@@ -1,0 +1,35 @@
+dataset:
+    preprocess:
+        class: LifPreProcessor
+        input_fname: 'path/to/file/example.lif'
+        base_output_dir: 'path/to/file'
+        split_volumes: true
+        crop_volumes:
+            channels: -1
+            normalize: zscore
+            tile_size: [128, 128, 64]
+            step_size: [128, 128, 64]
+    data_dir: '/path/to/cropped/images'
+    input_channels: [0, 1]
+    label_channels: [2, 3]
+    training_table_class: VSTrainingTable
+    split_by_column: sample
+    split_ratio:
+        train: 0.7
+        val: 0.15
+        test: 0.15
+    height: 128
+    width: 128
+    depth: 64
+verbose: 10
+trainer:
+    batch_size: 24
+    max_epochs: 100
+    patience: 25
+    augmentations:
+        rotation: 20
+        shear: 0.0
+        horizontal_flip: true
+        vertical_flip: true
+        translation: 0.05
+        scale: [0.8, 1.2]
