@@ -1,9 +1,14 @@
 #!/usr/bin/env python
 """Train neural network models in keras"""
 import argparse
+import os
+import pandas as pd
 import yaml
 
-from utils.train_utils import check_gpu_availability
+from micro_dl.input.dataset import BaseDataSet, BaseTrainingTable
+from micro_dl.train.trainer import BaseKerasTrainer
+from micro_dl.utils.aux_utils import import_class
+from micro_dl.utils.train_utils import check_gpu_availability
 
 
 def parse_args():
@@ -52,8 +57,9 @@ def pre_process(meta_preprocess):
      split_volumes, crop_volumes]
     """
 
-    #CHECK HOW TO IMPORT THIS CLASS DYNAMICALLY
+    # need a better way to import class dynamically
     preprocess_cls = meta_preprocess['class']
+    preprocess_cls = import_class('input.preprocessor', preprocess_cls)
     preprocessor = preprocess_cls(
         base_output_dir=meta_preprocess['base_output_dir'],
         verbose=meta_preprocess['verbose']
@@ -62,17 +68,16 @@ def pre_process(meta_preprocess):
         preprocessor.save_image_volumes(meta_preprocess['input_fname'])
     if meta_preprocess['crop_volumes']:
         preprocessor.crop_image_volumes(
-            meta_preprocess['crop_volumes']['channels'],
             meta_preprocess['crop_volumes']['tile_size'],
             meta_preprocess['crop_volumes']['step_size'],
-            meta_preprocess['crop_volumes']['normalize']
+            meta_preprocess['crop_volumes']['normalize'],
+            meta_preprocess['crop_volumes']['channels']
         )
 
 def run_action(args):
     """Performs training or tune hyper parameters
 
     :param Namespace args: namespace containing the arguments passed
-    :return: None
     """
 
     action = args.action
@@ -80,22 +85,59 @@ def run_action(args):
     if action=='train':
         if config['dataset']['preprocess']:
             preprocess_meta = config['dataset']['preprocess']
-            prepocess_meta['verbose'] = config['verbose']
+            preprocess_meta['verbose'] = config['verbose']
             pre_process(preprocess_meta)
-        training_table_class = config['dataset']['training_table_class']
-        for channel in config['dataset']['input_channels']:
-            df_fname = os.path.join(config['dataset']['data_dir'], )
-        df_train, df_test = training_table_class()
 
-        CsvBatchGenerator()
+        df_meta_fname = os.path.join(config['dataset']['data_dir'],
+                                     'cropped_images_info.csv')
+        df_meta = pd.read_csv(df_meta_fname)
+        # PRE-SELECT THE IMAGES THAT HAVE ENOUGH FOREGROUND / MODIFY LOSS
+        # FUNCTION
+        tt = BaseTrainingTable(df_meta, config['dataset']['input_channels'],
+                               config['dataset']['target_channels'],
+                               config['dataset']['split_by_column'],
+                               config['dataset']['split_ratio'])
 
+        if 'val' in config['dataset']['split_ratio']:
+            df_train, df_val, df_test = tt.train_test_split()
+            val_ds_params = {}
+            if 'augmentations' in config['trainer']:
+                val_ds_params['augmentations'] = (
+                    config['trainer']['augmentations']
+                )
+            # move this to preprocess or read from config.yml
+            val_ds_params['isotropic'] = True
 
+            ds_val = BaseDataSet(input_fnames=df_val['fpaths_input'],
+                                 target_fnames=df_val['fpaths_target'],
+                                 batch_size=config['trainer']['batch_size'],
+                                 **val_ds_params)
+            train_ds_params = val_ds_params.copy()
+        else:
+            df_train, df_test = tt.train_test_split()
+            ds_val = None
+            if 'augmentations' in config['trainer']:
+                train_ds_params['augmentations'] = (
+                    config['trainer']['augmentations']
+                )
+            train_ds_params['isotropic'] = True
 
+        ds_train = BaseDataSet(input_fnames=df_train['fpaths_input'],
+                               target_fnames=df_train['fpaths_target'],
+                               batch_size=config['trainer']['batch_size'],
+                               **train_ds_params)
 
-        # From the data set portion initiate the data manager
-        # dm = DataManager(main_path, verbose_level)
-        # dm.create_model(params)
-        # From the model portion, initiate the model
+        if 'model_name' in config['trainer']:
+            model_name = config['trainer']['model_name']
+        else:
+            model_name = None
+
+        trainer = BaseKerasTrainer(config=config,
+                                   model_dir=config['trainer']['model_dir'],
+                                   train_dataset=ds_train, val_dataset=ds_val,
+                                   model_name=model_name, gpu_ids=args.gpu,
+                                   gpu_mem_frac=args.gpu_mem_frac)
+        trainer.train()
     elif action=='tune_hyperparam':
         raise NotImplementedError
     else:

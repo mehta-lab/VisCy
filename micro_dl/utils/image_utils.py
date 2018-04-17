@@ -2,6 +2,7 @@
 import numpy as np
 from skimage.transform import resize
 
+
 def crop_3d(input_image, tile_size, step_size):
     """Creates 3D blocks from the image from given crop and overlap size.
 
@@ -42,7 +43,7 @@ def normalize_zscore(input_image):
     :return:
     """
 
-    norm_img = (input_image - np.mean(img)) / np.std(img)
+    norm_img = (input_image - np.mean(input_image)) / np.std(input_image)
     return norm_img
 
 

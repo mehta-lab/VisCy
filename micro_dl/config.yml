@@ -1,35 +1,56 @@
 dataset:
-    preprocess:
-        class: LifPreProcessor
-        input_fname: 'path/to/file/example.lif'
-        base_output_dir: 'path/to/file'
-        split_volumes: true
-        crop_volumes:
-            channels: -1
-            normalize: zscore
-            tile_size: [128, 128, 64]
-            step_size: [128, 128, 64]
-    data_dir: '/path/to/cropped/images'
+    preprocess: False
+    data_dir: '/data/anitha/debug_lif/image_tile_128-128-32_step_128-128-32_zscore'
     input_channels: [0, 1]
-    label_channels: [2, 3]
-    training_table_class: VSTrainingTable
-    split_by_column: sample
+    target_channels: [2, 3]
+    split_by_column: sample_num
     split_ratio:
         train: 0.7
         val: 0.15
         test: 0.15
     height: 128
     width: 128
-    depth: 64
+    depth: 32
 verbose: 10
 trainer:
-    batch_size: 24
+    model_dir: '/home/krishnan/model_output'
+    batch_size: 2
     max_epochs: 100
     patience: 25
-    augmentations:
-        rotation: 20
-        shear: 0.0
-        horizontal_flip: true
-        vertical_flip: true
-        translation: 0.05
-        scale: [0.8, 1.2]
+    metrics: mean_squared_error
+    loss: mean_squared_error
+    callbacks:
+        EarlyStopping:
+            mode: min
+            monitor: val_loss
+            patience: 10
+            verbose: True
+        ModelCheckpoint:
+            mode: min
+            monitor: val_loss
+            save_best_only: True
+            verbose: True
+        TensorBoard:
+            histogram_freq: 0
+            verbose: True
+    optimizer:
+        lr: 0.0001
+        name: Adam
+network:
+    class: UNet3D
+    num_filters_per_block: [16, 32, 64]
+    num_convs_per_block: 2
+    filter_size: 3
+    batch_norm: True
+    activation: relu
+    pooling_type: max
+    skip_merge_type: add
+    dropout: 0.2
+    residual: True
+    height: 128
+    width: 128
+    depth: 128
+    num_input_channels: 2
+    num_target_channels: 2
+    data_format: 'channels_first'
+    final_activation: elu

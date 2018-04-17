@@ -17,7 +17,7 @@ import logging
 import numpy as np
 import os
 import pandas as pd
-from microDL.utils.image_utils import crop_3d
+from micro_dl.utils.image_utils import crop_3d, normalize_zscore
 
 
 class BasePreProcessor(metaclass=ABCMeta):
@@ -153,7 +153,8 @@ class LifPreProcessor(BasePreProcessor):
             records,
             columns=['channel_num', 'sample_num', 'timepoint', 'fname']
         )
-        metadata_fname = os.path.join(volume_dir, 'image_volumes_info.csv')
+        metadata_fname = os.path.join(self.volume_dir,
+                                      'image_volumes_info.csv')
         df.to_csv(metadata_fname, sep=',')
         jv.kill_vm()
 
@@ -171,10 +172,9 @@ class LifPreProcessor(BasePreProcessor):
          default=-1, crop all channels
         """
 
-        volume_metadata = pd.DataFrame.from_csv(os.path.join(
-            self.volume_dir, 'image_volumes_info.csv'
-        ))
-        available_channels = volume_metadata['channel'].unique()
+        volume_metadata = pd.read_csv(os.path.join(self.volume_dir,
+                                                   'image_volumes_info.csv'))
+        available_channels = volume_metadata['channel_num'].unique()
         if isinstance(channel_ids, int) and channel_ids==-1:
             channel_ids = available_channels
 
@@ -189,15 +189,17 @@ class LifPreProcessor(BasePreProcessor):
                                                           str_step_size)
         if normalize:
             cropped_dir_name = '{}_{}'.format(cropped_dir_name, normalize)
-        cropped_dir = os.path.join(self.volume_dir, cropped_dir_name)
+        cropped_dir = os.path.join(self.base_output_dir, cropped_dir_name)
+        os.makedirs(cropped_dir, exist_ok=True)
 
         for channel_idx in channel_ids:
-            row_idx = volume_metadata['channel']==channel_idx
+            row_idx = volume_metadata['channel_num']==channel_idx
             channel_metadata = volume_metadata[row_idx]
             channel_dir = os.path.join(cropped_dir,
                                        'channel_{}'.format(channel_idx))
+            os.makedirs(channel_dir, exist_ok=True)
             metadata = []
-            for row in channel_metadata:
+            for _, row in channel_metadata.iterrows():
                 sample_fname = row['fname']
                 cur_image = np.load(sample_fname)
                 cropped_image_data = crop_3d(cur_image, tile_size, step_size)
@@ -215,7 +217,7 @@ class LifPreProcessor(BasePreProcessor):
                                      row['timepoint'], cropped_img_fname))
             if self.verbose:
                 self.logger.info(
-                    'Cropped images for channel:{}'.format(channel)
+                    'Cropped images for channel:{}'.format(channel_idx)
                 )
             fname_header = 'fname_{}'.format(channel_idx)
             cur_df = pd.DataFrame.from_records(
@@ -228,6 +230,6 @@ class LifPreProcessor(BasePreProcessor):
             if channel_idx == 0:
                 df = cur_df
             else:
-                df = pd.read_csv(metadata_fname, sep=',')
-                df[fname_header] = cur_image[fname_header]
+                df = pd.read_csv(metadata_fname, sep=',', index_col=0)
+                df[fname_header] = cur_df[fname_header]
             df.to_csv(metadata_fname, sep=',')
