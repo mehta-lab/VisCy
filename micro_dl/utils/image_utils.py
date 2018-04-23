@@ -3,7 +3,7 @@ import numpy as np
 from skimage.transform import resize
 
 
-def crop_3d(input_image, tile_size, step_size):
+def crop_3d(input_image, tile_size, step_size, isotropic=False):
     """Creates 3D blocks from the image from given crop and overlap size.
 
     :param np.array input_image: input image in 3d
@@ -31,6 +31,11 @@ def crop_3d(input_image, tile_size, step_size):
 
                 tiled_img = input_image[x:x + tile_size[0], y:y + tile_size[1],
                                         z:z + tile_size[2]]
+                if isotropic:
+                    isotropic_shape = [tile_size[0], ] * len(tile_size)
+                    cond = list(tile_size) == isotropic_shape
+                    if not cond:
+                        tiled_img = resample_image(tiled_img, isotropic_shape)
                 # tiled_img = np.rollaxis(tiled_img, 2, 0)
                 cropped_image_list.append((tiled_image_id, tiled_img))
     return cropped_image_list

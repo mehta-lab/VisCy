@@ -9,6 +9,7 @@ from keras.utils import plot_model
 import logging
 import os
 import tensorflow as tf
+from time import localtime, strftime
 import yaml
 
 from micro_dl.utils.aux_utils import import_class
@@ -100,32 +101,42 @@ class BaseKerasTrainer:
     def _get_callbacks(self):
         """Get the callbacks from config"""
 
-        # add filepath for ModelCheckPoint
-        # add log_dir for tensorboard
         callbacks_config = self.config['trainer']['callbacks']
         callbacks = []
         for cb_dict in callbacks_config:
             cb_cls = getattr(keras_callbacks, cb_dict)
-            if cb_dict == 'ModelCheckPoint':
-                filepath = self.model_dir
+            if cb_dict == 'ModelCheckpoint':
+                if self.model_name:
+                    model_name = self.model_name
+                else:
+                    model_name = self.config['network']['class']
+                timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
+                model_name = '{}_{}.hdf5'.format(model_name, timestamp)
+                filepath = os.path.join(self.model_dir, model_name)
+                # https://github.com/keras-team/keras/issues/8343
+                # Lambda layer: keras can't make a deepcopy of the layer
+                # configuration because there is a tensor in it! LAMBDA :-(
                 cur_cb = cb_cls(
                     filepath=filepath,
                     monitor=callbacks_config[cb_dict]['monitor'],
                     mode=callbacks_config[cb_dict]['mode'],
                     save_best_only=callbacks_config[cb_dict]['save_best_only'],
+                    save_weights_only=True,
                     verbose=callbacks_config[cb_dict]['verbose'])
             elif cb_dict == 'EarlyStopping':
                 cur_cb = cb_cls(mode=callbacks_config[cb_dict]['mode'],
                                 monitor=callbacks_config[cb_dict]['monitor'],
                                 patience=callbacks_config[cb_dict]['patience'],
                                 verbose=callbacks_config[cb_dict]['verbose'])
-            elif cb_dict == 'Tensorboard':
-                # VALIDATION DATA HAS TO BE PRELOADED OR CHANGE ACCORDINGLY
+            elif cb_dict == 'TensorBoard':
                 log_dir = os.path.join(self.model_dir, 'tensorboard_logs')
                 os.makedirs(log_dir, exist_ok=True)
+                # If printing histograms, validation_data must be provided,
+                # and cannot be a generator
                 cur_cb = cb_cls(
                     log_dir=log_dir,
-                    batch_size=self.config['trainer']['batch_size'])
+                    batch_size=self.config['trainer']['batch_size'],
+                    histogram_freq=0, write_graph=True)
             else:
                 cur_cb = None
             callbacks.append(cur_cb)
@@ -164,7 +175,6 @@ class BaseKerasTrainer:
         with open(os.path.join(self.model_dir, 'config.yml'), 'w') as f:
             yaml.dump(self.config, f, default_flow_style=False)
 
-        print('b4 compile model, loss:', self.loss, self.optimizer, self.metrics)
         self.model.compile(loss=self.loss, optimizer=self.optimizer,
                            metrics=self.metrics)
 
@@ -185,24 +195,14 @@ class BaseKerasTrainer:
             self.model.summary()
             self.logger.info('Model initialized and compiled')
 
-        batch_size = self.config['trainer']['batch_size']
-        n_batches_per_epoch = self.train_dataset.__len__()
-        print('n_batches_per_epoch:',n_batches_per_epoch)
-       
-        """
-        for b in range(n_batches_per_epoch):
-            batch_input, batch_target = self.train_dataset.__getitem__(b)
-            print(b, 'ip shape:', batch_input.shape, 'target shape:', batch_target.shape)
-        """
         try:
-            # FIGURE OUT HOW TO PASS VALIDATION DATA
-            print('callbacks: ',self.callbacks, 'steps_per_epoch:', n_batches_per_epoch)
-            print('epochs: ', self.config['trainer']['max_epochs'])
-            print('This is where it fails:', self.train_dataset)
-
+            # NUM WORKERS read from yml or find the num of empty cores?
             self.model.fit_generator(
                 generator=self.train_dataset,
                 validation_data=self.val_dataset,
-                epochs=self.config['trainer']['max_epochs'])
+                epochs=self.config['trainer']['max_epochs'],
+                callbacks=self.callbacks, workers=4, verbose=1
+            )
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
+

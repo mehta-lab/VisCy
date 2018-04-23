@@ -73,7 +73,7 @@ class BasePreProcessor(metaclass=ABCMeta):
 
     @abstractmethod
     def crop_image_volumes(self, tile_size, step_size, normalize,
-                           channel_ids=-1):
+                           isotropic=True, channel_ids=-1):
         """Crop image volumes in the specified channels"""
 
         raise NotImplementedError
@@ -159,8 +159,11 @@ class LifPreProcessor(BasePreProcessor):
         jv.kill_vm()
 
     def crop_image_volumes(self, tile_size, step_size, normalize,
-                           channel_ids=-1):
+                           isotropic=True, channel_ids=-1):
         """Crop image volumes in the specified channels
+      
+        Isotropic here refers to the same dimension/shape along x,y,z and not
+        really isotropic resolution in mm
 
         :param list/tuple/np array tile_size: size of the blocks to be cropped
          from the image
@@ -168,6 +171,7 @@ class LifPreProcessor(BasePreProcessor):
          case of no overlap, the step size is tile_size. If overlap,
          step_size < tile_size
         :param str normalize: type of normalization allowed
+        :param bool isotropic: if 3D, make the grid/shape isotropic
         :param list channel_ids: crop volumes in the given channels.
          default=-1, crop all channels
         """

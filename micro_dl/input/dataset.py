@@ -15,12 +15,8 @@ class BaseDataSet(keras.utils.Sequence):
     """
 
     def __init__(self, input_fnames, target_fnames, batch_size,
-                 augmentations=None, isotropic=False, shuffle=True,
-                 random_seed=42):
+                 augmentations=None, shuffle=True, random_seed=42):
         """Init
-
-        Isotropic here refers to same row, col, slice dimensions and NOT
-        isotropic voxel size!
 
         :param pd.Series input_fnames: pd.Series with each row containing
          filenames for one input
@@ -29,8 +25,6 @@ class BaseDataSet(keras.utils.Sequence):
         :param int batch_size: num of datasets in each batch
         :param dict augmentations: dictionary with allowed augmentations as
          keys and distortion amount as values
-        :param bool isotropic: resample to have same dimension along row, col,
-         slice. Default=False.
         :param bool shuffle: shuffle data for each epoch
         :param int random_seed: initialize the random number generator with
          this seed
@@ -41,7 +35,6 @@ class BaseDataSet(keras.utils.Sequence):
         self.batch_size = batch_size
 
         self.augmentations = augmentations
-        self.isotropic = isotropic
         self.shuffle = shuffle
         num_samples = len(self.input_fnames)
         self.num_samples = num_samples
@@ -105,14 +98,9 @@ class BaseDataSet(keras.utils.Sequence):
         image_volume = []
         for fname in fname_list:
             cur_channel = np.load(fname)
-            if self.isotropic:
-                # move this to pre-processing
-                img_shape = cur_channel.shape
-                img_shape = (img_shape[0], ) * len(img_shape)
-                cur_channel = resample_image(cur_channel, img_shape)
-                # add image augmentations here
-                if self.augmentations:
-                    self.__augment_image()
+            # add image augmentations here
+            if self.augmentations:
+                self.__augment_image()
             image_volume.append(cur_channel)
 
         image_volume = np.stack(image_volume)
