@@ -65,13 +65,19 @@ def pre_process(meta_preprocess):
         verbose=meta_preprocess['verbose']
     )
     if meta_preprocess['split_volumes']:
-        preprocessor.save_image_volumes(meta_preprocess['input_fname'])
+        preprocessor.save_images(meta_preprocess['input_fname'])
+    crop_params = {}
+    if 'normalize' in meta_preprocess['crop_volumes']:
+        crop_params['normalize'] = meta_preprocess['crop_volumes']['normalize']
+    if 'isotropic' in meta_preprocess['crop_volumes']:
+        crop_params['isotropic'] = meta_preprocess['crop_volumes']['isotropic']
+
     if meta_preprocess['crop_volumes']:
-        preprocessor.crop_image_volumes(
-            meta_preprocess['crop_volumes']['tile_size'],
-            meta_preprocess['crop_volumes']['step_size'],
-            meta_preprocess['crop_volumes']['normalize'],
-            meta_preprocess['crop_volumes']['channels']
+        preprocessor.crop_images(
+            tile_size=meta_preprocess['crop_volumes']['tile_size'],
+            step_size=meta_preprocess['crop_volumes']['step_size'],
+            channel_ids=meta_preprocess['crop_volumes']['channels'],
+            **crop_params
         )
 
 def run_action(args):
@@ -105,8 +111,6 @@ def run_action(args):
                 val_ds_params['augmentations'] = (
                     config['trainer']['augmentations']
                 )
-            # move this to preprocess or read from config.yml
-            val_ds_params['isotropic'] = True
 
             ds_val = BaseDataSet(input_fnames=df_val['fpaths_input'],
                                  target_fnames=df_val['fpaths_target'],
@@ -120,7 +124,6 @@ def run_action(args):
                 train_ds_params['augmentations'] = (
                     config['trainer']['augmentations']
                 )
-            train_ds_params['isotropic'] = True
 
         ds_train = BaseDataSet(input_fnames=df_train['fpaths_input'],
                                target_fnames=df_train['fpaths_target'],

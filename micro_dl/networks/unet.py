@@ -42,6 +42,7 @@ class BaseUNet(metaclass=ABCMeta):
             self.Conv = Conv2D
             self.UpSampling = UpSampling2D
 
+        self._set_pooling_type()
         self.num_down_blocks = num_down_blocks
         self.skip_merge_type = config['network']['skip_merge_type']
         self.data_format = config['network']['data_format']
@@ -291,7 +292,6 @@ class UNet2D(BaseUNet):
         """Init"""
 
         super().__init__(config=config)
-        self._set_pooling_type()
 
     @property
     def _get_input_shape(self):
@@ -321,10 +321,16 @@ class UNet2D(BaseUNet):
         input_zeros = K.zeros_like(final_layer)
         num_input_layers = int(input_layer.get_shape()[channel_axis])
         new_zero_channels = int((num_desired_channels - num_input_layers) / 2)
-        zero_pad_layers = input_zeros[:, :new_zero_channels, :, :]
-        layer_padded = Concatenate(axis=channel_axis)(
-            [zero_pad_layers, input_layer, zero_pad_layers]
-        )
+        if num_input_layers % 2 == 0:
+            zero_pad_layers = input_zeros[:, :new_zero_channels, :, :]
+            layer_padded = Concatenate(axis=channel_axis)(
+                [zero_pad_layers, input_layer, zero_pad_layers]
+            )
+        else:
+            zero_pad_layers = input_zeros[:, :new_zero_channels+1, :, :]
+            layer_padded = Concatenate(axis=channel_axis)(
+                [zero_pad_layers, input_layer, zero_pad_layers[:, :-1, :, :]]
+            )
         return layer_padded
 
 
@@ -333,9 +339,8 @@ class UNet3D(BaseUNet):
 
     def __init__(self, config):
         """Init"""
-
+        
         super().__init__(config=config)
-        self._set_pooling_type()
 
     @property
     def _get_input_shape(self):
@@ -366,11 +371,14 @@ class UNet3D(BaseUNet):
         input_zeros = K.zeros_like(final_layer)
         num_input_layers = int(input_layer.get_shape()[channel_axis])
         new_zero_channels = int((num_desired_channels - num_input_layers) / 2)
-        zero_pad_layers = input_zeros[:, :new_zero_channels, :, :, :]
-        layer_padded = Concatenate(axis=channel_axis)(
-            [zero_pad_layers, input_layer, zero_pad_layers]
-        )
+        if num_input_layers % 2 == 0:
+            zero_pad_layers = input_zeros[:, :new_zero_channels, :, :, :]
+            layer_padded = Concatenate(axis=channel_axis)(
+                [zero_pad_layers, input_layer, zero_pad_layers]
+            )
+        else:
+            zero_pad_layers = input_zeros[:, :new_zero_channels + 1, :, :, :]
+            layer_padded = Concatenate(axis=channel_axis)(
+                [zero_pad_layers, input_layer, zero_pad_layers[:, :-1, :, :, :]]
+            )
         return layer_padded
-
-
-

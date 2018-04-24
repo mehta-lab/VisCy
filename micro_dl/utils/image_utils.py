@@ -3,7 +3,7 @@ import numpy as np
 from skimage.transform import resize
 
 
-def crop_3d(input_image, tile_size, step_size, isotropic=False):
+def crop_image(input_image, tile_size, step_size, isotropic=False):
     """Creates 3D blocks from the image from given crop and overlap size.
 
     :param np.array input_image: input image in 3d
@@ -15,29 +15,43 @@ def crop_3d(input_image, tile_size, step_size, isotropic=False):
      xxmin-xmz_yymin-ymax_zzmin-zmax and cropped image
     """
 
-    assert len(tile_size)==len(step_size)
+    assert len(tile_size) == len(step_size)
     assert np.all(tile_size) > 0
-    cropped_image_list = []
+    size_x = input_image.shape[0]
+    size_y = input_image.shape[1]
+    step_size_x = step_size[0]
+    step_size_y = step_size[1]
 
-    size_x, size_y, size_z = input_image.shape
-    step_size_x, step_size_y, step_size_z = step_size
-    for z in range(0, size_z - step_size_z + 1, step_size_z):
+    cropped_image_list = []
+    if len(input_image.shape) == 3:
+        size_z = input_image.shape[2]
+        step_size_z = step_size[2]
+        for z in range(0, size_z - step_size_z + 1, step_size_z):
+            for y in range(0, size_y - step_size_y + 1, step_size_y):
+                for x in range(0, size_x - step_size_x + 1, step_size_x):
+                    img_id = 'x{}-{}_y{}-{}_z{}-{}'.format(
+                        x, x + tile_size[0], y, y + tile_size[1],
+                        z, z + tile_size[2]
+                    )
+                    cropped_img = input_image[x : x + tile_size[0],
+                                              y : y + tile_size[1],
+                                              z : z + tile_size[2]]
+                    if isotropic:
+                        isotropic_shape = [tile_size[0], ] * len(tile_size)
+                        cond = list(tile_size) == isotropic_shape
+                        if not cond:
+                            cropped_img = resample_image(cropped_img,
+                                                         isotropic_shape)
+                    # tiled_img = np.rollaxis(tiled_img, 2, 0)
+                    cropped_image_list.append((img_id, cropped_img))
+    else:
         for y in range(0, size_y - step_size_y + 1, step_size_y):
             for x in range(0, size_x - step_size_x + 1, step_size_x):
-                tiled_image_id = 'image_x{}-{}_y{}-{}_z{}-{}'.format(
-                    x, x + tile_size[0], y, y + tile_size[1], z,
-                    z + tile_size[2]
-                )
-
-                tiled_img = input_image[x:x + tile_size[0], y:y + tile_size[1],
-                                        z:z + tile_size[2]]
-                if isotropic:
-                    isotropic_shape = [tile_size[0], ] * len(tile_size)
-                    cond = list(tile_size) == isotropic_shape
-                    if not cond:
-                        tiled_img = resample_image(tiled_img, isotropic_shape)
-                # tiled_img = np.rollaxis(tiled_img, 2, 0)
-                cropped_image_list.append((tiled_image_id, tiled_img))
+                img_id = 'x{}-{}_y{}-{}'.format(x, x + tile_size[0],
+                                                y, y + tile_size[1])
+                cropped_img = input_image[x : x + tile_size[0],
+                                          y : y + tile_size[1]]
+                cropped_image_list.append((img_id, cropped_img))
     return cropped_image_list
 
 
