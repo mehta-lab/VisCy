@@ -5,7 +5,10 @@ import os
 import pandas as pd
 import yaml
 
-from micro_dl.input.dataset import BaseDataSet, BaseTrainingTable
+from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
+from micro_dl.input.training_table import (
+    BaseTrainingTable, TrainingTableWithMask
+)
 from micro_dl.train.trainer import BaseKerasTrainer
 from micro_dl.utils.aux_utils import import_class
 from micro_dl.utils.train_utils import check_gpu_availability
@@ -80,6 +83,98 @@ def pre_process(meta_preprocess):
             **crop_params
         )
 
+
+def train_xy(df_meta, config):
+    """Train using fit_generator"""
+
+    tt = BaseTrainingTable(df_meta, config['dataset']['input_channels'],
+                           config['dataset']['target_channels'],
+                           config['dataset']['split_by_column'],
+                           config['dataset']['split_ratio'])
+    if 'val' in config['dataset']['split_ratio']:
+        df_train, df_val, df_test = tt.train_test_split()
+        val_ds_params = {}
+        if 'augmentations' in config['trainer']:
+            val_ds_params['augmentations'] = (
+                config['trainer']['augmentations']
+            )
+
+        ds_val = BaseDataSet(input_fnames=df_val['fpaths_input'],
+                             target_fnames=df_val['fpaths_target'],
+                             batch_size=config['trainer']['batch_size'],
+                             **val_ds_params)
+        train_ds_params = val_ds_params.copy()
+    else:
+        df_train, df_test = tt.train_test_split()
+        ds_val = None
+        if 'augmentations' in config['trainer']:
+            train_ds_params['augmentations'] = (
+                config['trainer']['augmentations']
+            )
+    ds_train = BaseDataSet(input_fnames=df_train['fpaths_input'],
+                           target_fnames=df_train['fpaths_target'],
+                           batch_size=config['trainer']['batch_size'],
+                           **train_ds_params)
+    if 'model_name' in config['trainer']:
+        model_name = config['trainer']['model_name']
+    else:
+        model_name = None
+
+    trainer = BaseKerasTrainer(config=config,
+                               model_dir=config['trainer']['model_dir'],
+                               train_dataset=ds_train, val_dataset=ds_val,
+                               model_name=model_name, gpu_ids=args.gpu,
+                               gpu_mem_frac=args.gpu_mem_frac)
+    trainer.train()
+
+
+def train_xyweights(df_meta, config):
+    """Train using fit_generator"""
+
+    tt = TrainingTableWithMask(df_meta, config['dataset']['input_channels'],
+                               config['dataset']['target_channels'],
+                               config['dataset']['mask_channels'],
+                               config['dataset']['split_by_column'],
+                               config['dataset']['split_ratio'])
+    if 'val' in config['dataset']['split_ratio']:
+        df_train, df_val, df_test = tt.train_test_split()
+        val_ds_params = {}
+        if 'augmentations' in config['trainer']:
+            val_ds_params['augmentations'] = (
+                config['trainer']['augmentations']
+            )
+
+        ds_val = DataSetWithMask(input_fnames=df_val['fpaths_input'],
+                                 target_fnames=df_val['fpaths_target'],
+                                 mask_fnames=df_val['fpaths_mask'],
+                                 batch_size=config['trainer']['batch_size'],
+                                 **val_ds_params)
+        train_ds_params = val_ds_params.copy()
+    else:
+        df_train, df_test = tt.train_test_split()
+        ds_val = None
+        if 'augmentations' in config['trainer']:
+            train_ds_params['augmentations'] = (
+                config['trainer']['augmentations']
+            )
+    ds_train = DataSetWithMask(input_fnames=df_train['fpaths_input'],
+                               target_fnames=df_train['fpaths_target'],
+                               mask_fnames=df_train['fpaths_mask'],
+                               batch_size=config['trainer']['batch_size'],
+                               **train_ds_params)
+    if 'model_name' in config['trainer']:
+        model_name = config['trainer']['model_name']
+    else:
+        model_name = None
+
+    trainer = BaseKerasTrainer(config=config,
+                               model_dir=config['trainer']['model_dir'],
+                               train_dataset=ds_train, val_dataset=ds_val,
+                               model_name=model_name, gpu_ids=args.gpu,
+                               gpu_mem_frac=args.gpu_mem_frac)
+    trainer.train_wtd_loss()
+
+
 def run_action(args):
     """Performs training or tune hyper parameters
 
@@ -97,50 +192,10 @@ def run_action(args):
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
                                      'cropped_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
-        # PRE-SELECT THE IMAGES THAT HAVE ENOUGH FOREGROUND / MODIFY LOSS
-        # FUNCTION
-        tt = BaseTrainingTable(df_meta, config['dataset']['input_channels'],
-                               config['dataset']['target_channels'],
-                               config['dataset']['split_by_column'],
-                               config['dataset']['split_ratio'])
-
-        if 'val' in config['dataset']['split_ratio']:
-            df_train, df_val, df_test = tt.train_test_split()
-            val_ds_params = {}
-            if 'augmentations' in config['trainer']:
-                val_ds_params['augmentations'] = (
-                    config['trainer']['augmentations']
-                )
-
-            ds_val = BaseDataSet(input_fnames=df_val['fpaths_input'],
-                                 target_fnames=df_val['fpaths_target'],
-                                 batch_size=config['trainer']['batch_size'],
-                                 **val_ds_params)
-            train_ds_params = val_ds_params.copy()
+        if config['trainer']['weighted_loss']:
+            train_xyweights(df_meta, config)
         else:
-            df_train, df_test = tt.train_test_split()
-            ds_val = None
-            if 'augmentations' in config['trainer']:
-                train_ds_params['augmentations'] = (
-                    config['trainer']['augmentations']
-                )
-
-        ds_train = BaseDataSet(input_fnames=df_train['fpaths_input'],
-                               target_fnames=df_train['fpaths_target'],
-                               batch_size=config['trainer']['batch_size'],
-                               **train_ds_params)
-
-        if 'model_name' in config['trainer']:
-            model_name = config['trainer']['model_name']
-        else:
-            model_name = None
-
-        trainer = BaseKerasTrainer(config=config,
-                                   model_dir=config['trainer']['model_dir'],
-                                   train_dataset=ds_train, val_dataset=ds_val,
-                                   model_name=model_name, gpu_ids=args.gpu,
-                                   gpu_mem_frac=args.gpu_mem_frac)
-        trainer.train()
+            train_xy(df_meta, config)
     elif action=='tune_hyperparam':
         raise NotImplementedError
     else:

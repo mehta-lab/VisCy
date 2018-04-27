@@ -1,23 +1,22 @@
 dataset:
     preprocess: False
-    data_dir: '/data/anitha/debug_lif/image_tile_128-128-32_step_128-128-32_zscore'
-    input_channels: [0, 1]
-    target_channels: [2, 3]
+    data_dir: '/data/anitha/label_free/image_tile_256-256_step_256-256'
+    input_channels: [3]
+    target_channels: [0]
     split_by_column: sample_num
     split_ratio:
         train: 0.7
         val: 0.15
         test: 0.15
-    height: 128
-    width: 128
-    depth: 32
+    height: 256
+    width: 256
 verbose: 10
 trainer:
-    model_dir: '/home/krishnan/model_output'
-    batch_size: 2
-    max_epochs: 100
-    patience: 25
-    metrics: mean_squared_error
+    model_dir: '/home/krishnan/models_labelfree/tile256_bs16_mse'
+    batch_size: 32
+    max_epochs: 200
+    patience: 20
+    metrics: coeff_determination
     loss: mean_squared_error
     callbacks:
         EarlyStopping:
@@ -27,7 +26,7 @@ trainer:
             verbose: True
         ModelCheckpoint:
             mode: min
-            monitor: val_loss
+            monitor: train_loss
             save_best_only: True
             verbose: True
         TensorBoard:
@@ -37,8 +36,8 @@ trainer:
         lr: 0.0001
         name: Adam
 network:
-    class: UNet3D
-    num_filters_per_block: [16, 32, 64]
+    class: UNet2D
+    num_filters_per_block: [16, 32, 64, 96, 128]
     num_convs_per_block: 2
     filter_size: 3
     batch_norm: True
@@ -47,10 +46,9 @@ network:
     skip_merge_type: add
     dropout: 0.2
     residual: True
-    height: 128
-    width: 128
-    depth: 128
-    num_input_channels: 2
-    num_target_channels: 2
+    height: 256
+    width: 256
+    num_input_channels: 1
+    num_target_channels: 1
     data_format: 'channels_first'
     final_activation: elu

@@ -65,6 +65,14 @@ class BasePreProcessor(metaclass=ABCMeta):
         logger.addHandler(file_handler)
         return logger
 
+    @abstractmethod
+    def save_each_image(self, reader, num_pix_z, channel_dir, timepoint_idx,
+                        channel_idx, sample_idx, size_x_um, size_y_um,
+                        size_z_um):
+        """Save each image as a numpy array"""
+
+        raise NotImplementedError
+
     def _log_info(self, msg):
         """Log info"""
 
@@ -104,10 +112,11 @@ class BasePreProcessor(metaclass=ABCMeta):
                                            'channel_{}'.format(channel_idx))
                 os.makedirs(channel_dir, exist_ok=True)
                 for sample_idx in range(num_samples): # 15, 412):
-                    cur_records = save_one_image(reader, num_pix_z, channel_dir,
-                                                 timepoint_idx, channel_idx,
-                                                 sample_idx, size_x_um,
-                                                 size_y_um, size_z_um)
+                    cur_records = self.save_each_image(
+                        reader, num_pix_z, channel_dir, timepoint_idx,
+                        channel_idx, sample_idx, size_x_um, size_y_um,
+                        size_z_um
+                    )
                     records.extend(cur_records)
                 msg = 'Wrote files for tp:{}, channel:{}'.format(
                     timepoint_idx, channel_idx
@@ -124,16 +133,13 @@ class BasePreProcessor(metaclass=ABCMeta):
         df.to_csv(metadata_fname, sep=',')
         jv.kill_vm()
 
-
     @abstractmethod
-    def save_each_image(self, reader, num_pix_z, channel_dir, timepoint_idx,
-                        channel_idx, sample_idx, size_x_um, size_y_um,
-                        size_z_um):
-        """Save each image as a numpy array"""
+    def get_row_idx(self, volume_metadata, timepoint_idx, channel_idx):
+        """Get the indices for images with timepoint_idx and channel_idx"""
 
         raise NotImplementedError
 
-    def crop_images(self, tile_size, step_size, normalize,
+    def crop_images(self, tile_size, step_size, normalize=False,
                            isotropic=True, channel_ids=-1):
         """Crop image volumes in the specified channels
 
@@ -174,8 +180,8 @@ class BasePreProcessor(metaclass=ABCMeta):
                                          'timepoint_{}'.format(timepoint_idx))
             os.makedirs(timepoint_dir, exist_ok=True)
             for channel_idx in channel_ids:
-                row_idx = get_row_idx(volume_metadata, timepoint_idx,
-                                      channel_idx)
+                row_idx = self.get_row_idx(volume_metadata, timepoint_idx,
+                                           channel_idx)
                 channel_metadata = volume_metadata[row_idx]
                 channel_dir = os.path.join(timepoint_dir,
                                            'channel_{}'.format(channel_idx))
@@ -185,7 +191,7 @@ class BasePreProcessor(metaclass=ABCMeta):
                     sample_fname = row['fname']
                     cur_image = np.load(sample_fname)
                     cropped_image_data = crop_image(cur_image, tile_size,
-                                                    step_size)
+                                                    step_size, isotropic)
                     for id_img_tuple in cropped_image_data:
                         xyz_idx = id_img_tuple[0]
                         img_fname = 'n{}_{}'.format(row['sample_num'], xyz_idx)
@@ -218,11 +224,6 @@ class BasePreProcessor(metaclass=ABCMeta):
                     df[fname_header] = cur_df[fname_header]
                 df.to_csv(metadata_fname, sep=',')
 
-    @abstractmethod
-    def get_row_idx(self, volume_metadata, timepoint_idx, channel_idx):
-        """Get the indices for images with timepoint_idx and channel_idx"""
-
-        raise NotImplementedError
 
 
 class LifPreProcessor2D(BasePreProcessor):

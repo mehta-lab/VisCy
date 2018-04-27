@@ -1,4 +1,5 @@
 """Keras trainer"""
+from keras import backend as K
 from keras import Model
 from keras.models import load_model
 from keras import callbacks as keras_callbacks
@@ -12,8 +13,11 @@ import tensorflow as tf
 from time import localtime, strftime
 import yaml
 
+from micro_dl.train import metrics as custom_metrics
+from micro_dl.train.losses import weighted_binary_loss
 from micro_dl.utils.aux_utils import import_class
 from micro_dl.utils.train_utils import set_keras_session
+
 
 class BaseKerasTrainer:
     """Keras training class"""
@@ -70,8 +74,6 @@ class BaseKerasTrainer:
         if hasattr(keras_losses, loss):
             loss_cls = getattr(keras_losses, loss)
             return loss_cls
-        loss_cls = import_class('train.objectives', loss)
-        return loss_cls
 
     def _get_optimizer(self):
         """Get optimizer from config"""
@@ -87,16 +89,20 @@ class BaseKerasTrainer:
     def _get_metrics(self):
         """Get the metrics from config"""
  
+        metrics_cls = []
         metrics = self.config['trainer']['metrics']
-        if isinstance(metrics, list):
-            metrics_cls = []
-            metrics = self.config['trainer']['metrics']
-            for m in metrics:
+        if not isinstance(metrics, list):
+            metrics = [metrics]
+
+        for m in metrics:
+            if hasattr(keras_metrics, m):
                 cur_metric_cls = getattr(keras_metrics, m)
-                metrics_cls.append(cur_metric_cls)
-            return metrics_cls
-        else:
-            return [getattr(keras_metrics, metrics)]
+            elif hasattr(custom_metrics, m):
+                cur_metric_cls = getattr(custom_metrics, m)
+            else:
+                raise ValueError('%s is not a valid metric' % m)
+            metrics_cls.append(cur_metric_cls)
+        return metrics_cls
 
     def _get_callbacks(self):
         """Get the callbacks from config"""
@@ -116,6 +122,7 @@ class BaseKerasTrainer:
                 # https://github.com/keras-team/keras/issues/8343
                 # Lambda layer: keras can't make a deepcopy of the layer
                 # configuration because there is a tensor in it! LAMBDA :-(
+                # added save_weights_only
                 cur_cb = cb_cls(
                     filepath=filepath,
                     monitor=callbacks_config[cb_dict]['monitor'],
@@ -131,6 +138,7 @@ class BaseKerasTrainer:
             elif cb_dict == 'TensorBoard':
                 log_dir = os.path.join(self.model_dir, 'tensorboard_logs')
                 os.makedirs(log_dir, exist_ok=True)
+                # https://github.com/keras-team/keras/issues/3358
                 # If printing histograms, validation_data must be provided,
                 # and cannot be a generator
                 cur_cb = cb_cls(
@@ -205,4 +213,69 @@ class BaseKerasTrainer:
             )
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
+
+    def train_wtd_loss(self):
+        """Train the model with weighted loss
+
+        https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
+        https://gist.github.com/andreimouraviev/2642384705034da92d6954dd9993fb4d
+        https://github.com/keras-team/keras/issues/2115
+
+        Suggested: modify generator to return a tuple with (input, output,
+        sample_weights) and use sample_weight_mode=temporal. This doesn't fit
+        the case for non-scalar weighting (i.e. weight by an image)
+        Use model.fit instead of fit_generator as couldn't find how sample
+        weights are passed from generator to fit_generator / fit. From:
+        https://github.com/keras-team/keras/blob/master/keras/engine/training.py
+        might be hard to fit sample_weights into the expected form!
+        """
+
+        self.loss = self._get_loss()
+        self.loss = weighted_binary_loss(self.loss)
+        self.optimizer = self._get_optimizer()
+        self.metrics = self._get_metrics()
+        self.callbacks = self._get_callbacks()
+
+        if self.model_name:
+            self.model = self._load_model()
+            self.logger.info('Resume model training from ....')
+        else:
+            os.makedirs(self.model_dir, exist_ok=True)
+            self._init_model()
+            self.model.summary()
+            self.logger.info('Model initialized and compiled')
+
+        n_batches_per_epoch = self.train_dataset.__len__()
+        for epoch_idx in range(self.config['trainer']['max_epochs']):
+            epoch_loss = 0
+            for batch_idx in tqdm(range(n_batches_per_epoch)):
+                x, y, mask = self.train_dataset.__getitem__()
+                mask = K.batch_flatten(mask)
+                metrics = self.model.train_on_batch(x=x, y=y,
+                                                    sample_weights=mask)
+                print(batch_idx, metrics)
+                epoch_loss += metrics
+            mean_epoch_loss = epoch_loss / n_batches_per_epoch
+
+            if self.model_name:
+                model_name = self.model_name
+            else:
+                model_name = self.config['network']['class']
+            timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
+            model_name = '{}_{}.hdf5'.format(model_name, timestamp)
+            filepath = os.path.join(self.model_dir, model_name)
+
+            if epoch_idx == 0:
+                self.model.save(filepath)
+                best_loss = mean_epoch_loss
+            else:
+                if mean_epoch_loss <= best_loss:
+                    self.model.save(filepath)
+                    best_loss = mean_epoch_loss
+                    print('Model saved, Loss, epoch_idx:',
+                          best_loss, epoch_idx)
+
+
+
+
 
