@@ -1,0 +1,55 @@
+dataset:
+    preprocess: False
+    data_dir: '/data/anitha/label_free/image_tile_256-256_step_256-256'
+    input_channels: [3]
+    target_channels: [0]
+    split_by_column: sample_num
+    split_ratio:
+        train: 0.7
+        val: 0.15
+        test: 0.15
+    height: 256
+    width: 256
+verbose: 10
+trainer:
+    model_dir: '/home/krishnan/models_labelfree/tile256_bs32_wtdmse'
+    batch_size: 32
+    max_epochs: 200
+    patience: 20
+    metrics: coeff_determination
+    loss: mean_squared_error
+    weighted_loss: True
+    callbacks:
+        EarlyStopping:
+            mode: min
+            monitor: val_loss
+            patience: 10
+            verbose: True
+        ModelCheckpoint:
+            mode: min
+            monitor: train_loss
+            save_best_only: True
+            verbose: True
+        TensorBoard:
+            histogram_freq: 0
+            verbose: True
+    optimizer:
+        lr: 0.0001
+        name: Adam
+network:
+    class: UNet2D
+    num_filters_per_block: [16, 32, 64, 96, 128]
+    num_convs_per_block: 2
+    filter_size: 3
+    batch_norm: True
+    activation: relu
+    pooling_type: max
+    skip_merge_type: add
+    dropout: 0.2
+    residual: True
+    height: 256
+    width: 256
+    num_input_channels: 1
+    num_target_channels: 1
+    data_format: 'channels_first'
+    final_activation: elu
