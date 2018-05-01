@@ -115,17 +115,10 @@ def train_xy(df_meta, config):
                            target_fnames=df_train['fpaths_target'],
                            batch_size=config['trainer']['batch_size'],
                            **train_ds_params)
-    if 'model_name' in config['trainer']:
-        model_name = config['trainer']['model_name']
-    else:
-        model_name = None
-
-    trainer = BaseKerasTrainer(config=config,
-                               model_dir=config['trainer']['model_dir'],
-                               train_dataset=ds_train, val_dataset=ds_val,
-                               model_name=model_name, gpu_ids=args.gpu,
-                               gpu_mem_frac=args.gpu_mem_frac)
-    trainer.train()
+    ds_test = BaseDataSet(input_fnames=df_train['fpaths_input'],
+                          target_fnames=df_train['fpaths_target'],
+                          batch_size=config['trainer']['batch_size'])
+    return ds_train, ds_val, ds_test
 
 
 def train_xyweights(df_meta, config):
@@ -162,17 +155,12 @@ def train_xyweights(df_meta, config):
                                mask_fnames=df_train['fpaths_mask'],
                                batch_size=config['trainer']['batch_size'],
                                **train_ds_params)
-    if 'model_name' in config['trainer']:
-        model_name = config['trainer']['model_name']
-    else:
-        model_name = None
+    ds_test = DataSetWithMask(input_fnames=df_train['fpaths_input'],
+                              target_fnames=df_train['fpaths_target'],
+                              mask_fnames=df_train['fpaths_mask'],
+                              batch_size=config['trainer']['batch_size'])
+    return ds_train, ds_val, ds_test
 
-    trainer = BaseKerasTrainer(config=config,
-                               model_dir=config['trainer']['model_dir'],
-                               train_dataset=ds_train, val_dataset=ds_val,
-                               model_name=model_name, gpu_ids=args.gpu,
-                               gpu_mem_frac=args.gpu_mem_frac)
-    trainer.train_wtd_loss()
 
 
 def run_action(args):
@@ -192,10 +180,22 @@ def run_action(args):
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
                                      'cropped_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
-        if config['trainer']['weighted_loss']:
-            train_xyweights(df_meta, config)
+        if 'weighed_loss' in config['trainer']:
+            ds_train, ds_val, ds_test = train_xyweights(df_meta, config)
         else:
-            train_xy(df_meta, config)
+            ds_train, ds_val, ds_test = train_xy(df_meta, config)
+
+        if 'model_name' in config['trainer']:
+            model_name = config['trainer']['model_name']
+        else:
+            model_name = None
+
+        trainer = BaseKerasTrainer(config=config,
+                                   model_dir=config['trainer']['model_dir'],
+                                   train_dataset=ds_train, val_dataset=ds_val,
+                                   model_name=model_name, gpu_ids=args.gpu,
+                                   gpu_mem_frac=args.gpu_mem_frac)
+        trainer.train()
     elif action=='tune_hyperparam':
         raise NotImplementedError
     else:

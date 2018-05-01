@@ -84,3 +84,6 @@ def resample_image(input_image, output_shape):
 def resample_label(input_image, target_size):
     """Resample label/bool images"""
     raise NotImplementedError
+
+
+

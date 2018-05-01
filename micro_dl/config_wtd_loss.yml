@@ -17,7 +17,7 @@ trainer:
     max_epochs: 200
     patience: 20
     metrics: coeff_determination
-    loss: mean_squared_error
+    loss: mse_binary_wtd_loss
     weighted_loss: True
     callbacks:
         EarlyStopping:
@@ -27,7 +27,7 @@ trainer:
             verbose: True
         ModelCheckpoint:
             mode: min
-            monitor: train_loss
+            monitor: val_loss
             save_best_only: True
             verbose: True
         TensorBoard:

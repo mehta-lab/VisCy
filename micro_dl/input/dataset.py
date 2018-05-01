@@ -72,7 +72,9 @@ class BaseDataSet(keras.utils.Sequence):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_input = self._get_volume(cur_input_fnames.split(','))
+            cur_input = (cur_input - np.mean(cur_input)) / np.std(cur_input)
             cur_target = self._get_volume(cur_target_fnames.split(','))
+            cur_target = (cur_target - np.mean(cur_target))/np.std(cur_target)
             # _augment_image(cur_input, cur_target)
             input_image.append(cur_input)
             target_image.append(cur_target)
@@ -129,11 +131,6 @@ class DataSetWithMask(BaseDataSet):
                          shuffle, augmentations, random_seed)
         self.mask_fnames = mask_fnames
 
-    def _augment_image(self, input_image, target_image, mask_image=None):
-        """Augment images"""
-
-        return NotImplementedError
-
     def __getitem__(self, index):
         """Get a batch of data
 
@@ -149,24 +146,26 @@ class DataSetWithMask(BaseDataSet):
 
         input_image = []
         target_image = []
-        mask_image = []
+        #mask_image = []
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_mask_fnames = self.mask_fnames.iloc[self.row_idx[idx]]
             cur_input = super()._get_volume(cur_input_fnames.split(','))
             cur_target = super()._get_volume(cur_target_fnames.split(','))
+            # the mask is based on sum of flurophore images
             cur_mask_list = super()._get_volume(cur_mask_fnames.split(','))
             cur_mask = self._get_mask(cur_mask_list)
+            cur_target = np.stack([cur_target, cur_mask], axis=0)
 
             input_image.append(cur_input)
             target_image.append(cur_target)
-            mask_image.append(cur_mask)
+            #mask_image.append(cur_mask)
 
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
-        mask_image = np.stack(mask_image)
-        return input_image, target_image, mask_image
+        #mask_image = np.stack(mask_image)
+        return input_image, target_image
 
     def _get_mask(self, mask_list):
         """Generate the mask for weighting the loss"""

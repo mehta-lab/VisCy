@@ -1,5 +1,4 @@
 """Keras trainer"""
-from keras import backend as K
 from keras import Model
 from keras.models import load_model
 from keras import callbacks as keras_callbacks
@@ -14,8 +13,9 @@ from time import localtime, strftime
 import yaml
 
 from micro_dl.train import metrics as custom_metrics
-from micro_dl.train.losses import weighted_binary_loss
+from micro_dl.train import mse_losses as custom_losses
 from micro_dl.utils.aux_utils import import_class
+from micro_dl.utils.plot_utils import save_predicted_images
 from micro_dl.utils.train_utils import set_keras_session
 
 
@@ -73,7 +73,11 @@ class BaseKerasTrainer:
         loss = self.config['trainer']['loss']
         if hasattr(keras_losses, loss):
             loss_cls = getattr(keras_losses, loss)
-            return loss_cls
+        elif hasattr(custom_losses, loss):
+            loss_cls = getattr(custom_losses, loss)
+        else:
+            raise ValueError('%s is not a valid loss' % loss)
+        return loss_cls
 
     def _get_optimizer(self):
         """Get optimizer from config"""
@@ -169,6 +173,7 @@ class BaseKerasTrainer:
         # NEED A BETTER WAY TO IMPORT NETWORK
         network_cls = import_class('networks.unet', network_cls)
         self.network = network_cls(self.config)
+        # assert if network shape matches dataset shape
         self.inputs, self.outputs = self.network.build_net()
         with tf.device('/gpu:{}'.format(self.gpu_ids)):
             self.model = Model(inputs=self.inputs, outputs=self.outputs)
@@ -187,7 +192,23 @@ class BaseKerasTrainer:
                            metrics=self.metrics)
 
     def train(self):
-        """Train the model"""
+        """Train the model
+        https://groups.google.com/forum/#!searchin/keras-users/pass$20custom$20loss$20|sort:date/keras-users/ue1S8uAPDKU/x2ml5J7YBwAJ
+        https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
+        https://gist.github.com/andreimouraviev/2642384705034da92d6954dd9993fb4d
+        https://github.com/keras-team/keras/issues/2115
+
+        Suggested: modify generator to return a tuple with (input, output,
+        sample_weights) and use sample_weight_mode=temporal. This doesn't fit
+        the case for dynamic weighting (i.e. weights change with input image)
+        Use model.fit instead of fit_generator as couldn't find how sample
+        weights are passed from generator to fit_generator / fit. From:
+        https://github.com/keras-team/keras/blob/master/keras/engine/training.py
+        might be hard to fit sample_weights into the expected form!
+        https://github.com/keras-team/keras/issues/2115
+
+        FOUND A HACKY WAY TO PASS DYNAMIC WEIGHTS TO LOSS FUNCTION IN KERAS!
+        """
 
         self.loss = self._get_loss()
         self.optimizer = self._get_optimizer()
@@ -204,7 +225,7 @@ class BaseKerasTrainer:
             self.logger.info('Model initialized and compiled')
 
         try:
-            # NUM WORKERS read from yml or find the num of empty cores?
+        # NUM WORKERS read from yml or find the num of empty cores?
             self.model.fit_generator(
                 generator=self.train_dataset,
                 validation_data=self.val_dataset,
@@ -214,53 +235,54 @@ class BaseKerasTrainer:
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
 
-    def train_wtd_loss(self):
-        """Train the model with weighted loss
+    @classmethod
+    @staticmethod
+    def predict(config, model_fname, ds_test, model_dir):
+        """Run inference on images
 
-        https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
-        https://gist.github.com/andreimouraviev/2642384705034da92d6954dd9993fb4d
-        https://github.com/keras-team/keras/issues/2115
+        Due to the lambda layer only model weights are saved and not the model
+        config. Hence load_model wouldn't work here!
 
-        Suggested: modify generator to return a tuple with (input, output,
-        sample_weights) and use sample_weight_mode=temporal. This doesn't fit
-        the case for non-scalar weighting (i.e. weight by an image)
-        Use model.fit instead of fit_generator as couldn't find how sample
-        weights are passed from generator to fit_generator / fit. From:
-        https://github.com/keras-team/keras/blob/master/keras/engine/training.py
-        might be hard to fit sample_weights into the expected form!
+        :param yaml config: config used to train the model
+        :param str model_fname: fname with full path for the saved model
+         (.hdf5)
+        :param dataset ds_test: generator for the test set
+        :param str model_dir: dir where model results are to be saved
         """
 
-        self.loss = self._get_loss()
-        self.loss = weighted_binary_loss(self.loss)
-        self.optimizer = self._get_optimizer()
-        self.metrics = self._get_metrics()
-        self.callbacks = self._get_callbacks()
+        network_cls = config['network']['class']
+        network_cls = import_class('networks.unet', network_cls)
+        network = network_cls(config)
+        inputs, outputs = network.build_net()
+        model = Model(inputs=inputs, outputs=outputs)
+        model.load_weights(model_fname)
+        output_dir = os.path.join(model_dir, 'test_predictions')
+        for batch_idx in range(ds_test.__len__()):
+            cur_input, cur_target = ds_test.__getitem__(batch_idx)
+            if cur_input.shape[1] != cur_target.shape[1]:
+                # this is due to the hack for passing dynamic masks to loss fn
+                cur_target = cur_target[:, :-1, :, :]
+            pred_batch = self.model.predict(cur_input)
+            save_predicted_images(cur_input, cur_target, pred_batch,
+            save_predicted_images(cur_input, cur_target, pred_batch,
+                             output_dir, batch_idx)
 
+"""
         if self.model_name:
-            self.model = self._load_model()
-            self.logger.info('Resume model training from ....')
+            model_name = self.model_name
         else:
-            os.makedirs(self.model_dir, exist_ok=True)
-            self._init_model()
-            self.model.summary()
-            self.logger.info('Model initialized and compiled')
+            model_name = self.config['network']['class']
 
         n_batches_per_epoch = self.train_dataset.__len__()
         for epoch_idx in range(self.config['trainer']['max_epochs']):
             epoch_loss = 0
             for batch_idx in tqdm(range(n_batches_per_epoch)):
                 x, y, mask = self.train_dataset.__getitem__()
-                mask = K.batch_flatten(mask)
-                metrics = self.model.train_on_batch(x=x, y=y,
-                                                    sample_weights=mask)
+                metrics = self.model.train_on_batch([x, mask], y)
                 print(batch_idx, metrics)
                 epoch_loss += metrics
             mean_epoch_loss = epoch_loss / n_batches_per_epoch
 
-            if self.model_name:
-                model_name = self.model_name
-            else:
-                model_name = self.config['network']['class']
             timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
             model_name = '{}_{}.hdf5'.format(model_name, timestamp)
             filepath = os.path.join(self.model_dir, model_name)
@@ -274,8 +296,4 @@ class BaseKerasTrainer:
                     best_loss = mean_epoch_loss
                     print('Model saved, Loss, epoch_idx:',
                           best_loss, epoch_idx)
-
-
-
-
-
+"""
