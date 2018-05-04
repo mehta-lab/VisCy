@@ -196,11 +196,12 @@ def run_action(args):
                                    model_name=model_name, gpu_ids=args.gpu,
                                    gpu_mem_frac=args.gpu_mem_frac)
         trainer.train()
-    elif action=='tune_hyperparam':
+    elif action == 'tune_hyperparam':
         raise NotImplementedError
     else:
         raise TypeError(('action {} not permitted. options: train or '
                         'tune_hyperparam').format(action))
+
 
 if __name__ == '__main__':
     args = parse_args()

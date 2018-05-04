@@ -10,13 +10,14 @@ import logging
 import os
 import tensorflow as tf
 from time import localtime, strftime
+from tqdm import tqdm
 import yaml
 
 from micro_dl.train import metrics as custom_metrics
-from micro_dl.train import mse_losses as custom_losses
+from micro_dl.train import losses as custom_losses
+from micro_dl.train.losses import mse_binary_wtd
 from micro_dl.utils.aux_utils import import_class
-from micro_dl.utils.plot_utils import save_predicted_images
-from micro_dl.utils.train_utils import set_keras_session
+from micro_dl.utils.train_utils import set_keras_session, load_model
 
 
 class BaseKerasTrainer:
@@ -160,25 +161,24 @@ class BaseKerasTrainer:
         callbacks.append(csv_logger)
         return callbacks
 
-    def _load_model(self):
-        """Load the model from model_dir"""
+    def _init_model(self, loss, optimizer, metrics):
+        """Initialize the model from config
 
-        # find a way to get the last saved model and resume
-        self.model = load_model()
-
-    def _init_model(self):
-        """Initialize the model from config"""
+        :param loss: instance of keras loss or custom loss
+        :param optimizer: instance of an optimizer
+        :param metrics: a list of metrics instances
+        """
 
         network_cls = self.config['network']['class']
         # NEED A BETTER WAY TO IMPORT NETWORK
         network_cls = import_class('networks.unet', network_cls)
-        self.network = network_cls(self.config)
+        network = network_cls(self.config)
         # assert if network shape matches dataset shape
-        self.inputs, self.outputs = self.network.build_net()
+        inputs, outputs = network.build_net()
         with tf.device('/gpu:{}'.format(self.gpu_ids)):
-            self.model = Model(inputs=self.inputs, outputs=self.outputs)
+            model = Model(inputs=inputs, outputs=outputs)
 
-        plot_model(self.model,
+        plot_model(model,
                    to_file=os.path.join(self.model_dir,'model_graph.png'),
                    show_shapes=True, show_layer_names=True)
         # Lambda layers throw errors when converting to yaml!
@@ -187,13 +187,18 @@ class BaseKerasTrainer:
         #     f.write(model_yaml)
         with open(os.path.join(self.model_dir, 'config.yml'), 'w') as f:
             yaml.dump(self.config, f, default_flow_style=False)
-
-        self.model.compile(loss=self.loss, optimizer=self.optimizer,
-                           metrics=self.metrics)
+        
+        if 'weighted_loss' in self.config['trainer']:
+            n_output_channels = len(self.config['dataset']['target_channels'])
+            model.compile(loss=loss(n_output_channels), optimizer=optimizer,
+                          metrics=metrics)
+        else:
+            model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+        return model
 
     def train(self):
         """Train the model
-        https://groups.google.com/forum/#!searchin/keras-users/pass$20custom$20loss$20|sort:date/keras-users/ue1S8uAPDKU/x2ml5J7YBwAJ
+
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
         https://gist.github.com/andreimouraviev/2642384705034da92d6954dd9993fb4d
         https://github.com/keras-team/keras/issues/2115
@@ -202,98 +207,33 @@ class BaseKerasTrainer:
         sample_weights) and use sample_weight_mode=temporal. This doesn't fit
         the case for dynamic weighting (i.e. weights change with input image)
         Use model.fit instead of fit_generator as couldn't find how sample
-        weights are passed from generator to fit_generator / fit. From:
-        https://github.com/keras-team/keras/blob/master/keras/engine/training.py
-        might be hard to fit sample_weights into the expected form!
-        https://github.com/keras-team/keras/issues/2115
+        weights are passed from generator to fit_generator / fit.
 
         FOUND A HACKY WAY TO PASS DYNAMIC WEIGHTS TO LOSS FUNCTION IN KERAS!
+        https://groups.google.com/forum/#!searchin/keras-users/pass$20custom$20loss$20|sort:date/keras-users/ue1S8uAPDKU/x2ml5J7YBwAJ
         """
 
-        self.loss = self._get_loss()
-        self.optimizer = self._get_optimizer()
-        self.metrics = self._get_metrics()
-        self.callbacks = self._get_callbacks()
+        loss = self._get_loss()
+        optimizer = self._get_optimizer()
+        metrics = self._get_metrics()
+        callbacks = self._get_callbacks()
 
         if self.model_name:
-            self.model = self._load_model()
-            self.logger.info('Resume model training from ....')
+            model = load_model(self.config, self.model_name)
+            model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
+            self.logger.info('Resume model training')
         else:
             os.makedirs(self.model_dir, exist_ok=True)
-            self._init_model()
-            self.model.summary()
+            model = self._init_model(loss, optimizer, metrics)
+            model.summary()
             self.logger.info('Model initialized and compiled')
 
         try:
-        # NUM WORKERS read from yml or find the num of empty cores?
-            self.model.fit_generator(
-                generator=self.train_dataset,
-                validation_data=self.val_dataset,
+            # NUM WORKERS read from yml or find the num of empty cores?
+            model.fit_generator(
+                generator=self.train_dataset, validation_data=self.val_dataset,
                 epochs=self.config['trainer']['max_epochs'],
-                callbacks=self.callbacks, workers=4, verbose=1
+                callbacks=callbacks, workers=4, verbose=1
             )
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
-
-    @classmethod
-    @staticmethod
-    def predict(config, model_fname, ds_test, model_dir):
-        """Run inference on images
-
-        Due to the lambda layer only model weights are saved and not the model
-        config. Hence load_model wouldn't work here!
-
-        :param yaml config: config used to train the model
-        :param str model_fname: fname with full path for the saved model
-         (.hdf5)
-        :param dataset ds_test: generator for the test set
-        :param str model_dir: dir where model results are to be saved
-        """
-
-        network_cls = config['network']['class']
-        network_cls = import_class('networks.unet', network_cls)
-        network = network_cls(config)
-        inputs, outputs = network.build_net()
-        model = Model(inputs=inputs, outputs=outputs)
-        model.load_weights(model_fname)
-        output_dir = os.path.join(model_dir, 'test_predictions')
-        for batch_idx in range(ds_test.__len__()):
-            cur_input, cur_target = ds_test.__getitem__(batch_idx)
-            if cur_input.shape[1] != cur_target.shape[1]:
-                # this is due to the hack for passing dynamic masks to loss fn
-                cur_target = cur_target[:, :-1, :, :]
-            pred_batch = self.model.predict(cur_input)
-            save_predicted_images(cur_input, cur_target, pred_batch,
-            save_predicted_images(cur_input, cur_target, pred_batch,
-                             output_dir, batch_idx)
-
-"""
-        if self.model_name:
-            model_name = self.model_name
-        else:
-            model_name = self.config['network']['class']
-
-        n_batches_per_epoch = self.train_dataset.__len__()
-        for epoch_idx in range(self.config['trainer']['max_epochs']):
-            epoch_loss = 0
-            for batch_idx in tqdm(range(n_batches_per_epoch)):
-                x, y, mask = self.train_dataset.__getitem__()
-                metrics = self.model.train_on_batch([x, mask], y)
-                print(batch_idx, metrics)
-                epoch_loss += metrics
-            mean_epoch_loss = epoch_loss / n_batches_per_epoch
-
-            timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
-            model_name = '{}_{}.hdf5'.format(model_name, timestamp)
-            filepath = os.path.join(self.model_dir, model_name)
-
-            if epoch_idx == 0:
-                self.model.save(filepath)
-                best_loss = mean_epoch_loss
-            else:
-                if mean_epoch_loss <= best_loss:
-                    self.model.save(filepath)
-                    best_loss = mean_epoch_loss
-                    print('Model saved, Loss, epoch_idx:',
-                          best_loss, epoch_idx)
-"""

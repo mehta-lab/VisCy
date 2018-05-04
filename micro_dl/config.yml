@@ -43,7 +43,7 @@ network:
     batch_norm: True
     activation: relu
     pooling_type: max
-    skip_merge_type: add
+    skip_merge_type: concat
     dropout: 0.2
     residual: True
     height: 256

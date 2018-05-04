@@ -20,7 +20,7 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
 
     batch_size = input_batch.shape[0]
     # 3D images are better saved as movies/gif
-    assert len(batch_size.shape) == 4, 'saves 2D images only'
+    assert len(input_batch.shape) == 4, 'saves 2D images only'
 
     for img_idx in range(batch_size):
         cur_input = input_batch[img_idx]
@@ -34,18 +34,21 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
             ax[axis_count].imshow(cur_input[channel_idx], cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 0:
-                ax[axis_count].title('input')
-            ax[axis_count + 1].imshow(cur_target[channel_idx], cmap='gray')
-            ax[axis_count + 1].axis('off')
+                ax[axis_count].set_title('input')
+            axis_count += 1
+            ax[axis_count].imshow(cur_target[channel_idx], cmap='gray')
+            ax[axis_count].axis('off')
             if axis_count == 1:
-                ax[axis_count].title('target')
+                ax[axis_count].set_title('target')
+            axis_count += 1
             ax[axis_count].imshow(cur_prediction[channel_idx], cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 2:
-                ax[axis_count].title('prediction')
-            axis_count += 3
+                ax[axis_count].set_title('prediction')
+            axis_count += 1
         fname = os.path.join(output_dir,
                              '{}.jpg'.format(
                                  str(batch_idx * batch_size + img_idx))
                              )
         fig.savefig(fname, dpi=250)
+        plt.close(fig)
