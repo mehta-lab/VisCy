@@ -80,7 +80,10 @@ class BasePreProcessor(metaclass=ABCMeta):
             self.logger.info(msg)
 
     def save_images(self, img_fname):
-        """Saves the individual images as a npy file"""
+        """Saves the individual images as a npy file
+
+        https://github.com/czbiohub/VirtualStaining/blob/master/virtual_staining.py
+        """
 
         if not os.path.exists(img_fname):
             raise FileNotFoundError(
@@ -133,14 +136,56 @@ class BasePreProcessor(metaclass=ABCMeta):
         df.to_csv(metadata_fname, sep=',')
         jv.kill_vm()
 
+    def flat_field_corr(self, slice_idx=None):
+        """Estimates flat field correction image"""
+
+        meta_fname = os.path.join(self.volume_dir, 'image_volumes_info.csv')
+        try:
+            volume_metadata = pd.read_csv(meta_fname)
+        except IOError as e:
+            self.logger.error('cannot read individual image info:' + str(e))
+            raise
+
+        all_channels = volume_metadata['channel_num'].unique()
+        flat_field_dir = os.path.join(self.base_output_dir,
+                                      'flat_field_images')
+        for tp_idx in volume_metadata['timepoint'].unique():
+            for channel_idx in all_channels:
+                row_idx = self.get_row_idx(volume_metadata, tp_idx,
+                                           channel_idx, slice_idx)
+                channel_metadata = volume_metadata[row_idx]
+                for idx, row in channel_metadata.iterrows():
+                    sample_fname = row['fname']
+                    cur_image = np.load(sample_fname)
+                    n_dim = len(cur_image.shape)
+                    if n_dim == 3:
+                        cur_image = np.mean(cur_image, axis=2)
+                    if idx == 0:
+                        summed_image = cur_image.astype('float64')
+                    else:
+                        summed_image += cur_image
+                mean_image = summed_image / len(row_idx)
+                fname = 'flat-field_tp-{}_channel-{}.npy'.format(tp_idx,
+                                                                 channel_idx)
+                cur_fname = os.path.join(flat_field_dir, fname)
+                np.save(cur_fname, mean_image,
+                        allow_pickle=True, fix_imports=True)
+
+    #def save_flat_field_corr_images(self):
+    #    """Saves flat field corrected images"""
+
+    #def gen_mask(self, channel_ids):
+    #    """Generates a binary mask based on summation of channels"""
+
     @abstractmethod
-    def get_row_idx(self, volume_metadata, timepoint_idx, channel_idx):
+    def get_row_idx(self, volume_metadata, timepoint_idx,
+                    channel_idx, slice_idx=None):
         """Get the indices for images with timepoint_idx and channel_idx"""
 
         raise NotImplementedError
 
     def crop_images(self, tile_size, step_size, normalize=False,
-                           isotropic=True, channel_ids=-1):
+                           isotropic=True, channel_ids=-1, slice_idx=None):
         """Crop image volumes in the specified channels
 
         Isotropic here refers to the same dimension/shape along x,y,z and not
@@ -155,6 +200,8 @@ class BasePreProcessor(metaclass=ABCMeta):
         :param bool isotropic: if 3D, make the grid/shape isotropic
         :param list channel_ids: crop volumes in the given channels.
          default=-1, crop all channels
+        :param int slice_idx: 2D might have more acquisitions +/- focal plane,
+         (usually 3 images). slice_idx corresponds to the plane to consider
         """
 
         volume_metadata = pd.read_csv(os.path.join(self.volume_dir,
@@ -181,7 +228,7 @@ class BasePreProcessor(metaclass=ABCMeta):
             os.makedirs(timepoint_dir, exist_ok=True)
             for channel_idx in channel_ids:
                 row_idx = self.get_row_idx(volume_metadata, timepoint_idx,
-                                           channel_idx)
+                                           channel_idx, slice_idx)
                 channel_metadata = volume_metadata[row_idx]
                 channel_dir = os.path.join(timepoint_dir,
                                            'channel_{}'.format(channel_idx))
@@ -245,7 +292,7 @@ class LifPreProcessor2D(BasePreProcessor):
         """
         records = []
         # exclude the first 14 due to artifacts and some have one z
-        # (series 5, 412) instead of 3
+        # (series 15, 412) instead of 3
         for z_idx in range(num_pix_z):
             cur_fname = os.path.join(
                 channel_dir, 'image_n{}_z{}.npy'.format(sample_idx, z_idx)
@@ -261,7 +308,8 @@ class LifPreProcessor2D(BasePreProcessor):
                             cur_fname, size_x_um, size_y_um, size_z_um))
         return records
 
-    def get_row_idx(self, volume_metadata, timepoint_idx, channel_idx):
+    def get_row_idx(self, volume_metadata, timepoint_idx,
+                    channel_idx, slice_idx=None):
         """Get the indices for images with timepoint_idx and channel_idx"""
 
         row_idx = ((volume_metadata['timepoint'] == timepoint_idx) &

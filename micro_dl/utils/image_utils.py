@@ -6,6 +6,8 @@ from skimage.transform import resize
 def crop_image(input_image, tile_size, step_size, isotropic=False):
     """Creates 3D blocks from the image from given crop and overlap size.
 
+    https://github.com/czbiohub/VirtualStaining/blob/master/virtual_staining.py
+
     :param np.array input_image: input image in 3d
     :param list/tuple/np array tile_size: size of the blocks to be cropped
      from the image
