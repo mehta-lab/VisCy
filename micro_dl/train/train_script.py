@@ -62,16 +62,23 @@ def pre_process(meta_preprocess):
 
     # need a better way to import class dynamically
     preprocess_cls = meta_preprocess['class']
-    preprocess_cls = import_class('input.preprocessor', preprocess_cls)
+    preprocess_cls = import_class('input', preprocess_cls)
     preprocessor = preprocess_cls(
         base_output_dir=meta_preprocess['base_output_dir'],
         verbose=meta_preprocess['verbose']
     )
-    if meta_preprocess['split_volumes']:
-        preprocessor.save_images(meta_preprocess['input_fname'])
     crop_params = {}
-    if 'normalize' in meta_preprocess['crop_volumes']:
-        crop_params['normalize'] = meta_preprocess['crop_volumes']['normalize']
+    if meta_preprocess['split_volumes']:
+        if 'mask_channels' in meta_preprocess:
+            preprocessor.save_images(meta_preprocess['input_fname'],
+                                     meta_preprocess['mask_channels'],
+                                     meta_preprocess['focal_plane_idx'])
+            crop_params['mask_channel_ids'] = meta_preprocess['mask_channels']
+            crop_params['focal_plane_idx'] = meta_preprocess['focal_plane_idx']
+            crop_params['min_fraction'] = meta_preprocess['min_fraction']
+        else:
+            preprocessor.save_images(meta_preprocess['input_fname'])
+
     if 'isotropic' in meta_preprocess['crop_volumes']:
         crop_params['isotropic'] = meta_preprocess['crop_volumes']['isotropic']
 
@@ -82,7 +89,6 @@ def pre_process(meta_preprocess):
             channel_ids=meta_preprocess['crop_volumes']['channels'],
             **crop_params
         )
-
 
 def train_xy(df_meta, config):
     """Train using fit_generator"""

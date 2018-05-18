@@ -10,6 +10,7 @@ from keras.layers import (
 )
 from keras.layers.merge import Add, Concatenate
 
+
 class BaseUNet(metaclass=ABCMeta):
     """Base U-net implementation
 

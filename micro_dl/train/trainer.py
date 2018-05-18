@@ -10,12 +10,10 @@ import logging
 import os
 import tensorflow as tf
 from time import localtime, strftime
-from tqdm import tqdm
 import yaml
 
 from micro_dl.train import metrics as custom_metrics
 from micro_dl.train import losses as custom_losses
-from micro_dl.train.losses import mse_binary_wtd
 from micro_dl.utils.aux_utils import import_class
 from micro_dl.utils.train_utils import set_keras_session, load_model
 
@@ -170,10 +168,9 @@ class BaseKerasTrainer:
         """
 
         network_cls = self.config['network']['class']
-        # NEED A BETTER WAY TO IMPORT NETWORK
-        network_cls = import_class('networks.unet', network_cls)
+        network_cls = import_class('networks', network_cls)
         network = network_cls(self.config)
-        # assert if network shape matches dataset shape
+        # assert if network shape matches dataset shape?
         inputs, outputs = network.build_net()
         with tf.device('/gpu:{}'.format(self.gpu_ids)):
             model = Model(inputs=inputs, outputs=outputs)

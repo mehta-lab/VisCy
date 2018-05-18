@@ -104,6 +104,8 @@ class TrainingTableWithMask(BaseTrainingTable):
 
         df = super()._get_df(row_idx, retain_columns)
         orig_df = self.df_metadata[row_idx].copy(deep=True)
+        # modify to get mask fnames, get fname of mask_channels[0], fname_?,
+        # split path and replace dir channel with dir mask
         mask_column_names = self._get_col_name(self.mask_channels)
         df['fpaths_mask'] = (
             orig_df[mask_column_names].apply(lambda x: ','.join(x), axis=1)
