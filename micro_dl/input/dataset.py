@@ -2,7 +2,6 @@
 import keras
 import numpy as np
 import pandas as pd
-from scipy.ndimage.morphology import binary_fill_holes
 
 
 class BaseDataSet(keras.utils.Sequence):
@@ -57,6 +56,7 @@ class BaseDataSet(keras.utils.Sequence):
         https://www.tensorflow.org/performance/performance_guide#use_nchw_imag.
         will use nchw format. shape: [batch_size, num_channels, z, y, x]
 
+        :param int index: batch index
         :return: np.ndarrays input_image and target_image of shape
          [batch_size, num_channels, z, y, x]
         """
@@ -120,7 +120,7 @@ class DataSetWithMask(BaseDataSet):
         :param pd.Series target_fnames: pd.Series with each row containing
          filenames for one target
         :param pd.Series mask_fnames: pd.Series with each row containing
-         filenames for images to generate one mask per training pair
+         mask filenames
         :param int batch_size: num of datasets in each batch
         :param bool shuffle: shuffle data for each epoch
         :param int random_seed: initialize the random number generator with
@@ -134,6 +134,7 @@ class DataSetWithMask(BaseDataSet):
     def __getitem__(self, index):
         """Get a batch of data
 
+        :param int index: batch index
         :return: np.ndarrays input_image and target_image of shape
          [batch_size, num_channels, z, y, x] and mask_image of shape
          [batch_size, z, y, x]
@@ -146,7 +147,6 @@ class DataSetWithMask(BaseDataSet):
 
         input_image = []
         target_image = []
-        #mask_image = []
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
@@ -157,25 +157,12 @@ class DataSetWithMask(BaseDataSet):
             cur_target = super()._get_volume(cur_target_fnames.split(','))
             cur_target = (cur_target - np.mean(cur_target)) / np.std(cur_target)
             # the mask is based on sum of flurophore images
-            cur_mask_list = super()._get_volume(cur_mask_fnames.split(','))
-            cur_mask = self._get_mask(cur_mask_list)
-            cur_mask = np.expand_dims(cur_mask, axis=0)
+            cur_mask = super()._get_volume(cur_mask_fnames.split(','))
             cur_target = np.concatenate((cur_target, cur_mask), axis=0)
 
             input_image.append(cur_input)
             target_image.append(cur_target)
-            #mask_image.append(cur_mask)
 
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
-        #mask_image = np.stack(mask_image)
         return input_image, target_image
-
-    def _get_mask(self, mask_list):
-        """Generate the mask for weighting the loss"""
-
-        summed_img = np.sum(mask_list, axis=0)
-        thr = np.mean(summed_img)
-        thr_img = (summed_img >= thr).astype('uint8')
-        mask = binary_fill_holes(thr_img)
-        return mask

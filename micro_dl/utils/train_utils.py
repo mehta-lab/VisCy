@@ -6,7 +6,7 @@ import os
 import subprocess
 
 from micro_dl.utils.aux_utils import import_class
-from micro_dl.utils.plot_utils import save_predicted_images
+from micro_dl.plotting.plot_utils import save_predicted_images
 
 
 def check_gpu_availability(gpu_id, gpu_mem_frac):
@@ -67,6 +67,7 @@ def split_train_val_test(num_samples, train_ratio, test_ratio,
 
     split_idx = {}
     test_idx = np.random.randint(0, num_samples, num_test)
+    test_idx = list(test_idx)
     if num_test == 1:
         test_idx = [test_idx[0]]
     split_idx['test'] = test_idx
@@ -75,11 +76,11 @@ def split_train_val_test(num_samples, train_ratio, test_ratio,
     if val_ratio:
         num_val = int(val_ratio * num_samples)
         num_val = max(num_val, 1)
-        idx = np.random.randint(0, len(rem_set), num_val)
-        val_idx = list(rem_set)[idx[0]]
-        if isinstance(val_idx, int):
-            rem_set.remove(val_idx)
-            val_idx = [val_idx]
+        idx = np.random.randint(0, len(rem_set), num_val).astype('int')
+        rem_set_as_list = list(rem_set)
+        val_idx = [rem_set_as_list[val] for val in idx] 
+        if num_val == 1:
+            rem_set.remove(val_idx[0])
         else:
             rem_set = rem_set - set(val_idx)
         split_idx['val'] = val_idx

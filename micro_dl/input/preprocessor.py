@@ -19,10 +19,11 @@ import numpy as np
 import os
 import pandas as pd
 from scipy.ndimage.morphology import binary_fill_holes
+from skimage.filters import threshold_otsu
+from skimage.morphology import disk, binary_opening
 
-from micro_dl.utils.image_utils import (
-    crop_image, crop_at_indices, get_crop_indices
-)
+from micro_dl.input.preprocessor_utils import crop_image, get_crop_indices, \
+    crop_at_indices
 
 
 class BasePreProcessor(metaclass=ABCMeta):
@@ -233,8 +234,9 @@ class BasePreProcessor(metaclass=ABCMeta):
                         summed_image = np.load(cur_fname)
                     else:
                          summed_image += np.load(cur_fname)
-                thr = np.mean(summed_image)
-                thr_image = (summed_image >= thr).astype('uint8')
+                thr = threshold_otsu(summed_image, nbins=512)
+                str_elem = disk(5)
+                thr_image = binary_opening(summed_image>=thr, str_elem)
                 mask = binary_fill_holes(thr_image)
                 np.save(os.path.join(mask_dir, fname), mask,
                         allow_pickle=True, fix_imports=True)

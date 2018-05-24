@@ -15,7 +15,8 @@ import yaml
 from micro_dl.train import metrics as custom_metrics
 from micro_dl.train import losses as custom_losses
 from micro_dl.utils.aux_utils import import_class
-from micro_dl.utils.train_utils import set_keras_session, load_model
+from micro_dl.utils.train_utils import set_keras_session
+from micro_dl.train.model_inference import load_model
 
 
 class BaseKerasTrainer:

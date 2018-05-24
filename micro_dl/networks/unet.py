@@ -165,7 +165,7 @@ class BaseUNet(metaclass=ABCMeta):
         :return: keras.layers after upsampling, merging, conv->BN->activ
         """
 
-        layer_upsampled = self.UpSampling(size = (2, ) * self.num_dims,
+        layer_upsampled = self.UpSampling(size=(2, ) * self.num_dims,
                                           data_format=self.data_format)(layer)
         if self.skip_merge_type == Concatenate:
             layer = self.skip_merge_type(axis=self.channel_axis)(

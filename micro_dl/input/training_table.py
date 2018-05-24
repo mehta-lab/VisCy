@@ -1,4 +1,6 @@
 import numpy as np
+import os
+import pandas as pd
 
 from micro_dl.utils.train_utils import split_train_val_test
 
@@ -99,15 +101,30 @@ class TrainingTableWithMask(BaseTrainingTable):
                          split_by_column, split_ratio)
         self.mask_channels = mask_channels
 
+    def _replace_mask_dir(self, df_channel_fnames, mask_dir_name):
+        """Replace channel dir with mask dir in each fname"""
+        
+        channel_column_name = self._get_col_name([self.mask_channels[0]])
+        mask_fnames = []
+        for idx, row in df_channel_fnames.iterrows():
+            cur_fname = row[channel_column_name[0]]
+            cur_fname_list = cur_fname.split(os.sep)
+            cur_fname_list[-2] = mask_dir_name
+            mask_fname = str(os.sep).join(cur_fname_list)
+            mask_fnames.append(mask_fname)
+        return mask_fnames
+
     def _get_df(self, row_idx, retain_columns):
         """Get a df from the given row indices and column names/channel_ids"""
 
         df = super()._get_df(row_idx, retain_columns)
         orig_df = self.df_metadata[row_idx].copy(deep=True)
-        # modify to get mask fnames, get fname of mask_channels[0], fname_?,
-        # split path and replace dir channel with dir mask
-        mask_column_names = self._get_col_name(self.mask_channels)
-        df['fpaths_mask'] = (
-            orig_df[mask_column_names].apply(lambda x: ','.join(x), axis=1)
-        )
+        if isinstance(self.mask_channels, int):
+            self.mask_channels = [self.mask_channels]
+        mask_str = '-'.join(map(str, self.mask_channels))
+        mask_dir_name = 'mask_{}'.format(mask_str)
+        channel_column_name = self._get_col_name([self.mask_channels[0]])
+        mask_col = orig_df[channel_column_name].copy()
+        mask_fnames = self._replace_mask_dir(mask_col, mask_dir_name)
+        df['fpaths_mask'] = pd.Series(mask_fnames, index=df.index)
         return df

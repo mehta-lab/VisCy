@@ -186,7 +186,7 @@ def run_action(args):
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
                                      'cropped_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
-        if 'weighed_loss' in config['trainer']:
+        if 'weighted_loss' in config['trainer']:
             ds_train, ds_val, ds_test = train_xyweights(df_meta, config)
         else:
             ds_train, ds_val, ds_test = train_xy(df_meta, config)
