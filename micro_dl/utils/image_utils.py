@@ -41,13 +41,13 @@ def sample_block_medians(im, block_size=32):
     assert block_size < im_shape[0], "Block size larger than image height"
     assert block_size < im_shape[1], "Block size larger than image width"
 
-    blocks_height = im_shape[0] // block_size
-    blocks_width = im_shape[1] // block_size
-    sample_coords = np.zeros((blocks_height * blocks_width, 2), dtype=np.float64)
-    sample_values = np.zeros((blocks_height * blocks_width, ), dtype=np.float64)
-    for x in range(blocks_height):
-        for y in range(blocks_width):
-            idx = y * blocks_height + x
+    nbr_blocks_x = im_shape[0] // block_size
+    nbr_blocks_y = im_shape[1] // block_size
+    sample_coords = np.zeros((nbr_blocks_x * nbr_blocks_y, 2), dtype=np.float64)
+    sample_values = np.zeros((nbr_blocks_x * nbr_blocks_y, ), dtype=np.float64)
+    for x in range(nbr_blocks_x):
+        for y in range(nbr_blocks_y):
+            idx = y * nbr_blocks_x + x
             sample_coords[idx, :] = [x * block_size + (block_size - 1) / 2,
                                      y * block_size + (block_size - 1) / 2]
             sample_values[idx] = np.median(im[x * block_size:(x + 1) * block_size,
@@ -73,6 +73,8 @@ def fit_polynomial_surface(sample_coords,
 
     :return np.array poly_surface: 2D surface of shape im_shape
     """
+    assert (order + 1) ** 2 <= len(sample_values), \
+        "Can't fit a higher degree polynomial than there are sampled values"
     # Number of coefficients in determined by order + 1 squared
     orders = np.arange(order + 1)
     variable_matrix = np.zeros((sample_coords.shape[0], (order + 1) ** 2))
