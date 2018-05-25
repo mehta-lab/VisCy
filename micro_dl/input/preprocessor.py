@@ -22,8 +22,7 @@ from scipy.ndimage.morphology import binary_fill_holes
 from skimage.filters import threshold_otsu
 from skimage.morphology import disk, binary_opening
 
-from micro_dl.input.preprocessor_utils import crop_image, get_crop_indices, \
-    crop_at_indices
+import micro_dl.utils.image_utils as image_utils
 
 
 class BasePreProcessor(metaclass=ABCMeta):
@@ -186,10 +185,16 @@ class BasePreProcessor(metaclass=ABCMeta):
                     else:
                         summed_image += cur_image
                 mean_image = summed_image / len(row_idx)
+                # Compute flatfield from from mean image of stack
+                # TODO (Jenny): it currently samples median values
+                # from a mean images, not very statistically meaningful
+                # but easier than computing median of image stack
+                flatfield = image_utils.get_flatfield(mean_image)
+                corrected_image = mean_image / flatfield
                 fname = 'flat-field_tp-{}_channel-{}.npy'.format(tp_idx,
                                                                  channel_idx)
                 cur_fname = os.path.join(flat_field_dir, fname)
-                np.save(cur_fname, mean_image,
+                np.save(cur_fname, corrected_image,
                         allow_pickle=True, fix_imports=True)
 
     def save_flat_field_corrected_images(self):
@@ -304,7 +309,7 @@ class BasePreProcessor(metaclass=ABCMeta):
                                         mask_dir_name)
                 cropped_mask_dir = os.path.join(timepoint_dir, mask_dir_name)
                 os.makedirs(cropped_mask_dir, exist_ok=True)
-                crop_indices_dict = get_crop_indices(
+                crop_indices_dict = image_utils.get_crop_indices(
                     mask_dir, min_fraction, cropped_mask_dir, tile_size,
                     step_size, isotropic
                 )
@@ -321,11 +326,11 @@ class BasePreProcessor(metaclass=ABCMeta):
                     cur_image = np.load(sample_fname)
                     if mask_channel_ids is not None:
                         _, fname = os.path.split(sample_fname)
-                        cropped_image_data = crop_at_indices(
+                        cropped_image_data = image_utils.crop_at_indices(
                             cur_image, crop_indices_dict[fname], isotropic
                         )
                     else:
-                        cropped_image_data = crop_image(
+                        cropped_image_data = image_utils.crop_image(
                             input_image=cur_image, tile_size=tile_size,
                             step_size=step_size, isotropic=isotropic
                         )
