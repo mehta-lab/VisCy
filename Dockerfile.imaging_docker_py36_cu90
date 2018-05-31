@@ -57,11 +57,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     $PIP_INSTALL \
         setuptools \
         && \
-    
-    FROM python:3.6
-    COPY requirements.txt /tmp/
-    RUN pip install -r /tmp/requirements.txt
-    COPY . /tmp/
 
 # ==================================================================
 # jupyter
@@ -124,6 +119,11 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
           -D BUILD_PERF_TESTS=OFF \
           .. && \
     make -j"$(nproc)" install && \
+
+    FROM python:3.6
+    COPY requirements.txt /tmp/
+    RUN pip install -r /tmp/requirements.txt
+    COPY . /tmp/
 
 # ==================================================================
 # config & cleanup
