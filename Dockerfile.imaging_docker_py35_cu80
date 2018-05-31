@@ -120,9 +120,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
           .. && \
     make -j"$(nproc)" install && \
 
-    ADD requirements.txt /tmp/requirements.txt
-    RUN pip install --no-cache-dir -r /tmp/requirements.txt
-
 # ==================================================================
 # config & cleanup
 # ------------------------------------------------------------------
@@ -131,5 +128,12 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     apt-get clean && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /tmp/* ~/*
+
+# ==================================================================
+# install pip packages from requirements text file
+# ------------------------------------------------------------------
+
+    ADD requirements.txt /tmp/requirements.txt
+    RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 EXPOSE 8888 6006
