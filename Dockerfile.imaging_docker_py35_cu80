@@ -58,12 +58,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         setuptools \
         && \
 
-    ADD requirements.txt
-    
-    RUN pip install -r \
-        requirements.txt \
-        && \
-
 # ==================================================================
 # jupyter
 # ------------------------------------------------------------------
@@ -125,6 +119,9 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
           -D BUILD_PERF_TESTS=OFF \
           .. && \
     make -j"$(nproc)" install && \
+
+    ADD requirements.txt /tmp/requirements.txt
+    RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 # ==================================================================
 # config & cleanup
