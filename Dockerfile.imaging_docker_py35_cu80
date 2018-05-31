@@ -57,7 +57,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     $PIP_INSTALL \
         setuptools \
         && \
-    RUN $PIP_INSTALL -r requirements.txt
+    pip --no-cache-dir install --upgrade -r requirements.txt
 
 # ==================================================================
 # jupyter
