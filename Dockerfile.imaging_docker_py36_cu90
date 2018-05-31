@@ -58,9 +58,10 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         setuptools \
         && \
     
-    COPY requirements.txt /tmp/ && \
-    RUN pip install -r /tmp/requirements.txt && \
-    COPY . /tmp/ && \
+    FROM python:3.6
+    COPY requirements.txt /tmp/
+    RUN pip install -r /tmp/requirements.txt
+    COPY . /tmp/
 
 # ==================================================================
 # jupyter
