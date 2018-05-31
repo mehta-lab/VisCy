@@ -58,9 +58,9 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         setuptools \
         && \
     
-    COPY requirements.txt /tmp/
-    RUN pip install -r /tmp/requirements.txt
-    COPY . /tmp/
+    COPY requirements.txt /tmp/ && \
+    RUN pip install -r /tmp/requirements.txt && \
+    COPY . /tmp/ && \
 
 # ==================================================================
 # jupyter
