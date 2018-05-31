@@ -120,11 +120,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
           .. && \
     make -j"$(nproc)" install && \
 
-    FROM python:3.6
-    COPY requirements.txt /tmp/
-    RUN pip install -r /tmp/requirements.txt
-    COPY . /tmp/
-
 # ==================================================================
 # config & cleanup
 # ------------------------------------------------------------------
@@ -134,4 +129,9 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     apt-get autoremove && \
     rm -rf /var/lib/apt/lists/* /tmp/* ~/*
 
+FROM python:3.6
+COPY requirements.txt /tmp/
+RUN pip install -r /tmp/requirements.txt
+COPY . /tmp/
+    
 EXPOSE 8888 6006
