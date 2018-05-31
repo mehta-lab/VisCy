@@ -58,7 +58,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         setuptools \
         && \
     
-    ADD requirements.txt
+    ADD requirements.txt /
     
     RUN pip install -r \
         requirements.txt \
