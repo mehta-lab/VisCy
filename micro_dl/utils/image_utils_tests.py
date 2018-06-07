@@ -1,6 +1,7 @@
 import nose.tools
 import numpy as np
 
+import micro_dl.input.estimate_flat_field
 import micro_dl.utils.image_utils as image_utils
 
 
@@ -17,7 +18,7 @@ test_values[9:] = 200.
 def test_sample_block_medians():
     # Test that block sampling is performed correctly
     block_size = 3
-    coords, values = image_utils.sample_block_medians(test_im, block_size=block_size)
+    coords, values = micro_dl.input.estimate_flat_field.sample_block_medians(test_im, block_size=block_size)
     # A block size of 3 will create 3*5 block coordinates and values
     np.testing.assert_array_equal(values, test_values)
     np.testing.assert_array_equal(coords, test_coords)
@@ -34,7 +35,7 @@ def test_fit_polynomial_surface():
 
 
 def test_get_flatfield():
-    flatfield = image_utils.get_flatfield(test_im, block_size=3)
+    flatfield = micro_dl.input.estimate_flat_field.get_flatfield(test_im, block_size=3)
     # Since there's a bright block to the right, the left col should be < right col
     nose.tools.assert_true(np.mean(flatfield[:, 0]) < np.mean(flatfield[:, -1]))
     # Since flatfield is normalized, the mean should be close to one
@@ -43,4 +44,4 @@ def test_get_flatfield():
 
 @nose.tools.raises(ValueError)
 def test_negative_flatfield():
-    flatfield = image_utils.get_flatfield(test_im - 100, block_size=3)
+    flatfield = micro_dl.input.estimate_flat_field.get_flatfield(test_im - 100, block_size=3)

@@ -14,7 +14,7 @@ def zscore(input_image):
     return norm_img
 
 
-def hist_clipping(input_image, min_percentile=5, max_percentile=95):
+def hist_clipping(input_image, min_percentile=2, max_percentile=98):
     """Clips and rescales histogram from min to max intensity percentiles
 
     rescale_intensity with input check

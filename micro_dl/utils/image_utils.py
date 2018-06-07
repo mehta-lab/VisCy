@@ -1,7 +1,7 @@
 """Utility functions for processing images"""
-import glob
 import itertools
 import numpy as np
+import os
 from skimage.transform import resize
 
 
@@ -10,6 +10,7 @@ def resize_image(input_image, output_shape):
 
     :param np.ndarray input_image: image to be resized
     :param tuple/np.array output_shape: desired shape of the output image
+    :return: np.array, resized image
     """
 
     msg = 'the output shape does not match the image dimension'
@@ -25,41 +26,36 @@ def resize_mask(input_image, target_size):
     raise NotImplementedError
 
 
-def sample_block_medians(im, block_size=32):
+def apply_flat_field_correction(input_image, **kwargs):
+    """Apply flat field correction.
+
+    :param np.array input_image: image to be corrected
+    Kwargs:
+        flat_field_image (np.float): flat_field_image for correction
+        image_dir (str): dir with split images from stack (or individual
+         sample images
+        channel_id (int): input image channel
+    :return: np.array (float) corrected image
     """
-    Subdivide a 2D image in smaller blocks of size block_size and
-    compute the median intensity value for each block. Any incomplete
-    blocks (remainders of modulo operation) will be ignored.
 
-    :param np.array im:             2D image
-    :param int block_size:          Size of blocks image will be divided into
-
-    :return np.array sample_coords: Image coordinates for block centers (float)
-    :return np.array sample_values: Median intensity values for blocks (float)
-    """
-    im_shape = im.shape
-    assert block_size < im_shape[0], "Block size larger than image height"
-    assert block_size < im_shape[1], "Block size larger than image width"
-
-    nbr_blocks_x = im_shape[0] // block_size
-    nbr_blocks_y = im_shape[1] // block_size
-    sample_coords = np.zeros((nbr_blocks_x * nbr_blocks_y, 2), dtype=np.float64)
-    sample_values = np.zeros((nbr_blocks_x * nbr_blocks_y, ), dtype=np.float64)
-    for x in range(nbr_blocks_x):
-        for y in range(nbr_blocks_y):
-            idx = y * nbr_blocks_x + x
-            sample_coords[idx, :] = [x * block_size + (block_size - 1) / 2,
-                                     y * block_size + (block_size - 1) / 2]
-            sample_values[idx] = np.median(im[x * block_size:(x + 1) * block_size,
-                                              y * block_size:(y + 1) * block_size])
-    return sample_coords, sample_values
+    if 'flat_field_image' in kwargs:
+        corrected_image = input_image / kwargs['flat_field_image']
+    else:
+        msg = 'image_dir and channel_id are required to fetch flat field image'
+        assert all(k in kwargs for k in ('image_dir', 'channel_id')), msg
+        flat_field_image = np.load(os.path.join(
+            kwargs['image_dir'], 'flat_field_images',
+            'flat-field_channel-{}.npy'.format(kwargs['channel_id'])
+        ))
+        corrected_image = input_image.astype('float') / flat_field_image
+    return corrected_image
 
 
-def fit_polynomial_surface(sample_coords,
-                           sample_values,
-                           im_shape,
-                           order=2,
-                           normalize=True):
+def fit_polynomial_surface_2D(sample_coords,
+                              sample_values,
+                              im_shape,
+                              order=2,
+                              normalize=True):
     """
     Given coordinates and corresponding values, this function will fit a
     2D polynomial of given order, then create a surface of given shape.
@@ -97,26 +93,85 @@ def fit_polynomial_surface(sample_coords,
     return poly_surface
 
 
-def get_flatfield(im, block_size=32, order=2, normalize=True):
-    """
-    Combine sampling and polynomial surface fit for flatfield estimation.
-    To flatfield correct an image, divide it by flatfield
+def tile_image(input_image, tile_size, step_size, isotropic=False):
+    """Crops the image from given crop and step size.
 
-    :param np.array im:            2D image
-    :param int block_size:         Size of blocks image will be divided into
-    :param int order:              Order of polynomial (default 2)
-    :param bool normalize:         Normalize surface by dividing by its mean
-                                   for flatfield correction (default True)
-
-    :return np.array flatfield:    Flatfield image
+    :param np.array input_image: input image to be tiled
+    :param list/tuple/np array tile_size: size of the blocks to be cropped
+     from the image
+    :param list/tuple/np array step_size: size of the window shift. In case of
+     no overlap, the step size is tile_size. If overlap, step_size < tile_size
+    :param bool isotropic: if 3D, make the grid/shape isotropic
+    :return: a list with tuples of cropped image id of the format
+     rrmin-rmax_ccmin-cmax_slslmin-slmax and cropped image
     """
-    coords, values = sample_block_medians(im, block_size=block_size)
-    flatfield = fit_polynomial_surface(coords,
-                                       values,
-                                       im.shape,
-                                       order=order,
-                                       normalize=normalize)
-    # Flatfields can't contain zeros or negative values
-    if flatfield.min() <= 0:
-        raise ValueError("The generated flatfield was not strictly positive.")
-    return flatfield
+
+    check_1 = len(tile_size) == len(step_size)
+    check_2 = np.all(step_size <= tile_size)
+    check_3 = np.all(tile_size) > 0
+    assert check_1 and check_2 and check_3
+
+    n_rows = input_image.shape[0]
+    n_cols = input_image.shape[1]
+
+    n_dim = len(input_image.shape)
+    if n_dim == 3:
+        n_slices = input_image.shape[2]
+
+    if isotropic:
+        isotropic_shape = [tile_size[0], ] * len(tile_size)
+        isotropic_cond = not(list(tile_size) == isotropic_shape)
+    else:
+        isotropic_cond = isotropic
+
+    cropped_image_list = []
+    for row in range(0, n_rows - tile_size[0] + 1, step_size[0]):
+        for col in range(0, n_cols - tile_size[1] + 1, step_size[1]):
+            img_id = 'r{}-{}_c{}-{}'.format(row, row + tile_size[0],
+                                            col, col + tile_size[1])
+            if n_dim == 3:
+                for sl in range(0, n_slices - tile_size[2] + 1, step_size[2]):
+                    img_id = '{}_sl{}-{}'.format(img_id, sl, sl + tile_size[2])
+                    cropped_img = input_image[row: row + tile_size[0],
+                                              col: col + tile_size[1],
+                                              sl: sl + tile_size[2]]
+                    if isotropic_cond:
+                        cropped_img = resize_image(cropped_img,
+                                                   isotropic_shape)
+                    cropped_image_list.append((img_id, cropped_img))
+            else:
+                cropped_img = input_image[row: row + tile_size[0],
+                                          col: col + tile_size[1]]
+                cropped_image_list.append((img_id, cropped_img))
+    return cropped_image_list
+
+
+def crop_at_indices(input_image, crop_indices, isotropic=False):
+    """Crop image into tiles at given indices
+
+    :param np.array input_image: input image for cropping
+    :param list crop_indices: list of indices for cropping
+    :param bool isotropic: if 3D, make the grid/shape isotropic
+    :return: a list with tuples of cropped image id of the format
+     rrmin-rmax_ccmin-cmax_slslmin-slmax and cropped image
+    """
+
+    n_dim = len(input_image.shape)
+    cropped_img_list = []
+    for cur_idx in crop_indices:
+        img_id = 'r{}-{}_c{}-{}'.format(cur_idx[0], cur_idx[1],
+                                        cur_idx[2], cur_idx[3])
+        if n_dim == 3:
+            img_id = '{}_sl{}-{}'.format(img_id, cur_idx[4], cur_idx[5])
+            cropped_img = input_image[cur_idx[0]: cur_idx[1],
+                                      cur_idx[2]: cur_idx[3],
+                                      cur_idx[4]: cur_idx[5]]
+            if isotropic:
+                img_shape = cropped_img.shape
+                isotropic_shape = [img_shape[0], ] * len(img_shape)
+                cropped_img = resize_image(cropped_img, isotropic_shape)
+        else:
+            cropped_img = input_image[cur_idx[0]: cur_idx[1],
+                                      cur_idx[2]: cur_idx[3]]
+        cropped_img_list.append((img_id, cropped_img))
+    return cropped_img_list

@@ -10,7 +10,6 @@ from micro_dl.input.training_table import (
     BaseTrainingTable, TrainingTableWithMask
 )
 from micro_dl.train.trainer import BaseKerasTrainer
-from micro_dl.utils.aux_utils import import_class
 from micro_dl.utils.train_utils import check_gpu_availability
 
 
@@ -44,7 +43,10 @@ def parse_args():
 def read_config(config_fname):
     """Read the config file in yml format
 
+    TODO: validate config!
+
     :param str config_fname: fname of config yaml with its full path
+    :return:
     """
 
     with open(config_fname, 'r') as f:
@@ -52,43 +54,6 @@ def read_config(config_fname):
 
     return config
 
-
-def pre_process(meta_preprocess):
-    """Split and crop volumes from lif data
-
-    :param dict meta_preprocess: dict with keys [input_fname, base_output_dir,
-     split_volumes, crop_volumes]
-    """
-
-    # need a better way to import class dynamically
-    preprocess_cls = meta_preprocess['class']
-    preprocess_cls = import_class('input', preprocess_cls)
-    preprocessor = preprocess_cls(
-        base_output_dir=meta_preprocess['base_output_dir'],
-        verbose=meta_preprocess['verbose']
-    )
-    crop_params = {}
-    if meta_preprocess['split_volumes']:
-        if 'mask_channels' in meta_preprocess:
-            preprocessor.save_images(meta_preprocess['input_fname'],
-                                     meta_preprocess['mask_channels'],
-                                     meta_preprocess['focal_plane_idx'])
-            crop_params['mask_channel_ids'] = meta_preprocess['mask_channels']
-            crop_params['focal_plane_idx'] = meta_preprocess['focal_plane_idx']
-            crop_params['min_fraction'] = meta_preprocess['min_fraction']
-        else:
-            preprocessor.save_images(meta_preprocess['input_fname'])
-
-    if 'isotropic' in meta_preprocess['crop_volumes']:
-        crop_params['isotropic'] = meta_preprocess['crop_volumes']['isotropic']
-
-    if meta_preprocess['crop_volumes']:
-        preprocessor.crop_images(
-            tile_size=meta_preprocess['crop_volumes']['tile_size'],
-            step_size=meta_preprocess['crop_volumes']['step_size'],
-            channel_ids=meta_preprocess['crop_volumes']['channels'],
-            **crop_params
-        )
 
 def train_xy(df_meta, config):
     """Train using fit_generator"""
@@ -177,11 +142,7 @@ def run_action(args):
 
     action = args.action
     config = read_config(args.config)
-    if action=='train':
-        if config['dataset']['preprocess']:
-            preprocess_meta = config['dataset']['preprocess']
-            preprocess_meta['verbose'] = config['verbose']
-            pre_process(preprocess_meta)
+    if action == 'train':
 
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
                                      'cropped_images_info.csv')

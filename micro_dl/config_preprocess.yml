@@ -1,0 +1,20 @@
+base_output_dir: '/data/anitha/debug_lif'
+focal_plane_idx: 0
+verbose: 10
+split_volumes: True
+splitter_class: LifStackSplitter2D
+input_fname: '/home/krishnan/mntDir/DeviceData/CZLASX-01/Data/2017/VirtualStaining/20171121_ManuShalin/ZStack1_BF_Clath_Mito_Nuclei.lif'
+correct_flat_field: True
+flat_field_class: FlatFieldEstimator2D
+use_masks: True
+masks:
+    mask_channels: [0, 1]
+    str_elem_radius: 3
+tile_stack: True
+tile:
+    channels: -1
+    tile_size: [256, 256]
+    step_size: [64, 64]
+    save_cropped_masks: True
+    min_fraction: 0.15
+    hist_clip_limits: [2, 98]
