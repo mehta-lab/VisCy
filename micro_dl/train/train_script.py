@@ -118,6 +118,7 @@ def train_xyweights(df_meta, config):
     else:
         df_train, df_test = tt.train_test_split()
         ds_val = None
+        train_ds_params = {}
         if 'augmentations' in config['trainer']:
             train_ds_params['augmentations'] = (
                 config['trainer']['augmentations']
@@ -146,7 +147,7 @@ def run_action(args):
     if action == 'train':
 
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
-                                     'cropped_images_info.csv')
+                                     'tiled_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
         if 'weighted_loss' in config['trainer']:
             ds_train, ds_val, ds_test = train_xyweights(df_meta, config)

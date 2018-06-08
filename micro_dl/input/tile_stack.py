@@ -66,13 +66,13 @@ class ImageStackTiler:
         self.correct_flat_field = correct_flat_field
 
     @staticmethod
-    def _save_tile_meta(cropped_meta, cur_channel, cropped_dir):
+    def _save_tile_meta(cropped_meta, cur_channel, tiled_dir):
         """Save meta data for cropped images
 
         :param list cropped_meta: list of tuples holding meta info for cropped
          images
         :param int cur_channel: channel being cropped
-        :param str cropped_dir: dir to save meta data
+        :param str tiled_dir: dir to save meta data
         """
 
         fname_header = 'fname_{}'.format(cur_channel)
@@ -81,8 +81,8 @@ class ImageStackTiler:
             columns=['timepoint', 'channel_num', 'sample_num',
                      'slice_num', fname_header]
         )
-        metadata_fname = os.path.join(cropped_dir,
-                                      'cropped_images_info.csv')
+        metadata_fname = os.path.join(tiled_dir,
+                                      'tiled_images_info.csv')
         if cur_channel == 0:
             df = cur_df
         else:

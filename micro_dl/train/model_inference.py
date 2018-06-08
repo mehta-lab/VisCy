@@ -19,7 +19,7 @@ def load_model(config, model_fname):
 
     network_cls = config['network']['class']
     # not ideal as more networks get added
-    network_cls = import_class('networks.unet', network_cls)
+    network_cls = import_class('networks', network_cls)
     network = network_cls(config)
     inputs, outputs = network.build_net()
     model = Model(inputs=inputs, outputs=outputs)

@@ -94,12 +94,14 @@ class TrainingTableWithMask(BaseTrainingTable):
     """Adds the column for mask to metadata"""
 
     def __init__(self, df_metadata, input_channels, target_channels,
-                 mask_channels, split_by_column, split_ratio):
+                 mask_channels, split_by_column, split_ratio,
+                 min_fraction=None):
         """Init"""
 
         super().__init__(df_metadata, input_channels, target_channels,
                          split_by_column, split_ratio)
         self.mask_channels = mask_channels
+        self.min_fraction = min_fraction
 
     def _replace_mask_dir(self, df_channel_fnames, mask_dir_name):
         """Replace channel dir with mask dir in each fname"""
@@ -123,6 +125,8 @@ class TrainingTableWithMask(BaseTrainingTable):
             self.mask_channels = [self.mask_channels]
         mask_str = '-'.join(map(str, self.mask_channels))
         mask_dir_name = 'mask_{}'.format(mask_str)
+        if self.min_fraction is not None:
+            mask_dir_name = '{}_vf-{}'.format(mask_dir_name, self.min_fraction)
         channel_column_name = self._get_col_name([self.mask_channels[0]])
         mask_col = orig_df[channel_column_name].copy()
         mask_fnames = self._replace_mask_dir(mask_col, mask_dir_name)

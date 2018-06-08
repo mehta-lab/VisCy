@@ -131,7 +131,7 @@ class BaseKerasTrainer:
                 # https://github.com/keras-team/keras/issues/8343
                 # Lambda layer: keras can't make a deepcopy of the layer
                 # configuration because there is a tensor in it! LAMBDA :-(
-                # added save_weights_only
+                # save_weights_only
                 cur_cb = cb_cls(
                     filepath=filepath,
                     monitor=callbacks_config[cb_dict]['monitor'],

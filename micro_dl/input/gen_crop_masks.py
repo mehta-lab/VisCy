@@ -69,12 +69,12 @@ class MaskProcessor:
         if roi_vf >= min_fraction:
             sample_index_list.append(crop_index)
             if save_cropped_mask:
-                img_id = 'n{}_x{}_{}_y{}_{}'.format(
+                img_id = 'n{}_r{}_{}_c{}_{}'.format(
                     sample_idx, crop_index[0], crop_index[1], crop_index[2],
                     crop_index[3]
                 )
                 if len(cropped_mask.shape) == 3:
-                    img_id = '{}_z{}-{}.npy'.format(img_id, crop_index[4],
+                    img_id = '{}_sl{}-{}.npy'.format(img_id, crop_index[4],
                                                     crop_index[5])
                     if isotropic:
                         cropped_mask = resize_mask(
