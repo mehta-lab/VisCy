@@ -48,7 +48,7 @@ def pre_process(pp_config):
     # split images
     if pp_config['split_volumes']:
         stack_splitter_cls = pp_config['splitter_class']
-        stack_splitter_cls = import_class('input', stack_splitter_cls)
+        stack_splitter_cls = import_class('input.split_lif_stack', stack_splitter_cls)
         stack_splitter = stack_splitter_cls(
             lif_fname=pp_config['input_fname'],
             base_output_dir=pp_config['base_output_dir'],
@@ -72,7 +72,7 @@ def pre_process(pp_config):
 
     if correct_flat_field:
         flat_field_estimator_cls = pp_config['flat_field_class']
-        flat_field_estimator_cls = import_class('input',
+        flat_field_estimator_cls = import_class('input.estimate_flat_field',
                                                 flat_field_estimator_cls)
         flat_field_estimator = flat_field_estimator_cls(split_dir)
         flat_field_estimator.estimate_flat_field(focal_plane_idx)
