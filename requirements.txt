@@ -1,9 +1,10 @@
-numpy
-scipy
-pandas
-scikit-learn
-scikit-image
-matplotlib
 Cython
+matplotlib
 nose
+numpy
+pandas
 PIMS
+pydot
+scikit-image
+scikit-learn
+scipy

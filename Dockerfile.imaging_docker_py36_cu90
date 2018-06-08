@@ -32,6 +32,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         cmake \
         wget \
         git \
+	graphviz \
         vim \
         && \
 
@@ -80,7 +81,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # ------------------------------------------------------------------
 
     $PIP_INSTALL \
-        tensorflow-gpu \
+        tensorflow-gpu==1.7.0 \
         && \
 
 # ==================================================================
@@ -89,7 +90,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 
     $PIP_INSTALL \
         h5py \
-        keras \
+	keras==2.1.5 \
         && \
 
 # ==================================================================
@@ -135,5 +136,8 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 
     ADD requirements.txt /tmp/requirements.txt
     RUN pip install --no-cache-dir -r /tmp/requirements.txt
+
+    WORKDIR /microDL
+    RUN export PYTHONPATH=$(pwd)
 
 EXPOSE 8888 6006

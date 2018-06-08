@@ -32,6 +32,7 @@ class BaseKerasTrainer:
         self.gpu_ids = gpu_ids
         self.gpu_mem_frac = gpu_mem_frac
         self.verbose = 10
+        os.makedirs(model_dir, exist_ok=True)
         self.model_dir = model_dir
         self.model_name = model_name
         self.config = config
@@ -42,8 +43,12 @@ class BaseKerasTrainer:
             self.resume_training = True
         else:
             self.resume_training = False
-        self.sess = set_keras_session(gpu_ids=gpu_ids,
-                                      gpu_mem_frac=gpu_mem_frac)
+        if gpu_ids == -1:
+            self.sess = None
+        else:
+            self.sess = set_keras_session(
+                gpu_ids=gpu_ids,
+                gpu_mem_frac=gpu_mem_frac)
 
     def _init_train_logger(self):
         """Initialize logger for training"""
@@ -169,7 +174,7 @@ class BaseKerasTrainer:
         """
 
         network_cls = self.config['network']['class']
-        network_cls = import_class('networks', network_cls)
+        network_cls = import_class('networks.unet', network_cls)
         network = network_cls(self.config)
         # assert if network shape matches dataset shape?
         inputs, outputs = network.build_net()

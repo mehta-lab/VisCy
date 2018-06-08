@@ -13,9 +13,9 @@ def import_class(module_name, cls_name):
     :param str cls_name: class to find
     """
 
-    main_module = 'micro_dl'
+    full_module_name = ".".join(('micro_dl', module_name))
     try:
-        module = importlib.import_module(module_name, main_module)
+        module = importlib.import_module(full_module_name)
         obj = getattr(module, cls_name)
 
         if inspect.isclass(obj):
