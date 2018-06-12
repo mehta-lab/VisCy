@@ -6,7 +6,7 @@
 # jupyter       latest (pip)
 # pytorch       0.4.0  (pip)
 # tensorflow    1.8.0  (pip)
-# keras         latest (pip)
+# keras         2.1.5  (pip)
 # opencv        3.4.1  (git)
 # ==================================================================
 
@@ -81,7 +81,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # ------------------------------------------------------------------
 
     $PIP_INSTALL \
-        tensorflow-gpu==1.7.0 \
+        tensorflow-gpu \
         && \
 
 # ==================================================================
@@ -138,6 +138,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
     WORKDIR /microDL
-    RUN export PYTHONPATH=$(pwd)
+    RUN export PYTHONPATH=/microDL
 
 EXPOSE 8888 6006

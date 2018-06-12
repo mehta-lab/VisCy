@@ -1,5 +1,6 @@
 """Tile images for training"""
 
+import cv2
 import numpy as np
 import os
 import pandas as pd
@@ -12,11 +13,11 @@ import micro_dl.utils.image_utils as image_utils
 
 
 class ImageStackTiler:
-    """Crops all images images in a stack"""
+    """Tiles all images images in a stack"""
 
     def __init__(self, base_output_dir, tile_size, step_size,
                  timepoint_ids=-1, tile_channels=-1, correct_flat_field=False,
-                 isotropic=False):
+                 isotropic=False, meta_path=None):
         """Init
 
         Isotropic here refers to the same dimension/shape along row, col, slice
@@ -35,14 +36,19 @@ class ImageStackTiler:
         :param bool correct_flat_field: bool indicator for correcting for flat
          field
         :param bool isotropic: if 3D, make the grid/shape isotropic
+        :param meta_path: If none, assume metadata csv is in base_output_dir
+            + split_images/ and is named split_images_info.csv
         :return: a list with tuples - (cropped image id of the format
          rrmin-rmax_ccmin-cmax_slslmin-slmax, cropped image)
         """
 
         self.base_output_dir = base_output_dir
-        volume_metadata = pd.read_csv(os.path.join(
-            self.base_output_dir, 'split_images', 'split_images_info.csv'
-        ))
+        if meta_path is None:
+            volume_metadata = pd.read_csv(os.path.join(
+                self.base_output_dir, 'split_images', 'split_images_info.csv'
+            ))
+        else:
+            volume_metadata = pd.read_csv(meta_path)
         self.volume_metadata = volume_metadata
 
         tp_channel_ids = validate_tp_channel(volume_metadata,
@@ -64,6 +70,7 @@ class ImageStackTiler:
         self.tiled_dir = tiled_dir
         self.isotropic = isotropic
         self.correct_flat_field = correct_flat_field
+        self.is_npy = is_npy
 
     @staticmethod
     def _save_tile_meta(cropped_meta, cur_channel, tiled_dir):
@@ -138,7 +145,12 @@ class ImageStackTiler:
 
         for _, row in channel_metadata.iterrows():
             sample_fname = row['fname']
-            cur_image = np.load(sample_fname)
+            # Read npy or image
+            if sample_fname[-3:] == 'npy':
+                cur_image = np.load(sample_fname)
+            else:
+                cur_image = cv2.imread(sample_fname, cv2.IMREAD_ANYDEPTH)
+
             if self.correct_flat_field:
                 cur_image = image_utils.apply_flat_field_correction(
                     cur_image, flat_field_image=flat_field_image
@@ -192,13 +204,17 @@ class ImageStackTiler:
                 channel_dir = os.path.join(tp_dir,
                                            'channel_{}'.format(channel))
                 os.makedirs(channel_dir, exist_ok=True)
-
-                flat_field_image = np.load(
-                    os.path.join(self.base_output_dir, 'split_images',
-                                 'flat_field_images',
-                                 'flat-field_channel-{}.npy'.format(channel)
-                                 )
-                )
+                if self.correct_flat_field:
+                    flat_field_image = np.load(
+                        os.path.join(
+                            self.base_output_dir,
+                            'split_images',
+                            'flat_field_images',
+                            'flat-field_channel-{}.npy'.format(channel)
+                        )
+                    )
+                else:
+                    flat_field_image = None
                 metadata = []
                 self._tile_channel(image_utils.tile_image,
                                    channel_dir, channel_metadata,

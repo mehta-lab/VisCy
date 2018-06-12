@@ -1,5 +1,6 @@
 Cython
 matplotlib
+natsort
 nose
 numpy
 pandas

@@ -174,7 +174,8 @@ def run_action(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    if args.gpu > -1:
+    # Comment (Jenny): gpu_availability is assigned but not used after this?
+    if args.gpu >= 0:
         gpu_availability = check_gpu_availability(
             args.gpu,
             args.gpu_mem_frac)
