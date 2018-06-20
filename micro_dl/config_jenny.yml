@@ -1,6 +1,6 @@
 dataset:
     preprocess: False
-    data_dir: '/data/image_tile_256-256_step_256-256'
+    data_dir: '/Users/jenny.folkesson/Data/processed_data/image_tile_256-256_step_256-256'
     input_channels: [3]
     target_channels: [0]
     split_by_column: sample_num
@@ -12,17 +12,23 @@ dataset:
     width: 256
 verbose: 10
 trainer:
-    model_dir: '/data/labelfree_tile256_bs16_mse'
+    model_dir: '/Users/jenny.folkesson/Data/models/labelfree_tile256_bs16_mse_clr_nadam'
     batch_size: 16
     max_epochs: 50
     patience: 20
     metrics: coeff_determination
     loss: mean_squared_error
     callbacks:
+        LearningRateScheduler:
+            base_lr: 0.001
+            max_lr: 0.008
+            step_size: 2
+            gamma: 0.999
+            scale_mode: iterations
         EarlyStopping:
             mode: min
             monitor: val_loss
-            patience: 10
+            patience: 20
             verbose: True
         ModelCheckpoint:
             mode: min
@@ -33,8 +39,8 @@ trainer:
             histogram_freq: 0
             verbose: True
     optimizer:
-        lr: 0.0001
-        name: Adam
+        lr: 0.001
+        name: Nadam
 network:
     class: UNet2D
     num_filters_per_block: [16, 32, 64, 96, 128]
@@ -51,4 +57,4 @@ network:
     num_input_channels: 1
     num_target_channels: 1
     data_format: 'channels_first'
-    final_activation: elu
+    final_activation: linear

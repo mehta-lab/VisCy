@@ -138,6 +138,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
     WORKDIR /microDL
-    RUN export PYTHONPATH=/microDL
+    RUN export PYTHONPATH=$PYTHONPATH:`pwd`:`pwd`/microDL
 
 EXPOSE 8888 6006

@@ -12,11 +12,12 @@ import tensorflow as tf
 from time import localtime, strftime
 import yaml
 
-from micro_dl.train import metrics as custom_metrics
+from micro_dl.train import learning_rates as custom_learning
 from micro_dl.train import losses as custom_losses
+from micro_dl.train import metrics as custom_metrics
+from micro_dl.train.model_inference import load_model
 from micro_dl.utils.aux_utils import import_class
 from micro_dl.utils.train_utils import set_keras_session
-from micro_dl.train.model_inference import load_model
 
 
 class BaseKerasTrainer:
@@ -36,6 +37,7 @@ class BaseKerasTrainer:
         self.model_dir = model_dir
         self.model_name = model_name
         self.config = config
+        self.epochs = self.config['trainer']['max_epochs']
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
         self.logger = self._init_train_logger()
@@ -138,12 +140,23 @@ class BaseKerasTrainer:
                     mode=callbacks_config[cb_dict]['mode'],
                     save_best_only=callbacks_config[cb_dict]['save_best_only'],
                     save_weights_only=True,
-                    verbose=callbacks_config[cb_dict]['verbose'])
+                    verbose=callbacks_config[cb_dict]['verbose']
+                )
             elif cb_dict == 'EarlyStopping':
-                cur_cb = cb_cls(mode=callbacks_config[cb_dict]['mode'],
-                                monitor=callbacks_config[cb_dict]['monitor'],
-                                patience=callbacks_config[cb_dict]['patience'],
-                                verbose=callbacks_config[cb_dict]['verbose'])
+                cur_cb = cb_cls(
+                    mode=callbacks_config[cb_dict]['mode'],
+                    monitor=callbacks_config[cb_dict]['monitor'],
+                    patience=callbacks_config[cb_dict]['patience'],
+                    verbose=callbacks_config[cb_dict]['verbose']
+                )
+            elif cb_dict == 'LearningRateScheduler':
+                cur_cb = custom_learning.CyclicLearning(
+                    base_lr=callbacks_config[cb_dict]['base_lr'],
+                    max_lr=callbacks_config[cb_dict]['max_lr'],
+                    step_size=callbacks_config[cb_dict]['step_size'],
+                    gamma=callbacks_config[cb_dict]['gamma'],
+                    scale_mode=callbacks_config[cb_dict]['scale_mode'],
+                )
             elif cb_dict == 'TensorBoard':
                 log_dir = os.path.join(self.model_dir, 'tensorboard_logs')
                 os.makedirs(log_dir, exist_ok=True)
@@ -153,7 +166,8 @@ class BaseKerasTrainer:
                 cur_cb = cb_cls(
                     log_dir=log_dir,
                     batch_size=self.config['trainer']['batch_size'],
-                    histogram_freq=0, write_graph=True)
+                    histogram_freq=0, write_graph=True
+                )
             else:
                 cur_cb = None
             callbacks.append(cur_cb)
