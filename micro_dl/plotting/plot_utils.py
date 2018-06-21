@@ -5,8 +5,8 @@ import os
 
 
 def save_predicted_images(input_batch, target_batch, pred_batch,
-                          output_dir, batch_idx):
-    """Saves a batch predicted image to output dir as batch_idx.jpg/tiff/png
+                          output_dir, batch_idx=None, output_fname=None):
+    """Saves a batch predicted image to output dir
 
     Format: rows of [input, target, pred]
 
@@ -16,11 +16,20 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
     :param np.ndarray pred_batch: output predicted by the model
     :param str output_dir: dir to store the output images/mosaics
     :param int batch_idx: current batch number/index
+    :param str output_fname: fname for saving collage
     """
 
-    batch_size = input_batch.shape[0]
+    if not os.path.exists(output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+
+    batch_size = len(input_batch)
+    if batch_size == 1:
+        assert output_fname is not None, 'need fname for saving image'
+        fname = os.path.join(output_dir, '{}.jpg'.format(output_fname))
+
     # 3D images are better saved as movies/gif
-    assert len(input_batch.shape) == 4, 'saves 2D images only'
+    if batch_size != 1:
+        assert len(input_batch.shape) == 4, 'saves 2D images only'
 
     for img_idx in range(batch_size):
         cur_input = input_batch[img_idx]
@@ -46,9 +55,10 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
             if axis_count == 2:
                 ax[axis_count].set_title('prediction')
             axis_count += 1
-        fname = os.path.join(output_dir,
-                             '{}.jpg'.format(
-                                 str(batch_idx * batch_size + img_idx))
-                             )
+        if batch_size != 1:
+            fname = os.path.join(
+                output_dir,
+                '{}.jpg'.format(str(batch_idx * batch_size + img_idx))
+            )
         fig.savefig(fname, dpi=250)
         plt.close(fig)

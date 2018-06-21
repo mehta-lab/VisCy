@@ -2,32 +2,41 @@
 from keras import Model
 from keras.models import load_model
 from keras import callbacks as keras_callbacks
-from keras import losses as keras_losses
-from keras import metrics as keras_metrics
 from keras import optimizers as keras_optimizers
 from keras.utils import plot_model
-import logging
 import os
 import tensorflow as tf
 from time import localtime, strftime
 import yaml
 
 from micro_dl.train import learning_rates as custom_learning
-from micro_dl.train import losses as custom_losses
-from micro_dl.train import metrics as custom_metrics
 from micro_dl.train.model_inference import load_model
-from micro_dl.utils.aux_utils import import_class
-from micro_dl.utils.train_utils import set_keras_session
+from micro_dl.utils.aux_utils import import_class, init_logger
+from micro_dl.utils.train_utils import set_keras_session, get_loss, get_metrics
 
 
 class BaseKerasTrainer:
     """Keras training class"""
 
     def __init__(self, config, model_dir, train_dataset, val_dataset,
-                 model_name=None, gpu_ids=0, gpu_mem_frac=0.9):
+                 model_name=None, gpu_ids=0, gpu_mem_frac=0.95):
         """Init
 
-        :param yaml config:
+        Currently only model weights are stored and not the training state.
+        Resume training needs to be modified!
+
+        :param dict config: dict read from a config yaml, with parameters for
+         dataset, network and trainer
+        :param str model_dir: dir with full path to store all training related
+         info (model weights, log files, model_graph, etc)
+        :param BaseDataSet/DataSetWithMask train_dataset: generator used for
+         batching train images
+        :param BaseDataSet/DataSetWithMask val_dataset: generator used for
+         batching validation images
+        :param str model_name: fname of the .hdf5 file with model weights
+        :param int/list gpu_ids: gpu to use
+        :param float/list gpu_mem_frac: Memory fractions to use corresponding
+         to gpu_ids
         """
 
         self.gpu_ids = gpu_ids
@@ -55,36 +64,10 @@ class BaseKerasTrainer:
     def _init_train_logger(self):
         """Initialize logger for training"""
 
-        logger = logging.getLogger('training')
-        logger.setLevel(self.verbose)
-        logger.propagate = False
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(self.verbose)
-        logger.addHandler(stream_handler)
-
         logger_fname = os.path.join(self.model_dir,
                                     'training.log')
-        file_handler = logging.FileHandler(logger_fname)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        file_handler.setFormatter(formatter)
-        file_handler.setLevel(self.verbose)
-        logger.addHandler(file_handler)
+        logger = init_logger('training', logger_fname, self.verbose)
         return logger
-
-    def _get_loss(self):
-        """Get loss type from config"""
-
-        loss = self.config['trainer']['loss']
-        if hasattr(keras_losses, loss):
-            loss_cls = getattr(keras_losses, loss)
-        elif hasattr(custom_losses, loss):
-            loss_cls = getattr(custom_losses, loss)
-        else:
-            raise ValueError('%s is not a valid loss' % loss)
-        return loss_cls
 
     def _get_optimizer(self):
         """Get optimizer from config"""
@@ -96,24 +79,6 @@ class BaseKerasTrainer:
             return opt_cls(lr=lr)
         except Exception as e:
             self.logger.error('Optimizer not valid: ' + str(e))
-
-    def _get_metrics(self):
-        """Get the metrics from config"""
- 
-        metrics_cls = []
-        metrics = self.config['trainer']['metrics']
-        if not isinstance(metrics, list):
-            metrics = [metrics]
-
-        for m in metrics:
-            if hasattr(keras_metrics, m):
-                cur_metric_cls = getattr(keras_metrics, m)
-            elif hasattr(custom_metrics, m):
-                cur_metric_cls = getattr(custom_metrics, m)
-            else:
-                raise ValueError('%s is not a valid metric' % m)
-            metrics_cls.append(cur_metric_cls)
-        return metrics_cls
 
     def _get_callbacks(self):
         """Get the callbacks from config"""
@@ -230,9 +195,11 @@ class BaseKerasTrainer:
         https://groups.google.com/forum/#!searchin/keras-users/pass$20custom$20loss$20|sort:date/keras-users/ue1S8uAPDKU/x2ml5J7YBwAJ
         """
 
-        loss = self._get_loss()
+        loss_str = self.config['trainer']['loss']
+        loss = get_loss(loss_str)
         optimizer = self._get_optimizer()
-        metrics = self._get_metrics()
+        metrics_list = self.config['trainer']['metrics']
+        metrics = get_metrics(metrics_list)
         callbacks = self._get_callbacks()
 
         if self.model_name:

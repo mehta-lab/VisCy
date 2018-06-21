@@ -3,6 +3,7 @@
 import argparse
 import os
 import pandas as pd
+import pickle
 import yaml
 
 from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
@@ -64,33 +65,44 @@ def train_xy(df_meta, config):
                            config['dataset']['split_by_column'],
                            config['dataset']['split_ratio'])
     if 'val' in config['dataset']['split_ratio']:
-        df_train, df_val, df_test = tt.train_test_split()
-        val_ds_params = {}
+        train_metadata, val_metadata, test_metadata, split_idx = \
+            tt.train_test_split()
+        val_gen_params = {}
         if 'augmentations' in config['trainer']:
-            val_ds_params['augmentations'] = (
+            val_gen_params['augmentations'] = (
                 config['trainer']['augmentations']
             )
 
-        ds_val = BaseDataSet(input_fnames=df_val['fpaths_input'],
-                             target_fnames=df_val['fpaths_target'],
-                             batch_size=config['trainer']['batch_size'],
-                             **val_ds_params)
-        train_ds_params = val_ds_params.copy()
+        val_dataset = BaseDataSet(input_fnames=val_metadata['fpaths_input'],
+                                  target_fnames=val_metadata['fpaths_target'],
+                                  batch_size=config['trainer']['batch_size'],
+                                  **val_gen_params)
+        train_gen_params = val_gen_params.copy()
+        val_metadata.to_csv(
+            os.path.join(config['trainer']['model_dir'], 'val_metadata.csv'),
+            sep=','
+        )
     else:
-        df_train, df_test = tt.train_test_split()
-        ds_val = None
+        train_metadata, test_metadata, split_idx = tt.train_test_split()
+        val_dataset = None
+        train_gen_params = {}
         if 'augmentations' in config['trainer']:
-            train_ds_params['augmentations'] = (
+            train_gen_params['augmentations'] = (
                 config['trainer']['augmentations']
             )
-    ds_train = BaseDataSet(input_fnames=df_train['fpaths_input'],
-                           target_fnames=df_train['fpaths_target'],
-                           batch_size=config['trainer']['batch_size'],
-                           **train_ds_params)
-    ds_test = BaseDataSet(input_fnames=df_train['fpaths_input'],
-                          target_fnames=df_train['fpaths_target'],
-                          batch_size=config['trainer']['batch_size'])
-    return ds_train, ds_val, ds_test
+    test_metadata.to_csv(
+        os.path.join(config['trainer']['model_dir'], 'test_metadata.csv'),
+        sep=','
+    )
+
+    train_dataset = BaseDataSet(input_fnames=train_metadata['fpaths_input'],
+                                target_fnames=train_metadata['fpaths_target'],
+                                batch_size=config['trainer']['batch_size'],
+                                **train_gen_params)
+    test_dataset = BaseDataSet(input_fnames=test_metadata['fpaths_input'],
+                               target_fnames=test_metadata['fpaths_target'],
+                               batch_size=config['trainer']['batch_size'])
+    return train_dataset, val_dataset, test_dataset, split_idx
 
 
 def train_xyweights(df_meta, config):
@@ -102,38 +114,52 @@ def train_xyweights(df_meta, config):
                                config['dataset']['split_by_column'],
                                config['dataset']['split_ratio'])
     if 'val' in config['dataset']['split_ratio']:
-        df_train, df_val, df_test = tt.train_test_split()
-        val_ds_params = {}
+        train_metadata, val_metadata, test_metadata, split_idx = \
+            tt.train_test_split()
+        val_gen_params = {}
         if 'augmentations' in config['trainer']:
-            val_ds_params['augmentations'] = (
+            val_gen_params['augmentations'] = (
                 config['trainer']['augmentations']
             )
 
-        ds_val = DataSetWithMask(input_fnames=df_val['fpaths_input'],
-                                 target_fnames=df_val['fpaths_target'],
-                                 mask_fnames=df_val['fpaths_mask'],
-                                 batch_size=config['trainer']['batch_size'],
-                                 **val_ds_params)
-        train_ds_params = val_ds_params.copy()
+        val_dataset = DataSetWithMask(
+            input_fnames=val_metadata['fpaths_input'],
+            target_fnames=val_metadata['fpaths_target'],
+            mask_fnames=val_metadata['fpaths_mask'],
+            batch_size=config['trainer']['batch_size'],
+            **val_gen_params
+        )
+        train_gen_params = val_gen_params.copy()
+        val_metadata.to_csv(
+            os.path.join(config['trainer']['model_dir'], 'val_metadata.csv'),
+            sep=','
+        )
     else:
-        df_train, df_test = tt.train_test_split()
-        ds_val = None
-        train_ds_params = {}
+        train_metadata, test_metadata, split_idx = tt.train_test_split()
+        val_dataset = None
+        train_gen_params = {}
         if 'augmentations' in config['trainer']:
-            train_ds_params['augmentations'] = (
+            train_gen_params['augmentations'] = (
                 config['trainer']['augmentations']
             )
-    ds_train = DataSetWithMask(input_fnames=df_train['fpaths_input'],
-                               target_fnames=df_train['fpaths_target'],
-                               mask_fnames=df_train['fpaths_mask'],
-                               batch_size=config['trainer']['batch_size'],
-                               **train_ds_params)
-    ds_test = DataSetWithMask(input_fnames=df_train['fpaths_input'],
-                              target_fnames=df_train['fpaths_target'],
-                              mask_fnames=df_train['fpaths_mask'],
-                              batch_size=config['trainer']['batch_size'])
-    return ds_train, ds_val, ds_test
+    test_metadata.to_csv(os.path.join(config['trainer']['model_dir'],
+                                      'test_metadata.csv'),
+                         sep=',')
 
+    train_dataset = DataSetWithMask(
+        input_fnames=train_metadata['fpaths_input'],
+        target_fnames=train_metadata['fpaths_target'],
+        mask_fnames=train_metadata['fpaths_mask'],
+        batch_size=config['trainer']['batch_size'],
+        **train_gen_params
+    )
+    test_dataset = DataSetWithMask(
+        input_fnames=test_metadata['fpaths_input'],
+        target_fnames=test_metadata['fpaths_target'],
+        mask_fnames=test_metadata['fpaths_mask'],
+        batch_size=config['trainer']['batch_size']
+    )
+    return train_dataset, val_dataset, test_dataset, split_idx
 
 
 def run_action(args):
@@ -149,10 +175,18 @@ def run_action(args):
         df_meta_fname = os.path.join(config['dataset']['data_dir'],
                                      'tiled_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
+
         if 'weighted_loss' in config['trainer']:
-            ds_train, ds_val, ds_test = train_xyweights(df_meta, config)
+            train_dataset, val_dataset, test_dataset, split_indices = \
+                train_xyweights(df_meta, config)
         else:
-            ds_train, ds_val, ds_test = train_xy(df_meta, config)
+            train_dataset, val_dataset, test_dataset, split_indices = \
+                train_xy(df_meta, config)
+        split_idx_fname = os.path.join(config['trainer']['model_dir'],
+                                       'split_indices.pkl')
+
+        with open(split_idx_fname, 'wb') as f:
+            pickle.dump(split_indices, f)
 
         if 'model_name' in config['trainer']:
             model_name = config['trainer']['model_name']
@@ -161,10 +195,13 @@ def run_action(args):
 
         trainer = BaseKerasTrainer(config=config,
                                    model_dir=config['trainer']['model_dir'],
-                                   train_dataset=ds_train, val_dataset=ds_val,
-                                   model_name=model_name, gpu_ids=args.gpu,
+                                   train_dataset=train_dataset,
+                                   val_dataset=val_dataset,
+                                   model_name=model_name,
+                                   gpu_ids=args.gpu,
                                    gpu_mem_frac=args.gpu_mem_frac)
         trainer.train()
+
     elif action == 'tune_hyperparam':
         raise NotImplementedError
     else:
@@ -174,15 +211,10 @@ def run_action(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    # Comment (Jenny): gpu_availability is assigned but not used after this?
+    gpu_available = False
     if args.gpu >= 0:
-        gpu_availability = check_gpu_availability(
-            args.gpu,
-            args.gpu_mem_frac)
+        gpu_available = check_gpu_availability(args.gpu, args.gpu_mem_frac)
     if not isinstance(args.gpu, int):
         raise NotImplementedError
-    run_action(args)
-
-
-
-
+    if gpu_available:
+        run_action(args)

@@ -1,6 +1,8 @@
 """Auxiliary utility functions"""
 import inspect
 import importlib
+import logging
+
 import numpy as np
 
 
@@ -82,3 +84,30 @@ def validate_tp_channel(study_metadata, timepoint_ids=None, channel_ids=None):
         tp_channels_ids['channels'] = channel_ids
 
     return tp_channels_ids
+
+
+def init_logger(logger_name, log_fname, log_level):
+    """Creates a logger instance
+
+    :param str logger_name: name of the logger instance
+    :param str log_fname: fname with full path of the log file
+    :param int log_level: specifies the logging level: NOTSET:0, DEBUG:10,
+    INFO:20, WARNING:30, ERROR:40, CRITICAL:50
+    """
+
+    logger = logging.getLogger(logger_name)
+    logger.setLevel(log_level)
+    logger.propagate = False
+
+    stream_handler = logging.StreamHandler()
+    stream_handler.setLevel(log_level)
+    logger.addHandler(stream_handler)
+
+    file_handler = logging.FileHandler(log_fname)
+    formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(formatter)
+    file_handler.setLevel(log_level)
+    logger.addHandler(file_handler)
+    return logger

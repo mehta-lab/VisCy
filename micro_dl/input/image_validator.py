@@ -12,15 +12,16 @@ input_dir
         and so on
 """
 import cv2
-import logging
 import natsort
 import numpy as np
 import os
 import pandas as pd
 import re
 
+from micro_dl.utils.aux_utils import init_logger
 
-class ImageValidator():
+
+class ImageValidator:
     """Class for verifying image folder structure and writing metadata"""
 
     def __init__(self, input_dir, meta_name, verbose=0):
@@ -60,22 +61,8 @@ class ImageValidator():
         Logger outputs to console and log_file
         """
 
-        logger = logging.getLogger('preprocessing')
-        logger.setLevel(self.verbose)
-        logger.propagate = False
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(self.verbose)
-        logger.addHandler(stream_handler)
-
         logger_fname = os.path.join(self.input_dir, 'preprocessing.log')
-        file_handler = logging.FileHandler(logger_fname)
-        file_handler.setLevel(self.verbose)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        logger = init_logger('preprocessing', logger_fname, self.verbose)
         return logger
 
     def _log_info(self, msg):

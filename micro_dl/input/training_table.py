@@ -67,11 +67,13 @@ class BaseTrainingTable:
 
         unique_values = self.df_metadata[self.split_by_column].unique()
         # DOESNOT HANDLE NON-INTEGER VALUES. map to int if string
+        # the sample_idxs are required for evaluating performance on test set
         assert np.issubdtype(unique_values.dtype, np.integer)
         split_idx = split_train_val_test(
             len(unique_values), self.split_ratio['train'],
             self.split_ratio['test'], self.split_ratio['val']
         )
+
         train_set = unique_values[split_idx['train']]
         train_idx = self.df_metadata[self.split_by_column].isin(train_set)
         retain_columns = ['channel_num', 'sample_num', 'timepoint',
@@ -86,8 +88,8 @@ class BaseTrainingTable:
             val_set = unique_values[split_idx['val']]
             val_idx = self.df_metadata[self.split_by_column].isin(val_set)
             df_val = self._get_df(val_idx, retain_columns)
-            return df_train, df_val, df_test
-        return df_train, df_test
+            return df_train, df_val, df_test, split_idx
+        return df_train, df_test, split_idx
 
 
 class TrainingTableWithMask(BaseTrainingTable):

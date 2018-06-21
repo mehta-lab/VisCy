@@ -15,10 +15,11 @@ base_output_dir
 from abc import ABCMeta, abstractmethod
 import bioformats as bf
 import javabridge as jv
-import logging
 import numpy as np
 import os
 import pandas as pd
+
+from micro_dl.utils.aux_utils import init_logger
 
 
 class LifStackSplitter(metaclass=ABCMeta):
@@ -50,22 +51,8 @@ class LifStackSplitter(metaclass=ABCMeta):
         Logger outputs to console and log_file
         """
 
-        logger = logging.getLogger('lif_splitter')
-        logger.setLevel(self.verbose)
-        logger.propagate = False
-
-        stream_handler = logging.StreamHandler()
-        stream_handler.setLevel(self.verbose)
-        logger.addHandler(stream_handler)
-
         logger_fname = os.path.join(self.base_output_dir, 'lif_splitter.log')
-        file_handler = logging.FileHandler(logger_fname)
-        file_handler.setLevel(self.verbose)
-        formatter = logging.Formatter(
-            '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-        )
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
+        logger = init_logger('lif_splitter', logger_fname, self.verbose)
         return logger
 
     @abstractmethod

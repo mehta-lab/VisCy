@@ -69,7 +69,7 @@ class MaskProcessor:
         if roi_vf >= min_fraction:
             sample_index_list.append(crop_index)
             if save_cropped_mask:
-                img_id = 'n{}_r{}_{}_c{}_{}'.format(
+                img_id = 'n{}_r{}-{}_c{}-{}'.format(
                     sample_idx, crop_index[0], crop_index[1], crop_index[2],
                     crop_index[3]
                 )
@@ -126,6 +126,7 @@ class MaskProcessor:
                         )
                     mask_images.append(cur_image)
                 summed_image = np.sum(np.stack(mask_images), axis=0)
+                summed_image = summed_image.astype('float32')
 
                 thr = threshold_otsu(summed_image, nbins=512)
                 if len(cur_image.shape) == 2:
