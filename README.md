@@ -35,7 +35,7 @@ for current directory, or whatever other pythonpaths you want to export.
 
 If you want to launch a Jupyter notebook inside your container, you can do so with the following command:
 ```buildoutcfg
---ip=0.0.0.0 --port=8888 --allow-root --no-browser
+jupyter notebook --ip=0.0.0.0 --port=8888 --allow-root --no-browser
 ```
 Then you can access your notebooks in your browser at:
 ```buildoutcfg
