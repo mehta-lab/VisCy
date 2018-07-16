@@ -2,7 +2,7 @@ dataset:
     preprocess: False
     data_dir: '/Users/jenny.folkesson/Data/processed_data/image_tile_256-256_step_256-256'
     input_channels: [3]
-    target_channels: [0]
+    target_channels: [4]
     split_by_column: sample_num
     split_ratio:
         train: 0.7
@@ -16,8 +16,8 @@ trainer:
     batch_size: 16
     max_epochs: 50
     patience: 20
-    metrics: coeff_determination
-    loss: mean_squared_error
+    metrics: dice_coef
+    loss: dice_coef_loss
     callbacks:
         LearningRateScheduler:
             base_lr: 0.001
@@ -40,7 +40,7 @@ trainer:
             verbose: True
     optimizer:
         lr: 0.001
-        name: Nadam
+        name: sgd
 network:
     class: UNet2D
     num_filters_per_block: [16, 32, 64, 96, 128]
@@ -58,4 +58,4 @@ network:
     num_input_channels: 1
     num_target_channels: 1
     data_format: 'channels_first'
-    final_activation: linear
+    final_activation: sigmoid

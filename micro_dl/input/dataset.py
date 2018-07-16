@@ -74,12 +74,19 @@ class BaseDataSet(keras.utils.Sequence):
             cur_input = self._get_volume(cur_input_fnames.split(','))
             cur_input = (cur_input - np.mean(cur_input)) / np.std(cur_input)
             cur_target = self._get_volume(cur_target_fnames.split(','))
-            cur_target = (cur_target - np.mean(cur_target))/np.std(cur_target)
+            # If target is boolean (segmentation masks), convert to float
+            if cur_target.dtype == bool:
+                cur_target = cur_target.astype(np.float64)
+            else:
+                # Only normalize target if we're dealing with regression
+                cur_target = (cur_target - np.mean(cur_target)) /\
+                             np.std(cur_target)
             # _augment_image(cur_input, cur_target)
             input_image.append(cur_input)
             target_image.append(cur_target)
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
+
         return input_image, target_image
 
     def on_epoch_end(self):
