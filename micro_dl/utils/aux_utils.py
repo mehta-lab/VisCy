@@ -132,7 +132,7 @@ def save_tile_meta(cropped_meta,
         columns=['timepoint', 'channel_num', 'sample_num',
                  'slice_num', fname_header]
     )
-    metadata_fname = glob.glob(tiled_dir + "*info.csv")[0]
+    metadata_fname = os.path.join(tiled_dir, 'tiled_images_info.csv')
     if cur_channel == 0:
         df = cur_df
     else:
