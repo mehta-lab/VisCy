@@ -50,6 +50,7 @@ network:
     activation: relu
     pooling_type: max
     skip_merge_type: concat
+    upsampling: bilinear
     dropout: 0.2
     residual: True
     height: 256

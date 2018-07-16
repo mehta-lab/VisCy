@@ -216,5 +216,6 @@ if __name__ == '__main__':
         gpu_available = check_gpu_availability(args.gpu, args.gpu_mem_frac)
     if not isinstance(args.gpu, int):
         raise NotImplementedError
-    if gpu_available:
+    # Allow run if gpu_available or debug
+    if gpu_available or args.gpu == -1:
         run_action(args)
