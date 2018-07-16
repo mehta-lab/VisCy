@@ -30,10 +30,8 @@ class BaseDataSet(keras.utils.Sequence):
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
         self.batch_size = batch_size
-
         self.shuffle = shuffle
-        num_samples = len(self.input_fnames)
-        self.num_samples = num_samples
+        self.num_samples = len(self.input_fnames)
         self.augmentations = augmentations
         self.random_seed = random_seed
         np.random.seed(random_seed)
@@ -42,7 +40,7 @@ class BaseDataSet(keras.utils.Sequence):
     def __len__(self):
         """Gets the number of batches per epoch"""
 
-        n_batches = int(self.num_samples / self.batch_size)
+        n_batches = int(np.ceil(self.num_samples / self.batch_size))
         return n_batches
 
     def _augment_image(self, input_image, target_image, mask_image=None):
@@ -60,7 +58,6 @@ class BaseDataSet(keras.utils.Sequence):
         :return: np.ndarrays input_image and target_image of shape
          [batch_size, num_channels, z, y, x]
         """
-
         start_idx = index * self.batch_size
         end_idx = (index + 1) * self.batch_size
         if end_idx >= self.num_samples:
@@ -72,7 +69,6 @@ class BaseDataSet(keras.utils.Sequence):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_input = self._get_volume(cur_input_fnames.split(','))
-            cur_input = (cur_input - np.mean(cur_input)) / np.std(cur_input)
             cur_target = self._get_volume(cur_target_fnames.split(','))
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:

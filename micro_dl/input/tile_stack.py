@@ -9,6 +9,7 @@ import pickle
 from micro_dl.input.gen_crop_masks import MaskProcessor
 from micro_dl.utils.aux_utils import get_row_idx, validate_tp_channel
 from micro_dl.utils.normalize import hist_clipping, zscore
+from micro_dl.utils.aux_utils import save_tile_meta
 import micro_dl.utils.image_utils as image_utils
 
 
@@ -70,32 +71,6 @@ class ImageStackTiler:
         self.tiled_dir = tiled_dir
         self.isotropic = isotropic
         self.correct_flat_field = correct_flat_field
-        self.is_npy = is_npy
-
-    @staticmethod
-    def _save_tile_meta(cropped_meta, cur_channel, tiled_dir):
-        """Save meta data for cropped images
-
-        :param list cropped_meta: list of tuples holding meta info for cropped
-         images
-        :param int cur_channel: channel being cropped
-        :param str tiled_dir: dir to save meta data
-        """
-
-        fname_header = 'fname_{}'.format(cur_channel)
-        cur_df = pd.DataFrame.from_records(
-            cropped_meta,
-            columns=['timepoint', 'channel_num', 'sample_num',
-                     'slice_num', fname_header]
-        )
-        metadata_fname = os.path.join(tiled_dir,
-                                      'tiled_images_info.csv')
-        if cur_channel == 0:
-            df = cur_df
-        else:
-            df = pd.read_csv(metadata_fname, sep=',', index_col=0)
-            df[fname_header] = cur_df[fname_header]
-        df.to_csv(metadata_fname, sep=',')
 
     @staticmethod
     def _save_tiled_images(cropped_image_info, meta_row,
@@ -220,7 +195,7 @@ class ImageStackTiler:
                                    channel_dir, channel_metadata,
                                    flat_field_image, hist_clip_limits,
                                    metadata)
-                self._save_tile_meta(metadata, channel, self.tiled_dir)
+                save_tile_meta(metadata, channel, self.tiled_dir)
 
     def tile_stack_with_vf_constraint(self, mask_channels, min_fraction,
                                       save_cropped_masks=False,
@@ -303,4 +278,4 @@ class ImageStackTiler:
                                    channel_dir, channel_metadata,
                                    flat_field_image, hist_clip_limits,
                                    metadata, crop_indices_dict)
-                self._save_tile_meta(metadata, channel, tiled_dir)
+                save_tile_meta(metadata, channel, tiled_dir)

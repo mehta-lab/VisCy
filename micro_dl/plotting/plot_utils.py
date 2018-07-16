@@ -1,4 +1,5 @@
 """Utility functions for plotting"""
+import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import os
@@ -62,3 +63,35 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
             )
         fig.savefig(fname, dpi=250)
         plt.close(fig)
+
+
+def save_mask_overlay(input_image, mask, op_fname, alpha=0.7):
+    """
+    Plot and save a collage of input, mask, overlay
+
+    :param np.array input_image: 2D input image
+    :param np.array mask: 2D mask image
+    :param str op_fname: fname will full path for saving the collage as a jpg
+    :param int alpha: opacity/transparency for the mask overlay
+    """
+
+    assert 0 <= alpha <= 1, 'alpha must be between 0 and 1'
+    fig, ax = plt.subplots(1, 3)
+    fig.set_size_inches((15, 5))
+    ax[0].imshow(input_image, cmap='gray')
+    ax[0].axis('off')
+    ax[1].imshow(mask, cmap='gray')
+    ax[1].axis('off')
+    # Convert image to uint8 color, scale to 255, and overlay a color contour
+    im_rgb = input_image / input_image.max() * 255
+    im_rgb = im_rgb.astype(np.uint8)
+    im_rgb = cv2.cvtColor(im_rgb, cv2.COLOR_GRAY2RGB)
+    _, contours, _ = cv2.findContours(mask.astype(np.uint8),
+                                      cv2.RETR_TREE,
+                                      cv2.CHAIN_APPROX_SIMPLE)
+    # Draw contours in green with linewidth 2
+    im_rgb = cv2.drawContours(im_rgb, contours, -1, (0, 255, 0), 2)
+    ax[2].imshow(im_rgb)
+    ax[2].axis('off')
+    fig.savefig(op_fname, dpi=250)
+    plt.close(fig)

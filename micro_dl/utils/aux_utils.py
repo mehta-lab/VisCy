@@ -1,9 +1,11 @@
 """Auxiliary utility functions"""
+import glob
 import inspect
 import importlib
 import logging
-
 import numpy as np
+import os
+import pandas as pd
 
 
 def import_class(module_name, cls_name):
@@ -111,3 +113,29 @@ def init_logger(logger_name, log_fname, log_level):
     file_handler.setLevel(log_level)
     logger.addHandler(file_handler)
     return logger
+
+
+def save_tile_meta(cropped_meta,
+                   cur_channel,
+                   tiled_dir):
+    """Save meta data for cropped images
+
+    :param list cropped_meta: list of tuples holding meta info for cropped
+     images
+    :param int cur_channel: channel being cropped
+    :param str tiled_dir: dir to save meta data
+    """
+
+    fname_header = 'fname_{}'.format(cur_channel)
+    cur_df = pd.DataFrame.from_records(
+        cropped_meta,
+        columns=['timepoint', 'channel_num', 'sample_num',
+                 'slice_num', fname_header]
+    )
+    metadata_fname = glob.glob(tiled_dir + "*info.csv")[0]
+    if cur_channel == 0:
+        df = cur_df
+    else:
+        df = pd.read_csv(metadata_fname, sep=',', index_col=0)
+        df[fname_header] = cur_df[fname_header]
+    df.to_csv(metadata_fname, sep=',')

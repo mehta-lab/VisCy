@@ -5,12 +5,10 @@ import numpy as np
 import os
 import pandas as pd
 import pickle
-from scipy.ndimage.morphology import binary_fill_holes
-from skimage.filters import threshold_otsu
-from skimage.morphology import disk, ball, binary_opening
 
 from micro_dl.utils.aux_utils import get_row_idx, validate_tp_channel
-from micro_dl.utils.image_utils import apply_flat_field_correction, resize_mask
+from micro_dl.utils.image_utils import (apply_flat_field_correction,
+                                        create_mask, resize_mask)
 
 
 class MaskProcessor:
@@ -127,15 +125,8 @@ class MaskProcessor:
                     mask_images.append(cur_image)
                 summed_image = np.sum(np.stack(mask_images), axis=0)
                 summed_image = summed_image.astype('float32')
+                mask = create_mask(summed_image, str_elem_radius)
 
-                thr = threshold_otsu(summed_image, nbins=512)
-                if len(cur_image.shape) == 2:
-                    str_elem = disk(str_elem_radius)
-                else:
-                    str_elem = ball(str_elem_radius)
-                # remove small objects in mask
-                thr_image = binary_opening(summed_image >= thr, str_elem)
-                mask = binary_fill_holes(thr_image)
                 np.save(os.path.join(mask_dir, fname), mask,
                         allow_pickle=True, fix_imports=True)
 

@@ -2,6 +2,9 @@
 import itertools
 import numpy as np
 import os
+from scipy.ndimage.morphology import binary_fill_holes
+from skimage.filters import threshold_otsu
+from skimage.morphology import disk, ball, binary_opening
 from skimage.transform import resize
 
 
@@ -188,3 +191,22 @@ def crop_at_indices(input_image, crop_indices, isotropic=False):
                                       cur_idx[2]: cur_idx[3]]
         cropped_img_list.append((img_id, cropped_img))
     return cropped_img_list
+
+
+def create_mask(input_image, str_elem_size=3):
+    """Create a binary mask using morphological operations
+
+    :param np.array input_image: generate masks from this image
+    :param int str_elem_size: size of the structuring element. typically 3, 5
+    :return: mask of input_image, np.array
+    """
+
+    thr = threshold_otsu(input_image, nbins=512)
+    if len(input_image.shape) == 2:
+        str_elem = disk(str_elem_size)
+    else:
+        str_elem = ball(str_elem_size)
+    # remove small objects in mask
+    thr_image = binary_opening(input_image >= thr, str_elem)
+    mask = binary_fill_holes(thr_image)
+    return mask
