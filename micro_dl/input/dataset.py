@@ -12,9 +12,13 @@ class BaseDataSet(keras.utils.Sequence):
     https://github.com/aleju/imgaug
     """
 
-    def __init__(self, input_fnames, target_fnames, batch_size,
-                 shuffle=True, augmentations=None, random_seed=42):
+    def __init__(self, input_fnames, target_fnames, batch_size, shuffle=True,
+                 augmentations=None, random_seed=42, normalize=False):
         """Init
+
+        The images could be normalized at the image level during tiling
+        (default, normalize=False). If images were not normalized during tiling
+        set the normalize flag to normalize at the tile-level
 
         :param pd.Series input_fnames: pd.Series with each row containing
          filenames for one input
@@ -35,6 +39,7 @@ class BaseDataSet(keras.utils.Sequence):
         self.augmentations = augmentations
         self.random_seed = random_seed
         np.random.seed(random_seed)
+        self.normalize = normalize
         self.on_epoch_end()
 
     def __len__(self):
@@ -73,7 +78,8 @@ class BaseDataSet(keras.utils.Sequence):
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
-            else:
+                self.normalize = False
+            if self.normalize:
                 # Only normalize target if we're dealing with regression
                 cur_target = (cur_target - np.mean(cur_target)) /\
                              np.std(cur_target)

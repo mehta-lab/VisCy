@@ -108,11 +108,16 @@ def train_xy(df_meta, config):
 def train_xyweights(df_meta, config):
     """Train using fit_generator"""
 
+    if 'min_fraction' in config['dataset']:
+        min_fraction = config['dataset']['min_fraction']
+    else:
+        min_fraction = None
     tt = TrainingTableWithMask(df_meta, config['dataset']['input_channels'],
                                config['dataset']['target_channels'],
                                config['dataset']['mask_channels'],
                                config['dataset']['split_by_column'],
-                               config['dataset']['split_ratio'])
+                               config['dataset']['split_ratio'],
+                               min_fraction)
     if 'val' in config['dataset']['split_ratio']:
         train_metadata, val_metadata, test_metadata, split_idx = \
             tt.train_test_split()

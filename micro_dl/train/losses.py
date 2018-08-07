@@ -25,24 +25,26 @@ def mse_binary_wtd(n_channels):
             y_true, mask_image = tf.split(y_true, [n_channels, 1], axis=1)
         except Exception as e:
             print('cannot separate mask and y_true' + str(e))
-  
+
         y_true = K.batch_flatten(y_true)
         y_pred = K.batch_flatten(y_pred)
         weights = K.batch_flatten(mask_image)
         weights = K.cast(weights, 'float32')
-        loss = K.square(y_pred - y_true)
-
+        # loss = K.square(y_pred - y_true)
+        loss = K.abs(y_pred - y_true)
+        
         fg_count = K.sum(weights, axis=1)
         total_count = K.cast(K.shape(y_true)[1], 'float32')
-        fg_volume_fraction = tf.div(fg_count, total_count)
-        bg_volume_fraction = 1-fg_volume_fraction
+        fg_vol_frac = tf.div(fg_count, total_count)
+        bg_vol_frac = 1 - fg_vol_frac
         # fg_vf is a tensor
-        fg_weights = tf.where(fg_volume_fraction >= 0.5,
-                              fg_volume_fraction, bg_volume_fraction)
+        fg_weights = tf.where(fg_vol_frac >= 0.5, fg_vol_frac, bg_vol_frac)
         fg_mask = weights * K.expand_dims(fg_weights, axis=1)
         bg_mask = (1 - weights) * K.expand_dims(1 - fg_weights, axis=1)
+        
         mask = fg_mask + bg_mask
-        modified_loss = K.mean(K.sum(loss * mask, axis=1))
+        modified_loss = K.mean(loss * mask, axis=1)
+        # modified_loss = tf.Print(modified_loss, [modified_loss], message='modified_loss', summarize=16)
         return modified_loss
     return mse_wtd
 

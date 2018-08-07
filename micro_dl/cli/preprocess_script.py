@@ -4,7 +4,8 @@ import argparse
 import os
 import yaml
 
-from micro_dl.input import MaskProcessor, ImageStackTiler
+from micro_dl.input.gen_crop_masks import MaskProcessor
+from micro_dl.input.tile_stack import ImageStackTiler
 from micro_dl.utils.aux_utils import import_class
 
 

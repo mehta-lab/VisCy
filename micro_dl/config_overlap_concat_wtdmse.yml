@@ -1,8 +1,9 @@
 dataset:
-    preprocess: False
-    data_dir: '/data/anitha/label_free/image_tile_256-256_step_256-256'
+    data_dir: '/data/anitha/label_free_ff/image_tile_256-256_step_64-64_vf-0.15'
     input_channels: [3]
     target_channels: [0]
+    mask_channels: [0, 1]
+    min_fraction: 0.15
     split_by_column: sample_num
     split_ratio:
         train: 0.7
@@ -12,18 +13,17 @@ dataset:
     width: 256
 verbose: 10
 trainer:
-    model_dir: '/home/krishnan/models_labelfree/tile256_bs32_wtdmse'
+    model_dir: '/home/krishnan/models/2018-08-07-label_free_debug_wtd_loss'
     batch_size: 32
-    max_epochs: 200
-    patience: 20
+    max_epochs: 80
     metrics: coeff_determination
-    loss: mse_binary_wtd_loss
+    loss: mse_binary_wtd
     weighted_loss: True
     callbacks:
         EarlyStopping:
             mode: min
             monitor: val_loss
-            patience: 10
+            patience: 100
             verbose: True
         ModelCheckpoint:
             mode: min
@@ -34,17 +34,18 @@ trainer:
             histogram_freq: 0
             verbose: True
     optimizer:
-        lr: 0.0001
+        lr: 0.00008
         name: Adam
 network:
     class: UNet2D
-    num_filters_per_block: [16, 32, 64, 96, 128]
+    num_filters_per_block: [16, 32, 48, 64, 80]
     num_convs_per_block: 2
     filter_size: 3
     batch_norm: True
     activation: relu
     pooling_type: max
-    skip_merge_type: add
+    skip_merge_type: concat
+    upsampling: nearest_neighbor
     dropout: 0.2
     residual: True
     height: 256
