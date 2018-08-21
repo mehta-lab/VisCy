@@ -64,27 +64,23 @@ def split_train_val_test(num_samples, train_ratio, test_ratio,
     num_test = max(num_test, 1)
 
     split_idx = {}
-    test_idx = np.random.randint(0, num_samples, num_test)
-    test_idx = list(test_idx)
-    if num_test == 1:
-        test_idx = [test_idx[0]]
+    sample_set = list(range(0, num_samples))
+    test_idx = np.random.choice(sample_set, num_test, replace=False)
+
     split_idx['test'] = test_idx
-    rem_set = set(range(0, num_samples)) - set(test_idx)
+    rem_set = set(sample_set) - set(test_idx)
+    rem_set = list(rem_set)
 
     if val_ratio:
         num_val = int(val_ratio * num_samples)
         num_val = max(num_val, 1)
-        idx = np.random.randint(0, len(rem_set), num_val).astype('int')
-        rem_set_as_list = list(rem_set)
-        val_idx = [rem_set_as_list[val] for val in idx] 
-        if num_val == 1:
-            rem_set.remove(val_idx[0])
-        else:
-            rem_set = rem_set - set(val_idx)
+        val_idx = np.random.choice(rem_set, num_val, replace=False)
         split_idx['val'] = val_idx
-    train_idx = list(rem_set)
-    split_idx['train'] = train_idx
+        rem_set = set(rem_set) - set(val_idx)
+        rem_set = list(rem_set)
 
+    train_idx = np.array(rem_set, dtype='int')
+    split_idx['train'] = train_idx
     return split_idx
 
 
