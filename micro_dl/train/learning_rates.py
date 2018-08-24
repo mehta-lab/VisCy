@@ -24,7 +24,7 @@ class CyclicLearning(Callback):
     def __init__(self,
                  base_lr=0.001,
                  max_lr=0.006,
-                 step_size=2000.,
+                 step_size=2.,
                  gamma=1.,
                  scale_mode="cycle",
                  ):
@@ -38,7 +38,7 @@ class CyclicLearning(Callback):
         :param str scale_mode: Evaluate scaling on 'cycle' (default) or
             'iterations'
         """
-        super(CyclicLearning, self).__init__()
+        super().__init__()
 
         self.base_lr = base_lr
         self.max_lr = max_lr

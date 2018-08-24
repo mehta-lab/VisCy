@@ -16,26 +16,61 @@ def parse_args():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--input_dir', type=str,
-                        help='specify the input dir with full path')
-    parser.add_argument('--channel_id', nargs='*', type=int,
-                        help='specify the input channel ids')
-    parser.add_argument('--mask_id', type=int,
-                        help='specify the channel id for masks')
-    parser.add_argument('--output_dir', type=str,
-                        help='specify the output dir for tiled mask with full path'
+    parser.add_argument(
+        '--input_dir',
+        type=str,
+        help='specify the input dir with full path',
+    )
+    parser.add_argument(
+        '--channel_id',
+        nargs='*',
+        type=int,
+        help='specify the input channel ids',
+    )
+    parser.add_argument(
+        '--mask_id',
+        type=int,
+        help='specify the channel id for masks',
+    )
+    parser.add_argument(
+        '--output_dir',
+        type=str,
+        help='specify the output dir for tiled mask with full path',
+    )
+    parser.add_argument(
+        '--flatfield',
+        type=bool,
+        default=False,
+        help="Flatfield correct images prior to mask generation",
+    )
+    parser.add_argument(
+        '--plot',
+        type=bool,
+        default=False,
+        help="Save input, masks and overlay",
     )
     # group = parser.add_mutually_exclusive_group(required=True)
     #  Hmm.. how to specify a bunch of params to a group
     #  mutually_exclusive_group is not ideal here
     #  here tile_size & step_size belong to one group vs tile_index_fname in other
-    parser.add_argument('--tile_size', type=list, default=[256, 256],
-                       help='specify tile size along each dimension as a list')
-    parser.add_argument('--step_size', type=list, default=[256, 256],
-                       help='specify step size along each dimension as a list')
+    parser.add_argument(
+        '--tile_size',
+        type=list,
+        default=[256, 256],
+        help='specify tile size along each dimension as a list',
+    )
+    parser.add_argument(
+        '--step_size',
+        type=list,
+        default=[256, 256],
+        help='specify step size along each dimension as a list',
+    )
 
-    parser.add_argument('--tile_index_fname', type=str,
-                        help='path to checkpoint file/directory')
+    parser.add_argument(
+        '--tile_index_fname',
+        type=str,
+        help='path to checkpoint file/directory',
+    )
 
     args = parser.parse_args()
     return args
@@ -44,11 +79,14 @@ def parse_args():
 def create_masks(args):
 
     # Start mask instance and generate masks
-    mask_inst = gen_mask.MaskCreator(input_dir=args.input_dir,
-                                     input_channel_id=args.channel_id,
-                                     output_dir=args.output_dir,
-                                     output_channel_id=args.mask_id,
-                                     correct_flat_field=False)
+    mask_inst = gen_mask.MaskCreator(
+        input_dir=args.input_dir,
+        input_channel_id=args.channel_id,
+        output_dir=args.output_dir,
+        output_channel_id=args.mask_id,
+        correct_flat_field=args.flatfield,
+        plot_masks=args.plot,
+    )
 
     mask_inst.create_masks_for_stack()
     # Tile mask images and write them to directory containing other tiled data
@@ -66,7 +104,6 @@ def create_masks(args):
             tile_size=args.tile_size,
             step_size=args.step_size,
         )
-
 
 
 if __name__ == '__main__':

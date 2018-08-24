@@ -1,6 +1,7 @@
 """Generate masks to be used as target images for segmentation"""
 import cv2
 import glob
+import natsort
 import numpy as np
 import os
 import pandas as pd
@@ -21,7 +22,8 @@ class MaskCreator:
                  output_channel_id,
                  timepoint_id=0,
                  correct_flat_field=True,
-                 focal_plane_idx=0):
+                 focal_plane_idx=0,
+                 plot_masks=False):
         """Init
 
         :param str input_dir: base input dir at the level of individual sample
@@ -40,6 +42,7 @@ class MaskCreator:
          meta info at the sample image level. If None, read from the default
          dir structure
         :param int focal_plane_idx: focal plane acquisition to use
+        :param bool plot_masks: Plot input, masks and overlays
         """
 
         assert os.path.exists(input_dir), 'input_dir does not exist'
@@ -49,12 +52,13 @@ class MaskCreator:
 
         self.correct_flat_field = correct_flat_field
 
-        meta_fname = glob.glob(input_dir + "*info.csv")
+        meta_fname = glob.glob(os.path.join(input_dir, "*info.csv"))
         assert len(meta_fname) == 1,\
             "Can't find info.csv file in {}".format(input_dir)
         study_metadata = pd.read_csv(meta_fname[0])
 
         self.study_metadata = study_metadata
+        self.plot_masks = plot_masks
 
         avail_tp_channels = aux_utils.validate_tp_channel(study_metadata,
                                                 timepoint_ids=timepoint_id,
@@ -147,7 +151,8 @@ class MaskCreator:
                         op_fname = os.path.join(collage_dir, fname).split('.')[0]
                     else:
                         op_fname = os.path.join(collage_dir, fname)
-                    save_mask_overlay(cur_image, mask, op_fname)
+                    if self.plot_masks:
+                        save_mask_overlay(cur_image, mask, op_fname)
 
     def tile_mask_stack(self,
                         input_mask_dir,
@@ -193,6 +198,8 @@ class MaskCreator:
             cur_ch = int(sep_strs[-1].split('_')[-1])
             #  read all mask npy files
             mask_fnames = glob.glob(os.path.join(cur_dir, '*.npy'))
+            # Sort file names, the assumption is that the csv is sorted
+            mask_fnames = natsort.natsorted(mask_fnames)
             cropped_meta = []
             output_dir = os.path.join(
                 self.output_dir, 'timepoint_{}'.format(cur_tp),
