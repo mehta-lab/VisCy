@@ -53,7 +53,7 @@ def run_inference(args):
     df_test = pd.read_csv(os.path.join(config['trainer']['model_dir'],
                                        'test_metadata.csv'))
 
-    if 'weighted_loss' in config['trainer']:
+    if 'masked_loss' in config['trainer']:
         ds_test = DataSetWithMask(input_fnames=df_test['fpaths_input'],
                                   target_fnames=df_test['fpaths_target'],
                                   mask_fnames=df_test['fpaths_mask'],

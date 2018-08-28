@@ -1,5 +1,6 @@
 """Implementation of U-net"""
 from abc import ABCMeta, abstractmethod
+import numpy as np
 import tensorflow as tf
 import keras.backend as K
 from keras.layers import (
@@ -9,7 +10,7 @@ from keras.layers import (
 )
 from keras.layers.merge import Add, Concatenate
 
-from micro_dl.utils.aux_utils import import_class
+from micro_dl.utils.aux_utils import import_class, validate_config
 
 
 class BaseUNet(metaclass=ABCMeta):
@@ -21,15 +22,27 @@ class BaseUNet(metaclass=ABCMeta):
     last block to match the input image size.
     """
 
-    def __init__(self, config):
+    def __init__(self, network_config):
         """Init
 
-        :param yaml config: yaml with all network associated parameters
+        :param yaml network_config: yaml with all network associated parameters
         """
 
-        num_down_blocks = len(config['network']['num_filters_per_block']) - 1
+        req_params = ['num_filters_per_block',
+                      'num_convs_per_block',
+                      'skip_merge_type',
+                      'upsampling',
+                      'num_input_channels',
+                      'num_target_channels']
+        param_indicator = validate_config(network_config, req_params)
+        assert np.all(param_indicator), \
+            'Params absent in network_config: %s'.format(
+                req_params[param_indicator == 0]
+            )
+
+        num_down_blocks = len(network_config['num_filters_per_block']) - 1
         # assuming height=width
-        width = config['network']['width']
+        width = network_config['width']
         feature_width_at_last_block = width / (2 ** (num_down_blocks))
         msg = 'network depth is incompatible with the input size'
         assert feature_width_at_last_block >= 2, msg
@@ -37,13 +50,13 @@ class BaseUNet(metaclass=ABCMeta):
         #  keras upsampling repeats the rows and columns in data. leads to
         #  checkerboard in upsampled images. repeat - use keras builtin
         #  nearest_neighbor, bilinear: interpolate using custom layers
-        upsampling = config['network']['upsampling']
+        upsampling = network_config['upsampling']
         msg = 'invalid upsampling, not in repeat/bilinear/nearest_neighbor'
         assert upsampling in ['bilinear', 'nearest_neighbor', 'repeat'], msg
         self.upsampling_type = upsampling
 
-        self.config = config
-        if 'depth' in config['network']:
+        self.config = network_config
+        if 'depth' in network_config:
             self.num_dims = 3
             self.Conv = Conv3D
             if upsampling == 'repeat':
@@ -62,23 +75,13 @@ class BaseUNet(metaclass=ABCMeta):
 
         self._set_pooling_type()
         self.num_down_blocks = num_down_blocks
-        self.skip_merge_type = config['network']['skip_merge_type']
-        self.data_format = config['network']['data_format']
+        self.skip_merge_type = network_config['skip_merge_type']
+        self.data_format = network_config['data_format']
         self._set_skip_merge_type()
-        if config['network']['data_format'] == 'channels_first':
+        if network_config['data_format'] == 'channels_first':
             self.channel_axis = 1
         else:
             self.channel_axis = -1
-
-        if 'num_input_channels' not in config['network']:
-            config['network']['num_input_channels'] = (
-                len(config['dataset']['input_channels'])
-            )
-
-        if 'num_target_channels' not in config['network']:
-            config['network']['num_target_channels'] = (
-                len(config['dataset']['target_channels'])
-            )
 
     @staticmethod
     @abstractmethod
@@ -235,13 +238,13 @@ class BaseUNet(metaclass=ABCMeta):
     def build_net(self):
         """Assemble the network"""
 
-        num_convs_per_block = self.config['network']['num_convs_per_block']
-        filter_size = self.config['network']['filter_size']
-        activation = self.config['network']['activation']
-        batch_norm = self.config['network']['batch_norm']
-        dropout_prob = self.config['network']['dropout']
-        residual = self.config['network']['residual']
-        num_filters_per_block = self.config['network']['num_filters_per_block']
+        num_convs_per_block = self.config['num_convs_per_block']
+        filter_size = self.config['filter_size']
+        activation = self.config['activation']
+        batch_norm = self.config['batch_norm']
+        dropout_prob = self.config['dropout']
+        residual = self.config['residual']
+        num_filters_per_block = self.config['num_filters_per_block']
 
         with tf.name_scope('input'):
             input_layer = inputs = Input(shape=self._get_input_shape)
@@ -290,8 +293,8 @@ class BaseUNet(metaclass=ABCMeta):
             input_layer = layer
 
         #------------ output block ------------------------
-        final_activation = self.config['network']['final_activation']
-        num_output_channels = self.config['network']['num_target_channels']
+        final_activation = self.config['final_activation']
+        num_output_channels = self.config['num_target_channels']
         with tf.name_scope('output'):
             layer = self.Conv(filters=num_output_channels,
                               kernel_size=(1, ) * self.num_dims,
@@ -304,7 +307,7 @@ class BaseUNet(metaclass=ABCMeta):
     def _set_skip_merge_type(self):
         """Set if skip layers are to be added or concatenated"""
 
-        skip = self.config['network']['skip_merge_type']
+        skip = self.config['skip_merge_type']
         self.skip_merge_type = {'add': Add, 'concat': Concatenate}[skip]
 
     @abstractmethod
@@ -324,26 +327,26 @@ class BaseUNet(metaclass=ABCMeta):
 class UNet2D(BaseUNet):
     """2D UNet"""
 
-    def ___init__(self, config):
+    def ___init__(self, network_config):
         """Init"""
 
-        super().__init__(config=config)
+        super().__init__(network_config=network_config)
 
     @property
     def _get_input_shape(self):
         """Return shape of input"""
 
         shape = (
-            self.config['network']['num_input_channels'],
-            self.config['network']['height'],
-            self.config['network']['width']
+            self.config['num_input_channels'],
+            self.config['height'],
+            self.config['width']
         )
         return shape
 
     def _set_pooling_type(self):
         """Set the pooling type"""
 
-        pool = self.config['network']['pooling_type']
+        pool = self.config['pooling_type']
         self.Pooling = {
             'max': MaxPooling2D,
             'average': AveragePooling2D
@@ -373,27 +376,27 @@ class UNet2D(BaseUNet):
 class UNet3D(BaseUNet):
     """3D UNet"""
 
-    def __init__(self, config):
+    def __init__(self, network_config):
         """Init"""
         
-        super().__init__(config=config)
+        super().__init__(network_config=network_config)
 
     @property
     def _get_input_shape(self):
         """Return shape of input"""
 
         shape = (
-            self.config['network']['num_input_channels'],
-            self.config['network']['depth'],
-            self.config['network']['height'],
-            self.config['network']['width']
+            self.config['num_input_channels'],
+            self.config['depth'],
+            self.config['height'],
+            self.config['width']
         )
         return shape
 
     def _set_pooling_type(self):
         """Set the pooling type"""
 
-        pool = self.config['network']['pooling_type']
+        pool = self.config['pooling_type']
         self.Pooling = {
             'max': MaxPooling3D,
             'average': AveragePooling3D

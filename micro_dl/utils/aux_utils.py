@@ -139,3 +139,35 @@ def save_tile_meta(cropped_meta,
         df = pd.read_csv(metadata_fname, sep=',', index_col=0)
         df[fname_header] = cur_df[fname_header]
     df.to_csv(metadata_fname, sep=',')
+
+
+def validate_config(config_dict, params):
+    """Check if the required params are present in config
+
+    :param dict config_dict: dictionary with params as keys
+    :param list params: list of strings with expected params
+    :return: list with bool values indicating if param is present or not
+    """
+
+    param_indicator = np.zeros(len(params), dtype='bool')
+    for idx, exp_param in enumerate(params):
+        cur_indicator = (exp_param in config_dict) and \
+                        (config_dict[exp_param] is not None)
+        param_indicator[idx] = cur_indicator
+    return param_indicator
+
+
+def get_channel_axis(data_format):
+    """Get the channel axis given the data format
+
+    :param str data_format: as named. [channels_last, channel_first]
+    :return int channel_axis
+    """
+
+    assert data_format in ['channels_first', 'channels_last'], \
+        'Invalid data format %s' % data_format
+    if data_format == 'channel_first':
+        channel_axis = 1
+    else:
+        channel_axis = -1
+    return channel_axis

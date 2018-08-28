@@ -1,80 +1,75 @@
 """Keras trainer"""
-from keras import Model
-from keras.models import load_model
 from keras import callbacks as keras_callbacks
 from keras import optimizers as keras_optimizers
-from keras.utils import plot_model
 import os
-import tensorflow as tf
 from time import localtime, strftime
-import yaml
+
 
 import micro_dl.train.learning_rates as custom_learning
+from micro_dl.train.losses import masked_loss
 import micro_dl.train.lr_finder as lr_finder
-from micro_dl.train.model_inference import load_model
-from micro_dl.utils.aux_utils import import_class, init_logger
-from micro_dl.utils.train_utils import set_keras_session, get_loss, get_metrics
+from micro_dl.utils.aux_utils import init_logger
+from micro_dl.utils.train_utils import get_loss, get_metrics
 
 
 class BaseKerasTrainer:
     """Keras training class"""
 
-    def __init__(self, config, model_dir, train_dataset, val_dataset,
-                 model_name=None, gpu_ids=0, gpu_mem_frac=0.95):
+    def __init__(self, sess, train_config, train_dataset, val_dataset,
+                 model, num_target_channels, gpu_ids=0, gpu_mem_frac=0.95):
         """Init
 
         Currently only model weights are stored and not the training state.
         Resume training needs to be modified!
 
-        :param dict config: dict read from a config yaml, with parameters for
-         dataset, network and trainer
-        :param str model_dir: dir with full path to store all training related
-         info (model weights, log files, model_graph, etc)
+        :param tf.Session sess: keras session
+        :param dict train_config: dict read from a config yaml, with parameters
+         for training
         :param BaseDataSet/DataSetWithMask train_dataset: generator used for
          batching train images
         :param BaseDataSet/DataSetWithMask val_dataset: generator used for
          batching validation images
-        :param str model_name: fname of the .hdf5 file with model weights
+        :param keras.Model model: network instantiated from class but not
+         compiled
+        :param int num_target_channels: number of channels in target, needed
+         for splitting y_true and mask in case of masked_loss
         :param int/list gpu_ids: gpu to use
         :param float/list gpu_mem_frac: Memory fractions to use corresponding
          to gpu_ids
         """
 
+        self.sess = sess
         self.gpu_ids = gpu_ids
         self.gpu_mem_frac = gpu_mem_frac
         self.verbose = 10
-        os.makedirs(model_dir, exist_ok=True)
-        self.model_dir = model_dir
-        self.model_name = model_name
-        self.config = config
-        self.epochs = self.config['trainer']['max_epochs']
+
         self.train_dataset = train_dataset
         self.val_dataset = val_dataset
+        self.model = model
+
+        self.config = train_config
+        os.makedirs(train_config['model_dir'], exist_ok=True)
+        self.model_dir = train_config['model_dir']
+        self.epochs = train_config['max_epochs']
+        self.num_target_channels = num_target_channels
         self.logger = self._init_train_logger()
-        if model_name:
+
+        self.resume_training = False
+        if 'resume' in train_config and train_config['resume']:
             self.resume_training = True
-        else:
-            self.resume_training = False
-        if gpu_ids == -1:
-            self.sess = None
-        else:
-            self.sess = set_keras_session(
-                gpu_ids=gpu_ids,
-                gpu_mem_frac=gpu_mem_frac)
 
     def _init_train_logger(self):
         """Initialize logger for training"""
 
-        logger_fname = os.path.join(self.model_dir,
-                                    'training.log')
+        logger_fname = os.path.join(self.config['model_dir'], 'training.log')
         logger = init_logger('training', logger_fname, self.verbose)
         return logger
 
     def _get_optimizer(self):
         """Get optimizer from config"""
 
-        opt = self.config['trainer']['optimizer']['name']
-        lr = self.config['trainer']['optimizer']['lr']
+        opt = self.config['optimizer']['name']
+        lr = self.config['optimizer']['lr']
         try:
             opt_cls = getattr(keras_optimizers, opt)
             return opt_cls(lr=lr)
@@ -84,17 +79,17 @@ class BaseKerasTrainer:
     def _get_callbacks(self):
         """Get the callbacks from config"""
 
-        callbacks_config = self.config['trainer']['callbacks']
+        callbacks_config = self.config['callbacks']
         callbacks = []
         for cb_dict in callbacks_config:
             cb_cls = getattr(keras_callbacks, cb_dict)
             if cb_dict == 'ModelCheckpoint':
-                if self.model_name:
-                    model_name = self.model_name
-                else:
-                    model_name = self.config['network']['class']
+                if callbacks_config[cb_dict]['save_best_only']:
+                    assert callbacks_config[cb_dict]['monitor'] == 'val_loss',\
+                        'cannot checkpoint best_model if monitor' \
+                        'is not val_loss'
                 timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
-                model_name = '{}_{}.hdf5'.format(model_name, timestamp)
+                model_name = '{}_{}.hdf5'.format('Model', timestamp)
                 filepath = os.path.join(self.model_dir, model_name)
                 # https://github.com/keras-team/keras/issues/8343
                 # Lambda layer: keras can't make a deepcopy of the layer
@@ -141,7 +136,7 @@ class BaseKerasTrainer:
                 # and cannot be a generator
                 cur_cb = cb_cls(
                     log_dir=log_dir,
-                    batch_size=self.config['trainer']['batch_size'],
+                    batch_size=self.config['batch_size'],
                     histogram_freq=0, write_graph=True
                 )
             else:
@@ -155,7 +150,7 @@ class BaseKerasTrainer:
         callbacks.append(csv_logger)
         return callbacks
 
-    def _init_model(self, loss, optimizer, metrics):
+    def _compile_model(self, loss, optimizer, metrics):
         """Initialize the model from config
 
         :param loss: instance of keras loss or custom loss
@@ -163,31 +158,15 @@ class BaseKerasTrainer:
         :param metrics: a list of metrics instances
         """
 
-        network_cls = self.config['network']['class']
-        network_cls = import_class('networks.unet', network_cls)
-        network = network_cls(self.config)
-        # assert if network shape matches dataset shape?
-        inputs, outputs = network.build_net()
-        with tf.device('/gpu:{}'.format(self.gpu_ids)):
-            model = Model(inputs=inputs, outputs=outputs)
-
-        plot_model(model,
-                   to_file=os.path.join(self.model_dir,'model_graph.png'),
-                   show_shapes=True, show_layer_names=True)
-        # Lambda layers throw errors when converting to yaml!
-        # model_yaml = self.model.to_yaml()
-        # with open(os.path.join(self.model_dir, 'model.yml'), 'w') as f:
-        #     f.write(model_yaml)
-        with open(os.path.join(self.model_dir, 'config.yml'), 'w') as f:
-            yaml.dump(self.config, f, default_flow_style=False)
-        
-        if 'weighted_loss' in self.config['trainer']:
-            n_output_channels = len(self.config['dataset']['target_channels'])
-            model.compile(loss=loss(n_output_channels), optimizer=optimizer,
-                          metrics=metrics)
+        if 'masked_loss' in self.config:
+            masked_metrics = [metric(self.num_target_channels)
+                              for metric in metrics]
+            self.model.compile(loss=masked_loss(loss,
+                                                self.num_target_channels),
+                               optimizer=optimizer,
+                               metrics=masked_metrics)
         else:
-            model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
-        return model
+            self.model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
 
     def train(self):
         """Train the model
@@ -206,29 +185,24 @@ class BaseKerasTrainer:
         https://groups.google.com/forum/#!searchin/keras-users/pass$20custom$20loss$20|sort:date/keras-users/ue1S8uAPDKU/x2ml5J7YBwAJ
         """
 
-        loss_str = self.config['trainer']['loss']
+        loss_str = self.config['loss']
         loss = get_loss(loss_str)
         optimizer = self._get_optimizer()
-        metrics_list = self.config['trainer']['metrics']
+        metrics_list = self.config['metrics']
         metrics = get_metrics(metrics_list)
         callbacks = self._get_callbacks()
 
-        if self.model_name:
-            model = load_model(self.config, self.model_name)
-            model.compile(loss=loss, optimizer=optimizer, metrics=metrics)
-            self.logger.info('Resume model training')
-        else:
-            os.makedirs(self.model_dir, exist_ok=True)
-            model = self._init_model(loss, optimizer, metrics)
-            model.summary()
-            self.logger.info('Model initialized and compiled')
+        self._compile_model(loss, optimizer, metrics)
+        self.model.summary()
+        self.logger.info('Model compiled')
 
         try:
             # NUM WORKERS read from yml or find the num of empty cores?
-            model.fit_generator(
-                generator=self.train_dataset, validation_data=self.val_dataset,
-                epochs=self.config['trainer']['max_epochs'],
-                callbacks=callbacks, workers=4, verbose=1
-            )
+            self.model.fit_generator(generator=self.train_dataset,
+                                     validation_data=self.val_dataset,
+                                     epochs=self.epochs,
+                                     callbacks=callbacks,
+                                     workers=4,
+                                     verbose=1)
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))

@@ -12,8 +12,14 @@ class BaseDataSet(keras.utils.Sequence):
     https://github.com/aleju/imgaug
     """
 
-    def __init__(self, input_fnames, target_fnames, batch_size, shuffle=True,
-                 augmentations=None, random_seed=42, normalize=False):
+    def __init__(self,
+                 input_fnames,
+                 target_fnames,
+                 batch_size,
+                 shuffle=True,
+                 augmentations=None,
+                 random_seed=42,
+                 normalize=False):
         """Init
 
         The images could be normalized at the image level during tiling
@@ -70,19 +76,24 @@ class BaseDataSet(keras.utils.Sequence):
 
         input_image = []
         target_image = []
+        task = 'regression'
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_input = self._get_volume(cur_input_fnames.split(','))
             cur_target = self._get_volume(cur_target_fnames.split(','))
+
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
-                self.normalize = False
+                task = 'segmentation'
             if self.normalize:
+                cur_input = (cur_input - np.mean(cur_input)) /\
+                             np.std(cur_input)
                 # Only normalize target if we're dealing with regression
-                cur_target = (cur_target - np.mean(cur_target)) /\
-                             np.std(cur_target)
+                if task is not 'segmentation':
+                    cur_target = (cur_target - np.mean(cur_target)) /\
+                                 np.std(cur_target)
             # _augment_image(cur_input, cur_target)
             input_image.append(cur_input)
             target_image.append(cur_target)
@@ -117,8 +128,16 @@ class BaseDataSet(keras.utils.Sequence):
 class DataSetWithMask(BaseDataSet):
     """DataSet class that returns input, target images and sample weights"""
 
-    def __init__(self, input_fnames, target_fnames, mask_fnames, batch_size,
-                 shuffle=True, augmentations=None, random_seed=42):
+    def __init__(self,
+                 input_fnames,
+                 target_fnames,
+                 mask_fnames,
+                 batch_size,
+                 label_weights=None,
+                 shuffle=True,
+                 augmentations=None,
+                 random_seed=42,
+                 normalize=False):
         """Init
 
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
@@ -131,14 +150,21 @@ class DataSetWithMask(BaseDataSet):
         :param pd.Series mask_fnames: pd.Series with each row containing
          mask filenames
         :param int batch_size: num of datasets in each batch
+        :param list label_weights: weight for each label
         :param bool shuffle: shuffle data for each epoch
         :param int random_seed: initialize the random number generator with
          this seed
         """
 
-        super().__init__(input_fnames, target_fnames, batch_size,
-                         shuffle, augmentations, random_seed)
+        super().__init__(input_fnames,
+                         target_fnames,
+                         batch_size,
+                         shuffle,
+                         augmentations,
+                         random_seed,
+                         normalize)
         self.mask_fnames = mask_fnames
+        self.label_weights = label_weights
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -156,6 +182,7 @@ class DataSetWithMask(BaseDataSet):
 
         input_image = []
         target_image = []
+        task = 'regression'
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
@@ -164,8 +191,26 @@ class DataSetWithMask(BaseDataSet):
 
             cur_target = super()._get_volume(cur_target_fnames.split(','))
 
-            # the mask is based on sum of flurophore images
+            # If target is boolean (segmentation masks), convert to float
+            if cur_target.dtype == bool:
+                cur_target = cur_target.astype(np.float64)
+                task = 'segmentation'
+            if self.normalize:
+                cur_input = (cur_input - np.mean(cur_input)) /\
+                             np.std(cur_input)
+                # Only normalize target if we're dealing with regression
+                if task is not 'segmentation':
+                    cur_target = (cur_target - np.mean(cur_target)) /\
+                                 np.std(cur_target)
+
+            # the mask is based on sum of channel images
             cur_mask = super()._get_volume(cur_mask_fnames.split(','))
+            if self.label_weights is not None:
+                wtd_mask = np.zeros(cur_mask.shape)
+                for label_idx in range(len(self.label_weights)):
+                    wtd_mask += (cur_mask == label_idx) * \
+                                self.label_weights[label_idx]
+                cur_mask = wtd_mask
             cur_target = np.concatenate((cur_target, cur_mask), axis=0)
 
             input_image.append(cur_input)

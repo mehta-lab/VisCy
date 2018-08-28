@@ -3,6 +3,7 @@ dataset:
     input_channels: [3]
     target_channels: [0]
     mask_channels: [0, 1]
+    label_weights: [1, 2]
     min_fraction: 0.15
     split_by_column: sample_num
     split_ratio:
@@ -16,9 +17,9 @@ trainer:
     model_dir: '/home/krishnan/models/2018-08-07-label_free_debug_wtd_loss'
     batch_size: 32
     max_epochs: 80
-    metrics: coeff_determination
-    loss: mse_binary_wtd
-    weighted_loss: True
+    metrics: mask_coeff_determination
+    loss: mse_loss
+    masked_loss: True
     callbacks:
         EarlyStopping:
             mode: min

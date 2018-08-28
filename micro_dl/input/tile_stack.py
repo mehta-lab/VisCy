@@ -180,6 +180,7 @@ class ImageStackTiler:
                                            'channel_{}'.format(channel))
                 os.makedirs(channel_dir, exist_ok=True)
                 if self.correct_flat_field:
+                    # no not hard code this path if meta_path is provided
                     flat_field_image = np.load(
                         os.path.join(
                             self.base_output_dir,

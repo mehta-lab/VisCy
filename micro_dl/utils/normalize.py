@@ -1,6 +1,6 @@
 """Image normalization related functions"""
 import numpy as np
-from skimage.exposure import rescale_intensity, equalize_adapthist
+from skimage.exposure import equalize_adapthist
 
 
 def zscore(input_image):
@@ -27,7 +27,7 @@ def hist_clipping(input_image, min_percentile=2, max_percentile=98):
 
     assert (min_percentile < max_percentile) and max_percentile <= 100
     pmin, pmax = np.percentile(input_image, (min_percentile, max_percentile))
-    hist_clipped_image = rescale_intensity(input_image, in_range=(pmin, pmax))
+    hist_clipped_image = np.clip(input_image, pmin, pmax)
     return hist_clipped_image
 
 

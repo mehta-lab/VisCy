@@ -10,21 +10,21 @@ from micro_dl.plotting.plot_utils import save_predicted_images
 import micro_dl.utils.train_utils as train_utils
 
 
-def load_model(config, model_fname):
+def load_model(network_config, model_fname):
     """Load the model from model_dir
 
     Due to the lambda layer only model weights are saved and not the model
     config. Hence load_model wouldn't work here!
-    :param yaml config: a yaml file with all the required parameters
+    :param yaml network_config: a yaml file with all the required parameters
     :param str model_fname: fname with full path of the .hdf5 file with saved
      weights
     :return: Keras.Model instance
     """
 
-    network_cls = config['network']['class']
+    network_cls = network_config['class']
     # not ideal as more networks get added
     network_cls = aux_utils.import_class('networks', network_cls)
-    network = network_cls(config)
+    network = network_cls(network_config)
     inputs, outputs = network.build_net()
     model = Model(inputs=inputs, outputs=outputs)
     model.load_weights(model_fname)
@@ -95,7 +95,7 @@ class ModelEvaluator:
             num_batches = nb_batches
 
         for batch_idx in range(num_batches):
-            if 'weighted_loss' in self.config['trainer']:
+            if 'masked_loss' in self.config['trainer']:
                 cur_input, cur_target, cur_mask = ds_test.__getitem__(
                     batch_idx)
             else:

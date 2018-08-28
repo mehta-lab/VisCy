@@ -106,13 +106,24 @@ def set_keras_session(gpu_ids, gpu_mem_frac):
 def get_loss(loss_str):
     """Get loss type from config"""
 
-    if hasattr(keras_losses, loss_str):
-        loss_cls = getattr(keras_losses, loss_str)
-    elif hasattr(custom_losses, loss_str):
-        loss_cls = getattr(custom_losses, loss_str)
+    def _get_one_loss(cur_loss_str):
+        if hasattr(keras_losses, cur_loss_str):
+            loss_cls = getattr(keras_losses, cur_loss_str)
+        elif hasattr(custom_losses, cur_loss_str):
+            loss_cls = getattr(custom_losses, cur_loss_str)
+        else:
+            raise ValueError('%s is not a valid loss' % cur_loss_str)
+        return loss_cls
+
+    if not isinstance(loss_str, list):
+        loss_cls = _get_one_loss(loss_str)
+        return loss_cls
     else:
-        raise ValueError('%s is not a valid loss' % loss_str)
-    return loss_cls
+        loss_cls_list = []
+        for cur_loss in loss_str:
+            loss_cls = _get_one_loss(cur_loss)
+            loss_cls_list.append(loss_cls)
+        return loss_cls_list
 
 
 def get_metrics(metrics_list):

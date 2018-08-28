@@ -24,9 +24,12 @@ class MaskProcessor:
          (flurophore) channels
         """
 
-        meta_fname = os.path.join(image_dir, 'split_images_info.csv')
+        meta_fname = glob.glob(os.path.join(image_dir, '*info.csv'))
+        assert len(meta_fname) == 1, \
+            "Can't find info.csv file in {}".format(image_dir)
+
         try:
-            volume_metadata = pd.read_csv(meta_fname)
+            volume_metadata = pd.read_csv(meta_fname[0])
         except IOError as e:
             e.args += 'cannot read split image info'
             raise
@@ -73,7 +76,7 @@ class MaskProcessor:
                 )
                 if len(cropped_mask.shape) == 3:
                     img_id = '{}_sl{}-{}.npy'.format(img_id, crop_index[4],
-                                                    crop_index[5])
+                                                     crop_index[5])
                     if isotropic:
                         cropped_mask = resize_mask(
                             cropped_mask, [cropped_mask.shape[0], ] * 3

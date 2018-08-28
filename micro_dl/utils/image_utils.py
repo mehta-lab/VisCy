@@ -201,12 +201,15 @@ def create_mask(input_image, str_elem_size=3):
     :return: mask of input_image, np.array
     """
 
-    thr = threshold_otsu(input_image, nbins=512)
+    if np.min(input_image) == np.max(input_image):
+        thr = np.unique(input_image)
+    else:
+        thr = threshold_otsu(input_image, nbins=512)
     if len(input_image.shape) == 2:
         str_elem = disk(str_elem_size)
     else:
         str_elem = ball(str_elem_size)
     # remove small objects in mask
-    thr_image = binary_opening(input_image >= thr, str_elem)
+    thr_image = binary_opening(input_image > thr, str_elem)
     mask = binary_fill_holes(thr_image)
     return mask
