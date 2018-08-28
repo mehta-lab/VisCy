@@ -8,23 +8,23 @@ from micro_dl.train import losses as custom_losses, metrics as custom_metrics
 
 
 def check_gpu_availability(gpu_id, gpu_mem_frac):
-    """Check if mem_frac is available in given gpu_id
+    """
+    Check if mem_frac is available in given gpu_id
 
     :param int/list gpu_id: id of the gpu to be used. Int for single GPU
      training, list for distributed training
-    :param float/list gpu_mem_frac: mem fraction for each GPU in gpu_id
-    :return: boolean indicator for gpu_availability
+    :param list gpu_mem_frac: mem fraction for each GPU in gpu_id
+    :return bool gpu_availability: True if all mem_fracs are greater than
+        gpu_mem_frac
+    :return list curr_mem_frac: list of current memory fractions available
+        for gpus in to gpu_id
     """
-
-    gpu_availability = []
     if isinstance(gpu_id, int):
         gpu_id = [gpu_id]
 
-    if isinstance(gpu_mem_frac, float):
-        gpu_mem_frac = [gpu_mem_frac]
-
     msg = 'There is no matching memory fraction for all the given gpu_ids'
     assert len(gpu_id) == len(gpu_mem_frac), msg
+    curr_mem_frac = []
     for idx, gpu in enumerate(gpu_id):
         query = ('nvidia-smi --id={} --query-gpu=memory.free,memory.total '
                  '--format=csv').format(gpu)
@@ -34,11 +34,10 @@ def check_gpu_availability(gpu_id, gpu_mem_frac):
         query_output = query_output.split('\n')
         mem = query_output[1].split(',')
         mem = [int(val.replace('MiB', '')) for val in mem]
-        curr_mem_frac = mem[0] / mem[1]
-        curr_availability = curr_mem_frac>=gpu_mem_frac[idx]
-        gpu_availability.append(curr_availability)
-    gpu_availability = np.array(gpu_availability)
-    return np.all(gpu_availability)
+        curr_mem_frac.append(mem[0] / mem[1])
+
+    gpu_availability = np.all(np.array(curr_mem_frac >= gpu_mem_frac))
+    return gpu_availability, curr_mem_frac
 
 
 def split_train_val_test(num_samples, train_ratio, test_ratio,

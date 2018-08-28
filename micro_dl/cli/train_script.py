@@ -215,12 +215,29 @@ def run_action(args):
 
 
 if __name__ == '__main__':
+    # Parse command line arguments
     args = parse_args()
-    gpu_available = False
-    if args.gpu >= 0:
-        gpu_available = check_gpu_availability(args.gpu, args.gpu_mem_frac)
+    # Currently only supporting one GPU as input
     if not isinstance(args.gpu, int):
         raise NotImplementedError
-    # Allow run if gpu_available or debug
-    if gpu_available or args.gpu == -1:
+    # If debug mode, run without checking GPUs
+    if args.gpu == -1:
         run_action(args)
+    # Get currently available GPU memory fractions and determine if
+    # requested amount of memory is available
+    gpu_mem_frac = args.gpu_mem_frac
+    if isinstance(gpu_mem_frac, float):
+        gpu_mem_frac = [gpu_mem_frac]
+    gpu_available, curr_mem_frac = check_gpu_availability(
+        args.gpu,
+        gpu_mem_frac,
+    )
+    # Allow run if gpu_available
+    if gpu_available:
+        run_action(args)
+    else:
+        raise ValueError(
+            "Not enough memory available. Requested/current fractions:",
+            "\n".join([str(c) + " / " + "{0:.4g}".format(m)
+                       for c, m in zip(gpu_mem_frac, curr_mem_frac)]),
+        )
