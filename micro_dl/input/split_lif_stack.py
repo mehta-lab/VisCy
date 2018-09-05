@@ -162,7 +162,7 @@ class LifStackSplitter2D(LifStackSplitter):
         """
         records = []
         # exclude the first 14 due to artifacts and some have one z
-        # (series 15, 412) instead of 3
+        # (series 15, 412) instead of 3: 15:411 0 -indexed
         for z_idx in range(num_pix_z):
             cur_fname = os.path.join(
                 channel_dir, 'image_n{}_z{}.npy'.format(sample_idx, z_idx)

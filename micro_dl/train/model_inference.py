@@ -287,7 +287,7 @@ class ModelEvaluator:
                                       operation=place_operation)
         return predicted_image
 
-    def predict_on_full_image(self, image_meta, test_sample_idx,
+    def predict_on_full_image(self, image_meta, test_samples,
                               focal_plane_idx=None, depth=None,
                               per_tile_overlap=1/8,
                               flat_field_correct=False,
@@ -300,7 +300,7 @@ class ModelEvaluator:
         :param pd.DataFrame image_meta: Df with individual image info,
          timepoint', 'channel_num', 'sample_num', 'slice_num', 'fname',
          'size_x_microns', 'size_y_microns', 'size_z_microns'
-        :param list test_sample_idx: list of sample numbers to be used in the
+        :param list test_samples: list of sample numbers to be used in the
          test set
         :param int focal_plane_idx: focal plane to be used
         :param int depth: if 3D - num of slices used for tiling
@@ -354,9 +354,9 @@ class ModelEvaluator:
             )
             ip0_meta = image_meta[row_idx_ip0]
 
-            # get rows corr. to test_sample_idx from this DF
+            # get rows corr. to test_samples from this DF
             test_row_ip0 = ip0_meta.loc[
-                ip0_meta['sample_num'].isin(test_sample_idx)
+                ip0_meta['sample_num'].isin(test_samples)
             ]
             test_ip0_fnames = test_row_ip0['fname'].tolist()
             test_image_fnames = (

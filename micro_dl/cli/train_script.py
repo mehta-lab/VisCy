@@ -87,7 +87,7 @@ def create_datasets(df_meta, dataset_config, trainer_config):
                            dataset_config['split_by_column'],
                            dataset_config['split_ratio'])
     if 'val' in dataset_config['split_ratio']:
-        train_metadata, val_metadata, test_metadata, split_idx = \
+        train_metadata, val_metadata, test_metadata, split_samples = \
             tt.train_test_split()
         val_gen_params = {}
         if 'augmentations' in trainer_config:
@@ -105,7 +105,7 @@ def create_datasets(df_meta, dataset_config, trainer_config):
             sep=','
         )
     else:
-        train_metadata, test_metadata, split_idx = tt.train_test_split()
+        train_metadata, test_metadata, split_samples = tt.train_test_split()
         val_dataset = None
         train_gen_params = {}
         if 'augmentations' in trainer_config:
@@ -124,7 +124,7 @@ def create_datasets(df_meta, dataset_config, trainer_config):
     test_dataset = BaseDataSet(input_fnames=test_metadata['fpaths_input'],
                                target_fnames=test_metadata['fpaths_target'],
                                batch_size=trainer_config['batch_size'])
-    return train_dataset, val_dataset, test_dataset, split_idx
+    return train_dataset, val_dataset, test_dataset, split_samples
 
 
 def create_datasets_with_mask(df_meta, dataset_config, trainer_config):
@@ -153,7 +153,7 @@ def create_datasets_with_mask(df_meta, dataset_config, trainer_config):
                                dataset_config['split_ratio'],
                                min_fraction)
     if 'val' in dataset_config['split_ratio']:
-        train_metadata, val_metadata, test_metadata, split_idx = \
+        train_metadata, val_metadata, test_metadata, split_samples = \
             tt.train_test_split()
         val_gen_params = {}
         if 'label_weights' in dataset_config:
@@ -176,7 +176,7 @@ def create_datasets_with_mask(df_meta, dataset_config, trainer_config):
             sep=','
         )
     else:
-        train_metadata, test_metadata, split_idx = tt.train_test_split()
+        train_metadata, test_metadata, split_samples = tt.train_test_split()
         val_dataset = None
         train_gen_params = {}
         if 'label_weights' in dataset_config:
@@ -206,7 +206,7 @@ def create_datasets_with_mask(df_meta, dataset_config, trainer_config):
         batch_size=trainer_config['batch_size'],
         **test_gen_params
     )
-    return train_dataset, val_dataset, test_dataset, split_idx
+    return train_dataset, val_dataset, test_dataset, split_samples
 
 
 def create_network(network_config, gpu_id):
@@ -254,16 +254,18 @@ def run_action(args):
         df_meta = pd.read_csv(df_meta_fname)
 
         if 'masked_loss' in trainer_config:
-            train_dataset, val_dataset, test_dataset, split_indices = \
-                create_datasets_with_mask(df_meta, dataset_config, trainer_config)
+            train_dataset, val_dataset, test_dataset, split_samples = \
+                create_datasets_with_mask(df_meta,
+                                          dataset_config,
+                                          trainer_config)
         else:
-            train_dataset, val_dataset, test_dataset, split_indices = \
+            train_dataset, val_dataset, test_dataset, split_samples = \
                 create_datasets(df_meta, dataset_config, trainer_config)
 
         split_idx_fname = os.path.join(trainer_config['model_dir'],
-                                       'split_indices.pkl')
+                                       'split_samples.pkl')
         with open(split_idx_fname, 'wb') as f:
-            pickle.dump(split_indices, f)
+            pickle.dump(split_samples, f)
 
         K.set_image_data_format(network_config['data_format'])
 

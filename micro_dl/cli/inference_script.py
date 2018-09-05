@@ -71,13 +71,13 @@ def run_inference(args):
 
     ev_inst.predict_on_tiles(ds_test, nb_batches=args.num_batches)
     idx_fname = os.path.join(config['trainer']['model_dir'],
-                             'split_indices.pkl')
+                             'split_samples.pkl')
     with open(idx_fname, 'rb') as f:
-        split_idx = pickle.load(f)
+        split_samples = pickle.load(f)
 
     image_meta = pd.read_csv(args.image_meta_fname)
     ev_inst.predict_on_full_image(image_meta=image_meta,
-                                  test_sample_idx=split_idx['test'],
+                                  test_samples=split_samples['test'],
                                   focal_plane_idx=args.focal_plane_idx,
                                   flat_field_correct=args.flat_field_correct,
                                   base_image_dir=args.base_image_dir)

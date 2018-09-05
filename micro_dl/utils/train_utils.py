@@ -40,14 +40,14 @@ def check_gpu_availability(gpu_id, gpu_mem_frac):
     return gpu_availability, curr_mem_frac
 
 
-def split_train_val_test(num_samples, train_ratio, test_ratio,
+def split_train_val_test(sample_set, train_ratio, test_ratio,
                           val_ratio=None):
     """Generate indices for train, validation and test split
 
     This can be achieved by using sklearn.model_selection.train_test_split
     twice... :-)
 
-    :param int num_samples: total number of samples/datasets
+    :param set sample_set: as named, not necessarily continuous values
     :param float train_ratio: between 0 and 1, percent of samples to be
      used for training
     :param float test_ratio: between 0 and 1, percent of samples to be
@@ -59,11 +59,11 @@ def split_train_val_test(num_samples, train_ratio, test_ratio,
 
     msg = 'train, val and test ratios do not add upto 1'
     assert train_ratio + val_ratio + test_ratio == 1, msg
+    num_samples = len(sample_set)
     num_test = int(test_ratio * num_samples)
     num_test = max(num_test, 1)
 
     split_idx = {}
-    sample_set = list(range(0, num_samples))
     test_idx = np.random.choice(sample_set, num_test, replace=False)
 
     split_idx['test'] = test_idx

@@ -1,5 +1,4 @@
 """Auxiliary utility functions"""
-import glob
 import inspect
 import importlib
 import logging
