@@ -35,23 +35,25 @@ trainer:
         lr: 0.0001
         name: Adam
 network:
-    class: UNet3D
-    num_input_channels: 1
+    class: Image2DToVectorNet
+    num_input_channels: 4
     data_format: 'channels_first'
     height: 256
     width: 256
-    depth: 8
+    depth: 256
     batch_norm: True
     pooling_type: max
     filter_size: 3
     activation:
         type: relu
     dropout: 0.2
-    num_filters_per_block: [16, 32, 48]
+    num_initial_filters: 16
     num_convs_per_block: 2
     block_sequence: conv-activation-bn
-    skip_merge_type: concat
-    upsampling: bilinear
     residual: True
-    num_target_channels: 1
+    kernel_regularizer:
+        type: l2
+        lambda: 0.001
+    dropout_dense: 0.4
     final_activation: linear
+    regression_length: 32

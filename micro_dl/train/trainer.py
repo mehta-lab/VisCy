@@ -118,7 +118,7 @@ class BaseKerasTrainer:
                         base_lr=callbacks_config[cb_dict]['base_lr'],
                         max_lr=callbacks_config[cb_dict]['max_lr'],
                         max_epochs=callbacks_config[cb_dict]['max_epochs'],
-                        fig_name=callbacks_config[cb_dict]['fig_name'],
+                        fig_fname=callbacks_config[cb_dict]['fig_fname'],
                     )
                 else:
                     cur_cb = custom_learning.CyclicLearning(

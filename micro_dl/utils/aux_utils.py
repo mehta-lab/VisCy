@@ -148,12 +148,16 @@ def validate_config(config_dict, params):
     :return: list with bool values indicating if param is present or not
     """
 
+    params = np.array(params)
     param_indicator = np.zeros(len(params), dtype='bool')
     for idx, exp_param in enumerate(params):
         cur_indicator = (exp_param in config_dict) and \
                         (config_dict[exp_param] is not None)
         param_indicator[idx] = cur_indicator
-    return param_indicator
+    check = np.all(param_indicator)
+    msg = 'Params absent in network_config: {}'.\
+        format(params[param_indicator == 0])
+    return check, msg
 
 
 def get_channel_axis(data_format):
@@ -165,7 +169,7 @@ def get_channel_axis(data_format):
 
     assert data_format in ['channels_first', 'channels_last'], \
         'Invalid data format %s' % data_format
-    if data_format == 'channel_first':
+    if data_format == 'channels_first':
         channel_axis = 1
     else:
         channel_axis = -1

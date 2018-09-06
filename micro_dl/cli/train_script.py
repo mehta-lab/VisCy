@@ -219,11 +219,10 @@ def create_network(network_config, gpu_id):
     params = ['class', 'filter_size', 'activation', 'pooling_type',
               'batch_norm', 'height', 'width', 'data_format',
               'final_activation']
-    param_indicator = validate_config(network_config, params)
-    assert np.all(param_indicator), \
-        'Params absent in network_config: %s'.format(
-            params[param_indicator == 0]
-        )
+    param_check, msg = validate_config(network_config, params)
+    if not param_check:
+        raise ValueError(msg)
+
     network_cls = network_config['class']
     network_cls = import_class('networks', network_cls)
     network = network_cls(network_config)
@@ -249,6 +248,9 @@ def run_action(args):
     trainer_config = config['trainer']
     network_config = config['network']
     if action == 'train':
+        if not os.path.exists(trainer_config['model_dir']):
+            os.makedirs(trainer_config['model_dir'], exist_ok=True)
+
         df_meta_fname = os.path.join(dataset_config['data_dir'],
                                      'tiled_images_info.csv')
         df_meta = pd.read_csv(df_meta_fname)
@@ -281,7 +283,6 @@ def run_action(args):
             model = load_model(network_config, args.model_fname)
         else:
             model = create_network(network_config, args.gpu)
-            os.makedirs(trainer_config['model_dir'], exist_ok=True)
             plot_model(model,
                        to_file=os.path.join(trainer_config['model_dir'],
                                             'model_graph.png'),
