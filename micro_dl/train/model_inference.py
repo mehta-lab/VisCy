@@ -59,7 +59,7 @@ class ModelEvaluator:
         if model is not None:
             self.model = model
         else:
-            self.model = load_model(config, model_fname)
+            self.model = load_model(config['network'], model_fname)
 
     def evaluate_model(self, ds_test):
         """Evaluate model performance on the test set
