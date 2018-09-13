@@ -5,7 +5,7 @@ from keras.layers.merge import Add, Concatenate
 
 from micro_dl.networks.base_conv_net import BaseConvNet
 from micro_dl.networks.conv_blocks import conv_block, pad_channels, \
-    residual_conv_block, residual_downsample_conv_block
+    residual_conv_block, residual_downsample_conv_block, skip_merge
 from micro_dl.utils.aux_utils import get_channel_axis, import_class, \
     validate_config
 from micro_dl.utils.network_utils import get_keras_layer
@@ -155,16 +155,11 @@ class BaseUNet(BaseConvNet):
             )(input_layers)
 
         # skip-merge
-        channel_axis = get_channel_axis(self.config['data_format'])
-        if self.config['skip_merge_type'] == 'concat':
-            layer = Concatenate(axis=channel_axis)([layer_upsampled,
-                                                    skip_layers])
-        else:
-            skip_layers = Lambda(
-                pad_channels,
-                arguments={'final_layer': layer_upsampled,
-                           'channel_axis': channel_axis})(skip_layers)
-            layer = Add()([layer_upsampled, skip_layers])
+        layer = skip_merge(skip_layers=skip_layers,
+                           upsampled_layers=layer_upsampled,
+                           skip_merge_type=self.config['skip_merge_type'],
+                           data_format=self.config['data_format'],
+                           num_dims=self.config['num_dims'])
 
         # conv
         if self.config['residual']:

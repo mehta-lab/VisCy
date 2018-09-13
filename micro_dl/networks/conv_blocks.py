@@ -2,11 +2,12 @@
 import keras.backend as K
 from keras.layers import BatchNormalization, Dropout, Lambda
 from keras.layers.merge import Add, Concatenate
+import numpy as np
 import tensorflow as tf
 
 from micro_dl.utils.aux_utils import get_channel_axis
 from micro_dl.utils.network_utils import create_activation_layer, \
-    get_keras_layer
+    get_keras_layer, get_layer_shape
 
 
 def conv_block(layer, network_config, block_idx):
@@ -103,9 +104,12 @@ def downsample_conv_block(layer,
 def pad_channels(input_layer, final_layer, channel_axis):
     """Zero pad along channels before residual/skip merge
 
-    :param keras.layers input_layer:
-    :param keras.layers final_layer:
+    :param keras.layers input_layer: input layer to be padded with zeros / 1x1
+    to match shape of final layer
+    :param keras.layers final_layer: layer whose shape has to be matched
     :param int channel_axis: dimension along which to pad
+    :return: keras.layer layer_padded - layer with the same shape as final
+     layer
     """
 
     num_input_layers = int(input_layer.get_shape()[channel_axis])
@@ -132,6 +136,37 @@ def pad_channels(input_layer, final_layer, channel_axis):
     return layer_padded
 
 
+def _crop_layer(input_layer, final_layer, data_format, num_dims):
+    """Crop input layer to match shape of final layer
+
+    ONLY SYMMETRIC CROPPING IS HANDLED HERE!
+
+    :param keras.layers final_layer: last layer of conv block or skip layers
+     in Unet
+    :param keras.layers input_layer: input_layer to the block
+    :param str data_format: [channels_first, channels_last]
+    :param int num_dims: as named
+    :return: keras.layer, input layer cropped if shape is different than final
+     layer, else input layer as is
+    """
+
+    input_layer_shape = get_layer_shape(input_layer.get_shape().as_list(),
+                                        data_format)
+    final_layer_shape = get_layer_shape(final_layer.get_shape().as_list(),
+                                        data_format)
+
+    if not np.array_equal(input_layer_shape, final_layer_shape):
+        num_crop_pixels = (input_layer_shape - final_layer_shape) / 2
+        assert np.any(num_crop_pixels < 0), 'num of pixels to crop is -ve'
+        num_crop_pixels = tuple(num_crop_pixels.astype('int32'))
+        num_crop_pixels = tuple([(val, ) * 2 for val in num_crop_pixels])
+        # num_crop_pixels = (num_crop_pixels, ) * num_dims
+        crop_layer = get_keras_layer('cropping', num_dims)
+        input_layer = crop_layer(cropping=num_crop_pixels,
+                                 data_format=data_format)(input_layer)
+    return input_layer
+
+
 def _merge_residual(final_layer,
                     input_layer,
                     data_format,
@@ -153,6 +188,10 @@ def _merge_residual(final_layer,
                                   num_dims=num_dims)
     num_final_layers = int(final_layer.get_shape()[channel_axis])
     num_input_layers = int(input_layer.get_shape()[channel_axis])
+
+    # crop input if padding='valid'
+    input_layer = _crop_layer(input_layer, final_layer, data_format, num_dims)
+
     if num_input_layers > num_final_layers:
         # use 1x 1 to get to the desired num of feature maps
         input_layer = conv_object(
@@ -168,6 +207,41 @@ def _merge_residual(final_layer,
                       arguments={'final_layer': final_layer,
                                  'channel_axis': channel_axis})(input_layer)
     layer = Add()([final_layer, input_layer])
+    return layer
+
+
+def skip_merge(skip_layers,
+               upsampled_layers,
+               skip_merge_type,
+               data_format,
+               num_dims):
+    """Skip connection concatenate/add to upsampled layer
+
+    :param keras.layer skip_layers: as named
+    :param keras.layer upsampled_layers: as named
+    :param str skip_merge_type: [add, concat]
+    :param str data_format: [channels_first, channels_last]
+    :param int num_dims: as named
+    :return: keras.layer skip merged layer
+    """
+
+    channel_axis = get_channel_axis(data_format)
+
+    # crop input if padding='valid'
+    skip_layers = _crop_layer(skip_layers,
+                              upsampled_layers,
+                              data_format,
+                              num_dims)
+
+    if skip_merge_type == 'concat':
+        layer = Concatenate(axis=channel_axis)([upsampled_layers,
+                                                skip_layers])
+    else:
+        skip_layers = Lambda(
+            pad_channels,
+            arguments={'final_layer': upsampled_layers,
+                       'channel_axis': channel_axis})(skip_layers)
+        layer = Add()([upsampled_layers, skip_layers])
     return layer
 
 
@@ -212,7 +286,6 @@ def residual_downsample_conv_block(layer, network_config, block_idx,
                                             network_config=network_config,
                                             block_idx=block_idx,
                                             downsample_shape=downsample_shape)
-
         pool_layer = get_keras_layer(type=network_config['pooling_type'],
                                      num_dims=network_config['num_dims'])
         downsampled_input_layer = pool_layer(
@@ -227,3 +300,6 @@ def residual_downsample_conv_block(layer, network_config, block_idx,
                             num_dims=network_config['num_dims'],
                             kernel_init=network_config['init'])
     return layer
+
+
+
