@@ -9,7 +9,7 @@ from micro_dl.networks.base_unet import BaseUNet
 class UNetStackToStack(BaseUNet):
     """Unet for anisotropic stacks"""
 
-    def __init__(self, network_config):
+    def __init__(self, network_config, predict=False):
         """Init
 
         :param dict network_config: dict with all network associated parameters
@@ -19,8 +19,9 @@ class UNetStackToStack(BaseUNet):
         num_slices = network_config['depth']
         msg = 'Depth of the input has to be in powers of 2 as this network ' \
               'upsamples and downsamples in factors of 2'
-        if np.mod(np.log2(num_slices), 1) > 0:
-            raise ValueError(msg)
+        if not predict:
+            if np.mod(np.log2(num_slices), 1) > 0:
+                raise ValueError(msg)
 
         super().__init__(network_config)
 

@@ -113,6 +113,20 @@ def tile_image(input_image, tile_size, step_size,
      if return_index=True: return a list with tuples of crop indices
     """
 
+    def check_in_range(cur_value, max_value, tile_size):
+        """Get the start index for edge tiles
+
+        :param int cur_value: cur index in row / col / slice
+        :param int max_value: n_rows, n_cols or n_slices
+        :param int tile_size: size of tile along one dimension (row, col,
+         slice)
+        :return: int start_value - adjusted start_index to fit the edge tile
+        """
+        cur_length = max_value - cur_value
+        miss_length = tile_size - cur_length
+        start_value = cur_value - miss_length
+        return start_value
+
     check_1 = len(tile_size) == len(step_size)
     check_2 = np.all(step_size <= tile_size)
     check_3 = np.all(tile_size) > 0
@@ -133,12 +147,19 @@ def tile_image(input_image, tile_size, step_size,
 
     cropped_image_list = []
     cropping_index = []
-    for row in range(0, n_rows - tile_size[0] + 1, step_size[0]):
-        for col in range(0, n_cols - tile_size[1] + 1, step_size[1]):
+    for row in range(0, n_rows, step_size[0]):
+        if row + step_size[0] > n_rows:
+            row = check_in_range(row, n_rows, tile_size[0])
+        for col in range(0, n_cols, step_size[1]):
+            if col + step_size[1] > n_cols:
+                col = check_in_range(col, n_cols, tile_size[1])
             img_id = 'r{}-{}_c{}-{}'.format(row, row + tile_size[0],
                                             col, col + tile_size[1])
             if n_dim == 3:
-                for sl in range(0, n_slices - tile_size[2] + 1, step_size[2]):
+                for sl in range(0, n_slices, step_size[2]):
+                    if sl + step_size[2] > n_slices:
+                        sl = check_in_range(sl, n_slices, tile_size[2])
+
                     cur_index = (row, row + tile_size[0],
                                  col, col + tile_size[1],
                                  sl, sl + tile_size[2])

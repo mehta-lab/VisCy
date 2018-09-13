@@ -20,13 +20,15 @@ class BaseUNet(BaseConvNet):
     last block to match the input image size.
     """
 
-    def __init__(self, network_config):
+    def __init__(self, network_config, predict=False):
         """Init
 
         :param dict network_config: dict with all network associated parameters
+        :param bool predict: indicator for what the model is used for:
+         train/predict
         """
 
-        super().__init__(network_config)
+        super().__init__(network_config, predict)
         req_params = ['num_filters_per_block',
                       'num_convs_per_block',
                       'skip_merge_type',
@@ -35,17 +37,17 @@ class BaseUNet(BaseConvNet):
                       'residual',
                       'block_sequence']
 
-        param_check, msg = validate_config(network_config, req_params)
-        if not param_check:
-            raise ValueError(msg)
         self.config = network_config
-
         num_down_blocks = len(network_config['num_filters_per_block']) - 1
 
-        width = network_config['width']
-        feature_width_at_last_block = width / (2 ** num_down_blocks)
-        msg = 'network depth is incompatible with the input size'
-        assert feature_width_at_last_block >= 2, msg
+        if not predict:
+            param_check, msg = validate_config(network_config, req_params)
+            if not param_check:
+                raise ValueError(msg)
+            width = network_config['width']
+            feature_width_at_last_block = width / (2 ** num_down_blocks)
+            msg = 'network depth is incompatible with the input size'
+            assert feature_width_at_last_block >= 2, msg
 
         #  keras upsampling repeats the rows and columns in data. leads to
         #  checkerboard in upsampled images. repeat - use keras builtin

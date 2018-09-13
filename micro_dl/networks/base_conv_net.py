@@ -8,7 +8,7 @@ class BaseConvNet(metaclass=ABCMeta):
     """Base class for all networks"""
 
     @abstractmethod
-    def __init__(self, network_config):
+    def __init__(self, network_config, predict=False):
         """Init
 
         :param dict network_config: dict with all network associated parameters
@@ -37,14 +37,17 @@ class BaseConvNet(metaclass=ABCMeta):
          str kernel_regularizer: for networks with dense layers. Instace of
           keras.regularizers [l1, l2 or l1l2]
          float dropout_dense: dropout probability for dense layers
+        :param bool predict: indicator for what the model is used for:
+         train/predict
         """
 
         req_params = ['batch_norm', 'pooling_type', 'height', 'width',
                       'data_format', 'num_input_channels', 'final_activation']
-        param_check, msg = validate_config(network_config, req_params)
 
-        if not param_check:
-            raise ValueError(msg)
+        if not predict:
+            param_check, msg = validate_config(network_config, req_params)
+            if not param_check:
+                raise ValueError(msg)
         self.config = network_config
 
         assert network_config['data_format'] in ['channels_first',

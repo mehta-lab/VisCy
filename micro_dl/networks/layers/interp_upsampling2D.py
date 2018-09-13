@@ -62,10 +62,10 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
         :return: width and height of the upsampled image
         """
 
-        width = int(self.size[0] * input_shape[1]
-                    if input_shape[1] is not None else None)
-        height = int(self.size[1] * input_shape[2]
-                     if input_shape[2] is not None else None)
+        width = int(self.size[0] * input_shape[1])\
+            if input_shape[1] is not None else None
+        height = int(self.size[1] * input_shape[2])\
+            if input_shape[2] is not None else None
         return width, height
 
     def compute_output_shape(self, input_shape):
@@ -102,9 +102,14 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
         else:
             x = tf.image.resize_nearest_neighbor(x, new_shape,
                                                  align_corners=True)
+        resized_dim1 = (original_shape[1] * self.size[0]
+                        if original_shape[1] is not None else None)
+        resized_dim2 = (original_shape[2] * self.size[1]
+                        if original_shape[2] is not None else None)
+
         x.set_shape((original_shape[0],
-                     original_shape[1] * self.size[0],
-                     original_shape[2] * self.size[1],
+                     resized_dim1,
+                     resized_dim2,
                      original_shape[3]))
         return x
 
@@ -125,9 +130,14 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
             x = self._interp_image(x)
             #  switch back to channels_first
             x = tf.transpose(x, [0, 3, 1, 2])
-            x.set_shape((original_shape[0], original_shape[1],
-                         original_shape[2] * self.size[0],
-                         original_shape[3] * self.size[1]))
+            resized_dim2 = (original_shape[2] * self.size[0]
+                            if original_shape[2] is not None else None)
+            resized_dim3 = (original_shape[3] * self.size[1]
+                            if original_shape[3] is not None else None)
+            x.set_shape((original_shape[0],
+                         original_shape[1],
+                         resized_dim2,
+                         resized_dim3))
             return x
         else:
             x = self._interp_image(x)
