@@ -315,7 +315,7 @@ class TestConvBlocks(unittest.TestCase):
             # errors in pad_channels and merge_residual. USING CONV
             # DONWSAMPLING AND RESIDUAL MIGHT LEAD TO SHAPE MISMATCH ¯\_(ツ)_/¯
             nose.tools.assert_raises(
-                ValueError,
+                AssertionError,
                 self._create_model,
                 in_shape,
                 conv_blocks.residual_downsample_conv_block

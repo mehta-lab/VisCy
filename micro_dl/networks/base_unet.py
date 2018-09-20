@@ -1,13 +1,11 @@
 """Base class for U-net"""
 import tensorflow as tf
-from keras.layers import Activation, Input, Lambda, UpSampling2D, UpSampling3D
-from keras.layers.merge import Add, Concatenate
+from keras.layers import Activation, Input, UpSampling2D, UpSampling3D
 
 from micro_dl.networks.base_conv_net import BaseConvNet
-from micro_dl.networks.conv_blocks import conv_block, pad_channels, \
-    residual_conv_block, residual_downsample_conv_block, skip_merge
-from micro_dl.utils.aux_utils import get_channel_axis, import_class, \
-    validate_config
+from micro_dl.networks.conv_blocks import conv_block,  residual_conv_block, \
+    residual_downsample_conv_block, skip_merge
+from micro_dl.utils.aux_utils import import_class, validate_config
 from micro_dl.utils.network_utils import get_keras_layer
 
 
@@ -45,9 +43,13 @@ class BaseUNet(BaseConvNet):
             if not param_check:
                 raise ValueError(msg)
             width = network_config['width']
-            feature_width_at_last_block = width / (2 ** num_down_blocks)
-            msg = 'network depth is incompatible with the input size'
-            assert feature_width_at_last_block >= 2, msg
+            feature_width_at_last_block = width // (2 ** num_down_blocks)
+            assert feature_width_at_last_block >= 2, \
+                'network depth is incompatible with width'
+            feature_height_at_last_block = \
+                network_config['height'] // (2 ** num_down_blocks)
+            assert feature_height_at_last_block >= 2, \
+                'network depth is incompatible with height'
 
         #  keras upsampling repeats the rows and columns in data. leads to
         #  checkerboard in upsampled images. repeat - use keras builtin
@@ -71,7 +73,11 @@ class BaseUNet(BaseConvNet):
             else:
                 self.UpSampling = import_class('networks',
                                                'InterpUpSampling2D')
-
+        if not predict and self.config['num_dims'] == 3:
+            depth = self.config['depth']
+            feature_depth_at_last_block = depth // (2 ** num_down_blocks)
+            assert feature_depth_at_last_block >= 2, \
+                'network depth is incompatible with input depth'
         self.num_down_blocks = num_down_blocks
 
     def _downsampling_block(self,

@@ -58,7 +58,7 @@ class BaseConvNet(metaclass=ABCMeta):
         if 'filter_size' not in network_config:
             network_config['filter_size'] = 3
         if 'activation' not in network_config:
-            network_config['activation']['type'] = 'relu'
+            network_config['activation'] = {'type': 'relu'}
         if 'padding' not in network_config:
             network_config['padding'] = 'same'
         if 'init' not in network_config:

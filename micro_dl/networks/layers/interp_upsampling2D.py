@@ -58,13 +58,15 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
     def _get_output_shape(self, input_shape):
         """Compute shape of output in channels_last format
 
+        input format: bs x nc x height x width
+
         :param tuple/list/np.array input_shape: shape of the input tensor
         :return: width and height of the upsampled image
         """
 
-        width = int(self.size[0] * input_shape[1])\
+        height = int(self.size[0] * input_shape[1])\
             if input_shape[1] is not None else None
-        height = int(self.size[1] * input_shape[2])\
+        width = int(self.size[1] * input_shape[2])\
             if input_shape[2] is not None else None
         return width, height
 
@@ -82,29 +84,34 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
             width, height = self._get_output_shape(input_shape)
             #  switching back
             input_shape = input_shape[[0, 3, 1, 2]]
-            return tuple([input_shape[0], input_shape[1], width, height])
+            return tuple([input_shape[0], input_shape[1], height, width])
         else:
             width, height = self._get_output_shape(input_shape)
-            return tuple([input_shape[0], width, height, input_shape[3]])
+            return tuple([input_shape[0], height, width, input_shape[3]])
 
-    def _interp_image(self, x):
+    def _interp_image(self, x, size=None):
         """Interpolate the image in channel_last format
 
         :param keras.layers x: input layer for upsampling
+        :param tuple size: self.size is isotropic (2, 2) but for 3D
+         interpolation, it is (2, 2) for y-x followed by (1, 2) for y-z
         :return: resized tensor
         """
 
         original_shape = K.int_shape(x)
         new_shape = tf.shape(x)[1:3]
-        new_shape *= tf.constant(np.array(self.size[0:2]).astype('int32'))
+        if size is None:
+            size = self.size[0:2]
+
+        new_shape *= tf.constant(np.array(size).astype('int32'))
         if self.interp_type == 'bilinear':
             x = tf.image.resize_bilinear(x, new_shape, align_corners=True)
         else:
             x = tf.image.resize_nearest_neighbor(x, new_shape,
                                                  align_corners=True)
-        resized_dim1 = (original_shape[1] * self.size[0]
+        resized_dim1 = (original_shape[1] * size[0]
                         if original_shape[1] is not None else None)
-        resized_dim2 = (original_shape[2] * self.size[1]
+        resized_dim2 = (original_shape[2] * size[1]
                         if original_shape[2] is not None else None)
 
         x.set_shape((original_shape[0],

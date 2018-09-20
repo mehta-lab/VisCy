@@ -156,8 +156,11 @@ def _crop_layer(input_layer, final_layer, data_format, num_dims):
                                         data_format)
 
     if not np.array_equal(input_layer_shape, final_layer_shape):
-        num_crop_pixels = (input_layer_shape - final_layer_shape) / 2
-        assert np.any(num_crop_pixels < 0), 'num of pixels to crop is -ve'
+        num_crop_pixels = (input_layer_shape - final_layer_shape)
+        assert np.any(num_crop_pixels >= 0) and \
+               np.all(num_crop_pixels % 2 == 0), \
+            'num of pixels to crop is -ve or odd: %s' % num_crop_pixels
+        num_crop_pixels = (num_crop_pixels / 2).astype('int')
         num_crop_pixels = tuple(num_crop_pixels.astype('int32'))
         num_crop_pixels = tuple([(val, ) * 2 for val in num_crop_pixels])
         # num_crop_pixels = (num_crop_pixels, ) * num_dims
