@@ -45,39 +45,28 @@ You will need to copy/paste the token generated in your Docker container.
 
 ### Basic CLIs
 
-To run preprocessing on a Lif file, see config_preprocess.yml file
-and then run
-
-```buildoutcfg
-python micro_dl/input/preprocess_script.py --config micro_dl/config_preprocess.yml
-```
-
-To run preprocessing on images, they need to be in the following folder structure
+To train directly on datasets that have already been split into 2D frames, the dataset
+should have the following structure:
 
 ```buildoutcfg
 dir_name
     |
-    |- timepoint_0
-        |
-        |- channel_0
-            |
-            |- image_n0_z0.png
-            |- image_n1_z0.png
-            |- ...           
-        |- channel_1
-        |- ...
-    |
-    |- timepoint_1
-        |
-        |- channel_0
-        |- channel_1
-        |- ...
-    |
+    |- frames_meta.csv
+    |- global_metadata.csv
+    |- im_c***_t***_p***_z***.png
+    |- im_c***_t***_p***_z***.png
     |- ...
 ```
-That is the same structure that a Lif file will be decomposed into when converting it to
-npy arrays, which is the first step in the Lif-file specific CLI preprocess_script.
-If your starting point is images readable by OpenCV or numpy (e.g. png, tif, npy, ...)
+The image naming convention is (parenthesis is their name in frames_meta.csv)
+* **c** = channel index     (channel_idx)
+* **t** = timepoint index   (time_idx)
+* **p** = position (field of view) index (pos_idx)
+* **z** = slice index in z stack (slice_idx)
+
+If you download your dataset from the imaging database [imagingDB](https://github.com/czbiohub/imagingDB)
+you will get your dataset correctly formatted and can directly input that into microDL.
+
+If your starting point is images readable by OpenCV or numpy
 you can use the following command to preprocess them:
 
 ```buildoutcfg
@@ -113,21 +102,16 @@ for model inference run:
 * scikit-learn
 * scipy
 * testfixtures
-* python-bioformats (for Lif)
-* javabridge (for Lif)
 
 
 ## Preprocessing
 
 The following settings can be adjusted in preprocessing:
-* base_output_dir: (str) folder name
-* focal_plane_idx: (int) if more than one z-index present (3D image), select oen focal plane (for 2D analysis)
+* input_dir: (str) Directory where data to be preprocessed is located
+* output_dir: (str) folder name where all processed data will be written
+* slice_ids: (int/list) Value(s) of z-index to be processed
 * verbose: (int) Logging verbosity levels: NOTSET:0, DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50
-* split_volumes: (bool) split Lif file into 
-* splitter_class: LifStackSplitter2D or LifStackSplitter3D
-* input_fname: (str) full path to lif file
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
-* flat_field_class: FlatFieldEstimator2D
 * use_masks: (bool) whether to generate binary masks from images
 * masks:
     * mask_channels: (list of ints) which channels should be used for masks
@@ -141,18 +125,16 @@ The following settings can be adjusted in preprocessing:
     * min_fraction: (float) minimum fraction of image occupied by foreground in masks
     * hist_clip_limits: (list of ints) lower and upper intensity percentiles for histogram clipping
 
-During preprocessing, a csv file named tiled_images_info.csv will be generated, which
+During preprocessing, a csv file named frames_csv.csv will be generated, which
 will be used for further processing. The csv contains the following fields for each image tile:
 
-* 'timepoint': the timepoint it came from
-* 'channel_num': its channel
-* 'sample_num': the image index 
-* 'slice_num': the z index in case of 3D data (currently supported in Lif files)
-* 'fname': file name
-* 'size_x_microns': pixel size in x (microns) (currently supported in Lif)
-* 'size_y_microns': pixel size in y (microns) (currently supported in Lif)
-* 'size_z_microns': pixel size in z (microns) (currently supported in Lif)
-
+* 'time_idx': the timepoint it came from
+* 'channel_idx': its channel
+* 'slice_idx': the z index in case of 3D data
+* 'pos_idx': the field of view index
+* 'file_name': file name
+* 'row_start': starting row for tile (add tile_size for endpoint)
+* 'col_idx': start column (add tile_size for endpoint)
 
 ## Modeling
 

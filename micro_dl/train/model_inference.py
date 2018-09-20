@@ -364,7 +364,7 @@ class ModelEvaluator:
 
         ip_channel_ids = self.config['dataset']['input_channels']
         op_channel_ids = self.config['dataset']['target_channels']
-        tp_channel_ids = aux_utils.validate_tp_channel(
+        tp_channel_ids = aux_utils.validate_metadata_indices(
             image_meta, timepoint_ids=timepoint_ids
         )
         tp_idx = tp_channel_ids['timepoints']

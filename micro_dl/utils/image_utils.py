@@ -1,4 +1,5 @@
 """Utility functions for processing images"""
+import cv2
 import itertools
 import numpy as np
 import os
@@ -35,9 +36,9 @@ def apply_flat_field_correction(input_image, **kwargs):
     :param np.array input_image: image to be corrected
     Kwargs:
         flat_field_image (np.float): flat_field_image for correction
-        image_dir (str): dir with split images from stack (or individual
+        flat_field_dir (str): dir with split images from stack (or individual
          sample images
-        channel_id (int): input image channel
+        channel_idx (int): input image channel index
     :return: np.array (float) corrected image
     """
 
@@ -45,12 +46,14 @@ def apply_flat_field_correction(input_image, **kwargs):
     if 'flat_field_image' in kwargs:
         corrected_image = input_image / kwargs['flat_field_image']
     else:
-        msg = 'image_dir and channel_id are required to fetch flat field image'
-        assert all(k in kwargs for k in ('image_dir', 'channel_id')), msg
-        flat_field_image = np.load(os.path.join(
-            kwargs['image_dir'], 'flat_field_images',
-            'flat-field_channel-{}.npy'.format(kwargs['channel_id'])
-        ))
+        msg = 'flat_field_dir and channel_id are required to fetch flat field image'
+        assert all(k in kwargs for k in ('flat_field_dir', 'channel_idx')), msg
+        flat_field_image = np.load(
+            os.path.join(
+                kwargs['flat_field_dir'],
+                'flat-field_channel-{}.npy'.format(kwargs['channel_idx']),
+            )
+        )
         corrected_image = input_image / flat_field_image
     return corrected_image
 
@@ -97,19 +100,24 @@ def fit_polynomial_surface_2D(sample_coords,
     return poly_surface
 
 
-def tile_image(input_image, tile_size, step_size,
-               isotropic=False, return_index=False):
-    """Crops the image from given crop and step size.
+def tile_image(input_image,
+               tile_size,
+               step_size,
+               isotropic=False,
+               return_index=False,
+               min_fraction=None):
+    """
+     Tiles the image based on given tile and step size.
 
     :param np.array input_image: input image to be tiled
-    :param list/tuple/np array tile_size: size of the blocks to be cropped
+    :param list/tuple/np array tile_size: size of the blocks to be tiled
      from the image
     :param list/tuple/np array step_size: size of the window shift. In case of
      no overlap, the step size is tile_size. If overlap, step_size < tile_size
     :param bool isotropic: if 3D, make the grid/shape isotropic
-    :param bool return_index: indicator for returning crop indices
-    :return: a list with tuples of cropped image id of the format
-     rrmin-rmax_ccmin-cmax_slslmin-slmax and cropped image
+    :param bool return_index: indicator for returning tile indices
+    :return: a list with tuples of tiled image id of the format
+     rrmin-rmax_ccmin-cmax_slslmin-slmax and tiled image
      if return_index=True: return a list with tuples of crop indices
     """
 
@@ -127,14 +135,28 @@ def tile_image(input_image, tile_size, step_size,
         start_value = cur_value - miss_length
         return start_value
 
+    def use_tile(im, min_fraction):
+        """
+        Determine if tile should be used given minimum image foreground fraction
+        :param np.array im: 2D image tile
+        :param float min_fraction: Minimum fraction of image being foreground
+        :return bool use_tile: Indicator if tile should be used
+        """
+        use_tile = True
+        if min_fraction is not None:
+            mask_fraction = np.mean(cropped_img)
+            if mask_fraction < min_fraction:
+                use_tile = False
+        return use_tile
+
     check_1 = len(tile_size) == len(step_size)
     check_2 = np.all(step_size <= tile_size)
     check_3 = np.all(tile_size) > 0
-    assert check_1 and check_2 and check_3
+    assert check_1 and check_2 and check_3,\
+        "Tiling not valid with tile size {} and step {}".format(tile_size, step_size)
 
     n_rows = input_image.shape[0]
     n_cols = input_image.shape[1]
-
     n_dim = len(input_image.shape)
     if n_dim == 3:
         n_slices = input_image.shape[2]
@@ -170,14 +192,16 @@ def tile_image(input_image, tile_size, step_size,
                     if isotropic_cond:
                         cropped_img = resize_image(cropped_img,
                                                    isotropic_shape)
-                    cropped_image_list.append((img_id, cropped_img))
-                    cropping_index.append(cur_index)
+                    if use_tile(cropped_img, min_fraction):
+                        cropped_image_list.append((img_id, cropped_img))
+                        cropping_index.append(cur_index)
             else:
                 cur_index = (row, row + tile_size[0], col, col + tile_size[1])
                 cropped_img = input_image[row: row + tile_size[0],
                                           col: col + tile_size[1]]
-                cropped_image_list.append((img_id, cropped_img))
-                cropping_index.append(cur_index)
+                if use_tile(cropped_img, min_fraction):
+                    cropped_image_list.append((img_id, cropped_img))
+                    cropping_index.append(cur_index)
     if return_index:
         return cropped_image_list, cropping_index
     return cropped_image_list
@@ -234,3 +258,24 @@ def create_mask(input_image, str_elem_size=3):
     thr_image = binary_opening(input_image > thr, str_elem)
     mask = binary_fill_holes(thr_image)
     return mask
+
+
+def read_image(file_path):
+    """
+    Read 2D grayscale image from file.
+    Checks file extension for npy and load array if true. Otherwise
+    reads regular image using OpenCV (png, tif, jpg, see OpenCV for supported
+    files) of any bit depth.
+
+    :param str file_path: Full path to image
+    :return array im: 2D image
+    :raise IOError if image can't be opened
+    """
+    if file_path[-3:] == 'npy':
+        im = np.load(file_path)
+    else:
+        try:
+            im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
+        except IOError as e:
+            print(e)
+    return im

@@ -60,7 +60,7 @@ class MaskCreator:
         self.study_metadata = study_metadata
         self.plot_masks = plot_masks
 
-        avail_tp_channels = aux_utils.validate_tp_channel(study_metadata,
+        avail_tp_channels = aux_utils.validate_metadata_indices(study_metadata,
                                                 timepoint_ids=timepoint_id,
                                                 channel_ids=input_channel_id)
 

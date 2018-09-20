@@ -1,87 +1,67 @@
 """Estimate flat field images"""
 
-from abc import ABCMeta, abstractmethod
 import numpy as np
 import os
 import pandas as pd
 
-from micro_dl.utils.aux_utils import get_row_idx
-from micro_dl.utils.image_utils import fit_polynomial_surface_2D
+import micro_dl.utils.aux_utils as aux_utils
+from micro_dl.utils.image_utils import fit_polynomial_surface_2D, read_image
 
 
-class FlatFieldEstimator(metaclass=ABCMeta):
-    """Estimates flat field correction image"""
+class FlatFieldEstimator2D:
+    """Estimates flat field image"""
 
-    def __init__(self, image_dir):
-        """Init.
-
-        :param str image_dir: base dir with individual/split images from stack
+    def __init__(self, input_dir, flat_field_dir, slice_ids):
         """
+        Flatfield images are estimated once per channel for 2D data
 
-        self.image_dir = image_dir
-
-    @abstractmethod
-    def sample_block_medians(self, im, block_size=32):
-        """Subdivide a 2D image in smaller blocks of size block_size and
-        compute the median intensity value for each block. Any incomplete
-        blocks (remainders of modulo operation) will be ignored.
+        :param str input_dir: Directory with 2D image frames from dataset
+        :param str flat_field_dir: Directory where flatfield images will be
+            stored
         """
+        self.input_dir = input_dir
+        self.flat_field_dir = flat_field_dir
+        self.slice_ids = slice_ids
+        self.frames_metadata = aux_utils.read_meta(self.input_dir)
+        metadata_ids = aux_utils.validate_metadata_indices(
+            frames_metadata=self.frames_metadata,
+            channel_ids=-1,
+            slice_ids=slice_ids,
+        )
+        self.channels_ids = metadata_ids['channel_ids']
+        self.slice_ids = metadata_ids['slice_ids']
 
-        raise NotImplementedError
-
-    @abstractmethod
-    def get_flatfield(self, im, block_size=32, order=2, normalize=True):
+    def estimate_flat_field(self):
         """
-        Combine sampling and polynomial surface fit for flatfield estimation.
-        To flatfield correct an image, divide it by flatfield.
+        Estimates flat field correction image.
         """
-
-        raise NotImplementedError
-
-    def estimate_flat_field(self, focal_plane_idx=None):
-        """Estimates flat field correction image.
-
-        :param int focal_plane_idx: for 2D acquisitions with multiple images
-         along focal plane/axis, this specifies the plane to use
-        """
-
-        meta_fname = os.path.join(self.image_dir, 'split_images_info.csv')
-        try:
-            volume_metadata = pd.read_csv(meta_fname)
-        except IOError as e:
-            e.args += 'cannot read split image info'
-            raise
-
-        all_channels = volume_metadata['channel_num'].unique()
-        flat_field_dir = os.path.join(self.image_dir, 'flat_field_images')
-        os.makedirs(flat_field_dir, exist_ok=True)
-        tp_idx = 0  # flat_field constant over time
-        for channel_idx in all_channels:
-            row_idx = get_row_idx(volume_metadata, tp_idx,
-                                  channel_idx, focal_plane_idx)
-            channel_metadata = volume_metadata[row_idx]
+        # flat_field constant over time, so time_idx=0. And use only first
+        # slice if multiple are present
+        for channel_idx in self.channels_ids:
+            row_idx = aux_utils.get_row_idx(
+                frames_metadata=self.frames_metadata,
+                time_idx=0,
+                channel_idx=channel_idx,
+                slice_idx=self.slice_ids[0],
+            )
+            channel_metadata = self.frames_metadata[row_idx]
             for idx, row in channel_metadata.iterrows():
-                sample_fname = row['fname']
-                cur_image = np.load(sample_fname)
-                n_dim = len(cur_image.shape)
-                if n_dim == 3:
-                    cur_image = np.mean(cur_image, axis=2)
+                file_path = os.path.join(self.input_dir, row['file_name'])
+                im = read_image(file_path)
+                if len(im.shape) == 3:
+                    im = np.mean(im, axis=2)
                 if idx == 0:
-                    summed_image = cur_image.astype('float64')
+                    summed_image = im.astype('float64')
                 else:
-                    summed_image += cur_image
+                    summed_image += im
             mean_image = summed_image / len(row_idx)
             # TODO (Jenny): it currently samples median values from a mean
             # images, not very statistically meaningful but easier than
             # computing median of image stack
             flatfield = self.get_flatfield(mean_image)
             fname = 'flat-field_channel-{}.npy'.format(channel_idx)
-            cur_fname = os.path.join(flat_field_dir, fname)
+            cur_fname = os.path.join(self.flat_field_dir, fname)
             np.save(cur_fname, flatfield, allow_pickle=True, fix_imports=True)
-
-
-class FlatFieldEstimator2D(FlatFieldEstimator):
-    """Estimate flat field from 2D mean images"""
 
     def sample_block_medians(self, im, block_size=32):
         """Subdivide a 2D image in smaller blocks of size block_size and
@@ -90,7 +70,6 @@ class FlatFieldEstimator2D(FlatFieldEstimator):
 
         :param np.array im:         2D image
         :param int block_size:      Size of blocks image will be divided into
-
         :return np.array(float) sample_coords: Image coordinates for block
                                                centers
         :return np.array(float) sample_values: Median intensity values for
@@ -132,9 +111,17 @@ class FlatFieldEstimator2D(FlatFieldEstimator):
         :return np.array flatfield:    Flatfield image
         """
 
-        coords, values = self.sample_block_medians(im, block_size=block_size)
-        flatfield = fit_polynomial_surface_2D(coords, values, im.shape,
-                                              order=order, normalize=normalize)
+        coords, values = self.sample_block_medians(
+            im=im,
+            block_size=block_size,
+        )
+        flatfield = fit_polynomial_surface_2D(
+            sample_coords=coords,
+            sample_values=values,
+            im_shape=im.shape,
+            order=order,
+            normalize=normalize,
+        )
         # Flatfields can't contain zeros or negative values
         if flatfield.min() <= 0:
             raise ValueError(
