@@ -157,8 +157,10 @@ class BaseKerasTrainer:
         :param optimizer: instance of an optimizer
         :param metrics: a list of metrics instances
         """
-
+        loss_is_masked = False
         if 'masked_loss' in self.config:
+            loss_is_masked = self.config["masked_loss"]
+        if loss_is_masked:
             masked_metrics = [metric(self.num_target_channels)
                               for metric in metrics]
             self.model.compile(loss=masked_loss(loss,

@@ -11,16 +11,20 @@ from micro_dl.utils.image_utils import fit_polynomial_surface_2D, read_image
 class FlatFieldEstimator2D:
     """Estimates flat field image"""
 
-    def __init__(self, input_dir, flat_field_dir, slice_ids):
+    def __init__(self, input_dir, output_dir, slice_ids):
         """
         Flatfield images are estimated once per channel for 2D data
 
         :param str input_dir: Directory with 2D image frames from dataset
-        :param str flat_field_dir: Directory where flatfield images will be
-            stored
+        :param str output_dir: Base output directory
+        :param int/list slice_ids: Z slice indices for flatfield correction
         """
         self.input_dir = input_dir
-        self.flat_field_dir = flat_field_dir
+        self.output_dir = output_dir
+        # Create flat_field_dir as a subdirectory of output_dir
+        self.flat_field_dir = os.path.join(self.output_dir,
+                                           'flat_field_images')
+        os.makedirs(self.flat_field_dir, exist_ok=True)
         self.slice_ids = slice_ids
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
         metadata_ids = aux_utils.validate_metadata_indices(
@@ -30,6 +34,13 @@ class FlatFieldEstimator2D:
         )
         self.channels_ids = metadata_ids['channel_ids']
         self.slice_ids = metadata_ids['slice_ids']
+
+    def get_flat_field_dir(self):
+        """
+        Return flatfield directory
+        :return str flat_field_dir: Flatfield directory
+        """
+        return self.flat_field_dir
 
     def estimate_flat_field(self):
         """

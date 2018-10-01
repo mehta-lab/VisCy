@@ -20,7 +20,7 @@ class MaskProcessor:
                  int2str_len=3):
         """
         :param str input_dir: Directory with image frames
-        :param str output_dir: Directory where masks will be saved
+        :param str output_dir: Base output directory
         :param str flat_field_dir: Directory with flatfield images if
             flatfield correction is applied
         :param int/list channel_ids: generate mask from the sum of these
@@ -35,6 +35,9 @@ class MaskProcessor:
         self.flat_field_dir = flat_field_dir
 
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
+        # Create a unique mask channel number so masks can be treated
+        # as a new channel
+        self.mask_channel = int(self.frames_metadata["channel_idx"].max() + 1)
         metadata_ids = aux_utils.validate_metadata_indices(
             frames_metadata=self.frames_metadata,
             time_ids=time_ids,
@@ -44,8 +47,28 @@ class MaskProcessor:
         self.time_ids = metadata_ids['time_ids']
         self.channel_ids = metadata_ids['channel_ids']
         self.slice_ids = metadata_ids['slice_ids']
+        # Create mask_dir as a subdirectory of output_dir
+        self.mask_dir = os.path.join(
+            self.output_dir,
+            'mask_channels_' + '-'.join(map(str, self.channel_ids)),
+        )
+        os.makedirs(self.mask_dir, exist_ok=True)
 
         self.int2str_len = int2str_len
+
+    def get_mask_dir(self):
+        """
+        Return mask directory
+        :return str mask_dir: Directory where masks are stored
+        """
+        return self.mask_dir
+
+    def get_mask_channel(self):
+        """
+        Return mask channel
+        :return int mask_channel: Assigned channel number for mask
+        """
+        return self.mask_channel
 
     def generate_masks(self,
                        correct_flat_field=False,
@@ -95,12 +118,12 @@ class MaskProcessor:
                     # Create mask name for given slice, time and position
                     file_name = aux_utils.get_im_name(
                         time_idx=time_idx,
-                        channel_idx=None,
+                        channel_idx=self.mask_channel,
                         slice_idx=slice_idx,
                         pos_idx=pos_idx,
                     )
                     # Save mask for given channels
-                    np.save(os.path.join(self.output_dir, file_name),
+                    np.save(os.path.join(self.mask_dir, file_name),
                             mask,
                             allow_pickle=True,
                             fix_imports=True)

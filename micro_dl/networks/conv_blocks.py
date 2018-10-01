@@ -289,6 +289,7 @@ def residual_downsample_conv_block(layer, network_config, block_idx,
                                             network_config=network_config,
                                             block_idx=block_idx,
                                             downsample_shape=downsample_shape)
+
         pool_layer = get_keras_layer(type=network_config['pooling_type'],
                                      num_dims=network_config['num_dims'])
         downsampled_input_layer = pool_layer(

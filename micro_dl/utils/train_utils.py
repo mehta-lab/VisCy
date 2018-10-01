@@ -57,7 +57,7 @@ def split_train_val_test(sample_set, train_ratio, test_ratio,
     :return: dict split_idx with keys [train, val, test] and values as lists
     """
 
-    msg = 'train, val and test ratios do not add upto 1'
+    msg = 'train, val and test ratios do not add up to 1'
     assert train_ratio + val_ratio + test_ratio == 1, msg
     num_samples = len(sample_set)
     num_test = int(test_ratio * num_samples)

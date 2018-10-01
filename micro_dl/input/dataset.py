@@ -1,6 +1,7 @@
 """Dataset classes"""
 import keras
 import numpy as np
+import os
 import pandas as pd
 
 
@@ -13,9 +14,11 @@ class BaseDataSet(keras.utils.Sequence):
     """
 
     def __init__(self,
+                 tile_dir,
                  input_fnames,
                  target_fnames,
                  batch_size,
+                 model_task='regression',
                  shuffle=True,
                  augmentations=None,
                  random_seed=42,
@@ -26,23 +29,26 @@ class BaseDataSet(keras.utils.Sequence):
         (default, normalize=False). If images were not normalized during tiling
         set the normalize flag to normalize at the tile-level
 
+        :param str tile_dir: directory containing training image tiles
         :param pd.Series input_fnames: pd.Series with each row containing
          filenames for one input
         :param pd.Series target_fnames: pd.Series with each row containing
          filenames for one target
         :param int batch_size: num of datasets in each batch
+        :param str model_task: Can be 'regression' or 'segmentation'
         :param bool shuffle: shuffle data for each epoch
         :param dict augmentations: options for image augmentation
         :param int random_seed: initialize the random number generator with
          this seed
         """
-
+        self.tile_dir = tile_dir
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
         self.batch_size = batch_size
         self.shuffle = shuffle
         self.num_samples = len(self.input_fnames)
         self.augmentations = augmentations
+        self.model_task = model_task
         self.random_seed = random_seed
         np.random.seed(random_seed)
         self.normalize = normalize
@@ -76,22 +82,19 @@ class BaseDataSet(keras.utils.Sequence):
 
         input_image = []
         target_image = []
-        task = 'regression'
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_input = self._get_volume(cur_input_fnames.split(','))
             cur_target = self._get_volume(cur_target_fnames.split(','))
-
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
-                task = 'segmentation'
             if self.normalize:
                 cur_input = (cur_input - np.mean(cur_input)) /\
                              np.std(cur_input)
                 # Only normalize target if we're dealing with regression
-                if task is not 'segmentation':
+                if self.model_task is not 'segmentation':
                     cur_target = (cur_target - np.mean(cur_target)) /\
                                  np.std(cur_target)
             # _augment_image(cur_input, cur_target)
@@ -115,10 +118,9 @@ class BaseDataSet(keras.utils.Sequence):
         :param list fname_list: list of file names of input/target images
         :return: np.ndarray of stacked images
         """
-
         image_volume = []
         for fname in fname_list:
-            cur_channel = np.load(fname)
+            cur_channel = np.load(os.path.join(self.tile_dir, fname))
             image_volume.append(cur_channel)
 
         image_volume = np.stack(image_volume)
@@ -129,10 +131,12 @@ class DataSetWithMask(BaseDataSet):
     """DataSet class that returns input, target images and sample weights"""
 
     def __init__(self,
+                 tile_dir,
                  input_fnames,
                  target_fnames,
                  mask_fnames,
                  batch_size,
+                 model_task='regression',
                  label_weights=None,
                  shuffle=True,
                  augmentations=None,
@@ -143,6 +147,7 @@ class DataSetWithMask(BaseDataSet):
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
         https://gist.github.com/andreimouraviev/2642384705034da92d6954dd9993fb4d
 
+        :param str tile_dir: directory containing training image tiles
         :param pd.Series input_fnames: pd.Series with each row containing
          filenames for one input
         :param pd.Series target_fnames: pd.Series with each row containing
@@ -150,15 +155,18 @@ class DataSetWithMask(BaseDataSet):
         :param pd.Series mask_fnames: pd.Series with each row containing
          mask filenames
         :param int batch_size: num of datasets in each batch
+        :param str model_task: Can be 'regression' or 'segmentation'
         :param list label_weights: weight for each label
         :param bool shuffle: shuffle data for each epoch
         :param int random_seed: initialize the random number generator with
          this seed
         """
 
-        super().__init__(input_fnames,
+        super().__init__(tile_dir,
+                         input_fnames,
                          target_fnames,
                          batch_size,
+                         model_task,
                          shuffle,
                          augmentations,
                          random_seed,
@@ -182,7 +190,6 @@ class DataSetWithMask(BaseDataSet):
 
         input_image = []
         target_image = []
-        task = 'regression'
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
@@ -194,12 +201,11 @@ class DataSetWithMask(BaseDataSet):
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
-                task = 'segmentation'
             if self.normalize:
                 cur_input = (cur_input - np.mean(cur_input)) /\
                              np.std(cur_input)
                 # Only normalize target if we're dealing with regression
-                if task is not 'segmentation':
+                if self.model_task is not 'segmentation':
                     cur_target = (cur_target - np.mean(cur_target)) /\
                                  np.std(cur_target)
 

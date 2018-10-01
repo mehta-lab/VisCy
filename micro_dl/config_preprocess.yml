@@ -11,5 +11,5 @@ tile:
     channels: [0, 5]
     tile_size: [256, 256]
     step_size: [64, 64]
-    save_cropped_masks: True
-    min_fraction: 0.5
+    save_tiled_masks: 'as_channel'
+    min_fraction: 0.25

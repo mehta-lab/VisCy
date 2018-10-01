@@ -30,7 +30,7 @@ class ImageStackTiler:
         and not really isotropic resolution in mm.
 
         :param str input_dir: Directory with frames to be tiled
-        :param str output_dir: Directory for storing the tiled images
+        :param str output_dir: Base output directory
         :param list/tuple/np array tile_size: size of the blocks to be cropped
          from the image
         :param list/tuple/np array step_size: size of the window shift. In case
@@ -49,6 +49,14 @@ class ImageStackTiler:
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
+        self.str_tile_size = '-'.join([str(val) for val in tile_size])
+        self.str_step_size = '-'.join([str(val) for val in step_size])
+        self.tile_dir = os.path.join(
+            output_dir,
+            'tiles_{}_step_{}'.format(self.str_tile_size, self.str_step_size),
+        )
+        os.makedirs(self.tile_dir, exist_ok=True)
+        self.tile_mask_dir = None
         self.flat_field_dir = flat_field_dir
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
         # Get metadata indices
@@ -58,7 +66,7 @@ class ImageStackTiler:
             channel_ids=channel_ids,
             slice_ids=slice_ids,
         )
-        self.channels_ids = metadata_ids['channel_ids']
+        self.channel_ids = metadata_ids['channel_ids']
         self.time_ids = metadata_ids['time_ids']
         self.slice_ids = metadata_ids['slice_ids']
 
@@ -66,6 +74,20 @@ class ImageStackTiler:
         self.step_size = step_size
         self.isotropic = isotropic
         self.hist_clip_limits = hist_clip_limits
+
+    def get_tile_dir(self):
+        """
+        Return directory containing tiles
+        :return str tile_dir: Directory with tiles
+        """
+        return self.tile_dir
+
+    def get_tile_mask_dir(self):
+        """
+        Return directory containing tiles of mask
+        :return str tile_mask_dir: Directory with tiled mask
+        """
+        return self.tile_mask_dir
 
     def _preprocess_im(self,
                        time_idx,
@@ -216,7 +238,7 @@ class ImageStackTiler:
         """
         tiled_metadata = self._get_dataframe()
         tile_indices = None
-        for channel_idx in self.channels_ids:
+        for channel_idx in self.channel_ids:
             # Perform flatfield correction if flatfield dir is specified
             flat_field_im = self._get_flat_field(channel_idx=channel_idx)
 
@@ -248,7 +270,7 @@ class ImageStackTiler:
                             )
                         tiled_metadata = self._write_tiled_data(
                             tiled_image_data,
-                            save_dir=self.output_dir,
+                            save_dir=self.tile_dir,
                             time_idx=time_idx,
                             channel_idx=channel_idx,
                             slice_idx=slice_idx,
@@ -257,14 +279,16 @@ class ImageStackTiler:
                             tiled_metadata=tiled_metadata,
                         )
         # Finally, save all the metadata
+        tiled_metadata = tiled_metadata.sort_values(by=['file_name'])
         tiled_metadata.to_csv(
-            os.path.join(self.output_dir, "frames_meta.csv"),
+            os.path.join(self.tile_dir, "frames_meta.csv"),
             sep=",",
         )
 
     def tile_mask_stack(self,
                         mask_dir=None,
-                        tile_mask_dir=None,
+                        save_tiled_masks=None,
+                        mask_channel=None,
                         min_fraction=None,
                         isotropic=False):
         """
@@ -276,26 +300,43 @@ class ImageStackTiler:
         'slice_idx', 'file_name'] for all the tiles
 
         :param str mask_dir: Directory containing masks
-        :param str tile_mask_dir: Directory where tiled masks will be saved
+        :param str save_tiled_masks: How/if to save mask tiles. If None, don't
+            save masks.
+            If 'as_channel', save masked tiles as a channel given
+            by mask_channel in tile_dir.
+            If 'as_masks', create a new tile_mask_dir and save them there
+        :param str mask_channel: Channel number assigned to mask
         :param float min_fraction: Minimum fraction of foreground in tiled masks
         :param bool isotropic: Indicator of isotropy
         """
+        if save_tiled_masks == 'as_masks':
+            self.tile_mask_dir = os.path.join(
+                self.output_dir,
+                'mask_' + '-'.join(map(str, self.channel_ids)) +
+                '_tiles_{}_step_{}'.format(self.str_tile_size,
+                                           self.str_step_size),
+            )
+            os.makedirs(self.tile_mask_dir, exist_ok=True)
+        elif save_tiled_masks == 'as_channel':
+            self.tile_mask_dir = self.tile_dir
+
         tiled_metadata = self._get_dataframe()
+        mask_metadata = self._get_dataframe()
         # Load flatfield images if flatfield dir is specified
         flat_field_im = None
         if self.flat_field_dir is not None:
             flat_field_ims = []
-            for channel_idx in self.channels_ids:
+            for channel_idx in self.channel_ids:
                 flat_field_ims.append(self._get_flat_field(channel_idx))
 
         for slice_idx in self.slice_ids:
             for time_idx in self.time_ids:
                 for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
                     # Since masks are generated across channels, we only need
-                    # load them once across channels (masks have no channel info
-                    # in file name)
+                    # load them once across channels
                     file_name = aux_utils.get_im_name(
                         time_idx=time_idx,
+                        channel_idx=mask_channel,
                         slice_idx=slice_idx,
                         pos_idx=pos_idx,
                     )
@@ -313,22 +354,18 @@ class ImageStackTiler:
                         return_index=True,
                     )
                     # Loop through all the mask tiles, write tiled masks
-                    mask_metadata = self._get_dataframe()
                     mask_metadata = self._write_tiled_data(
                         tiled_data=tiled_mask_data,
-                        save_dir=tile_mask_dir,
+                        save_dir=self.tile_mask_dir,
                         time_idx=time_idx,
+                        channel_idx=mask_channel,
                         slice_idx=slice_idx,
                         pos_idx=pos_idx,
                         tile_indices=tile_indices,
                         tiled_metadata=mask_metadata,
                     )
-                    mask_metadata.to_csv(
-                        os.path.join(tile_mask_dir, "frames_meta.csv"),
-                        sep=",",
-                    )
                     # Loop through all channels and tile from indices
-                    for i, channel_idx in enumerate(self.channels_ids):
+                    for i, channel_idx in enumerate(self.channel_ids):
                         if self.flat_field_dir is not None:
                             flat_field_im = flat_field_ims[i]
 
@@ -349,7 +386,7 @@ class ImageStackTiler:
                         # Loop through all the tiles, write and add to metadata
                         tiled_metadata = self._write_tiled_data(
                             tiled_data=tiled_image_data,
-                            save_dir=self.output_dir,
+                            save_dir=self.tile_dir,
                             time_idx=time_idx,
                             channel_idx=channel_idx,
                             slice_idx=slice_idx,
@@ -359,7 +396,18 @@ class ImageStackTiler:
                         )
 
         # Finally, save all the metadata
+        if self.tile_mask_dir == self.tile_dir:
+            tiled_metadata = tiled_metadata.append(
+                mask_metadata,
+                ignore_index=True,
+            )
+        else:
+            mask_metadata.to_csv(
+                os.path.join(self.tile_mask_dir, "frames_meta.csv"),
+                sep=",",
+            )
+        tiled_metadata = tiled_metadata.sort_values(by=['file_name'])
         tiled_metadata.to_csv(
-            os.path.join(self.output_dir, "frames_meta.csv"),
+            os.path.join(self.tile_dir, "frames_meta.csv"),
             sep=",",
         )

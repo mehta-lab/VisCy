@@ -153,7 +153,8 @@ def tile_image(input_image,
     check_2 = np.all(step_size <= tile_size)
     check_3 = np.all(tile_size) > 0
     assert check_1 and check_2 and check_3,\
-        "Tiling not valid with tile size {} and step {}".format(tile_size, step_size)
+        "Tiling not valid with tile size {} and step {}".format(
+            tile_size, step_size)
 
     n_rows = input_image.shape[0]
     n_cols = input_image.shape[1]
@@ -170,10 +171,10 @@ def tile_image(input_image,
     cropped_image_list = []
     cropping_index = []
     for row in range(0, n_rows, step_size[0]):
-        if row + step_size[0] > n_rows:
+        if row + tile_size[0] > n_rows:
             row = check_in_range(row, n_rows, tile_size[0])
         for col in range(0, n_cols, step_size[1]):
-            if col + step_size[1] > n_cols:
+            if col + tile_size[1] > n_cols:
                 col = check_in_range(col, n_cols, tile_size[1])
             img_id = 'r{}-{}_c{}-{}'.format(row, row + tile_size[0],
                                             col, col + tile_size[1])
