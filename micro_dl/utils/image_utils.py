@@ -170,10 +170,10 @@ def tile_image(input_image,
 
     cropped_image_list = []
     cropping_index = []
-    for row in range(0, n_rows, step_size[0]):
+    for row in range(0, n_rows - tile_size[0] + step_size[0], step_size[0]):
         if row + tile_size[0] > n_rows:
             row = check_in_range(row, n_rows, tile_size[0])
-        for col in range(0, n_cols, step_size[1]):
+        for col in range(0, n_cols - tile_size[1] + step_size[1], step_size[1]):
             if col + tile_size[1] > n_cols:
                 col = check_in_range(col, n_cols, tile_size[1])
             img_id = 'r{}-{}_c{}-{}'.format(row, row + tile_size[0],
