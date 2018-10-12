@@ -136,7 +136,7 @@ def pad_channels(input_layer, final_layer, channel_axis):
     return layer_padded
 
 
-def _crop_layer(input_layer, final_layer, data_format, num_dims):
+def _crop_layer(input_layer, final_layer, data_format, num_dims, padding):
     """Crop input layer to match shape of final layer
 
     ONLY SYMMETRIC CROPPING IS HANDLED HERE!
@@ -146,6 +146,7 @@ def _crop_layer(input_layer, final_layer, data_format, num_dims):
     :param keras.layers input_layer: input_layer to the block
     :param str data_format: [channels_first, channels_last]
     :param int num_dims: as named
+    :param str padding: same or valid
     :return: keras.layer, input layer cropped if shape is different than final
      layer, else input layer as is
     """
@@ -155,7 +156,7 @@ def _crop_layer(input_layer, final_layer, data_format, num_dims):
     final_layer_shape = get_layer_shape(final_layer.get_shape().as_list(),
                                         data_format)
 
-    if not np.array_equal(input_layer_shape, final_layer_shape):
+    if padding == 'valid':
         num_crop_pixels = (input_layer_shape - final_layer_shape)
         assert np.any(num_crop_pixels >= 0) and \
                np.all(num_crop_pixels % 2 == 0), \
@@ -174,7 +175,8 @@ def _merge_residual(final_layer,
                     input_layer,
                     data_format,
                     num_dims,
-                    kernel_init):
+                    kernel_init,
+                    padding):
     """Add residual connection from input to last layer
 
     :param keras.layers final_layer: last layer
@@ -182,6 +184,7 @@ def _merge_residual(final_layer,
     :param str data_format: [channels_first, channels_last]
     :param int num_dims: as named
     :param str kernel_init: kernel initializer from config
+    :param str padding: same or valid
     :return: input_layer 1x1 / padded to match the shape of final_layer
      and added
     """
@@ -193,7 +196,11 @@ def _merge_residual(final_layer,
     num_input_layers = int(input_layer.get_shape()[channel_axis])
 
     # crop input if padding='valid'
-    input_layer = _crop_layer(input_layer, final_layer, data_format, num_dims)
+    input_layer = _crop_layer(input_layer,
+                              final_layer,
+                              data_format,
+                              num_dims,
+                              padding)
 
     if num_input_layers > num_final_layers:
         # use 1x 1 to get to the desired num of feature maps
@@ -217,7 +224,8 @@ def skip_merge(skip_layers,
                upsampled_layers,
                skip_merge_type,
                data_format,
-               num_dims):
+               num_dims,
+               padding):
     """Skip connection concatenate/add to upsampled layer
 
     :param keras.layer skip_layers: as named
@@ -225,6 +233,7 @@ def skip_merge(skip_layers,
     :param str skip_merge_type: [add, concat]
     :param str data_format: [channels_first, channels_last]
     :param int num_dims: as named
+    :param str padding: same or valid
     :return: keras.layer skip merged layer
     """
 
@@ -234,7 +243,8 @@ def skip_merge(skip_layers,
     skip_layers = _crop_layer(skip_layers,
                               upsampled_layers,
                               data_format,
-                              num_dims)
+                              num_dims,
+                              padding)
 
     if skip_merge_type == 'concat':
         layer = Concatenate(axis=channel_axis)([upsampled_layers,
@@ -263,7 +273,8 @@ def residual_conv_block(layer, network_config, block_idx):
                             input_layer=input_layer,
                             data_format=network_config['data_format'],
                             num_dims=network_config['num_dims'],
-                            kernel_init=network_config['init'])
+                            kernel_init=network_config['init'],
+                            padding=network_config['padding'])
     return layer
 
 
@@ -302,7 +313,8 @@ def residual_downsample_conv_block(layer, network_config, block_idx,
                             input_layer=input_layer,
                             data_format=network_config['data_format'],
                             num_dims=network_config['num_dims'],
-                            kernel_init=network_config['init'])
+                            kernel_init=network_config['init'],
+                            padding=network_config['padding'])
     return layer
 
 

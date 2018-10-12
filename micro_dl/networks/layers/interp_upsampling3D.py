@@ -89,7 +89,8 @@ class InterpUpSampling3D(InterpUpSampling2D):
         squeeze_b_z = tf.reshape(
             x, tf.convert_to_tensor([-1, y_size, x_size, c_size])
         )
-        resize_b_z = super()._interp_image(squeeze_b_z)
+        resize_b_z = super()._interp_image(squeeze_b_z,
+                                           (self.size[1:]))
         #  tf doesn't like None in reshape
         #  https://github.com/tensorflow/tensorflow/issues/7253
         resume_b_z = tf.reshape(

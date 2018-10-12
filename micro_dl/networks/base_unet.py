@@ -73,11 +73,6 @@ class BaseUNet(BaseConvNet):
             else:
                 self.UpSampling = import_class('networks',
                                                'InterpUpSampling2D')
-        if not predict and self.config['num_dims'] == 3:
-            depth = self.config['depth']
-            feature_depth_at_last_block = depth // (2 ** num_down_blocks)
-            assert feature_depth_at_last_block >= 2, \
-                'network depth is incompatible with input depth'
         self.num_down_blocks = num_down_blocks
 
     def _downsampling_block(self,
@@ -167,7 +162,8 @@ class BaseUNet(BaseConvNet):
                            upsampled_layers=layer_upsampled,
                            skip_merge_type=self.config['skip_merge_type'],
                            data_format=self.config['data_format'],
-                           num_dims=self.config['num_dims'])
+                           num_dims=self.config['num_dims'],
+                           padding=self.config['padding'])
 
         # conv
         if self.config['residual']:

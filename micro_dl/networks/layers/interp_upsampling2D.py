@@ -113,7 +113,6 @@ class InterpUpSampling2D(Layer, metaclass=ABCMeta):
                         if original_shape[1] is not None else None)
         resized_dim2 = (original_shape[2] * size[1]
                         if original_shape[2] is not None else None)
-
         x.set_shape((original_shape[0],
                      resized_dim1,
                      resized_dim2,

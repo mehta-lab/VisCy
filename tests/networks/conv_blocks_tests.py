@@ -399,7 +399,8 @@ class TestConvBlocks(unittest.TestCase):
                     input_layer=in_layer,
                     data_format=self.network_config['data_format'],
                     num_dims=2,
-                    kernel_init='Ones'
+                    kernel_init='Ones',
+                    padding=padding
                 )
                 model = Model(in_layer, res_layer)
                 test_shape = list(in_shape)
@@ -455,6 +456,7 @@ class TestConvBlocks(unittest.TestCase):
                     skip_merge_type=skip_type,
                     data_format=self.network_config['data_format'],
                     num_dims=2,
+                    padding=padding
                 )
                 model = Model(in_layer, res_layer)
                 test_shape = list(in_shape)

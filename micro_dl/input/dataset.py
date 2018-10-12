@@ -20,7 +20,7 @@ class BaseDataSet(keras.utils.Sequence):
                  batch_size,
                  model_task='regression',
                  shuffle=True,
-                 augmentations=None,
+                 augmentations=False,
                  random_seed=42,
                  normalize=False):
         """Init
@@ -60,10 +60,51 @@ class BaseDataSet(keras.utils.Sequence):
         n_batches = int(np.ceil(self.num_samples / self.batch_size))
         return n_batches
 
-    def _augment_image(self, input_image, target_image, mask_image=None):
-        """Augment images"""
+    def _augment_image(self, input_image, aug_idx):
+        """Adds image augmentation among 6 possible options
 
-        return NotImplementedError
+        :param np.array input_image: input image to be transformed
+        :param int aug_idx: integer specifying the transformation to apply.
+         0 - Image as is, 1 - flip LR, 2 - flip UD, 3 - rot 90, 4 - rot 180,
+         5 - rot 270
+        :return np.array image after transformation is applied
+        """
+
+        assert len(input_image.shape) == 2, 'current implementation works' \
+                                            'for 2D images only'
+        if aug_idx == 0:
+            return input_image
+        elif aug_idx == 1:
+            trans_image = np.fliplr(input_image)
+        elif aug_idx == 2:
+            trans_image = np.flipud(input_image)
+        elif aug_idx == 3:
+            trans_image = np.rot90(input_image, 1)
+        elif aug_idx == 4:
+            trans_image = np.rot90(input_image, 2)
+        elif aug_idx == 5:
+            trans_image = np.rot90(input_image, 3)
+        else:
+            msg = '{} not in allowed aug_idx: 0-5'.format(aug_idx)
+            raise ValueError(msg)
+        return trans_image
+
+    def _get_volume(self, fname_list, aug_idx=0):
+        """Read a volume from fname_list
+
+        :param list fname_list: list of file names of input/target images
+        :param int aug_idx: type of augmentation to be applied (if any)
+        :return: np.ndarray of stacked images
+        """
+
+        image_volume = []
+        for fname in fname_list:
+            cur_channel = np.load(os.path.join(self.tile_dir, fname))
+            cur_channel = self._augment_image(cur_channel, aug_idx)
+            image_volume.append(cur_channel)
+
+        image_volume = np.stack(image_volume)
+        return image_volume, aug_idx
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -82,11 +123,16 @@ class BaseDataSet(keras.utils.Sequence):
 
         input_image = []
         target_image = []
+        aug_idx = 0
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
-            cur_input = self._get_volume(cur_input_fnames.split(','))
-            cur_target = self._get_volume(cur_target_fnames.split(','))
+            if self.augmentations:
+                aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
+            cur_input = self._get_volume(cur_input_fnames.split(','),
+                                         aug_idx)
+            cur_target = self._get_volume(cur_target_fnames.split(','),
+                                          aug_idx)
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
@@ -112,20 +158,6 @@ class BaseDataSet(keras.utils.Sequence):
         if self.shuffle:
             np.random.shuffle(self.row_idx)
 
-    def _get_volume(self, fname_list):
-        """Read a volume from fname_list
-
-        :param list fname_list: list of file names of input/target images
-        :return: np.ndarray of stacked images
-        """
-        image_volume = []
-        for fname in fname_list:
-            cur_channel = np.load(os.path.join(self.tile_dir, fname))
-            image_volume.append(cur_channel)
-
-        image_volume = np.stack(image_volume)
-        return image_volume
-
 
 class DataSetWithMask(BaseDataSet):
     """DataSet class that returns input, target images and sample weights"""
@@ -139,7 +171,7 @@ class DataSetWithMask(BaseDataSet):
                  model_task='regression',
                  label_weights=None,
                  shuffle=True,
-                 augmentations=None,
+                 augmentations=False,
                  random_seed=42,
                  normalize=False):
         """Init
@@ -190,13 +222,18 @@ class DataSetWithMask(BaseDataSet):
 
         input_image = []
         target_image = []
+        aug_idx = 0
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             cur_mask_fnames = self.mask_fnames.iloc[self.row_idx[idx]]
-            cur_input = super()._get_volume(cur_input_fnames.split(','))
 
-            cur_target = super()._get_volume(cur_target_fnames.split(','))
+            if self.augmentations:
+                aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
+            cur_input = super()._get_volume(cur_input_fnames.split(','),
+                                            aug_idx)
+            cur_target = super()._get_volume(cur_target_fnames.split(','),
+                                             aug_idx)
 
             # If target is boolean (segmentation masks), convert to float
             if cur_target.dtype == bool:
@@ -210,7 +247,8 @@ class DataSetWithMask(BaseDataSet):
                                  np.std(cur_target)
 
             # the mask is based on sum of channel images
-            cur_mask = super()._get_volume(cur_mask_fnames.split(','))
+            cur_mask = super()._get_volume(cur_mask_fnames.split(','),
+                                           aug_idx)
             if self.label_weights is not None:
                 wtd_mask = np.zeros(cur_mask.shape)
                 for label_idx in range(len(self.label_weights)):
