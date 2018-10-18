@@ -135,7 +135,7 @@ def tile_image(input_image,
         start_value = cur_value - miss_length
         return start_value
 
-    def use_tile(im, min_fraction):
+    def use_tile(cropped_img, min_fraction):
         """
         Determine if tile should be used given minimum image foreground fraction
         :param np.array im: 2D image tile
@@ -279,4 +279,5 @@ def read_image(file_path):
             im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
         except IOError as e:
             print(e)
+            raise
     return im

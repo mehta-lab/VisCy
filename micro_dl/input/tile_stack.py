@@ -5,8 +5,7 @@ import os
 import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
-from micro_dl.utils.normalize import hist_clipping, zscore
-from micro_dl.utils.aux_utils import get_meta_idx
+import micro_dl.utils.normalize as normalize
 import micro_dl.utils.image_utils as image_utils
 
 
@@ -16,14 +15,18 @@ class ImageStackTiler:
     def __init__(self,
                  input_dir,
                  output_dir,
-                 tile_size,
-                 step_size,
+                 tile_dict,
+                 tile_size=[256, 256],
+                 step_size=[64, 64],
+                 depth=1,
                  time_ids=-1,
                  channel_ids=-1,
                  slice_ids=-1,
+                 pos_ids=-1,
                  hist_clip_limits=None,
                  flat_field_dir=None,
-                 isotropic=False):
+                 isotropic=False,
+                 data_format='channels_first'):
         """
         Normalizes images using z-score, then tiles them.
         Isotropic here refers to the same dimension/shape along row, col, slice
@@ -31,31 +34,70 @@ class ImageStackTiler:
 
         :param str input_dir: Directory with frames to be tiled
         :param str output_dir: Base output directory
-        :param list/tuple/np array tile_size: size of the blocks to be cropped
+        :param list tile_size: size of the blocks to be cropped
          from the image
-        :param list/tuple/np array step_size: size of the window shift. In case
+        :param list step_size: size of the window shift. In case
          of no overlap, the step size is tile_size. If overlap, step_size <
          tile_size
+        :param int depth: Determines z depth for generating stack training data
+            Default 1 assumes 2D data
         :param list/int time_ids: Tile given timepoint indices
         :param list/int tile_channels: Tile images in the given channel indices
          default=-1, tile all channels
         :param int slice_ids: Index of which focal plane acquisition to
          use (for 2D). default=-1 for the whole z-stack
+        :param int pos_ids: Position (FOV) indices to use
         :param list hist_clip_limits: lower and upper percentiles used for
          histogram clipping.
         :param str flat_field_dir: Flatfield directory. None if no flatfield
             correction
         :param bool isotropic: if 3D, make the grid/shape isotropic
+        :param str data_format: Channels first or last
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
+
+        if 'depth' in tile_dict:
+            depth = tile_dict['depth']
+        assert depth in {1, 3, 5},\
+            "Stack depth must be 1, 3 or 5, not {}".format(depth)
+        if 'tile_size' in tile_dict:
+            tile_size = tile_dict['tile_size']
+        if 'step_size' in tile_dict:
+            step_size = tile_dict['step_size']
+        if 'isotropic' in tile_dict:
+            isotropic = tile_dict['isotropic']
+        if 'channels' in tile_dict:
+            channel_ids = tile_dict['channels']
+        if 'positions' in tile_dict:
+            pos_ids = tile_dict['positions']
+        if 'hist_clip_limits' in tile_dict:
+            hist_clip_limits = tile_dict['hist_clip_limits']
+        if 'data_format' in tile_dict:
+            data_format = tile_dict['data_format']
+            assert data_format in {'channels_first', 'channels_last'},\
+                "Data format must be channels_first or channels_last"
+        self.depth = depth
+        self.tile_size = tile_size
+        self.step_size = step_size
+        self.isotropic = isotropic
+        self.hist_clip_limits = hist_clip_limits
+        self.data_format = data_format
+
         self.str_tile_size = '-'.join([str(val) for val in tile_size])
         self.str_step_size = '-'.join([str(val) for val in step_size])
         self.tile_dir = os.path.join(
             output_dir,
             'tiles_{}_step_{}'.format(self.str_tile_size, self.str_step_size),
         )
-        os.makedirs(self.tile_dir, exist_ok=True)
+        # If tile dir already exist, things could get messy because we don't
+        # have any checks in place for how to add to existing tiles
+        try:
+            os.makedirs(self.tile_dir, exist_ok=False)
+        except FileExistsError as e:
+            print("You're trying to write to existing dir. ", e)
+            raise
+
         self.tile_mask_dir = None
         self.flat_field_dir = flat_field_dir
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
@@ -65,15 +107,29 @@ class ImageStackTiler:
             time_ids=time_ids,
             channel_ids=channel_ids,
             slice_ids=slice_ids,
+            pos_ids=pos_ids,
         )
         self.channel_ids = metadata_ids['channel_ids']
         self.time_ids = metadata_ids['time_ids']
         self.slice_ids = metadata_ids['slice_ids']
+        self.pos_ids = metadata_ids['pos_ids']
 
-        self.tile_size = tile_size
-        self.step_size = step_size
-        self.isotropic = isotropic
-        self.hist_clip_limits = hist_clip_limits
+        self.margin = 0
+        if self.depth > 1:
+            if len(tile_size) == 2:
+                self.tile_size.append(self.depth)
+            if len(step_size) == 2:
+                self.step_size.append(self.depth)
+            self.margin = self.depth // 2
+            nbr_slices = len(self.slice_ids)
+            assert nbr_slices > 2 * self.margin,\
+                "Insufficient slices ({}) for depth {}".format(
+                    nbr_slices, self.depth)
+            assert self.slice_ids[-1] - self.slice_ids[0] + 1 == nbr_slices,\
+                "Slice indices are not contiguous"
+            # TODO: use itertools.groupby if non-contiguous data is a thing
+            # np.unique is sorted so we can just remove first and last ids
+            self.slice_ids = self.slice_ids[self.margin:-self.margin]
 
     def get_tile_dir(self):
         """
@@ -109,32 +165,37 @@ class ImageStackTiler:
         :return np.array im: 2D preprocessed image
         :return str channel_name: Channel name
         """
-        meta_idx = get_meta_idx(
-            self.frames_metadata,
-            time_idx,
-            channel_idx,
-            slice_idx,
-            pos_idx,
-        )
-        channel_name = self.frames_metadata.loc[meta_idx, "channel_name"]
-        file_path = os.path.join(
-            self.input_dir,
-            self.frames_metadata.loc[meta_idx, "file_name"],
-        )
-        im = image_utils.read_image(file_path)
-        if flat_field_im is not None:
-            im = image_utils.apply_flat_field_correction(
-                im,
-                flat_field_image=flat_field_im,
+        im_stack = []
+        for z in range(slice_idx - self.margin, slice_idx + self.margin + 1):
+            meta_idx = aux_utils.get_meta_idx(
+                self.frames_metadata,
+                time_idx,
+                channel_idx,
+                z,
+                pos_idx,
             )
+            channel_name = self.frames_metadata.loc[meta_idx, "channel_name"]
+            file_path = os.path.join(
+                self.input_dir,
+                self.frames_metadata.loc[meta_idx, "file_name"],
+            )
+            im = image_utils.read_image(file_path)
+            if flat_field_im is not None:
+                im = image_utils.apply_flat_field_correction(
+                    im,
+                    flat_field_image=flat_field_im,
+                )
+            im_stack.append(im)
+        # Stack images
+        im_stack = np.squeeze(np.stack(im_stack, axis=2))
         # normalize
         if hist_clip_limits is not None:
-            im = hist_clipping(
-                im,
+            im_stack = normalize.hist_clipping(
+                im_stack,
                 hist_clip_limits[0],
                 hist_clip_limits[1],
             )
-        return zscore(im), channel_name
+        return normalize.zscore(im_stack), channel_name
 
     def _write_tiled_data(self,
                           tiled_data,
@@ -170,8 +231,11 @@ class ImageStackTiler:
                 pos_idx=pos_idx,
                 extra_field=rcsl_idx,
             )
+            tile = data_tuple[1]
+            if self.data_format == 'channels_first':
+                tile = np.swapaxes(tile, 0, 2)
             np.save(os.path.join(save_dir, file_name),
-                    data_tuple[1],
+                    tile,
                     allow_pickle=True,
                     fix_imports=True)
             tile_idx = tile_indices[i]
@@ -244,7 +308,7 @@ class ImageStackTiler:
 
             for slice_idx in self.slice_ids:
                 for time_idx in self.time_ids:
-                    for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
+                    for pos_idx in self.pos_ids:
                         im, channel_name = self._preprocess_im(
                             time_idx,
                             channel_idx,
@@ -284,6 +348,34 @@ class ImageStackTiler:
             os.path.join(self.tile_dir, "frames_meta.csv"),
             sep=",",
         )
+
+    def _get_mask(self, time_idx, mask_channel, slice_idx, pos_idx, mask_dir):
+        """
+        Load a mask image or an image stack, depending on depth
+
+        :param int time_idx: Time index
+        :param str mask_channel: Channel index for mask
+        :param int slice_idx: Slice (z) index
+        :param int pos_idx: Position index
+        :param str mask_dir: Directory containing masks
+        :return np.array im_stack: Mask image/stack
+        """
+
+        im_stack = []
+        for z in range(slice_idx - self.margin, slice_idx + self.margin + 1):
+            file_name = aux_utils.get_im_name(
+                time_idx=time_idx,
+                channel_idx=mask_channel,
+                slice_idx=z,
+                pos_idx=pos_idx,
+            )
+            file_path = os.path.join(
+                mask_dir,
+                file_name,
+            )
+            im_stack.append(image_utils.read_image(file_path))
+        # Stack images
+        return np.squeeze(np.stack(im_stack, axis=2))
 
     def tile_mask_stack(self,
                         mask_dir=None,
@@ -334,17 +426,12 @@ class ImageStackTiler:
                 for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
                     # Since masks are generated across channels, we only need
                     # load them once across channels
-                    file_name = aux_utils.get_im_name(
+                    mask_image = self._get_mask(
                         time_idx=time_idx,
-                        channel_idx=mask_channel,
+                        mask_channel=mask_channel,
                         slice_idx=slice_idx,
                         pos_idx=pos_idx,
-                    )
-                    file_path = os.path.join(
-                        mask_dir,
-                        file_name,
-                    )
-                    mask_image = image_utils.read_image(file_path)
+                        mask_dir=mask_dir)
                     tiled_mask_data, tile_indices = image_utils.tile_image(
                         input_image=mask_image,
                         min_fraction=min_fraction,
@@ -377,7 +464,7 @@ class ImageStackTiler:
                             flat_field_im=flat_field_im,
                             hist_clip_limits=self.hist_clip_limits,
                         )
-                        # Now to the actual tiling
+                        # Now to the actual tiling of data
                         tiled_image_data = image_utils.crop_at_indices(
                             input_image=im,
                             crop_indices=tile_indices,

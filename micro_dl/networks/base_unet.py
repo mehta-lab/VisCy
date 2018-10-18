@@ -73,6 +73,7 @@ class BaseUNet(BaseConvNet):
             else:
                 self.UpSampling = import_class('networks',
                                                'InterpUpSampling2D')
+
         self.num_down_blocks = num_down_blocks
 
     def _downsampling_block(self,

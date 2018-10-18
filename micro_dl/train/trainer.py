@@ -199,6 +199,9 @@ class BaseKerasTrainer:
         self.logger.info('Model compiled')
 
         try:
+            print("train", type(self.train_dataset))
+            print("val", type(self.val_dataset))
+            print("epochs", self.epochs)
             # NUM WORKERS read from yml or find the num of empty cores?
             self.model.fit_generator(generator=self.train_dataset,
                                      validation_data=self.val_dataset,
@@ -208,3 +211,4 @@ class BaseKerasTrainer:
                                      verbose=1)
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
+            raise

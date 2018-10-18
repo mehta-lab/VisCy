@@ -89,29 +89,13 @@ def pre_process(pp_config):
     tile_dir = None
     tile_mask_dir = None
     if pp_config['tile_stack']:
-        tile_size = pp_config['tile']['tile_size']
-        step_size = pp_config['tile']['step_size']
-        isotropic = False
-        if 'isotropic' in pp_config['tile']:
-            isotropic = pp_config['tile']['isotropic']
-        channel_ids = -1
-        if "channels" in pp_config['tile']:
-            channel_ids = pp_config['tile']['channels']
-        hist_clip_limits = None
-        if 'hist_clip_limits' in pp_config['tile']:
-            hist_clip_limits = pp_config['tile']['hist_clip_limits']
-
         tile_inst = ImageStackTiler(
             input_dir=input_dir,
             output_dir=output_dir,
-            tile_size=tile_size,
-            step_size=step_size,
+            tile_dict=pp_config['tile'],
             time_ids=time_ids,
-            channel_ids=channel_ids,
             slice_ids=slice_ids,
-            hist_clip_limits=hist_clip_limits,
             flat_field_dir=flat_field_dir,
-            isotropic=isotropic,
         )
         tile_dir = tile_inst.get_tile_dir()
         # If you're using min fraction, it assumes you've generated masks

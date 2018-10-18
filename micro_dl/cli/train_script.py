@@ -83,7 +83,6 @@ def create_datasets(df_meta,
             val_gen_params['augmentations'] = (
                 trainer_config['augmentations']
             )
-
         val_dataset = BaseDataSet(
             tile_dir=tile_dir,
             input_fnames=val_metadata['fpaths_input'],

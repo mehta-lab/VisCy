@@ -65,7 +65,6 @@ def split_train_val_test(sample_set, train_ratio, test_ratio,
 
     split_idx = {}
     test_idx = np.random.choice(sample_set, num_test, replace=False)
-
     split_idx['test'] = test_idx
     rem_set = set(sample_set) - set(test_idx)
     rem_set = list(rem_set)

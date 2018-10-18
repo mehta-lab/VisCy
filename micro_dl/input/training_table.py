@@ -75,6 +75,9 @@ class BaseTrainingTable:
         """
 
         unique_values = self.df_metadata[self.split_by_column].unique()
+        assert len(unique_values) > 1,\
+            "{} only contains one or less values, can't be split "\
+            "into train/val".format(self.split_by_column)
         # DOES NOT HANDLE NON-INTEGER VALUES. map to int if string
         # the sample_idxs are required for evaluating performance on test set
         assert np.issubdtype(unique_values.dtype, np.integer)

@@ -4,6 +4,7 @@ import inspect
 import importlib
 import json
 import logging
+import natsort
 import numpy as np
 import os
 import pandas as pd
@@ -348,3 +349,32 @@ def write_json(json_dict, json_filename):
     json_dump = json.dumps(json_dict)
     with open(json_filename, "w") as write_file:
         write_file.write(json_dump)
+
+
+def get_sorted_names(dir_name):
+    """
+    Get image names in directory and sort them by their indices
+
+    :param str dir_name: Image directory name
+    :return list of strs im_names: Image names sorted according to indices
+    """
+    im_names = [f for f in os.listdir(dir_name) if f.startswith('im_')]
+    # Sort image names according to indices
+    return natsort.natsorted(im_names)
+
+
+def get_ids_from_imname(im_name, df_names):
+    """
+    Assumes im_name is im_c***_t***_p***_z***.png, e.g. im_c000_z010_t000_p000.png
+    :param str im_name: Image name without path
+    :return dict meta_row: One row of metadata given image file name
+    """
+    meta_row = dict.fromkeys(df_names)
+    # Channel name can't be retrieved from image name
+    meta_row["channel_name"] = None
+    meta_row["channel_idx"] = int(im_name[4:7])
+    meta_row["slice_idx"] = int(im_name[9:12])
+    meta_row["time_idx"] = int(im_name[14:17])
+    meta_row["pos_idx"] = int(im_name[19:22])
+    meta_row["file_name"] = im_name
+    return meta_row

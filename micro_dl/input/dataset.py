@@ -100,11 +100,12 @@ class BaseDataSet(keras.utils.Sequence):
         image_volume = []
         for fname in fname_list:
             cur_channel = np.load(os.path.join(self.tile_dir, fname))
-            cur_channel = self._augment_image(cur_channel, aug_idx)
+            if self.augmentations:
+                cur_channel = self._augment_image(cur_channel, aug_idx)
             image_volume.append(cur_channel)
 
         image_volume = np.stack(image_volume)
-        return image_volume, aug_idx
+        return image_volume
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -127,6 +128,7 @@ class BaseDataSet(keras.utils.Sequence):
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
+            # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
             cur_input = self._get_volume(cur_input_fnames.split(','),
@@ -236,6 +238,7 @@ class DataSetWithMask(BaseDataSet):
                                              aug_idx)
 
             # If target is boolean (segmentation masks), convert to float
+
             if cur_target.dtype == bool:
                 cur_target = cur_target.astype(np.float64)
             if self.normalize:

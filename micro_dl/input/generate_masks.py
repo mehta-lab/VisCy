@@ -17,6 +17,7 @@ class MaskProcessor:
                  flat_field_dir=None,
                  time_ids=-1,
                  slice_ids=-1,
+                 pos_ids=-1,
                  int2str_len=3):
         """
         :param str input_dir: Directory with image frames
@@ -28,6 +29,7 @@ class MaskProcessor:
         :param list/int time_ids: timepoints to consider
         :param int slice_ids: Index of which focal plane (z)
             acquisition to use (default -1 includes all slices)
+        :param int pos_ids: Position (FOV) indices to use
         :param int int2str_len: Length of str when converting ints
         """
         self.input_dir = input_dir
@@ -43,10 +45,12 @@ class MaskProcessor:
             time_ids=time_ids,
             channel_ids=channel_ids,
             slice_ids=slice_ids,
+            pos_ids=pos_ids,
         )
         self.time_ids = metadata_ids['time_ids']
         self.channel_ids = metadata_ids['channel_ids']
         self.slice_ids = metadata_ids['slice_ids']
+        self.pos_ids = metadata_ids['pos_ids']
         # Create mask_dir as a subdirectory of output_dir
         self.mask_dir = os.path.join(
             self.output_dir,
@@ -86,7 +90,7 @@ class MaskProcessor:
         # Loop through all the indices and create masks
         for slice_idx in self.slice_ids:
             for time_idx in self.time_ids:
-                for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
+                for pos_idx in self.pos_ids:
                     mask_images = []
                     for channel_idx in self.channel_ids:
                         frame_idx = aux_utils.get_meta_idx(
