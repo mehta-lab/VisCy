@@ -40,9 +40,9 @@ network:
     data_format: 'channels_first'
     height: 256
     width: 256
-    depth: 256
     batch_norm: True
-    pooling_type: max
+    pooling_type: conv
+    res_pool_type: max
     filter_size: 3
     activation:
         type: relu
@@ -51,9 +51,12 @@ network:
     num_convs_per_block: 2
     block_sequence: conv-activation-bn
     residual: True
-    kernel_regularizer:
-        type: l2
-        lambda: 0.001
-    dropout_dense: 0.4
+    dense:
+        type: conv
+        dropout: 0.4
+        num_units: [512, 256, 128]
+        regression_length: 32
+        kernel_regularizer:
+            type: l2
+            lambda: 0.001
     final_activation: linear
-    regression_length: 32
