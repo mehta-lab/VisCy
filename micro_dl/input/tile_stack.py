@@ -18,7 +18,8 @@ class ImageStackTiler:
                  tile_dict,
                  tile_size=[256, 256],
                  step_size=[64, 64],
-                 depth=1,
+                 depths=1,
+                 mask_depth=1,
                  time_ids=-1,
                  channel_ids=-1,
                  slice_ids=-1,
@@ -39,8 +40,11 @@ class ImageStackTiler:
         :param list step_size: size of the window shift. In case
          of no overlap, the step size is tile_size. If overlap, step_size <
          tile_size
-        :param int depth: Determines z depth for generating stack training data
-            Default 1 assumes 2D data
+        :param int/list depths: The z depth for generating stack training data
+            Default 1 assumes 2D data for all channels to be tiled.
+            For cases where input and target shapes are not the same (e.g. stack
+             to 2D) you should specify depths for each channel in tile.channels.
+        :param int mask_depth: Depth for mask channel
         :param list/int time_ids: Tile given timepoint indices
         :param list/int tile_channels: Tile images in the given channel indices
          default=-1, tile all channels
@@ -53,14 +57,16 @@ class ImageStackTiler:
             correction
         :param bool isotropic: if 3D, make the grid/shape isotropic
         :param str data_format: Channels first or last
+        TODO: It's unclear how this will work for 3D datasets
+        TODO: ADD TESTS!!!
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
 
-        if 'depth' in tile_dict:
-            depth = tile_dict['depth']
-        assert depth in {1, 3, 5},\
-            "Stack depth must be 1, 3 or 5, not {}".format(depth)
+        if 'depths' in tile_dict:
+            depths = tile_dict['depths']
+        if 'mask_depth' in tile_dict:
+            mask_depth = tile_dict['mask_depth']
         if 'tile_size' in tile_dict:
             tile_size = tile_dict['tile_size']
         if 'step_size' in tile_dict:
@@ -77,7 +83,8 @@ class ImageStackTiler:
             data_format = tile_dict['data_format']
             assert data_format in {'channels_first', 'channels_last'},\
                 "Data format must be channels_first or channels_last"
-        self.depth = depth
+        self.depths = depths
+        self.mask_depth = mask_depth
         self.tile_size = tile_size
         self.step_size = step_size
         self.isotropic = isotropic
@@ -113,23 +120,35 @@ class ImageStackTiler:
         self.time_ids = metadata_ids['time_ids']
         self.slice_ids = metadata_ids['slice_ids']
         self.pos_ids = metadata_ids['pos_ids']
+        # If more than one depth is specified, they must match channel ids
+        if isinstance(self.depths, list):
+            assert len(self.depths) == len(self.channel_ids),\
+             "depths ({}) and channels ({}) length mismatch".format(
+                len(self.depths), len(self.channel_ids)
+            )
+            # Get max of all specified depths
+            max_depth = max(max(self.depths), self.mask_depth)
+            # Convert channels + depths to dict for lookup
+            self.channel_depth = dict(zip(self.channel_ids, self.depths))
+        else:
+            max_depth = max(self.depths, self.mask_depth)
+            self.channel_depth = dict(zip(
+                self.channel_ids,
+                [self.depths] * len(self.channel_ids)),
+            )
 
         self.margin = 0
-        if self.depth > 1:
-            if len(tile_size) == 2:
-                self.tile_size.append(self.depth)
-            if len(step_size) == 2:
-                self.step_size.append(self.depth)
-            self.margin = self.depth // 2
+        if max_depth > 1:
+            margin = max_depth // 2
             nbr_slices = len(self.slice_ids)
             assert nbr_slices > 2 * self.margin,\
-                "Insufficient slices ({}) for depth {}".format(
-                    nbr_slices, self.depth)
+                "Insufficient slices ({}) for max depth {}".format(
+                    nbr_slices, max_depth)
             assert self.slice_ids[-1] - self.slice_ids[0] + 1 == nbr_slices,\
                 "Slice indices are not contiguous"
             # TODO: use itertools.groupby if non-contiguous data is a thing
             # np.unique is sorted so we can just remove first and last ids
-            self.slice_ids = self.slice_ids[self.margin:-self.margin]
+            self.slice_ids = self.slice_ids[margin:-margin]
 
     def get_tile_dir(self):
         """
@@ -165,8 +184,10 @@ class ImageStackTiler:
         :return np.array im: 2D preprocessed image
         :return str channel_name: Channel name
         """
+        depth = self.channel_depth[channel_idx]
+        margin = 0 if depth == 1 else depth // 2
         im_stack = []
-        for z in range(slice_idx - self.margin, slice_idx + self.margin + 1):
+        for z in range(slice_idx - margin, slice_idx + margin + 1):
             meta_idx = aux_utils.get_meta_idx(
                 self.frames_metadata,
                 time_idx,
@@ -187,7 +208,7 @@ class ImageStackTiler:
                 )
             im_stack.append(im)
         # Stack images
-        im_stack = np.squeeze(np.stack(im_stack, axis=2))
+        im_stack = np.stack(im_stack, axis=2)
         # normalize
         if hist_clip_limits is not None:
             im_stack = normalize.hist_clipping(
@@ -232,7 +253,8 @@ class ImageStackTiler:
                 extra_field=rcsl_idx,
             )
             tile = data_tuple[1]
-            if self.data_format == 'channels_first':
+            # Check and potentially flip dimensions for 3D data
+            if self.data_format == 'channels_first' and len(tile.shape) > 2:
                 tile = np.swapaxes(tile, 0, 2)
             np.save(os.path.join(save_dir, file_name),
                     tile,
@@ -360,9 +382,9 @@ class ImageStackTiler:
         :param str mask_dir: Directory containing masks
         :return np.array im_stack: Mask image/stack
         """
-
+        margin = self.mask_depth // 2
         im_stack = []
-        for z in range(slice_idx - self.margin, slice_idx + self.margin + 1):
+        for z in range(slice_idx - margin, slice_idx + margin + 1):
             file_name = aux_utils.get_im_name(
                 time_idx=time_idx,
                 channel_idx=mask_channel,
@@ -375,7 +397,7 @@ class ImageStackTiler:
             )
             im_stack.append(image_utils.read_image(file_path))
         # Stack images
-        return np.squeeze(np.stack(im_stack, axis=2))
+        return np.stack(im_stack, axis=2)
 
     def tile_mask_stack(self,
                         mask_dir=None,
@@ -453,6 +475,7 @@ class ImageStackTiler:
                     )
                     # Loop through all channels and tile from indices
                     for i, channel_idx in enumerate(self.channel_ids):
+
                         if self.flat_field_dir is not None:
                             flat_field_im = flat_field_ims[i]
 

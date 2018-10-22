@@ -145,7 +145,6 @@ class BaseDataSet(keras.utils.Sequence):
                 if self.model_task is not 'segmentation':
                     cur_target = (cur_target - np.mean(cur_target)) /\
                                  np.std(cur_target)
-            # _augment_image(cur_input, cur_target)
             input_image.append(cur_input)
             target_image.append(cur_target)
         input_image = np.stack(input_image)

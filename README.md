@@ -43,7 +43,7 @@ http://fry:<whatever port you mapped to when starting up docker>
 ```
 You will need to copy/paste the token generated in your Docker container.
 
-### Basic CLIs
+### Data Format
 
 To train directly on datasets that have already been split into 2D frames, the dataset
 should have the following structure:
@@ -65,25 +65,14 @@ The image naming convention is (parenthesis is their name in frames_meta.csv)
 
 If you download your dataset from the imaging database [imagingDB](https://github.com/czbiohub/imagingDB)
 you will get your dataset correctly formatted and can directly input that into microDL.
-
-If your starting point is images readable by OpenCV or numpy
-you can use the following command to preprocess them:
-
-```buildoutcfg
-python micro_dl/cli/run_image_preprocessing.py -i <dir_name> -o <output_dir>
---tile_size (optional) --step_size (optinal)
-```
-
-To train the model using your preprocessed data, you can modify the followind config file and run:
+If you don't have your data in the imaging database, write a script that converts your 
+your data to image files that adhere to the naming convention above, then run 
 
 ```buildoutcfg
-python micro_dl/train/train_script.py --config micro_dl/config.yml
+python micro_dl/cli/generate_meta.py --input <directory name>
 ```
+That will generate the frames_meta.csv file you will need for data preprocessing.
 
-for model inference run:
-```buildoutcfg
-
-```
 
 ## Requirements
 
@@ -121,7 +110,13 @@ The following settings can be adjusted in preprocessing:
     * channels: (list of ints) specify channel numbers, -1 for all channels
     * tile_size: (list of ints) tile size in pixels for each dimension
     * step_size: (list of ints) step size in pixels for each dimension
-    * save_cropped_masks: (bool) save tiled masks
+    * depths: (list of ints) tile z depth for all the channels specified
+    * mask_depth: (int) z depth of mask
+    * save_tiled_masks: (str) save tiled masks 'as_channel' (recommended) will generate a new
+    channel number (1 + max existing channel), write tiles in the same directory as the rest of the
+    channels, and add the new mask channel to frames metadata. 'as_mask' will write mask tiles in a new directory
+    and not add them to metadata.
+    * data_format: (str) 'channels_first' or 'channels_last'.
     * min_fraction: (float) minimum fraction of image occupied by foreground in masks
     * hist_clip_limits: (list of ints) lower and upper intensity percentiles for histogram clipping
 
@@ -134,7 +129,7 @@ will be used for further processing. The csv contains the following fields for e
 * 'pos_idx': the field of view index
 * 'file_name': file name
 * 'row_start': starting row for tile (add tile_size for endpoint)
-* 'col_idx': start column (add tile_size for endpoint)
+* 'col_start': start column (add tile_size for endpoint)
 
 ## Modeling
 

@@ -138,7 +138,7 @@ def tile_image(input_image,
     def use_tile(cropped_img, min_fraction):
         """
         Determine if tile should be used given minimum image foreground fraction
-        :param np.array im: 2D image tile
+        :param np.array cropped_img: Image tile
         :param float min_fraction: Minimum fraction of image being foreground
         :return bool use_tile: Indicator if tile should be used
         """
@@ -148,6 +148,15 @@ def tile_image(input_image,
             if mask_fraction < min_fraction:
                 use_tile = False
         return use_tile
+
+    # Add to tile size and step size in case of 3D images
+    im_shape = input_image.shape
+    if len(im_shape) == 3:
+        if len(tile_size) == 2:
+            tile_size.append(im_shape[2])
+        # Step size in z is assumed to be the same as depth
+        if len(step_size) == 2:
+            step_size.append(im_shape[2])
 
     check_1 = len(tile_size) == len(step_size)
     check_2 = np.all(step_size <= tile_size)
@@ -220,21 +229,21 @@ def crop_at_indices(input_image, crop_indices, isotropic=False):
 
     n_dim = len(input_image.shape)
     cropped_img_list = []
+    im_depth = input_image.shape[2]
     for cur_idx in crop_indices:
         img_id = 'r{}-{}_c{}-{}'.format(cur_idx[0], cur_idx[1],
                                         cur_idx[2], cur_idx[3])
-        if n_dim == 3:
-            img_id = '{}_sl{}-{}'.format(img_id, cur_idx[4], cur_idx[5])
-            cropped_img = input_image[cur_idx[0]: cur_idx[1],
-                                      cur_idx[2]: cur_idx[3],
-                                      cur_idx[4]: cur_idx[5]]
+
+        cropped_img = input_image[cur_idx[0]: cur_idx[1],
+                      cur_idx[2]: cur_idx[3], ...]
+        if n_dim == 3 and len(cur_idx) == 6:
+            img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
+
             if isotropic:
                 img_shape = cropped_img.shape
                 isotropic_shape = [img_shape[0], ] * len(img_shape)
                 cropped_img = resize_image(cropped_img, isotropic_shape)
-        else:
-            cropped_img = input_image[cur_idx[0]: cur_idx[1],
-                                      cur_idx[2]: cur_idx[3]]
+
         cropped_img_list.append((img_id, cropped_img))
     return cropped_img_list
 

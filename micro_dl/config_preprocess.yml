@@ -11,7 +11,8 @@ tile:
     channels: [0, 5]
     tile_size: [256, 256]
     step_size: [128, 128]
-    depth: 3
+    depths: [3, 1]
+    mask_depth: 3
     data_format: 'channels_first'
     save_tiled_masks: 'as_channel'
     min_fraction: 0.25
