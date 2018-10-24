@@ -7,6 +7,7 @@ import logging
 import natsort
 import numpy as np
 import os
+import re
 import pandas as pd
 import yaml
 
@@ -363,18 +364,36 @@ def get_sorted_names(dir_name):
     return natsort.natsorted(im_names)
 
 
-def get_ids_from_imname(im_name, df_names):
+def get_ids_from_imname(im_name, df_names, order="cztp"):
     """
-    Assumes im_name is im_c***_t***_p***_z***.png, e.g. im_c000_z010_t000_p000.png
+    Assumes im_name is e.g. im_c***_z***_p***_t***.png,
+    It doesn't care about the extension or the number of digits each index is
+    represented by, it extracts all integers from the image file name and assigns
+    them by order. By default it assumes that the order is c, z, t, p.
+
     :param str im_name: Image name without path
+    :param list of strs df_names: Dataframe col names
+    :param str order: Order in which c, z, t, p are given in the image (4 chars)
     :return dict meta_row: One row of metadata given image file name
     """
+    order_list = list(order)
+    assert len(set(order_list)) == 4,\
+        "Order needs 4 unique values, not {}".format(order)
     meta_row = dict.fromkeys(df_names)
     # Channel name can't be retrieved from image name
     meta_row["channel_name"] = None
-    meta_row["channel_idx"] = int(im_name[4:7])
-    meta_row["slice_idx"] = int(im_name[9:12])
-    meta_row["time_idx"] = int(im_name[14:17])
-    meta_row["pos_idx"] = int(im_name[19:22])
     meta_row["file_name"] = im_name
+    # Find all integers in name string
+    ints = re.findall(r'\d+', im_name)
+    assert len(ints) == 4, "Expected 4 integers, found {}".format(len(ints))
+    # Assign indices based on ints and order
+    idx_dict = {"c": "channel_idx",
+                "z": "slice_idx",
+                "t": "time_idx",
+                "p": "pos_idx"}
+    for i in idx_dict.keys():
+        assert i in order_list, "{} not in order".format(i)
+    for i, order_char in enumerate(order_list):
+        idx_name = idx_dict[order_char]
+        meta_row[idx_name] = int(ints[i])
     return meta_row

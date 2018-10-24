@@ -14,8 +14,18 @@ def parse_args():
     :return: namespace containing the arguments passed.
     """
     parser = argparse.ArgumentParser()
-    parser.add_argument('-i', '--input', type=str,
-                        help="Path to folder containing all 2D image frames")
+    parser.add_argument(
+        '-i',
+        '--input',
+        type=str,
+        help="Path to folder containing all 2D image frames",
+    )
+    parser.add_argument(
+        '--order',
+        type=str,
+        default="cztp",
+        help="The order in which indices are listed in the image file name",
+    )
     return parser.parse_args()
 
 
@@ -26,13 +36,13 @@ def meta_generator(args):
     Assumed file naming convention is:
     dir_name
     |
-    |- im_c***_t***_p***_z***.png
-    |- im_c***_t***_p***_z***.png
+    |- im_c***_z***_t***_p***.png
+    |- im_c***_z***_t***_p***.png
 
     c is channel
+    z is slice in stack (z)
     t is time
     p is position (FOV)
-    z is slice in stack (z)
 
     :param list args:    parsed args containing
         str input_dir:   path to input directory containing images
@@ -57,6 +67,7 @@ def meta_generator(args):
         frames_meta.loc[i] = aux_utils.get_ids_from_imname(
             im_name=im_names[i],
             df_names=df_names,
+            order=args.order,
         )
     # Write metadata
     meta_filename = os.path.join(args.input, meta_name)

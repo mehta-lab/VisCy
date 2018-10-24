@@ -53,15 +53,15 @@ dir_name
     |
     |- frames_meta.csv
     |- global_metadata.csv
-    |- im_c***_t***_p***_z***.png
-    |- im_c***_t***_p***_z***.png
+    |- im_c***_z***_t***_p***.png
+    |- im_c***_z***_t***_p***.png
     |- ...
 ```
 The image naming convention is (parenthesis is their name in frames_meta.csv)
 * **c** = channel index     (channel_idx)
+* **z** = slice index in z stack (slice_idx)
 * **t** = timepoint index   (time_idx)
 * **p** = position (field of view) index (pos_idx)
-* **z** = slice index in z stack (slice_idx)
 
 If you download your dataset from the imaging database [imagingDB](https://github.com/czbiohub/imagingDB)
 you will get your dataset correctly formatted and can directly input that into microDL.
