@@ -1,6 +1,6 @@
 # MicroDL
 
-This is a pipeline for training U-Net models. It consists of three modudules:
+This is a pipeline for training U-Net models. It consists of three modules:
 
 * Preprocessing: normalization, flatfield correction, masking, tiling
 * Training: model creation, loss functions (w/wo masks), metrics, learning rates
