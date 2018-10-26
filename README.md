@@ -3,8 +3,8 @@
 This is a pipeline for training U-Net models. It consists of three modudules:
 
 * Preprocessing: normalization, flatfield correction, masking, tiling
-* Training: 2D-3D model creation, training with certain losses, metrics, learning rates
-* Inference: perform inference on tiles that can be stitched to full images
+* Training: model creation, loss functions (w/wo masks), metrics, learning rates
+* Inference: on full images or on tiles that can be stitched to full images
 
 ## Getting Started
 
@@ -95,7 +95,7 @@ That will generate the frames_meta.csv file you will need for data preprocessing
 
 ## Preprocessing
 
-The following settings can be adjusted in preprocessing:
+The following settings can be adjusted in preprocessing (see example in preprocess_config.yml):
 * input_dir: (str) Directory where data to be preprocessed is located
 * output_dir: (str) folder name where all processed data will be written
 * slice_ids: (int/list) Value(s) of z-index to be processed
@@ -120,6 +120,11 @@ The following settings can be adjusted in preprocessing:
     * min_fraction: (float) minimum fraction of image occupied by foreground in masks
     * hist_clip_limits: (list of ints) lower and upper intensity percentiles for histogram clipping
 
+The tiling class will take the 2D image files, assemble them to stacks in case 3D tiles are required,
+and store them as tiles based on input tile size, step size, and depth.
+
+All data will be stored in the specified output dir, where a 'preprocessing_info.json' file
+
 During preprocessing, a csv file named frames_csv.csv will be generated, which
 will be used for further processing. The csv contains the following fields for each image tile:
 
@@ -131,7 +136,40 @@ will be used for further processing. The csv contains the following fields for e
 * 'row_start': starting row for tile (add tile_size for endpoint)
 * 'col_start': start column (add tile_size for endpoint)
 
-## Modeling
+## Training
 
+### Learning Rate
+Prior to training, you may want to explore learning rates using the learning rate (LR) finder.
+You can see an example on how to run it in 'config_lr_finder.yml'.
+The implemented LR finder is based on the [paper by Smith.](https://arxiv.org/abs/1506.01186)
+but with the adaptation from [fast.ai](http://www.fast.ai/) to plot loss instead of accuracy
+on the y-axis.
+The LR finder should be run for a few epochs at most. During those epochs it gradually increase
+the learning rate from base_lr to max_lr.
+It saves a plot of the results from which you can determine learning
+rate bounds from learning rate vs. loss.
+
+While training, you can either set the training rate to a value (e.g. from LR finder)
+or you can use cyclic learning rates where you set an upper and lower bound for the learning rate.
+Cyclical learning rate (CLR) is a custom callback function implemented as in
+[this paper.](https://arxiv.org/abs/1506.01186)
+Learning rate is increased then decreased in a repeated triangular
+pattern over time. One triangle = one cycle.
+Step size is the number of iterations / batches in half a cycle.
+The paper recommends a step-size of 2-10 times the number of batches in
+an epoch (empirical) i.e step-size = 2-10 epochs.
+It might be best to stop training at the end of a cycle when the learning rate is
+at minimum value and accuracy/performance potentially peaks.
+Initial amplitude is scaled by gamma ** iterations.
+
+### Run Training
+
+Assuming you have a config file that specifies what you would like to train
+(see examples config.yml or config_regression.yml), you can start training with the command
+```buildoutcfg
+python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id (default 0)> --gpu_mem_frac <0-1 (default 1> --model_fname <file name if starting from weights>
+```
+
+    
 
 ## Inference

@@ -5,7 +5,7 @@ import os
 
 from micro_dl.input.estimate_flat_field import FlatFieldEstimator2D
 from micro_dl.input.generate_masks import MaskProcessor
-from micro_dl.input.tile_stack import ImageStackTiler
+from micro_dl.input.tile_images import ImageTiler
 import micro_dl.utils.aux_utils as aux_utils
 
 
@@ -30,8 +30,9 @@ def pre_process(pp_config):
     """
     Preprocess data. Possible options are:
     correct_flat_field: Perform flatfield correction (2D only currently)
-    use_masks: Generate binary masks from given input channels
-    tile_stack: Split frames into smaller tiles with tile_size and step_size
+    create_masks: Generate binary masks from given input channels
+    do_tiling: Split frames (stacked frames if generating 3D tiles) into
+    smaller tiles with tile_size and step_size.
     This script will preprocess your dataset, save tiles and associated
     metadata. Then in the train_script, a dataframe for training data
     will be assembled based on the inputs and target you specify.
@@ -65,7 +66,7 @@ def pre_process(pp_config):
     # Generate masks
     mask_dir = None
     mask_channel = None
-    if pp_config['use_masks']:
+    if pp_config['create_masks']:
         mask_processor_inst = MaskProcessor(
             input_dir=input_dir,
             output_dir=output_dir,
@@ -88,8 +89,8 @@ def pre_process(pp_config):
     # Tile frames
     tile_dir = None
     tile_mask_dir = None
-    if pp_config['tile_stack']:
-        tile_inst = ImageStackTiler(
+    if pp_config['do_tiling']:
+        tile_inst = ImageTiler(
             input_dir=input_dir,
             output_dir=output_dir,
             tile_dict=pp_config['tile'],
@@ -100,7 +101,7 @@ def pre_process(pp_config):
         tile_dir = tile_inst.get_tile_dir()
         # If you're using min fraction, it assumes you've generated masks
         # and want to tile only the ones with a minimum amount of foreground
-        if 'min_fraction' in pp_config['tile'] and pp_config['use_masks']:
+        if 'min_fraction' in pp_config['tile'] and pp_config['create_masks']:
             save_tiled_masks = None
             if 'save_tiled_masks' in pp_config['tile']:
                 save_tiled_masks = pp_config['tile']['save_tiled_masks']

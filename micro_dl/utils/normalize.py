@@ -4,13 +4,15 @@ from skimage.exposure import equalize_adapthist
 
 
 def zscore(input_image):
-    """Performs z-score normalization
+    """
+    Performs z-score normalization. Adds epsilon in denominator for robustness
 
     :param input_image: input image for intensity normalization
     :return: z score normalized image
     """
 
-    norm_img = (input_image - np.mean(input_image)) / np.std(input_image)
+    norm_img = (input_image - np.mean(input_image)) /\
+               (np.std(input_image) + np.finfo(float).eps)
     return norm_img
 
 

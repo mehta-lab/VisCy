@@ -2,11 +2,11 @@ output_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010_train_data
 verbose: 10
 input_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010'
 correct_flat_field: True
-use_masks: True
+create_masks: True
 masks:
     channels: [5]
     str_elem_radius: 3
-tile_stack: True
+do_tiling: True
 tile:
     channels: [0, 5]
     tile_size: [256, 256]

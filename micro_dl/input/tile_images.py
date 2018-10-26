@@ -9,8 +9,8 @@ import micro_dl.utils.normalize as normalize
 import micro_dl.utils.image_utils as image_utils
 
 
-class ImageStackTiler:
-    """Tiles all images images in a stack"""
+class ImageTiler:
+    """Tiles all images images in a dataset"""
 
     def __init__(self,
                  input_dir,
@@ -57,8 +57,6 @@ class ImageStackTiler:
             correction
         :param bool isotropic: if 3D, make the grid/shape isotropic
         :param str data_format: Channels first or last
-        TODO: It's unclear how this will work for 3D datasets
-        TODO: ADD TESTS!!!
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -91,11 +89,13 @@ class ImageStackTiler:
         self.hist_clip_limits = hist_clip_limits
         self.data_format = data_format
 
-        self.str_tile_size = '-'.join([str(val) for val in tile_size])
-        self.str_step_size = '-'.join([str(val) for val in step_size])
+        self.str_tile_step = 'tiles_{}_step_{}'.format(
+            '-'.join([str(val) for val in tile_size]),
+            '-'.join([str(val) for val in step_size]),
+        )
         self.tile_dir = os.path.join(
             output_dir,
-            'tiles_{}_step_{}'.format(self.str_tile_size, self.str_step_size),
+            self.str_tile_step,
         )
         # If tile dir already exist, things could get messy because we don't
         # have any checks in place for how to add to existing tiles
@@ -347,6 +347,7 @@ class ImageStackTiler:
                                     tile_size=self.tile_size,
                                     step_size=self.step_size,
                                     isotropic=self.isotropic,
+                                    return_index=True,
                                 )
                         else:
                             tiled_image_data = image_utils.crop_at_indices(
@@ -427,8 +428,7 @@ class ImageStackTiler:
             self.tile_mask_dir = os.path.join(
                 self.output_dir,
                 'mask_' + '-'.join(map(str, self.channel_ids)) +
-                '_tiles_{}_step_{}'.format(self.str_tile_size,
-                                           self.str_step_size),
+                self.str_tile_step,
             )
             os.makedirs(self.tile_mask_dir, exist_ok=True)
         elif save_tiled_masks == 'as_channel':
