@@ -17,41 +17,64 @@ class BaseDataSet(keras.utils.Sequence):
                  tile_dir,
                  input_fnames,
                  target_fnames,
-                 batch_size,
-                 model_task='regression',
-                 shuffle=True,
-                 augmentations=False,
-                 random_seed=42,
-                 normalize=False):
+                 dataset_config,
+                 batch_size):
         """Init
 
         The images could be normalized at the image level during tiling
         (default, normalize=False). If images were not normalized during tiling
         set the normalize flag to normalize at the tile-level
+        Works for either data format (channels_first or channels_last).
+        Tiles will be loaded as is, so it's important that you've made sure
+        your data format matches your preprocessing config.
+        TODO: Test with multiple channel tiles
 
         :param str tile_dir: directory containing training image tiles
         :param pd.Series input_fnames: pd.Series with each row containing
          filenames for one input
         :param pd.Series target_fnames: pd.Series with each row containing
          filenames for one target
+        :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param str model_task: Can be 'regression' or 'segmentation'
-        :param bool shuffle: shuffle data for each epoch
-        :param dict augmentations: options for image augmentation
-        :param int random_seed: initialize the random number generator with
-         this seed
         """
         self.tile_dir = tile_dir
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
-        self.batch_size = batch_size
-        self.shuffle = shuffle
         self.num_samples = len(self.input_fnames)
-        self.augmentations = augmentations
-        self.model_task = model_task
+        self.batch_size = batch_size
+
+        # Check if model task (regression or segmentation) is specified
+        self.model_task = 'regression'
+        if 'model_task' in dataset_config:
+            self.model_task = dataset_config['model_task']
+            assert self.model_task in {'regression', 'segmentation'}, \
+                "Model task must be either 'segmentation' or 'regression'"
+
+        self.augmentations = False
+        if 'augmentations' in dataset_config:
+            self.augmentations = dataset_config['augmentations']
+        assert isinstance(self.augmentations, bool),\
+            'augmentation parameter should be boolean'
+
+        self.normalize = False
+        if 'normalize' in dataset_config:
+            self.normalize = dataset_config['normalize']
+        assert isinstance(self.normalize, bool),\
+            'normalize parameter should be boolean'
+
+        self.shuffle = True
+        if 'shuffle' in dataset_config:
+            self.shuffle = dataset_config['shuffle']
+        assert isinstance(self.shuffle, bool),\
+            'shuffle parameter should be boolean'
+
+        random_seed = None
+        if 'random_seed' in dataset_config:
+            random_seed = dataset_config['random_seed']
+
         self.random_seed = random_seed
         np.random.seed(random_seed)
-        self.normalize = normalize
+
         self.on_epoch_end()
 
     def __len__(self):
@@ -65,32 +88,59 @@ class BaseDataSet(keras.utils.Sequence):
 
         :param np.array input_image: input image to be transformed
         :param int aug_idx: integer specifying the transformation to apply.
-         0 - Image as is, 1 - flip LR, 2 - flip UD, 3 - rot 90, 4 - rot 180,
-         5 - rot 270
+         0 - Image as is
+         1 - flip LR (horizontally) about axis 1 (y)
+         2 - flip UD (vertically) about axis 0 (x)
+         3 - rotate 90 degrees in the xy-plane in the x toward y direction
+         4 - rotate 180 degrees in the xy-plane in the x toward y direction
+         5 - rotate 270 degrees in the xy-plane in the x toward y direction
+        :param str data_format: channels_first or _last. Data is always loaded
+        as channels_first so channels_last operations may be obsolete
         :return np.array image after transformation is applied
         """
+        # We need to flip over different dimensions depending on data format
+        add_dim = 0
+        # Get tile data format from shape
+        if len(input_image.shape) == 3 and input_image.shape[0] <= 3:
+            add_dim = 1
 
-        assert len(input_image.shape) == 2, 'current implementation works' \
-                                            'for 2D images only'
         if aug_idx == 0:
             return input_image
         elif aug_idx == 1:
-            trans_image = np.fliplr(input_image)
+            # flip about axis=1 (which is row in numpy, hence about y)
+            trans_image = np.flip(input_image, 1 + add_dim)
         elif aug_idx == 2:
-            trans_image = np.flipud(input_image)
+            # flip about axis=0 (which is cols in numpy, hence about x)
+            trans_image = np.flip(input_image, 0 + add_dim)
         elif aug_idx == 3:
-            trans_image = np.rot90(input_image, 1)
+            # rot in plane defined by axis=(0, 1) or (1,2)
+            trans_image = np.rot90(
+                input_image,
+                k=1,
+                axes=(0 + add_dim, 1 + add_dim),
+            )
         elif aug_idx == 4:
-            trans_image = np.rot90(input_image, 2)
+            # rot in plane defined by axis=(0, 1) or (1,2)
+            trans_image = np.rot90(
+                input_image,
+                k=2,
+                axes=(0 + add_dim, 1 + add_dim),
+            )
         elif aug_idx == 5:
-            trans_image = np.rot90(input_image, 3)
+            # rot in plane defined by axis=(0, 1) or (1,2)
+            trans_image = np.rot90(
+                input_image,
+                k=3,
+                axes=(0 + add_dim, 1 + add_dim),
+            )
         else:
             msg = '{} not in allowed aug_idx: 0-5'.format(aug_idx)
             raise ValueError(msg)
         return trans_image
 
     def _get_volume(self, fname_list, aug_idx=0):
-        """Read a volume from fname_list
+        """
+        Read tiles from fname_list and stack them into an image volume.
 
         :param list fname_list: list of file names of input/target images
         :param int aug_idx: type of augmentation to be applied (if any)
@@ -99,13 +149,12 @@ class BaseDataSet(keras.utils.Sequence):
 
         image_volume = []
         for fname in fname_list:
-            cur_channel = np.load(os.path.join(self.tile_dir, fname))
+            cur_tile = np.load(os.path.join(self.tile_dir, fname))
             if self.augmentations:
-                cur_channel = self._augment_image(cur_channel, aug_idx)
-            image_volume.append(cur_channel)
-
-        image_volume = np.stack(image_volume)
-        return image_volume
+                cur_tile = self._augment_image(cur_tile, aug_idx)
+            image_volume.append(cur_tile)
+        # Stack images channels first
+        return np.stack(image_volume)
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -131,6 +180,7 @@ class BaseDataSet(keras.utils.Sequence):
             # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
+            print(aug_idx)
             cur_input = self._get_volume(cur_input_fnames.split(','),
                                          aug_idx)
             cur_target = self._get_volume(cur_target_fnames.split(','),
@@ -142,14 +192,13 @@ class BaseDataSet(keras.utils.Sequence):
                 cur_input = (cur_input - np.mean(cur_input)) /\
                              np.std(cur_input)
                 # Only normalize target if we're dealing with regression
-                if self.model_task is not 'segmentation':
+                if self.model_task is not 'segmentation' and self.normalize:
                     cur_target = (cur_target - np.mean(cur_target)) /\
                                  np.std(cur_target)
             input_image.append(cur_input)
             target_image.append(cur_target)
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
-
         return input_image, target_image
 
     def on_epoch_end(self):
@@ -168,13 +217,8 @@ class DataSetWithMask(BaseDataSet):
                  input_fnames,
                  target_fnames,
                  mask_fnames,
-                 batch_size,
-                 model_task='regression',
-                 label_weights=None,
-                 shuffle=True,
-                 augmentations=False,
-                 random_seed=42,
-                 normalize=False):
+                 dataset_config,
+                 batch_size):
         """Init
 
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
@@ -187,25 +231,21 @@ class DataSetWithMask(BaseDataSet):
          filenames for one target
         :param pd.Series mask_fnames: pd.Series with each row containing
          mask filenames
+        :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param str model_task: Can be 'regression' or 'segmentation'
-        :param list label_weights: weight for each label
         :param bool shuffle: shuffle data for each epoch
-        :param int random_seed: initialize the random number generator with
-         this seed
         """
 
         super().__init__(tile_dir,
                          input_fnames,
                          target_fnames,
-                         batch_size,
-                         model_task,
-                         shuffle,
-                         augmentations,
-                         random_seed,
-                         normalize)
+                         dataset_config,
+                         batch_size)
         self.mask_fnames = mask_fnames
-        self.label_weights = label_weights
+        # list label_weights: weight for each label
+        self.label_weights = None
+        if 'label_weights' in dataset_config:
+            self.label_weights = dataset_config['label_weights']
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -213,7 +253,8 @@ class DataSetWithMask(BaseDataSet):
         :param int index: batch index
         :return: np.ndarrays input_image and target_image of shape
          [batch_size, num_channels, z, y, x] and mask_image of shape
-         [batch_size, z, y, x]
+         [batch_size, z, y, x] for data format channels_first,
+         otherwise [..., y, x, z]
         """
 
         start_idx = index * self.batch_size

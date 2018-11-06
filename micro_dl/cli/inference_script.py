@@ -8,6 +8,7 @@ import yaml
 
 from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
 from micro_dl.train.model_inference import ModelEvaluator
+import micro_dl.utils.aux_utils as aux_utils
 from micro_dl.utils.train_utils import check_gpu_availability
 
 def parse_args():
@@ -77,9 +78,8 @@ def run_inference(args):
 
     ev_inst.predict_on_tiles(ds_test, nb_batches=args.num_batches)
     idx_fname = os.path.join(config['trainer']['model_dir'],
-                             'split_samples.pkl')
-    with open(idx_fname, 'rb') as f:
-        split_samples = pickle.load(f)
+                             'split_samples.json')
+    split_samples = aux_utils.read_json(idx_fname)
 
     image_meta = pd.read_csv(args.image_meta_fname)
     # for regression tasks change place_operation to 'mean'

@@ -5,17 +5,19 @@ dataset:
     mask_channels: None
     split_by_column: slice_idx
     model_task: 'regression'
+    normalize: False
+    augmentation: False
     split_ratio:
-        train: 0.5
-        val: 0.5
-        test: 0.0
+        train: 0.6
+        val: 0.2
+        test: 0.2
     height: 256
     width: 256
 verbose: 10
 trainer:
     model_dir: '/Users/jenny.folkesson/Data/models/stack_2d_labelfree_bs16_mse'
     batch_size: 16
-    max_epochs: 50
+    max_epochs: 200
     patience: 20
     masked_loss: False
     metrics: coeff_determination
@@ -26,7 +28,7 @@ trainer:
             max_epochs: 3
             fig_fname: '/Users/jenny.folkesson/Data/models/stack_2d_labelfree_bs16_mse/lr_finder.png'
             base_lr: 0.001
-            max_lr: 0.01
+            max_lr: 0.006
             step_size: 2
             gamma: 0.999
             scale_mode: iterations

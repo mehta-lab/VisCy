@@ -255,7 +255,7 @@ class ImageTiler:
             tile = data_tuple[1]
             # Check and potentially flip dimensions for 3D data
             if self.data_format == 'channels_first' and len(tile.shape) > 2:
-                tile = np.swapaxes(tile, 0, 2)
+                tile = np.transpose(tile, (2, 0, 1))
             np.save(os.path.join(save_dir, file_name),
                     tile,
                     allow_pickle=True,

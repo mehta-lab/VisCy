@@ -98,9 +98,9 @@ class BaseTrainingTable:
         test_idx = self.df_metadata[self.split_by_column].isin(test_set)
         df_test = self._get_df(test_idx, retain_columns)
 
+        df_val = None
         if self.split_ratio['val']:
             val_set = split_idx['val']
             val_idx = self.df_metadata[self.split_by_column].isin(val_set)
             df_val = self._get_df(val_idx, retain_columns)
-            return df_train, df_val, df_test, split_idx
-        return df_train, df_test, split_idx
+        return [df_train, df_val, df_test], split_idx
