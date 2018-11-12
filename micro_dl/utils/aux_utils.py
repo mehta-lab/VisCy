@@ -233,7 +233,7 @@ def validate_metadata_indices(frames_metadata,
             all_ids = frames_metadata[col_name].unique()
             id_indicator = [i in all_ids for i in ids]
             assert np.all(id_indicator),\
-                'Indices for {} available'.format(col_name)
+                'Indices for {} not available'.format(col_name)
             metadata_ids[meta_id_name] = ids
 
     tp_dict = None

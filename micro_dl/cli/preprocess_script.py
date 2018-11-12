@@ -270,7 +270,7 @@ def pre_process(pp_config, req_params_dict):
         elif 'correct' in pp_config['flat_field'] and \
                 pp_config['flat_field']['correct']:
             flat_field_dir = pp_config['flat_field']['flat_field_dir']
-    
+
     # Resample images
     if 'resize' in pp_config:
         scale_factor = pp_config['resize']['scale_factor']
