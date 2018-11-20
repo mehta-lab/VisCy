@@ -95,7 +95,11 @@ That will generate the frames_meta.csv file you will need for data preprocessing
 
 ## Preprocessing
 
-The following settings can be adjusted in preprocessing (see example in preprocess_config.yml):
+The main command for preprocessing is:
+```buildoutcfg
+python micro_dl/cli/preprocess_script.py --config <config path (.yml)>
+```
+The following settings can be adjusted in preprocessing using a config file (see example in preprocess_config.yml):
 * input_dir: (str) Directory where data to be preprocessed is located
 * output_dir: (str) folder name where all processed data will be written
 * slice_ids: (int/list) Value(s) of z-index to be processed
