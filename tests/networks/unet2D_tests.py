@@ -100,6 +100,7 @@ class TestUNet2D(unittest.TestCase):
         down_block_idx = [[1, 11], [11, 22], [22, 33]]
         upsamp_idx = [45, 33]
         concat_idx = [46, 34]
+
         for idx, down_idx in enumerate(down_block_idx):
             # conv layers
             cur_down_block = self.model_layers[down_idx[0]: down_idx[1]]
@@ -151,20 +152,16 @@ class TestUNet2D(unittest.TestCase):
     def test_UNet2D_shape_mismatches(self):
         """Test for shape mismatches with padding=valid and/or residual"""
 
-        # shape mismatch between conv downsampled layer and input pooled layer
-        self.network_config['padding'] = 'valid'
-        tst = UNet2D(self.network_config)
-        nose.tools.assert_raises(AssertionError,
-                                 tst.build_net)
 
         # even without conv downsampling, there could be shape mismatches if
         # downsampling results in odd num of channels, as in upsampling we'll
         # have even num of channels
+        self.network_config['padding'] = 'same'
         self.network_config['residual'] = False
         self.network_config['height'] = 54
         self.network_config['width'] = 54
         tst = UNet2D(self.network_config)
-        nose.tools.assert_raises(AssertionError,
+        nose.tools.assert_raises(ValueError,
                                  tst.build_net)
 
     def test_UNet2D_valid_shapes(self):

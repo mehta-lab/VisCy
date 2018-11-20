@@ -81,39 +81,37 @@ class InterpUpSampling3D(InterpUpSampling2D):
         :return: resized tensor
         """
 
-        b_size, z_size, y_size, x_size, c_size = x.shape.as_list()
-        x_size_new = x_size * self.size[2]
-        y_size_new = y_size * self.size[1]
-        z_size_new = z_size * self.size[0]
-        # resize y-x
-        squeeze_b_z = tf.reshape(
-            x, tf.convert_to_tensor([-1, y_size, x_size, c_size])
-        )
-        resize_b_z = super()._interp_image(squeeze_b_z,
-                                           (self.size[1:]))
-        #  tf doesn't like None in reshape
-        #  https://github.com/tensorflow/tensorflow/issues/7253
-        resume_b_z = tf.reshape(
-            tensor=resize_b_z,
-            shape=tf.convert_to_tensor([-1, z_size,
-                                        y_size_new,
-                                        x_size_new,
-                                        c_size])
+        shape_list = x.shape.as_list()[1:]
+        z_size = shape_list[0] if shape_list[0] is not None else tf.shape(x)[1]
+        y_size = shape_list[1] if shape_list[1] is not None else tf.shape(x)[2]
+        x_size = shape_list[2] if shape_list[2] is not None else tf.shape(x)[3]
+        c_size = shape_list[3]
+
+        x_size_new = x_size * self.size[2] if x_size is not None \
+            else tf.shape(x)[3] * self.size[2]
+        y_size_new = y_size * self.size[1] if y_size is not None \
+            else tf.shape(x)[2] * self.size[1]
+        z_size_new = z_size * self.size[0] if z_size is not None \
+            else tf.shape(x)[1] * self.size[0]
+
+        squeeze_b_z = tf.reshape(x, [-1, y_size, x_size, c_size])
+        resize_b_z = super()._interp_image(squeeze_b_z, self.size[1:])
+        resume_b_x = tf.reshape(
+            resize_b_z,
+            [-1, z_size, y_size_new, x_size_new, c_size]
         )
         # resize y-z, only z as y is already resized in the previous step
-        #   first reorient
-        reoriented = tf.transpose(resume_b_z, [0, 3, 2, 1, 4])
-        #   squeeze and 2d resize
-        squeeze_b_x = tf.reshape(reoriented, [-1, y_size_new, z_size, c_size])
+        # first reorient
+        reoriented = tf.transpose(resume_b_x, [0, 3, 2, 1, 4])
+        #  squeeze and 2d resize
+        squeeze_b_x = tf.reshape(reoriented,
+                                 [-1, y_size_new, z_size, c_size])
         resize_b_x = super()._interp_image(squeeze_b_x, (1, self.size[0]))
-        resume_b_x = tf.reshape(
-            tensor=resize_b_x,
-            shape=tf.convert_to_tensor((-1, x_size_new,
-                                        y_size_new,
-                                        z_size_new,
-                                        c_size))
+        resume_b_z = tf.reshape(
+            resize_b_x,
+            [-1, x_size_new, y_size_new, z_size_new, c_size]
         )
-        output_tensor = tf.transpose(resume_b_x, [0, 3, 2, 1, 4])
+        output_tensor = tf.transpose(resume_b_z, [0, 3, 2, 1, 4])
         return output_tensor
 
     def call(self, x, mask=None):
@@ -125,19 +123,6 @@ class InterpUpSampling3D(InterpUpSampling2D):
         :param keras.layers x: input layer for upsampling
         :return: upsampled tensor
         """
-
-        if self.data_format == 'channels_last':
-            b_size, z_size, y_size, x_size, c_size = x.shape.as_list()
-        else:
-            b_size, c_size, z_size, y_size, x_size = x.shape.as_list()
-        x_size_new = self.size[2] * x_size
-        y_size_new = self.size[1] * y_size
-        z_size_new = self.size[0] * z_size
-
-        if (x_size == x_size_new) and (y_size == y_size_new) and (
-                z_size == z_size_new):
-            # already in the target shape
-            return x
 
         if self.data_format == 'channels_first':
             #  convert to channels_last

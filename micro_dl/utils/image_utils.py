@@ -1,12 +1,16 @@
 """Utility functions for processing images"""
 import cv2
 import itertools
+import math
 import numpy as np
 import os
 from scipy.ndimage.morphology import binary_fill_holes
 from skimage.filters import threshold_otsu
 from skimage.morphology import disk, ball, binary_opening
 from skimage.transform import resize
+
+import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.normalize as normalize
 
 
 def resize_image(input_image, output_shape):
@@ -23,6 +27,31 @@ def resize_image(input_image, output_shape):
 
     resized_image = resize(input_image, output_shape)
     return resized_image
+
+
+def crop2base(im, base=2):
+    """
+    Crop image to nearest smaller factor of the base (usually 2)
+
+    :param nd.array im: Image
+    :param int base: Base to use, typically 2
+    :return nd.array im: Cropped image
+    :raises AssertionError: if base is less than zero
+    """
+    assert base > 0, "Base needs to be greater than zero, not {}".format(base)
+    im_shape = im.shape
+
+    x_shape = base ** int(math.log(im_shape[0], base))
+    y_shape = base ** int(math.log(im_shape[1], base))
+    if x_shape < im_shape[0]:
+        # Approximate center crop
+        start_idx = (im_shape[0] - x_shape) // 2
+        im = im[start_idx:start_idx + x_shape, ...]
+    if y_shape < im_shape[1]:
+        # Approximate center crop
+        start_idx = (im_shape[1] - y_shape) // 2
+        im = im[:, start_idx:start_idx + y_shape, ...]
+    return im
 
 
 def resize_mask(input_image, target_size):
@@ -100,6 +129,60 @@ def fit_polynomial_surface_2D(sample_coords,
     return poly_surface
 
 
+def preprocess_imstack(frames_metadata,
+                       input_dir,
+                       depth,
+                       time_idx,
+                       channel_idx,
+                       slice_idx,
+                       pos_idx,
+                       flat_field_im=None,
+                       hist_clip_limits=None):
+    """
+    Preprocess image given by indices: flatfield correction, histogram
+    clipping and z-score normalization is performed.
+
+    :param int time_idx: Time index
+    :param int channel_idx: Channel index
+    :param int slice_idx: Slice (z) index
+    :param int pos_idx: Position (FOV) index
+    :param np.array flat_field_im: Flat field image for channel
+    :param list hist_clip_limits: Limits for histogram clipping (size 2)
+    :return np.array im: 2D preprocessed image
+    """
+    margin = 0 if depth == 1 else depth // 2
+    im_stack = []
+    for z in range(slice_idx - margin, slice_idx + margin + 1):
+        meta_idx = aux_utils.get_meta_idx(
+            frames_metadata,
+            time_idx,
+            channel_idx,
+            z,
+            pos_idx,
+        )
+        file_path = os.path.join(
+            input_dir,
+            frames_metadata.loc[meta_idx, "file_name"],
+        )
+        im = read_image(file_path)
+        if flat_field_im is not None:
+            im = apply_flat_field_correction(
+                im,
+                flat_field_image=flat_field_im,
+            )
+        im_stack.append(im)
+    # Stack images
+    im_stack = np.stack(im_stack, axis=2)
+    # normalize
+    if hist_clip_limits is not None:
+        im_stack = normalize.hist_clipping(
+            im_stack,
+            hist_clip_limits[0],
+            hist_clip_limits[1],
+        )
+    return normalize.zscore(im_stack)
+
+
 def tile_image(input_image,
                tile_size,
                step_size,
@@ -116,6 +199,8 @@ def tile_image(input_image,
      no overlap, the step size is tile_size. If overlap, step_size < tile_size
     :param bool isotropic: if 3D, make the grid/shape isotropic
     :param bool return_index: indicator for returning tile indices
+    :param float min_fraction: Minimum fraction of foreground in mask for
+    including tile
     :return: a list with tuples of tiled image id of the format
      rrmin-rmax_ccmin-cmax_slslmin-slmax and tiled image
      if return_index=True: return a list with tuples of crop indices

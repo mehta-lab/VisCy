@@ -149,18 +149,6 @@ class TestImageTiler(unittest.TestCase):
     def test_tile_mask_dir(self):
         nose.tools.assert_equal(self.tile_inst.get_tile_mask_dir(), None)
 
-    def test_preprocess_im(self):
-        im_stack, channel_name = self.tile_inst._preprocess_im(
-            time_idx=self.time_idx,
-            channel_idx=self.channel_idx,
-            slice_idx=16,
-            pos_idx=self.pos_idx1,
-        )
-        self.assertTupleEqual(im_stack.shape, (15, 11, 3))
-        im_norm = norm_util.zscore(self.im)
-        for z in range(0, 3):
-            numpy.testing.assert_array_equal(im_stack[..., z], im_norm)
-
     def test_write_tiled_data(self):
         tiled_data = [('r0-5_c0-5_sl0-3', np.zeros((5, 5, 3), dtype=np.float)),
                       ('r4-9_c0-5_sl0-3', np.ones((5, 5, 3), dtype=np.float))]
@@ -408,18 +396,6 @@ class TestImageMaskTiler(unittest.TestCase):
             self.tile_inst.get_tile_dir(),
             os.path.join(self.output_dir, "tiles_5-5_step_5-5"),
         )
-
-    def test_preprocess_im(self):
-        im_stack, channel_name = self.tile_inst._preprocess_im(
-            time_idx=self.time_idx,
-            channel_idx=self.channel_idx1,
-            slice_idx=16,
-            pos_idx=self.pos_idx,
-        )
-        self.assertTupleEqual(im_stack.shape, (15, 11, 3))
-        im_norm = norm_util.zscore(self.im)
-        for z in range(0, 3):
-            numpy.testing.assert_array_equal(im_stack[..., z], im_norm)
 
     def test_write_tiled_data(self):
         tiled_data = [('r0-5_c0-5_sl0-3', np.zeros((5, 5, 3), dtype=np.float)),

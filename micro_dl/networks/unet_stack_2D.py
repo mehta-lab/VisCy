@@ -16,11 +16,16 @@ class UNetStackTo2D(BaseUNet):
 
         :param dict network_config: dict with all network associated parameters
         """
+        if not predict:
+            # Depth is None when predicting
+            assert 'depth' in network_config and network_config['depth'] > 1,\
+                'depth is missing in network config'
+            assert network_config['depth'] % 2 != 0, \
+                'depth is even. Expecting an odd value to predict center slice'
+            if network_config['depth'] > 5:
+                warnings.warn('using more than 5 slices to predict center slice',
+                              Warning)
 
-        assert 'depth' in network_config and network_config['depth'] > 1, \
-            'depth is missing in network config'
-        assert network_config['depth'] % 2 != 0, \
-            'depth is even. Expecting an odd value to predict center slice'
         assert ('padding' not in network_config or
                 network_config['padding'] == 'same'), \
             'Due to anisotropic filter shape only padding=same allowed here'
@@ -28,10 +33,6 @@ class UNetStackTo2D(BaseUNet):
         super().__init__(network_config, predict)
         num_down_blocks = len(network_config['num_filters_per_block'])
         self.num_down_blocks = num_down_blocks
-
-        if network_config['depth'] > 5:
-            warnings.warn('using more than 5 slices to predict center slice',
-                          Warning)
 
     def _skip_block(self, input_layer, num_slices, num_filters):
         """Converts skip layers from 3D to 2D: 1x1 along Z
@@ -44,7 +45,6 @@ class UNetStackTo2D(BaseUNet):
         :param int num_filters: as named
         :return: convolved layer with valid padding
         """
-
         filter_shape = (num_slices, 1, 1)
         layer = Conv3D(filters=num_filters,
                        kernel_size=filter_shape,
@@ -67,10 +67,8 @@ class UNetStackTo2D(BaseUNet):
          skip_layers_list: list of all skip layers
         """
 
-        assert filter_shape is not None and downsample_shape is not None, \
-            'anisotropic filter_shape and downsample_shape are required'
-        if filter_shape is not None:
-            self.config['filter_size'] = filter_shape
+        assert filter_shape is not None, 'Anisotropic filter shape is required'
+        assert downsample_shape is not None, 'Downsample_shape is required'
 
         if self.config['residual']:
             layer = residual_conv_block(layer=input_layer,

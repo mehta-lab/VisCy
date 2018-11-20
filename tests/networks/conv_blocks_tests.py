@@ -308,19 +308,6 @@ class TestConvBlocks(unittest.TestCase):
             # test for op layer shape
             self._test_same_out_shape(layers_list=out_layers,
                                       exp_shapes=exp_out_shapes)
-            # valid_padding
-            self.network_config['padding'] = 'valid'
-            # when block_idx > 2, the downsampled input layer for residual
-            # connection and final conv layer have shape mismatches, will raise
-            # errors in pad_channels and merge_residual. USING CONV
-            # DONWSAMPLING AND RESIDUAL MIGHT LEAD TO SHAPE MISMATCH ¯\_(ツ)_/¯
-            nose.tools.assert_raises(
-                AssertionError,
-                self._create_model,
-                in_shape,
-                conv_blocks.residual_downsample_conv_block
-            )
-            self.network_config['padding'] = 'same'
 
             # test for num of trainable weights
             nose.tools.assert_equal(len(weight_arrays),

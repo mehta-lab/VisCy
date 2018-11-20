@@ -180,7 +180,7 @@ class BaseDataSet(keras.utils.Sequence):
             # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
-            print(aug_idx)
+
             cur_input = self._get_volume(cur_input_fnames.split(','),
                                          aug_idx)
             cur_target = self._get_volume(cur_target_fnames.split(','),

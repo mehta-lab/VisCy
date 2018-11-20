@@ -22,7 +22,8 @@ def load_model(network_config, model_fname, predict=False):
      checks on input shape
     :return: Keras.Model instance
     """
-
+    network_config['width'] = None
+    network_config['height'] = None
     network_cls = network_config['class']
     # not ideal as more networks get added
     network_cls = aux_utils.import_class('networks', network_cls)
@@ -33,29 +34,20 @@ def load_model(network_config, model_fname, predict=False):
     return model
 
 
-def predict_on_larger_image(network_config, model_fname, input_image):
+def predict_on_larger_image(model, input_image):
     """Predict on an image larger than the one it was trained on
 
     All networks with U-net like architecture in this repo, use downsampling of
     2, which is only conducive for images with shapes in powers of 2. If
     different, please crop / resize accordingly to avoid shape mismatches.
 
-    :param dict network_config: a dict with all the required parameters
-    :param str model_fname: fname with full path of the .hdf5 file with saved
-     weights
+    :param keras.Model model: Model instance
     :param np.array input_image: as named. expected shape:
      [num_channels, (depth,) height, width] or
      [(depth,) height, width, num_channels]
     :return np.array predicted image: as named. Batch axis removed (and channel
      axis if num_channels=1)
     """
-
-    network_config['width'] = None
-    network_config['height'] = None
-    if 'depth' in network_config:
-        network_config['depth'] = None
-    model = load_model(network_config, model_fname, predict=True)
-    input_image = zscore(input_image)
     im_size = input_image.shape
     num_dims = len(im_size)
     if num_dims == 3:

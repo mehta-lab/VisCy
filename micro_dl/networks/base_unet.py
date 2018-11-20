@@ -36,7 +36,7 @@ class BaseUNet(BaseConvNet):
                       'block_sequence']
 
         self.config = network_config
-        num_down_blocks = len(network_config['num_filters_per_block']) - 1
+        num_down_blocks = len(self.config['num_filters_per_block']) - 1
 
         if not predict:
             param_check, msg = validate_config(network_config, req_params)
@@ -50,29 +50,42 @@ class BaseUNet(BaseConvNet):
                 network_config['height'] // (2 ** num_down_blocks)
             assert feature_height_at_last_block >= 2, \
                 'network depth is incompatible with height'
-
         #  keras upsampling repeats the rows and columns in data. leads to
         #  checkerboard in upsampled images. repeat - use keras builtin
         #  nearest_neighbor, bilinear: interpolate using custom layers
-        upsampling = network_config['upsampling']
+        upsampling = self.config['upsampling']
         msg = 'invalid upsampling, not in repeat/bilinear/nearest_neighbor'
         assert upsampling in ['bilinear', 'nearest_neighbor', 'repeat'], msg
 
-        self.config = network_config
-        if 'depth' in network_config and self.config['depth'] > 1:
-            self.config['num_dims'] = 3
-            if upsampling == 'repeat':
-                self.UpSampling = UpSampling3D
-            else:
-                self.UpSampling = import_class('networks',
-                                               'InterpUpSampling3D')
-        else:
+        def _init_2D():
             self.config['num_dims'] = 2
             if upsampling == 'repeat':
                 self.UpSampling = UpSampling2D
             else:
                 self.UpSampling = import_class('networks',
                                                'InterpUpSampling2D')
+            return
+
+        def _init_3D():
+            self.config['num_dims'] = 3
+            if upsampling == 'repeat':
+                self.UpSampling = UpSampling3D
+            else:
+                self.UpSampling = import_class('networks',
+                                               'InterpUpSampling3D')
+
+        if 'depth' in self.config:
+            if not predict:
+                assert self.config['depth'] >= 1, \
+                    'depth is set to none or zero. confirm if 2D or 3D model'
+                if self.config['depth'] > 1:
+                    _init_3D()
+                elif self.config['depth'] == 1:
+                    _init_2D()
+            else:
+                _init_3D()
+        else:
+            _init_2D()
 
         self.num_down_blocks = num_down_blocks
 

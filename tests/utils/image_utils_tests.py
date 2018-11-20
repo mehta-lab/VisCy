@@ -1,5 +1,6 @@
 import nose.tools
 import numpy as np
+import numpy.testing
 
 import micro_dl.input.estimate_flat_field
 import micro_dl.utils.image_utils as image_utils
@@ -44,4 +45,29 @@ def test_get_flatfield():
 
 @nose.tools.raises(ValueError)
 def test_negative_flatfield():
-    flatfield = micro_dl.input.estimate_flat_field.get_flatfield(test_im - 100, block_size=3)
+    flatfield = micro_dl.input.estimate_flat_field.get_flatfield(
+        test_im - 100,
+        block_size=3,
+    )
+
+
+def test_preprocess_imstack():
+    df_names = ["channel_idx",
+                "slice_idx",
+                "time_idx",
+                "channel_name",
+                "file_name",
+                "pos_idx"]
+    frames_meta = pd.DataFrame(
+        columns=df_names,
+    )
+    im_stack = image_utils.preprocess_imstack(
+        time_idx=self.time_idx,
+        channel_idx=self.channel_idx,
+        slice_idx=16,
+        pos_idx=self.pos_idx1,
+    )
+    self.assertTupleEqual(im_stack.shape, (15, 11, 3))
+    im_norm = norm_util.zscore(self.im)
+    for z in range(0, 3):
+        numpy.testing.assert_array_equal(im_stack[..., z], im_norm)

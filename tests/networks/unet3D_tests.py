@@ -1,9 +1,10 @@
 """Tests for UNet3D"""
+import unittest
+
 import keras.backend as K
-from keras import Model
 import nose.tools
 import numpy as np
-import unittest
+from keras import Model
 
 from micro_dl.networks import UNet3D
 
@@ -159,20 +160,15 @@ class TestUNet3D(unittest.TestCase):
     def test_UNet3D_shape_mismatches(self):
         """Test for shape mismatches with padding=valid and/or residual"""
 
-        # shape mismatch between conv downsampled layer and input pooled layer
-        self.network_config['padding'] = 'valid'
-        tst = UNet3D(self.network_config)
-        nose.tools.assert_raises(AssertionError,
-                                 tst.build_net)
-
         # even without conv downsampling, there could be shape mismatches if
         # downsampling results in odd num of channels, as in upsampling we'll
         # have even num of channels
+        self.network_config['padding'] = 'same'
         self.network_config['residual'] = False
         self.network_config['height'] = 54
         self.network_config['width'] = 54
         tst = UNet3D(self.network_config)
-        nose.tools.assert_raises(AssertionError,
+        nose.tools.assert_raises(ValueError,
                                  tst.build_net)
 
     def test_UNet3D_valid_shapes(self):
