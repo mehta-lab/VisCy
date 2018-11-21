@@ -266,7 +266,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     try:
         frames_metadata = pd.read_csv(meta_fname[0])
     except IOError as e:
-        e.args += 'cannot read split image info'
+        e.args += 'cannot read metadata csv file'
         raise
     return frames_metadata
 

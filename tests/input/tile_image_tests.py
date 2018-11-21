@@ -150,8 +150,11 @@ class TestImageTiler(unittest.TestCase):
         nose.tools.assert_equal(self.tile_inst.get_tile_mask_dir(), None)
 
     def test_write_tiled_data(self):
-        tiled_data = [('r0-5_c0-5_sl0-3', np.zeros((5, 5, 3), dtype=np.float)),
-                      ('r4-9_c0-5_sl0-3', np.ones((5, 5, 3), dtype=np.float))]
+        tile = np.zeros((5, 5, 3), dtype=np.float)
+        tile[..., 1] = 1
+        tile[..., 2] = 2
+        tiled_data = [['r0-5_c0-5_sl0-3', tile],
+                      ['r4-9_c0-5_sl0-3', 5 * tile]]
         tiled_metadata = self.tile_inst._get_dataframe()
         tile_indices = [(0, 5, 0, 5), (4, 9, 0, 5)]
         tile_dir = self.tile_inst.get_tile_dir()
@@ -398,8 +401,11 @@ class TestImageMaskTiler(unittest.TestCase):
         )
 
     def test_write_tiled_data(self):
-        tiled_data = [('r0-5_c0-5_sl0-3', np.zeros((5, 5, 3), dtype=np.float)),
-                      ('r5-10_c0-5_sl0-3', np.ones((5, 5, 3), dtype=np.float))]
+        tile = np.zeros((5, 5, 3), dtype=np.float)
+        tile[..., 1] = 1
+        tile[..., 2] = 2
+        tiled_data = [['r0-5_c0-5_sl0-3', tile],
+                      ['r5-10_c0-5_sl0-3', 5 * tile]]
         tiled_metadata = self.tile_inst._get_dataframe()
         tile_indices = [(0, 5, 0, 5), (4, 9, 0, 5)]
         tile_dir = self.tile_inst.get_tile_dir()
@@ -469,13 +475,11 @@ class TestImageMaskTiler(unittest.TestCase):
         nose.tools.assert_equal(flat_field_im, None)
 
     def test_tile_mask_stack(self):
-        import glob
-        print(glob.glob(self.mask_dir + '/*'))
         self.tile_inst.tile_mask_stack(
             min_fraction=0.0,
             mask_dir=self.mask_dir,
             mask_channel=self.mask_channel,
-            save_tiled_masks='as_channel',
+            save_tiled_masks=True,
             )
         # Read and validate the saved metadata
         tile_dir = self.tile_inst.get_tile_dir()

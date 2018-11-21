@@ -8,11 +8,11 @@ masks:
     str_elem_radius: 3
 do_tiling: True
 tile:
-    channels: [0, 5]
+    channels: [0, 1, 5]
     tile_size: [256, 256]
     step_size: [128, 128]
-    depths: [3, 1]
+    depths: [3, 3, 1]
     mask_depth: 3
     data_format: 'channels_first'
-    save_tiled_masks: 'as_channel'
+    save_tiled_masks: True
     min_fraction: 0.25

@@ -2,6 +2,7 @@
 
 import argparse
 import os
+import time
 
 from micro_dl.input.estimate_flat_field import FlatFieldEstimator2D
 from micro_dl.input.generate_masks import MaskProcessor
@@ -88,8 +89,8 @@ def pre_process(pp_config):
 
     # Tile frames
     tile_dir = None
-    tile_mask_dir = None
     if pp_config['do_tiling']:
+        start = time.time()
         tile_inst = ImageTiler(
             input_dir=input_dir,
             output_dir=output_dir,
@@ -102,19 +103,14 @@ def pre_process(pp_config):
         # If you're using min fraction, it assumes you've generated masks
         # and want to tile only the ones with a minimum amount of foreground
         if 'min_fraction' in pp_config['tile'] and pp_config['create_masks']:
-            save_tiled_masks = None
-            if 'save_tiled_masks' in pp_config['tile']:
-                save_tiled_masks = pp_config['tile']['save_tiled_masks']
-
             tile_inst.tile_mask_stack(
                 min_fraction=pp_config['tile']['min_fraction'],
                 mask_dir=mask_dir,
                 mask_channel=mask_channel,
-                save_tiled_masks=save_tiled_masks,
             )
-            tile_mask_dir = tile_inst.get_tile_mask_dir()
         else:
             tile_inst.tile_stack()
+        print('Tiling time: {}'.format(time.time() - start))
 
     # Write in/out/mask/tile paths and config to json in output directory
     processing_info = {
@@ -124,7 +120,6 @@ def pre_process(pp_config):
         "mask_dir": mask_dir,
         "mask_channel": mask_channel,
         "tile_dir": tile_dir,
-        "tile_mask_dir": tile_mask_dir,
         "config": pp_config,
     }
     meta_path = os.path.join(output_dir, "preprocessing_info.json")

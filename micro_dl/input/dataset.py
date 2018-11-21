@@ -1,4 +1,6 @@
 """Dataset classes"""
+
+import concurrent.futures
 import keras
 import numpy as np
 import os
@@ -156,6 +158,16 @@ class BaseDataSet(keras.utils.Sequence):
         # Stack images channels first
         return np.stack(image_volume)
 
+    def _get_batch(self, fname_tuple, normalize):
+        (fname, aug_idx, _) = fname_tuple
+        cur_vol = self._get_volume(fname.split(','), aug_idx)
+        # If target is boolean (segmentation masks), convert to float
+        if cur_vol.dtype == bool:
+            cur_vol = cur_vol.astype(np.float64)
+        if normalize:
+            cur_vol = (cur_vol - np.mean(cur_vol)) / np.std(cur_vol)
+        return cur_vol
+
     def __getitem__(self, index):
         """Get a batch of data
 
@@ -171,32 +183,44 @@ class BaseDataSet(keras.utils.Sequence):
         if end_idx >= self.num_samples:
             end_idx = self.num_samples
 
-        input_image = []
-        target_image = []
+        input_fnames = []
+        target_fnames = []
+        aug_ids = []
+        norm_output = self.model_task is not 'segmentation' and self.normalize
+
         aug_idx = 0
         for idx in range(start_idx, end_idx, 1):
-            cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
-            cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
+            input_fnames.append(self.input_fnames.iloc[self.row_idx[idx]])
+            target_fnames.append(self.target_fnames.iloc[self.row_idx[idx]])
             # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
+            aug_ids.append(aug_idx)
+        order = range(len(aug_ids))
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_input = {executor.submit(
+                self._get_batch,
+                fname_tuple,
+                self.normalize):
+                fname_tuple for fname_tuple in zip(input_fnames, aug_ids, order)}
+        input_image = [None] * len(input_fnames)
+        for future in concurrent.futures.as_completed(future_input):
+            cur_input = future.result()
+            i = future_input[future][2]
+            input_image[i] = cur_input
 
-            cur_input = self._get_volume(cur_input_fnames.split(','),
-                                         aug_idx)
-            cur_target = self._get_volume(cur_target_fnames.split(','),
-                                          aug_idx)
-            # If target is boolean (segmentation masks), convert to float
-            if cur_target.dtype == bool:
-                cur_target = cur_target.astype(np.float64)
-            if self.normalize:
-                cur_input = (cur_input - np.mean(cur_input)) /\
-                             np.std(cur_input)
-                # Only normalize target if we're dealing with regression
-                if self.model_task is not 'segmentation' and self.normalize:
-                    cur_target = (cur_target - np.mean(cur_target)) /\
-                                 np.std(cur_target)
-            input_image.append(cur_input)
-            target_image.append(cur_target)
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_target = {executor.submit(
+                self._get_batch,
+                fname_tuple,
+                norm_output):
+                fname_tuple for fname_tuple in zip(target_fnames, aug_ids, order)}
+        target_image = [None] * len(target_fnames)
+        for future in concurrent.futures.as_completed(future_target):
+            cur_target = future.result()
+            i = future_target[future][2]
+            target_image[i] = cur_target
+
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
         return input_image, target_image

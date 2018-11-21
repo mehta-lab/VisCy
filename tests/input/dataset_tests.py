@@ -208,10 +208,12 @@ class TestBaseDataSet(unittest.TestCase):
         for i in range(2):
             # only compare self.im
             im_test = np.squeeze(im_in[i, ...])
+            print(i, im_test[0, ...])
             im_expected = self.data_inst._augment_image(
                 self.im + shuf_ids[i],
                 augmentations[i],
             )
+            print(im_expected[0, ...])
             np.testing.assert_array_equal(im_test, im_expected)
 
     def test__getitem__normalized(self):

@@ -1,5 +1,6 @@
 """Tile images for training"""
 
+import concurrent.futures
 import numpy as np
 import os
 import pandas as pd
@@ -31,6 +32,9 @@ class ImageTiler:
         Normalizes images using z-score, then tiles them.
         Isotropic here refers to the same dimension/shape along row, col, slice
         and not really isotropic resolution in mm.
+        If tile_dir already exist, it will check which channels are already
+        tiled, get indices from them and tile from indices only on the channels
+        not already present.
 
         :param str input_dir: Directory with frames to be tiled
         :param str output_dir: Base output directory
@@ -96,13 +100,13 @@ class ImageTiler:
             output_dir,
             self.str_tile_step,
         )
-        # If tile dir already exist, things could get messy because we don't
-        # have any checks in place for how to add to existing tiles
+        # If tile dir already exist, only tile channels not already present
+        self.tiles_exist = False
         try:
             os.makedirs(self.tile_dir, exist_ok=False)
         except FileExistsError as e:
-            print("You're trying to write to existing dir. ", e)
-            raise
+            print("Tile dir exists. Only add untiled channels.")
+            self.tiles_exist = True
 
         self.tile_mask_dir = None
         self.flat_field_dir = flat_field_dir
@@ -119,7 +123,7 @@ class ImageTiler:
         self.time_ids = metadata_ids['time_ids']
         self.slice_ids = metadata_ids['slice_ids']
         self.pos_ids = metadata_ids['pos_ids']
-        # If more than one depth is specified, they must match channel ids
+        # If more than one depth is specified, length must match channel ids
         if isinstance(self.depths, list):
             assert len(self.depths) == len(self.channel_ids),\
              "depths ({}) and channels ({}) length mismatch".format(
@@ -130,6 +134,7 @@ class ImageTiler:
             # Convert channels + depths to dict for lookup
             self.channel_depth = dict(zip(self.channel_ids, self.depths))
         else:
+            # If depth is scalar, make depth the same for all channels
             max_depth = max(self.depths, self.mask_depth)
             self.channel_depth = dict(zip(
                 self.channel_ids,
@@ -180,8 +185,12 @@ class ImageTiler:
          tiles
         :return dataframe tiled_metadata: Metadata with rows added to it
         """
-        for i, data_tuple in enumerate(tiled_data):
-            rcsl_idx = data_tuple[0]
+        flip = False
+        if self.data_format == 'channels_first' and \
+            len(tiled_data[0][1].shape) > 2:
+            flip = True
+        for i, data_list in enumerate(tiled_data):
+            rcsl_idx = data_list[0]
             file_name = aux_utils.get_im_name(
                 time_idx=time_idx,
                 channel_idx=channel_idx,
@@ -189,14 +198,7 @@ class ImageTiler:
                 pos_idx=pos_idx,
                 extra_field=rcsl_idx,
             )
-            tile = data_tuple[1]
-            # Check and potentially flip dimensions for 3D data
-            if self.data_format == 'channels_first' and len(tile.shape) > 2:
-                tile = np.transpose(tile, (2, 0, 1))
-            np.save(os.path.join(save_dir, file_name),
-                    tile,
-                    allow_pickle=True,
-                    fix_imports=True)
+            tiled_data[i][0] = os.path.join(save_dir, file_name)
             tile_idx = tile_indices[i]
             if tiled_metadata is not None:
                 tiled_metadata = tiled_metadata.append(
@@ -210,6 +212,10 @@ class ImageTiler:
                      },
                     ignore_index=True,
                 )
+        # Numpy save is really slow, use threading
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            {executor.submit(image_utils.write_tile, tile, flip):
+             tile for tile in tiled_data}
         return tiled_metadata
 
     def _get_flat_field(self, channel_idx):
@@ -228,6 +234,44 @@ class ImageTiler:
                 )
             )
         return flat_field_im
+
+    def _get_tiled_data(self):
+        """
+        If tile directory already exists, check which channels have been
+        processed and only tile new channels.
+
+        :return dataframe tiled_meta: Metadata with previously tiled channels
+        :return list of lists tile_indices: Nbr tiles x 4 indices with row
+        start + stop and column start + stop indices
+        """
+        if self.tiles_exist:
+            tiled_meta = aux_utils.read_meta(self.tile_dir)
+            # Find untiled channels
+            tiled_channels = np.unique(tiled_meta['channel_idx'])
+            new_channels = list(set(self.channel_ids) - set(tiled_channels))
+            if len(new_channels) == 0:
+                print('All channels in config have already been tiled')
+                return
+            self.channel_ids = new_channels
+            # Get tile indices from one channel only
+            c = tiled_meta['channel_idx'] == tiled_channels[0]
+            z = tiled_meta['slice_idx'] == self.slice_ids[0]
+            p = tiled_meta['pos_idx'] == self.pos_ids[0]
+            t = tiled_meta['time_idx'] == self.time_ids[0]
+            channel_meta = tiled_meta[c & z & p & t]
+            # Get tile_indices
+            tile_indices = pd.concat([
+                channel_meta['row_start'],
+                channel_meta['row_start'].add(self.tile_size[0]),
+                channel_meta['col_start'],
+                channel_meta['col_start'].add(self.tile_size[1]),
+            ], axis=1)
+            # Match list format similar to tile_image
+            tile_indices = tile_indices.values.tolist()
+        else:
+            tiled_meta = self._get_dataframe()
+            tile_indices = None
+        return tiled_meta, tile_indices
 
     def _get_dataframe(self):
         """
@@ -259,8 +303,9 @@ class ImageTiler:
         ['time_idx', 'channel_idx', 'pos_idx','slice_idx', 'file_name']
         for all the tiles
         """
-        tiled_metadata = self._get_dataframe()
-        tile_indices = None
+        # Get or create tiled metadata and tile indices
+        tiled_metadata, tile_indices = self._get_tiled_data()
+
         for channel_idx in self.channel_ids:
             # Perform flatfield correction if flatfield dir is specified
             flat_field_im = self._get_flat_field(channel_idx=channel_idx)
@@ -342,9 +387,9 @@ class ImageTiler:
 
     def tile_mask_stack(self,
                         mask_dir=None,
-                        save_tiled_masks=None,
                         mask_channel=None,
                         min_fraction=None,
+                        save_tiled_masks=True,
                         isotropic=False):
         """
         Tiles images in the specified channels assuming there are masks
@@ -355,26 +400,14 @@ class ImageTiler:
         'slice_idx', 'file_name'] for all the tiles
 
         :param str mask_dir: Directory containing masks
-        :param str save_tiled_masks: How/if to save mask tiles. If None, don't
-            save masks.
-            If 'as_channel', save masked tiles as a channel given
-            by mask_channel in tile_dir.
-            If 'as_masks', create a new tile_mask_dir and save them there
+        :param bool save_tiled_masks: How/if to save mask tiles. If true,
+         save masked tiles as a channel given by mask_channel in tile_dir.
         :param str mask_channel: Channel number assigned to mask
         :param float min_fraction: Minimum fraction of foreground in tiled masks
         :param bool isotropic: Indicator of isotropy
         """
-        if save_tiled_masks == 'as_masks':
-            self.tile_mask_dir = os.path.join(
-                self.output_dir,
-                'mask_' + '-'.join(map(str, self.channel_ids)) +
-                self.str_tile_step,
-            )
-            os.makedirs(self.tile_mask_dir, exist_ok=True)
-        elif save_tiled_masks == 'as_channel':
-            self.tile_mask_dir = self.tile_dir
-
-        tiled_metadata = self._get_dataframe()
+        # Get or create tiled metadata and tile indices
+        tiled_metadata, tile_indices = self._get_tiled_data()
         mask_metadata = self._get_dataframe()
         # Load flatfield images if flatfield dir is specified
         flat_field_im = None
@@ -386,33 +419,35 @@ class ImageTiler:
         for slice_idx in self.slice_ids:
             for time_idx in self.time_ids:
                 for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
-                    # Since masks are generated across channels, we only need
-                    # load them once across channels
-                    mask_image = self._get_mask(
-                        time_idx=time_idx,
-                        mask_channel=mask_channel,
-                        slice_idx=slice_idx,
-                        pos_idx=pos_idx,
-                        mask_dir=mask_dir)
-                    tiled_mask_data, tile_indices = image_utils.tile_image(
-                        input_image=mask_image,
-                        min_fraction=min_fraction,
-                        tile_size=self.tile_size,
-                        step_size=self.step_size,
-                        isotropic=isotropic,
-                        return_index=True,
-                    )
-                    # Loop through all the mask tiles, write tiled masks
-                    mask_metadata = self._write_tiled_data(
-                        tiled_data=tiled_mask_data,
-                        save_dir=self.tile_mask_dir,
-                        time_idx=time_idx,
-                        channel_idx=mask_channel,
-                        slice_idx=slice_idx,
-                        pos_idx=pos_idx,
-                        tile_indices=tile_indices,
-                        tiled_metadata=mask_metadata,
-                    )
+                    # Evaluate mask, then channels. The masks will influence
+                    # tiling indices, so it's not allowed to add masks to existing
+                    # tile datasets (indices will be retrieved from existing meta)
+                    if not self.tiles_exist:
+                        mask_image = self._get_mask(
+                            time_idx=time_idx,
+                            mask_channel=mask_channel,
+                            slice_idx=slice_idx,
+                            pos_idx=pos_idx,
+                            mask_dir=mask_dir)
+                        tiled_mask_data, tile_indices = image_utils.tile_image(
+                            input_image=mask_image,
+                            min_fraction=min_fraction,
+                            tile_size=self.tile_size,
+                            step_size=self.step_size,
+                            isotropic=isotropic,
+                            return_index=True,
+                        )
+                        # Loop through all the mask tiles, write tiled masks
+                        mask_metadata = self._write_tiled_data(
+                            tiled_data=tiled_mask_data,
+                            save_dir=self.tile_dir,
+                            time_idx=time_idx,
+                            channel_idx=mask_channel,
+                            slice_idx=slice_idx,
+                            pos_idx=pos_idx,
+                            tile_indices=tile_indices,
+                            tiled_metadata=mask_metadata,
+                        )
                     # Loop through all channels and tile from indices
                     for i, channel_idx in enumerate(self.channel_ids):
 
@@ -449,15 +484,10 @@ class ImageTiler:
                         )
 
         # Finally, save all the metadata
-        if self.tile_mask_dir == self.tile_dir:
+        if save_tiled_masks:
             tiled_metadata = tiled_metadata.append(
                 mask_metadata,
                 ignore_index=True,
-            )
-        else:
-            mask_metadata.to_csv(
-                os.path.join(self.tile_mask_dir, "frames_meta.csv"),
-                sep=",",
             )
         tiled_metadata = tiled_metadata.sort_values(by=['file_name'])
         tiled_metadata.to_csv(
