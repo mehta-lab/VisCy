@@ -6,7 +6,7 @@
 # jupyter       latest (pip)
 # pytorch       0.4.0  (pip)
 # tensorflow    1.8.0  (pip)
-# keras         2.1.5  (pip)
+# keras         2.2.4  (pip)
 # opencv        3.4.1  (git)
 # ==================================================================
 
@@ -32,6 +32,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
         cmake \
         wget \
         git \
+        tmux \
 	graphviz \
         vim \
         && \
@@ -90,36 +91,21 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 
     $PIP_INSTALL \
         h5py \
-	keras==2.1.5 \
+	keras==2.2.4 \
+        && \
+
+    # keras contrib
+    $PIP_INSTALL \
+        git+https://www.github.com/keras-team/keras-contrib.git \
         && \
 
 # ==================================================================
 # opencv
 # ------------------------------------------------------------------
 
-    DEBIAN_FRONTEND=noninteractive $APT_INSTALL \
-        libatlas-base-dev \
-        libgflags-dev \
-        libgoogle-glog-dev \
-        libhdf5-serial-dev \
-        libleveldb-dev \
-        liblmdb-dev \
-        libprotobuf-dev \
-        libsnappy-dev \
-        protobuf-compiler \
+    $PIP_INSTALL \
+        opencv-python \
         && \
-
-    $GIT_CLONE --branch 3.4.1 https://github.com/opencv/opencv ~/opencv && \
-    mkdir -p ~/opencv/build && cd ~/opencv/build && \
-    cmake -D CMAKE_BUILD_TYPE=RELEASE \
-          -D CMAKE_INSTALL_PREFIX=/usr/local \
-          -D WITH_IPP=OFF \
-          -D WITH_CUDA=OFF \
-          -D WITH_OPENCL=OFF \
-          -D BUILD_TESTS=OFF \
-          -D BUILD_PERF_TESTS=OFF \
-          .. && \
-    make -j"$(nproc)" install && \
 
 # ==================================================================
 # config & cleanup
@@ -138,6 +124,6 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
     RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
     WORKDIR /microDL
-    RUN export PYTHONPATH=$PYTHONPATH:`pwd`:`pwd`/microDL
+    ENV PYTHONPATH /microDL
 
 EXPOSE 8888 6006
