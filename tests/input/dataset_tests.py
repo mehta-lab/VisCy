@@ -52,6 +52,7 @@ class TestBaseDataSet(unittest.TestCase):
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
+            data_format='channels_last',
         )
 
     def tearDown(self):
@@ -143,7 +144,8 @@ class TestBaseDataSet(unittest.TestCase):
         self.data_inst._augment_image(self.im, -1)
 
     def test_augment_image_lr_channels_first(self):
-        im_test = np.swapaxes(self.im, 0, 2)
+        im_test = np.transpose(self.im, [2, 0, 1])
+        self.data_inst.data_format = 'channels_first'
         trans_im = self.data_inst._augment_image(im_test, 1)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -152,7 +154,8 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_augment_image_ud_channels_first(self):
-        im_test = np.swapaxes(self.im, 0, 2)
+        im_test = np.transpose(self.im, [2, 0, 1])
+        self.data_inst.data_format = 'channels_first'
         trans_im = self.data_inst._augment_image(im_test, 2)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -161,7 +164,8 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_augment_image_rot90_channels_first(self):
-        im_test = np.swapaxes(self.im, 0, 2)
+        im_test = np.transpose(self.im, [2, 0, 1])
+        self.data_inst.data_format = 'channels_first'
         trans_im = self.data_inst._augment_image(im_test, 3)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -170,7 +174,8 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_augment_image_rot180_channels_first(self):
-        im_test = np.swapaxes(self.im, 0, 2)
+        im_test = np.transpose(self.im, [2, 0, 1])
+        self.data_inst.data_format = 'channels_first'
         trans_im = self.data_inst._augment_image(im_test, 4)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -179,7 +184,8 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_augment_image_rot270_channels_first(self):
-        im_test = np.swapaxes(self.im, 0, 2)
+        im_test = np.transpose(self.im, [2, 0, 1])
+        self.data_inst.data_format = 'channels_first'
         trans_im = self.data_inst._augment_image(im_test, 5)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -188,7 +194,7 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_get_volume(self):
-        image_volume = self.data_inst._get_volume(self.input_fnames)
+        image_volume = self.data_inst._get_volume(self.input_fnames, normalize=False)
         # There are 4 input images of shape (5, 7, 3)
         self.assertTupleEqual(image_volume.shape, (4, 5, 7, 3))
         # Check image content (normalize is false)

@@ -3,7 +3,7 @@ dataset:
     data_dir: '/data/image_tile_256-256_step_256-256'
     input_channels: [3]
     target_channels: [4]
-    split_by_column: sample_num
+    split_by_column: pos_idx
     split_ratio:
         train: 0.7
         val: 0.15
@@ -45,4 +45,5 @@ network:
     num_input_channels: 1
     num_target_channels: 1
     data_format: 'channels_first'
+    dropout_dense: 0.4
     final_activation: sigmoid

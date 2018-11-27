@@ -54,6 +54,13 @@ class BaseKerasTrainer:
         self.num_target_channels = num_target_channels
         self.logger = self._init_train_logger()
 
+        workers = 4
+        if 'workers' in train_config:
+            workers = train_config['workers']
+            assert isinstance(workers, int) and workers > 0, \
+                'workers must be a positive integer'
+        self.workers = workers
+
         self.resume_training = False
         if 'resume' in train_config and train_config['resume']:
             self.resume_training = True
@@ -114,11 +121,17 @@ class BaseKerasTrainer:
                 # Learning rate scheduler should be used either prior to
                 # training using LR finder, or for CLR during training
                 if callbacks_config[cb_dict]['lr_find']:
+                    if 'fig_fname' in callbacks_config[cb_dict]:
+                        fig_fname = callbacks_config[cb_dict]['fig_fname']
+                    else:
+                        # Save figure in model dir with default name
+                        fig_fname = os.path.join(self.model_dir,
+                                                'lr_finder_result.png')
                     cur_cb = lr_finder.LRFinder(
                         base_lr=callbacks_config[cb_dict]['base_lr'],
                         max_lr=callbacks_config[cb_dict]['max_lr'],
                         max_epochs=callbacks_config[cb_dict]['max_epochs'],
-                        fig_fname=callbacks_config[cb_dict]['fig_fname'],
+                        fig_fname=fig_fname,
                     )
                 else:
                     cur_cb = custom_learning.CyclicLearning(
@@ -204,7 +217,7 @@ class BaseKerasTrainer:
                                      validation_data=self.val_dataset,
                                      epochs=self.epochs,
                                      callbacks=callbacks,
-                                     workers=4,
+                                     workers=self.workers,
                                      verbose=1)
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))

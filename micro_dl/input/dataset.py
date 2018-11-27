@@ -1,6 +1,5 @@
 """Dataset classes"""
 
-import concurrent.futures
 import keras
 import numpy as np
 import os
@@ -20,7 +19,8 @@ class BaseDataSet(keras.utils.Sequence):
                  input_fnames,
                  target_fnames,
                  dataset_config,
-                 batch_size):
+                 batch_size,
+                 data_format):
         """Init
 
         The images could be normalized at the image level during tiling
@@ -38,12 +38,14 @@ class BaseDataSet(keras.utils.Sequence):
          filenames for one target
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
+        :param str data_format: Channel location (channels_first or last)
         """
         self.tile_dir = tile_dir
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
         self.num_samples = len(self.input_fnames)
         self.batch_size = batch_size
+        self.data_format = data_format
 
         # Check if model task (regression or segmentation) is specified
         self.model_task = 'regression'
@@ -52,28 +54,38 @@ class BaseDataSet(keras.utils.Sequence):
             assert self.model_task in {'regression', 'segmentation'}, \
                 "Model task must be either 'segmentation' or 'regression'"
 
+        # Whether or not to do augmentations
         self.augmentations = False
         if 'augmentations' in dataset_config:
             self.augmentations = dataset_config['augmentations']
         assert isinstance(self.augmentations, bool),\
             'augmentation parameter should be boolean'
 
+        # Whether to do zscore normalization on tile level
         self.normalize = False
         if 'normalize' in dataset_config:
             self.normalize = dataset_config['normalize']
         assert isinstance(self.normalize, bool),\
             'normalize parameter should be boolean'
 
+        # Whether to shuffle indices at the end of each epoch
         self.shuffle = True
         if 'shuffle' in dataset_config:
             self.shuffle = dataset_config['shuffle']
         assert isinstance(self.shuffle, bool),\
             'shuffle parameter should be boolean'
 
+        # Whether to remove singleton dimensions from tiles (e.g. 2D models)
+        self.squeeze = False
+        if 'squeeze' in dataset_config:
+            self.squeeze = dataset_config['squeeze']
+        assert isinstance(self.squeeze, bool),\
+            'squeeze parameter should be boolean'
+
+        # Whether to use fixed random seed (only recommended for testing)
         random_seed = None
         if 'random_seed' in dataset_config:
             random_seed = dataset_config['random_seed']
-
         self.random_seed = random_seed
         np.random.seed(random_seed)
 
@@ -96,14 +108,11 @@ class BaseDataSet(keras.utils.Sequence):
          3 - rotate 90 degrees in the xy-plane in the x toward y direction
          4 - rotate 180 degrees in the xy-plane in the x toward y direction
          5 - rotate 270 degrees in the xy-plane in the x toward y direction
-        :param str data_format: channels_first or _last. Data is always loaded
-        as channels_first so channels_last operations may be obsolete
         :return np.array image after transformation is applied
         """
         # We need to flip over different dimensions depending on data format
         add_dim = 0
-        # Get tile data format from shape
-        if len(input_image.shape) == 3 and input_image.shape[0] <= 3:
+        if self.data_format == 'channels_first' and not self.squeeze:
             add_dim = 1
 
         if aug_idx == 0:
@@ -140,33 +149,31 @@ class BaseDataSet(keras.utils.Sequence):
             raise ValueError(msg)
         return trans_image
 
-    def _get_volume(self, fname_list, aug_idx=0):
+    def _get_volume(self, fname_list, normalize=True, aug_idx=0):
         """
         Read tiles from fname_list and stack them into an image volume.
 
         :param list fname_list: list of file names of input/target images
+        :param bool normalize: Whether to zscore normalize tiles
         :param int aug_idx: type of augmentation to be applied (if any)
         :return: np.ndarray of stacked images
         """
-
         image_volume = []
         for fname in fname_list:
             cur_tile = np.load(os.path.join(self.tile_dir, fname))
             if self.augmentations:
                 cur_tile = self._augment_image(cur_tile, aug_idx)
+            if self.squeeze:
+                cur_tile = np.squeeze(cur_tile)
             image_volume.append(cur_tile)
         # Stack images channels first
-        return np.stack(image_volume)
-
-    def _get_batch(self, fname_tuple, normalize):
-        (fname, aug_idx, _) = fname_tuple
-        cur_vol = self._get_volume(fname.split(','), aug_idx)
-        # If target is boolean (segmentation masks), convert to float
-        if cur_vol.dtype == bool:
-            cur_vol = cur_vol.astype(np.float64)
+        image_volume =  np.stack(image_volume)
+        if image_volume.dtype == bool:
+            image_volume = image_volume.astype(np.float64)
         if normalize:
-            cur_vol = (cur_vol - np.mean(cur_vol)) / np.std(cur_vol)
-        return cur_vol
+            image_volume = (image_volume - np.mean(image_volume)) / \
+                           np.std(image_volume)
+        return image_volume
 
     def __getitem__(self, index):
         """Get a batch of data
@@ -183,43 +190,30 @@ class BaseDataSet(keras.utils.Sequence):
         if end_idx >= self.num_samples:
             end_idx = self.num_samples
 
-        input_fnames = []
-        target_fnames = []
-        aug_ids = []
         norm_output = self.model_task is not 'segmentation' and self.normalize
 
+        input_image = []
+        target_image = []
         aug_idx = 0
         for idx in range(start_idx, end_idx, 1):
-            input_fnames.append(self.input_fnames.iloc[self.row_idx[idx]])
-            target_fnames.append(self.target_fnames.iloc[self.row_idx[idx]])
+            cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
+            cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
-            aug_ids.append(aug_idx)
-        order = range(len(aug_ids))
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_input = {executor.submit(
-                self._get_batch,
-                fname_tuple,
-                self.normalize):
-                fname_tuple for fname_tuple in zip(input_fnames, aug_ids, order)}
-        input_image = [None] * len(input_fnames)
-        for future in concurrent.futures.as_completed(future_input):
-            cur_input = future.result()
-            i = future_input[future][2]
-            input_image[i] = cur_input
 
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_target = {executor.submit(
-                self._get_batch,
-                fname_tuple,
-                norm_output):
-                fname_tuple for fname_tuple in zip(target_fnames, aug_ids, order)}
-        target_image = [None] * len(target_fnames)
-        for future in concurrent.futures.as_completed(future_target):
-            cur_target = future.result()
-            i = future_target[future][2]
-            target_image[i] = cur_target
+            cur_input = self._get_volume(
+                fname_list=cur_input_fnames.split(','),
+                normalize=self.normalize,
+                aug_idx=aug_idx,
+            )
+            cur_target = self._get_volume(
+                fname_list=cur_target_fnames.split(','),
+                normalize=norm_output,
+                aug_idx=aug_idx,
+            )
+            input_image.append(cur_input)
+            target_image.append(cur_target)
 
         input_image = np.stack(input_image)
         target_image = np.stack(target_image)
@@ -242,7 +236,8 @@ class DataSetWithMask(BaseDataSet):
                  target_fnames,
                  mask_fnames,
                  dataset_config,
-                 batch_size):
+                 batch_size,
+                 data_format):
         """Init
 
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
@@ -257,14 +252,15 @@ class DataSetWithMask(BaseDataSet):
          mask filenames
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param bool shuffle: shuffle data for each epoch
+        :param str data_format: Channel location (channels_first or last)
         """
 
         super().__init__(tile_dir,
                          input_fnames,
                          target_fnames,
                          dataset_config,
-                         batch_size)
+                         batch_size,
+                         data_format)
         self.mask_fnames = mask_fnames
         # list label_weights: weight for each label
         self.label_weights = None

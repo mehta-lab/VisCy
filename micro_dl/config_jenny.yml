@@ -7,6 +7,7 @@ dataset:
     model_task: 'regression'
     normalize: False
     augmentation: False
+    squeeze: True
     split_ratio:
         train: 0.6
         val: 0.2
@@ -26,7 +27,7 @@ trainer:
         LearningRateScheduler:
             lr_find: True
             max_epochs: 3
-            fig_fname: '/Users/jenny.folkesson/Data/models/stack_2d_labelfree_bs16_mse/lr_finder.png'
+            fig_fname: 'lr_finder.png'
             base_lr: 0.001
             max_lr: 0.006
             step_size: 2

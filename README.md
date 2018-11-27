@@ -99,6 +99,7 @@ The following settings can be adjusted in preprocessing using a config file (see
 * slice_ids: (int/list) Value(s) of z-index to be processed
 * verbose: (int) Logging verbosity levels: NOTSET:0, DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
+* squeeze: (bool) whether to squeeze singleton tile dimensions (e.g. for 2D models)
 * use_masks: (bool) whether to generate binary masks from images
 * masks:
     * mask_channels: (list of ints) which channels should be used for masks

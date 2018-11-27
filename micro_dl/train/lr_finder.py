@@ -25,7 +25,7 @@ class LRFinder(Callback):
         https://github.com/surmenok/keras_lr_finder
         https://github.com/LucasAnders1/LearningRateFinder
 
-        :param fig_fname: Figure file name for saving
+        :param fig_fname: Figure file name (in model_dir).
         :param max_epochs: Maximum number of epochs
         :param base_lr: Base (minimum) learning rate
         :param max_lr: Maximum learning rate

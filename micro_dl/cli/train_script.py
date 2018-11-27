@@ -50,7 +50,8 @@ def parse_args():
 def create_datasets(df_meta,
                     tile_dir,
                     dataset_config,
-                    trainer_config):
+                    trainer_config,
+                    data_format):
     """Create train, val and test datasets
 
     Saves val_metadata.csv and test_metadata.csv for checking model performance
@@ -59,6 +60,7 @@ def create_datasets(df_meta,
     :param str tile_dir: directory containing training image tiles
     :param dict dataset_config: dict with dataset related params
     :param dict trainer_config: dict with params related to training
+    :param str data_format: Channel location (channels_first of last)
     :return:
      :BaseDataSet train_dataset
      :BaseDataSet val_dataset
@@ -88,6 +90,7 @@ def create_datasets(df_meta,
                 target_fnames=metadata['fpaths_target'],
                 dataset_config=dataset_config,
                 batch_size=trainer_config['batch_size'],
+                data_format=data_format,
             )
             metadata.to_csv(
                 os.path.join(trainer_config['model_dir'], csv_names[i]),
@@ -101,13 +104,15 @@ def create_datasets(df_meta,
 def create_datasets_with_mask(df_meta,
                               tile_dir,
                               dataset_config,
-                              trainer_config):
+                              trainer_config,
+                              data_format):
     """Create train, val and test datasets
 
     :param pd.DataFrame df_meta: Dataframe containing info on split tiles
     :param str tile_dir: directory containing training image tiles
     :param dict dataset_config: dict with dataset related params
     :param dict trainer_config: dict with params related to training
+    :param str data_format: Channel location (channels_first or last)
     :return:
      :BaseDataSet train_dataset: y_true has mask concatenated at the end
      :BaseDataSet val_dataset
@@ -139,6 +144,7 @@ def create_datasets_with_mask(df_meta,
                 mask_fnames=metadata['fpaths_mask'],
                 dataset_config=dataset_config,
                 batch_size=trainer_config['batch_size'],
+                data_format=data_format,
             )
             metadata.to_csv(
                 os.path.join(trainer_config['model_dir'], csv_names[i]),
@@ -221,6 +227,7 @@ def run_action(args):
                     tile_dir,
                     dataset_config,
                     trainer_config,
+                    network_config['data_format'],
                 )
         else:
             train_dataset, val_dataset, test_dataset, split_samples = \
@@ -229,6 +236,7 @@ def run_action(args):
                     tile_dir,
                     dataset_config,
                     trainer_config,
+                    network_config['data_format'],
                 )
 
         # Save train, validation and test indices
