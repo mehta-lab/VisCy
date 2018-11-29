@@ -6,7 +6,6 @@ import keras.backend as K
 from keras.utils import plot_model
 import os
 import pandas as pd
-import pickle
 import tensorflow as tf
 import yaml
 
@@ -15,36 +14,58 @@ from micro_dl.input.training_table import BaseTrainingTable
 from micro_dl.train.model_inference import load_model
 from micro_dl.train.trainer import BaseKerasTrainer
 import micro_dl.utils.aux_utils as aux_utils
-from micro_dl.utils.train_utils import check_gpu_availability, \
-    set_keras_session
+import micro_dl.utils.train_utils as train_utils
 
 
 def parse_args():
-    """Parse command line arguments
+    """
+    Parse command line arguments
 
     In python namespaces are implemented as dictionaries
     :return: namespace containing the arguments passed.
     """
-
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', type=int, default=0,
-                        help=('specify the gpu to use: 0,1,...',
-                              ', -1 for debugging'))
-    parser.add_argument('--gpu_mem_frac', type=float, default=1.,
-                        help='specify the gpu memory fraction to use')
-    parser.add_argument('--action', type=str, default='train',
-                        choices=('train', 'tune_hyperparam'),
-                        help=('action to take on the model: train,'
-                              'tune_hyperparam'))
+    parser.add_argument(
+        '--gpu',
+        type=int,
+        default=None,
+        help=('Default: find GPU with most memory.',
+              'Optional: specify the gpu to use: 0,1,...',
+              ', -1 for debugging'),
+    )
+    parser.add_argument(
+        '--gpu_mem_frac',
+        type=float,
+        default=None,
+        help=('Default: max memory fraction for given GPU ID.'
+              'Optional: specify the gpu memory fraction to use [0, 1]'),
+    )
+    parser.add_argument(
+        '--action',
+        type=str,
+        default='train',
+        choices=('train', 'tune_hyperparam'),
+        help='action to take on the model: train,tune_hyperparam',
+    )
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument('--config', type=str,
-                       help='path to yaml configuration file')
-    group.add_argument('--model_fname', type=str, default=None,
-                       help='path to checkpoint file')
-    parser.add_argument('--port', type=int, default=-1,
-                        help='port to use for the tensorboard callback')
-    args = parser.parse_args()
-    return args
+    group.add_argument(
+        '--config',
+        type=str,
+        help='path to yaml configuration file',
+    )
+    group.add_argument(
+        '--model_fname',
+        type=str,
+        default=None,
+        help='path to checkpoint file',
+    )
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=-1,
+        help='port to use for the tensorboard callback',
+    )
+    return parser.parse_args()
 
 
 def create_datasets(df_meta,
@@ -179,13 +200,15 @@ def create_network(network_config, gpu_id):
     return model
 
 
-def run_action(args):
+def run_action(args, gpu_ids, gpu_mem_frac):
     """Performs training or tune hyper parameters
 
     Lambda layers throw errors when converting to yaml!
     model_yaml = self.model.to_yaml()
 
     :param Namespace args: namespace containing the arguments passed
+    :param int gpu_ids: GPU ID
+    :param float gpu_mem_frac: Available GPU memory fraction
     """
 
     action = args.action
@@ -246,11 +269,13 @@ def run_action(args):
 
         K.set_image_data_format(network_config['data_format'])
 
-        if args.gpu == -1:
+        if gpu_ids == -1:
             sess = None
         else:
-            sess = set_keras_session(gpu_ids=args.gpu,
-                                     gpu_mem_frac=args.gpu_mem_frac)
+            sess = train_utils.set_keras_session(
+                gpu_ids=gpu_ids,
+                gpu_mem_frac=gpu_mem_frac,
+            )
 
         if args.model_fname:
             # load model only loads the weights, have to save intermediate
@@ -260,7 +285,7 @@ def run_action(args):
             with open(os.path.join(trainer_config['model_dir'],
                                    'config.yml'), 'w') as f:
                 yaml.dump(config, f, default_flow_style=False)
-            model = create_network(network_config, args.gpu)
+            model = create_network(network_config, gpu_ids)
             plot_model(model,
                        to_file=os.path.join(trainer_config['model_dir'],
                                             'model_graph.png'),
@@ -287,27 +312,9 @@ def run_action(args):
 if __name__ == '__main__':
     # Parse command line arguments
     args = parse_args()
-    # Currently only supporting one GPU as input
-    if not isinstance(args.gpu, int):
-        raise NotImplementedError
-    # If debug mode, run without checking GPUs
-    if args.gpu == -1:
-        run_action(args)
-    # Get currently available GPU memory fractions and determine if
-    # requested amount of memory is available
-    gpu_mem_frac = args.gpu_mem_frac
-    if isinstance(gpu_mem_frac, float):
-        gpu_mem_frac = [gpu_mem_frac]
-    gpu_available, curr_mem_frac = check_gpu_availability(
+    # Get GPU ID and memory fraction
+    gpu_id, gpu_mem_frac = train_utils.select_gpu(
         args.gpu,
-        gpu_mem_frac,
+        args.gpu_mem_frac,
     )
-    # Allow run if gpu_available
-    if gpu_available:
-        run_action(args)
-    else:
-        raise ValueError(
-            "Not enough memory available. Requested/current fractions:",
-            "\n".join([str(c) + " / " + "{0:.4g}".format(m)
-                       for c, m in zip(gpu_mem_frac, curr_mem_frac)]),
-        )
+    run_action(args, gpu_id, gpu_mem_frac)

@@ -7,7 +7,7 @@ import subprocess
 from micro_dl.train import losses as custom_losses, metrics as custom_metrics
 
 
-def check_gpu_availability(gpu_id, gpu_mem_frac):
+def check_gpu_availability(gpu_id):
     """
     Check if mem_frac is available in given gpu_id
 
@@ -22,9 +22,7 @@ def check_gpu_availability(gpu_id, gpu_mem_frac):
     if isinstance(gpu_id, int):
         gpu_id = [gpu_id]
 
-    msg = 'There is no matching memory fraction for all the given gpu_ids'
-    assert len(gpu_id) == len(gpu_mem_frac), msg
-    curr_mem_frac = []
+    cur_mem_frac = []
     for idx, gpu in enumerate(gpu_id):
         query = ('nvidia-smi --id={} --query-gpu=memory.free,memory.total '
                  '--format=csv').format(gpu)
@@ -34,10 +32,62 @@ def check_gpu_availability(gpu_id, gpu_mem_frac):
         query_output = query_output.split('\n')
         mem = query_output[1].split(',')
         mem = [int(val.replace('MiB', '')) for val in mem]
-        curr_mem_frac.append(mem[0] / mem[1])
+        cur_mem_frac.append(mem[0] / mem[1])
+    return cur_mem_frac
 
-    gpu_availability = np.all(np.array(curr_mem_frac >= gpu_mem_frac))
-    return gpu_availability, curr_mem_frac
+
+def select_gpu(gpu_ids=None, gpu_mem_frac=None):
+    """
+    Find the GPU ID with highest available memory fraction.
+    If ID is given as input, set the gpu_mem_frac to maximum available,
+    or if a memory fraction is given, make sure the given GPU has the desired
+    memory fraction available.
+    Currently only supports single GPU runs.
+
+    :param int gpu_ids: Desired GPU ID. If None, find GPU with the most memory
+        available.
+    :param float gpu_mem_frac: Desired GPU memory fraction [0, 1]. If None,
+        use maximum available amount of GPU.
+    :return int gpu_ids: GPU ID to use.
+    :return float cur_mem_frac: GPU memory fraction to use
+    :raises NotImplementedError: If gpu_ids is not int
+    :raises AssertionError: If requested memory fraction isn't available
+    """
+    # Check if user has specified a GPU ID to use
+    if not isinstance(gpu_ids, type(None)):
+        # Currently only supporting one GPU as input
+        if not isinstance(gpu_ids, int):
+            raise NotImplementedError
+        if isinstance(gpu_mem_frac, float):
+            gpu_mem_frac = [gpu_mem_frac]
+        cur_mem_frac = check_gpu_availability(gpu_ids)
+        assert np.all(np.array(cur_mem_frac >= gpu_mem_frac)), \
+            ("Not enough memory available. Requested/current fractions:",
+                "\n".join([str(c) + " / " + "{0:.4g}".format(m)
+                           for c, m in zip(gpu_mem_frac, cur_mem_frac)]))
+        return gpu_ids, cur_mem_frac
+
+    # User has not specified GPU ID, find the GPU with most memory available
+    sp = subprocess.Popen(['nvidia-smi --query-gpu=index --format=csv'],
+                          stdout=subprocess.PIPE,
+                          shell=True)
+    gpu_ids = sp.communicate()
+    gpu_ids = gpu_ids[0].decode('utf8')
+    gpu_ids = gpu_ids.split('\n')
+    # If no GPUs are found, run on CPU (debug mode)
+    if len(gpu_ids) <= 2:
+        print('No GPUs found, run will be slow. Query result: {}'.format(gpu_ids))
+        return -1, 0
+    gpu_ids = [int(gpu_id) for gpu_id in gpu_ids[1:-1]]
+    cur_mem_frac = check_gpu_availability(gpu_ids)
+    # Get the GPU with maximum memory fraction
+    max_mem = max(cur_mem_frac)
+    idx = cur_mem_frac.index(max_mem)
+    gpu_id = gpu_ids[idx]
+    # Subtract a little margin to be safe
+    max_mem = max_mem - np.finfo(np.float32).eps
+    print('Using GPU {} with memory fraction {}.'.format(gpu_id, max_mem))
+    return gpu_id, max_mem
 
 
 def split_train_val_test(sample_set, train_ratio, test_ratio,

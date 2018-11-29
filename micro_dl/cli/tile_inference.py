@@ -9,7 +9,7 @@ import yaml
 from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
 from micro_dl.train.model_inference import ModelEvaluator
 import micro_dl.utils.aux_utils as aux_utils
-from micro_dl.utils.train_utils import check_gpu_availability
+from micro_dl.utils.train_utils import select_gpu
 
 def parse_args():
     """Parse command line arguments
@@ -19,11 +19,11 @@ def parse_args():
     """
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--gpu', type=int, default=0,
-                        help=('specify the gpu to use: 0,1,...',
-                              ', -1 for debugging'))
-    parser.add_argument('--gpu_mem_frac', type=float, default=1.,
-                        help='specify the gpu memory fraction to use')
+    parser.add_argument('--gpu', type=int, default=None,
+                        help=('Optional: specify the gpu to use: 0,1,...',
+                              ', -1 for debugging. Default: pick best GPU'))
+    parser.add_argument('--gpu_mem_frac', type=float, default=None,
+                        help='Optional: specify the gpu memory fraction to use')
     parser.add_argument('--config', type=str,
                        help='path to yaml configuration file')
     parser.add_argument('--model_fname', type=str, default=None,
@@ -52,7 +52,7 @@ def parse_args():
     return args
 
 
-def run_inference(args):
+def run_inference(args, gpu_id, gpu_mem_frac):
     """Evaluate model performance"""
 
     with open(args.config, 'r') as f:
@@ -72,8 +72,8 @@ def run_inference(args):
 
     ev_inst = ModelEvaluator(config,
                              model_fname=args.model_fname,
-                             gpu_ids=args.gpu,
-                             gpu_mem_frac=args.gpu_mem_frac)
+                             gpu_ids=gpu_id,
+                             gpu_mem_frac=gpu_mem_frac)
     test_perf_metrics = ev_inst.evaluate_model(ds_test)
 
     ev_inst.predict_on_tiles(ds_test, nb_batches=args.num_batches)
@@ -94,12 +94,10 @@ def run_inference(args):
 
 if __name__ == '__main__':
     args = parse_args()
-    gpu_available = False
-    assert isinstance(args.gpu, int)
-    if args.gpu >= 0:
-        gpu_available = check_gpu_availability(args.gpu, args.gpu_mem_frac)
-    if gpu_available:
-        model_perf = run_inference(args)
-        print('model performance on test images:', model_perf)
-
-
+    # Get GPU ID and memory fraction
+    gpu_id, gpu_mem_frac = select_gpu(
+        args.gpu,
+        args.gpu_mem_frac,
+    )
+    model_perf = run_inference(args, gpu_id, gpu_mem_frac)
+    print('model performance on test images:', model_perf)
