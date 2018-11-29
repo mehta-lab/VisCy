@@ -100,11 +100,11 @@ The following settings can be adjusted in preprocessing using a config file (see
 * verbose: (int) Logging verbosity levels: NOTSET:0, DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
 * squeeze: (bool) whether to squeeze singleton tile dimensions (e.g. for 2D models)
-* use_masks: (bool) whether to generate binary masks from images
+* create_masks: (bool) whether to generate binary masks from images
 * masks:
-    * mask_channels: (list of ints) which channels should be used for masks
+    * channels: (list of ints) which channels should be used for masks
     * str_elem_radius: (int) morpological structuring element radius
-* tile_stack: (bool) do tiling (recommended)
+* do_tiling: (bool) do tiling (recommended)
 * tile:
     * channels: (list of ints) specify channel numbers, -1 for all channels
     * tile_size: (list of ints) tile size in pixels for each dimension
