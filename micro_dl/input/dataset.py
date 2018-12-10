@@ -20,15 +20,16 @@ class BaseDataSet(keras.utils.Sequence):
                  target_fnames,
                  dataset_config,
                  batch_size,
-                 data_format):
+                 shape_order):
         """Init
 
         The images could be normalized at the image level during tiling
         (default, normalize=False). If images were not normalized during tiling
         set the normalize flag to normalize at the tile-level
-        Works for either data format (channels_first or channels_last).
-        Tiles will be loaded as is, so it's important that you've made sure
-        your data format matches your preprocessing config.
+        Works for tile shapes with z first (zyx) or last (yxz).
+        Tiles will be loaded as is, and shape order will be determined
+        from the preprocessing config file which is saved in your training
+        data dir as preprocessing_info.json.
         TODO: Test with multiple channel tiles
 
         :param str tile_dir: directory containing training image tiles
@@ -38,14 +39,14 @@ class BaseDataSet(keras.utils.Sequence):
          filenames for one target
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param str data_format: Channel location (channels_first or last)
+        :param str shape_order: Tile shape order: 'yxz' or 'zyx'
         """
         self.tile_dir = tile_dir
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
         self.num_samples = len(self.input_fnames)
         self.batch_size = batch_size
-        self.data_format = data_format
+        self.shape_order = shape_order
 
         # Check if model task (regression or segmentation) is specified
         self.model_task = 'regression'
@@ -112,7 +113,7 @@ class BaseDataSet(keras.utils.Sequence):
         """
         # We need to flip over different dimensions depending on data format
         add_dim = 0
-        if self.data_format == 'channels_first' and not self.squeeze:
+        if self.shape_order == 'zyx' and not self.squeeze:
             add_dim = 1
 
         if aug_idx == 0:

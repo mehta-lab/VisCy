@@ -58,6 +58,8 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
         # Currently only supporting one GPU as input
         if not isinstance(gpu_ids, int):
             raise NotImplementedError
+        if gpu_ids == -1:
+            return -1, 0
         if isinstance(gpu_mem_frac, float):
             gpu_mem_frac = [gpu_mem_frac]
         cur_mem_frac = check_gpu_availability(gpu_ids)

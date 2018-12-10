@@ -72,7 +72,8 @@ def create_datasets(df_meta,
                     tile_dir,
                     dataset_config,
                     trainer_config,
-                    data_format):
+                    shape_order,
+                    masked_loss):
     """Create train, val and test datasets
 
     Saves val_metadata.csv and test_metadata.csv for checking model performance
@@ -81,99 +82,61 @@ def create_datasets(df_meta,
     :param str tile_dir: directory containing training image tiles
     :param dict dataset_config: dict with dataset related params
     :param dict trainer_config: dict with params related to training
-    :param str data_format: Channel location (channels_first of last)
-    :return:
-     :BaseDataSet train_dataset
-     :BaseDataSet val_dataset
-     :BaseDataSet test dataset
+    :param str shape_order: Tile shape order: 'yxz' or 'zyx'
+    :param bool masked_loss: Whether or not to use masks
+    :return: Dict containing
+     :BaseDataSet df_train: training dataset
+     :BaseDataSet df_val: validation dataset
+     :BaseDataSet df_test: test dataset
      :dict split_idx: dict with keys [train, val, test] and list of sample
       numbers as values
     """
-
+    mask_channels = None
+    if masked_loss:
+        mask_channels = dataset_config['mask_channels']
     tt = BaseTrainingTable(
         df_metadata=df_meta,
         input_channels=dataset_config['input_channels'],
         target_channels=dataset_config['target_channels'],
         split_by_column=dataset_config['split_by_column'],
         split_ratio=dataset_config['split_ratio'],
+        mask_channels=mask_channels,
     )
     all_metadata, split_samples = tt.train_test_split()
     csv_names = ['train_metadata.csv', 'val_metadata.csv', 'test_metadata.csv']
-    all_datasets = []
+    df_names = ['df_train', 'df_val', 'df_test']
+    all_datasets = {}
     for i in range(3):
-        metadata = all_metadata[i]
+        metadata = all_metadata[df_names[i]]
         if isinstance(metadata, type(None)):
-            all_datasets.append(None)
+            all_datasets[df_names[i]] = None
         else:
-            dataset = BaseDataSet(
-                tile_dir=tile_dir,
-                input_fnames=metadata['fpaths_input'],
-                target_fnames=metadata['fpaths_target'],
-                dataset_config=dataset_config,
-                batch_size=trainer_config['batch_size'],
-                data_format=data_format,
-            )
+            if masked_loss:
+                dataset = DataSetWithMask(
+                    tile_dir=tile_dir,
+                    input_fnames=metadata['fpaths_input'],
+                    target_fnames=metadata['fpaths_target'],
+                    mask_fnames=metadata['fpaths_mask'],
+                    dataset_config=dataset_config,
+                    batch_size=trainer_config['batch_size'],
+                    shape_order=shape_order,
+                )
+            else:
+                dataset = BaseDataSet(
+                    tile_dir=tile_dir,
+                    input_fnames=metadata['fpaths_input'],
+                    target_fnames=metadata['fpaths_target'],
+                    dataset_config=dataset_config,
+                    batch_size=trainer_config['batch_size'],
+                    shape_order=shape_order,
+                )
             metadata.to_csv(
                 os.path.join(trainer_config['model_dir'], csv_names[i]),
                 sep=','
             )
-            all_datasets.append(dataset)
+            all_datasets[df_names[i]] = dataset
 
-    return all_datasets[0], all_datasets[1], all_datasets[2], split_samples
-
-
-def create_datasets_with_mask(df_meta,
-                              tile_dir,
-                              dataset_config,
-                              trainer_config,
-                              data_format):
-    """Create train, val and test datasets
-
-    :param pd.DataFrame df_meta: Dataframe containing info on split tiles
-    :param str tile_dir: directory containing training image tiles
-    :param dict dataset_config: dict with dataset related params
-    :param dict trainer_config: dict with params related to training
-    :param str data_format: Channel location (channels_first or last)
-    :return:
-     :BaseDataSet train_dataset: y_true has mask concatenated at the end
-     :BaseDataSet val_dataset
-     :BaseDataSet test dataset
-     :dict split_idx: dict with keys [train, val, test] and list of sample
-      numbers as values
-    """
-
-    tt = BaseTrainingTable(
-        df_metadata=df_meta,
-        input_channels=dataset_config['input_channels'],
-        target_channels=dataset_config['target_channels'],
-        split_by_column=dataset_config['split_by_column'],
-        split_ratio=dataset_config['split_ratio'],
-        mask_channels=dataset_config['mask_channels'],
-    )
-    all_metadata, split_samples = tt.train_test_split()
-    csv_names = ['train_metadata.csv', 'val_metadata.csv', 'test_metadata.csv']
-    all_datasets = []
-    for i in range(3):
-        metadata = all_metadata[i]
-        if isinstance(metadata, type(None)):
-            all_datasets.append(None)
-        else:
-            dataset = DataSetWithMask(
-                tile_dir=tile_dir,
-                input_fnames=metadata['fpaths_input'],
-                target_fnames=metadata['fpaths_target'],
-                mask_fnames=metadata['fpaths_mask'],
-                dataset_config=dataset_config,
-                batch_size=trainer_config['batch_size'],
-                data_format=data_format,
-            )
-            metadata.to_csv(
-                os.path.join(trainer_config['model_dir'], csv_names[i]),
-                sep=','
-            )
-            all_datasets.append(dataset)
-
-    return all_datasets[0], all_datasets[1], all_datasets[2], split_samples
+    return all_datasets, split_samples
 
 
 def create_network(network_config, gpu_id):
@@ -217,6 +180,12 @@ def run_action(args, gpu_ids, gpu_mem_frac):
     trainer_config = config['trainer']
     network_config = config['network']
 
+    # Safety check: 2D UNets needs to have singleton dimension squeezed
+    if network_config['class'] == 'UNet2D':
+        dataset_config['squeeze'] = True
+    elif network_config['class'] == 'UNetStackTo2D':
+        dataset_config['squeeze'] = False
+
     # Check if masked loss exists
     masked_loss = False
     if 'masked_loss' in trainer_config:
@@ -234,6 +203,11 @@ def run_action(args, gpu_ids, gpu_mem_frac):
         if hasattr(preprocessing_info, preprocessing_info['tile_dir']):
             tile_dir_name = preprocessing_info['tile_dir']
     tile_dir = preprocessing_info[tile_dir_name]
+    # Get shape order from preprocessing config
+    config_preprocess = preprocessing_info['config']
+    shape_order = 'yxz'
+    if 'shape_order' in config_preprocess['tile']:
+        shape_order = config_preprocess['tile']['shape_order']
 
     if action == 'train':
         # Create directory where model will be saved
@@ -243,24 +217,14 @@ def run_action(args, gpu_ids, gpu_mem_frac):
         tiles_meta = pd.read_csv(os.path.join(tile_dir, 'frames_meta.csv'))
         tiles_meta = aux_utils.sort_meta_by_channel(tiles_meta)
         # Generate training, validation and test data sets
-        if masked_loss:
-            train_dataset, val_dataset, test_dataset, split_samples = \
-                create_datasets_with_mask(
-                    tiles_meta,
-                    tile_dir,
-                    dataset_config,
-                    trainer_config,
-                    network_config['data_format'],
-                )
-        else:
-            train_dataset, val_dataset, test_dataset, split_samples = \
-                create_datasets(
-                    tiles_meta,
-                    tile_dir,
-                    dataset_config,
-                    trainer_config,
-                    network_config['data_format'],
-                )
+        all_datasets, split_samples = create_datasets(
+            tiles_meta,
+            tile_dir,
+            dataset_config,
+            trainer_config,
+            shape_order,
+            masked_loss,
+        )
 
         # Save train, validation and test indices
         split_idx_fname = os.path.join(trainer_config['model_dir'],
@@ -294,8 +258,8 @@ def run_action(args, gpu_ids, gpu_mem_frac):
         num_target_channels = network_config['num_target_channels']
         trainer = BaseKerasTrainer(sess=sess,
                                    train_config=trainer_config,
-                                   train_dataset=train_dataset,
-                                   val_dataset=val_dataset,
+                                   train_dataset=all_datasets['df_train'],
+                                   val_dataset=all_datasets['df_val'],
                                    model=model,
                                    num_target_channels=num_target_channels,
                                    gpu_ids=args.gpu,

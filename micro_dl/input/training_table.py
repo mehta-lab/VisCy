@@ -92,15 +92,18 @@ class BaseTrainingTable:
         if self.mask_channels is not None:
             retain_columns.append('fpaths_mask')
 
-        df_train = self._get_df(train_idx, retain_columns)
+        df_dict = {
+            'df_train': self._get_df(train_idx, retain_columns),
+        }
 
         test_set = split_idx['test']
         test_idx = self.df_metadata[self.split_by_column].isin(test_set)
-        df_test = self._get_df(test_idx, retain_columns)
+        df_dict['df_test'] = self._get_df(test_idx, retain_columns)
 
         df_val = None
         if self.split_ratio['val']:
             val_set = split_idx['val']
             val_idx = self.df_metadata[self.split_by_column].isin(val_set)
             df_val = self._get_df(val_idx, retain_columns)
-        return [df_train, df_val, df_test], split_idx
+        df_dict['df_val'] = df_val
+        return df_dict, split_idx

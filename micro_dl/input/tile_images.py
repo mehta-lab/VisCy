@@ -27,7 +27,7 @@ class ImageTiler:
                  hist_clip_limits=None,
                  flat_field_dir=None,
                  isotropic=False,
-                 data_format='channels_first'):
+                 shape_order='zyx'):
         """
         Normalizes images using z-score, then tiles them.
         Isotropic here refers to the same dimension/shape along row, col, slice
@@ -59,7 +59,7 @@ class ImageTiler:
         :param str flat_field_dir: Flatfield directory. None if no flatfield
             correction
         :param bool isotropic: if 3D, make the grid/shape isotropic
-        :param str data_format: Channels first or last
+        :param str shape_order: Order of axes for tiles: 'yxz' or 'zyx'
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -80,17 +80,17 @@ class ImageTiler:
             pos_ids = tile_dict['positions']
         if 'hist_clip_limits' in tile_dict:
             hist_clip_limits = tile_dict['hist_clip_limits']
-        if 'data_format' in tile_dict:
-            data_format = tile_dict['data_format']
-            assert data_format in {'channels_first', 'channels_last'},\
-                "Data format must be channels_first or channels_last"
+        if 'shape_order' in tile_dict:
+            shape_order = tile_dict['shape_order']
+            assert shape_order in {'yxz', 'zyx'},\
+                "Axes order must be yxz or zyx, not {}".format(shape_order)
         self.depths = depths
         self.mask_depth = mask_depth
         self.tile_size = tile_size
         self.step_size = step_size
         self.isotropic = isotropic
         self.hist_clip_limits = hist_clip_limits
-        self.data_format = data_format
+        self.shape_order = shape_order
 
         self.str_tile_step = 'tiles_{}_step_{}'.format(
             '-'.join([str(val) for val in tile_size]),
@@ -186,7 +186,7 @@ class ImageTiler:
         :return dataframe tiled_metadata: Metadata with rows added to it
         """
         flip = False
-        if self.data_format == 'channels_first' and \
+        if self.shape_order == 'zyx' and \
             len(tiled_data[0][1].shape) > 2:
             flip = True
         for i, data_list in enumerate(tiled_data):
