@@ -39,7 +39,7 @@ def pre_process(pp_config):
     will be assembled based on the inputs and target you specify.
 
     :param dict pp_config: dict with key options:
-    [input_dir, output_dir, slice_ids, time_ids,
+    [input_dir, output_dir, slice_ids, time_ids, pos_ids
     correct_flat_field, use_masks, masks, tile_stack, tile]
     """
     input_dir = pp_config['input_dir']
@@ -51,6 +51,9 @@ def pre_process(pp_config):
     time_ids = -1
     if 'time_ids' in pp_config:
         time_ids = pp_config['time_ids']
+    pos_ids = -1
+    if 'pos_ids' in pp_config:
+        pos_ids = pp_config['pos_ids']
 
     # estimate flat_field images
     correct_flat_field = True if pp_config['correct_flat_field'] else False
@@ -75,6 +78,7 @@ def pre_process(pp_config):
             flat_field_dir=flat_field_dir,
             time_ids=time_ids,
             slice_ids=slice_ids,
+            pos_ids=pos_ids,
         )
         str_elem_radius = 5
         if 'str_elem_radius' in pp_config['masks']:
@@ -97,6 +101,7 @@ def pre_process(pp_config):
             tile_dict=pp_config['tile'],
             time_ids=time_ids,
             slice_ids=slice_ids,
+            pos_ids=pos_ids,
             flat_field_dir=flat_field_dir,
         )
         tile_dir = tile_inst.get_tile_dir()
