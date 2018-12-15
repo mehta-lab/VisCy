@@ -353,6 +353,7 @@ def write_tile(tile, save_dict, img_id):
                                       int2str_len=save_dict['int2str_len'],
                                       extra_field=img_id)
     op_fname = os.path.join(save_dict['save_dir'], file_name)
+    print(tile.shape)
     if save_dict['image_format'] == 'zyx' and len(tile.shape) > 2:
         tile = np.transpose(tile, (2, 0, 1))
     np.save(op_fname, tile, allow_pickle=True, fix_imports=True)
