@@ -419,6 +419,7 @@ class ImageTilerUniform:
                             fn_args.append(cur_args)
         tiled_meta_df_list = mp_crop_at_indices_save(fn_args,
                                                      workers=self.num_workers)
+
         tiled_meta_df_list.append(tiled_meta0)
         tiled_metadata = pd.concat(tiled_meta_df_list, ignore_index=True)
         if self.tiles_exist:
@@ -531,6 +532,7 @@ class ImageTilerUniform:
                             min_fraction=min_fraction
                         )
                         mask_fn_args.append(cur_args)
+
             # tile_image uses min_fraction assuming input_image is a bool
             mask_meta_df_list = mp_tile_save(mask_fn_args,
                                              workers=self.num_workers)
@@ -574,7 +576,7 @@ class ImageTilerUniform:
                                 pos_idx)
                             fn_args.append(cur_args)
         tiled_meta_df_list = mp_crop_at_indices_save(fn_args,
-                                                     workers=self.num_workers)
+                                                     workers = self.num_workers)
         tiled_metadata = pd.concat(tiled_meta_df_list, ignore_index=True)
         prev_tiled_metadata = aux_utils.read_meta(self.tile_dir)
         tiled_metadata = pd.concat([prev_tiled_metadata.reset_index(drop=True),
@@ -585,5 +587,5 @@ class ImageTilerUniform:
         tiled_metadata = tiled_metadata.sort_values(by=['file_name'])
         tiled_metadata.to_csv(
             os.path.join(self.tile_dir, "frames_meta.csv"),
-            sep=",",
+            sep=',',
         )

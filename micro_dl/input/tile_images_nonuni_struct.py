@@ -104,8 +104,10 @@ class ImageTilerNonUniform(ImageTilerUniform):
                         min_fraction=min_fraction
                     )
                     fn_args.append(cur_args)
+
         # tile_image uses min_fraction assuming input_image is a bool
         ch0_meta_df_list = mp_tile_save(fn_args, workers=self.num_workers)
+
         ch0_meta_df = pd.concat(ch0_meta_df_list, ignore_index=True)
         # Finally, save all the metadata
         ch0_meta_df = ch0_meta_df.sort_values(by=['file_name'])
