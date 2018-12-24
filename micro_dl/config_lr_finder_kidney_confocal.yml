@@ -1,0 +1,52 @@
+dataset:
+    preprocess: False
+    data_dir: '/data/sguo/Processed/2018_11_01_kidney_slice/SMS_2018_1101_1906_1_BG_2018_1101_1906_1/tiles_local_zscore'
+    input_channels: [1]
+    target_channels: [6]
+    split_by_column: pos_idx
+    split_ratio:
+        train: 0.7
+        val: 0.15
+        test: 0.15
+    height: 256
+    width: 256
+verbose: 10
+trainer:
+    model_dir: '/data/sguo/models_kidney_confocal/lr_finder/tile256_step128_curated_fltr16_256_do20_MSE_chan1_6_local_norm_augmented'
+    batch_size: 24
+    max_epochs: 50
+    patience: 20
+    metrics: coeff_determination
+    loss: mean_squared_error
+    augmentations: True
+    callbacks:
+        LearningRateScheduler:
+            lr_find: True
+            base_lr: 0.00001
+            max_lr: 0.001
+            max_epochs: 3
+            fig_fname: '/data/sguo/models_kidney_confocal/lr_finder/tile256_step128_curated_fltr16_256_do20_MSE_chan1_6_local_norm_augmented/lr_finder_result_3.png'
+    optimizer:
+        lr: 0.001
+        name: adam
+network:
+    class: UNet2D
+    num_filters_per_block: [16, 32, 64, 128, 256]
+    num_convs_per_block: 2
+    block_sequence: conv-activation-bn
+    filter_size: 3
+    batch_norm: True
+    activation:
+        type: relu
+    pooling_type: average
+    skip_merge_type: concat
+    upsampling: bilinear
+    dropout: 0.2
+    residual: True
+    height: 256
+    width: 256
+    num_input_channels: 1
+    num_target_channels: 1
+    data_format: 'channels_first'
+    dropout_dense: 0.4
+    final_activation: linear
