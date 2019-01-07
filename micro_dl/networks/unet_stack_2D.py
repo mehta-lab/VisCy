@@ -155,7 +155,7 @@ class UNetStackTo2D(BaseUNet):
         # ------------ output block ------------------------
         final_activation = self.config['final_activation']
         with tf.name_scope('output'):
-            layer = Conv3D(filters=1,
+            layer = Conv3D(filters=self.config['num_target_channels'],
                            kernel_size=(1, 1, 1),
                            padding='same',
                            kernel_initializer='he_normal',
@@ -168,12 +168,13 @@ class UNetStackTo2D(BaseUNet):
         """Return shape of input"""
 
         if self.config['data_format'] == 'channels_first':
-            shape = (1,
+            shape = (self.config['num_input_channels'],
                      self.config['depth'],
                      self.config['height'],
                      self.config['width'])
         else:
             shape = (self.config['depth'],
                      self.config['height'],
-                     self.config['width'], 1)
+                     self.config['width'],
+                     self.config['num_input_channels'])
         return shape

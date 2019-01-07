@@ -174,8 +174,11 @@ class BaseKerasTrainer:
         if 'masked_loss' in self.config:
             loss_is_masked = self.config["masked_loss"]
         if loss_is_masked:
-            masked_metrics = [metric(self.num_target_channels)
-                              for metric in metrics]
+            if metrics is not None:
+                masked_metrics = [metric(self.num_target_channels)
+                                  for metric in metrics]
+            else:
+                masked_metrics = metrics
             self.model.compile(loss=masked_loss(loss,
                                                 self.num_target_channels),
                                optimizer=optimizer,
@@ -203,9 +206,12 @@ class BaseKerasTrainer:
         loss_str = self.config['loss']
         loss = get_loss(loss_str)
         optimizer = self._get_optimizer()
-        metrics_list = self.config['metrics']
-        metrics = get_metrics(metrics_list)
         callbacks = self._get_callbacks()
+        if 'metrics' in self.config:
+            metrics_list = self.config['metrics']
+            metrics = get_metrics(metrics_list)
+        else:
+            metrics = None
 
         self._compile_model(loss, optimizer, metrics)
         self.model.summary()

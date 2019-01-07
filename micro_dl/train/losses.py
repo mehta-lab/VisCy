@@ -87,11 +87,14 @@ def masked_loss(loss_fn, n_channels):
 
     def masked_loss_fn(y_true, y_pred):
         y_true, mask_image = _split_ytrue_mask(y_true, n_channels)
-        y_true = K.batch_flatten(y_true)
-        y_pred = K.batch_flatten(y_pred)
         loss = loss_fn(y_true, y_pred, mean_loss=False)
-        mask = K.batch_flatten(mask_image)
-        modified_loss = K.mean(loss * mask, axis=1)
+        total_loss = 0.0
+        for ch_idx in range(n_channels):
+            cur_loss = loss[:, ch_idx]
+            cur_loss = cur_loss * mask_image
+            mean_loss = K.mean(cur_loss)
+            total_loss += mean_loss
+        modified_loss = total_loss / n_channels
         return modified_loss
     return masked_loss_fn
 

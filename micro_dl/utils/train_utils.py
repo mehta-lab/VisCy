@@ -67,7 +67,7 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
             ("Not enough memory available. Requested/current fractions:",
                 "\n".join([str(c) + " / " + "{0:.4g}".format(m)
                            for c, m in zip(gpu_mem_frac, cur_mem_frac)]))
-        return gpu_ids, cur_mem_frac
+        return gpu_ids, cur_mem_frac[0]
 
     # User has not specified GPU ID, find the GPU with most memory available
     sp = subprocess.Popen(['nvidia-smi --query-gpu=index --format=csv'],
@@ -93,7 +93,7 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
 
 
 def split_train_val_test(sample_set, train_ratio, test_ratio,
-                          val_ratio=None):
+                          val_ratio=None, random_seed=None):
     """Generate indices for train, validation and test split
 
     This can be achieved by using sklearn.model_selection.train_test_split
@@ -106,6 +106,7 @@ def split_train_val_test(sample_set, train_ratio, test_ratio,
      used for test set
     :param float val_ratio: between 0 and 1, percent of samples to be
      used for the validation set
+    :param int random_seed: seed the random number generator with this
     :return: dict split_idx with keys [train, val, test] and values as lists
     """
 
@@ -115,6 +116,7 @@ def split_train_val_test(sample_set, train_ratio, test_ratio,
     num_test = int(test_ratio * num_samples)
     num_test = max(num_test, 1)
 
+    np.random.seed(random_seed)
     split_idx = {}
     test_idx = np.random.choice(sample_set, num_test, replace=False)
     split_idx['test'] = test_idx.tolist()

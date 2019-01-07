@@ -94,6 +94,11 @@ def create_datasets(df_meta,
     mask_channels = None
     if masked_loss:
         mask_channels = dataset_config['mask_channels']
+
+    random_seed = None
+    if 'random_seed' in dataset_config:
+        random_seed = dataset_config['random_seed']
+
     tt = BaseTrainingTable(
         df_metadata=df_meta,
         input_channels=dataset_config['input_channels'],
@@ -101,6 +106,7 @@ def create_datasets(df_meta,
         split_by_column=dataset_config['split_by_column'],
         split_ratio=dataset_config['split_ratio'],
         mask_channels=mask_channels,
+        random_seed=random_seed
     )
     all_metadata, split_samples = tt.train_test_split()
     csv_names = ['train_metadata.csv', 'val_metadata.csv', 'test_metadata.csv']

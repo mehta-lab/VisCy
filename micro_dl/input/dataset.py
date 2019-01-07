@@ -238,7 +238,8 @@ class DataSetWithMask(BaseDataSet):
                  mask_fnames,
                  dataset_config,
                  batch_size,
-                 data_format):
+                 data_format,
+                 shape_order):
         """Init
 
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
@@ -254,6 +255,7 @@ class DataSetWithMask(BaseDataSet):
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
         :param str data_format: Channel location (channels_first or last)
+        :param str shape_order: Tile shape order: 'yxz' or 'zyx'
         """
 
         super().__init__(tile_dir,
@@ -261,7 +263,8 @@ class DataSetWithMask(BaseDataSet):
                          target_fnames,
                          dataset_config,
                          batch_size,
-                         data_format)
+                         data_format,
+                         shape_order)
         self.mask_fnames = mask_fnames
         # list label_weights: weight for each label
         self.label_weights = None
