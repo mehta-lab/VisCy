@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import pickle
 
+import micro_dl.utils.tile_utils as tile_utils
 from micro_dl.plotting.plot_utils import save_mask_overlay
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
@@ -211,13 +212,13 @@ class MaskCreator:
                 sample_num = int(fname.split('_')[1][1:])
                 cur_mask = np.load(cur_mask_fname)
                 if tile_index_fname:
-                    cropped_image_data = image_utils.crop_at_indices(
+                    cropped_image_data = tile_utils.crop_at_indices(
                         input_image=cur_mask,
                         crop_indices=crop_indices_dict[fname],
                         isotropic=isotropic
                     )
                 else:
-                    cropped_image_data = image_utils.tile_image(
+                    cropped_image_data = tile_utils.tile_image(
                         input_image=cur_mask,
                         tile_size=tile_size,
                         step_size=step_size,

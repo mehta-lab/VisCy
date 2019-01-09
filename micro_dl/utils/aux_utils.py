@@ -82,6 +82,7 @@ def get_meta_idx(metadata_df,
     :param int pos_idx: Position (FOV) index
     :return: int pos_idx: Row position matching indices above
     """
+
     frame_idx = metadata_df.index[
         (metadata_df['channel_idx'] == channel_idx) &
         (metadata_df['time_idx'] == time_idx) &
@@ -134,7 +135,7 @@ def sort_meta_by_channel(frames_metadata):
         channel X.
     """
 
-    metadata_ids = validate_metadata_indices(
+    metadata_ids, tp_dict = validate_metadata_indices(
         frames_metadata,
         time_ids=-1,
         channel_ids=-1,
@@ -170,7 +171,8 @@ def validate_metadata_indices(frames_metadata,
                               time_ids=None,
                               channel_ids=None,
                               slice_ids=None,
-                              pos_ids=None):
+                              pos_ids=None,
+                              uniform_structure=True):
     """
     Check the availability of indices provided timepoints, channels, positions
     and slices for all data.
@@ -186,15 +188,17 @@ def validate_metadata_indices(frames_metadata,
      frames_metadata
     :param int/list pos_ids: Check availability of positions in metadata
     :param int/list slice_ids: Check availability of z slices in metadata
+    :param bool uniform_structure: bool indicator if unequal quantities in any
+     of the ids (channel, time, slice, pos)
     :return dict metadata_ids: All indices found given input
     :raise AssertionError: If not all channels, timepoints, positions
         or slices are present
     """
     meta_id_names = [
-        "channel_ids",
-        "slice_ids",
-        "time_ids",
-        "pos_ids",
+        'channel_ids',
+        'slice_ids',
+        'time_ids',
+        'pos_ids',
     ]
     id_list = [
         channel_ids,
@@ -203,10 +207,10 @@ def validate_metadata_indices(frames_metadata,
         pos_ids,
     ]
     col_names = [
-        "channel_idx",
-        "slice_idx",
-        "time_idx",
-        "pos_idx",
+        'channel_idx',
+        'slice_idx',
+        'time_idx',
+        'pos_idx',
     ]
     metadata_ids = {}
     for meta_id_name, ids, col_name in zip(meta_id_names, id_list, col_names):
@@ -222,7 +226,25 @@ def validate_metadata_indices(frames_metadata,
                 'Indices for {} available'.format(col_name)
             metadata_ids[meta_id_name] = ids
 
-    return metadata_ids
+    tp_dict = None
+    if not uniform_structure:
+        tp_dict = {}
+        for tp_idx in metadata_ids['time_ids']:
+            ch_dict = {}
+            for ch_idx in metadata_ids['channel_ids']:
+                pos_dict = {}
+                for pos_idx in metadata_ids['pos_ids']:
+                    row_idx = ((frames_metadata['time_idx'] == tp_idx) &
+                               (frames_metadata['channel_idx'] == ch_idx) &
+                               (frames_metadata['pos_idx'] == pos_idx))
+                    if np.any(row_idx):
+                        cur_slice_ids = \
+                            frames_metadata[row_idx]['slice_idx'].unique()
+                        pos_dict[pos_idx] = cur_slice_ids
+                ch_dict[ch_idx] = pos_dict
+            tp_dict[tp_idx] = ch_dict
+
+    return metadata_ids, tp_dict
 
 
 def init_logger(logger_name, log_fname, log_level):
@@ -264,7 +286,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     assert len(meta_fname) == 1, \
         "Can't find info.csv file in {}".format(input_dir)
     try:
-        frames_metadata = pd.read_csv(meta_fname[0])
+        frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
         e.args += 'cannot read metadata csv file'
         raise

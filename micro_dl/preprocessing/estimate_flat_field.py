@@ -2,7 +2,6 @@
 
 import numpy as np
 import os
-import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
 from micro_dl.utils.image_utils import fit_polynomial_surface_2D, read_image

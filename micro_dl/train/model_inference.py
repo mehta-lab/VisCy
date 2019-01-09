@@ -5,6 +5,7 @@ import os
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
+from micro_dl.utils.tile_utils import tile_image
 from micro_dl.utils.normalize import zscore
 from micro_dl.plotting.plot_utils import save_predicted_images
 import micro_dl.utils.train_utils as train_utils
@@ -357,7 +358,7 @@ class ModelEvaluator:
         ip_channel_ids = self.config['dataset']['input_channels']
         op_channel_ids = self.config['dataset']['target_channels']
         tp_channel_ids = aux_utils.validate_metadata_indices(
-            image_meta, timepoint_ids=timepoint_ids
+            image_meta, time_ids=timepoint_ids
         )
         tp_idx = tp_channel_ids['timepoints']
         tile_size = [self.config['network']['height'],
@@ -389,7 +390,7 @@ class ModelEvaluator:
             # get the meta for all images in tp_dir and channel_dir
             row_idx_ip0 = aux_utils.get_row_idx(
                 image_meta, tp, ip_channel_ids[0],
-                focal_plane_idx=focal_plane_idx
+                slice_idx=focal_plane_idx
             )
             ip0_meta = image_meta[row_idx_ip0]
 
@@ -403,9 +404,9 @@ class ModelEvaluator:
             )
             tp_dir = str(os.sep).join(test_ip0_fnames[0].split(os.sep)[:-2])
             test_image = np.load(test_ip0_fnames[0])
-            _, crop_indices = image_utils.tile_image(test_image, tile_size,
-                                                     step_size, isotropic,
-                                                     return_index=True)
+            _, crop_indices = tile_image(test_image, tile_size,
+                                         step_size, isotropic,
+                                         return_index=True)
             pred_dir = os.path.join(self.config['trainer']['model_dir'],
                                     'predicted_images', 'tp_{}'.format(tp))
             for fname in test_image_fnames:

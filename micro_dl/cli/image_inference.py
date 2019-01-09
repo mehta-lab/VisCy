@@ -13,6 +13,7 @@ import micro_dl.plotting.plot_utils as plot_utils
 import micro_dl.train.model_inference as inference
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
+from micro_dl.utils.tile_utils import preprocess_imstack
 
 
 def parse_args():
@@ -155,7 +156,7 @@ def run_prediction(args):
         for pos_idx in metadata_ids['pos_idx']:
             for slice_idx in metadata_ids['slice_idx']:
                 # TODO: Add flatfield support
-                im_stack = image_utils.preprocess_imstack(
+                im_stack = preprocess_imstack(
                     frames_metadata=frames_meta,
                     input_dir=args.image_dir,
                     depth=depth,
