@@ -44,6 +44,7 @@ def pre_process(pp_config):
     [input_dir, output_dir, slice_ids, time_ids, pos_ids
     correct_flat_field, use_masks, masks, tile_stack, tile]
     """
+    time_start = time.time()
     input_dir = pp_config['input_dir']
     output_dir = pp_config['output_dir']
 
@@ -150,7 +151,9 @@ def pre_process(pp_config):
             tile_inst.tile_stack()
 
     # Write in/out/mask/tile paths and config to json in output directory
+    time_el = time.time() - time_start
     processing_info = {
+        "preprocessing_time": time_el,
         "input_dir": input_dir,
         "output_dir": output_dir,
         "flat_field_dir": flat_field_dir,

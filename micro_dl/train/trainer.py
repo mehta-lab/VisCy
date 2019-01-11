@@ -2,7 +2,7 @@
 from keras import callbacks as keras_callbacks
 from keras import optimizers as keras_optimizers
 import os
-from time import localtime, strftime
+import time
 
 
 import micro_dl.train.learning_rates as custom_learning
@@ -95,7 +95,8 @@ class BaseKerasTrainer:
                     assert callbacks_config[cb_dict]['monitor'] == 'val_loss',\
                         'cannot checkpoint best_model if monitor' \
                         'is not val_loss'
-                timestamp = strftime("%Y-%m-%d-%H-%M-%S", localtime())
+                timestamp = time.strftime("%Y-%m-%d-%H-%M-%S",
+                                          time.localtime())
                 model_name = '{}_{}.hdf5'.format('Model', timestamp)
                 filepath = os.path.join(self.model_dir, model_name)
                 # https://github.com/keras-team/keras/issues/8343
@@ -216,15 +217,21 @@ class BaseKerasTrainer:
         self._compile_model(loss, optimizer, metrics)
         self.model.summary()
         self.logger.info('Model compiled')
+        steps_per_epoch = self.train_dataset.get_steps_per_epoch()
+        self.logger.info("Steps per epoch: {}".format(steps_per_epoch))
 
         try:
+            time_start = time.time()
             # NUM WORKERS read from yml or find the num of empty cores?
             self.model.fit_generator(generator=self.train_dataset,
                                      validation_data=self.val_dataset,
                                      epochs=self.epochs,
+                                     steps_per_epoch=steps_per_epoch,
                                      callbacks=callbacks,
                                      workers=self.workers,
                                      verbose=1)
+            time_el = time.time() - time_start
+            self.logger.info("Training time: {}".format(time_el))
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
             raise

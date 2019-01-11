@@ -3,6 +3,7 @@ dataset:
     data_dir: '/data/anitha/label_free/image_tile_256-256_step_256-256'
     input_channels: [3]
     target_channels: [0]
+    train_fraction: 0.25
     split_by_column: sample_num
     split_ratio:
         train: 0.7

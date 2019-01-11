@@ -46,6 +46,8 @@ class BaseDataSet(keras.utils.Sequence):
         self.target_fnames = target_fnames
         self.num_samples = len(self.input_fnames)
         self.batch_size = batch_size
+        assert shape_order in {'yxz', 'zyx'},\
+            "Shape order should be yxz or zyx, not {}".format(shape_order)
         self.shape_order = shape_order
 
         # Check if model task (regression or segmentation) is specified
@@ -76,6 +78,20 @@ class BaseDataSet(keras.utils.Sequence):
         assert isinstance(self.shuffle, bool),\
             'shuffle parameter should be boolean'
 
+        # Whether to only use a fraction of training data each epoch
+        self.num_epoch_samples = self.num_samples
+        if 'train_fraction' in dataset_config:
+            train_fraction = dataset_config['train_fraction']
+            assert 0. < train_fraction < 1.,\
+                'Train fraction should be {0,1}, not {}'.format(train_fraction)
+            # You must shuffle if only using a fraction of the training data
+            self.shuffle = True
+            self.num_epoch_samples = int(self.num_samples * train_fraction)
+        self.steps_per_epoch = int(np.ceil(self.num_epoch_samples /
+                                           self.batch_size))
+        # Declare row indices, will to an inital shuffle at the end of init`
+        self.row_idx = np.arange(self.num_samples)
+
         # Whether to remove singleton dimensions from tiles (e.g. 2D models)
         self.squeeze = False
         if 'squeeze' in dataset_config:
@@ -97,6 +113,15 @@ class BaseDataSet(keras.utils.Sequence):
 
         n_batches = int(np.ceil(self.num_samples / self.batch_size))
         return n_batches
+
+    def get_steps_per_epoch(self):
+        """
+        Returns steps per epoch which is number of training samples per
+        epoch divided by batch size.
+
+        :return int steps_per_epoch: Steps per epoch
+        """
+        return self.steps_per_epoch
 
     def _augment_image(self, input_image, aug_idx):
         """Adds image augmentation among 6 possible options
@@ -177,7 +202,10 @@ class BaseDataSet(keras.utils.Sequence):
         return image_volume
 
     def __getitem__(self, index):
-        """Get a batch of data
+        """
+        Get a batch of data. If using a fraction of the training data, shuffle
+        if automatically set to True to make sure you have a chance of accessing
+        all training data and not just the first indices.
 
         https://www.tensorflow.org/performance/performance_guide#use_nchw_imag.
         will use nchw format. shape: [batch_size, num_channels, z, y, x]
@@ -222,8 +250,6 @@ class BaseDataSet(keras.utils.Sequence):
 
     def on_epoch_end(self):
         """Update indices and shuffle after each epoch"""
-
-        self.row_idx = np.arange(self.num_samples)
         if self.shuffle:
             np.random.shuffle(self.row_idx)
 
@@ -277,7 +303,7 @@ class DataSetWithMask(BaseDataSet):
         :param int index: batch index
         :return: np.ndarrays input_image and target_image of shape
          [batch_size, num_channels, z, y, x] and mask_image of shape
-         [batch_size, z, y, x] for data format channels_first,
+         [batch_size, z, y, x] for shape order zyx,
          otherwise [..., y, x, z]
         """
 

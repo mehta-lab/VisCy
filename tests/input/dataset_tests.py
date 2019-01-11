@@ -30,12 +30,12 @@ class TestBaseDataSet(unittest.TestCase):
         self.im = np.zeros((5, 7, 3))
         self.im[:, :5, 0] = np.diag([1, 2, 3, 4, 5])
         self.im[:4, :4, 1] = 1
-        # BaseDataSet works for either data format (channels_first or last)
-        # To prove it, targets are channels first
-        # This wouldn't work for a model, so it assumes you have matched your
-        # preprocessing and traning configs with the right data format!
-        self.im_target = np.zeros((3, 5, 7))
-        self.im_target[0, :4, :4] = 1
+
+        self.im_target = np.zeros((5, 7, 3))
+        self.im_target[:4, :4, 0] = 1
+        # Batch size is 2, input images of shape (5, 7, 3)
+        # stack adds singleton dimension
+        self.batch_shape = (2, 1, 5, 7, 3)
         for i, (in_name, out_name) in enumerate(zip(self.input_fnames,
                                                     self.target_fnames)):
             np.save(os.path.join(self.temp_path, in_name), self.im + i)
@@ -52,7 +52,7 @@ class TestBaseDataSet(unittest.TestCase):
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
-            data_format='channels_last',
+            shape_order='yxz',
         )
 
     def tearDown(self):
@@ -90,6 +90,10 @@ class TestBaseDataSet(unittest.TestCase):
         nbr_batches = self.data_inst.__len__()
         expected_batches = len(self.input_fnames) / self.batch_size
         nose.tools.assert_equal(nbr_batches, expected_batches)
+
+    def test_get_steps_per_epoch(self):
+        steps = self.data_inst.get_steps_per_epoch()
+        nose.tools.assert_equal(steps, 2)
 
     def test_augment_image_asis(self):
         trans_im = self.data_inst._augment_image(self.im, 0)
@@ -143,9 +147,9 @@ class TestBaseDataSet(unittest.TestCase):
     def test_augment_image_m1(self):
         self.data_inst._augment_image(self.im, -1)
 
-    def test_augment_image_lr_channels_first(self):
+    def test_augment_image_lr_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.data_format = 'channels_first'
+        self.data_inst.shape_order = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 1)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -153,9 +157,9 @@ class TestBaseDataSet(unittest.TestCase):
                 np.fliplr(im_test[i, ...]),
             )
 
-    def test_augment_image_ud_channels_first(self):
+    def test_augment_image_ud_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.data_format = 'channels_first'
+        self.data_inst.shape_order = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 2)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -165,7 +169,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot90_channels_first(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.data_format = 'channels_first'
+        self.data_inst.shape_order = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 3)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -173,9 +177,9 @@ class TestBaseDataSet(unittest.TestCase):
                 np.rot90(im_test[i, ...], k=1),
             )
 
-    def test_augment_image_rot180_channels_first(self):
+    def test_augment_image_rot180_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.data_format = 'channels_first'
+        self.data_inst.shape_order = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 4)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -183,9 +187,9 @@ class TestBaseDataSet(unittest.TestCase):
                 np.rot90(im_test[i, ...], k=2),
             )
 
-    def test_augment_image_rot270_channels_first(self):
+    def test_augment_image_rot270_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.data_format = 'channels_first'
+        self.data_inst.shape_order = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 5)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -204,45 +208,36 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test__getitem__(self):
         im_in, im_target = self.data_inst.__getitem__(0)
-        # Batch size is 2, input images of shape (5, 7, 3)
-        # stack adds singleton dimension
-        self.assertTupleEqual(im_in.shape, (2, 1, 5, 7, 3))
-        self.assertTupleEqual(im_target.shape, (2, 1, 3, 5, 7))
+        self.assertTupleEqual(im_in.shape, self.batch_shape)
+        self.assertTupleEqual(im_target.shape, self.batch_shape)
         # With a fixed random seed, augmentations and shuffles are the same
         augmentations = [2, 4]
         shuf_ids = [1, 3]
         for i in range(2):
             # only compare self.im
             im_test = np.squeeze(im_in[i, ...])
-            print(i, im_test[0, ...])
             im_expected = self.data_inst._augment_image(
                 self.im + shuf_ids[i],
                 augmentations[i],
             )
-            print(im_expected[0, ...])
             np.testing.assert_array_equal(im_test, im_expected)
 
     def test__getitem__normalized(self):
         self.data_inst.normalize = True
         im_in, im_target = self.data_inst.__getitem__(0)
-        # Batch size is 2, input images of shape (5, 7, 3)
-        # stack adds singleton dimension
-        self.assertTupleEqual(im_in.shape, (2, 1, 5, 7, 3))
-        self.assertTupleEqual(im_target.shape, (2, 1, 3, 5, 7))
+        self.assertTupleEqual(im_in.shape, self.batch_shape)
+        self.assertTupleEqual(im_target.shape, self.batch_shape)
         # Just test normalization this time
         for i in range(2):
             im_test = np.squeeze(im_in[i, ...])
-            nose.tools.assert_almost_equal(im_test.mean(), 0, 2)
+            nose.tools.assert_almost_equal(im_test.mean(), 0, 1)
             nose.tools.assert_almost_equal(im_test.std(), 1, 2)
             im_test = np.squeeze(im_target[i, ...])
             nose.tools.assert_almost_equal(im_test.mean(), 0, 2)
             nose.tools.assert_almost_equal(im_test.std(), 1, 2)
 
     def test_on_epoch_end(self):
-        row_idx = self.data_inst.row_idx
-        # Random seed 42 results in same order as before...
-        # Random seed 1 swaps all axes
-        np.random.seed(1)
+        row_idx = self.data_inst.row_idx.copy()
         self.data_inst.on_epoch_end()
         new_idx = self.data_inst.row_idx
         self.assertFalse((row_idx == new_idx).all())

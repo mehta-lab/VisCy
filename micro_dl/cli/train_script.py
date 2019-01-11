@@ -179,7 +179,6 @@ def run_action(args, gpu_ids, gpu_mem_frac):
     :param int gpu_ids: GPU ID
     :param float gpu_mem_frac: Available GPU memory fraction
     """
-
     action = args.action
     config = aux_utils.read_config(args.config)
     dataset_config = config['dataset']
@@ -211,7 +210,7 @@ def run_action(args, gpu_ids, gpu_mem_frac):
     tile_dir = preprocessing_info[tile_dir_name]
     # Get shape order from preprocessing config
     config_preprocess = preprocessing_info['config']
-    shape_order = 'yxz'
+    shape_order = 'zyx'
     if 'shape_order' in config_preprocess['tile']:
         shape_order = config_preprocess['tile']['shape_order']
 
@@ -288,3 +287,4 @@ if __name__ == '__main__':
         args.gpu_mem_frac,
     )
     run_action(args, gpu_id, gpu_mem_frac)
+
