@@ -115,6 +115,11 @@ class ImageTilerUniform:
             print("Tile dir exists. Only add untiled channels.")
             self.tiles_exist = True
 
+        # make dir for saving indiv meta per image, could be used for
+        # tracking job success / fail
+        os.makedirs(os.path.join(self.tile_dir, 'meta_dir'),
+                    exist_ok=True)
+
         self.flat_field_dir = flat_field_dir
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
         # Get metadata indices

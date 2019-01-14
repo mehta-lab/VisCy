@@ -57,7 +57,7 @@ def pre_process(pp_config):
 
     uniform_struct = False
     if 'uniform_struct' in pp_config:
-        uniform_struct = pp_config['uniform_structure']
+        uniform_struct = pp_config['uniform_struct']
 
     int2str_len = 3
     if 'int2str_len' in pp_config:
