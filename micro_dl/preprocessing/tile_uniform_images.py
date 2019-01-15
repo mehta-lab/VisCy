@@ -405,6 +405,7 @@ class ImageTilerUniform:
         """
         # Get or create tiled metadata and tile indices
         prev_tiled_metadata, tile_indices = self._get_tiled_data()
+        tiled_meta0 = None
         fn_args = []
         for channel_idx in self.channel_ids:
             # Perform flatfield correction if flatfield dir is specified
@@ -454,8 +455,8 @@ class ImageTilerUniform:
                             fn_args.append(cur_args)
         tiled_meta_df_list = mp_crop_save(fn_args,
                                           workers=self.num_workers)
-
-        tiled_meta_df_list.append(tiled_meta0)
+        if tiled_meta0 is not None:
+            tiled_meta_df_list.append(tiled_meta0)
         tiled_metadata = pd.concat(tiled_meta_df_list, ignore_index=True)
         if self.tiles_exist:
             tiled_metadata.reset_index(drop=True, inplace=True)
