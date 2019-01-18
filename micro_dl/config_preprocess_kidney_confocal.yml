@@ -1,6 +1,7 @@
 output_dir: '/data/sguo/Processed/2018_11_01_kidney_slice/SMS_2018_1101_1906_1_BG_2018_1101_1906_1/tiles_local_zscore'
 verbose: 10
 input_dir: '/data/sguo/Processed/2018_11_01_kidney_slice/SMS_2018_1101_1906_1_BG_2018_1101_1906_1/microDL_format'
+num_workers: 4
 correct_flat_field: False
 create_masks: False
 masks:

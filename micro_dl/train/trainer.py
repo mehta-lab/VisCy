@@ -135,12 +135,15 @@ class BaseKerasTrainer:
                         fig_fname=fig_fname,
                     )
                 else:
+                    scale_mode = "cycle"
+                    if 'scale_mode' in callbacks_config[cb_dict]:
+                        scale_mode = callbacks_config[cb_dict]['scale_mode']
                     cur_cb = custom_learning.CyclicLearning(
                         base_lr=callbacks_config[cb_dict]['base_lr'],
                         max_lr=callbacks_config[cb_dict]['max_lr'],
                         step_size=callbacks_config[cb_dict]['step_size'],
                         gamma=callbacks_config[cb_dict]['gamma'],
-                        scale_mode=callbacks_config[cb_dict]['scale_mode'],
+                        scale_mode=scale_mode,
                     )
             elif cb_dict == 'TensorBoard':
                 log_dir = os.path.join(self.model_dir, 'tensorboard_logs')

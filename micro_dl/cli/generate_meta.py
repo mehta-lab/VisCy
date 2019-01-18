@@ -2,7 +2,6 @@
 
 import argparse
 import os
-import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
 
@@ -48,25 +47,15 @@ def meta_generator(args):
         str input_dir:   path to input directory containing images
     """
     meta_name = 'frames_meta.csv'
-    df_names = ["channel_idx",
-                "slice_idx",
-                "time_idx",
-                "channel_name",
-                "file_name",
-                "pos_idx"]
 
     # Get all image names
     im_names = aux_utils.get_sorted_names(args.input)
     # Create empty dataframe
-    frames_meta = pd.DataFrame(
-        index=range(len(im_names)),
-        columns=df_names,
-    )
+    frames_meta = aux_utils.make_dataframe(nbr_rows=len(im_names))
     # Fill dataframe with rows from image names
     for i in range(len(im_names)):
         frames_meta.loc[i] = aux_utils.get_ids_from_imname(
             im_name=im_names[i],
-            df_names=df_names,
             order=args.order,
         )
     # Write metadata

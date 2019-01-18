@@ -20,13 +20,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
         self.temp_path = self.tempdir.path
         # Start frames meta file
         self.meta_name = 'frames_meta.csv'
-        self.df_names = ['channel_idx',
-                         'slice_idx',
-                         'time_idx',
-                         'channel_name',
-                         'file_name',
-                         'pos_idx']
-        frames_meta = pd.DataFrame(columns=self.df_names,)
+        frames_meta = aux_utils.make_dataframe()
         self.im = 127 * np.ones((15, 11), dtype=np.uint8)
         self.im2 = 234 * np.ones((15, 11), dtype=np.uint8)
         self.int2str_len = 3
@@ -38,22 +32,34 @@ class TestImageTilerNonUniform(unittest.TestCase):
         for z in range(5):
             for t in range(3):
                 for c in self.channel_idx:
-                    im_name = self._get_name(c, z, t, self.pos_idx1, '.png')
+                    im_name = aux_utils.get_im_name(
+                        channel_idx=c,
+                        slice_idx=z,
+                        time_idx=t,
+                        pos_idx=self.pos_idx1,
+                        ext='.png',
+                    )
                     sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                                     self.im)
                     frames_meta = frames_meta.append(
-                        aux_utils.get_ids_from_imname(im_name, self.df_names),
+                        aux_utils.get_ids_from_imname(im_name),
                         ignore_index=True,
                     )
         # write pos2 with 2 time points and 3 slices
         for z in range(3):
             for t in range(2):
                 for c in self.channel_idx:
-                    im_name = self._get_name(c, z, t, self.pos_idx2, '.png')
+                    im_name = aux_utils.get_im_name(
+                        channel_idx=c,
+                        slice_idx=z,
+                        time_idx=t,
+                        pos_idx=self.pos_idx2,
+                        ext='.png',
+                    )
                     sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                                     self.im)
                     frames_meta = frames_meta.append(
-                        aux_utils.get_ids_from_imname(im_name, self.df_names),
+                        aux_utils.get_ids_from_imname(im_name),
                         ignore_index=True,
                     )
 
@@ -72,13 +78,6 @@ class TestImageTilerNonUniform(unittest.TestCase):
             output_dir=self.output_dir,
             tile_dict=self.tile_dict,
         )
-
-    def _get_name(self, ch_idx, sl_idx, time_idx, pos_idx, ext):
-        im_name = 'im_c' + str(ch_idx).zfill(self.int2str_len) + \
-                  '_z' + str(sl_idx).zfill(self.int2str_len) + \
-                  '_t' + str(time_idx).zfill(self.int2str_len) + \
-                  '_p' + str(pos_idx).zfill(self.int2str_len) + ext
-        return im_name
 
     def tearDown(self):
         """Tear down temporary folder and file structure"""
@@ -135,7 +134,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
             for col in [0, 4, 6]:
                 for z in [1, 2, 3]:
                     for t in [0, 1, 2]:
-                        fname = self._get_name(1, z, t, 7, '.npy')
+                        fname = aux_utils.get_im_name(
+                            channel_idx=1,
+                            slice_idx=z,
+                            time_idx=t,
+                            pos_idx=7,
+                        )
                         tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row+5,
                                                                col, col+5)
                         fname = fname.split('.')[0] + tile_id + '.npy'
@@ -148,7 +152,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
                                     'col_start': col}
                         exp_meta.append(cur_meta)
                 for t in [0, 1]:
-                    fname = self._get_name(1, 1, t, 8, '.npy')
+                    fname = aux_utils.get_im_name(
+                        channel_idx=1,
+                        slice_idx=1,
+                        time_idx=t,
+                        pos_idx=8,
+                    )
                     tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row + 5,
                                                             col, col + 5)
                     fname = fname.split('.')[0] + tile_id + '.npy'
@@ -198,7 +207,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
                 for z in [1, 2, 3]:
                     for t in [0, 1, 2]:
                         for c in self.channel_idx:
-                            fname = self._get_name(c, z, t, 7, '.npy')
+                            fname = aux_utils.get_im_name(
+                                channel_idx=c,
+                                slice_idx=z,
+                                time_idx=t,
+                                pos_idx=7,
+                            )
                             tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row+5,
                                                                     col, col+5)
                             fname = fname.split('.')[0] + tile_id + '.npy'
@@ -212,7 +226,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
                             exp_meta.append(cur_meta)
                 for t in [0, 1]:
                     for c in self.channel_idx:
-                        fname = self._get_name(c, 1, t, 8, '.npy')
+                        fname = aux_utils.get_im_name(
+                            channel_idx=c,
+                            slice_idx=1,
+                            time_idx=t,
+                            pos_idx=8,
+                        )
                         tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row + 5,
                                                                 col, col + 5)
                         fname = fname.split('.')[0] + tile_id + '.npy'
@@ -266,11 +285,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
         for z in range(5):
             for t in range(3):
                 cur_im = mask_images[:, :, z]
-                im_name = self._get_name(ch_idx=3,
-                                         sl_idx=z,
-                                         time_idx=t,
-                                         pos_idx=self.pos_idx1,
-                                         ext='.npy')
+                im_name = aux_utils.get_im_name(
+                    channel_idx=3,
+                    slice_idx=z,
+                    time_idx=t,
+                    pos_idx=self.pos_idx1,
+                )
                 np.save(os.path.join(mask_dir, im_name), cur_im)
                 cur_meta = {'channel_idx': 3,
                             'slice_idx': z,

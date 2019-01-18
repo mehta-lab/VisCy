@@ -1,10 +1,11 @@
+import cv2
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import os
 
-from micro_dl.utils import aux_utils as aux_utils
-from micro_dl.utils.image_utils import create_mask
-from micro_dl.utils import tile_utils as tile_utils
+import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.image_utils as image_utils
+import micro_dl.utils.tile_utils as tile_utils
 
 
 def mp_create_save_mask(fn_args, workers):
@@ -50,7 +51,7 @@ def create_save_mask(input_fnames,
     summed_image = np.sum(np.stack(im_stack), axis=2)
     summed_image = summed_image.astype('float32')
 
-    mask = create_mask(summed_image, str_elem_radius)
+    mask = image_utils.create_mask(summed_image, str_elem_radius)
     # Create mask name for given slice, time and position
     file_name = aux_utils.get_im_name(time_idx=time_idx,
                                       channel_idx=mask_channel_idx,
@@ -221,3 +222,31 @@ def crop_at_indices_save(input_fnames,
         raise e
 
     return tile_meta_df
+
+
+def mp_resize_save(mp_args, workers):
+    """
+    Resize and save images with multiprocessing
+
+    :param dict mp_args: Function keyword arguments
+    :param int workers: max number of workers
+    """
+    with ProcessPoolExecutor(workers) as ex:
+        {ex.submit(resize_and_save, **kwargs): kwargs for kwargs in mp_args}
+
+
+def resize_and_save(**kwargs):
+    """
+    Resizing images and saving them
+    :param kwargs: Keyword arguments:
+    str file_path: Path to input image
+    str write_path: Path to image to be written
+    float scale_factor: Scale factor for resizing
+    """
+    im = image_utils.read_image(kwargs['file_path'])
+    im_resized = image_utils.rescale_image(
+        im=im,
+        scale_factor=kwargs['scale_factor'],
+    )
+    # Write image
+    cv2.imwrite(kwargs['write_path'], im_resized)

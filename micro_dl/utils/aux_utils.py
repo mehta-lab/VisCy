@@ -11,6 +11,13 @@ import re
 import pandas as pd
 import yaml
 
+DF_NAMES = ["channel_idx",
+            "slice_idx",
+            "time_idx",
+            "channel_name",
+            "file_name",
+            "pos_idx"]
+
 
 def import_class(module_name, cls_name):
     """Imports a class specified in yaml dynamically
@@ -273,6 +280,27 @@ def init_logger(logger_name, log_fname, log_level):
     return logger
 
 
+def make_dataframe(nbr_rows=None, df_names=DF_NAMES):
+    """
+    Create empty frames metadata pandas dataframe given number of rows
+    and standard column names defined below
+
+    :param [None, int] nbr_rows: The number of rows in the dataframe
+    :return dataframe frames_meta: Empty dataframe with given
+        indices and column names
+    """
+
+    if nbr_rows is not None:
+        # Create empty dataframe
+        frames_meta = pd.DataFrame(
+            index=range(nbr_rows),
+            columns=df_names,
+        )
+    else:
+        frames_meta = pd.DataFrame(columns=df_names)
+    return frames_meta
+
+
 def read_meta(input_dir, meta_fname='frames_meta.csv'):
     """
     Read metadata file, which is assumed to be named 'frames_meta.csv'
@@ -284,7 +312,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     """
     meta_fname = glob.glob(os.path.join(input_dir, meta_fname))
     assert len(meta_fname) == 1, \
-        "Can't find info.csv file in {}".format(input_dir)
+        "Can't find metadata csv file in {}".format(input_dir)
     try:
         frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
@@ -426,7 +454,7 @@ def get_sorted_names(dir_name):
     return natsort.natsorted(im_names)
 
 
-def get_ids_from_imname(im_name, df_names, order="cztp"):
+def get_ids_from_imname(im_name, df_names=DF_NAMES, order="cztp"):
     """
     Assumes im_name is e.g. im_c***_z***_p***_t***.png,
     It doesn't care about the extension or the number of digits each index is

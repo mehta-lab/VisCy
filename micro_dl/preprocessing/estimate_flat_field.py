@@ -26,7 +26,7 @@ class FlatFieldEstimator2D:
         os.makedirs(self.flat_field_dir, exist_ok=True)
         self.slice_ids = slice_ids
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
-        metadata_ids = aux_utils.validate_metadata_indices(
+        metadata_ids, _ = aux_utils.validate_metadata_indices(
             frames_metadata=self.frames_metadata,
             channel_ids=-1,
             slice_ids=slice_ids,

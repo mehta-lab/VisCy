@@ -6,6 +6,7 @@ import time
 
 from micro_dl.preprocessing.estimate_flat_field import FlatFieldEstimator2D
 from micro_dl.preprocessing.generate_masks import MaskProcessor
+from micro_dl.preprocessing.resize_images import ImageResizer
 from micro_dl.preprocessing.tile_uniform_images import ImageTilerUniform
 from micro_dl.preprocessing.tile_nonuniform_images import \
     ImageTilerNonUniform
@@ -34,6 +35,8 @@ def pre_process(pp_config):
     Preprocess data. Possible options are:
     correct_flat_field: Perform flatfield correction (2D only currently)
     create_masks: Generate binary masks from given input channels
+    resample: Resize 2D images (xy-plane) according to a scale factor,
+        e.g. to match resolution in z.
     do_tiling: Split frames (stacked frames if generating 3D tiles) into
     smaller tiles with tile_size and step_size.
     This script will preprocess your dataset, save tiles and associated
@@ -51,9 +54,18 @@ def pre_process(pp_config):
     slice_ids = -1
     if 'slice_ids' in pp_config:
         slice_ids = pp_config['slice_ids']
+
     time_ids = -1
     if 'time_ids' in pp_config:
         time_ids = pp_config['time_ids']
+
+    pos_ids = -1
+    if 'pos_ids' in pp_config:
+        pos_ids = pp_config['pos_ids']
+
+    channel_ids = -1
+    if 'channel_ids' in pp_config:
+        channel_ids = pp_config['channel_ids']
 
     uniform_struct = False
     if 'uniform_struct' in pp_config:
@@ -63,15 +75,29 @@ def pre_process(pp_config):
     if 'int2str_len' in pp_config:
         int2str_len = pp_config['int2str_len']
 
-    pos_ids = -1
-    if 'pos_ids' in pp_config:
-        pos_ids = pp_config['pos_ids']
-
     num_workers = 4
-    if 'num_workers' in pp_config['tile']:
+    if 'num_workers' in pp_config:
         num_workers = pp_config['num_workers']
 
-    # estimate flat_field images
+    # Resample images first
+    if 'resample_scale' in pp_config:
+        scale_factor = pp_config['resample_scale']
+        if scale_factor != 1:
+            resize_inst = ImageResizer(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                scale_factor=scale_factor,
+                channel_ids=channel_ids,
+                time_ids=time_ids,
+                slice_ids=slice_ids,
+                pos_ids=pos_ids,
+                int2str_len=int2str_len,
+            )
+            resize_inst.resize_frames()
+            # Point input to resized images
+            input_dir = resize_inst.get_resize_dir()
+
+    # Estimate flat_field images
     correct_flat_field = True if pp_config['correct_flat_field'] else False
     flat_field_dir = None
     if correct_flat_field:
@@ -87,10 +113,15 @@ def pre_process(pp_config):
     mask_dir = None
     mask_channel = None
     if pp_config['create_masks']:
+        mask_channel = pp_config['masks']['channels']
+        if channel_ids != -1:
+            assert mask_channel in channel_ids,\
+                "Mask channel {} not in channel indices {}".format(
+                    mask_channel, channel_ids)
         mask_processor_inst = MaskProcessor(
             input_dir=input_dir,
             output_dir=output_dir,
-            channel_ids=pp_config['masks']['channels'],
+            channel_ids=mask_channel,
             flat_field_dir=flat_field_dir,
             time_ids=time_ids,
             slice_ids=slice_ids,
@@ -112,10 +143,6 @@ def pre_process(pp_config):
     # Tile frames
     tile_dir = None
     if pp_config['do_tiling']:
-        channel_ids = -1
-        if 'channels' in pp_config['tile']:
-            channel_ids = pp_config['tile']['channels']
-
         if uniform_struct:
             tile_inst = ImageTilerUniform(input_dir=input_dir,
                                           output_dir=output_dir,

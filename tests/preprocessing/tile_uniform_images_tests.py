@@ -20,13 +20,7 @@ class TestImageTilerUniform(unittest.TestCase):
         self.temp_path = self.tempdir.path
         # Start frames meta file
         self.meta_name = 'frames_meta.csv'
-        self.df_names = ['channel_idx',
-                         'slice_idx',
-                         'time_idx',
-                         'channel_name',
-                         'file_name',
-                         'pos_idx']
-        frames_meta = pd.DataFrame(columns=self.df_names,)
+        frames_meta = aux_utils.make_dataframe()
         # Write images
         self.im = 127 * np.ones((15, 11), dtype=np.uint8)
         self.im2 = 234 * np.ones((15, 11), dtype=np.uint8)
@@ -38,22 +32,32 @@ class TestImageTilerUniform(unittest.TestCase):
 
         # Write test images with 4 z and 2 pos idx
         for z in range(15, 20):
-            im_name = self._get_name(self.channel_idx, z,
-                                     self.time_idx, self.pos_idx1, '.png')
+            im_name = aux_utils.get_im_name(
+                channel_idx=self.channel_idx,
+                slice_idx=z,
+                time_idx=self.time_idx,
+                pos_idx=self.pos_idx1,
+                ext='.png',
+            )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             self.im)
             frames_meta = frames_meta.append(
-                aux_utils.get_ids_from_imname(im_name, self.df_names),
+                aux_utils.get_ids_from_imname(im_name),
                 ignore_index=True,
             )
 
         for z in range(15, 20):
-            im_name = self._get_name(self.channel_idx, z,
-                                     self.time_idx, self.pos_idx2, '.png')
+            im_name = aux_utils.get_im_name(
+                channel_idx=self.channel_idx,
+                slice_idx=z,
+                time_idx=self.time_idx,
+                pos_idx=self.pos_idx2,
+                ext='.png',
+            )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             self.im2)
             frames_meta = frames_meta.append(
-                aux_utils.get_ids_from_imname(im_name, self.df_names),
+                aux_utils.get_ids_from_imname(im_name),
                 ignore_index=True,
             )
 
@@ -83,13 +87,6 @@ class TestImageTilerUniform(unittest.TestCase):
             tile_dict=self.tile_dict,
             flat_field_dir=self.flat_field_dir,
         )
-
-    def _get_name(self, ch_idx, sl_idx, time_idx, pos_idx, ext):
-        im_name = 'im_c' + str(ch_idx).zfill(self.int2str_len) + \
-                  '_z' + str(sl_idx).zfill(self.int2str_len) + \
-                  '_t' + str(time_idx).zfill(self.int2str_len) + \
-                  '_p' + str(pos_idx).zfill(self.int2str_len) + ext
-        return im_name
 
     def tearDown(self):
         """Tear down temporary folder and file structure"""
@@ -210,7 +207,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     channel_idx=self.channel_idx,
                     slice_idx=z,
                     pos_idx=self.pos_idx1,
-                    extra_field=cur_img_id
+                    extra_field=cur_img_id,
                 )
                 pos1_meta = {'channel_idx': self.channel_idx,
                              'slice_idx': z,
@@ -225,7 +222,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     channel_idx=self.channel_idx,
                     slice_idx=z,
                     pos_idx=self.pos_idx2,
-                    extra_field=cur_img_id
+                    extra_field=cur_img_id,
                 )
                 pos2_meta = {'channel_idx': self.channel_idx,
                              'slice_idx': z,
@@ -397,11 +394,12 @@ class TestImageTilerUniform(unittest.TestCase):
         # write mask images and add meta to frames_meta
         for z in range(5):
             cur_im = mask_images[:, :, z]
-            im_name = self._get_name(ch_idx=3,
-                                     sl_idx=z+15,
-                                     time_idx=self.time_idx,
-                                     pos_idx=self.pos_idx1,
-                                     ext='.npy')
+            im_name = aux_utils.get_im_name(
+                channel_idx=3,
+                slice_idx=z+15,
+                time_idx=self.time_idx,
+                pos_idx=self.pos_idx1,
+            )
             np.save(os.path.join(mask_dir, im_name), cur_im)
             cur_meta = {'channel_idx': 3,
                         'slice_idx': z+15,

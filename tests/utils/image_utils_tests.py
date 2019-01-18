@@ -1,14 +1,13 @@
 import nose.tools
 import numpy as np
 
-import micro_dl.preprocessing.estimate_flat_field as est_flat_field
 import micro_dl.utils.image_utils as image_utils
 
 
 # Create a test image and its corresponding coordinates and values
 # Create a test image with a bright block to the right
 
-test_im = np.zeros((10, 15), np.uint8) + 100
+test_im = np.zeros((10, 15), np.uint16) + 100
 test_im[:, 9:] = 200
 x, y = np.meshgrid(np.linspace(1, 7, 3), np.linspace(1, 13, 5))
 test_coords = np.vstack((x.flatten(), y.flatten())).T
@@ -16,20 +15,42 @@ test_values = np.zeros((15,), dtype=np.float64) + 100.
 test_values[9:] = 200.
 
 
-def test_sample_block_medians():
-    # Test that block sampling is performed correctly
-    block_size = 3
-    coords, values = est_flat_field.sample_block_medians(test_im,
-                                                         block_size=block_size)
-    # A block size of 3 will create 3*5 block coordinates and values
-    np.testing.assert_array_equal(values, test_values)
-    np.testing.assert_array_equal(coords, test_coords)
+def test_upscale_image():
+    im_out = image_utils.rescale_image(test_im, 2)
+    im_shape = im_out.shape
+    test_shape = test_im.shape
+    nose.tools.assert_equal(im_shape[0], test_shape[0] * 2)
+    nose.tools.assert_equal(im_shape[1], test_shape[1] * 2)
+    nose.tools.assert_equal(im_out[0, 0], test_im[0, 0])
+    nose.tools.assert_equal(im_out[-1, -1], test_im[-1, -1])
+
+
+def test_downscale_image():
+    im_out = image_utils.rescale_image(test_im, 0.5)
+    im_shape = im_out.shape
+    test_shape = test_im.shape
+    nose.tools.assert_equal(im_shape[0], round(test_shape[0] * .5))
+    nose.tools.assert_equal(im_shape[1], round(test_shape[1] * .5))
+    nose.tools.assert_equal(im_out[0, 0], test_im[0, 0])
+    nose.tools.assert_equal(im_out[-1, -1], test_im[-1, -1])
+
+
+def test_samescale_image():
+    im_out = image_utils.rescale_image(test_im, 1)
+    im_shape = im_out.shape
+    test_shape = test_im.shape
+    nose.tools.assert_equal(im_shape[0], test_shape[0])
+    nose.tools.assert_equal(im_shape[1], test_shape[1])
+    nose.tools.assert_equal(im_out[0, 0], test_im[0, 0])
+    nose.tools.assert_equal(im_out[-1, -1], test_im[-1, -1])
 
 
 def test_fit_polynomial_surface():
-    flatfield = image_utils.fit_polynomial_surface(test_coords,
-                                                   test_values,
-                                                   im_shape=(10, 15))
+    flatfield = image_utils.fit_polynomial_surface_2D(
+        test_coords,
+        test_values,
+        im_shape=(10, 15),
+    )
     # Since there's a bright block to the right, the left col should be
     # < right col
     nose.tools.assert_true(np.mean(flatfield[:, 0]) <
@@ -37,17 +58,3 @@ def test_fit_polynomial_surface():
     # Since flatfield is normalized, the mean should be close to one
     nose.tools.assert_almost_equal(np.mean(flatfield), 1., places=3)
 
-
-def test_get_flatfield():
-    flatfield = est_flat_field.get_flatfield(test_im, block_size=3)
-    # Since there's a bright block to the right, the left col should be
-    # < right col
-    nose.tools.assert_true(np.mean(flatfield[:, 0]) <
-                           np.mean(flatfield[:, -1]))
-    # Since flatfield is normalized, the mean should be close to one
-    nose.tools.assert_almost_equal(np.mean(flatfield), 1., places=3)
-
-
-@nose.tools.raises(ValueError)
-def test_negative_flatfield():
-    flatfield = est_flat_field.get_flatfield(test_im - 100, block_size=3,)
