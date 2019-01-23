@@ -227,7 +227,7 @@ def validate_metadata_indices(frames_metadata,
         if ids is not None:
             if np.issubdtype(type(ids), np.integer):
                 if ids == -1:
-                    ids = frames_metadata[col_name].unique()
+                    ids = frames_metadata[col_name].unique().tolist()
                 else:
                     ids = [ids]
             all_ids = frames_metadata[col_name].unique()

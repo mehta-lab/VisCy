@@ -86,7 +86,7 @@ class BaseTrainingTable:
             "into train/val".format(self.split_by_column)
         # DOES NOT HANDLE NON-INTEGER VALUES. map to int if string
         # the sample_idxs are required for evaluating performance on test set
-
+        unique_values = unique_values.astype(np.uint32)
         assert np.issubdtype(unique_values.dtype, np.integer)
         split_idx = split_train_val_test(
             unique_values, self.split_ratio['train'],
