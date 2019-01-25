@@ -107,7 +107,7 @@ def split_train_val_test(sample_set, train_ratio, test_ratio,
      used for test set
     :param float val_ratio: between 0 and 1, percent of samples to be
      used for the validation set
-    :param int random_seed: seed the random number generator with this
+    :param int random_seed: between 0 and 2**32 - 1, random seed for train-val-test split
     :return: dict split_idx with keys [train, val, test] and values as lists
     """
 

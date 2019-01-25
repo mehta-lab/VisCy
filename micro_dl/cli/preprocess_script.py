@@ -137,6 +137,7 @@ def pre_process(pp_config):
             correct_flat_field=correct_flat_field,
             str_elem_radius=str_elem_radius,
         )
+
         mask_dir = mask_processor_inst.get_mask_dir()
         mask_channel = mask_processor_inst.get_mask_channel()
 

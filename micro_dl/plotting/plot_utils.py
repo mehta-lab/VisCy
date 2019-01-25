@@ -5,10 +5,12 @@ matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from micro_dl.utils.normalize import hist_clipping
 
 
 def save_predicted_images(input_batch, target_batch, pred_batch,
-                          output_dir, batch_idx=None, output_fname=None):
+                          output_dir, batch_idx=None, output_fname=None,
+                          tol=1, font_size=15):
     """Saves a batch predicted image to output dir
 
     Format: rows of [input, target, pred]
@@ -20,6 +22,8 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
     :param str output_dir: dir to store the output images/mosaics
     :param int batch_idx: current batch number/index
     :param str output_fname: fname for saving collage
+    :param float tol: top and bottom % of intensity to saturate
+    :param int font_size: font size of the image title
     """
 
     if not os.path.exists(output_dir):
@@ -43,27 +47,30 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
         fig.set_size_inches((15, 5 * n_channels))
         axis_count = 0
         for channel_idx in range(n_channels):
-            ax[axis_count].imshow(cur_input[channel_idx], cmap='gray')
+            ax[axis_count].imshow(hist_clipping(cur_input[channel_idx],
+                                                tol, 100 - tol), cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 0:
-                ax[axis_count].set_title('input')
+                ax[axis_count].set_title('Input', fontsize=font_size)
             axis_count += 1
-            ax[axis_count].imshow(cur_target[channel_idx], cmap='gray')
+            ax[axis_count].imshow(hist_clipping(cur_target[channel_idx],
+                                                tol, 100 - tol), cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 1:
-                ax[axis_count].set_title('target')
+                ax[axis_count].set_title('Target', fontsize=font_size)
             axis_count += 1
-            ax[axis_count].imshow(cur_prediction[channel_idx], cmap='gray')
+            ax[axis_count].imshow(hist_clipping(cur_prediction[channel_idx],
+                                                tol, 100 - tol), cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 2:
-                ax[axis_count].set_title('prediction')
+                ax[axis_count].set_title('Prediction', fontsize=font_size)
             axis_count += 1
         if batch_size != 1:
             fname = os.path.join(
                 output_dir,
                 '{}.jpg'.format(str(batch_idx * batch_size + img_idx))
             )
-        fig.savefig(fname, dpi=250)
+        fig.savefig(fname, dpi=300, bbox_inches='tight')
         plt.close(fig)
 
 
