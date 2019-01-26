@@ -47,6 +47,7 @@ def pre_process(pp_config):
     [input_dir, output_dir, slice_ids, time_ids, pos_ids
     correct_flat_field, use_masks, masks, tile_stack, tile]
     """
+
     time_start = time.time()
     input_dir = pp_config['input_dir']
     output_dir = pp_config['output_dir']
@@ -104,6 +105,7 @@ def pre_process(pp_config):
         flat_field_inst = FlatFieldEstimator2D(
             input_dir=input_dir,
             output_dir=output_dir,
+            channel_ids=channel_ids,
             slice_ids=slice_ids,
         )
         flat_field_inst.estimate_flat_field()

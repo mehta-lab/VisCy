@@ -20,14 +20,16 @@ def read_imstack(input_fnames,
     """
 
     im_stack = []
-    for fname in input_fnames:
+    for idx, fname in enumerate(input_fnames):
         im = read_image(fname)
         if flat_field_fname is not None:
-            flat_field_image = np.load(flat_field_fname)
-            im = apply_flat_field_correction(
-                im,
-                flat_field_image=flat_field_image,
-            )
+            # multiple flat field images are passed in case of mask generation
+            if isinstance(flat_field_fname, (list, tuple)):
+                flat_field_image = np.load(flat_field_fname[idx])
+            else:
+                flat_field_image = np.load(flat_field_fname)
+            im = apply_flat_field_correction(im,
+                                             flat_field_image=flat_field_image)
         im_stack.append(im)
     input_image = np.stack(im_stack, axis=2)
     if hist_clip_limits is not None:

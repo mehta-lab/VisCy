@@ -117,6 +117,7 @@ def get_im_name(time_idx=None,
     :param int int2str_len: Length of string of the converted integers
     :return st im_name: Image file name
     """
+
     im_name = "im"
     if channel_idx is not None:
         im_name += "_c" + str(channel_idx).zfill(int2str_len)
