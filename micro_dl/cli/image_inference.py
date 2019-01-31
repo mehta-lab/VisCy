@@ -14,7 +14,6 @@ import micro_dl.train.model_inference as inference
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
 from micro_dl.utils.tile_utils import preprocess_imstack
-from micro_dl.utils.train_utils import select_gpu
 import micro_dl.utils.train_utils as train_utils
 
 
@@ -61,20 +60,27 @@ def parse_args():
         '--image_dir',
         type=str,
         default=None,
-        help='Directory containing images',
+        help="Directory containing images",
     )
     parser.add_argument(
         '--ext',
         type=str,
-        default='.png',
-        help='Image extension, if .npy, image is saved as is, else scaled to uint16'
+        default='.tif',
+        help="Image extension. If .png rescales to uint16, otherwise save as is",
     )
     parser.add_argument(
         '--save_figs',
-        type=bool,
-        default=False,
-        help='Saves input, target, prediction plots. Assumes you have target channel'
+        dest='save_figs',
+        action='store_true',
+        help="Saves input, target, prediction plots. Assumes you have target channel",
     )
+    parser.add_argument(
+        '--no_figs',
+        dest='save_figs',
+        action='store_false',
+        help="Don't save plots"
+    )
+    parser.set_defaults(save_figs=False)
     args = parser.parse_args()
     return args
 
@@ -255,7 +261,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
 if __name__ == '__main__':
     args = parse_args()
     # Get GPU ID and memory fraction
-    gpu_id, gpu_mem_frac = select_gpu(
+    gpu_id, gpu_mem_frac = train_utils.select_gpu(
         args.gpu,
         args.gpu_mem_frac,
     )
