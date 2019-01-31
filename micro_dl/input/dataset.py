@@ -20,7 +20,7 @@ class BaseDataSet(keras.utils.Sequence):
                  target_fnames,
                  dataset_config,
                  batch_size,
-                 shape_order):
+                 image_format='zyx'):
         """Init
 
         The images could be normalized at the image level during tiling
@@ -39,16 +39,16 @@ class BaseDataSet(keras.utils.Sequence):
          filenames for one target
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param str shape_order: Tile shape order: 'yxz' or 'zyx'
+        :param str image_format: Tile shape order: 'yxz' or 'zyx'
         """
         self.tile_dir = tile_dir
         self.input_fnames = input_fnames
         self.target_fnames = target_fnames
         self.num_samples = len(self.input_fnames)
         self.batch_size = batch_size
-        assert shape_order in {'yxz', 'zyx'},\
-            "Shape order should be yxz or zyx, not {}".format(shape_order)
-        self.shape_order = shape_order
+        assert image_format in {'yxz', 'zyx'},\
+            "Image format should be yxz or zyx, not {}".format(image_format)
+        self.image_format = image_format
 
         # Check if model task (regression or segmentation) is specified
         self.model_task = 'regression'
@@ -138,7 +138,7 @@ class BaseDataSet(keras.utils.Sequence):
         """
         # We need to flip over different dimensions depending on data format
         add_dim = 0
-        if self.shape_order == 'zyx' and not self.squeeze:
+        if self.image_format == 'zyx' and not self.squeeze:
             add_dim = 1
 
         if aug_idx == 0:
@@ -196,7 +196,7 @@ class BaseDataSet(keras.utils.Sequence):
         image_volume =  np.stack(image_volume)
         if image_volume.dtype == bool:
             image_volume = image_volume.astype(np.float64)
-        if normalize:
+        elif normalize:
             image_volume = (image_volume - np.mean(image_volume)) / \
                            np.std(image_volume)
         return image_volume
@@ -264,8 +264,7 @@ class DataSetWithMask(BaseDataSet):
                  mask_fnames,
                  dataset_config,
                  batch_size,
-                 data_format,
-                 shape_order):
+                 image_format='zyx'):
         """Init
 
         https://stackoverflow.com/questions/44747288/keras-sample-weight-array-error
@@ -280,8 +279,7 @@ class DataSetWithMask(BaseDataSet):
          mask filenames
         :param dict dataset_config: Dataset part of the main config file
         :param int batch_size: num of datasets in each batch
-        :param str data_format: Channel location (channels_first or last)
-        :param str shape_order: Tile shape order: 'yxz' or 'zyx'
+        :param str image_format: Tile shape order: 'yxz' or 'zyx'
         """
 
         super().__init__(tile_dir,
@@ -289,8 +287,7 @@ class DataSetWithMask(BaseDataSet):
                          target_fnames,
                          dataset_config,
                          batch_size,
-                         data_format,
-                         shape_order)
+                         image_format)
         self.mask_fnames = mask_fnames
         # list label_weights: weight for each label
         self.label_weights = None

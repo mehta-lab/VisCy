@@ -23,7 +23,7 @@ class MaskProcessor:
         """
         :param str input_dir: Directory with image frames
         :param str output_dir: Base output directory
-        :param str channel_ids: Channel indices to be masked (typically
+        :param list[int] channel_ids: Channel indices to be masked (typically
             just one)
         :param str flat_field_dir: Directory with flatfield images if
             flatfield correction is applied
@@ -196,8 +196,5 @@ class MaskProcessor:
         mask_meta_list = mp_create_save_mask(fn_args, self.num_workers)
         mask_meta_df = pd.DataFrame.from_dict(mask_meta_list)
         mask_meta_df = mask_meta_df.sort_values(by=['file_name'])
-        meta_df = pd.concat([self.frames_metadata, mask_meta_df],
-                            axis=0,
-                            ignore_index=True)
-        meta_df.to_csv(os.path.join(self.input_dir, 'frames_meta.csv'),
+        mask_meta_df.to_csv(os.path.join(self.mask_dir, 'frames_meta.csv'),
                        sep=',')

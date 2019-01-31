@@ -52,7 +52,7 @@ class TestBaseDataSet(unittest.TestCase):
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
-            shape_order='yxz',
+            image_format='yxz',
         )
 
     def tearDown(self):
@@ -149,7 +149,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_lr_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.shape_order = 'zyx'
+        self.data_inst.image_format = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 1)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -159,7 +159,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_ud_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.shape_order = 'zyx'
+        self.data_inst.image_format = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 2)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -169,7 +169,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot90_channels_first(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.shape_order = 'zyx'
+        self.data_inst.image_format = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 3)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -179,7 +179,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot180_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.shape_order = 'zyx'
+        self.data_inst.image_format = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 4)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -189,7 +189,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot270_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.shape_order = 'zyx'
+        self.data_inst.image_format = 'zyx'
         trans_im = self.data_inst._augment_image(im_test, 5)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -198,7 +198,10 @@ class TestBaseDataSet(unittest.TestCase):
             )
 
     def test_get_volume(self):
-        image_volume = self.data_inst._get_volume(self.input_fnames, normalize=False)
+        image_volume = self.data_inst._get_volume(
+            self.input_fnames,
+            normalize=False,
+        )
         # There are 4 input images of shape (5, 7, 3)
         self.assertTupleEqual(image_volume.shape, (4, 5, 7, 3))
         # Check image content (normalize is false)

@@ -2,9 +2,7 @@ import cv2
 import nose.tools
 import numpy as np
 import os
-import pandas as pd
 from testfixtures import TempDirectory
-import time
 import unittest
 
 import micro_dl.preprocessing.resize_images as resize_images

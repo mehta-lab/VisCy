@@ -11,6 +11,7 @@ from micro_dl.preprocessing.tile_uniform_images import ImageTilerUniform
 from micro_dl.preprocessing.tile_nonuniform_images import \
     ImageTilerNonUniform
 import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.preprocess_utils as preprocess_utils
 
 
 def parse_args():
@@ -113,69 +114,81 @@ def pre_process(pp_config):
 
     # Generate masks
     mask_dir = None
-    mask_channel = None
-    if pp_config['create_masks']:
-        mask_channel = pp_config['masks']['channels']
-        if channel_ids != -1:
-            assert mask_channel in channel_ids,\
-                "Mask channel {} not in channel indices {}".format(
-                    mask_channel, channel_ids)
-        mask_processor_inst = MaskProcessor(
-            input_dir=input_dir,
-            output_dir=output_dir,
-            channel_ids=mask_channel,
-            flat_field_dir=flat_field_dir,
-            time_ids=time_ids,
-            slice_ids=slice_ids,
-            pos_ids=pos_ids,
-            int2str_len=int2str_len,
-            uniform_struct=uniform_struct,
-            num_workers=num_workers
-        )
-        str_elem_radius = 5
-        if 'str_elem_radius' in pp_config['masks']:
-            str_elem_radius = pp_config['masks']['str_elem_radius']
-        mask_processor_inst.generate_masks(
-            correct_flat_field=correct_flat_field,
-            str_elem_radius=str_elem_radius,
-        )
-
-        mask_dir = mask_processor_inst.get_mask_dir()
-        mask_channel = mask_processor_inst.get_mask_channel()
+    mask_out_channel = None
+    if 'masks' in pp_config:
+        if 'channels' in pp_config['masks']:
+            # Generate masks from channel
+            assert 'mask_dir' not in pp_config['masks'], \
+                "Don't specify a mask_dir if generating masks from channel"
+            mask_channel = pp_config['masks']['channels']
+            if channel_ids != -1:
+                assert mask_channel in channel_ids,\
+                    "Mask channel {} not in channel indices {}".format(
+                        mask_channel, channel_ids)
+            # Instantiate channel to mask processor
+            mask_processor_inst = MaskProcessor(
+                input_dir=input_dir,
+                output_dir=output_dir,
+                channel_ids=mask_channel,
+                flat_field_dir=flat_field_dir,
+                time_ids=time_ids,
+                slice_ids=slice_ids,
+                pos_ids=pos_ids,
+                int2str_len=int2str_len,
+                uniform_struct=uniform_struct,
+                num_workers=num_workers,
+            )
+            str_elem_radius = 5
+            if 'str_elem_radius' in pp_config['masks']:
+                str_elem_radius = pp_config['masks']['str_elem_radius']
+            mask_processor_inst.generate_masks(
+                correct_flat_field=correct_flat_field,
+                str_elem_radius=str_elem_radius,
+            )
+            mask_dir = mask_processor_inst.get_mask_dir()
+            mask_out_channel = mask_processor_inst.get_mask_channel()
+        elif 'mask_dir' in pp_config['masks']:
+            mask_dir = pp_config['masks']['mask_dir']
+            # Get preexisting masks from directory and match to input dir
+            mask_out_channel = preprocess_utils.validate_mask_meta(pp_config)
+        else:
+            raise ValueError("If using masks, specify either mask_channel",
+                             "or mask_dir.")
 
     # Tile frames
     tile_dir = None
-    if pp_config['do_tiling']:
+    if 'tile' in pp_config:
+        kwargs = {
+            'input_dir': input_dir,
+            'output_dir': output_dir,
+            'tile_dict': pp_config['tile'],
+            'time_ids': time_ids,
+            'slice_ids': slice_ids,
+            'channel_ids': channel_ids,
+            'pos_ids': pos_ids,
+            'flat_field_dir':flat_field_dir,
+            'num_workers': num_workers,
+            'int2str_len': int2str_len,
+        }
         if uniform_struct:
-            tile_inst = ImageTilerUniform(input_dir=input_dir,
-                                          output_dir=output_dir,
-                                          tile_dict=pp_config['tile'],
-                                          time_ids=time_ids,
-                                          slice_ids=slice_ids,
-                                          channel_ids=channel_ids,
-                                          pos_ids=pos_ids,
-                                          flat_field_dir=flat_field_dir,
-                                          num_workers=num_workers,
-                                          int2str_len=int2str_len)
+            tile_inst = ImageTilerUniform(**kwargs)
         else:
-            tile_inst = ImageTilerNonUniform(input_dir=input_dir,
-                                             output_dir=output_dir,
-                                             tile_dict=pp_config['tile'],
-                                             time_ids=time_ids,
-                                             slice_ids=slice_ids,
-                                             channel_ids=channel_ids,
-                                             pos_ids=pos_ids,
-                                             flat_field_dir=flat_field_dir,
-                                             num_workers=num_workers,
-                                             int2str_len=int2str_len)
+            tile_inst = ImageTilerNonUniform(**kwargs)
 
         tile_dir = tile_inst.get_tile_dir()
         # and want to tile only the ones with a minimum amount of foreground
-        if 'min_fraction' in pp_config['tile'] and pp_config['create_masks']:
+        if 'masks' in pp_config:
+            min_fraction = 0.
+            if 'min_fraction' in pp_config['tile']:
+                min_fraction = pp_config['tile']['min_fraction']
+            mask_depth = 1
+            if 'mask_depth' in pp_config['tile']:
+                mask_depth = pp_config['tile']['mask_depth']
             tile_inst.tile_mask_stack(
-                min_fraction=pp_config['tile']['min_fraction'],
                 mask_dir=mask_dir,
-                mask_channel=mask_channel,
+                mask_channel=mask_out_channel,
+                min_fraction=min_fraction,
+                mask_depth=mask_depth,
             )
         else:
             tile_inst.tile_stack()
@@ -188,7 +201,7 @@ def pre_process(pp_config):
         "output_dir": output_dir,
         "flat_field_dir": flat_field_dir,
         "mask_dir": mask_dir,
-        "mask_channel": mask_channel,
+        "mask_channel": mask_out_channel,
         "tile_dir": tile_dir,
         "config": pp_config,
     }

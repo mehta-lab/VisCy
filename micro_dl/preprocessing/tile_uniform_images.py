@@ -46,7 +46,6 @@ class ImageTilerUniform:
             Default 1 assumes 2D data for all channels to be tiled.
             For cases where input and target shapes are not the same (e.g. stack
              to 2D) you should specify depths for each channel in tile.channels.
-        :param int mask_depth: Depth for mask channel
         :param list/int time_ids: Tile given timepoint indices
         :param list/int tile_channels: Tile images in the given channel indices
          default=-1, tile all channels
@@ -294,20 +293,26 @@ class ImageTilerUniform:
         im_fnames = []
         for z in range(slice_idx - margin, slice_idx + margin + 1):
             if mask_dir is not None:
-                file_name = aux_utils.get_im_name(time_idx=time_idx,
-                                                  channel_idx=channel_idx,
-                                                  slice_idx=z,
-                                                  pos_idx=pos_idx,
-                                                  int2str_len=self.int2str_len)
-                file_path = os.path.join(mask_dir,
-                                         file_name)
+                mask_meta = aux_utils.read_meta(mask_dir)
+                meta_idx = aux_utils.get_meta_idx(
+                    mask_meta,
+                    time_idx,
+                    channel_idx,
+                    z,
+                    pos_idx,
+                )
+                file_path = os.path.join(
+                    mask_dir,
+                    mask_meta.loc[meta_idx, 'file_name'],
+                )
             else:
-
-                meta_idx = aux_utils.get_meta_idx(self.frames_metadata,
-                                                  time_idx,
-                                                  channel_idx,
-                                                  z,
-                                                  pos_idx)
+                meta_idx = aux_utils.get_meta_idx(
+                    self.frames_metadata,
+                    time_idx,
+                    channel_idx,
+                    z,
+                    pos_idx,
+                )
                 file_path = os.path.join(
                     self.input_dir,
                     self.frames_metadata.loc[meta_idx, 'file_name'],
@@ -349,19 +354,22 @@ class ImageTilerUniform:
 
         # no flat field correction for mask
         flat_field_fname = None
+        hist_clip_limits = None
+        is_mask = False
         if mask_dir is None:
             if self.flat_field_dir is not None:
                 flat_field_fname = os.path.join(
-                        self.flat_field_dir,
-                        'flat-field_channel-{}.npy'.format(channel_idx)
-                    )
-        # no hist_clipping for mask as mask is bool
-        hist_clip_limits = None
-        if mask_dir is None:
+                    self.flat_field_dir,
+                    'flat-field_channel-{}.npy'.format(channel_idx)
+                )
+            # no hist_clipping for mask as mask is bool
             if self.hist_clip_limits is not None:
                 hist_clip_limits = tuple(
                     self.hist_clip_limits
                 )
+        else:
+            # Using masks, need to make sure they're bool
+            is_mask = True
 
         if task_type == 'crop':
             cur_args = (tuple(input_fnames),
@@ -375,7 +383,8 @@ class ImageTilerUniform:
                         self.image_format,
                         self.isotropic,
                         self.tile_dir,
-                        self.int2str_len)
+                        self.int2str_len,
+                        is_mask)
         elif task_type == 'tile':
             cur_args = (tuple(input_fnames),
                         flat_field_fname,
@@ -390,7 +399,8 @@ class ImageTilerUniform:
                         self.image_format,
                         self.isotropic,
                         self.tile_dir,
-                        self.int2str_len)
+                        self.int2str_len,
+                        is_mask)
         return cur_args
 
     def tile_stack(self):
@@ -515,7 +525,7 @@ class ImageTilerUniform:
                             pos_idx=pos_idx,
                             task_type='tile',
                             mask_dir=mask_dir,
-                            min_fraction=min_fraction
+                            min_fraction=min_fraction,
                         )
                         mask_fn_args.append(cur_args)
 

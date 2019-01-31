@@ -104,7 +104,6 @@ The following settings can be adjusted in preprocessing using a config file (see
 * verbose: (int) Logging verbosity levels: NOTSET:0, DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50
 * resample_scale: (float) Scale factor for resizing 2D frames, e.g. to match resolution in z
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
-* squeeze: (bool) whether to squeeze singleton tile dimensions (e.g. for 2D models)
 * create_masks: (bool) whether to generate binary masks from images
 * masks:
     * channels: (list of ints) which channels should be used for masks
@@ -119,7 +118,7 @@ The following settings can be adjusted in preprocessing using a config file (see
     channel number (1 + max existing channel), write tiles in the same directory as the rest of the
     channels, and add the new mask channel to frames metadata. 'as_mask' will write mask tiles in a new directory
     and not add them to metadata.
-    * shape_order (str): 'zyx' (default) or 'yxz'. Order of tile dimensions
+    * image_format (str): 'zyx' (default) or 'yxz'. Order of tile dimensions
     * train_fraction (float): If specified in range (0, 1), will randomly select that fraction
     of training data in each epoch. It will update steps_per_epoch in fit_generator accordingly.
     * min_fraction: (float) minimum fraction of image occupied by foreground in masks

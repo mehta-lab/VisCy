@@ -72,7 +72,7 @@ def create_datasets(df_meta,
                     tile_dir,
                     dataset_config,
                     trainer_config,
-                    shape_order,
+                    image_format,
                     masked_loss):
     """Create train, val and test datasets
 
@@ -82,7 +82,7 @@ def create_datasets(df_meta,
     :param str tile_dir: directory containing training image tiles
     :param dict dataset_config: dict with dataset related params
     :param dict trainer_config: dict with params related to training
-    :param str shape_order: Tile shape order: 'yxz' or 'zyx'
+    :param str image_format: Tile shape order: 'yxz' or 'zyx'
     :param bool masked_loss: Whether or not to use masks
     :return: Dict containing
      :BaseDataSet df_train: training dataset
@@ -125,7 +125,7 @@ def create_datasets(df_meta,
                     mask_fnames=metadata['fpaths_mask'],
                     dataset_config=dataset_config,
                     batch_size=trainer_config['batch_size'],
-                    shape_order=shape_order,
+                    image_format=image_format,
                 )
             else:
                 dataset = BaseDataSet(
@@ -134,7 +134,7 @@ def create_datasets(df_meta,
                     target_fnames=metadata['fpaths_target'],
                     dataset_config=dataset_config,
                     batch_size=trainer_config['batch_size'],
-                    shape_order=shape_order,
+                    image_format=image_format,
                 )
             metadata.to_csv(
                 os.path.join(trainer_config['model_dir'], csv_names[i]),
@@ -210,9 +210,9 @@ def run_action(args, gpu_ids, gpu_mem_frac):
     tile_dir = preprocessing_info[tile_dir_name]
     # Get shape order from preprocessing config
     config_preprocess = preprocessing_info['config']
-    shape_order = 'zyx'
-    if 'shape_order' in config_preprocess['tile']:
-        shape_order = config_preprocess['tile']['shape_order']
+    image_format = 'zyx'
+    if 'image_format' in config_preprocess['tile']:
+        image_format = config_preprocess['tile']['image_format']
 
     if action == 'train':
         # Create directory where model will be saved
@@ -227,10 +227,9 @@ def run_action(args, gpu_ids, gpu_mem_frac):
             tile_dir,
             dataset_config,
             trainer_config,
-            shape_order,
+            image_format,
             masked_loss,
         )
-
         # Save train, validation and test indices
         split_idx_fname = os.path.join(trainer_config['model_dir'],
                                        'split_samples.json')
