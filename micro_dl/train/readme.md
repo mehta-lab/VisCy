@@ -29,7 +29,7 @@ at minimum value and accuracy/performance potentially peaks.
 Initial amplitude is scaled by gamma ** iterations. An example of learning rate with
 exponential decay can be seen below.
 
-![LR Finder](../CLR.png?raw=true "Title")
+![LR Finder](CLR.png?raw=true "Title")
 
 ### Run Training
 
