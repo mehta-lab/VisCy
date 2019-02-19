@@ -13,7 +13,7 @@ rate bounds from learning rate vs. loss.
 Before proceeding to actual training, update base_lr and max_lr to be within the range where
 loss starts decreasing to a bit before the loss becomes unstable or start increasing again.
 E.g. in the figure below you migth select base_lr = 0.001 and max_lr = 0.006.
-![LR Finder](lr_finder_result.png?raw=true "Title")
+![LR Finder](../lr_finder_result.png?raw=true "Title")
 
 While training, you can either set the training rate to a value (e.g. from LR finder)
 or you can use cyclic learning rates where you set an upper and lower bound for the learning rate.
@@ -29,7 +29,7 @@ at minimum value and accuracy/performance potentially peaks.
 Initial amplitude is scaled by gamma ** iterations. An example of learning rate with
 exponential decay can be seen below.
 
-![LR Finder](CLR.png?raw=true "Title")
+![LR Finder](../CLR.png?raw=true "Title")
 
 ### Run Training
 
