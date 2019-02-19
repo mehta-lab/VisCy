@@ -38,3 +38,4 @@ Assuming you have a config file that specifies what you would like to train
 ```buildoutcfg
 python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id (default 0)> --gpu_mem_frac <0-1 (default 1> --model_fname <file name if starting from weights>
 ```
+## Inference
