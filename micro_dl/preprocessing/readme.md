@@ -14,8 +14,8 @@ The following settings can be adjusted in preprocessing using a config file (see
 * pos_ids: (int/list) Value(s) of FOVs/positions to be processed (default is -1 for all indices)
 * verbose: (int) Logging verbosity levels: NOTSET:0, DEBUG:10, INFO:20, WARNING:30, ERROR:40, CRITICAL:50
 * resize:
-    *scale_factor(float/list): Scale factor for resizing 2D frames, e.g. to match resolution in z or resizing volumes
-    *num_slices_subvolume (int): number of slices to be included in each subvolume, default=-1, includes all slices in            slice_ids
+    * scale_factor(float/list): Scale factor for resizing 2D frames, e.g. to match resolution in z or resizing volumes
+    * num_slices_subvolume (int): number of slices to be included in each subvolume, default=-1, includes all slices in           slice_ids
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
 * create_masks: (bool) whether to generate binary masks from images
 * masks:
