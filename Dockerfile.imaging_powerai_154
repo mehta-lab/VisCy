@@ -6,6 +6,9 @@ ENV PATH ${CONDA_DIR}/bin:${PATH}
 ENV WORK_DIR /home/${USER_NAME}/microDL
 
 RUN echo 1 | sudo /opt/DL/license/bin/accept-powerai-license.sh
+RUN sudo /bin/ln -sf /bin/bash /bin/sh
+RUN sudo /bin/sed -i -e "/ddl-tensorflow/a\
+\ \ \ \ scripts['tensorboard']=\'/opt/DL/tensorboard/bin/tensorboard-activate\'" /var/local/powerai/default_framework.sh
 
 # Tools
 RUN sudo apt-get update && sudo apt-get install -y --no-install-recommends \
