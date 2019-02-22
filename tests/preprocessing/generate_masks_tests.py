@@ -122,10 +122,10 @@ class TestMaskProcessor(unittest.TestCase):
 
         ip_fnames, ff_fname = self.mask_gen_inst._get_args_read_image(
             time_idx=self.time_ids,
-            channel_idx=self.channel_ids,
+            channel_ids=self.channel_ids,
             slice_idx=5,
             pos_idx=self.pos_ids,
-            correct_flat_field=None
+            correct_flat_field=False,
         )
         exp_fnames = ['im_c001_z005_t000_p001.png',
                       'im_c002_z005_t000_p001.png']
@@ -139,15 +139,15 @@ class TestMaskProcessor(unittest.TestCase):
 
         self.mask_gen_inst.generate_masks(str_elem_radius=1)
         frames_meta = pd.read_csv(
-            os.path.join(self.temp_path, 'frames_meta.csv'),
-            index_col=0
+            os.path.join(self.mask_gen_inst.get_mask_dir(), 'frames_meta.csv'),
+            index_col=0,
         )
         # 8 slices and 3 channels
-        exp_len = 24
+        exp_len = 8
         nose.tools.assert_equal(len(frames_meta), exp_len)
         for idx in range(8):
             nose.tools.assert_equal('im_c003_z00{}_t000_p001.npy'.format(idx),
-                                    frames_meta.iloc[16 + idx]['file_name'])
+                                    frames_meta.iloc[idx]['file_name'])
 
     def test_generate_masks_nonuni(self):
         """Test generate_masks with non-uniform structure"""
@@ -207,13 +207,13 @@ class TestMaskProcessor(unittest.TestCase):
         mask_gen_inst.generate_masks(str_elem_radius=1)
 
         frames_meta = pd.read_csv(
-            os.path.join(self.temp_path, 'frames_meta.csv'),
-            index_col=0
+            os.path.join(mask_gen_inst.get_mask_dir(), 'frames_meta.csv'),
+            index_col=0,
         )
         # pos1: 8 slices, pos2: 3 slices
-        exp_len = 22
+        exp_len = 8 + 3
         nose.tools.assert_equal(len(frames_meta), exp_len)
-        mask_fnames = frames_meta['file_name'].tolist()[11:22]
+        mask_fnames = frames_meta['file_name'].tolist()
         exp_mask_fnames = [
             'im_c001_z000_t000_p001.npy', 'im_c001_z000_t000_p002.npy',
             'im_c001_z001_t000_p001.npy', 'im_c001_z001_t000_p002.npy',

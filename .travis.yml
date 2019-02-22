@@ -1,0 +1,15 @@
+language: python
+python:
+  - 3.6
+install:
+  - pip install coverage
+  - pip install -r requirements.txt
+script:
+  - nosetests -v --with-coverage --cover-package=micro_dl/
+notifications:
+  email:
+    recipients:
+      - anitha.krishnan@czbiohub.org
+      - jenny.folkesson@czbiohub.org
+    on_success: never # default: change
+    on_failure: always # default: always

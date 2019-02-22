@@ -277,9 +277,10 @@ class TestImageTilerNonUniform(unittest.TestCase):
         os.makedirs(mask_dir, exist_ok=True)
         mask_images = np.zeros((15, 11, 5), dtype='bool')
         mask_images[4:12, 4:9, 2:4] = 1
-        frames_meta = pd.read_csv(os.path.join(self.tile_inst.input_dir,
-                                               'frames_meta.csv'),
-                                  index_col=0)
+        frames_meta = pd.read_csv(
+            os.path.join(self.tile_inst.input_dir, 'frames_meta.csv'),
+            index_col=0,
+        )
         # write mask images and add meta to frames_meta. same mask across all
         # timepoints for testing
         for z in range(5):
@@ -298,7 +299,11 @@ class TestImageTilerNonUniform(unittest.TestCase):
                             'pos_idx': self.pos_idx1,
                             'file_name': im_name}
                 frames_meta = frames_meta.append(cur_meta, ignore_index=True)
-        self.tile_inst.frames_metadata = frames_meta
+        # Write metadata
+        frames_meta.to_csv(
+            os.path.join(mask_dir, 'frames_meta.csv'),
+            sep=',',
+        )
         self.tile_inst.pos_ids = [7]
 
         self.tile_inst.tile_mask_stack(mask_dir,
