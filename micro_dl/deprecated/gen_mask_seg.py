@@ -7,6 +7,7 @@ import os
 import pandas as pd
 import pickle
 
+import micro_dl.utils.masks
 import micro_dl.utils.tile_utils as tile_utils
 from micro_dl.plotting.plot_utils import save_mask_overlay
 import micro_dl.utils.aux_utils as aux_utils
@@ -139,7 +140,7 @@ class MaskCreator:
                         cur_image = image_utils.apply_flat_field_correction(
                             cur_image, flat_field_image=cur_flat_field
                         )
-                    mask = image_utils.create_mask(
+                    mask = micro_dl.utils.masks.create_otsu_mask(
                         cur_image, str_elem_size=str_elem_radius
                     )
                     _, fname = os.path.split(sample_fname)

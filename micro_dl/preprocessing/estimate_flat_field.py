@@ -57,12 +57,13 @@ class FlatFieldEstimator2D:
                 slice_idx=self.slice_ids[0],
             )
             channel_metadata = self.frames_metadata[row_idx]
+            summed_image = None
             for idx, row in channel_metadata.iterrows():
                 file_path = os.path.join(self.input_dir, row['file_name'])
                 im = read_image(file_path)
                 if len(im.shape) == 3:
                     im = np.mean(im, axis=2)
-                if idx == 0:
+                if summed_image is None:
                     summed_image = im.astype('float64')
                 else:
                     summed_image += im

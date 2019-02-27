@@ -1,11 +1,10 @@
 import nose.tools
 import numpy as np
 
-import micro_dl.utils.image_utils as image_utils
-
-
 # Create a test image and its corresponding coordinates and values
 # Create a test image with a bright block to the right
+from micro_dl.utils import image_utils as image_utils
+from tests.preprocessing.mask_utils_tests import uni_thr_tst_image
 
 test_im = np.zeros((10, 15), np.uint16) + 100
 test_im[:, 9:] = 200
@@ -58,3 +57,21 @@ def test_fit_polynomial_surface():
     # Since flatfield is normalized, the mean should be close to one
     nose.tools.assert_almost_equal(np.mean(flatfield), 1., places=3)
 
+
+def test_rescale_volume():
+    # shape (5, 31, 31)
+    nd_image = np.repeat(uni_thr_tst_image[np.newaxis], 5, axis=0)
+    # upsample isotropically, 0.5 upsampling
+    res_volume = image_utils.rescale_nd_image(nd_image, 1.3)
+    nose.tools.assert_tuple_equal(res_volume.shape, (6, 40, 40))
+    # upsample anisotropically
+    res_volume = image_utils.rescale_nd_image(nd_image, [2.1, 1.1, 1.7])
+    nose.tools.assert_tuple_equal(res_volume.shape, (10, 34, 53))
+    # downsample isotropically, 0.5 downsampling
+    res_volume = image_utils.rescale_nd_image(uni_thr_tst_image, 0.7)
+    nose.tools.assert_tuple_equal(res_volume.shape, (4, 22, 22))
+    # assertion error
+    nose.tools.assert_raises(
+        AssertionError,
+        image_utils.rescale_nd_image(nd_image, [1.2, 1.8])
+    )

@@ -2,6 +2,7 @@ import cv2
 import nose.tools
 import numpy as np
 import os
+import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
@@ -83,10 +84,9 @@ class TestResizeImages(unittest.TestCase):
             im_expected = cv2.resize(im_expected, (new_shape[1], new_shape[0]))
             np.testing.assert_array_equal(im, im_expected)
 
-
     def test_upsample(self):
         # Half the image size
-        scale_factor = 2
+        scale_factor = 2.0
         resize_inst = resize_images.ImageResizer(
             input_dir=self.temp_path,
             output_dir=self.output_dir,
@@ -111,3 +111,74 @@ class TestResizeImages(unittest.TestCase):
             im_expected = self.im + row['channel_idx'] * 100
             im_expected = cv2.resize(im_expected, (new_shape[1], new_shape[0]))
             np.testing.assert_array_equal(im, im_expected)
+
+    def test_resize_volumes(self):
+        """Test resizing volumes"""
+
+        # set up a volume with 5 slices, 2 channels
+        slice_ids = [0, 1, 2, 3, 4]
+        channel_ids = [2, 3]
+        frames_meta = aux_utils.make_dataframe()
+        exp_meta_dict = []
+        for c in channel_ids:
+            for s in slice_ids:
+                im_name = aux_utils.get_im_name(
+                    channel_idx=c,
+                    slice_idx=s,
+                    time_idx=self.time_idx,
+                    pos_idx=self.pos_idx,
+                    ext='.png',
+                )
+                cv2.imwrite(os.path.join(self.temp_path, im_name),
+                            self.im + c * 100)
+                frames_meta = frames_meta.append(
+                    aux_utils.get_ids_from_imname(im_name),
+                    ignore_index=True,
+                )
+            op_fname = 'im_c00{}_z000_t005_p007_3.3-0.8-1.0.npy'.format(c)
+            exp_meta_dict.append({'time_idx': self.time_idx,
+                                  'pos_idx': self.pos_idx,
+                                  'channel_idx': c,
+                                  'slice_idx': 0,
+                                  'file_name': op_fname})
+        # Write metadata
+        frames_meta.to_csv(
+            os.path.join(self.temp_path, self.meta_name),
+            sep=',',
+        )
+
+        scale_factor = [3.3, 0.8, 1.0]
+        resize_inst = resize_images.ImageResizer(
+            input_dir=self.temp_path,
+            output_dir=self.output_dir,
+            scale_factor=scale_factor,
+        )
+
+        # save all slices in one volume
+        resize_inst.resize_volumes()
+        saved_meta = pd.read_csv(os.path.join(self.output_dir,
+                                              'resized_images',
+                                              'frames_meta.csv'))
+        del saved_meta['Unnamed: 0']
+        exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
+        pd.testing.assert_frame_equal(saved_meta, exp_meta_df)
+
+        # num_slices_subvolume = 3, save vol chunks
+        exp_meta_dict = []
+        for c in channel_ids:
+            for s in [0, 2]:
+                op_fname = 'im_c00{}_z00{}_t005_p007_3.3-0.8-1.0.npy'.format(c,
+                                                                             s)
+                exp_meta_dict.append({'time_idx': self.time_idx,
+                                      'pos_idx': self.pos_idx,
+                                      'channel_idx': c,
+                                      'slice_idx': s,
+                                      'file_name': op_fname})
+
+        resize_inst.resize_volumes(num_slices_subvolume=3)
+        saved_meta = pd.read_csv(os.path.join(self.output_dir,
+                                              'resized_images',
+                                              'frames_meta.csv'))
+        del saved_meta['Unnamed: 0']
+        exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
+        pd.testing.assert_frame_equal(saved_meta, exp_meta_df)

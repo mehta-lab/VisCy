@@ -4,8 +4,7 @@ import numpy as np
 import pandas as pd
 
 from micro_dl.utils import normalize as normalize, aux_utils as aux_utils
-from micro_dl.utils.image_utils import read_image, \
-    apply_flat_field_correction, resize_image
+from micro_dl.utils.image_utils import read_image, apply_flat_field_correction
 
 
 def read_imstack(input_fnames,
@@ -38,7 +37,15 @@ def read_imstack(input_fnames,
                 flat_field_image=flat_field_image,
             )
         im_stack.append(im)
-    input_image = np.stack(im_stack, axis=2)
+    if len(im.shape) == 3:
+        if len(input_fnames) == 1:
+            # multiple 3d images could be passed for creating masks from their
+            # sum
+            input_image = im
+        elif len(input_fnames) > 1:
+            input_image = np.stack(im_stack, axis=3)
+    else:
+        input_image = np.stack(im_stack, axis=2)
     if not is_mask:
         if hist_clip_limits is not None:
             input_image = normalize.hist_clipping(
@@ -99,8 +106,14 @@ def preprocess_imstack(frames_metadata,
                 flat_field_image=flat_field_im,
             )
         im_stack.append(im)
-    # Stack images
-    im_stack = np.stack(im_stack, axis=2)
+
+    if len(im.shape) == 3:
+        # each channel is tiled independently and stacked later in dataset cls
+        im_stack = im
+        assert depth == 1, 'more than one 3D volume gets read'
+    else:
+        # Stack images in same channel
+        im_stack = np.stack(im_stack, axis=2)
     # normalize
     if hist_clip_limits is not None:
         im_stack = normalize.hist_clipping(
@@ -114,7 +127,6 @@ def preprocess_imstack(frames_metadata,
 def tile_image(input_image,
                tile_size,
                step_size,
-               isotropic=False,
                return_index=False,
                min_fraction=None,
                save_dict=None):
@@ -128,7 +140,6 @@ def tile_image(input_image,
      from the image
     :param list/tuple/np array step_size: size of the window shift. In case of
      no overlap, the step size is tile_size. If overlap, step_size < tile_size
-    :param bool isotropic: if 3D, make the grid/shape isotropic
     :param bool return_index: indicator for returning tile indices
     :param float min_fraction: Minimum fraction of foreground in mask for
     including tile
@@ -168,18 +179,34 @@ def tile_image(input_image,
                 use_tile = False
         return use_tile
 
-    tile_3d = False
+    def get_tile_meta(cropped_img, img_id, save_dict, row, col, sl_start=None):
+        cur_metadata = None
+        if save_dict is not None:
+            file_name = write_tile(cropped_img, save_dict, img_id)
+            cur_metadata = {'channel_idx': save_dict['channel_idx'],
+                            'slice_idx': save_dict['slice_idx'],
+                            'time_idx': save_dict['time_idx'],
+                            'file_name': file_name,
+                            'pos_idx': save_dict['pos_idx'],
+                            'row_start': row,
+                            'col_start': col}
+            if sl_start is not None:
+                cur_metadata['slice_start'] = sl_start
+        return cur_metadata
+
     # Add to tile size and step size in case of 3D images
     im_shape = input_image.shape
+    im_depth = im_shape[2]
     if len(im_shape) == 3:
         if len(tile_size) == 2:
             tile_size.append(im_shape[2])
-        else:
-            tile_3d = True
-
-        # Step size in z is assumed to be the same as depth
-        if len(step_size) == 2:
             step_size.append(im_shape[2])
+            tile_3d = False
+        else:
+            if step_size[2] == im_depth:
+                tile_3d = False
+            else:
+                tile_3d = True
 
     assert len(tile_size) == len(step_size),\
         "Tile {} and step size {} mismatch".format(tile_size, step_size)
@@ -190,16 +217,9 @@ def tile_image(input_image,
 
     n_rows = im_shape[0]
     n_cols = im_shape[1]
-    n_dim = len(im_shape)
-    im_depth = im_shape[2]
+    n_dim = len(input_image.shape)
     if n_dim == 3:
-        n_slices = im_depth
-
-    if isotropic:
-        isotropic_shape = [tile_size[0], ] * len(tile_size)
-        isotropic_cond = not(list(tile_size) == isotropic_shape)
-    else:
-        isotropic_cond = isotropic
+        n_slices = im_shape[2]
 
     cropped_image_list = []
     cropping_index = []
@@ -218,37 +238,38 @@ def tile_image(input_image,
                                       col: col + tile_size[1], ...]
             if n_dim == 3:
                 if tile_3d:
-                    for sl in range(0, n_slices, step_size[2]):
-                        if sl + step_size[2] > n_slices:
+                    for sl in range(0,
+                                    n_slices - tile_size[2] + step_size[2],
+                                    step_size[2]):
+                        if sl + tile_size[2] > n_slices:
                             sl = check_in_range(sl, n_slices, tile_size[2])
-
                         cur_index = (row, row + tile_size[0],
                                      col, col + tile_size[1],
                                      sl, sl + tile_size[2])
-                        img_id = '{}_sl{}-{}'.format(img_id, sl,
-                                                     sl + tile_size[2])
+                        cur_img_id = '{}_sl{}-{}'.format(img_id, sl,
+                                                         sl + tile_size[2])
                         cropped_img = input_image[row: row + tile_size[0],
                                                   col: col + tile_size[1],
                                                   sl: sl + tile_size[2]]
+                        if use_tile(cropped_img, min_fraction):
+                            cropped_image_list.append([cur_img_id, cropped_img])
+                            cropping_index.append(cur_index)
+                            cur_tile_meta = get_tile_meta(cropped_img,
+                                                          cur_img_id,
+                                                          save_dict,
+                                                          row, col, sl)
+                            tiled_metadata.append(cur_tile_meta)
                 else:
                     img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
-                if isotropic_cond:
-                    img_shape = cropped_img.shape
-                    isotropic_shape = [img_shape[0], ] * len(img_shape)
-                    cropped_img = resize_image(cropped_img, isotropic_shape)
-            if use_tile(cropped_img, min_fraction):
+            if use_tile(cropped_img, min_fraction) and not tile_3d:
                 cropped_image_list.append([img_id, cropped_img])
                 cropping_index.append(cur_index)
-                if save_dict is not None:
-                    file_name = write_tile(cropped_img, save_dict, img_id)
-                    tiled_metadata.append(
-                        {'channel_idx': save_dict['channel_idx'],
-                         'slice_idx': save_dict['slice_idx'],
-                         'time_idx': save_dict['time_idx'],
-                         'file_name': file_name,
-                         'pos_idx': save_dict['pos_idx'],
-                         'row_start': row,
-                         'col_start': col})
+                cur_tile_meta = get_tile_meta(cropped_img,
+                                              img_id,
+                                              save_dict,
+                                              row, col)
+                tiled_metadata.append(cur_tile_meta)
+
     if save_dict is None:
         if return_index:
             return cropped_image_list, cropping_index
@@ -263,15 +284,15 @@ def tile_image(input_image,
 
 def crop_at_indices(input_image,
                     crop_indices,
-                    isotropic=False,
-                    save_dict=None):
+                    save_dict=None,
+                    tile_3d=False):
     """Crop image into tiles at given indices
 
     :param np.array input_image: input image for cropping
     :param list crop_indices: list of indices for cropping
-    :param bool isotropic: if 3D, make the grid/shape isotropic
     :param dict save_dict: dict with keys: time_idx, channel_idx, slice_idx,
      pos_idx, image_format and save_dir for generation output fname
+    :param bool tile_3d: boolean flag for adding slice_start_idx to meta
     :return: if not saving tiles: a list with tuples of cropped image id of
      the format rrmin-rmax_ccmin-cmax_slslmin-slmax and cropped image.
      Else saves tiles in-place and returns a df with tile metadata
@@ -288,21 +309,23 @@ def crop_at_indices(input_image,
         cropped_img = input_image[cur_idx[0]: cur_idx[1],
                                   cur_idx[2]: cur_idx[3], ...]
         if n_dim == 3:
-            img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
+            if tile_3d:
+                img_id = '{}_sl{}-{}'.format(img_id, cur_idx[4], cur_idx[5])
+            else:
+                img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
 
-            if isotropic:
-                img_shape = cropped_img.shape
-                isotropic_shape = [img_shape[0], ] * len(img_shape)
-                cropped_img = resize_image(cropped_img, isotropic_shape)
         if save_dict is not None:
             file_name = write_tile(cropped_img, save_dict, img_id)
-            tiled_metadata.append({'channel_idx': save_dict['channel_idx'],
-                                   'slice_idx': save_dict['slice_idx'],
-                                   'time_idx': save_dict['time_idx'],
-                                   'file_name': file_name,
-                                   'pos_idx': save_dict['pos_idx'],
-                                   'row_start': cur_idx[0],
-                                   'col_start': cur_idx[2]})
+            cur_metadata = {'channel_idx': save_dict['channel_idx'],
+                            'slice_idx': save_dict['slice_idx'],
+                            'time_idx': save_dict['time_idx'],
+                            'file_name': file_name,
+                            'pos_idx': save_dict['pos_idx'],
+                            'row_start': cur_idx[0],
+                            'col_start': cur_idx[2]}
+            if tile_3d:
+                cur_metadata['slice_start'] = cur_idx[4]
+            tiled_metadata.append(cur_metadata)
         tiles_list.append([img_id, cropped_img])
     if save_dict is None:
         return tiles_list
@@ -356,6 +379,6 @@ def write_meta(tiled_metadata, save_dict):
                      + '.csv')
         tile_meta_df.to_csv(
             os.path.join(save_dict['save_dir'], 'meta_dir', meta_name),
-            sep=",",
+            sep=',',
         )
         return tile_meta_df

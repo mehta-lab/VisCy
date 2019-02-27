@@ -81,7 +81,8 @@ class TestImageTilerNonUniform(unittest.TestCase):
                           'tile_size': [5, 5],
                           'step_size': [4, 4],
                           'depths': 3,
-                          'image_format': 'zyx', }
+                          'image_format': 'zyx',
+                          'tile_3d': False}
         self.tile_inst = tile_images.ImageTilerNonUniform(
             input_dir=self.temp_path,
             output_dir=self.output_dir,
@@ -272,26 +273,14 @@ class TestImageTilerNonUniform(unittest.TestCase):
     def test_tile_mask_stack(self):
         """Test tile_mask_stack"""
 
-        nested_id_dict_1 = copy.deepcopy(self.tile_inst.nested_id_dict)
-        # remove entries for pos_idx2 from nested_id_dict
-        for tp_idx, tp_dict in self.tile_inst.nested_id_dict.items():
-            for ch_idx, ch_dict in tp_dict.items():
-                for pos_idx, pos_dict in ch_dict.items():
-                    if pos_idx == 8:
-                        del nested_id_dict_1[tp_idx][ch_idx][pos_idx]
-
-        self.tile_inst.nested_id_dict = nested_id_dict_1
         # create a mask
         mask_dir = os.path.join(self.temp_path, 'mask_dir')
         os.makedirs(mask_dir, exist_ok=True)
         mask_images = np.zeros((15, 11, 5), dtype='bool')
         mask_images[4:12, 4:9, 2:4] = 1
-        frames_meta = pd.read_csv(
-            os.path.join(self.tile_inst.input_dir, 'frames_meta.csv'),
-            index_col=0,
-        )
-        # write mask images and add meta to frames_meta. same mask across all
+
         # timepoints for testing
+        mask_meta = []
         for z in range(5):
             for t in range(3):
                 cur_im = mask_images[:, :, z]
@@ -307,12 +296,10 @@ class TestImageTilerNonUniform(unittest.TestCase):
                             'time_idx': t,
                             'pos_idx': self.pos_idx1,
                             'file_name': im_name}
-                frames_meta = frames_meta.append(cur_meta, ignore_index=True)
-        # Write metadata
-        frames_meta.to_csv(
-            os.path.join(mask_dir, 'frames_meta.csv'),
-            sep=',',
-        )
+                mask_meta.append(cur_meta)
+        mask_meta_df = pd.DataFrame.from_dict(mask_meta)
+        mask_meta_df.to_csv(os.path.join(mask_dir, 'frames_meta.csv'), sep=',')
+
         self.tile_inst.pos_ids = [7]
 
         self.tile_inst.tile_mask_stack(mask_dir,

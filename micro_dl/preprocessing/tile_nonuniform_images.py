@@ -24,7 +24,6 @@ class ImageTilerNonUniform(ImageTilerUniform):
                  pos_ids=-1,
                  hist_clip_limits=None,
                  flat_field_dir=None,
-                 isotropic=False,
                  image_format='zyx',
                  num_workers=4,
                  int2str_len=3):
@@ -48,7 +47,6 @@ class ImageTilerNonUniform(ImageTilerUniform):
                          pos_ids,
                          hist_clip_limits,
                          flat_field_dir,
-                         isotropic,
                          image_format,
                          num_workers,
                          int2str_len)
@@ -185,7 +183,7 @@ class ImageTilerNonUniform(ImageTilerUniform):
         """
 
         ch_to_tile = self.channel_ids[0]
-        ch_depth = self.channel_depth[0]
+        ch_depth = self.channel_depth[ch_to_tile]
 
         # create a copy of nested_id_dict to remove the entries of the first
         # channel
@@ -233,35 +231,37 @@ class ImageTilerNonUniform(ImageTilerUniform):
         assert mask_depth <= max(self.channel_depth.values())
         self.mask_depth = mask_depth
 
-        # nested_id_dict had no info on mask channel if channel_ids != -1.
-        # Assuming structure is same across channels. Get time, pos and slice
-        # indices for ch_idx=0 or mask channel if channel_ids == -1
-        mask_ch_in_dict = mask_channel in self.channel_ids
-        ch0 = mask_channel if mask_ch_in_dict else self.channel_ids[0]
+        # Mask meta is stored in mask dir. If channel_ids= -1,frames_meta will
+        # not contain any rows for mask channel. Assuming structure is same
+        # across channels. Get time, pos and slice indices for mask channel
 
-        # create a copy of nested_id_dict to remove the entries of the first
-        # channel
-        nested_id_dict_copy = copy.deepcopy(self.nested_id_dict)
+        mask_meta_df = aux_utils.read_meta(mask_dir)
+        # TODO: different masks across timepoints (but MaskProcessor generates
+        # mask for tp=0 only)
+        _, mask_nested_id_dict = aux_utils.validate_metadata_indices(
+            frames_metadata=mask_meta_df,
+            time_ids=self.time_ids,
+            channel_ids=mask_channel,
+            slice_ids=self.slice_ids,
+            pos_ids=self.pos_ids,
+            uniform_structure=False
+        )
 
         # get t, z, p indices for mask_channel
-        ch0_ids = {}
-        for tp_idx, tp_dict in self.nested_id_dict.items():
+        mask_ch_ids = {}
+        for tp_idx, tp_dict in mask_nested_id_dict.items():
             for ch_idx, ch_dict in tp_dict.items():
-                if ch_idx == ch0:
+                if ch_idx == mask_channel:
                     ch0_dict = {mask_channel: ch_dict}
-                    if mask_ch_in_dict:
-                        del nested_id_dict_copy[tp_idx][ch_idx]
-            ch0_ids[tp_idx] = ch0_dict
+                    mask_ch_ids[tp_idx] = ch0_dict
 
-        # tile first channel and use the tile indices to tile the rest
-        meta_df = self.tile_first_channel(channel0_ids=ch0_ids,
+        # tile mask channel and use the tile indices to tile the rest
+        meta_df = self.tile_first_channel(channel0_ids=mask_ch_ids,
                                           channel0_depth=mask_depth,
                                           cur_mask_dir=mask_dir,
                                           min_fraction=min_fraction)
 
-        nested_dict = nested_id_dict_copy if mask_ch_in_dict \
-            else self.nested_id_dict
         # tile the rest
-        self.tile_remaining_channels(nested_id_dict=nested_dict,
+        self.tile_remaining_channels(nested_id_dict=self.nested_id_dict,
                                      tiled_ch_id=mask_channel,
                                      cur_meta_df=meta_df)

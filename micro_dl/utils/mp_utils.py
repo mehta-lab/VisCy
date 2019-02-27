@@ -5,6 +5,7 @@ import os
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
+import micro_dl.utils.masks as mask_utils
 import micro_dl.utils.tile_utils as tile_utils
 
 
@@ -30,7 +31,8 @@ def create_save_mask(input_fnames,
                      time_idx,
                      pos_idx,
                      slice_idx,
-                     int2str_len):
+                     int2str_len,
+                     mask_type):
     """Create and save mask
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -43,15 +45,31 @@ def create_save_mask(input_fnames,
     :param int pos_idx: generate masks for given position / sample ids
     :param int slice_idx: generate masks for given slice ids
     :param int int2str_len: Length of str when converting ints
+    :param str mask_type: thresholding type used for masking or str to map to
+     masking function
     :return dict cur_meta for each mask
     """
+
     im_stack = tile_utils.read_imstack(input_fnames,
                                        flat_field_fname)
     # Combine channel images and generate mask
-    summed_image = np.sum(np.stack(im_stack), axis=2)
+    if len(im_stack.shape) == 3:
+        if len(input_fnames) == 1:
+            # read a 3d image
+            summed_image = im_stack
+        else:
+            # read a 2d image stack
+            summed_image = np.sum(np.stack(im_stack), axis=2)
+    elif len(im_stack.shape) == 4:
+        # read a 3d image stack
+        summed_image = np.sum(np.stack(im_stack), axis=3)
     summed_image = summed_image.astype('float32')
+    if mask_type == 'otsu':
+        mask = mask_utils.create_otsu_mask(summed_image, str_elem_radius)
+    elif mask_type == 'unimodal':
+        mask = mask_utils.create_unimodal_mask(summed_image,
+                                               str_elem_radius)
 
-    mask = image_utils.create_mask(summed_image, str_elem_radius)
     # Create mask name for given slice, time and position
     file_name = aux_utils.get_im_name(time_idx=time_idx,
                                       channel_idx=mask_channel_idx,
@@ -96,7 +114,6 @@ def tile_and_save(input_fnames,
                   step_size,
                   min_fraction,
                   image_format,
-                  isotropic,
                   save_dir,
                   int2str_len=3,
                   is_mask=False):
@@ -113,7 +130,6 @@ def tile_and_save(input_fnames,
     :param list step_size: step size along row, col (& slices)
     :param float min_fraction: min foreground volume fraction for keep tile
     :param str image_format: zyx / yxz
-    :param bool isotropic: if 3D, make the grid/shape isotropic
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
@@ -139,7 +155,6 @@ def tile_and_save(input_fnames,
             input_image=input_image,
             tile_size=tile_size,
             step_size=step_size,
-            isotropic=isotropic,
             min_fraction=min_fraction,
             save_dict=save_dict,
         )
@@ -177,10 +192,10 @@ def crop_at_indices_save(input_fnames,
                          slice_idx,
                          crop_indices,
                          image_format,
-                         isotropic,
                          save_dir,
                          int2str_len=3,
-                         is_mask=False):
+                         is_mask=False,
+                         tile_3d=False):
     """Crop image into tiles at given indices and save
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -192,10 +207,10 @@ def crop_at_indices_save(input_fnames,
     :param int pos_idx: sample idx of input image
     :param tuple crop_indices: tuple of indices for cropping
     :param str image_format: zyx or yxz
-    :param bool isotropic: if 3D, make the grid/shape isotropic
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
+    :param bool tile_3d: indicator for tiling in 3D
     :return: pd.DataFrame from a list of dicts with metadata
     """
 
@@ -217,8 +232,8 @@ def crop_at_indices_save(input_fnames,
         tile_meta_df = tile_utils.crop_at_indices(
             input_image=input_image,
             crop_indices=crop_indices,
-            isotropic=isotropic,
             save_dict=save_dict,
+            tile_3d=tile_3d
         )
     except Exception as e:
         err_msg = 'error in t_{}, c_{}, pos_{}, sl_{}'.format(
@@ -250,11 +265,76 @@ def resize_and_save(**kwargs):
     str file_path: Path to input image
     str write_path: Path to image to be written
     float scale_factor: Scale factor for resizing
+    str ff_path: path to flat field correction image
     """
+
     im = image_utils.read_image(kwargs['file_path'])
+    if kwargs['ff_path'] is not None:
+        ff_image = np.load(kwargs['ff_path'])
+        im = image_utils.apply_flat_field_correction(
+            im,
+            flat_field_image=ff_image
+        )
     im_resized = image_utils.rescale_image(
         im=im,
         scale_factor=kwargs['scale_factor'],
     )
     # Write image
     cv2.imwrite(kwargs['write_path'], im_resized)
+
+
+def mp_rescale_vol(fn_args, workers):
+    """Rescale and save image stacks with multiprocessing
+
+    :param list of tuple fn_args: list with tuples of function arguments
+    :param int workers: max number of workers
+    """
+
+    with ProcessPoolExecutor(workers) as ex:
+        # can't use map directly as it works only with single arg functions
+        ex.map(rescale_vol_and_save, *zip(*fn_args))
+
+
+def rescale_vol_and_save(time_idx,
+                         pos_idx,
+                         channel_idx,
+                         sl_start_idx,
+                         sl_end_idx,
+                         frames_metadata,
+                         output_fname,
+                         scale_factor,
+                         input_dir,
+                         ff_path):
+    """Rescale volumes and save
+
+    :param int time_idx: time point of input image
+    :param int pos_idx: sample idx of input image
+    :param int channel_idx: channel idx of input image
+    :param int sl_start_idx: start slice idx for the vol to be saved
+    :param int sl_end_idx: end slice idx for the vol to be saved
+    :param pd.Dataframe frames_metadata: metadata for the input slices
+    :param str output_fname: output_fname
+    :param float/list scale_factor: scale factor for resizing
+    :param str input_dir: input dir for 2D images
+    :param str ff_path: path to flat field correction image
+    """
+
+    input_stack = []
+    for sl_idx in range(sl_start_idx, sl_end_idx):
+        meta_idx = aux_utils.get_meta_idx(frames_metadata,
+                                          time_idx,
+                                          channel_idx,
+                                          sl_idx,
+                                          pos_idx)
+        cur_fname = frames_metadata.loc[meta_idx, 'file_name']
+        cur_img = image_utils.read_image(os.path.join(input_dir, cur_fname))
+        if ff_path is not None:
+            ff_image = np.load(ff_path)
+            cur_img = image_utils.apply_flat_field_correction(
+                cur_img,
+                flat_field_image=ff_image
+            )
+        input_stack.append(cur_img)
+    input_stack = np.stack(input_stack, axis=2)
+    resc_vol = image_utils.rescale_nd_image(input_stack, scale_factor)
+    np.save(output_fname, resc_vol, allow_pickle=True, fix_imports=True)

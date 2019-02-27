@@ -57,6 +57,7 @@ def dice_coef(y_true, y_pred, smooth=1.):
            (K.sum(y_true_f) + K.sum(y_pred_f) + smooth)
     return dice
 
+
 def ssim(y_true, y_pred, max_val=6):
     """Structural similarity
     Use max_val=5 to approximate maximum of normalized images

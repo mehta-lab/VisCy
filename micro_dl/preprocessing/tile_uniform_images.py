@@ -8,7 +8,7 @@ from micro_dl.utils.mp_utils import mp_tile_save, mp_crop_save
 
 
 class ImageTilerUniform:
-    """Tiles all images images in a dataset"""
+    """Tiles all images in a dataset"""
 
     def __init__(self,
                  input_dir,
@@ -23,14 +23,11 @@ class ImageTilerUniform:
                  pos_ids=-1,
                  hist_clip_limits=None,
                  flat_field_dir=None,
-                 isotropic=False,
                  image_format='zyx',
                  num_workers=4,
                  int2str_len=3):
         """
         Normalizes images using z-score, then tiles them.
-        Isotropic here refers to the same dimension/shape along row, col, slice
-        and not really isotropic resolution in mm.
         If tile_dir already exist, it will check which channels are already
         tiled, get indices from them and tile from indices only on the channels
         not already present.
@@ -56,7 +53,6 @@ class ImageTilerUniform:
          histogram clipping.
         :param str flat_field_dir: Flatfield directory. None if no flatfield
             correction
-        :param bool isotropic: if 3D, make the grid/shape isotropic
         :param str image_format: zyx (preferred) or yxz
         :param int num_workers: number of workers for multiprocessing
         :param int int2str_len: number of characters for each idx to be used
@@ -71,8 +67,6 @@ class ImageTilerUniform:
             tile_size = tile_dict['tile_size']
         if 'step_size' in tile_dict:
             step_size = tile_dict['step_size']
-        if 'isotropic' in tile_dict:
-            isotropic = tile_dict['isotropic']
         if 'channels' in tile_dict:
             channel_ids = tile_dict['channels']
         if 'positions' in tile_dict:
@@ -86,7 +80,6 @@ class ImageTilerUniform:
         self.depths = depths
         self.tile_size = tile_size
         self.step_size = step_size
-        self.isotropic = isotropic
         self.hist_clip_limits = hist_clip_limits
         self.image_format = image_format
         self.num_workers = num_workers
@@ -159,6 +152,7 @@ class ImageTilerUniform:
             depth=max_depth,
         )
         self.int2str_len = int2str_len
+        self.tile_3d = tile_dict['tile_3d']
 
     def get_tile_dir(self):
         """
@@ -228,12 +222,22 @@ class ImageTilerUniform:
         t = tiled_meta['time_idx'] == time_idx
         channel_meta = tiled_meta[c & z & p & t]
         # Get tile_indices
-        tile_indices = pd.concat([
-            channel_meta['row_start'],
-            channel_meta['row_start'].add(self.tile_size[0]),
-            channel_meta['col_start'],
-            channel_meta['col_start'].add(self.tile_size[1]),
-        ], axis=1)
+        if self.tile_3d:
+            tile_indices = pd.concat([
+                channel_meta['row_start'],
+                channel_meta['row_start'].add(self.tile_size[0]),
+                channel_meta['col_start'],
+                channel_meta['col_start'].add(self.tile_size[1]),
+                channel_meta['slice_start'],
+                channel_meta['slice_start'].add(self.tile_size[2])
+            ], axis=1)
+        else:
+            tile_indices = pd.concat([
+                channel_meta['row_start'],
+                channel_meta['row_start'].add(self.tile_size[0]),
+                channel_meta['col_start'],
+                channel_meta['col_start'].add(self.tile_size[1]),
+            ], axis=1)
         # Match list format similar to tile_image
         tile_indices = tile_indices.values.tolist()
         return tile_indices
@@ -381,10 +385,10 @@ class ImageTilerUniform:
                         slice_idx,
                         tuple(tile_indices),
                         self.image_format,
-                        self.isotropic,
                         self.tile_dir,
                         self.int2str_len,
-                        is_mask)
+                        is_mask,
+                        self.tile_3d)
         elif task_type == 'tile':
             cur_args = (tuple(input_fnames),
                         flat_field_fname,
@@ -397,7 +401,6 @@ class ImageTilerUniform:
                         self.step_size,
                         min_fraction,
                         self.image_format,
-                        self.isotropic,
                         self.tile_dir,
                         self.int2str_len,
                         is_mask)
@@ -449,7 +452,6 @@ class ImageTilerUniform:
                                     input_image=im,
                                     tile_size=self.tile_size,
                                     step_size=self.step_size,
-                                    isotropic=self.isotropic,
                                     return_index=True,
                                     save_dict=save_dict
                                 )
@@ -510,6 +512,8 @@ class ImageTilerUniform:
                 os.path.join(self.tile_dir, 'frames_meta.csv')
             )
         else:
+            # TODO: different masks across timepoints (but MaskProcessor
+            # generates mask for tp=0 only)
             mask_fn_args = []
             for slice_idx in self.slice_ids:
                 for time_idx in self.time_ids:

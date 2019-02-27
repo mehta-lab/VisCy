@@ -1,12 +1,11 @@
 """Utility functions for processing images"""
+
 import cv2
 import itertools
 import math
 import numpy as np
 import os
-from scipy.ndimage.morphology import binary_fill_holes
-from skimage.filters import threshold_otsu
-from skimage.morphology import disk, ball, binary_opening
+from scipy.ndimage.interpolation import zoom
 from skimage.transform import resize
 
 
@@ -45,6 +44,34 @@ def rescale_image(im, scale_factor):
              int(round(im_shape[0] * scale_factor)))
 
     return cv2.resize(im, dsize=dsize)
+
+
+def rescale_nd_image(input_volume, scale_factor):
+    """Rescale a nd array, mainly used for 3D volume
+
+    For non-int dims, the values are rounded off to closest int. 0.5 is iffy,
+    when downsampling the value gets floored and upsampling it gets rounded to
+    next int
+
+    :param np.array input_volume: 3D stack
+    :param float/list scale_factor: if scale_factor is a float, scale all
+     dimensions by this. Else scale_factor has to be specified for each
+     dimension in a list or tuple
+    :return np.array res_volume: rescaled volume
+    """
+
+    assert not input_volume.dtype == 'bool', \
+        'input image is binary, not ideal for spline interpolation'
+
+    if not isinstance(scale_factor, float):
+        assert len(input_volume.shape) == len(scale_factor), \
+            'Missing scale factor:' \
+            'scale_factor:{} != input_volume:{}'.format(
+                len(scale_factor), len(input_volume.shape)
+            )
+
+    res_image = zoom(input_volume, scale_factor)
+    return res_image
 
 
 def crop2base(im, base=2):
@@ -145,30 +172,6 @@ def fit_polynomial_surface_2D(sample_coords,
     if normalize:
         poly_surface /= np.mean(poly_surface)
     return poly_surface
-
-
-def create_mask(input_image, str_elem_size=3):
-    """Create a binary mask using morphological operations
-
-    Opening removes small objects in the foreground.
-
-    :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the structuring element. typically 3, 5
-    :return: mask of input_image, np.array
-    """
-
-    if np.min(input_image) == np.max(input_image):
-        thr = np.unique(input_image)
-    else:
-        thr = threshold_otsu(input_image, nbins=512)
-    if len(input_image.shape) == 2:
-        str_elem = disk(str_elem_size)
-    else:
-        str_elem = ball(str_elem_size)
-    # remove small objects in mask
-    thr_image = binary_opening(input_image > thr, str_elem)
-    mask = binary_fill_holes(thr_image)
-    return mask
 
 
 def read_image(file_path):

@@ -19,7 +19,9 @@ class MaskProcessor:
                  pos_ids=-1,
                  int2str_len=3,
                  uniform_struct=True,
-                 num_workers=4):
+                 num_workers=4,
+                 mask_type='otsu',
+                 mask_out_channel=None):
         """
         :param str input_dir: Directory with image frames
         :param str output_dir: Base output directory
@@ -37,7 +39,13 @@ class MaskProcessor:
         :param bool uniform_struct: bool indicator for same structure across
          pos and time points
         :param int num_workers: number of workers for multiprocessing
+        :param str mask_type: method to use for generating mask. Needed for
+         mapping to the masking function
+        :param int mask_out_channel: channel num assigned to mask channel. If
+         resizing images on a subset of channels, frames_meta is from resize
+         dir, which could lead to wrong mask channel being assigned.
         """
+
         self.input_dir = input_dir
         self.output_dir = output_dir
         self.flat_field_dir = flat_field_dir
@@ -46,7 +54,13 @@ class MaskProcessor:
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
         # Create a unique mask channel number so masks can be treated
         # as a new channel
-        self.mask_channel = int(self.frames_metadata["channel_idx"].max() + 1)
+        if mask_out_channel is None:
+            self.mask_channel = int(
+                self.frames_metadata['channel_idx'].max() + 1
+            )
+        else:
+            self.mask_channel = mask_out_channel
+        
         metadata_ids, nested_id_dict = aux_utils.validate_metadata_indices(
             frames_metadata=self.frames_metadata,
             time_ids=time_ids,
@@ -69,6 +83,10 @@ class MaskProcessor:
         self.int2str_len = int2str_len
         self.uniform_struct = uniform_struct
         self.nested_id_dict = nested_id_dict
+
+        assert mask_type in ['otsu', 'unimodal'], \
+            'Masking method invalid, Otsu and unimodal are currently supported'
+        self.mask_type = mask_type
 
     def get_mask_dir(self):
         """
@@ -102,8 +120,6 @@ class MaskProcessor:
             field
         :return np.array im: image corresponding to the given channel indices
             and flatfield corrected
-        TODO: This doesn't work for flatfield correction because each channel
-            needs a separate flatfield image
         """
 
         input_fnames = []
@@ -169,7 +185,8 @@ class MaskProcessor:
                                     time_idx,
                                     pos_idx,
                                     slice_idx,
-                                    self.int2str_len)
+                                    self.int2str_len,
+                                    self.mask_type)
                         fn_args.append(cur_args)
         else:
             for tp_idx, tp_dict in self.nested_id_dict.items():
@@ -190,11 +207,12 @@ class MaskProcessor:
                                     tp_idx,
                                     pos_idx,
                                     sl_idx,
-                                    self.int2str_len)
+                                    self.int2str_len,
+                                    self.mask_type)
                         fn_args.append(cur_args)
 
         mask_meta_list = mp_create_save_mask(fn_args, self.num_workers)
         mask_meta_df = pd.DataFrame.from_dict(mask_meta_list)
         mask_meta_df = mask_meta_df.sort_values(by=['file_name'])
         mask_meta_df.to_csv(os.path.join(self.mask_dir, 'frames_meta.csv'),
-                       sep=',')
+                            sep=',')

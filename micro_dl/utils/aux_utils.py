@@ -251,7 +251,6 @@ def validate_metadata_indices(frames_metadata,
                         pos_dict[pos_idx] = cur_slice_ids
                 ch_dict[ch_idx] = pos_dict
             tp_dict[tp_idx] = ch_dict
-
     return metadata_ids, tp_dict
 
 

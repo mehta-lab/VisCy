@@ -48,7 +48,7 @@ class TestTileUtils(unittest.TestCase):
             im_name = 'im_c' + str(ch_idx).zfill(self.int2str_len) + \
                       '_z' + str(sl_idx).zfill(self.int2str_len) + \
                       '_t' + str(time_idx).zfill(self.int2str_len) + \
-                      '_p' + str(pos_idx).zfill(self.int2str_len) + ".png"
+                      '_p' + str(pos_idx).zfill(self.int2str_len) + '.png'
             return im_name
 
         for z in range(sph.shape[2]):
@@ -67,6 +67,19 @@ class TestTileUtils(unittest.TestCase):
         # Write metadata
         frames_meta.to_csv(os.path.join(self.temp_path, meta_fname), sep=',')
         self.frames_meta = frames_meta
+
+        self.sph_fname = os.path.join(self.temp_path,
+                                      'im_c001_z000_t000_p001_3d.npy')
+        np.save(self.sph_fname, self.sph, allow_pickle=True, fix_imports=True)
+        meta_3d = pd.DataFrame.from_dict([{
+            'channel_idx': 1,
+            'slice_idx': 0,
+            'time_idx': 0,
+            'channel_name': '3d_test',
+            'file_name': 'im_c001_z000_t000_p001_3d.npy',
+            'pos_idx': 1,
+        }])
+        self.meta_3d = meta_3d
 
     def tearDown(self):
         """
@@ -87,6 +100,14 @@ class TestTileUtils(unittest.TestCase):
         numpy.testing.assert_array_equal(exp_stack[:, :, :3],
                                          im_stack)
 
+        # read a 3D image
+        im_stack = tile_utils.read_imstack([self.sph_fname])
+        numpy.testing.assert_equal(im_stack.shape, (32, 32, 8))
+
+        # read multiple 3D images
+        im_stack = tile_utils.read_imstack((self.sph_fname, self.sph_fname))
+        numpy.testing.assert_equal(im_stack.shape, (32, 32, 8, 2))
+
     def test_preprocess_imstack(self):
         """Test preprocess_imstack"""
 
@@ -101,6 +122,16 @@ class TestTileUtils(unittest.TestCase):
         numpy.testing.assert_equal(im_stack.shape, (32, 32, 3))
         exp_stack = zscore(self.sph[:, :, 1:4])
         numpy.testing.assert_array_equal(im_stack, exp_stack)
+
+        # preprocess a 3D image
+        im_stack = tile_utils.preprocess_imstack(self.meta_3d,
+                                                 self.temp_path,
+                                                 depth=1,
+                                                 time_idx=0,
+                                                 channel_idx=1,
+                                                 slice_idx=0,
+                                                 pos_idx=1)
+        numpy.testing.assert_equal(im_stack.shape, (32, 32, 8))
 
     def test_tile_image(self):
         """Test tile_image"""
@@ -191,6 +222,37 @@ class TestTileUtils(unittest.TestCase):
                           (8, 24, 16, 32, 0, 3),
                           (16, 32, 8, 24, 0, 3)]
         numpy.testing.assert_array_equal(tile_index, exp_tile_index)
+
+        # tile_3d
+        input_image = self.sph
+        tile_size = [16, 16, 6]
+        step_size = [8, 8, 4]
+        # returns at tuple of (img_id, tile)
+        tiled_image_list = tile_utils.tile_image(input_image,
+                                                 tile_size=tile_size,
+                                                 step_size=step_size)
+        nose.tools.assert_equal(len(tiled_image_list), 18)
+        c = 0
+        for row in range(0, 17, 8):
+            for col in range(0, 17, 8):
+                for sl in range(0, 8, 6):
+                    if sl == 0:
+                        sl_start_end = [0, 6]
+                    else:
+                        sl_start_end = [2, 8]
+
+                    id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(
+                        row, row + tile_size[0], col, col + tile_size[1],
+                        sl_start_end[0], sl_start_end[1]
+                    )
+                    nose.tools.assert_equal(id_str, tiled_image_list[c][0])
+                    tile = input_image[row:row + tile_size[0],
+                                       col: col + tile_size[1],
+                                       sl_start_end[0]: sl_start_end[1]]
+                    print(tiled_image_list[c][0])
+                    numpy.testing.assert_array_equal(tile,
+                                                     tiled_image_list[c][1])
+                    c += 1
 
     def test_crop_at_indices(self):
         """Test crop_at_indices"""

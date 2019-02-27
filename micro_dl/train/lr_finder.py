@@ -3,8 +3,8 @@ from keras.callbacks import Callback
 
 import micro_dl.plotting.plot_utils as plot_utils
 
-class LRFinder(Callback):
 
+class LRFinder(Callback):
 
     def __init__(
             self,
