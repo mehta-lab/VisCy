@@ -6,6 +6,7 @@ import pandas as pd
 import skimage.io as sk_im_io
 from testfixtures import TempDirectory
 import unittest
+import warnings
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.mp_utils as mp_utils
@@ -62,16 +63,24 @@ class TestMpUtils(unittest.TestCase):
 
         for z in range(sph.shape[2]):
             im_name = _get_name(1, z, self.time_ids, self.pos_ids)
-            sk_im_io.imsave(os.path.join(self.temp_path, im_name),
-                            object1[:, :, z].astype('uint8'))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                sk_im_io.imsave(
+                    os.path.join(self.temp_path, im_name),
+                    object1[:, :, z].astype('uint8'),
+                )
             frames_meta = frames_meta.append(
                 aux_utils.get_ids_from_imname(im_name, df_columns),
                 ignore_index=True
             )
         for z in range(rec.shape[2]):
             im_name = _get_name(2, z, self.time_ids, self.pos_ids)
-            sk_im_io.imsave(os.path.join(self.temp_path, im_name),
-                            rec[:, :, z].astype('uint8'))
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                sk_im_io.imsave(
+                    os.path.join(self.temp_path, im_name),
+                    rec[:, :, z].astype('uint8'),
+                )
             frames_meta = frames_meta.append(
                 aux_utils.get_ids_from_imname(im_name, df_columns),
                 ignore_index=True

@@ -6,6 +6,7 @@ import pandas as pd
 import skimage.io as sk_im_io
 from testfixtures import TempDirectory
 import unittest
+import warnings
 
 import micro_dl.preprocessing.tile_nonuniform_images as tile_images
 import micro_dl.utils.aux_utils as aux_utils
@@ -39,8 +40,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
                         pos_idx=self.pos_idx1,
                         ext='.png',
                     )
-                    sk_im_io.imsave(os.path.join(self.temp_path, im_name),
-                                    self.im)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        sk_im_io.imsave(
+                            os.path.join(self.temp_path, im_name),
+                            self.im,
+                        )
                     frames_meta = frames_meta.append(
                         aux_utils.get_ids_from_imname(im_name),
                         ignore_index=True,
@@ -56,8 +61,12 @@ class TestImageTilerNonUniform(unittest.TestCase):
                         pos_idx=self.pos_idx2,
                         ext='.png',
                     )
-                    sk_im_io.imsave(os.path.join(self.temp_path, im_name),
-                                    self.im)
+                    with warnings.catch_warnings():
+                        warnings.simplefilter("ignore")
+                        sk_im_io.imsave(
+                            os.path.join(self.temp_path, im_name),
+                            self.im,
+                        )
                     frames_meta = frames_meta.append(
                         aux_utils.get_ids_from_imname(im_name),
                         ignore_index=True,

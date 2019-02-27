@@ -6,6 +6,7 @@ import pandas as pd
 import skimage.io as sk_im_io
 from testfixtures import TempDirectory
 import unittest
+import warnings
 
 import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.aux_utils as aux_utils
@@ -52,8 +53,12 @@ class TestTileUtils(unittest.TestCase):
 
         for z in range(sph.shape[2]):
             im_name = _get_name(1, z, self.time_ids, self.pos_ids)
-            sk_im_io.imsave(os.path.join(self.temp_path, im_name),
-                            sph[:, :, z])
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                sk_im_io.imsave(
+                    os.path.join(self.temp_path, im_name),
+                    sph[:, :, z],
+                )
             frames_meta = frames_meta.append(
                 aux_utils.get_ids_from_imname(im_name, self.df_columns),
                 ignore_index=True
