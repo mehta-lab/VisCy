@@ -44,8 +44,8 @@ def parse_args():
         '--action',
         type=str,
         default='train',
-        choices=('train', 'tune_hyperparam'),
-        help='action to take on the model: train,tune_hyperparam',
+        choices=('train', ),  # as only train supported currently
+        help='action to take on the model: train, ',
     )
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument(
@@ -57,7 +57,7 @@ def parse_args():
         '--model_fname',
         type=str,
         default=None,
-        help='path to checkpoint file',
+        help='full path of saved model to resume training',
     )
     parser.add_argument(
         '--port',
@@ -169,6 +169,39 @@ def create_network(network_config, gpu_id):
     return model
 
 
+def get_image_dir_format(dataset_config):
+    """Get dir with input images for generating full path from frames_meta
+
+    If the tiled dir is passed as data dir there will be no
+    preprocessing_info.json. If json present use it, else read images from the
+    given dir.
+    """
+
+    # tile dir pass directly as data_dir
+    tile_dir = dataset_config['data_dir']
+    image_format = 'zyx'
+
+    # If the parent dir with tile dir, mask dir is passed as data_dir,
+    # it should contain a json with directory names
+    json_fname = os.path.join(dataset_config['data_dir'],
+                              'preprocessing_info.json')
+    if os.path.exists(json_fname):
+        preprocessing_info = aux_utils.read_json(json_filename=json_fname)
+
+        # Preprocessing_info is a list of jsons. Use the last json. If a tile
+        # (training data) dir is specified and exists in info json use that
+        recent_json = preprocessing_info[-1]
+        if (hasattr(recent_json, recent_json['tile']) and
+                hasattr(recent_json['tile'], recent_json['tile']['tile_dir'])):
+            tile_dir = recent_json['tile']['tile_dir']
+
+        # Get shape order from recent_json
+        if 'image_format' in recent_json['tile']:
+            image_format = recent_json['tile']['image_format']
+
+    return tile_dir, image_format
+
+
 def run_action(args, gpu_ids, gpu_mem_frac):
     """Performs training or tune hyper parameters
 
@@ -196,23 +229,7 @@ def run_action(args, gpu_ids, gpu_mem_frac):
     if 'masked_loss' in trainer_config:
         masked_loss = trainer_config["masked_loss"]
 
-    # The data directory should contain a json with directory names
-    json_fname = os.path.join(dataset_config['data_dir'],
-                              'preprocessing_info.json')
-
-    preprocessing_info = aux_utils.read_json(json_filename=json_fname)
-    tile_dir_name = 'tile_dir'
-    # If a tile (training data) dir is specified and exists in info json,
-    # use that instead of default 'tile_dir'
-    if 'tile_dir' in dataset_config:
-        if hasattr(preprocessing_info, preprocessing_info['tile_dir']):
-            tile_dir_name = preprocessing_info['tile_dir']
-    tile_dir = preprocessing_info[tile_dir_name]
-    # Get shape order from preprocessing config
-    config_preprocess = preprocessing_info['config']
-    image_format = 'zyx'
-    if 'image_format' in config_preprocess['tile']:
-        image_format = config_preprocess['tile']['image_format']
+    tile_dir, image_format = get_image_dir_format(dataset_config)
 
     if action == 'train':
         # Create directory where model will be saved
@@ -270,11 +287,9 @@ def run_action(args, gpu_ids, gpu_mem_frac):
                                    gpu_mem_frac=args.gpu_mem_frac)
         trainer.train()
 
-    elif action == 'tune_hyperparam':
-        raise NotImplementedError
     else:
-        raise TypeError(('action {} not permitted. options: train or '
-                        'tune_hyperparam').format(action))
+        raise TypeError(('action {} not permitted. options: only train'
+                         'supported currently').format(action))
 
 
 if __name__ == '__main__':

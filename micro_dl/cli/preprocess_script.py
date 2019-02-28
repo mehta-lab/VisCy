@@ -206,11 +206,10 @@ def tile_images(params_dict,
     # retain tiles with a minimum amount of foreground
     if 'min_fraction' in tile_dict:
         min_fraction = tile_dict['min_fraction']
-        mask_depth = 1
-
         mask_out_channel = tile_dict['mask_channel']
         mask_dir = tile_dict['mask_dir']
 
+        mask_depth = 1
         if 'mask_depth' in tile_dict:
             mask_depth = tile_dict['mask_depth']
 

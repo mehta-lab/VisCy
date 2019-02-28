@@ -308,13 +308,16 @@ def crop_at_indices(input_image,
         img_id = 'r{}-{}_c{}-{}'.format(cur_idx[0], cur_idx[1],
                                         cur_idx[2], cur_idx[3])
 
-        cropped_img = input_image[cur_idx[0]: cur_idx[1],
-                                  cur_idx[2]: cur_idx[3], ...]
         if n_dim == 3:
             if tile_3d:
                 img_id = '{}_sl{}-{}'.format(img_id, cur_idx[4], cur_idx[5])
+                cropped_img = input_image[cur_idx[0]: cur_idx[1],
+                                          cur_idx[2]: cur_idx[3],
+                                          cur_idx[4]: cur_idx[5]]
             else:
                 img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
+                cropped_img = input_image[cur_idx[0]: cur_idx[1],
+                                          cur_idx[2]: cur_idx[3], ...]
 
         if save_dict is not None:
             file_name = write_tile(cropped_img, save_dict, img_id)
