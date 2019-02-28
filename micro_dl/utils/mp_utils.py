@@ -50,11 +50,16 @@ def create_save_mask(input_fnames,
     :return dict cur_meta for each mask
     """
 
-    im_stack = tile_utils.read_imstack(input_fnames,
-                                       flat_field_fname)
+    im_stack = np.squeeze(tile_utils.read_imstack(
+        input_fnames,
+        flat_field_fname,
+        normalize_im=False,
+    ))
     # Combine channel images and generate mask
-    if len(im_stack.shape) == 3:
-        if len(input_fnames) == 1:
+    if len(im_stack.shape) == 2:
+        summed_image = im_stack
+    elif len(im_stack.shape) == 3:
+        if len(input_fnames) > 1:
             # read a 3d image
             summed_image = im_stack
         else:
@@ -96,7 +101,6 @@ def mp_tile_save(fn_args, workers):
     :param int workers: max number of workers
     :return: list of returned df from tile_and_save
     """
-
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(tile_and_save, *zip(*fn_args))
@@ -135,7 +139,6 @@ def tile_and_save(input_fnames,
     :param bool is_mask: Indicates if files are masks
     :return: pd.DataFrame from a list of dicts with metadata
     """
-
     try:
         input_image = tile_utils.read_imstack(
             input_fnames=input_fnames,
