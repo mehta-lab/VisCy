@@ -47,7 +47,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     self.im,
                 )
             frames_meta = frames_meta.append(
-                aux_utils.get_ids_from_imname(im_name),
+                aux_utils.parse_idx_from_name(im_name),
                 ignore_index=True,
             )
 
@@ -66,7 +66,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     self.im2,
                 )
             frames_meta = frames_meta.append(
-                aux_utils.get_ids_from_imname(im_name),
+                aux_utils.parse_idx_from_name(im_name),
                 ignore_index=True,
             )
 

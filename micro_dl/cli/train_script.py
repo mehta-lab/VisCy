@@ -160,7 +160,7 @@ def create_network(network_config, gpu_id):
         raise ValueError(msg)
 
     network_cls = network_config['class']
-    network_cls = aux_utils.import_class('networks', network_cls)
+    network_cls = aux_utils.import_object('networks', network_cls)
     network = network_cls(network_config)
     # assert if network shape matches dataset shape?
     inputs, outputs = network.build_net()

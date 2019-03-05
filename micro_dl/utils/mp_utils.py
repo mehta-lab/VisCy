@@ -59,7 +59,7 @@ def create_save_mask(input_fnames,
     if len(im_stack.shape) == 2:
         summed_image = im_stack
     elif len(im_stack.shape) == 3:
-        if len(input_fnames) > 1:
+        if len(input_fnames) == 1:
             # read a 3d image
             summed_image = im_stack
         else:

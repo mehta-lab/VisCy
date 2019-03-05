@@ -19,22 +19,24 @@ DF_NAMES = ["channel_idx",
             "pos_idx"]
 
 
-def import_class(module_name, cls_name):
-    """Imports a class specified in yaml dynamically
-
-    REFACTOR THIS!!
+def import_object(module_name, obj_name, obj_type='class'):
+    """Imports a class or function dynamically
 
     :param str module_name: modules such as input, utils, train etc
-    :param str cls_name: class to find
+    :param str obj_name: class to find
     """
 
     full_module_name = ".".join(('micro_dl', module_name))
     try:
         module = importlib.import_module(full_module_name)
-        obj = getattr(module, cls_name)
-
-        if inspect.isclass(obj):
-            return obj
+        obj = getattr(module, obj_name)
+        if obj_type == 'class':
+            assert inspect.isclass(obj),\
+                "Expected {} to be class".format(obj_name)
+        elif obj_type == 'function':
+            assert inspect.isfunction(obj),\
+                "Expected {} to be function".format(obj_name)
+        return obj
     except ImportError:
         raise
 
@@ -449,12 +451,12 @@ def get_sorted_names(dir_name):
     :param str dir_name: Image directory name
     :return list of strs im_names: Image names sorted according to indices
     """
-    im_names = [f for f in os.listdir(dir_name) if f.startswith('im_')]
+    im_names = [f for f in os.listdir(dir_name) if f.startswith('im')]
     # Sort image names according to indices
     return natsort.natsorted(im_names)
 
 
-def get_ids_from_imname(im_name, df_names=DF_NAMES, order="cztp"):
+def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
     """
     Assumes im_name is e.g. im_c***_z***_p***_t***.png,
     It doesn't care about the extension or the number of digits each index is
@@ -487,3 +489,49 @@ def get_ids_from_imname(im_name, df_names=DF_NAMES, order="cztp"):
         idx_name = idx_dict[order_char]
         meta_row[idx_name] = int(ints[i])
     return meta_row
+
+
+def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
+    """
+    Parse metadata from file name or file path.
+    This function is custom for the computational microscopy (SMS)
+    group, who has the following file naming convention:
+    File naming convention is assumed to be:
+        img_channelname_t***_p***_z***.tif
+    This function will alter list and dict in place.
+
+    :param str im_name: File name or path
+    :param list of strs df_names: Dataframe col names
+    :param list[str] channel_names: Expanding list of channel names
+    :return dict meta_row: One row of metadata given image file name
+    """
+    meta_row = dict.fromkeys(df_names)
+    # Get rid of path if present
+    im_name = os.path.basename(im_name)
+    meta_row["file_name"] = im_name
+    im_name = im_name[:-4]
+    str_split = im_name.split("_")[1:]
+
+    if len(str_split) > 4:
+        # this means they have introduced additional _ in the file name
+        channel_name = '_'.join(str_split[:-3])
+    else:
+        channel_name = str_split[0]
+    # Add channel name and index
+    meta_row["channel_name"] = channel_name
+    if channel_name not in channel_names:
+        channel_names.append(channel_name)
+    # Index channels by names
+    meta_row["channel_idx"] = channel_names.index(channel_name)
+    # Loop through the rest of the indices which should be in name
+    str_split = str_split[-3:]
+    for s in str_split:
+        if s.find("t") == 0 and len(s) == 4:
+            meta_row["time_idx"] = int(s[1:])
+        elif s.find("p") == 0 and len(s) == 4:
+            meta_row["pos_idx"] = int(s[1:])
+        elif s.find("z") == 0 and len(s) == 4:
+            meta_row["slice_idx"] = int(s[1:])
+    return meta_row
+
+

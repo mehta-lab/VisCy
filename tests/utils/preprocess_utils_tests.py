@@ -38,7 +38,7 @@ class TestPreprocessUtils(unittest.TestCase):
                     ext='.png',
                 )
                 input_meta = input_meta.append(
-                    aux_utils.get_ids_from_imname(im_name),
+                    aux_utils.parse_idx_from_name(im_name),
                     ignore_index=True,
                 )
         input_meta.to_csv(

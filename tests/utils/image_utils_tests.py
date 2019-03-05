@@ -68,10 +68,11 @@ def test_rescale_volume():
     res_volume = image_utils.rescale_nd_image(nd_image, [2.1, 1.1, 1.7])
     nose.tools.assert_tuple_equal(res_volume.shape, (10, 34, 53))
     # downsample isotropically, 0.5 downsampling
-    res_volume = image_utils.rescale_nd_image(uni_thr_tst_image, 0.7)
+    res_volume = image_utils.rescale_nd_image(nd_image, 0.7)
     nose.tools.assert_tuple_equal(res_volume.shape, (4, 22, 22))
     # assertion error
-    nose.tools.assert_raises(
-        AssertionError,
-        image_utils.rescale_nd_image(nd_image, [1.2, 1.8])
-    )
+
+@nose.tools.raises(AssertionError)
+def test_rescale_volume_vrong_dims():
+    nd_image = np.repeat(uni_thr_tst_image[np.newaxis], 5, axis=0)
+    image_utils.rescale_nd_image(nd_image, [1.2, 1.8])

@@ -5,7 +5,7 @@ from keras.layers import Activation, Input, UpSampling2D, UpSampling3D
 from micro_dl.networks.base_conv_net import BaseConvNet
 from micro_dl.networks.conv_blocks import conv_block,  residual_conv_block, \
     residual_downsample_conv_block, skip_merge
-from micro_dl.utils.aux_utils import import_class, validate_config
+import micro_dl.utils.aux_utils as aux_utils
 from micro_dl.utils.network_utils import get_keras_layer
 
 
@@ -39,7 +39,10 @@ class BaseUNet(BaseConvNet):
         num_down_blocks = len(self.config['num_filters_per_block']) - 1
 
         if not predict:
-            param_check, msg = validate_config(network_config, req_params)
+            param_check, msg = aux_utils.validate_config(
+                network_config,
+                req_params,
+            )
             if not param_check:
                 raise ValueError(msg)
             width = network_config['width']
@@ -62,8 +65,10 @@ class BaseUNet(BaseConvNet):
             if upsampling == 'repeat':
                 self.UpSampling = UpSampling2D
             else:
-                self.UpSampling = import_class('networks',
-                                               'InterpUpSampling2D')
+                self.UpSampling = aux_utils.import_object(
+                    'networks',
+                    'InterpUpSampling2D',
+                )
             return
 
         def _init_3D():
@@ -71,9 +76,10 @@ class BaseUNet(BaseConvNet):
             if upsampling == 'repeat':
                 self.UpSampling = UpSampling3D
             else:
-                self.UpSampling = import_class('networks',
-                                               'InterpUpSampling3D')
-
+                self.UpSampling = aux_utils.import_object(
+                    'networks',
+                    'InterpUpSampling3D',
+                )
         if 'depth' in self.config:
             if not predict:
                 assert self.config['depth'] >= 1, \

@@ -27,7 +27,7 @@ def load_model(network_config, model_fname, predict=False):
     network_config['height'] = None
     network_cls = network_config['class']
     # not ideal as more networks get added
-    network_cls = aux_utils.import_class('networks', network_cls)
+    network_cls = aux_utils.import_object('networks', network_cls)
     network = network_cls(network_config, predict)
     inputs, outputs = network.build_net()
     model = Model(inputs=inputs, outputs=outputs)
