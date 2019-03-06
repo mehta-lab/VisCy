@@ -82,3 +82,15 @@ def ssim(y_true, y_pred, max_val=6):
             y_pred = tf.transpose(y_pred, [0, 2, 3, 1])
     ssim = tf.image.ssim(y_true, y_pred, max_val=max_val)
     return K.mean(ssim)
+
+def pearson_corr(y_true, y_pred):
+    """Pearson correlation
+    :param tensor y_true: Labeled ground truth
+    :param tensor y_pred: Predicted label,
+    :param float max_val: The dynamic range of the images (i.e., the
+        difference between the maximum the and minimum allowed values).
+    :return float : Pearson over all images in the batch
+    """
+    covariance = K.mean((y_pred - K.mean(y_pred))
+                        * (y_true - K.mean(y_true)))
+    return covariance/K.std(y_pred)/K.std(y_true)
