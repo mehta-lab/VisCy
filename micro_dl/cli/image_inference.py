@@ -8,6 +8,7 @@ import os
 import pandas as pd
 import time
 import yaml
+import keras.backend as K
 
 import micro_dl.plotting.plot_utils as plot_utils
 import micro_dl.train.model_inference as inference
@@ -81,6 +82,14 @@ def parse_args():
         help="Don't save plots"
     )
     parser.set_defaults(save_figs=False)
+
+    parser.add_argument(
+        '--metrics',
+        type=str,
+        default=None,
+        nargs='*',
+        help='Metrics for model evaluation'
+    )
     args = parser.parse_args()
     return args
 
@@ -106,8 +115,25 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
     with open(config_name, 'r') as f:
         config = yaml.load(f)
     # Load frames metadata and determine indices
-    frames_meta = pd.read_csv(os.path.join(args.image_dir, 'frames_meta.csv'))
-    split_idx_name = config['dataset']['split_by_column']
+    network_config = config['network']
+    dataset_config = config['dataset']
+    trainer_config = config['trainer']
+    frames_meta = pd.read_csv(os.path.join(args.image_dir, 'frames_meta.csv'),
+                              index_col=0)
+    test_tile_meta = pd.read_csv(os.path.join(args.model_dir, 'test_metadata.csv'),
+                              index_col=0)
+    # TODO: generate test_frames_meta.csv together with tile csv during training
+    test_frames_meta_filename = os.path.join(args.model_dir, 'test_frames_meta.csv')
+    metrics = trainer_config['metrics']
+    if args.metrics:
+        metrics = args.metrics
+    if isinstance(metrics, str):
+        metrics = [metircs]
+    loss = trainer_config['loss']
+    metrics_cls = train_utils.get_metrics(args.metrics)
+    loss_cls = train_utils.get_loss(loss)
+    split_idx_name = dataset_config['split_by_column']
+    K.set_image_data_format(network_config['data_format'])
     if args.test_data:
         idx_fname = os.path.join(args.model_dir, 'split_samples.json')
         try:
@@ -122,10 +148,15 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
     # E.g. if split is position, we also need to iterate over time and slice
     metadata_ids = {split_idx_name: test_ids}
     iter_ids = ['slice_idx', 'pos_idx', 'time_idx']
+    n_test_row = len(test_ids)
     for id in iter_ids:
         if id != split_idx_name:
-            metadata_ids[id] = np.unique(frames_meta[id])
-
+            metadata_ids[id] = np.unique(test_tile_meta[id])
+            n_test_row *= len(metadata_ids[id])
+    # create empty dataframe for test image metadata
+    test_frames_meta = pd.DataFrame(columns=
+                                    frames_meta.columns.values.tolist()+metrics,
+                                    index=range(n_test_row))
     # Get model weight file name, if none, load latest saved weights
     model_fname = args.model_fname
     if model_fname is None:
@@ -169,7 +200,8 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
         predict=True,
     )
     print(model.summary())
-
+    model.compile(loss=loss_cls, optimizer='Adam', metrics=metrics_cls)
+    test_row_ind = 0
     # Iterate over all indices for test data
     for time_idx in metadata_ids['time_idx']:
         for pos_idx in metadata_ids['pos_idx']:
@@ -229,33 +261,60 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                     np.save(file_name, im_pred, allow_pickle=True)
                 else:
                     raise ValueError('Unsupported file extension')
+
+                # assuming target and predicted images are always 2D for now
+                # Load target
+                meta_idx = aux_utils.get_meta_idx(
+                    frames_meta,
+                    time_idx,
+                    target_channel,
+                    slice_idx,
+                    pos_idx,
+                )
+                file_path = os.path.join(
+                    args.image_dir,
+                    frames_meta.loc[meta_idx, "file_name"],
+                )
+                # get a single row of frame meta data
+                test_frames_meta_row = frames_meta.loc[[meta_idx]]
+                im_target = preprocess_imstack(
+                    frames_metadata=frames_meta,
+                    input_dir=args.image_dir,
+                    depth=1,
+                    time_idx=time_idx,
+                    channel_idx=target_channel,
+                    slice_idx=slice_idx,
+                    pos_idx=pos_idx,
+                )
+                im_target = image_utils.crop2base(im_target)
+                if data_format == 'channels_first':
+                    # Change dimension order to zyx (3D) or channel first (2D)
+                    im_target = np.transpose(im_target, [2, 0, 1])
+                im_target = im_target[np.newaxis, ...]
+
+                metric_vals = model.evaluate(x=im_stack, y=im_target)
+                for metric, metric_val in zip([loss]+metrics, metric_vals):
+                    test_frames_meta_row[metric] = metric_val
+                print(test_frames_meta_row)
+                test_frames_meta.loc[test_row_ind] = test_frames_meta_row.loc[meta_idx]
+                test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
-                    # Load target
-                    meta_idx = aux_utils.get_meta_idx(
-                        frames_meta,
-                        time_idx,
-                        target_channel,
-                        slice_idx,
-                        pos_idx,
-                    )
-                    file_path = os.path.join(
-                        args.image_dir,
-                        frames_meta.loc[meta_idx, "file_name"],
-                    )
-                    im_target = image_utils.read_image(file_path)
-                    im_target = image_utils.crop2base(im_target)
-
                     # assuming target and predicted images are always 2D for now
                     plot_utils.save_predicted_images(
                         input_batch=im_stack,
-                        target_batch=im_target[np.newaxis, np.newaxis, ...],
+                        target_batch=im_target,
                         pred_batch=im_pred,
                         output_dir=fig_dir,
                         output_fname=im_name[:-4],
+                        ext='jpg',
                         tol=1,
                         font_size=15
                     )
+    # calculate means of the metrics
+    test_frames_meta = test_frames_meta.append(
+        test_frames_meta[metrics].agg('mean'), ignore_index=True)
+    test_frames_meta.to_csv(test_frames_meta_filename, sep=",")
 
 
 if __name__ == '__main__':
