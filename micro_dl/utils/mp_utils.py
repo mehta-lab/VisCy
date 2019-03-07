@@ -32,7 +32,8 @@ def create_save_mask(input_fnames,
                      pos_idx,
                      slice_idx,
                      int2str_len,
-                     mask_type):
+                     mask_type,
+                     save_mask_fig):
     """Create and save mask
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -47,6 +48,8 @@ def create_save_mask(input_fnames,
     :param int int2str_len: Length of str when converting ints
     :param str mask_type: thresholding type used for masking or str to map to
      masking function
+    :param bool save_mask_fig: save the mask as uint8 PNG in addition to
+         NPY files for visualization
     :return dict cur_meta for each mask
     """
 
@@ -77,13 +80,18 @@ def create_save_mask(input_fnames,
             mask,
             allow_pickle=True,
             fix_imports=True)
+
     cur_meta = {'channel_idx': mask_channel_idx,
                 'slice_idx': slice_idx,
                 'time_idx': time_idx,
                 'pos_idx': pos_idx,
                 'file_name': file_name}
+    if save_mask_fig:
+        file_name = file_name[:-3] + 'png'
+        # Covert mask to uint8
+        mask = mask.astype(np.uint8) * (2 ** 8 - 1)
+        cv2.imwrite(os.path.join(mask_dir, file_name), mask)
     return cur_meta
-
 
 def mp_tile_save(fn_args, workers):
     """Tile and save with multiprocessing
