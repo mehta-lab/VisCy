@@ -38,15 +38,8 @@ def read_imstack(input_fnames,
                 flat_field_image=flat_field_image,
             )
         im_stack.append(im)
-    if len(im.shape) == 3:
-        if len(input_fnames) == 1:
-            # multiple 3d images could be passed for creating masks from their
-            # sum
-            input_image = im
-        elif len(input_fnames) > 1:
-            input_image = np.stack(im_stack, axis=3)
-    else:
-        input_image = np.stack(im_stack, axis=2)
+
+    input_image = np.stack(im_stack, axis=-1)
     if not is_mask:
         if hist_clip_limits is not None:
             input_image = normalize.hist_clipping(

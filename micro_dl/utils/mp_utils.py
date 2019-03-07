@@ -50,30 +50,21 @@ def create_save_mask(input_fnames,
     :return dict cur_meta for each mask
     """
 
-    im_stack = np.squeeze(tile_utils.read_imstack(
+    im_stack = tile_utils.read_imstack(
         input_fnames,
         flat_field_fname,
         normalize_im=False,
-    ))
-    # Combine channel images and generate mask
-    if len(im_stack.shape) == 2:
-        summed_image = im_stack
-    elif len(im_stack.shape) == 3:
-        if len(input_fnames) == 1:
-            # read a 3d image
-            summed_image = im_stack
-        else:
-            # read a 2d image stack
-            summed_image = np.sum(np.stack(im_stack), axis=2)
-    elif len(im_stack.shape) == 4:
-        # read a 3d image stack
-        summed_image = np.sum(np.stack(im_stack), axis=3)
-    summed_image = summed_image.astype('float32')
-    if mask_type == 'otsu':
-        mask = mask_utils.create_otsu_mask(summed_image, str_elem_radius)
-    elif mask_type == 'unimodal':
-        mask = mask_utils.create_unimodal_mask(summed_image,
-                                               str_elem_radius)
+    )
+    masks = []
+    for idx in range(im_stack.shape[-1]):
+        im = im_stack[..., idx].astype('float32')
+        if mask_type == 'otsu':
+            mask = mask_utils.create_otsu_mask(im, str_elem_radius)
+        elif mask_type == 'unimodal':
+            mask = mask_utils.create_unimodal_mask(im,  str_elem_radius)
+        masks += [mask]
+    masks = np.stack(masks, axis=-1)
+    mask = np.any(masks, axis=-1)
 
     # Create mask name for given slice, time and position
     file_name = aux_utils.get_im_name(time_idx=time_idx,
