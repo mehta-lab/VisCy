@@ -310,7 +310,7 @@ def pre_process(pp_config, req_params_dict):
             mask_type = 'otsu'
             if 'mask_type' in pp_config['masks']:
                 mask_type = pp_config['masks']['mask_type']
-            mask_ext = 'png'
+            mask_ext = 'npy'
             if 'mask_ext' in pp_config['masks']:
                 mask_ext = pp_config['masks']['mask_ext']
             mask_dir, mask_out_channel = generate_masks(req_params_dict,

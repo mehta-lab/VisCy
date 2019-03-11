@@ -22,7 +22,7 @@ class MaskProcessor:
                  num_workers=4,
                  mask_type='otsu',
                  mask_out_channel=None,
-                 mask_ext='png'):
+                 mask_ext='npy'):
         """
         :param str input_dir: Directory with image frames
         :param str output_dir: Base output directory

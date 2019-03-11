@@ -137,6 +137,8 @@ class TestMpUtils(unittest.TestCase):
                                     True)
 
             mask_image = image_utils.read_image(op_fname)
+            if mask_image.dtype != bool:
+                mask_image = mask_image > 0
             input_image = (self.sph_object[:, :, sl_idx] +
                            self.rec_object[:, :, sl_idx])
             numpy.testing.assert_array_equal(
