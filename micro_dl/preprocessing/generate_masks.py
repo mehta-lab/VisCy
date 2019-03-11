@@ -22,7 +22,7 @@ class MaskProcessor:
                  num_workers=4,
                  mask_type='otsu',
                  mask_out_channel=None,
-                 save_mask_fig=False):
+                 mask_ext='png'):
         """
         :param str input_dir: Directory with image frames
         :param str output_dir: Base output directory
@@ -45,8 +45,8 @@ class MaskProcessor:
         :param int mask_out_channel: channel num assigned to mask channel. If
          resizing images on a subset of channels, frames_meta is from resize
          dir, which could lead to wrong mask channel being assigned.
-        :param bool save_mask_fig: save the mask as uint8 PNG in addition to
-            NPY files for visualization
+        :param str mask_ext: 'npy' or 'png'. Save the mask as uint8 PNG or
+         NPY files
         """
 
         self.input_dir = input_dir
@@ -90,7 +90,7 @@ class MaskProcessor:
         assert mask_type in ['otsu', 'unimodal'], \
             'Masking method invalid, Otsu and unimodal are currently supported'
         self.mask_type = mask_type
-        self.save_mask_fig = save_mask_fig
+        self.mask_ext = mask_ext
 
     def get_mask_dir(self):
         """
@@ -191,7 +191,7 @@ class MaskProcessor:
                                     slice_idx,
                                     self.int2str_len,
                                     self.mask_type,
-                                    self.save_mask_fig)
+                                    self.mask_ext)
                         fn_args.append(cur_args)
         else:
             for tp_idx, tp_dict in self.nested_id_dict.items():
@@ -214,7 +214,7 @@ class MaskProcessor:
                                     sl_idx,
                                     self.int2str_len,
                                     self.mask_type,
-                                    self.save_mask_fig)
+                                    self.mask_ext)
                         fn_args.append(cur_args)
 
         mask_meta_list = mp_create_save_mask(fn_args, self.num_workers)

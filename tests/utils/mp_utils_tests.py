@@ -10,6 +10,7 @@ import warnings
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.mp_utils as mp_utils
+import micro_dl.utils.image_utils as image_utils
 from micro_dl.utils.masks import create_otsu_mask
 
 
@@ -117,11 +118,13 @@ class TestMpUtils(unittest.TestCase):
                 slice_idx=sl_idx,
                 int2str_len=3,
                 mask_type='otsu',
+                mask_ext='png'
             )
             fname = aux_utils.get_im_name(time_idx=self.time_ids,
                                           channel_idx=3,
                                           slice_idx=sl_idx,
-                                          pos_idx=self.pos_ids)
+                                          pos_idx=self.pos_ids,
+                                          ext='.png')
             exp_meta = {'channel_idx': 3,
                         'slice_idx': sl_idx,
                         'time_idx': 0,
@@ -132,7 +135,8 @@ class TestMpUtils(unittest.TestCase):
             op_fname = os.path.join(self.output_dir, fname)
             nose.tools.assert_equal(os.path.exists(op_fname),
                                     True)
-            mask_image = np.load(op_fname)
+
+            mask_image = image_utils.read_image(op_fname)
             input_image = (self.sph_object[:, :, sl_idx] +
                            self.rec_object[:, :, sl_idx])
             numpy.testing.assert_array_equal(

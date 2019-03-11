@@ -112,7 +112,8 @@ def generate_masks(params_dict,
                    flat_field_dir,
                    str_elem_radius,
                    mask_type,
-                   mask_out_channel):
+                   mask_out_channel,
+                   mask_ext):
     """Generate masks per image or volume
 
     :param dict params_dict: dict with keys: input_dir, output_dir, time_ids,
@@ -124,6 +125,8 @@ def generate_masks(params_dict,
      opening
     :param str mask_type: string to map to masking function. otsu or uniform
     :param int mask_out_channel: channel num assigned to mask channel. I
+    :param str mask_ext: 'npy' or 'png'. Save the mask as uint8 PNG or
+         NPY files
     :return:
      str mask_dir: dir with created masks
      int mask_out_channel: channel number assigned to masks
@@ -144,7 +147,8 @@ def generate_masks(params_dict,
         uniform_struct=params_dict['uniform_struct'],
         num_workers=params_dict['num_workers'],
         mask_type=mask_type,
-        mask_out_channel=mask_out_channel
+        mask_out_channel=mask_out_channel,
+        mask_ext=mask_ext
     )
 
     correct_flat_field = False
@@ -306,12 +310,17 @@ def pre_process(pp_config, req_params_dict):
             mask_type = 'otsu'
             if 'mask_type' in pp_config['masks']:
                 mask_type = pp_config['masks']['mask_type']
+            mask_ext = 'png'
+            if 'mask_ext' in pp_config['masks']:
+                mask_ext = pp_config['masks']['mask_ext']
             mask_dir, mask_out_channel = generate_masks(req_params_dict,
                                                         mask_from_channel,
                                                         flat_field_dir,
                                                         str_elem_radius,
                                                         mask_type,
-                                                        mask_out_channel)
+                                                        mask_out_channel,
+                                                        mask_ext)
+            pp_config['masks']['created_mask_dir'] = mask_dir
         elif 'mask_dir' in pp_config['masks']:
             mask_dir = pp_config['masks']['mask_dir']
             # Get preexisting masks from directory and match to input dir
