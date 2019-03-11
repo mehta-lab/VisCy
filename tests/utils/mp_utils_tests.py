@@ -139,11 +139,13 @@ class TestMpUtils(unittest.TestCase):
             mask_image = image_utils.read_image(op_fname)
             if mask_image.dtype != bool:
                 mask_image = mask_image > 0
-            input_image = (self.sph_object[:, :, sl_idx] +
+            input_image = (self.sph_object[:, :, sl_idx],
                            self.rec_object[:, :, sl_idx])
+            mask_stack = np.stack(create_otsu_mask(input_image[0], str_elem_size=1),
+                                  create_otsu_mask(input_image[1], str_elem_size=1))
+            mask_exp = np.any(mask_stack)
             numpy.testing.assert_array_equal(
-                mask_image,
-                create_otsu_mask(input_image, str_elem_size=1)
+                mask_image, mask_exp
             )
 
     def test_rescale_vol_and_save(self):
