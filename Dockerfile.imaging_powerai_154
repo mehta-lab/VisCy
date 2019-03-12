@@ -16,8 +16,10 @@ RUN sudo apt-get update && sudo apt-get install -y --no-install-recommends \
          libcupti-dev \
          ca-certificates \
          cmake \
+         libfreetype6-dev \
          wget \
          git \
+         pkg-config \
          tmux \
          graphviz \
          vim && \
@@ -36,7 +38,7 @@ sudo rm -rf /var/lib/apt/lists/*
 
 # Install pip packages from requirements text file
 
-ADD requirements.txt /tmp/requirements.txt
+ADD requirements_docker.txt /tmp/requirements.txt
 RUN pip install -r /tmp/requirements.txt
 
 WORKDIR ${WORK_DIR}

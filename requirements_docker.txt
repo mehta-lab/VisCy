@@ -1,15 +1,12 @@
 Cython
-keras==2.1.6
 matplotlib==3.0.3
 natsort
 nose
 numpy
-opencv-python
 pandas
 pydot
 PyYAML
 scikit-image
 scikit-learn
 scipy
-tensorflow==1.10.0
 testfixtures
