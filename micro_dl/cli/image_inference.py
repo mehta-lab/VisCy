@@ -301,11 +301,12 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                 test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
-                    # assuming target and predicted images are always 2D for now
-                    im_center = im_stack[..., depth // 2, :, :]
-                    im_target = im_target[0, ...] 
+                    # save predicted images assumes 2D
+                    if depth > 1:
+                        im_stack = im_stack[..., depth // 2, :, :]
+                        im_target = im_target[0, ...]
                     plot_utils.save_predicted_images(
-                        input_batch=im_center,
+                        input_batch=im_stack,
                         target_batch=im_target,
                         pred_batch=im_pred,
                         output_dir=fig_dir,
