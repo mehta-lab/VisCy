@@ -291,18 +291,21 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                     # Change dimension order to zyx (3D) or channel first (2D)
                     im_target = np.transpose(im_target, [2, 0, 1])
                 im_target = im_target[np.newaxis, ...]
-
+                if len(im_target.shape) < len(im_stack.shape):
+                    im_target = im_target[np.newaxis, ...]   
                 metric_vals = model.evaluate(x=im_stack, y=im_target)
                 for metric, metric_val in zip([loss]+metrics, metric_vals):
                     test_frames_meta_row[metric] = metric_val
-                print(test_frames_meta_row)
+
                 test_frames_meta.loc[test_row_ind] = test_frames_meta_row.loc[meta_idx]
                 test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
                     # assuming target and predicted images are always 2D for now
+                    im_center = im_stack[..., depth // 2, :, :]
+                    im_target = im_target[0, ...] 
                     plot_utils.save_predicted_images(
-                        input_batch=im_stack,
+                        input_batch=im_center,
                         target_batch=im_target,
                         pred_batch=im_pred,
                         output_dir=fig_dir,
