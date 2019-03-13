@@ -31,6 +31,9 @@ python3.6 ~/get-pip.py && \
 # keras
 pip install --upgrade --no-cache-dir keras==2.1.6 && \
 
+# Jupyter
+pip install --upgrade --no-cache-dir jupyter && \
+
 # Cleanup
 sudo apt-get clean && \
 sudo apt-get autoremove && \
