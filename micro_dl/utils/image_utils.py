@@ -189,7 +189,7 @@ def read_image(file_path):
         im = np.load(file_path)
     else:
         try:
-            im = cv2.imread(file_path) #cv2.IMREAD_ANYDEPTH)
+            im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
         except IOError as e:
             raise e
     return im

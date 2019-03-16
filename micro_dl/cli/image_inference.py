@@ -294,7 +294,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                 for metric, metric_val in zip([loss]+metrics, metric_vals):
                     test_frames_meta_row[metric] = metric_val
 
-                test_frames_meta.append(test_frames_meta_row, ignore_index=True)
+                test_frames_meta = test_frames_meta.append(test_frames_meta_row, ignore_index=True)
                 test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
