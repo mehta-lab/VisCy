@@ -128,9 +128,9 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
     if args.metrics:
         metrics = args.metrics
     if isinstance(metrics, str):
-        metrics = [metircs]
+        metrics = [metrics]
     loss = trainer_config['loss']
-    metrics_cls = train_utils.get_metrics(args.metrics)
+    metrics_cls = train_utils.get_metrics(metrics)
     loss_cls = train_utils.get_loss(loss)
     split_idx_name = dataset_config['split_by_column']
     K.set_image_data_format(network_config['data_format'])
@@ -155,8 +155,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
             n_test_row *= len(metadata_ids[id])
     # create empty dataframe for test image metadata
     test_frames_meta = pd.DataFrame(columns=
-                                    frames_meta.columns.values.tolist()+metrics,
-                                    index=range(n_test_row))
+                                    frames_meta.columns.values.tolist()+metrics)
     # Get model weight file name, if none, load latest saved weights
     model_fname = args.model_fname
     if model_fname is None:
@@ -169,16 +168,16 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
     # Create image subdirectory to write predicted images
     pred_dir = os.path.join(args.model_dir, 'predictions')
     os.makedirs(pred_dir, exist_ok=True)
+    target_channel = dataset_config['target_channels'][0]
     # If saving figures, create another subdirectory to predictions
     if args.save_figs:
-        target_channel = config['dataset']['target_channels'][0]
         fig_dir = os.path.join(pred_dir, 'figures')
         os.makedirs(fig_dir, exist_ok=True)
 
     # If network depth is > 3 determine depth margins for +-z
     depth = 1
-    if 'depth' in config['network']:
-        depth = config['network']['depth']
+    if 'depth' in network_config:
+        depth = network_config['depth']
         if depth > 1:
             metadata_ids['slice_idx'] = aux_utils.adjust_slice_margins(
                 slice_ids=metadata_ids['slice_idx'],
@@ -186,21 +185,22 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
             )
     # Get input channel
     # TODO: Add multi channel support once such models are tested
-    input_channel = config['dataset']['input_channels'][0]
+    input_channel = dataset_config['input_channels'][0]
     assert isinstance(input_channel, int),\
         "Only supporting single input channel for now"
     # Get data format
     data_format = 'channels_first'
-    if 'data_format' in config['network']:
-        data_format = config['network']['data_format']
+    if 'data_format' in network_config:
+        data_format = network_config['data_format']
     # Load model with predict = True
     model = inference.load_model(
-        network_config=config['network'],
+        network_config=network_config,
         model_fname=weights_path,
         predict=True,
     )
     print(model.summary())
-    model.compile(loss=loss_cls, optimizer='Adam', metrics=metrics_cls)
+    optimizer = trainer_config['optimizer']['name']
+    model.compile(loss=loss_cls, optimizer=optimizer, metrics=metrics_cls)
     test_row_ind = 0
     # Iterate over all indices for test data
     for time_idx in metadata_ids['time_idx']:
@@ -271,12 +271,8 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                     slice_idx,
                     pos_idx,
                 )
-                file_path = os.path.join(
-                    args.image_dir,
-                    frames_meta.loc[meta_idx, "file_name"],
-                )
                 # get a single row of frame meta data
-                test_frames_meta_row = frames_meta.loc[[meta_idx]]
+                test_frames_meta_row = frames_meta.loc[meta_idx]
                 im_target = preprocess_imstack(
                     frames_metadata=frames_meta,
                     input_dir=args.image_dir,
@@ -290,6 +286,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                 if data_format == 'channels_first':
                     # Change dimension order to zyx (3D) or channel first (2D)
                     im_target = np.transpose(im_target, [2, 0, 1])
+                # add the batch dimension
                 im_target = im_target[np.newaxis, ...]
                 if len(im_target.shape) < len(im_stack.shape):
                     im_target = im_target[np.newaxis, ...]   
@@ -297,7 +294,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                 for metric, metric_val in zip([loss]+metrics, metric_vals):
                     test_frames_meta_row[metric] = metric_val
 
-                test_frames_meta.loc[test_row_ind] = test_frames_meta_row.loc[meta_idx]
+                test_frames_meta.append(test_frames_meta_row, ignore_index=True)
                 test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
