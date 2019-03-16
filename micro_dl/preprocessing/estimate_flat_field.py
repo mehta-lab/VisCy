@@ -10,8 +10,12 @@ from micro_dl.utils.image_utils import fit_polynomial_surface_2D, read_image
 class FlatFieldEstimator2D:
     """Estimates flat field image"""
 
-    def __init__(self, input_dir, output_dir,
-                 channel_ids, slice_ids):
+    def __init__(self,
+                 input_dir,
+                 output_dir,
+                 channel_ids,
+                 slice_ids,
+                 block_size=32):
         """
         Flatfield images are estimated once per channel for 2D data
 
@@ -19,6 +23,7 @@ class FlatFieldEstimator2D:
         :param str output_dir: Base output directory
         :param int/list channel_ids: channel ids for flat field_correction
         :param int/list slice_ids: Z slice indices for flatfield correction
+        :param int block_size: Size of blocks image will be divided into
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -35,6 +40,9 @@ class FlatFieldEstimator2D:
         )
         self.channels_ids = metadata_ids['channel_ids']
         self.slice_ids = metadata_ids['slice_ids']
+        if block_size is None:
+            block_size = 32
+        self.block_size = block_size
 
     def get_flat_field_dir(self):
         """
@@ -47,12 +55,13 @@ class FlatFieldEstimator2D:
         """
         Estimates flat field correction image.
         """
-        # flat_field constant over time, so time_idx=0. And use only first
+        # flat_field constant over time, so use first time idx. And use only first
         # slice if multiple are present
+        time_idx = self.frames_metadata['time_idx'].unique()[0]
         for channel_idx in self.channels_ids:
             row_idx = aux_utils.get_row_idx(
                 frames_metadata=self.frames_metadata,
-                time_idx=0,
+                time_idx=time_idx,
                 channel_idx=channel_idx,
                 slice_idx=self.slice_ids[0],
             )
@@ -76,13 +85,12 @@ class FlatFieldEstimator2D:
             cur_fname = os.path.join(self.flat_field_dir, fname)
             np.save(cur_fname, flatfield, allow_pickle=True, fix_imports=True)
 
-    def sample_block_medians(self, im, block_size=32):
+    def sample_block_medians(self, im):
         """Subdivide a 2D image in smaller blocks of size block_size and
         compute the median intensity value for each block. Any incomplete
         blocks (remainders of modulo operation) will be ignored.
 
         :param np.array im:         2D image
-        :param int block_size:      Size of blocks image will be divided into
         :return np.array(float) sample_coords: Image coordinates for block
                                                centers
         :return np.array(float) sample_values: Median intensity values for
@@ -90,11 +98,11 @@ class FlatFieldEstimator2D:
         """
 
         im_shape = im.shape
-        assert block_size < im_shape[0], "Block size larger than image height"
-        assert block_size < im_shape[1], "Block size larger than image width"
+        assert self.block_size < im_shape[0], "Block size larger than image height"
+        assert self.block_size < im_shape[1], "Block size larger than image width"
 
-        nbr_blocks_x = im_shape[0] // block_size
-        nbr_blocks_y = im_shape[1] // block_size
+        nbr_blocks_x = im_shape[0] // self.block_size
+        nbr_blocks_y = im_shape[1] // self.block_size
         sample_coords = np.zeros((nbr_blocks_x * nbr_blocks_y, 2),
                                  dtype=np.float64)
         sample_values = np.zeros((nbr_blocks_x * nbr_blocks_y, ),
@@ -102,21 +110,20 @@ class FlatFieldEstimator2D:
         for x in range(nbr_blocks_x):
             for y in range(nbr_blocks_y):
                 idx = y * nbr_blocks_x + x
-                sample_coords[idx, :] = [x * block_size + (block_size - 1) / 2,
-                                         y * block_size + (block_size - 1) / 2]
+                sample_coords[idx, :] = [x * self.block_size + (self.block_size - 1) / 2,
+                                         y * self.block_size + (self.block_size - 1) / 2]
                 sample_values[idx] = np.median(
-                    im[x * block_size:(x + 1) * block_size,
-                       y * block_size:(y + 1) * block_size]
+                    im[x * self.block_size:(x + 1) * self.block_size,
+                       y * self.block_size:(y + 1) * self.block_size]
                 )
         return sample_coords, sample_values
 
-    def get_flatfield(self, im, block_size=32, order=2, normalize=True):
+    def get_flatfield(self, im, order=2, normalize=True):
         """
         Combine sampling and polynomial surface fit for flatfield estimation.
         To flatfield correct an image, divide it by flatfield.
 
         :param np.array im:        2D image
-        :param int block_size:     Size of blocks image will be divided into
         :param int order:          Order of polynomial (default 2)
         :param bool normalize:     Normalize surface by dividing by its mean
                                    for flatfield correction (default True)
@@ -124,10 +131,7 @@ class FlatFieldEstimator2D:
         :return np.array flatfield:    Flatfield image
         """
 
-        coords, values = self.sample_block_medians(
-            im=im,
-            block_size=block_size,
-        )
+        coords, values = self.sample_block_medians(im=im)
         flatfield = fit_polynomial_surface_2D(
             sample_coords=coords,
             sample_values=values,
@@ -138,6 +142,7 @@ class FlatFieldEstimator2D:
         # Flatfields can't contain zeros or negative values
         if flatfield.min() <= 0:
             raise ValueError(
-                "The generated flatfield was not strictly positive."
+                "The generated flatfield was not strictly positive {}.".format(
+                    flatfield.min()),
             )
         return flatfield

@@ -29,11 +29,11 @@ class ImageResizer:
         :param int/list channel_ids: Channel indices to resize
             (default -1 includes all slices)
         :param int/list time_ids: timepoints to use
-        :param int/list slice_ids: Index of slize (z) indices to use
+        :param int/list slice_ids: Index of slice (z) indices to use
         :param int/list pos_ids: Position (FOV) indices to use
         :param int int2str_len: Length of str when converting ints
         :param int num_workers: number of workers for multiprocessing
-        :param str flat_field_dir: dir with flat flield images
+        :param str flat_field_dir: dir with flat field images
         """
         self.input_dir = input_dir
         self.output_dir = output_dir

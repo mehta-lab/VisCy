@@ -2,13 +2,12 @@ output_dir: '/data/sguo/Processed/2018_11_01_kidney_slice/SMS_2018_1101_1906_1_B
 verbose: 10
 input_dir: '/data/sguo/Processed/2018_11_01_kidney_slice/SMS_2018_1101_1906_1_BG_2018_1101_1906_1/microDL_format'
 num_workers: 4
-correct_flat_field: False
 uniform_structure: True
 masks:
     channels: [5]
     str_elem_radius: 3
+    mask_type: 'unimodal'
 tile:
-    channels: -1
     tile_size: [256, 256]
     step_size: [128, 128]
     depths: [3, 3, 3, 3, 1, 1, 1]

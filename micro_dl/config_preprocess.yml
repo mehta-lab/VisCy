@@ -2,12 +2,16 @@ output_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010_train_data
 verbose: 10
 input_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010'
 channel_ids: [0, 1, 5]
-resample_scale: 0.2
 num_workers: 4
-correct_flat_field: True
+flat_field:
+    estimate: True
+resize:
+    scale_factor: 2
+    resize_3d: False
 masks:
     channels: [5]
     str_elem_radius: 3
+    mask_type: 'otsu'
 tile:
     tile_size: [256, 256]
     step_size: [128, 128]

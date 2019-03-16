@@ -35,7 +35,7 @@ def parse_args():
     return args
 
 
-def flat_field_correct(params_dict):
+def flat_field_correct(params_dict, block_size):
     """Estimate flat_field_images
 
     :param dict params_dict: dict with keys: input_dir, output_dir, time_ids,
@@ -49,6 +49,7 @@ def flat_field_correct(params_dict):
         output_dir=params_dict['output_dir'],
         channel_ids=params_dict['channel_ids'],
         slice_ids=params_dict['slice_ids'],
+        block_size=block_size,
     )
     flat_field_inst.estimate_flat_field()
     flat_field_dir = flat_field_inst.get_flat_field_dir()
@@ -127,6 +128,8 @@ def generate_masks(params_dict,
      str mask_dir: dir with created masks
      int mask_out_channel: channel number assigned to masks
     """
+    assert mask_type in {'otsu', 'unimodal'},\
+        "Supported mask types: 'otsu', 'unimodal', not {}".format(mask_type)
 
     # Instantiate channel to mask processor
     mask_processor_inst = MaskProcessor(
@@ -254,7 +257,10 @@ def pre_process(pp_config, req_params_dict):
                 pp_config['flat_field']['estimate']:
             assert 'flat_field_dir' not in pp_config['flat_field'], \
                 'estimate_flat_field or use images in flat_field_dir.'
-            flat_field_dir = flat_field_correct(req_params_dict)
+            block_size = None
+            if 'block_size' in pp_config['flat_field']:
+                block_size = pp_config['flat_field']['block_size']
+            flat_field_dir = flat_field_correct(req_params_dict, block_size)
             pp_config['flat_field']['flat_field_dir'] = flat_field_dir
 
         elif 'correct' in pp_config['flat_field'] and \
@@ -306,7 +312,6 @@ def pre_process(pp_config, req_params_dict):
                                                         str_elem_radius,
                                                         mask_type,
                                                         mask_out_channel)
-            pp_config['masks']['created_mask_dir'] = mask_dir
         elif 'mask_dir' in pp_config['masks']:
             mask_dir = pp_config['masks']['mask_dir']
             # Get preexisting masks from directory and match to input dir
@@ -344,6 +349,7 @@ def save_config(cur_config, runtime):
     # Read preprocessing.json if exists in input dir
     parent_dir = cur_config['input_dir'].split(os.sep)[:-1]
     parent_dir = os.sep.join(parent_dir)
+
     prior_config_fname = os.path.join(parent_dir, 'preprocessing_info.json')
     prior_pp_config = None
     if os.path.exists(prior_config_fname):
