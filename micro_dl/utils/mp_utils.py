@@ -35,7 +35,8 @@ def create_save_mask(input_fnames,
                      mask_type,
                      mask_ext):
     """Create and save mask
-
+    When >1 channel are used to generate the mask, mask of each channel is
+    generated then added together
     :param tuple input_fnames: tuple of input fnames with full path
     :param str flat_field_fname: fname of flat field image
     :param int str_elem_radius: size of structuring element used for binary
