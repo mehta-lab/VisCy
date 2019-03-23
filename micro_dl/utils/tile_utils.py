@@ -40,6 +40,9 @@ def read_imstack(input_fnames,
         im_stack.append(im)
 
     input_image = np.stack(im_stack, axis=-1)
+    # remove singular dimension for 3D images
+    if len(input_image.shape) > 3:
+        input_image = np.squeeze(input_image)
     if not is_mask:
         if hist_clip_limits is not None:
             input_image = normalize.hist_clipping(
