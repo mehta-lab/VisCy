@@ -102,7 +102,7 @@ class TestTileUtils(unittest.TestCase):
 
         # read a 3D image
         im_stack = tile_utils.read_imstack([self.sph_fname])
-        numpy.testing.assert_equal(im_stack.shape, (32, 32, 8, 1))
+        numpy.testing.assert_equal(im_stack.shape, (32, 32, 8))
 
         # read multiple 3D images
         im_stack = tile_utils.read_imstack((self.sph_fname, self.sph_fname))
