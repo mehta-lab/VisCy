@@ -1,3 +1,5 @@
+Travis CI Build Status: [![Build Status](https://travis-ci.com/czbiohub/microDL.svg?branch=master)](https://travis-ci.com/czbiohub/microDL)
+
 # MicroDL
 
 This is a pipeline for training U-Net models. It consists of three modules:
