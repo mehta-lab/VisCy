@@ -1,5 +1,7 @@
 import glob
+import numpy as np
 import os
+import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
 
@@ -46,7 +48,12 @@ def validate_mask_meta(pp_config):
         # See if frames_meta is already present, if so, move on
         has_meta = next((s for s in csv_name if 'frames_meta.csv' in s), None)
         if isinstance(has_meta, str):
-            return mask_channel
+            # Return existing mask channel from frames_meta
+            frames_meta = pd.read_csv(os.path.join(mask_dir, 'frames_meta.csv'))
+            mask_channel = np.unique(frames_meta['channel_idx'])
+            assert len(mask_channel) == 1,\
+                "Found more than one mask channel: {}".format(mask_channel)
+            return mask_channel[0]
         if len(csv_name) == 1:
             # Use the one existing csv name
             csv_name = csv_name[0]

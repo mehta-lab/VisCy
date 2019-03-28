@@ -191,13 +191,13 @@ def get_image_dir_format(dataset_config):
         # Preprocessing_info is a list of jsons. Use the last json. If a tile
         # (training data) dir is specified and exists in info json use that
         recent_json = preprocessing_info[-1]
-        if (hasattr(recent_json, recent_json['tile']) and
-                hasattr(recent_json['tile'], recent_json['tile']['tile_dir'])):
-            tile_dir = recent_json['tile']['tile_dir']
+        pp_config = recent_json['config']
+        if 'tile' in pp_config and 'tile_dir' in pp_config['tile']:
+            tile_dir = pp_config['tile']['tile_dir']
 
         # Get shape order from recent_json
-        if 'image_format' in recent_json['tile']:
-            image_format = recent_json['tile']['image_format']
+        if 'image_format' in pp_config['tile']:
+            image_format = pp_config['tile']['image_format']
 
     return tile_dir, image_format
 
