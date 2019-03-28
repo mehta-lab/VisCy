@@ -1,18 +1,25 @@
 """Utility functions for plotting"""
 import cv2
+import glob
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
+import natsort
 import numpy as np
 import os
 from micro_dl.utils.normalize import hist_clipping
 
 
-def save_predicted_images(input_batch, target_batch, pred_batch,
-                          output_dir, batch_idx=None, output_fname=None,
-                          tol=1, font_size=15):
-    """Saves a batch predicted image to output dir
-
+def save_predicted_images(input_batch,
+                          target_batch,
+                          pred_batch,
+                          output_dir,
+                          batch_idx=None,
+                          output_fname=None,
+                          clip_limits=1,
+                          font_size=15):
+    """
+    Saves a batch predicted image to output dir
     Format: rows of [input, target, pred]
 
     :param np.ndarray input_batch: expected shape [batch_size, n_channels,
@@ -22,7 +29,7 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
     :param str output_dir: dir to store the output images/mosaics
     :param int batch_idx: current batch number/index
     :param str output_fname: fname for saving collage
-    :param float tol: top and bottom % of intensity to saturate
+    :param float clip_limits: top and bottom % of intensity to saturate
     :param int font_size: font size of the image title
     """
 
@@ -47,20 +54,32 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
         fig.set_size_inches((15, 5 * n_channels))
         axis_count = 0
         for channel_idx in range(n_channels):
-            ax[axis_count].imshow(hist_clipping(cur_input[channel_idx],
-                                                tol, 100 - tol), cmap='gray')
+            cur_im = hist_clipping(
+                cur_input[channel_idx],
+                clip_limits,
+                100 - clip_limits,
+            )
+            ax[axis_count].imshow(cur_im,  cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 0:
                 ax[axis_count].set_title('Input', fontsize=font_size)
             axis_count += 1
-            ax[axis_count].imshow(hist_clipping(cur_target[channel_idx],
-                                                tol, 100 - tol), cmap='gray')
+            cur_im = hist_clipping(
+                cur_target[channel_idx],
+                clip_limits,
+                100 - clip_limits,
+            )
+            ax[axis_count].imshow(cur_im, cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 1:
                 ax[axis_count].set_title('Target', fontsize=font_size)
             axis_count += 1
-            ax[axis_count].imshow(hist_clipping(cur_prediction[channel_idx],
-                                                tol, 100 - tol), cmap='gray')
+            cur_im = hist_clipping(
+                cur_prediction[channel_idx],
+                clip_limits,
+                100 - clip_limits,
+            )
+            ax[axis_count].imshow(cur_im, cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 2:
                 ax[axis_count].set_title('Prediction', fontsize=font_size)
@@ -72,6 +91,101 @@ def save_predicted_images(input_batch, target_batch, pred_batch,
             )
         fig.savefig(fname, dpi=300, bbox_inches='tight')
         plt.close(fig)
+
+
+def save_center_slices(image_dir,
+                       pos_idx,
+                       save_path,
+                       mean_std=None,
+                       clip_limits=1,
+                       margin=20,
+                       z_scale=5,
+                       channel_str=None,
+                       font_size=15,
+                       color_map='gray',
+                       fig_title=None):
+    """
+    Given an image directory, loads a z-stack, plots the center cross-sections
+    of xy, yz and xz planes with the larger xy section top left, yz top right
+    and xz bottom left in the figure.
+
+    :param str image_dir: Directory containing z-stacks
+    :param int pos_idx: Which FOV to plot
+    :param str save_path: Full path of where to write figure file
+    :param tuple mean_std: If None, just assume the image will plot well as is,
+        if tuple containing a mean and std (e.g. mean over training data),
+        set z-stack mean and std and convert to uint16
+    :param float clip_limits: top and bottom % of intensity to saturate
+        in histogram clipping
+    :param int margin: Number of pixel margin between the three center slices
+        xy and xz, yz
+    :param int z_scale: How much to upsample in z (to be able to see xz and yz)
+    :param str channel_str: If there's more than one channel in image_dir
+        (e.g. input image dir as opposed to predictions) use this str to select
+        which channel to build z-stack from. E.g. '3', 'brightfield'.
+    :param int font_size: font size of the image title
+    :param str color_map: Matplotlib colormap
+    :param str fig_title: Figure title
+    """
+
+    search_str = os.path.join(image_dir, "*p{:03d}*".format(pos_idx))
+    slice_names = natsort.natsorted(glob.glob(search_str))
+
+    if channel_str is not None:
+        slice_names = [s for s in slice_names if channel_str in s]
+
+    im_stack = []
+    for im_z in slice_names:
+        im_stack.append(cv2.imread(im_z, cv2.IMREAD_ANYDEPTH))
+    im_stack = np.stack(im_stack, axis=-1)
+    # If mean and std tuple exist, scale, otherwise leave as is
+    im_norm = im_stack
+    if isinstance(mean_std, tuple):
+        im_norm = im_stack / im_stack.std() * mean_std[0]
+        im_norm = im_norm - im_norm.mean() + mean_std[1]
+        # cutoff at 0
+        im_norm[im_norm < 0] = 0.
+        # Convert to uint16
+        im_norm = im_norm.astype(np.uint16)
+
+    # Add xy center slice to plot image (canvas)
+    center_slice = hist_clipping(
+        im_norm[..., int(len(slice_names) // 2)],
+        clip_limits, 100 - clip_limits,
+    )
+    im_shape = im_stack.shape
+    canvas = center_slice.max() * np.ones(
+        (im_shape[0] + im_shape[2] * z_scale + margin,
+         im_shape[1] + im_shape[2] * z_scale + margin),
+        dtype=np.uint16,
+    )
+    canvas[0:im_shape[0], 0:im_shape[1]] = center_slice
+    # add yz center slice
+    yz_slice = hist_clipping(
+        np.squeeze(im_norm[:, int(im_shape[1] // 2), :]),
+        clip_limits, 100 - clip_limits,
+    )
+    yz_shape = yz_slice.shape
+    yz_slice = cv2.resize(yz_slice, (yz_shape[1] * int(z_scale, yz_shape[0])))
+    canvas[0:yz_shape[0], im_shape[1] + margin:] = yz_slice
+    # add xy center slice
+    xy_slice = hist_clipping(
+        np.squeeze(im_norm[int(im_shape[1] // 2), :, :]),
+        clip_limits, 100 - clip_limits,
+    )
+    xy_shape = xy_slice.shape
+    xy_slice = cv2.resize(xy_slice, (xy_shape[1] * int(z_scale, xy_shape[0])))
+    # Need to rotate to fit this slice on the bottom of canvas
+    xy_slice = np.rot90(xy_slice)
+    canvas[im_shape[0] + margin:, 0:xy_slice.shape[1]] = xy_slice
+
+    plt.imshow(canvas, cmap=color_map)
+    plt.axis('off')
+    if fig_title is not None:
+        plt.title(fig_title, fontsize=font_size)
+
+    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.close()
 
 
 def save_mask_overlay(input_image, mask, op_fname, alpha=0.7):
