@@ -320,7 +320,7 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                         output_dir=fig_dir,
                         output_fname=im_name[:-4],
                         ext='jpg',
-                        tol=1,
+                        clip_limits=1,
                         font_size=15
                     )
     # calculate means of the metrics
