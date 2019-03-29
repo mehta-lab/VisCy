@@ -154,8 +154,9 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
             metadata_ids[id] = np.unique(test_tile_meta[id])
             n_test_row *= len(metadata_ids[id])
     # create empty dataframe for test image metadata
-    test_frames_meta = pd.DataFrame(columns=
-                                    frames_meta.columns.values.tolist()+metrics)
+    test_frames_meta = pd.DataFrame(
+        columns=frames_meta.columns.values.tolist()+metrics
+    )
     # Get model weight file name, if none, load latest saved weights
     model_fname = args.model_fname
     if model_fname is None:
@@ -218,19 +219,18 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                 )
                 # Crop image shape to nearest factor of two
                 im_stack = image_utils.crop2base(im_stack)
-                # Remove singular z dimension for 2D image
-                im_stack = np.squeeze(im_stack)
-                # Change 3D image dimension order to zyx (3D)
-                if depth > 1:
-                    im_stack = np.transpose(im_stack, [2, 0, 1])
+                # Change image stack format to zyx
+                im_stack = np.transpose(im_stack, [2, 0, 1])
+                if depth == 1:
+                    # Remove singular z dimension for 2D image
+                    im_stack = np.squeeze(im_stack)
                 # Add channel dimension
                 if data_format == 'channels_first':
-                    im_stack = im_stack[np.newaxis,...]
+                    im_stack = im_stack[np.newaxis, ...]
                 else:
                     im_stack = im_stack[..., np.newaxis]
-
                 # add batch dimensions
-                im_stack = np.expand_dims(im_stack, axis=0)
+                im_stack = im_stack[np.newaxis, ...]
                 # Predict on large image
                 start = time.time()
                 im_pred = inference.predict_on_larger_image(
@@ -283,18 +283,29 @@ def run_prediction(args, gpu_ids, gpu_mem_frac):
                     pos_idx=pos_idx,
                 )
                 im_target = image_utils.crop2base(im_target)
+                #TODO: Add image_format option to network config
+
+                # Change image stack format to zyx
+                im_target = np.transpose(im_target, [2, 0, 1])
+                if depth == 1:
+                    # Remove singular z dimension for 2D image
+                    im_target = np.squeeze(im_target)
+                # Add channel dimension
                 if data_format == 'channels_first':
-                    # Change dimension order to zyx (3D) or channel first (2D)
-                    im_target = np.transpose(im_target, [2, 0, 1])
-                # add the batch dimension
+                    im_target = im_target[np.newaxis, ...]
+                else:
+                    im_target = im_target[..., np.newaxis]
+                # add batch dimensions
                 im_target = im_target[np.newaxis, ...]
-                if len(im_target.shape) < len(im_stack.shape):
-                    im_target = im_target[np.newaxis, ...]   
+
                 metric_vals = model.evaluate(x=im_stack, y=im_target)
                 for metric, metric_val in zip([loss]+metrics, metric_vals):
                     test_frames_meta_row[metric] = metric_val
 
-                test_frames_meta = test_frames_meta.append(test_frames_meta_row, ignore_index=True)
+                test_frames_meta = test_frames_meta.append(
+                    test_frames_meta_row,
+                    ignore_index=True
+                )
                 test_row_ind += 1
                 # Save figures if specified
                 if args.save_figs:
