@@ -1,4 +1,5 @@
-Travis CI Build Status: [![Build Status](https://travis-ci.com/czbiohub/microDL.svg?branch=master)](https://travis-ci.com/czbiohub/microDL)
+[![Build Status](https://travis-ci.com/czbiohub/microDL.svg?branch=master)](https://travis-ci.com/czbiohub/microDL)
+[![Code Coverage](https://codecov.io/gh/czbiohub/microDL/branch/master/graphs/badge.svg)](https://codecov.io/gh/czbiohub/microDL)
 
 # MicroDL
 
