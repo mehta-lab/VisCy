@@ -4,10 +4,10 @@
 # cuda          9.0    (apt)
 # python        3.6    (apt)
 # jupyter       latest (pip)
-# pytorch       0.4.0  (pip)
+# pytorch       1.0  (pip)
 # tensorflow    1.10.0  (pip)
-# keras         2.1.5  (pip)
-# opencv        3.4.1  (git)
+# keras         2.1.6  (pip)
+# opencv        3.4.2  (pip)
 # ==================================================================
 
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
@@ -91,7 +91,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 
     $PIP_INSTALL \
         h5py \
-	keras==2.1.5 \
+	keras==2.1.6 \
         && \
 
 # ==================================================================
@@ -115,7 +115,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # install pip packages from requirements text file
 # ------------------------------------------------------------------
 
-    ADD requirements.txt /tmp/requirements.txt
+    ADD requirements_docker.txt /tmp/requirements.txt
     RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
     WORKDIR /microDL
