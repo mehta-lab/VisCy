@@ -38,4 +38,68 @@ Assuming you have a config file that specifies what you would like to train
 ```buildoutcfg
 python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id (default 0)> --gpu_mem_frac <0-1 (default 1> --model_fname <file name if starting from weights>
 ```
-## Inference
+## Config File Settings
+
+There are three main blocks you can configure settings for in this module: dataset, trainer and network. 
+
+* **ataset** is where you set things like where is your data, how to split your data and which channels to model.
+* **trainer** sets your model directory, callbacks and optimizer.
+* **network** sets network parameters like which model class, how to configure blocks, dropouts, activations etc.
+
+Below is a more detailed list of possible config settings. You can see some example configs in the micro_dl directory.
+
+* dataset:
+    * data_dir (str): Full path to where your preprocessed or tiled dataset is located
+    * input_channels (list): List of integers indicating which channel indices to be used as inputs
+    * target_channels (list): List of integers indicating which channel indices to be used as targets
+    * train_fraction (float): What fraction of total data will be used in each epoch (0, 1]
+    * split_by_column (idx): Which index the dataset split should be done over (pos_idx, channel_idx, time_idx, slice_idx)
+    * split_ratio:
+        train (float): Fraction of all data to be used for training. train, val and test must sum to 1.
+        val (float): Fraction of total data to be used for validation.
+        test (float): Fraction of total data to be used for testing.
+* verbose (int): Verbosity (default 10)
+* trainer:
+    * model_dir (str): Directory where model weights, graph and tensorboard log will be written
+    * batch_size (int): Mini-batch gradient descent batch size
+    * max_epochs (int): Maximum number of epochs to run
+    * metrics: Either Keras metrics, or custom metrics in micro_dl/train/metrics.py
+    * loss: Either Keras loss, or custom loss in micro_dl/train/losses.py
+    * callbacks:
+        * EarlyStopping:
+            mode: min
+            monitor: val_loss
+            patience: 50
+            verbose: True
+        * ModelCheckpoint:
+            mode: min
+            monitor: val_loss
+            save_best_only: True
+            verbose: True
+        * TensorBoard:
+            histogram_freq: 0
+            verbose: True
+    * optimizer:
+        * lr (float): Learning rate
+        * name: Any Keras optimizer
+* network:
+    * class: E.g. UNet2D, UNet3D, UNetStackTo2D, Image2DToVectorNet
+    * num_input_channels (int): Number of input channels
+    * num_target_channels (int): Number of target channels
+    * data_format: 'channels_first'
+    * height (int): Tile height
+    * width (int): Tile width
+    * depth (int): Tile depth (z)
+    * batch_norm (bool): Wether to use batch norm
+    * pooling_type: E.g. max, average
+    * filter_size (int): Filter size. Must be uneven integer
+    * activation:
+        type: relu
+    * dropout (float): Dropout fraction [0, 1]
+    * num_filters_per_block (list): List of integers specifying number of filters in each layer
+    * num_convs_per_block (int): Number of convolutions per block
+    * block_sequence: conv-activation-bn
+    * skip_merge_type: Options are concat or add
+    * upsampling: Options are bilinear, nearest_neighbor
+    * residual (bool): Use residual connections
+    * final_activation: Keras activations, e.g. linear, sigmoid, ...
