@@ -42,7 +42,7 @@ python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id (de
 
 There are three main blocks you can configure settings for in this module: dataset, trainer and network. 
 
-* **ataset** is where you set things like where is your data, how to split your data and which channels to model.
+* **dataset** is where you set things like where is your data, how to split your data and which channels to model.
 * **trainer** sets your model directory, callbacks and optimizer.
 * **network** sets network parameters like which model class, how to configure blocks, dropouts, activations etc.
 
