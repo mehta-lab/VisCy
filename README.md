@@ -46,7 +46,7 @@ jupyter notebook --ip=0.0.0.0 --port=8888 --allow-root --no-browser
 ```
 Then you can access your notebooks in your browser at:
 ```buildoutcfg
-http://<your server name (e.g. Fry)>:<whatever port you mapped to when starting up docker>
+http://<your server name (e.g. fry)>:<whatever port you mapped to when starting up docker>
 ```
 You will need to copy/paste the token generated in your Docker container.
 
