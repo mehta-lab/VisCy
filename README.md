@@ -3,7 +3,9 @@
 
 # MicroDL
 
-This is a pipeline for U-Net models. It consists of three modules:
+This is a pipeline that allows you to design, train and evaluate U-Net models using just a few YAML config files. It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets, as well as networks with anistropic filters. It also supports networks with an encoder plus dense layers for image to vector or image to scalar models. Our hope is that microDL will provide easy to use CLIs for segmentation, regression and classification tasks of microscopy images. 
+
+microDL consists of three modules:
 
 * Preprocessing: normalization, flatfield correction, masking, tiling
 * Training: model creation, loss functions (w/wo masks), metrics, learning rates
