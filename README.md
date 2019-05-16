@@ -61,7 +61,6 @@ should have the following structure:
 dir_name
     |
     |- frames_meta.csv
-    |- global_metadata.csv
     |- im_c***_z***_t***_p***.png
     |- im_c***_z***_t***_p***.png
     |- ...
@@ -72,7 +71,7 @@ The image naming convention is (parenthesis is their name in frames_meta.csv)
 * **t** = timepoint index   (time_idx)
 * **p** = position (field of view) index (pos_idx)
 
-If you download your dataset from the imaging database [imagingDB](https://github.com/czbiohub/imagingDB)
+If you download your dataset from the CZ Biohub imaging database [imagingDB](https://github.com/czbiohub/imagingDB)
 you will get your dataset correctly formatted and can directly input that into microDL.
 If you don't have your data in the imaging database, write a script that converts your 
 your data to image files that adhere to the naming convention above, then run 
