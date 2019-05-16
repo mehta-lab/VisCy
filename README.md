@@ -1,9 +1,9 @@
 [![Build Status](https://travis-ci.com/czbiohub/microDL.svg?branch=master)](https://travis-ci.com/czbiohub/microDL)
 [![Code Coverage](https://codecov.io/gh/czbiohub/microDL/branch/master/graphs/badge.svg)](https://codecov.io/gh/czbiohub/microDL)
 
-# MicroDL
+# microDL
 
-This is a pipeline that allows you to design, train and evaluate U-Net models using just a few YAML config files. It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets, as well as 3D networks with anistropic filters. It also supports networks with an encoder plus dense layers for image to vector or image to scalar models. Our hope is that microDL will provide easy to use CLIs for segmentation, regression and classification tasks of microscopy images. 
+microDL allows you to design, train and evaluate U-Net models using just a few YAML config files. It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets, as well as 3D networks with anistropic filters. It also supports networks with an encoder plus dense layers for image to vector or image to scalar models. Our hope is that microDL will provide easy to use CLIs for segmentation, regression and classification tasks of microscopy images. 
 
 microDL consists of three modules:
 
