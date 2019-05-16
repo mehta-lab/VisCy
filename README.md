@@ -25,10 +25,8 @@ python micro_dl/cli/image_inference.py --model_dir <model directory> --image_dir
 
 ### Docker
 
-It is recommended that you run microDL inside a Docker container, especially if you're using shared resources like Fry
-or Fry2. microDL comes with two Docker images, one for Python3.6 with CUDA 9 support (which is most likely what
-you'll want), and one for Python3.5 with CUDA 8.0 support. You should be in the Docker group on Fry/Fry2, if not you
-can request to join. The Python 3.6 image is already built on Fry/Fry2, but if you want to modify it and build your own,
+It is recommended that you run microDL inside a Docker container, especially if you're using shared resources like a GPU server. microDL comes with two Docker images, one for Python3.6 with CUDA 9 support (which is most likely what
+you'll want), and one for Python3.5 with CUDA 8.0 support. If you're working at the CZ Biohub you should be in the Docker group on our GPU servers Fry/Fry2, if not you can request anyone in the data science team to join. The Python 3.6 image is already built on Fry/Fry2, but if you want to modify it and build your own,
 you can do so:
 ```
 docker build -t imaging_docker:gpu_py36_cu90 -f Dockerfile.imaging_docker_py36_cu90 .
@@ -48,7 +46,7 @@ jupyter notebook --ip=0.0.0.0 --port=8888 --allow-root --no-browser
 ```
 Then you can access your notebooks in your browser at:
 ```buildoutcfg
-http://fry:<whatever port you mapped to when starting up docker>
+http://<your server name (e.g. Fry)>:<whatever port you mapped to when starting up docker>
 ```
 You will need to copy/paste the token generated in your Docker container.
 
@@ -85,6 +83,8 @@ That will generate the frames_meta.csv file you will need for data preprocessing
 
 ## Requirements
 
+There is a requirements.txt file we use for continuous integration, and a requirements_docker.txt file we use to build the Docker image. The main packages you'll need are:
+
 * keras
 * tensorflow
 * cv2
@@ -94,9 +94,8 @@ That will generate the frames_meta.csv file you will need for data preprocessing
 * nose
 * numpy
 * pandas
-* PIMS
 * pydot
 * scikit-image
 * scikit-learn
 * scipy
-* testfixtures
+* testfixtures (for running tests)
