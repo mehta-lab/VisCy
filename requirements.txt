@@ -11,5 +11,5 @@ PyYAML
 scikit-image
 scikit-learn
 scipy
-tensorflow==1.10.0
+tensorflow>=1.12.1
 testfixtures
