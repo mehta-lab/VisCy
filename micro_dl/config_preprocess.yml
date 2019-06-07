@@ -1,7 +1,9 @@
 output_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010_train_data'
 verbose: 10
 input_dir: '/Users/jenny.folkesson/Data/SMS-2018-07-03-18-35-00-0010'
-channel_ids: [0, 1, 5]
+channel_ids: [0, 1, 2]
+slice_ids: [10, 11, 12, 13, 14, 15]
+pos_ids: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 num_workers: 4
 flat_field:
     estimate: True
@@ -9,14 +11,15 @@ resize:
     scale_factor: 2
     resize_3d: False
 masks:
-    channels: [5]
+    channels: [1]
     str_elem_radius: 3
     mask_type: 'otsu'
+    mask_ext: 'png'
 tile:
     tile_size: [256, 256]
     step_size: [128, 128]
-    depths: [3, 3, 1]
-    mask_depth: 3
+    depths: [1, 1, 1]
+    mask_depth: 1
     image_format: 'zyx'
     save_tiled_masks: True
     min_fraction: 0.25

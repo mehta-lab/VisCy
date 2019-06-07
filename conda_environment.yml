@@ -1,0 +1,24 @@
+name: micro_dl
+channels:
+  - anaconda
+  - conda-forge
+  - defaults
+dependencies:
+  - Cython
+  - jupyter
+  - matplotlib
+  - natsort
+  - nose
+  - numpy
+  - opencv
+  - pandas
+  - pydot
+  - PyYAML
+  - tensorflow-gpu
+  - testfixtures
+  - scikit-image
+  - scikit-learn
+  - scipy
+  - pip
+  - pip:
+    - keras==2.1.6

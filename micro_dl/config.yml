@@ -34,17 +34,17 @@ trainer:
             histogram_freq: 0
             verbose: True
     optimizer:
-        lr: 0.0001
+        lr: 0.001
         name: Adam
 network:
-    class: UNet3D
+    class: UNet2D
     num_input_channels: 1
     data_format: 'channels_first'
     height: 256
     width: 256
-    depth: 8
+    depth: 1
     batch_norm: True
-    pooling_type: max
+    pooling_type: average
     filter_size: 3
     activation:
         type: relu
