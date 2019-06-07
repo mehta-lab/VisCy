@@ -76,10 +76,13 @@ def rescale_nd_image(input_volume, scale_factor):
 
 def crop2base(im, base=2):
     """
-    Crop image to nearest smaller factor of the base (usually 2)
+    Crop image to nearest smaller factor of the base (usually 2), assumes xyz
+    format, will work for zyx too but the x_shape, y_shape and z_shape will be
+    z_shape, y_shape and x_shape respectively
 
     :param nd.array im: Image
     :param int base: Base to use, typically 2
+    :param bool crop_z: crop along z dim, only for UNet3D
     :return nd.array im: Cropped image
     :raises AssertionError: if base is less than zero
     """
@@ -193,3 +196,27 @@ def read_image(file_path):
         except IOError as e:
             raise e
     return im
+
+
+def center_crop_to_shape(input_image, output_shape):
+    """Center crop the image to a given shape
+
+    :param np.array input_image: input image to be cropped
+    :param list output_shape: desired crop shape
+    """
+
+    input_shape = np.array(input_image.shape)
+    singleton_dims = np.where(input_shape == 1)[0]
+    input_image = np.squeeze(input_image)
+    assert np.all(np.array(output_shape) <= np.array(input_image.shape)), \
+        'output shape is larger than image shape, use resize or rescale'
+
+    start_0 = (input_image.shape[0] - output_shape[0]) // 2
+    start_1 = (input_image.shape[1] - output_shape[1]) // 2
+    start_2 = (input_image.shape[2] - output_shape[2]) // 2
+    center_block = input_image[start_0: start_0 + output_shape[0],
+                   start_1: start_1 + output_shape[1],
+                   start_2: start_2 + output_shape[2]]
+    for idx in singleton_dims:
+        center_block = np.expand_dims(center_block, axis=idx)
+    return center_block

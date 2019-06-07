@@ -3,11 +3,11 @@
 import argparse
 import os
 import pandas as pd
-import pickle
 import yaml
 
-from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
-from micro_dl.train.model_inference import ModelEvaluator
+from micro_dl.input.dataset import BaseDataSet
+from micro_dl.input import DataSetWithMask
+from micro_dl.inference.model_inference import ModelEvaluator
 import micro_dl.utils.aux_utils as aux_utils
 from micro_dl.utils.train_utils import select_gpu
 
@@ -56,7 +56,7 @@ def run_inference(args, gpu_id, gpu_mem_frac):
     """Evaluate model performance"""
 
     with open(args.config, 'r') as f:
-        config = yaml.load(f)
+        config = yaml.safe_load(f)
     df_test = pd.read_csv(os.path.join(config['trainer']['model_dir'],
                                        'test_metadata.csv'))
 

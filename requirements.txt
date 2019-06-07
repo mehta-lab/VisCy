@@ -4,7 +4,7 @@ matplotlib==3.0.3
 natsort
 nose
 numpy
-opencv-python
+opencv-python==4.1.0.25
 pandas
 pydot
 PyYAML

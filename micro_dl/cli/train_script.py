@@ -9,9 +9,10 @@ import pandas as pd
 import tensorflow as tf
 import yaml
 
-from micro_dl.input.dataset import BaseDataSet, DataSetWithMask
+from micro_dl.input.dataset import BaseDataSet
+from micro_dl.input import DataSetWithMask
 from micro_dl.input.training_table import BaseTrainingTable
-from micro_dl.train.model_inference import load_model
+from micro_dl.inference.model_inference import load_model
 from micro_dl.train.trainer import BaseKerasTrainer
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.train_utils as train_utils
@@ -82,7 +83,7 @@ def create_datasets(df_meta,
     :param str tile_dir: directory containing training image tiles
     :param dict dataset_config: dict with dataset related params
     :param dict trainer_config: dict with params related to training
-    :param str image_format: Tile shape order: 'yxz' or 'zyx'
+    :param str image_format: Tile shape order: 'xyz' or 'zyx'
     :param bool masked_loss: Whether or not to use masks
     :return: Dict containing
      :BaseDataSet df_train: training dataset

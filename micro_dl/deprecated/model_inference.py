@@ -1,5 +1,4 @@
 """Model inference related functions"""
-from keras import Model
 import numpy as np
 import os
 
@@ -9,54 +8,6 @@ import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.train_utils as train_utils
 from micro_dl.utils.normalize import zscore
 from micro_dl.plotting.plot_utils import save_predicted_images
-
-
-def load_model(network_config, model_fname, predict=False):
-    """Load the model from model_dir
-
-    Due to the lambda layer only model weights are saved and not the model
-    config. Hence load_model wouldn't work here!
-    :param yaml network_config: a yaml file with all the required parameters
-    :param str model_fname: fname with full path of the .hdf5 file with saved
-     weights
-    :param bool predict: load model for predicting / training. predict skips
-     checks on input shape
-    :return: Keras.Model instance
-    """
-    network_config['width'] = None
-    network_config['height'] = None
-    network_cls = network_config['class']
-    # not ideal as more networks get added
-    network_cls = aux_utils.import_object('networks', network_cls)
-    network = network_cls(network_config, predict)
-    inputs, outputs = network.build_net()
-    model = Model(inputs=inputs, outputs=outputs)
-    model.load_weights(model_fname)
-    return model
-
-
-def predict_on_larger_image(model, input_image):
-    """Predict on an image larger than the one it was trained on
-
-    All networks with U-net like architecture in this repo, use downsampling of
-    2, which is only conducive for images with shapes in powers of 2. If
-    different, please crop / resize accordingly to avoid shape mismatches.
-
-    :param keras.Model model: Model instance
-    :param np.array input_image: as named. expected shape:
-     [num_channels, (depth,) height, width] or
-     [(depth,) height, width, num_channels]
-    :return np.array predicted image: as named. Batch axis removed (and channel
-     axis if num_channels=1)
-    """
-    im_size = input_image.shape
-    num_dims = len(im_size)
-    assert num_dims in [4,5], \
-        'Invalid image shape: only 4D and 5D inputs - 2D / 3D ' \
-        'images with channel and batch dim allowed'
-
-    predicted_image = model.predict(input_image)
-    return predicted_image
 
 
 class ModelEvaluator:
@@ -197,7 +148,7 @@ class ModelEvaluator:
         for batch_idx in range(num_batches):
             start_idx = batch_idx * batch_size
             end_idx = np.min([(batch_idx + 1) * batch_size,
-                             len(crop_indices)])
+                              len(crop_indices)])
             ip_batch_list = []
             for cur_index in crop_indices[start_idx:end_idx]:
                 cur_index_slice = self._get_crop_indices(ip_image.shape,
@@ -320,7 +271,7 @@ class ModelEvaluator:
 
     def predict_on_full_image(self, image_meta, test_samples,
                               focal_plane_idx=None, depth=None,
-                              per_tile_overlap=1/8,
+                              per_tile_overlap=1 / 8,
                               flat_field_correct=False,
                               base_image_dir=None,
                               place_operation='mean'):
@@ -341,7 +292,7 @@ class ModelEvaluator:
          max for segmentation tasks
         """
 
-        assert place_operation in ['mean', 'max'],\
+        assert place_operation in ['mean', 'max'], \
             'only mean and max are allowed: %s' % place_operation
         if 'timepoints' not in self.config['dataset']:
             timepoint_ids = -1
@@ -393,9 +344,9 @@ class ModelEvaluator:
             tp_dir = str(os.sep).join(test_ip0_fnames[0].split(os.sep)[:-2])
             test_image = np.load(test_ip0_fnames[0])
             _, crop_indices = tile_utils.tile_image(test_image,
-                                         tile_size,
-                                         step_size,
-                                         return_index=True)
+                                                    tile_size,
+                                                    step_size,
+                                                    return_index=True)
             pred_dir = os.path.join(self.config['trainer']['model_dir'],
                                     'predicted_images', 'tp_{}'.format(tp))
             for fname in test_image_fnames:
@@ -407,9 +358,9 @@ class ModelEvaluator:
                                               crop_indices,
                                               batch_size)
                 pred_image = self._stitch_image(pred_tiles, crop_indices,
-                                               input_image.shape, batch_size,
-                                               tile_size, overlap_size,
-                                               place_operation)
+                                                input_image.shape, batch_size,
+                                                tile_size, overlap_size,
+                                                place_operation)
                 pred_fname = '{}.npy'.format(fname.split('.')[0])
                 for idx, op_ch in enumerate(op_channel_ids):
                     op_dir = os.path.join(pred_dir, 'channel_{}'.format(op_ch))

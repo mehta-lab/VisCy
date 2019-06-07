@@ -53,7 +53,7 @@ class ImageTilerUniform:
          histogram clipping.
         :param str flat_field_dir: Flatfield directory. None if no flatfield
             correction
-        :param str image_format: zyx (preferred) or yxz
+        :param str image_format: zyx (preferred) or xyz
         :param int num_workers: number of workers for multiprocessing
         :param int int2str_len: number of characters for each idx to be used
          in file names
@@ -75,8 +75,8 @@ class ImageTilerUniform:
             hist_clip_limits = tile_dict['hist_clip_limits']
         if 'image_format' in tile_dict:
             image_format = tile_dict['image_format']
-            assert image_format in {'zyx', 'yxz'}, \
-                'Data format must be zyx or yxz'
+            assert image_format in {'zyx', 'xyz'}, \
+                'Data format must be zyx or xyz'
         self.depths = depths
         self.tile_size = tile_size
         self.step_size = step_size

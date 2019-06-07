@@ -34,15 +34,16 @@ def create_save_mask(input_fnames,
                      int2str_len,
                      mask_type,
                      mask_ext):
+
     """Create and save mask
     When >1 channel are used to generate the mask, mask of each channel is
     generated then added together
     :param tuple input_fnames: tuple of input fnames with full path
     :param str flat_field_fname: fname of flat field image
     :param int str_elem_radius: size of structuring element used for binary
-         opening. str_elem: disk or ball
+     opening. str_elem: disk or ball
     :param str mask_dir: dir to save masks
-    :param int mask_channel_idx: channel number of maskß
+    :param int mask_channel_idx: channel number of mask
     :param int time_idx: time points to use for generating mask
     :param int pos_idx: generate masks for given position / sample ids
     :param int slice_idx: generate masks for given slice ids
@@ -50,7 +51,7 @@ def create_save_mask(input_fnames,
     :param str mask_type: thresholding type used for masking or str to map to
      masking function
     :param str mask_ext: 'npy' or 'png'. Save the mask as uint8 PNG or
-         NPY files
+     NPY files
     :return dict cur_meta for each mask
     """
 
@@ -136,7 +137,7 @@ def tile_and_save(input_fnames,
     :param list tile_size: size of tile along row, col (& slices)
     :param list step_size: step size along row, col (& slices)
     :param float min_fraction: min foreground volume fraction for keep tile
-    :param str image_format: zyx / yxz
+    :param str image_format: zyx / xyz
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
@@ -212,7 +213,7 @@ def crop_at_indices_save(input_fnames,
     :param int slice_idx: slice idx of input image
     :param int pos_idx: sample idx of input image
     :param tuple crop_indices: tuple of indices for cropping
-    :param str image_format: zyx or yxz
+    :param str image_format: zyx or xyz
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks

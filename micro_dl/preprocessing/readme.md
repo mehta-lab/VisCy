@@ -31,7 +31,7 @@ The following settings can be adjusted in preprocessing using a config file (see
     channel number (1 + max existing channel), write tiles in the same directory as the rest of the
     channels, and add the new mask channel to frames metadata. 'as_mask' will write mask tiles in a new directory
     and not add them to metadata.
-    * image_format (str): 'zyx' (default) or 'yxz'. Order of tile dimensions
+    * image_format (str): 'zyx' (default) or 'xyz'. Order of tile dimensions
     * train_fraction (float): If specified in range (0, 1), will randomly select that fraction
     of training data in each epoch. It will update steps_per_epoch in fit_generator accordingly.
     * min_fraction: (float) minimum fraction of image occupied by foreground in masks

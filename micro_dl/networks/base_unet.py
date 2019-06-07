@@ -84,10 +84,13 @@ class BaseUNet(BaseConvNet):
             if not predict:
                 assert self.config['depth'] >= 1, \
                     'depth is set to none or zero. confirm if 2D or 3D model'
-            if self.config['depth'] > 1:
+                if self.config['depth'] > 1:
+                    _init_3D()
+                elif self.config['depth'] == 1:
+                    _init_2D()
+            else:
+                # if depth is set to None during 3D inference
                 _init_3D()
-            elif self.config['depth'] == 1:
-                _init_2D()
         else:
             _init_2D()
 

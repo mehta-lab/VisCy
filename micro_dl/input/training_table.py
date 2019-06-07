@@ -93,7 +93,7 @@ class BaseTrainingTable:
             self.random_seed
         )
 
-        retain_columns = ['channel_idx', 'pos_idx', 'time_idx', "slice_idx",
+        retain_columns = ['channel_idx', 'pos_idx', 'time_idx', 'slice_idx',
                           'fpaths_input', 'fpaths_target']
         if self.mask_channels is not None:
             retain_columns.append('fpaths_mask')

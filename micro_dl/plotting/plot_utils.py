@@ -16,7 +16,7 @@ def save_predicted_images(input_batch,
                           output_dir,
                           batch_idx=None,
                           output_fname=None,
-                          ext='.jpg',
+                          ext='jpg',
                           clip_limits=1,
                           font_size=15):
     """
@@ -102,6 +102,7 @@ def save_center_slices(image_dir,
                        clip_limits=1,
                        margin=20,
                        z_scale=5,
+                       z_range=None,
                        channel_str=None,
                        font_size=15,
                        color_map='gray',
@@ -122,6 +123,7 @@ def save_center_slices(image_dir,
     :param int margin: Number of pixel margin between the three center slices
         xy and xz, yz
     :param int z_scale: How much to upsample in z (to be able to see xz and yz)
+    :param list z_range: Min and max z slice from given stack
     :param str channel_str: If there's more than one channel in image_dir
         (e.g. input image dir as opposed to predictions) use this str to select
         which channel to build z-stack from. E.g. '3', 'brightfield'.
@@ -129,12 +131,18 @@ def save_center_slices(image_dir,
     :param str color_map: Matplotlib colormap
     :param str fig_title: Figure title
     """
-
     search_str = os.path.join(image_dir, "*p{:03d}*".format(pos_idx))
     slice_names = natsort.natsorted(glob.glob(search_str))
 
     if channel_str is not None:
         slice_names = [s for s in slice_names if channel_str in s]
+
+    # Remove a given nbr of slices from front and back of names
+    if z_range is not None:
+        assert len(z_range) == 2, 'Z-range must consist of two values'
+        slice_names = slice_names[z_range[0]:z_range[1]]
+    assert len(slice_names) > 0, \
+        "Couldn't find images with given search criteria"
 
     im_stack = []
     for im_z in slice_names:
@@ -168,7 +176,7 @@ def save_center_slices(image_dir,
         clip_limits, 100 - clip_limits,
     )
     yz_shape = yz_slice.shape
-    yz_slice = cv2.resize(yz_slice, (yz_shape[1] * int(z_scale, yz_shape[0])))
+    yz_slice = cv2.resize(yz_slice, (yz_shape[1] * int(z_scale), yz_shape[0]))
     canvas[0:yz_shape[0], im_shape[1] + margin:] = yz_slice
     # add xy center slice
     xy_slice = hist_clipping(
@@ -176,7 +184,7 @@ def save_center_slices(image_dir,
         clip_limits, 100 - clip_limits,
     )
     xy_shape = xy_slice.shape
-    xy_slice = cv2.resize(xy_slice, (xy_shape[1] * int(z_scale, xy_shape[0])))
+    xy_slice = cv2.resize(xy_slice, (xy_shape[1] * int(z_scale), xy_shape[0]))
     # Need to rotate to fit this slice on the bottom of canvas
     xy_slice = np.rot90(xy_slice)
     canvas[im_shape[0] + margin:, 0:xy_slice.shape[1]] = xy_slice
@@ -211,9 +219,19 @@ def save_mask_overlay(input_image, mask, op_fname, alpha=0.7):
     im_rgb = input_image / input_image.max() * 255
     im_rgb = im_rgb.astype(np.uint8)
     im_rgb = cv2.cvtColor(im_rgb, cv2.COLOR_GRAY2RGB)
-    _, contours, _ = cv2.findContours(mask.astype(np.uint8),
-                                      cv2.RETR_TREE,
-                                      cv2.CHAIN_APPROX_SIMPLE)
+    try:
+        _, contours, _ = cv2.findContours(
+            mask.astype(np.uint8),
+            cv2.RETR_TREE,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
+    except ValueError:
+        # Older versions of opencv expects two return values
+        contours, _ = cv2.findContours(
+            mask.astype(np.uint8),
+            cv2.RETR_TREE,
+            cv2.CHAIN_APPROX_SIMPLE,
+        )
     # Draw contours in green with linewidth 2
     im_rgb = cv2.drawContours(im_rgb, contours, -1, (0, 255, 0), 2)
     ax[2].imshow(im_rgb)

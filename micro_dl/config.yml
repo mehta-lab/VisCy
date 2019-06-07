@@ -1,19 +1,20 @@
 dataset:
-    preprocess: False
-    data_dir: '/data/anitha/label_free/image_tile_256-256_step_256-256'
+    data_dir: '/data/image_tile_256-256_step_256-256'
     input_channels: [3]
     target_channels: [0]
     train_fraction: 0.25
-    split_by_column: sample_num
+    split_by_column: pos_idx
+    model_task: 'regression'
+    normalize: False
+    mask_channels: [2]
+    random_seed: 42
     split_ratio:
         train: 0.7
         val: 0.15
         test: 0.15
-    height: 256
-    width: 256
 verbose: 10
 trainer:
-    model_dir: '/home/krishnan/models_labelfree/tile256_bs16_mse'
+    model_dir: '/home/models/tile256_bs16_mse'
     batch_size: 32
     max_epochs: 200
     metrics: coeff_determination

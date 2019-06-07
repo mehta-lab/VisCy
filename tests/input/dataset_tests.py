@@ -52,7 +52,7 @@ class TestBaseDataSet(unittest.TestCase):
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
-            image_format='yxz',
+            image_format='xyz',
         )
 
     def tearDown(self):

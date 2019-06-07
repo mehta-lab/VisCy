@@ -66,7 +66,8 @@ def preprocess_imstack(frames_metadata,
                        slice_idx,
                        pos_idx,
                        flat_field_im=None,
-                       hist_clip_limits=None):
+                       hist_clip_limits=None,
+                       normalize_im=True):
     """
     Preprocess image given by indices: flatfield correction, histogram
     clipping and z-score normalization is performed.
@@ -80,7 +81,8 @@ def preprocess_imstack(frames_metadata,
     :param int pos_idx: Position (FOV) index
     :param np.array flat_field_im: Flat field image for channel
     :param list hist_clip_limits: Limits for histogram clipping (size 2)
-    :return np.array im: 2D preprocessed image
+    :param bool normalize_im: indicator to z-score the image or not
+    :return np.array im: 3D preprocessed image
     """
 
     margin = 0 if depth == 1 else depth // 2
@@ -119,7 +121,9 @@ def preprocess_imstack(frames_metadata,
             hist_clip_limits[0],
             hist_clip_limits[1],
         )
-    return normalize.zscore(im_stack)
+    if normalize_im:
+        im_stack = normalize.zscore(im_stack)
+    return im_stack
 
 
 def tile_image(input_image,

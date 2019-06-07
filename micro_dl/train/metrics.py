@@ -167,6 +167,7 @@ def pearson_corr(y_true, y_pred):
     """Pearson correlation
     :param tensor y_true: Labeled ground truth
     :param tensor y_pred: Predicted label,
+
     :return float r: Pearson over all images in the batch
     """
     covariance = K.mean((y_pred - K.mean(y_pred)) *
