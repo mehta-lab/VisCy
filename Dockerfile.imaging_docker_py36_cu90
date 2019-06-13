@@ -4,10 +4,10 @@
 # cuda          9.0    (apt)
 # python        3.6    (apt)
 # jupyter       latest (pip)
-# pytorch       0.4.0  (pip)
-# tensorflow    1.10.0  (pip)
+# pytorch       1.1.0  (pip)
+# tensorflow    1.12.2  (pip)
 # keras         2.1.6  (pip)
-# opencv        3.4.1  (git)
+# opencv        4.1.0  (git)
 # ==================================================================
 
 FROM nvidia/cuda:9.0-cudnn7-devel-ubuntu16.04
@@ -73,7 +73,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # ------------------------------------------------------------------
 
     $PIP_INSTALL \
-        http://download.pytorch.org/whl/cu90/torch-0.4.0-cp36-cp36m-linux_x86_64.whl \
+        torch \
         torchvision \
         && \
 
@@ -82,7 +82,7 @@ RUN APT_INSTALL="apt-get install -y --no-install-recommends" && \
 # ------------------------------------------------------------------
 
     $PIP_INSTALL \
-        tensorflow-gpu==1.12.1 \
+        tensorflow-gpu==1.12.2 \
         && \
 
 # ==================================================================
