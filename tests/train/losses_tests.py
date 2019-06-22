@@ -1,4 +1,3 @@
-import keras.backend as K
 import nose.tools
 import numpy as np
 import tensorflow as tf

@@ -123,7 +123,7 @@ def generate_masks(params_dict,
     :param str flat_field_dir: dir with flat field correction images
     :param int str_elem_radius: structuring element size for morphological
      opening
-    :param str mask_type: string to map to masking function. otsu or uniform
+    :param str mask_type: string to map to masking function. otsu or unimodal or borders_weight_loss_map
     :param int mask_out_channel: channel num assigned to mask channel. I
     :param str mask_ext: 'npy' or 'png'. Save the mask as uint8 PNG or
          NPY files
@@ -131,8 +131,8 @@ def generate_masks(params_dict,
      str mask_dir: dir with created masks
      int mask_out_channel: channel number assigned to masks
     """
-    assert mask_type in {'otsu', 'unimodal'},\
-        "Supported mask types: 'otsu', 'unimodal', not {}".format(mask_type)
+    assert mask_type in {'otsu', 'unimodal', 'borders_weight_loss_map'},\
+        "Supported mask types: 'otsu', 'unimodal', 'borders_weight_loss_map', not {}".format(mask_type)
 
     # Instantiate channel to mask processor
     mask_processor_inst = MaskProcessor(

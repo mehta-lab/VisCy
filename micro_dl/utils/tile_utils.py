@@ -15,7 +15,7 @@ def read_imstack(input_fnames,
     """
     Read the images in the fnames and assembles a stack.
     If images are masks, make sure they're boolean by setting >0 to True
-    
+
     :param tuple input_fnames: tuple of input fnames with full path
     :param str flat_field_fname: fname of flat field image
     :param tuple hist_clip_limits: limits for histogram clipping
@@ -376,12 +376,13 @@ def write_meta(tiled_metadata, save_dict):
         tile_meta_df = pd.DataFrame.from_dict(tiled_metadata)
         tile_meta_df = tile_meta_df.sort_values(by=['file_name'])
         idx_len = save_dict['int2str_len']
-        meta_name = ('meta'
-                     + '_c' + str(save_dict['channel_idx']).zfill(idx_len)
-                     + '_z' + str(save_dict['slice_idx']).zfill(idx_len)
-                     + '_t' + str(save_dict['time_idx']).zfill(idx_len)
-                     + '_p' + str(save_dict['pos_idx']).zfill(idx_len)
-                     + '.csv')
+        meta_name = (
+            'meta' +
+            '_c' + str(save_dict['channel_idx']).zfill(idx_len) +
+            '_z' + str(save_dict['slice_idx']).zfill(idx_len) +
+            '_t' + str(save_dict['time_idx']).zfill(idx_len) +
+            '_p' + str(save_dict['pos_idx']).zfill(idx_len) +
+            '.csv')
         tile_meta_df.to_csv(
             os.path.join(save_dict['save_dir'], 'meta_dir', meta_name),
             sep=',',

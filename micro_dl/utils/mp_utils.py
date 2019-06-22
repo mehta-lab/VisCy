@@ -62,11 +62,14 @@ def create_save_mask(input_fnames,
     )
     masks = []
     for idx in range(im_stack.shape[-1]):
-        im = im_stack[..., idx].astype('float32')
+        im = im_stack[..., idx]
         if mask_type == 'otsu':
-            mask = mask_utils.create_otsu_mask(im, str_elem_radius)
+            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius)
         elif mask_type == 'unimodal':
-            mask = mask_utils.create_unimodal_mask(im,  str_elem_radius)
+            mask = mask_utils.create_unimodal_mask(im.astype('float32'), str_elem_radius)
+        elif mask_type == 'borders_weight_loss_map':
+            im = tile_utils.read_image(input_fnames[idx])
+            mask = mask_utils.get_unet_border_weight_map(im)
         masks += [mask]
     masks = np.stack(masks, axis=-1)
     mask = np.any(masks, axis=-1)
@@ -97,6 +100,7 @@ def create_save_mask(input_fnames,
                 'pos_idx': pos_idx,
                 'file_name': file_name}
     return cur_meta
+
 
 def mp_tile_save(fn_args, workers):
     """Tile and save with multiprocessing

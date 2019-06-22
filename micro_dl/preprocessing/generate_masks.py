@@ -63,7 +63,7 @@ class MaskProcessor:
             )
         else:
             self.mask_channel = mask_out_channel
-        
+
         metadata_ids, nested_id_dict = aux_utils.validate_metadata_indices(
             frames_metadata=self.frames_metadata,
             time_ids=time_ids,
@@ -87,8 +87,8 @@ class MaskProcessor:
         self.uniform_struct = uniform_struct
         self.nested_id_dict = nested_id_dict
 
-        assert mask_type in ['otsu', 'unimodal'], \
-            'Masking method invalid, Otsu and unimodal are currently supported'
+        assert mask_type in ['otsu', 'unimodal', 'borders_weight_loss_map'], \
+            'Masking method invalid, Otsu, borders_weight_loss_map, and unimodal are currently supported'
         self.mask_type = mask_type
         self.mask_ext = mask_ext
 
