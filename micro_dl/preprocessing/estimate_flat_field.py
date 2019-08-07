@@ -67,6 +67,7 @@ class FlatFieldEstimator2D:
             )
             channel_metadata = self.frames_metadata[row_idx]
             summed_image = None
+            # Average over all positions
             for idx, row in channel_metadata.iterrows():
                 file_path = os.path.join(self.input_dir, row['file_name'])
                 im = read_image(file_path)

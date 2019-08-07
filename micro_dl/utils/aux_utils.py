@@ -56,23 +56,28 @@ def read_config(config_fname):
     return config
 
 
-def get_row_idx(frames_metadata, time_idx,
-                channel_idx, slice_idx=-1):
-    """Get the indices for images with timepoint_idx and channel_idx
+def get_row_idx(frames_metadata,
+                time_idx,
+                channel_idx,
+                slice_idx=-1,
+                pos_idx=-1):
+    """
+    Get the indices for images with timepoint_idx and channel_idx
 
     :param pd.DataFrame frames_metadata: DF with columns time_idx,
      channel_idx, slice_idx, file_name]
     :param int time_idx: get info for this timepoint
     :param int channel_idx: get info for this channel
     :param int slice_idx: get info for this focal plane (2D)
+    :param int pos_idx: Specify FOV (default to all if -1)
     """
+    row_idx = ((frames_metadata['time_idx'] == time_idx) &
+               (frames_metadata['channel_idx'] == channel_idx))
     if slice_idx > -1:
-        row_idx = ((frames_metadata['time_idx'] == time_idx) &
-                   (frames_metadata['channel_idx'] == channel_idx) &
-                   (frames_metadata['slice_idx'] == slice_idx))
-    else:
-        row_idx = ((frames_metadata['time_idx'] == time_idx) &
-                   (frames_metadata['channel_idx'] == channel_idx))
+        row_idx = (row_idx & (frames_metadata['slice_idx'] == slice_idx))
+    if pos_idx > -1:
+        row_idx = (row_idx & (frames_metadata['pos_idx'] == pos_idx))
+
     return row_idx
 
 
@@ -150,8 +155,8 @@ def sort_meta_by_channel(frames_metadata):
         time_ids=-1,
         channel_ids=-1,
         slice_ids=-1,
-        pos_ids=-1)
-
+        pos_ids=-1,
+    )
     channel_ids = metadata_ids["channel_ids"]
     # Get all metadata for first channel
     sorted_metadata = frames_metadata[
@@ -159,6 +164,8 @@ def sort_meta_by_channel(frames_metadata):
     ].reset_index()
 
     # Loop through the rest of the channels and concat filenames
+    if len(channel_ids) == 1:
+        return sorted_metadata
     for c in channel_ids[1:]:
         col_name = "file_name_{}".format(c)
         channel_meta = frames_metadata[frames_metadata["channel_idx"] == c]
@@ -172,8 +179,10 @@ def sort_meta_by_channel(frames_metadata):
     # Rename file name
     sorted_metadata = sorted_metadata.rename(
         index=str,
-        columns={"file_name": "file_name_{}".format(channel_ids[0])})
-    sorted_metadata = sorted_metadata.drop(["index", "Unnamed: 0"], axis=1)
+        columns={"file_name": "file_name_{}".format(channel_ids[0])},
+    )
+    if 'Unnamed: 0' in sorted_metadata.index:
+        sorted_metadata = sorted_metadata.drop(["index", "Unnamed: 0"], axis=1)
     return sorted_metadata
 
 
@@ -309,6 +318,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     in given directory
 
     :param str input_dir: Directory containing data and metadata
+    :param str meta_fname: Metadata file name
     :return dataframe frames_metadata: Metadata for all frames
     :raise IOError: If metadata file isn't present
     """
@@ -318,7 +328,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     try:
         frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
-        raise Exception('cannot read metadata csv file: {}'.format(e))
+        raise IOError('cannot read metadata csv file: {}'.format(e))
     return frames_metadata
 
 
