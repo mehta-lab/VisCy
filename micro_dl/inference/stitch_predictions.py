@@ -84,28 +84,33 @@ class ImageStitcher:
             idx_in_block.append(np.s_[:])
         idx_in_img[z_dim] = np.s_[start_idx + num_overlap: end_idx]
         idx_in_block[z_dim] = np.s_[num_overlap:]
-        pred_image[idx_in_img] = pred_block[idx_in_block]
+
+        pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
         if start_idx > 0:
             for sl_idx in range(num_overlap):
                 idx_in_img[z_dim] = start_idx + sl_idx
                 idx_in_block[z_dim] = sl_idx
                 if overlap_operation == 'mean':
-                    pred_image[idx_in_img] = \
-                        (reverse_wts[sl_idx] * pred_image[idx_in_img] +
-                         forward_wts[sl_idx] * pred_block[idx_in_block])
+                    pred_image[tuple(idx_in_img)] = \
+                        (reverse_wts[sl_idx] * pred_image[tuple(idx_in_img)] +
+                         forward_wts[sl_idx] * pred_block[tuple(idx_in_block)])
                 elif overlap_operation == 'any':
-                    pred_block[idx_in_img] = np.any(pred_image[idx_in_img],
-                                                    pred_block[idx_in_block])
+                    pred_image[tuple(idx_in_img)] = np.any(
+                        [pred_image[tuple(idx_in_img)],
+                         pred_block[tuple(idx_in_block)]]
+                    )
         else:
             idx_in_img[z_dim] = np.s_[start_idx: start_idx + num_overlap]
             idx_in_block[z_dim] = np.s_[0: num_overlap]
-            pred_image[idx_in_img] = pred_block[idx_in_block]
+            pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
         return
 
     def _stitch_along_z(self,
                         tile_imgs_list,
                         block_indices_list):
         """Stitch images along Z with or w/o overlap
+
+        Tile predictions and the stitched img are in 3D
 
         :param list tile_imgs_list: list with predicted tensors
         :param list block_indices_list: list with tuples of (start, end) idx
@@ -135,7 +140,8 @@ class ImageStitcher:
                          crop_index):
         """Place the current block prediction in the larger vol
 
-        pred_image mutated in-place
+        pred_image mutated in-place. Tile predictions in 5D and stitched img
+        in 3D
 
         :param np.array pred_block: current prediction block
         :param np.array pred_image: full 3D prediction image with zeros
@@ -173,7 +179,7 @@ class ImageStitcher:
                                        overlap_shape[idx_3D]:
                                        crop_index[idx_3D * 2 + 1]]
             idx_in_block[idx_5D] = np.s_[overlap_shape[idx_3D]:]
-        pred_image[idx_in_img] = pred_block[idx_in_block]
+        pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
 
         if self.image_format == 'zyx':
             overlap_dim = [self.z_dim, self.y_dim, self.x_dim]
@@ -191,9 +197,10 @@ class ImageStitcher:
                     idx_in_img[idx_3d] = crop_index[2 * idx_3d] + idx
                     if overlap_operation == 'mean':
                         # smoothly weight the two images in overlapping slices
-                        pred_image[idx_in_img] = \
-                            (reverse_wts[idx] * pred_image[idx_in_img] +
-                             forward_wts[idx] * pred_block[idx_in_block])
+                        pred_image[tuple(idx_in_img)] = (
+                            reverse_wts[idx] * pred_image[tuple(idx_in_img)] +
+                            forward_wts[idx] * pred_block[tuple(idx_in_block)]
+                        )
                     elif overlap_operation == 'any':
                         pred_block[idx_in_img] = np.any(
                             pred_image[idx_in_img], pred_block[idx_in_block]
@@ -204,7 +211,7 @@ class ImageStitcher:
                           crop_index[2 * idx_3d] + overlap_shape[idx_3d]]
                 )
                 idx_in_block[idx_5d] = np.s_[:overlap_shape[idx_3d]]
-                pred_image[idx_in_img] = pred_block[idx_in_block]
+                pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
             idx_in_img[idx_3d] = np.s_[crop_index[2 * idx_3d] +
                                        overlap_shape[idx_3d]:
                                        crop_index[2 * idx_3d + 1]]

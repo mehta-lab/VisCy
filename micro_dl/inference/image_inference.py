@@ -104,7 +104,6 @@ class ImagePredictor:
         # create an instance of MetricsEstimator
         self.df_iteration_meta = dataset_inst.get_df_iteration_meta()
 
-        metrics_est_inst = None
         if mask_param_dict is not None:
             assert ('mask_channel' in mask_param_dict and
                     'mask_dir' in mask_param_dict), \
