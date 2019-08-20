@@ -81,17 +81,12 @@ class BaseUNet(BaseConvNet):
                     'InterpUpSampling3D',
                 )
         if 'depth' in self.config:
-            if not predict:
-                assert self.config['depth'] >= 1, \
-                    'depth is set to none or zero. confirm if 2D or 3D model'
-                if self.config['depth'] > 1:
-                    _init_3D()
-                elif self.config['depth'] == 1:
-                    _init_2D()
-            else:
-                # if depth is set to None during 3D inference
+            if self.config['depth'] > 1:
                 _init_3D()
+            elif self.config['depth'] == 1:
+                _init_2D()
         else:
+            # If no depth set, default to 2D
             _init_2D()
 
         self.num_down_blocks = num_down_blocks

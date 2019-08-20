@@ -12,7 +12,6 @@ after_success:
 notifications:
   email:
     recipients:
-      - anitha.krishnan@czbiohub.org
       - jenny.folkesson@czbiohub.org
     on_success: never # default: change
     on_failure: always # default: always

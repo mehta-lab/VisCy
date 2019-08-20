@@ -114,9 +114,20 @@ class MetricsEstimator:
     def __init__(self,
                  metrics_list,
                  masked_metrics=False):
-        """Init
+        """
+        Init. After instantiating the class you can call metrics estimation
+        in xy, xz, yz and xyz orientations assuming images are of shape xyz.
+        The first three indices will iterate over planes whereas xyz will
+        generate one global 3D metric.
 
         :param list metrics_list: list of strings with name of metrics
+            Currently avaiable metrics:
+            'ssim' - structual similarity index
+            'corr' = correlation
+            'r2' - R squared (coefficient of determination
+            'mse' - Mean squared error
+            'mae' - Mean absolute error
+            TODO: Add accuracy and Dice
         :param bool masked_metrics: get the metrics for the masked region
         """
 
@@ -229,7 +240,7 @@ class MetricsEstimator:
                              pred_name,
                              mask=None):
         """
-        Estimate metrics for the current input, target pair
+        Estimate 3D metrics for the current input, target pair
 
         :param np.array target: ground truth
         :param np.array prediction: model prediction
@@ -261,11 +272,13 @@ class MetricsEstimator:
 
         :param np.array target: ground truth
         :param np.array prediction: model prediction
-        :param str pred_name: filename used for saving model prediction
+        :param str/list pred_name: filename(s) used for saving model prediction
         :param np.array mask: binary mask with foreground / background
         """
         self.assert_input(target, prediction, pred_name, mask)
-        assert len(target.shape) == 3, 'Dataset is assumed to be 3D'
+        if len(target.shape) == 2:
+            target = target[..., np.newaxis]
+            prediction = prediction[..., np.newaxis]
         self.metrics_xy = pd.DataFrame(columns=self.pd_col_names)
         # Loop through slices
         for slice_idx in range(target.shape[2]):

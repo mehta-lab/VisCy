@@ -168,7 +168,7 @@ def compute_metrics(args):
             pred_fnames = []
             for slice_idx in metadata_ids['slice_idx']:
                 im_idx = aux_utils.get_meta_idx(
-                    metadata_df=frames_meta,
+                    frames_metadata=frames_meta,
                     time_idx=time_idx,
                     channel_idx=target_channel,
                     slice_idx=slice_idx,

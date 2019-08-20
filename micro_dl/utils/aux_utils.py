@@ -23,7 +23,8 @@ def import_object(module_name, obj_name, obj_type='class'):
     """Imports a class or function dynamically
 
     :param str module_name: modules such as input, utils, train etc
-    :param str obj_name: class to find
+    :param str obj_name: Object to find
+    :param str obj_type: Object type (class or function)
     """
 
     full_module_name = ".".join(('micro_dl', module_name))
@@ -81,7 +82,7 @@ def get_row_idx(frames_metadata,
     return row_idx
 
 
-def get_meta_idx(metadata_df,
+def get_meta_idx(frames_metadata,
                  time_idx,
                  channel_idx,
                  slice_idx,
@@ -89,7 +90,7 @@ def get_meta_idx(metadata_df,
     """
     Get row index in metadata dataframe given variable indices
 
-    :param dataframe metadata_df: Dataframe with column names given below
+    :param dataframe frames_metadata: Dataframe with column names given below
     :param int time_idx: Timepoint index
     :param int channel_idx: Channel index
     :param int slice_idx: Slize (z) index
@@ -97,11 +98,11 @@ def get_meta_idx(metadata_df,
     :return: int pos_idx: Row position matching indices above
     """
 
-    frame_idx = metadata_df.index[
-        (metadata_df['channel_idx'] == channel_idx) &
-        (metadata_df['time_idx'] == time_idx) &
-        (metadata_df["slice_idx"] == slice_idx) &
-        (metadata_df["pos_idx"] == pos_idx)].tolist()
+    frame_idx = frames_metadata.index[
+        (frames_metadata['channel_idx'] == channel_idx) &
+        (frames_metadata['time_idx'] == time_idx) &
+        (frames_metadata["slice_idx"] == slice_idx) &
+        (frames_metadata["pos_idx"] == pos_idx)].tolist()
     return frame_idx[0]
 
 

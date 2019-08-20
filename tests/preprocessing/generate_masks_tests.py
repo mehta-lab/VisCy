@@ -20,13 +20,7 @@ class TestMaskProcessor(unittest.TestCase):
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
         self.meta_fname = 'frames_meta.csv'
-        df_columns = ['channel_idx',
-                      'slice_idx',
-                      'time_idx',
-                      'channel_name',
-                      'file_name',
-                      'pos_idx']
-        frames_meta = pd.DataFrame(columns=df_columns)
+        frames_meta = aux_utils.make_dataframe()
 
         # create an image with bimodal hist
         x = np.linspace(-4, 4, 32)
@@ -53,15 +47,14 @@ class TestMaskProcessor(unittest.TestCase):
         self.pos_ids = 1
         self.int2str_len = 3
 
-        def _get_name(ch_idx, sl_idx, time_idx, pos_idx):
-            im_name = 'im_c' + str(ch_idx).zfill(self.int2str_len) + \
-                      '_z' + str(sl_idx).zfill(self.int2str_len) + \
-                      '_t' + str(time_idx).zfill(self.int2str_len) + \
-                      '_p' + str(pos_idx).zfill(self.int2str_len) + ".png"
-            return im_name
-
         for z in range(sph.shape[2]):
-            im_name = _get_name(1, z, self.time_ids, self.pos_ids)
+            im_name = aux_utils.get_im_name(
+                time_idx=self.time_ids,
+                channel_idx=1,
+                slice_idx=z,
+                pos_idx=self.pos_ids,
+                ext='.png',
+            )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 sk_im_io.imsave(
@@ -69,11 +62,17 @@ class TestMaskProcessor(unittest.TestCase):
                     object1[:, :, z].astype('uint8'),
                 )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, df_columns),
+                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
                 ignore_index=True
             )
         for z in range(rec.shape[2]):
-            im_name = _get_name(2, z, self.time_ids, self.pos_ids)
+            im_name = aux_utils.get_im_name(
+                time_idx=self.time_ids,
+                channel_idx=2,
+                slice_idx=z,
+                pos_idx=self.pos_ids,
+                ext='.png',
+            )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 sk_im_io.imsave(
@@ -81,7 +80,7 @@ class TestMaskProcessor(unittest.TestCase):
                     rec[:, :, z].astype('uint8'),
                 )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, df_columns),
+                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
                 ignore_index=True
             )
         # Write metadata
@@ -165,36 +164,34 @@ class TestMaskProcessor(unittest.TestCase):
         channel_ids = 0
         time_ids = 0
         pos_ids = [1, 2]
-
-        df_columns = ['channel_idx',
-                      'slice_idx',
-                      'time_idx',
-                      'channel_name',
-                      'file_name',
-                      'pos_idx']
-        frames_meta = pd.DataFrame(columns=df_columns)
-
-        def _get_name(ch_idx, sl_idx, time_idx, pos_idx):
-            im_name = 'im_c' + str(ch_idx).zfill(self.int2str_len) + \
-                      '_z' + str(sl_idx).zfill(self.int2str_len) + \
-                      '_t' + str(time_idx).zfill(self.int2str_len) + \
-                      '_p' + str(pos_idx).zfill(self.int2str_len) + ".png"
-            return im_name
+        frames_meta = aux_utils.make_dataframe()
 
         for z in range(self.sph_object.shape[2]):
-            im_name = _get_name(channel_ids, z, time_ids, pos_ids[0])
+            im_name = aux_utils.get_im_name(
+                time_idx=time_ids,
+                channel_idx=channel_ids,
+                slice_idx=z,
+                pos_idx=pos_ids[0],
+                ext='.png',
+            )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             self.sph_object[:, :, z].astype('uint8'))
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, df_columns),
+                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
                 ignore_index=True
             )
         for z in range(rec.shape[2]):
-            im_name = _get_name(channel_ids, z, time_ids, pos_ids[1])
+            im_name = aux_utils.get_im_name(
+                time_idx=time_ids,
+                channel_idx=channel_ids,
+                slice_idx=z,
+                pos_idx=pos_ids[1],
+                ext='.png',
+            )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             rec[:, :, z].astype('uint8'))
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, df_columns),
+                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
                 ignore_index=True
             )
         # Write metadata

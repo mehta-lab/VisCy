@@ -250,6 +250,8 @@ def pre_process(pp_config, req_params_dict):
     [input_dir, output_dir, slice_ids, time_ids, pos_ids
     correct_flat_field, use_masks, masks, tile_stack, tile]
     :param dict req_params_dict: dict with commom params for all tasks
+    :raises AssertionError: If 'masks' in pp_config contains both channels
+     and mask_dir (the former is for generating masks from a channel)
     """
 
     time_start = time.time()
@@ -272,6 +274,7 @@ def pre_process(pp_config, req_params_dict):
             flat_field_dir = pp_config['flat_field']['flat_field_dir']
 
     # Resample images
+    mask_out_channel = None
     if 'resize' in pp_config:
         scale_factor = pp_config['resize']['scale_factor']
         num_slices_subvolume = -1
@@ -293,8 +296,6 @@ def pre_process(pp_config, req_params_dict):
         mask_out_channel = int(init_frames_meta['channel_idx'].max() + 1)
         req_params_dict['input_dir'] = resize_dir
         req_params_dict['slice_ids'] = slice_ids
-    else:
-        mask_out_channel = None
 
     # Generate masks
     mask_dir = None
@@ -313,18 +314,25 @@ def pre_process(pp_config, req_params_dict):
             mask_ext = 'npy'
             if 'mask_ext' in pp_config['masks']:
                 mask_ext = pp_config['masks']['mask_ext']
-            mask_dir, mask_out_channel = generate_masks(req_params_dict,
-                                                        mask_from_channel,
-                                                        flat_field_dir,
-                                                        str_elem_radius,
-                                                        mask_type,
-                                                        mask_out_channel,
-                                                        mask_ext)
+            mask_dir, mask_out_channel = generate_masks(
+                req_params_dict,
+                mask_from_channel,
+                flat_field_dir,
+                str_elem_radius,
+                mask_type,
+                mask_out_channel,
+                mask_ext,
+            )
             pp_config['masks']['created_mask_dir'] = mask_dir
         elif 'mask_dir' in pp_config['masks']:
+            assert 'channels' not in pp_config['masks'], \
+                "Don't specify channels to mask if using pre-generated masks"
             mask_dir = pp_config['masks']['mask_dir']
             # Get preexisting masks from directory and match to input dir
-            mask_out_channel = preprocess_utils.validate_mask_meta(pp_config)
+            mask_out_channel = preprocess_utils.validate_mask_meta(
+                pp_config,
+                mask_out_channel,
+            )
         else:
             raise ValueError("If using masks, specify either mask_channel",
                              "or mask_dir.")

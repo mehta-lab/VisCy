@@ -16,14 +16,18 @@ class TestBaseDataSet(unittest.TestCase):
         """
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
-        self.input_fnames = pd.Series(['in1.npy',
-                                  'in2.npy',
-                                  'in3.npy',
-                                  'in4.npy'])
-        self.target_fnames = pd.Series(['out1.npy',
-                                   'out2.npy',
-                                   'out3.npy',
-                                   'out4.npy'])
+        self.input_fnames = pd.Series([
+            'in1.npy',
+            'in2.npy',
+            'in3.npy',
+            'in4.npy',
+        ])
+        self.target_fnames = pd.Series([
+            'out1.npy',
+            'out2.npy',
+            'out3.npy',
+            'out4.npy',
+        ])
         self.batch_size = 2
         # Normally, tiles would have the same shape in x, y but this helps
         # us test augmentations

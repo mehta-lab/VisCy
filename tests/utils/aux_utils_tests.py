@@ -236,6 +236,7 @@ def test_parse_idx_different_order():
     nose.tools.assert_equal(meta["time_idx"], 50000)
     nose.tools.assert_equal(meta["pos_idx"], 20)
 
+
 @nose.tools.raises(AssertionError)
 def test_parse_idx_from_name_no_channel():
     file_name = 'img_phase_t500_p400_z300.tif'

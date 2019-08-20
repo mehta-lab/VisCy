@@ -100,6 +100,7 @@ def preprocess_imstack(frames_metadata,
             frames_metadata.loc[meta_idx, "file_name"],
         )
         im = read_image(file_path)
+
         if flat_field_im is not None:
             im = apply_flat_field_correction(
                 im,
