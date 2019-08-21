@@ -13,7 +13,8 @@ microDL consists of three modules:
 
 ## Getting Started
 
-Assuming your data is already formatted in a way that microDL understands (see Data Format below), you can run preprocessing, training and inference in three command lines. For config settings, see specific Readme's in micro_dl/preprocessing, micro_dl/training and (soon) micro_dl/inferece.
+Assuming your data is already formatted in a way that microDL understands (see Data Format below), you can run preprocessing, training and inference in three command lines.
+For config settings, see module specific readme's in micro_dl/preprocessing, micro_dl/training and micro_dl/inference.
 
 ```buildoutcfg
 python micro_dl/cli/preprocessing_script.py --config <preprocessing yaml config file>
@@ -22,7 +23,7 @@ python micro_dl/cli/preprocessing_script.py --config <preprocessing yaml config 
 python micro_dl/cli/train_script.py --config <train config yml> --gpu <int> --gpu_mem_frac <GPU memory fraction>
 ```
 ```buildoutcfg
-python micro_dl/cli/image_inference.py --model_dir <model directory> --image_dir <image directory> --gpu <int> --gpu_mem_frac <GPU memory fraction>
+python micro_dl/cli/inference_script.py --config <train config yml> --gpu <int> --gpu_mem_frac <GPU memory fraction>
 ```
 
 ### Docker

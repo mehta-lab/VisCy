@@ -49,10 +49,12 @@ class TestMetricsScript(unittest.TestCase):
                     ext=self.ext,
                 )
                 cv2.imwrite(os.path.join(self.image_dir, im_name), self.im)
-                norm_im = normalize.zscore(self.im + im_add).astype(np.float32)
-                cv2.imwrite(
-                    os.path.join(self.pred_dir, im_name), norm_im,
-                )
+                if c == 2:
+                    norm_im = normalize.zscore(self.im + im_add).astype(np.float32)
+                    cv2.imwrite(
+                        os.path.join(self.pred_dir, im_name),
+                        norm_im,
+                    )
                 self.frames_meta = self.frames_meta.append(
                     aux_utils.parse_idx_from_name(im_name),
                     ignore_index=True,
@@ -102,7 +104,6 @@ class TestMetricsScript(unittest.TestCase):
             self.assertEqual(parsed_args.model_dir, self.model_dir)
             self.assertTrue(parsed_args.test_data)
             self.assertEqual(parsed_args.image_dir, self.image_dir)
-            self.assertEqual(parsed_args.ext, '.tif')
             self.assertListEqual(parsed_args.metrics, ['ssim', 'corr'])
             self.assertListEqual(parsed_args.orientations, ['xy', 'xz'])
 
@@ -114,17 +115,14 @@ class TestMetricsScript(unittest.TestCase):
             metrics_script.parse_args()
 
     def test_compute_metrics(self):
-        args = argparse.Namespace(
+        metrics_script.compute_metrics(
             model_dir=self.model_dir,
-            test_data=True,
             image_dir=self.image_dir,
-            ext=self.ext,
-            metrics=['mse', 'mae'],
-            orientations=['xy', 'xyz'],
+            metrics_list=['mse', 'mae'],
+            orientations_list=['xy', 'xyz'],
         )
-        metrics_script.compute_metrics(args)
         metrics_xy = pd.read_csv(os.path.join(self.pred_dir, 'metrics_xy.csv'))
-        self.assertTupleEqual(metrics_xy.shape, (5, 4))
+        self.assertTupleEqual(metrics_xy.shape, (5, 3))
         for i, row in metrics_xy.iterrows():
             expected_name = 't5_p7_xy{}'.format(i)
             self.assertEqual(row.pred_name, expected_name)
@@ -134,7 +132,7 @@ class TestMetricsScript(unittest.TestCase):
         metrics_xyz = pd.read_csv(
             os.path.join(self.pred_dir, 'metrics_xyz.csv'),
         )
-        self.assertTupleEqual(metrics_xyz.shape, (1, 4))
+        self.assertTupleEqual(metrics_xyz.shape, (1, 3))
         self.assertEqual(metrics_xyz.loc[0, 'mse'], 1.0)
         self.assertEqual(metrics_xyz.loc[0, 'mae'], 1.0)
         self.assertEqual(metrics_xyz.loc[0, 'pred_name'], 't5_p7')

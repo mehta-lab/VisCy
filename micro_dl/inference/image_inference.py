@@ -30,7 +30,8 @@ class ImagePredictor:
             to dataset, trainer and network
         :param dict inference_config: Read yaml file with following parameters:
             str model_dir: Path to model directory
-            str model_fname: File name of weights in model dir (.hdf5).
+            str/None model_fname: File name of weights in model dir (.hdf5).
+             If left out, latest weights file will be selected.
             str image_dir: dir containing input images AND NOT TILES!
             str data_split: Which data (train/test/val) to run inference on.
              (default = test)
@@ -679,5 +680,6 @@ class ImagePredictor:
                 df_name = 'metrics_{}.csv'.format(orientation)
                 metrics_df.to_csv(
                     os.path.join(self.pred_dir, df_name),
-                    sep=','
+                    sep=',',
+                    index=False,
                 )

@@ -275,6 +275,7 @@ class TestImageInference(unittest.TestCase):
         # Run prediction. Should create a metrics_xy.csv in pred dir
         self.infer_inst.run_prediction()
         metrics = pd.read_csv(os.path.join(self.model_dir, 'predictions/metrics_xy.csv'))
+        self.assertTupleEqual(metrics.shape, (2, 2))
         # MAE should be 1.
         self.assertEqual(metrics.mae.mean(), 1.0)
         # There should be two rows, one per test index

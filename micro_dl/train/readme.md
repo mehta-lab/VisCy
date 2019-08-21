@@ -36,8 +36,17 @@ exponential decay can be seen below.
 Assuming you have a config file that specifies what you would like to train
 (see examples config.yml or config_regression.yml), you can start training with the command
 ```buildoutcfg
-python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id (default 0)> --gpu_mem_frac <0-1 (default 1> --model_fname <file name if starting from weights>
+python micro_dl/cli/train_script.py --config <config yml file> --gpu <gpu id> --gpu_mem_frac <memory fraction>
 ```
+
+where the parameters are defined as follows:
+* **config** (yaml file): Configuration file, see below.
+* **gpu** (int): ID number of if you'd like to specify which GPU you'd like to run on. If you don't
+specify a GPU then the GPU with the largest amount of available memory will be selected for you.
+* **gpu_mem_fraction** (float): You can specify what fraction of total GPU memory you'd like to utilize.
+If there's not enough memory available on the GPU, and AssertionError will be raised.
+If memory fraction is unspecified, all memory currently available on the GPU will automatically
+be allocated for you.
 ## Config File Settings
 
 There are three main blocks you can configure settings for in this module: dataset, trainer and network. 

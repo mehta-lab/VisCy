@@ -18,14 +18,23 @@ def parse_args():
 
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('--gpu', type=int, default=None,
-                        help=('Optional: specify the gpu to use: 0,1,...',
-                              ', -1 for debugging. Default: pick best GPU'))
-    parser.add_argument('--gpu_mem_frac', type=float, default=None,
-                        help='Optional: specify gpu memory fraction to use')
+    parser.add_argument(
+        '--gpu',
+        type=int,
+        default=None,
+        help=('Optional: specify the gpu to use: 0,1,...',
+              ', -1 for debugging. Default: pick best GPU'),
+    )
+    parser.add_argument(
+        '--gpu_mem_frac',
+        type=float,
+        default=None,
+        help='Optional: specify gpu memory fraction to use',
+    )
     parser.add_argument(
         '--config',
         type=str,
+        required=True,
         help='path to inference yaml configuration file',
     )
 
@@ -34,13 +43,14 @@ def parse_args():
 
 
 def run_inference(config_fname,
-                   gpu_ids,
-                   gpu_mem_frac):
+                  gpu_ids,
+                  gpu_mem_frac=None):
     """
+    Run inference and optionally also evaluation metrics.
 
     :param str config_fname: Full path to config yaml file
     :param int gpu_ids: gpu id to use
-    :param float gpu_mem_frac: gpu memory fraction to use
+    :param float/None gpu_mem_frac: gpu memory fraction to use
     """
 
     with open(config_fname, 'r') as f:
