@@ -126,8 +126,9 @@ class BaseKerasTrainer:
                         fig_fname = callbacks_config[cb_dict]['fig_fname']
                     else:
                         # Save figure in model dir with default name
-                        fig_fname = os.path.join(self.model_dir,
-                                                'lr_finder_result.png')
+                        fig_fname = os.path.join(
+                            self.model_dir,
+                            ' lr_finder_result.png')
                     cur_cb = lr_finder.LRFinder(
                         base_lr=callbacks_config[cb_dict]['base_lr'],
                         max_lr=callbacks_config[cb_dict]['max_lr'],

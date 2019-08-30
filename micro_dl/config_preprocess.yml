@@ -14,12 +14,12 @@ masks:
     channels: [1]
     str_elem_radius: 3
     mask_type: 'otsu'
-    mask_ext: 'png'
+    mask_ext: '.png'
+make_weight_map: True
 tile:
     tile_size: [256, 256]
     step_size: [128, 128]
     depths: [1, 1, 1]
     mask_depth: 1
     image_format: 'zyx'
-    save_tiled_masks: True
     min_fraction: 0.25

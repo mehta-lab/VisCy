@@ -4,7 +4,7 @@ import numpy as np
 # Create a test image and its corresponding coordinates and values
 # Create a test image with a bright block to the right
 from micro_dl.utils import image_utils as image_utils
-from tests.preprocessing.mask_utils_tests import uni_thr_tst_image
+from tests.utils.masks_utils_tests import uni_thr_tst_image
 
 test_im = np.zeros((10, 15), np.uint16) + 100
 test_im[:, 9:] = 200

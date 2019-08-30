@@ -12,7 +12,8 @@ import warnings
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.mp_utils as mp_utils
 import micro_dl.utils.image_utils as image_utils
-from micro_dl.utils.masks import create_otsu_mask, get_unet_border_weight_map
+
+from micro_dl.utils.masks import create_otsu_mask
 
 
 class TestMpUtilsBaseClass(unittest.TestCase):
@@ -121,7 +122,7 @@ class TestMpUtilsOtsu(TestMpUtilsBaseClass):
                 slice_idx=sl_idx,
                 int2str_len=3,
                 mask_type='otsu',
-                mask_ext='png'
+                mask_ext='.png'
             )
             fname = aux_utils.get_im_name(time_idx=self.time_ids,
                                           channel_idx=3,
@@ -197,8 +198,6 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
         self.touching_circles_object = self.get_touching_circles()
 
         frames_meta = self.write_data_in_meta_csv(self.touching_circles_object, self.frames_meta, 1)
-        frames_meta = self.write_data_in_meta_csv(self.touching_circles_object, frames_meta, 2)
-
         # Write metadata
         frames_meta.to_csv(os.path.join(self.temp_path, self.meta_fname), sep=',')
         self.frames_meta = frames_meta
@@ -206,11 +205,10 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
         os.makedirs(self.output_dir, exist_ok=True)
 
     def test_create_save_mask_border_map(self):
-        """test create_save_mask otsu"""
+        """test create_save_mask border weight map"""
         self.write_mask_data()
         for sl_idx in range(1):
-            input_fnames = ['im_c001_z00{}_t000_p001.png'.format(sl_idx),
-                            'im_c002_z00{}_t000_p001.png'.format(sl_idx)]
+            input_fnames = ['im_c001_z00{}_t000_p001.png'.format(sl_idx)]
             input_fnames = [os.path.join(self.temp_path, fname)
                             for fname in input_fnames]
             cur_meta = mp_utils.create_save_mask(
@@ -218,20 +216,20 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
                 None,
                 str_elem_radius=1,
                 mask_dir=self.output_dir,
-                mask_channel_idx=3,
+                mask_channel_idx=2,
                 time_idx=self.time_ids,
                 pos_idx=self.pos_ids,
                 slice_idx=sl_idx,
                 int2str_len=3,
                 mask_type='borders_weight_loss_map',
-                mask_ext='png'
+                mask_ext='.png'
             )
             fname = aux_utils.get_im_name(time_idx=self.time_ids,
-                                          channel_idx=3,
+                                          channel_idx=2,
                                           slice_idx=sl_idx,
                                           pos_idx=self.pos_ids,
                                           ext='.png')
-            exp_meta = {'channel_idx': 3,
+            exp_meta = {'channel_idx': 2,
                         'slice_idx': sl_idx,
                         'time_idx': 0,
                         'pos_idx': 1,
@@ -241,7 +239,6 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
             op_fname = os.path.join(self.output_dir, fname)
             nose.tools.assert_equal(os.path.exists(op_fname),
                                     True)
-
             weight_map = image_utils.read_image(op_fname)
             max_weight_map = np.max(weight_map)
             # weight map between 20, 16 and 44, 16 should be maximum
@@ -250,14 +247,3 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
             for x_coord in range(self.params[0][0] + self.radius, self.params[1][0] - self.radius):
                 distance_near_intersection = weight_map[x_coord, y_coord]
                 nose.tools.assert_equal(max_weight_map, distance_near_intersection)
-
-            if weight_map.dtype != bool:
-                weight_map = weight_map > 0
-            input_image = (self.touching_circles_object[:, :, sl_idx],
-                           self.touching_circles_object[:, :, sl_idx])
-            mask_stack = np.stack([get_unet_border_weight_map(input_image[0]),
-                                  get_unet_border_weight_map(input_image[1])])
-            mask_exp = np.any(mask_stack, axis=0)
-            numpy.testing.assert_array_equal(
-                weight_map, mask_exp
-            )

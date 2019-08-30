@@ -14,19 +14,20 @@ class ImageTilerNonUniform(ImageTilerUniform):
     def __init__(self,
                  input_dir,
                  output_dir,
-                 tile_dict,
                  tile_size=[256, 256],
                  step_size=[64, 64],
                  depths=1,
                  time_ids=-1,
                  channel_ids=-1,
+                 normalize_channels=-1,
                  slice_ids=-1,
                  pos_ids=-1,
                  hist_clip_limits=None,
                  flat_field_dir=None,
                  image_format='zyx',
                  num_workers=4,
-                 int2str_len=3):
+                 int2str_len=3,
+                 tile_3d=False):
         """Init
 
         Assuming same structure across channels and same number of samples
@@ -35,21 +36,22 @@ class ImageTilerNonUniform(ImageTilerUniform):
         Please ref to init of ImageTilerUniform.
         """
 
-        super().__init__(input_dir,
-                         output_dir,
-                         tile_dict,
-                         tile_size,
-                         step_size,
-                         depths,
-                         time_ids,
-                         channel_ids,
-                         slice_ids,
-                         pos_ids,
-                         hist_clip_limits,
-                         flat_field_dir,
-                         image_format,
-                         num_workers,
-                         int2str_len)
+        super().__init__(input_dir=input_dir,
+                         output_dir=output_dir,
+                         tile_size=tile_size,
+                         step_size=step_size,
+                         depths=depths,
+                         time_ids=time_ids,
+                         channel_ids=channel_ids,
+                         normalize_channels=normalize_channels,
+                         slice_ids=slice_ids,
+                         pos_ids=pos_ids,
+                         hist_clip_limits=hist_clip_limits,
+                         flat_field_dir=flat_field_dir,
+                         image_format=image_format,
+                         num_workers=num_workers,
+                         int2str_len=int2str_len,
+                         tile_3d=tile_3d)
         # Get metadata indices
         metadata_ids, nested_id_dict = aux_utils.validate_metadata_indices(
             frames_metadata=self.frames_metadata,
@@ -70,7 +72,8 @@ class ImageTilerNonUniform(ImageTilerUniform):
                            channel0_ids,
                            channel0_depth,
                            cur_mask_dir=None,
-                           min_fraction=None):
+                           min_fraction=None,
+                           is_mask=False):
         """Tile first channel or mask and use the tile indices for the rest
 
         Tiles and saves the tiles, meta_df for each image in
@@ -82,6 +85,7 @@ class ImageTilerNonUniform(ImageTilerUniform):
         :param int channel0_depth: image depth for first channel or mask
         :param str cur_mask_dir: mask dir if tiling mask channel else none
         :param float min_fraction: Min fraction of foreground in tiled masks
+        :param bool is_mask: Is mask channel
         :return pd.DataFrame ch0_meta_df: pd.Dataframe with ids, row_start
          and col_start
         """
@@ -89,6 +93,10 @@ class ImageTilerNonUniform(ImageTilerUniform):
         fn_args = []
         for tp_idx, tp_dict in channel0_ids.items():
             for ch_idx, ch_dict in tp_dict.items():
+                if is_mask:
+                    normalize_im = False
+                else:
+                    normalize_im = self.normalize_channels[ch_idx]
                 for pos_idx, sl_idx_list in ch_dict.items():
                     cur_sl_idx_list = aux_utils.adjust_slice_margins(
                         sl_idx_list, channel0_depth
@@ -101,7 +109,8 @@ class ImageTilerNonUniform(ImageTilerUniform):
                             pos_idx=pos_idx,
                             task_type='tile',
                             mask_dir=cur_mask_dir,
-                            min_fraction=min_fraction
+                            min_fraction=min_fraction,
+                            normalize_im=normalize_im,
                         )
                         fn_args.append(cur_args)
 
@@ -143,6 +152,8 @@ class ImageTilerNonUniform(ImageTilerUniform):
                             pos_idx=pos_idx,
                             slice_idx=sl_idx
                         )
+                        # Find channel index position in channel_ids list
+                        list_idx = self.channel_ids.index(ch_idx)
                         if np.any(cur_tile_indices):
                             cur_args = super().get_crop_tile_args(
                                 ch_idx,
@@ -150,18 +161,22 @@ class ImageTilerNonUniform(ImageTilerUniform):
                                 sl_idx,
                                 pos_idx,
                                 task_type='crop',
-                                tile_indices=cur_tile_indices
+                                tile_indices=cur_tile_indices,
+                                normalize_im=self.normalize_channels[list_idx]
                             )
                             fn_args.append(cur_args)
 
-        tiled_meta_df_list = mp_crop_save(fn_args,
-                                          workers=self.num_workers)
+        tiled_meta_df_list = mp_crop_save(
+            fn_args,
+            workers=self.num_workers,
+        )
         tiled_metadata = pd.concat(tiled_meta_df_list, ignore_index=True)
-
-        tiled_metadata = pd.concat([cur_meta_df.reset_index(drop=True),
-                                    tiled_metadata.reset_index(drop=True)],
-                                   axis=0,
-                                   ignore_index=True)
+        tiled_metadata = pd.concat(
+            [cur_meta_df.reset_index(drop=True),
+             tiled_metadata.reset_index(drop=True)],
+            axis=0,
+            ignore_index=True,
+        )
         # Finally, save all the metadata
         tiled_metadata = tiled_metadata.sort_values(by=['file_name'])
         tiled_metadata.to_csv(
@@ -256,12 +271,16 @@ class ImageTilerNonUniform(ImageTilerUniform):
                     mask_ch_ids[tp_idx] = ch0_dict
 
         # tile mask channel and use the tile indices to tile the rest
-        meta_df = self.tile_first_channel(channel0_ids=mask_ch_ids,
-                                          channel0_depth=mask_depth,
-                                          cur_mask_dir=mask_dir,
-                                          min_fraction=min_fraction)
-
+        meta_df = self.tile_first_channel(
+            channel0_ids=mask_ch_ids,
+            channel0_depth=mask_depth,
+            cur_mask_dir=mask_dir,
+            min_fraction=min_fraction,
+            is_mask=True,
+        )
         # tile the rest
-        self.tile_remaining_channels(nested_id_dict=self.nested_id_dict,
-                                     tiled_ch_id=mask_channel,
-                                     cur_meta_df=meta_df)
+        self.tile_remaining_channels(
+            nested_id_dict=self.nested_id_dict,
+            tiled_ch_id=mask_channel,
+            cur_meta_df=meta_df,
+        )

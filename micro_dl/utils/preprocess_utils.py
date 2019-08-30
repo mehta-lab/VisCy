@@ -60,10 +60,11 @@ def validate_mask_meta(mask_dir,
                     os.path.join(mask_dir, 'frames_meta.csv'),
                 )
                 mask_channel = np.unique(frames_meta['channel_idx'])
-                assert len(mask_channel) == 1,\
-                    "Found more than one mask channel: {}".format(mask_channel)
-                mask_channel = mask_channel[0]
-                if mask_channel.dtype == np.array:
+                if isinstance(mask_channel, list):
+                    assert len(mask_channel) == 1,\
+                        "Found more than one mask channel: {}".format(mask_channel)
+                    mask_channel = mask_channel[0]
+                if type(mask_channel).__module__ == 'numpy':
                     mask_channel = mask_channel.item()
                 return mask_channel
             elif len(csv_name) == 1:

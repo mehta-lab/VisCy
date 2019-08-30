@@ -73,13 +73,13 @@ class TestPreprocessUtils(unittest.TestCase):
         nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
 
     def test_validate_mask_meta(self):
-        mask_out_channel = preprocess_utils.validate_mask_meta(
+        mask_channel = preprocess_utils.validate_mask_meta(
             mask_dir=self.mask_dir,
             input_dir=self.input_dir,
             csv_name=self.csv_name,
             mask_channel=50,
         )
-        self.assertEqual(mask_out_channel, 50)
+        self.assertEqual(mask_channel, 50)
 
         out_meta = aux_utils.read_meta(self.mask_dir)
         for i, row in out_meta.iterrows():
@@ -90,12 +90,12 @@ class TestPreprocessUtils(unittest.TestCase):
             self.assertEqual(row.file_name, "mask_{}.png".format(i + 1))
 
     def test_validate_mask_meta_no_channel(self):
-        mask_out_channel = preprocess_utils.validate_mask_meta(
+        mask_channel = preprocess_utils.validate_mask_meta(
             mask_dir=self.mask_dir,
             input_dir=self.input_dir,
             csv_name=self.csv_name,
         )
-        self.assertEqual(mask_out_channel, 4)
+        self.assertEqual(mask_channel, 4)
 
         out_meta = aux_utils.read_meta(self.mask_dir)
         for i, row in out_meta.iterrows():

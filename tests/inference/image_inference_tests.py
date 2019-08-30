@@ -193,7 +193,6 @@ class TestImageInference(unittest.TestCase):
         prediction[:5, :, :] = 1
         self.infer_inst.estimate_metrics(target, prediction, ['test_name'], None)
         metrics = self.infer_inst.df_xy
-        print(metrics)
         self.assertTupleEqual(metrics.shape, (5, 2))
         self.assertListEqual(list(metrics), ['mae', 'pred_name'])
         self.assertEqual(metrics.mae.mean(), 0.5)

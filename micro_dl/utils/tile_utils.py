@@ -33,10 +33,11 @@ def read_imstack(input_fnames,
                 flat_field_image = np.load(flat_field_fname[idx])
             else:
                 flat_field_image = np.load(flat_field_fname)
-            im = apply_flat_field_correction(
-                im,
-                flat_field_image=flat_field_image,
-            )
+            if not is_mask and not normalize_im:
+                im = apply_flat_field_correction(
+                    im,
+                    flat_field_image=flat_field_image,
+                )
         im_stack.append(im)
 
     input_image = np.stack(im_stack, axis=-1)
@@ -67,7 +68,7 @@ def preprocess_imstack(frames_metadata,
                        pos_idx,
                        flat_field_im=None,
                        hist_clip_limits=None,
-                       normalize_im=True):
+                       normalize_im=False):
     """
     Preprocess image given by indices: flatfield correction, histogram
     clipping and z-score normalization is performed.
@@ -81,10 +82,9 @@ def preprocess_imstack(frames_metadata,
     :param int pos_idx: Position (FOV) index
     :param np.array flat_field_im: Flat field image for channel
     :param list hist_clip_limits: Limits for histogram clipping (size 2)
-    :param bool normalize_im: indicator to z-score the image or not
+    :param bool normalize_im: indicator to normalize image based on z-score or not
     :return np.array im: 3D preprocessed image
     """
-
     margin = 0 if depth == 1 else depth // 2
     im_stack = []
     for z in range(slice_idx - margin, slice_idx + margin + 1):
@@ -100,8 +100,8 @@ def preprocess_imstack(frames_metadata,
             frames_metadata.loc[meta_idx, "file_name"],
         )
         im = read_image(file_path)
-
-        if flat_field_im is not None:
+        # Only flatfield correct images that will be normalized
+        if flat_field_im is not None and not normalize_im:
             im = apply_flat_field_correction(
                 im,
                 flat_field_image=flat_field_im,
@@ -272,7 +272,6 @@ def tile_image(input_image,
                                               save_dict,
                                               row, col)
                 tiled_metadata.append(cur_tile_meta)
-
     if save_dict is None:
         if return_index:
             return cropped_image_list, cropping_index

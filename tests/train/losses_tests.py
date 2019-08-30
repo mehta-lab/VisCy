@@ -85,3 +85,23 @@ def test_dice_loss():
         res = sess.run(dice_loss)
         nose.tools.assert_greater(res, .3)
         nose.tools.assert_greater(.4, np.min(res))
+
+
+def test_binary_crossentropy_loss():
+    y_true = np.zeros((1, 10, 1), np.float32)
+    y_true[:, :10, :] = 1.
+    y_pred = np.zeros_like(y_true)
+    y_pred[:, :5, :] = 1.
+    y_true = tf.convert_to_tensor(y_true, dtype=tf.float32)
+    y_pred = tf.convert_to_tensor(y_pred, dtype=tf.float32)
+    binary_crossentropy_loss = losses.binary_crossentropy_loss(y_true, y_pred)
+    with tf.Session() as sess:
+        res = sess.run(binary_crossentropy_loss)
+        np.testing.assert_array_equal(res.shape, (1, 10))
+
+        # Lower entropy for predictions that match
+        np.testing.assert_array_less(res[:, :5].flatten().tolist(), [0.1] * 5)
+
+        # Entropy is higher when there is an higher uncertainity/mismatched prediction
+        np.testing.assert_array_less([15] * 5, res[:, 5:].flatten().tolist())
+        np.testing.assert_array_less(res[:, 5:].flatten().tolist(), [20] * 5)

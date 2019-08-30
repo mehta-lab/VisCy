@@ -3,7 +3,6 @@
 import keras
 import numpy as np
 import os
-import pandas as pd
 
 
 class BaseDataSet(keras.utils.Sequence):

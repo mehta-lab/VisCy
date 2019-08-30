@@ -92,7 +92,6 @@ def test_xy_metrics_mask():
         mask=mask,
     )
     metrics_xy = metrics_inst.get_metrics_xy()
-    print(metrics_xy)
     nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 6))
     expected_list = [
         'corr', 'r2', 'vol_frac', 'corr_masked', 'r2_masked', 'pred_name',

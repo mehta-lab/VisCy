@@ -17,20 +17,24 @@ The following settings can be adjusted in preprocessing using a config file (see
     * scale_factor(float/list): Scale factor for resizing 2D frames, e.g. to match resolution in z or resizing volumes
     * num_slices_subvolume (int): number of slices to be included in each subvolume, default=-1, includes all slices in           slice_ids
 * correct_flat_field: (bool) perform flatfield correction (2D data only)
-* create_masks: (bool) whether to generate binary masks from images
+
 * masks:
-    * channels: (list of ints) which channels should be used for masks
-    * str_elem_radius: (int) morpological structuring element radius
+    * channels: (list of ints) which channels should be used to generate masks from
+    * str_elem_radius: (int) structuring element radius for morphological operations on masks
+    * normalize_im (bool): Whether to normalize image before generating masks
+    * mask_dir (str): As an alternative to channels/str_element_radius, you can specify a directory
+    containing already generated masks (e.g. manual annotations). Masks must match input images in 
+    terms of shape and indices.
+    * csv_name (str): If specifying mask_dir, the directory must contain a csv file matching mask names
+    with image names. If left out, the script will look for first a frames_meta.csv,
+    second one csv file containing mask names in one column and matched image names in a 
+    second column.
 * do_tiling: (bool) do tiling (recommended)
 * tile:
     * tile_size: (list of ints) tile size in pixels for each dimension
     * step_size: (list of ints) step size in pixels for each dimension
     * depths: (list of ints) tile z depth for all the channels specified
     * mask_depth: (int) z depth of mask
-    * save_tiled_masks: (str) save tiled masks 'as_channel' (recommended) will generate a new
-    channel number (1 + max existing channel), write tiles in the same directory as the rest of the
-    channels, and add the new mask channel to frames metadata. 'as_mask' will write mask tiles in a new directory
-    and not add them to metadata.
     * image_format (str): 'zyx' (default) or 'xyz'. Order of tile dimensions
     * train_fraction (float): If specified in range (0, 1), will randomly select that fraction
     of training data in each epoch. It will update steps_per_epoch in fit_generator accordingly.

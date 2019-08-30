@@ -16,7 +16,6 @@ def mp_create_save_mask(fn_args, workers):
     :param int workers: max number of workers
     :return: list of returned dicts from create_save_mask
     """
-
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(create_save_mask, *zip(*fn_args))
@@ -33,11 +32,14 @@ def create_save_mask(input_fnames,
                      slice_idx,
                      int2str_len,
                      mask_type,
-                     mask_ext):
+                     mask_ext,
+                     normalize_im=False):
 
-    """Create and save mask
+    """
+    Create and save mask.
     When >1 channel are used to generate the mask, mask of each channel is
-    generated then added together
+    generated then added together.
+
     :param tuple input_fnames: tuple of input fnames with full path
     :param str flat_field_fname: fname of flat field image
     :param int str_elem_radius: size of structuring element used for binary
@@ -50,15 +52,17 @@ def create_save_mask(input_fnames,
     :param int int2str_len: Length of str when converting ints
     :param str mask_type: thresholding type used for masking or str to map to
      masking function
-    :param str mask_ext: 'npy' or 'png'. Save the mask as uint8 PNG or
-     NPY files
+    :param str mask_ext: '.npy' or '.png'. Save the mask as uint8 PNG or
+     NPY files for otsu, unimodal masks, recommended to save as npy
+     float64 for borders_weight_loss_map masks to avoid loss due to scaling it
+     to uint8.
+    :param bool normalize_im: indicator to normalize image based on z-score or not
     :return dict cur_meta for each mask
     """
-
     im_stack = tile_utils.read_imstack(
         input_fnames,
         flat_field_fname,
-        normalize_im=False,
+        normalize_im=normalize_im,
     )
     masks = []
     for idx in range(im_stack.shape[-1]):
@@ -68,32 +72,43 @@ def create_save_mask(input_fnames,
         elif mask_type == 'unimodal':
             mask = mask_utils.create_unimodal_mask(im.astype('float32'), str_elem_radius)
         elif mask_type == 'borders_weight_loss_map':
-            im = tile_utils.read_image(input_fnames[idx])
             mask = mask_utils.get_unet_border_weight_map(im)
         masks += [mask]
-    masks = np.stack(masks, axis=-1)
-    mask = np.any(masks, axis=-1)
+    # Border weight map mask is a float mask not binary like otsu or unimodal,
+    # so keep it as is (assumes only one image in stack)
+    if mask_type == 'borders_weight_loss_map':
+        mask = masks[0]
+    else:
+        masks = np.stack(masks, axis=-1)
+        mask = np.any(masks, axis=-1)
 
     # Create mask name for given slice, time and position
-    file_name = aux_utils.get_im_name(time_idx=time_idx,
-                                      channel_idx=mask_channel_idx,
-                                      slice_idx=slice_idx,
-                                      pos_idx=pos_idx,
-                                      int2str_len=int2str_len)
-
-    if mask_ext == 'npy':
+    file_name = aux_utils.get_im_name(
+        time_idx=time_idx,
+        channel_idx=mask_channel_idx,
+        slice_idx=slice_idx,
+        pos_idx=pos_idx,
+        int2str_len=int2str_len,
+        ext=mask_ext,
+    )
+    if mask_ext == '.npy':
         # Save mask for given channels, mask is 2D
         np.save(os.path.join(mask_dir, file_name),
                 mask,
                 allow_pickle=True,
                 fix_imports=True)
-    elif mask_ext == 'png':
-        file_name = file_name[:-3] + 'png'
+    elif mask_ext == '.png':
         # Covert mask to uint8
-        mask = mask.astype(np.uint8) * (2 ** 8 - 1)
+        # Border weight map mask is a float mask not binary like otsu or unimodal,
+        # so keep it as is
+        if mask_type == 'borders_weight_loss_map':
+            assert im_stack.shape[-1] == 1
+            # Note: Border weight map mask should only be generated from one binary image
+        else:
+            mask = mask.astype(np.uint8) * np.iinfo(np.uint8).max
         cv2.imwrite(os.path.join(mask_dir, file_name), mask)
     else:
-        raise ValueError("mask_ext can only be 'npy' or 'png'")
+        raise ValueError("mask_ext can be '.npy' or '.png', not {}".format(mask_ext))
     cur_meta = {'channel_idx': mask_channel_idx,
                 'slice_idx': slice_idx,
                 'time_idx': time_idx,
@@ -128,7 +143,8 @@ def tile_and_save(input_fnames,
                   image_format,
                   save_dir,
                   int2str_len=3,
-                  is_mask=False):
+                  is_mask=False,
+                  normalize_im=False):
     """Crop image into tiles at given indices and save
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -145,6 +161,7 @@ def tile_and_save(input_fnames,
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
+    :param bool normalize_im: Indicates if normalizing using z score is needed
     :return: pd.DataFrame from a list of dicts with metadata
     """
     try:
@@ -153,6 +170,7 @@ def tile_and_save(input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,
             is_mask=is_mask,
+            normalize_im=normalize_im
         )
         save_dict = {'time_idx': time_idx,
                      'channel_idx': channel_idx,
@@ -206,7 +224,8 @@ def crop_at_indices_save(input_fnames,
                          save_dir,
                          int2str_len=3,
                          is_mask=False,
-                         tile_3d=False):
+                         tile_3d=False,
+                         normalize_im=False):
     """Crop image into tiles at given indices and save
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -222,6 +241,7 @@ def crop_at_indices_save(input_fnames,
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
     :param bool tile_3d: indicator for tiling in 3D
+    :param bool normalize_im: Indicates if normalizing using z score is needed
     :return: pd.DataFrame from a list of dicts with metadata
     """
 
@@ -231,6 +251,7 @@ def crop_at_indices_save(input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,
             is_mask=is_mask,
+            normalize_im=normalize_im
         )
         save_dict = {'time_idx': time_idx,
                      'channel_idx': channel_idx,
@@ -244,7 +265,7 @@ def crop_at_indices_save(input_fnames,
             input_image=input_image,
             crop_indices=crop_indices,
             save_dict=save_dict,
-            tile_3d=tile_3d
+            tile_3d=tile_3d,
         )
     except Exception as e:
         err_msg = 'error in t_{}, c_{}, pos_{}, sl_{}'.format(

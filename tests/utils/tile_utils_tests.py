@@ -111,26 +111,32 @@ class TestTileUtils(unittest.TestCase):
     def test_preprocess_imstack(self):
         """Test preprocess_imstack"""
 
-        im_stack = tile_utils.preprocess_imstack(self.frames_meta,
-                                                 self.temp_path,
-                                                 depth=3,
-                                                 time_idx=self.time_ids,
-                                                 channel_idx=self.channel_ids,
-                                                 slice_idx=2,
-                                                 pos_idx=self.pos_ids)
+        im_stack = tile_utils.preprocess_imstack(
+            self.frames_meta,
+            self.temp_path,
+            depth=3,
+            time_idx=self.time_ids,
+            channel_idx=self.channel_ids,
+            slice_idx=2,
+            pos_idx=self.pos_ids,
+            normalize_im=True,
+        )
 
         numpy.testing.assert_equal(im_stack.shape, (32, 32, 3))
         exp_stack = zscore(self.sph[:, :, 1:4])
         numpy.testing.assert_array_equal(im_stack, exp_stack)
 
         # preprocess a 3D image
-        im_stack = tile_utils.preprocess_imstack(self.meta_3d,
-                                                 self.temp_path,
-                                                 depth=1,
-                                                 time_idx=0,
-                                                 channel_idx=1,
-                                                 slice_idx=0,
-                                                 pos_idx=1)
+        im_stack = tile_utils.preprocess_imstack(
+            self.meta_3d,
+            self.temp_path,
+            depth=1,
+            time_idx=0,
+            channel_idx=1,
+            slice_idx=0,
+            pos_idx=1,
+            normalize_im=True,
+        )
         numpy.testing.assert_equal(im_stack.shape, (32, 32, 8))
 
     def test_tile_image(self):
@@ -140,9 +146,11 @@ class TestTileUtils(unittest.TestCase):
         tile_size = [16, 16]
         step_size = [8, 8]
         # returns at tuple of (img_id, tile)
-        tiled_image_list = tile_utils.tile_image(input_image,
-                                                 tile_size=tile_size,
-                                                 step_size=step_size)
+        tiled_image_list = tile_utils.tile_image(
+            input_image,
+            tile_size=tile_size,
+            step_size=step_size,
+        )
         nose.tools.assert_equal(len(tiled_image_list), 9)
         c = 0
         for row in range(0, 17, 8):
@@ -250,7 +258,6 @@ class TestTileUtils(unittest.TestCase):
                     tile = input_image[row:row + tile_size[0],
                                        col: col + tile_size[1],
                                        sl_start_end[0]: sl_start_end[1]]
-                    print(tiled_image_list[c][0])
                     numpy.testing.assert_array_equal(tile,
                                                      tiled_image_list[c][1])
                     c += 1

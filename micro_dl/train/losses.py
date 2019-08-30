@@ -2,6 +2,7 @@
 from keras import backend as K
 from keras.losses import mean_absolute_error
 import tensorflow as tf
+import numpy as np
 
 import micro_dl.train.metrics as metrics
 from micro_dl.utils.aux_utils import get_channel_axis
@@ -146,3 +147,20 @@ def dice_coef_loss(y_true, y_pred):
     :return: Dice loss
     """
     return 1. - metrics.dice_coef(y_true, y_pred)
+
+
+def binary_crossentropy_loss(y_true, y_pred, mean_loss=True):
+    """Binary cross entropy loss
+    :param y_true: Ground truth
+    :param y_pred: Prediction
+    :return float: Binary cross entropy loss
+    """
+    assert len(np.unique(y_true).tolist()) <= 2
+    assert len(np.unique(y_pred).tolist()) <= 2
+
+    if not mean_loss:
+        return K.binary_crossentropy(y_true, y_pred)
+
+    channel_axis = get_channel_axis(K.image_data_format())
+    return K.mean(K.binary_crossentropy(y_true, y_pred), axis=channel_axis)
+

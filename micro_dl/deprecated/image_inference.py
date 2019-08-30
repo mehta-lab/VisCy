@@ -84,6 +84,20 @@ def parse_args():
     parser.set_defaults(save_figs=False)
 
     parser.add_argument(
+        '--normalize_im',
+        dest='normalize_im',
+        action='store_true',
+        help="normalizes input image",
+    )
+    parser.add_argument(
+        '--dont_normalize_im',
+        dest='normalize_im',
+        action='store_false',
+        help="Don't normalize input image"
+    )
+    parser.set_defaults(normalize_im=False)
+
+    parser.add_argument(
         '--metrics',
         type=str,
         default=None,
@@ -102,7 +116,8 @@ def run_prediction(model_dir,
                    metrics=None,
                    test_data=True,
                    ext='.tif',
-                   save_figs=False):
+                   save_figs=False,
+                   normalize_im=False):
     """
     Predict images given model + weights.
     If the test_data flag is set to True, the test indices in
@@ -153,7 +168,9 @@ def run_prediction(model_dir,
     if metrics is not None:
         if isinstance(metrics, str):
             metrics = [metrics]
-    metrics_cls = train_utils.get_metrics(metrics)
+        metrics_cls = train_utils.get_metrics(metrics)
+    else:
+        metrics_cls = metrics
     loss = trainer_config['loss']
     loss_cls = train_utils.get_loss(loss)
     split_idx_name = dataset_config['split_by_column']
@@ -177,9 +194,14 @@ def run_prediction(model_dir,
             metadata_ids[id] = np.unique(test_tile_meta[id])
 
     # create empty dataframe for test image metadata
-    test_frames_meta = pd.DataFrame(
-        columns=frames_meta.columns.values.tolist() + metrics,
-    )
+    if metrics is not None:
+        test_frames_meta = pd.DataFrame(
+            columns=frames_meta.columns.values.tolist() + metrics,
+        )
+    else:
+        test_frames_meta = pd.DataFrame(
+            columns=frames_meta.columns.values.tolist()
+        )
     # Get model weight file name, if none, load latest saved weights
     if model_fname is None:
         fnames = [f for f in os.listdir(model_dir) if f.endswith('.hdf5')]
@@ -233,6 +255,7 @@ def run_prediction(model_dir,
                     channel_idx=input_channel,
                     slice_idx=slice_idx,
                     pos_idx=pos_idx,
+                    normalize_im=normalize_im
                 )
                 # Crop image shape to nearest factor of two
                 im_stack = image_utils.crop2base(im_stack)
@@ -300,7 +323,7 @@ def run_prediction(model_dir,
                     pos_idx=pos_idx,
                 )
                 im_target = image_utils.crop2base(im_target)
-                #TODO: Add image_format option to network config
+                # TODO: Add image_format option to network config
                 # Change image stack format to zyx
                 im_target = np.transpose(im_target, [2, 0, 1])
                 if depth == 1:
@@ -314,7 +337,7 @@ def run_prediction(model_dir,
                 # add batch dimensions
                 im_target = im_target[np.newaxis, ...]
 
-                metric_vals = model.evaluate(x=im_stack, y=im_target)
+                metric_vals = model.evaluate(x=im_pred, y=im_target)
                 for metric, metric_val in zip([loss] + metrics, metric_vals):
                     test_frames_meta_row[metric] = metric_val
 
@@ -360,5 +383,6 @@ if __name__ == '__main__':
         test_data=args.test_data,
         ext=args.ext,
         save_figs=args.save_figs,
+        normalize_im=args.normalize_im
     )
 

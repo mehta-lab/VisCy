@@ -213,7 +213,7 @@ def compute_metrics(model_dir,
                     metrics_mapping[orientation](),
                     ignore_index=True,
                 )
-                
+
     # Save non-empty dataframes
     for orientation in orientations_list:
         metrics_df = df_mapping[orientation]

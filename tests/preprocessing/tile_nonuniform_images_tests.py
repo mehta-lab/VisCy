@@ -77,16 +77,15 @@ class TestImageTilerNonUniform(unittest.TestCase):
                            sep=',',)
         # Instantiate tiler class
         self.output_dir = os.path.join(self.temp_path, 'tile_dir')
-        self.tile_dict = {'channels': [1, 2],
-                          'tile_size': [5, 5],
-                          'step_size': [4, 4],
-                          'depths': 3,
-                          'image_format': 'zyx',
-                          'tile_3d': False}
+
         self.tile_inst = tile_images.ImageTilerNonUniform(
             input_dir=self.temp_path,
             output_dir=self.output_dir,
-            tile_dict=self.tile_dict,
+            tile_size=[5, 5],
+            step_size=[4, 4],
+            depths=3,
+            channel_ids=[1, 2],
+            normalize_channels=[False, True]
         )
 
     def tearDown(self):
@@ -301,6 +300,8 @@ class TestImageTilerNonUniform(unittest.TestCase):
         mask_meta_df.to_csv(os.path.join(mask_dir, 'frames_meta.csv'), sep=',')
 
         self.tile_inst.pos_ids = [7]
+
+        self.tile_inst.normalize_channels = [None, None, None, False]
 
         self.tile_inst.tile_mask_stack(mask_dir,
                                        mask_channel=3,

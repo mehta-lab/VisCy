@@ -42,7 +42,6 @@ def save_predicted_images(input_batch,
         assert output_fname is not None, 'need fname for saving image'
         fname = os.path.join(output_dir, '{}.{}'.format(output_fname, ext))
 
-
     # 3D images are better saved as movies/gif
     if batch_size != 1:
         assert len(input_batch.shape) == 4, 'saves 2D images only'
@@ -61,16 +60,12 @@ def save_predicted_images(input_batch,
                 clip_limits,
                 100 - clip_limits,
             )
-            ax[axis_count].imshow(cur_im,  cmap='gray')
+            ax[axis_count].imshow(cur_im, cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 0:
                 ax[axis_count].set_title('Input', fontsize=font_size)
             axis_count += 1
-            cur_im = hist_clipping(
-                cur_target[channel_idx],
-                clip_limits,
-                100 - clip_limits,
-            )
+            cur_im = cur_target[channel_idx]
             ax[axis_count].imshow(cur_im, cmap='gray')
             ax[axis_count].axis('off')
             if axis_count == 1:

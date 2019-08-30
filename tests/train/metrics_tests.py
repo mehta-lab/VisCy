@@ -46,6 +46,18 @@ def test_dice_coef_complete():
         nose.tools.assert_equal(sess.run(dice), expected_dice)
 
 
+def test_binary_accuracy():
+    y_true = np.zeros((5, 7, 3), np.float)
+    y_pred = np.zeros_like(y_true)
+    y_true[2:4, 2:4, 1] = 1.
+    y_pred[2:4, 2:4, 1] = 1.
+    # y_true and y_pred both have 2x2 ones
+    expected_dice = 1.
+    dice = metrics.binary_accuracy(y_true=y_true, y_pred=y_pred)
+    with tf.Session() as sess:
+        nose.tools.assert_equal(sess.run(dice), expected_dice)
+
+
 def test_dice_coef_none():
     y_true = np.zeros((5, 7, 3), np.float)
     y_pred = np.zeros_like(y_true)

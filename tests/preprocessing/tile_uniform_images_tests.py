@@ -91,16 +91,14 @@ class TestImageTilerUniform(unittest.TestCase):
         )
         # Instantiate tiler class
         self.output_dir = os.path.join(self.temp_path, 'tile_dir')
-        self.tile_dict = {'channels': [1],
-                          'tile_size': [5, 5],
-                          'step_size': [4, 4],
-                          'depths': 3,
-                          'image_format': 'zyx',
-                          'tile_3d': False}
         self.tile_inst = tile_images.ImageTilerUniform(
             input_dir=self.temp_path,
             output_dir=self.output_dir,
-            tile_dict=self.tile_dict,
+            tile_size=[5, 5],
+            step_size=[4, 4],
+            depths=3,
+            channel_ids=[1],
+            normalize_channels=[True],
             flat_field_dir=self.flat_field_dir,
         )
         exp_fnames = ['im_c001_z015_t005_p007.png',
@@ -410,6 +408,7 @@ class TestImageTilerUniform(unittest.TestCase):
         """Test tile_mask_stack"""
 
         self.tile_inst.pos_ids = [7]
+        self.tile_inst.normalize_channels = [True, True, True, True]
 
         # use the saved masks to tile other channels
         self.tile_inst.tile_mask_stack(

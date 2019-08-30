@@ -111,30 +111,41 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
 
     TODO: Calculate boundaries directly and calculate distance
     from boundary of cells to another
-    TODO: The below method only works for UNet Segmentation only
+    Note: The below method only works for UNet Segmentation only
     """
+    # if there is only one label, zero return the array as is
+    if np.sum(annotation) == 0:
+        return annotation
 
-    assert annotation.dtype == np.uint8, (
-        "datatype expected uint8, it is {}".format(annotation.dtype))
+    # Masks could be saved as .npy bools, if so convert to uint8 and generate
+    # labels from binary
+    if annotation.dtype == bool:
+        annotation = annotation.astype(np.uint8)
+    assert annotation.dtype in [np.uint8, np.uint16], (
+        "Expected data type uint, it is {}".format(annotation.dtype))
+
+    # cells instances for distance computation
+    # 4 connected i.e default (cross-shaped)
+    # structuring element to measure connectivy
+    # If cells are 8 connected/touching they are labeled as one single object
+    # Loss metric on such borders is not useful
+    labeled_array, _ = scipy.ndimage.measurements.label(annotation)
     # class balance weights w_c(x)
-    unique_values = np.unique(annotation).tolist()
+    unique_values = np.unique(labeled_array).tolist()
     weight_map = [0] * len(unique_values)
     for index, unique_value in enumerate(unique_values):
         mask = np.zeros(
             (annotation.shape[0], annotation.shape[1]), dtype=np.float64)
         mask[annotation == unique_value] = 1
-        print(mask.sum())
-        weight_map[index] = mask.sum()
+        weight_map[index] = 1 / mask.sum()
 
-    # this normalization is important - background pixels must have weight 1
+    # this normalization is important - foreground pixels must have weight 1
     weight_map = [i / max(weight_map) for i in weight_map]
 
     wc = np.zeros((annotation.shape[0], annotation.shape[1]), dtype=np.float64)
     for index, unique_value in enumerate(unique_values):
         wc[annotation == unique_value] = weight_map[index]
 
-    # cells instances for distance computation
-    labeled_array, _ = scipy.ndimage.measurements.label(annotation)
     # cells distance map
     border_loss_map = np.zeros(
         (annotation.shape[0], annotation.shape[1]), dtype=np.float64)
@@ -148,7 +159,6 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
             mask[labeled_array == index + 1] = 0
             distance_maps[:, :, index] = \
                 scipy.ndimage.distance_transform_edt(mask)
-
     distance_maps = np.sort(distance_maps, 2)
     d1 = distance_maps[:, :, 0]
     d2 = distance_maps[:, :, 1]
