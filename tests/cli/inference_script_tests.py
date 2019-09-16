@@ -127,7 +127,7 @@ class TestInferenceScript(unittest.TestCase):
     def test_run_inference(self, mock_predict, mock_model):
         mock_model.return_value = 'dummy_model'
         # Image shape is cropped to the nearest factor of 2
-        mock_predict.return_value = 1. + np.ones((1, 16, 16), dtype=np.float32)
+        mock_predict.return_value = 1. + np.ones((1, 16, 16), dtype=np.float64)
         # Run inference
         inference_script.run_inference(
             config_fname=self.infer_config_name,

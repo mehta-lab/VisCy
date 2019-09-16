@@ -1,9 +1,16 @@
+import cv2
 import nose.tools
 import numpy as np
+import os
+import pandas as pd
+from testfixtures import TempDirectory
+import unittest
 
 # Create a test image and its corresponding coordinates and values
 # Create a test image with a bright block to the right
-from micro_dl.utils import image_utils as image_utils
+import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.image_utils as image_utils
+import micro_dl.utils.normalize as normalize
 from tests.utils.masks_utils_tests import uni_thr_tst_image
 
 test_im = np.zeros((10, 15), np.uint16) + 100
@@ -72,7 +79,128 @@ def test_rescale_volume():
     nose.tools.assert_tuple_equal(res_volume.shape, (4, 22, 22))
     # assertion error
 
+
 @nose.tools.raises(AssertionError)
 def test_rescale_volume_vrong_dims():
     nd_image = np.repeat(uni_thr_tst_image[np.newaxis], 5, axis=0)
     image_utils.rescale_nd_image(nd_image, [1.2, 1.8])
+
+
+class TestImageUtils(unittest.TestCase):
+
+    def setUp(self):
+        """Set up a dictionary with images"""
+
+        self.tempdir = TempDirectory()
+        self.temp_path = self.tempdir.path
+        meta_fname = 'frames_meta.csv'
+        self.df_columns = ['channel_idx',
+                           'slice_idx',
+                           'time_idx',
+                           'channel_name',
+                           'file_name',
+                           'pos_idx']
+        self.frames_meta = pd.DataFrame(columns=self.df_columns)
+
+        x = np.linspace(-4, 4, 32)
+        y = x.copy()
+        z = np.linspace(-3, 3, 8)
+        xx, yy, zz = np.meshgrid(x, y, z)
+        sph = (xx ** 2 + yy ** 2 + zz ** 2)
+        sph = (sph <= 8) * (8 - sph)
+        sph = (sph / sph.max()) * 255
+        sph = sph.astype('uint8')
+        self.sph = sph
+
+        self.channel_idx = 1
+        self.time_idx = 0
+        self.pos_idx = 1
+        self.int2str_len = 3
+
+        for z in range(sph.shape[2]):
+            im_name = aux_utils.get_im_name(
+                channel_idx=1,
+                slice_idx=z,
+                time_idx=self.time_idx,
+                pos_idx=self.pos_idx,
+            )
+            cv2.imwrite(os.path.join(self.temp_path, im_name), sph[:, :, z])
+            self.frames_meta = self.frames_meta.append(
+                aux_utils.parse_idx_from_name(im_name, self.df_columns),
+                ignore_index=True,
+            )
+
+        # Write metadata
+        self.frames_meta.to_csv(os.path.join(self.temp_path, meta_fname), sep=',')
+        # Write 3D sphere data
+        self.sph_fname = os.path.join(
+            self.temp_path,
+            'im_c001_z000_t000_p001_3d.npy',
+        )
+        np.save(self.sph_fname, self.sph, allow_pickle=True, fix_imports=True)
+        meta_3d = pd.DataFrame.from_dict([{
+            'channel_idx': 1,
+            'slice_idx': 0,
+            'time_idx': 0,
+            'channel_name': '3d_test',
+            'file_name': 'im_c001_z000_t000_p001_3d.npy',
+            'pos_idx': 1,
+        }])
+        self.meta_3d = meta_3d
+
+    def tearDown(self):
+        """
+        Tear down temporary folder and file structure
+        """
+        TempDirectory.cleanup_all()
+        nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
+
+    def test_read_imstack(self):
+        """Test read_imstack"""
+
+        fnames = self.frames_meta['file_name'][:3]
+        fnames = [os.path.join(self.temp_path, fname) for fname in fnames]
+        # non-boolean
+        im_stack = image_utils.read_imstack(fnames)
+        exp_stack = normalize.zscore(self.sph[:, :, :3])
+        np.testing.assert_equal(im_stack.shape, (32, 32, 3))
+        np.testing.assert_array_equal(exp_stack[:, :, :3],
+                                      im_stack)
+
+        # read a 3D image
+        im_stack = image_utils.read_imstack([self.sph_fname])
+        np.testing.assert_equal(im_stack.shape, (32, 32, 8))
+
+        # read multiple 3D images
+        im_stack = image_utils.read_imstack((self.sph_fname, self.sph_fname))
+        np.testing.assert_equal(im_stack.shape, (32, 32, 8, 2))
+
+    def test_preprocess_imstack(self):
+        """Test preprocess_imstack"""
+        print(self.frames_meta)
+        im_stack = image_utils.preprocess_imstack(
+            self.frames_meta,
+            self.temp_path,
+            depth=3,
+            time_idx=self.time_idx,
+            channel_idx=self.channel_idx,
+            slice_idx=2,
+            pos_idx=self.pos_idx,
+            normalize_im=True,
+        )
+        np.testing.assert_equal(im_stack.shape, (32, 32, 3))
+        exp_stack = normalize.zscore(self.sph[:, :, 1:4])
+        np.testing.assert_array_equal(im_stack, exp_stack)
+
+        # preprocess a 3D image
+        im_stack = image_utils.preprocess_imstack(
+            self.meta_3d,
+            self.temp_path,
+            depth=1,
+            time_idx=0,
+            channel_idx=1,
+            slice_idx=0,
+            pos_idx=1,
+            normalize_im=True,
+        )
+        np.testing.assert_equal(im_stack.shape, (32, 32, 8))

@@ -6,8 +6,7 @@ import os
 import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
-from micro_dl.utils.image_utils import crop2base
-from micro_dl.utils.tile_utils import preprocess_imstack
+import micro_dl.utils.image_utils as image_utils
 
 
 class InferenceDataSet(keras.utils.Sequence):
@@ -65,7 +64,16 @@ class InferenceDataSet(keras.utils.Sequence):
         # the raw input images have to be normalized (z-score typically)
         self.normalize = True if self.model_task == 'regression' else False
 
+        self.input_channels = dataset_config['input_channels']
+        self.target_channels = dataset_config['target_channels']
+        # get a subset of frames meta for only one channel to easily
+        # extract indices (pos, time, slice) to iterate over
+        df_idx = (self.frames_meta['channel_idx'] == self.target_channels[0])
+        self.iteration_meta = self.frames_meta.copy()
+        self.iteration_meta = self.iteration_meta[df_idx]
+
         self.depth = 1
+        self.target_depth = 1
         # adjust slice margins if stacktostack or stackto2d
         network_cls = network_config['class']
         if network_cls in ['UNetStackTo2D', 'UNetStackToStack']:
@@ -85,12 +93,6 @@ class InferenceDataSet(keras.utils.Sequence):
         if 'data_format' in network_config:
             self.data_format = network_config['data_format']
 
-        self.input_channels = dataset_config['input_channels']
-        self.target_channels = dataset_config['target_channels']
-        # get a subset of frames meta for only one channel to easily
-        # extract indices (pos, time, slice) to iterate over
-        df_idx = (self.frames_meta['channel_idx'] == self.target_channels[0])
-        self.iteration_meta = self.frames_meta[df_idx]
         # check if sorted values look right
         self.iteration_meta = self.iteration_meta.sort_values(
             ['pos_idx',  'slice_idx'],
@@ -101,22 +103,24 @@ class InferenceDataSet(keras.utils.Sequence):
 
     def adjust_slice_indices(self):
         """
-        Adjust slice indices if stackto2d or stacktostack.
-        These networks will have a depth > 1
+        Adjust slice indices if model is UNetStackTo2D or UNetStackToStack.
+        These networks will have a depth > 1.
+        Adjust iteration_meta only as we'll need all the indices to load
+        stack with depth > 1.
         """
         margin = self.depth // 2
         # Drop indices above margin
-        max_slice_idx = self.frames_meta['slice_idx'].max() + 1
+        max_slice_idx = self.iteration_meta['slice_idx'].max() + 1
         drop_idx = list(range(max_slice_idx - margin, max_slice_idx))
-        df_drop_idx = self.frames_meta.index[
-            self.frames_meta['slice_idx'].isin(drop_idx),
+        df_drop_idx = self.iteration_meta.index[
+            self.iteration_meta['slice_idx'].isin(drop_idx),
         ]
-        self.frames_meta.drop(self.frames_meta.index[df_drop_idx], inplace=True)
+        self.iteration_meta.drop(df_drop_idx, inplace=True)
         # Drop indices below margin
-        df_drop_idx = self.frames_meta.index[
-            self.frames_meta['slice_idx'].isin(list(range(margin)))
+        df_drop_idx = self.iteration_meta.index[
+            self.iteration_meta['slice_idx'].isin(list(range(margin)))
         ]
-        self.frames_meta.drop(self.frames_meta.index[df_drop_idx], inplace=True)
+        self.iteration_meta.drop(df_drop_idx, inplace=True)
 
     def get_iteration_meta(self):
         """
@@ -140,6 +144,7 @@ class InferenceDataSet(keras.utils.Sequence):
                    input_dir,
                    cur_row,
                    channel_ids,
+                   depth,
                    normalize):
         """
         Assemble one input or target tensor
@@ -147,6 +152,7 @@ class InferenceDataSet(keras.utils.Sequence):
         :param str input_dir: Directory containing images or targets
         :param pd.Series cur_row: Current row in frames_meta
         :param int/list channel_ids: Channel indices
+        :param int depth: Stack depth
         :param bool normalize: If image should be normalized
         :return np.array (3D / 4D) im_stack: Image stack
         """
@@ -160,10 +166,10 @@ class InferenceDataSet(keras.utils.Sequence):
                 )
                 flat_field_im = np.load(flat_field_fname)
             # Load image with given indices
-            im = preprocess_imstack(
+            im = image_utils.preprocess_imstack(
                 frames_metadata=self.frames_meta,
                 input_dir=input_dir,
-                depth=self.depth,
+                depth=depth,
                 time_idx=cur_row['time_idx'],
                 channel_idx=channel_idx,
                 slice_idx=cur_row['slice_idx'],
@@ -172,7 +178,7 @@ class InferenceDataSet(keras.utils.Sequence):
                 normalize_im=normalize,
             )
             # Crop image to nearest factor of two in xy
-            im = crop2base(im)  # crop_z=self.im_3d)
+            im = image_utils.crop2base(im)  # crop_z=self.im_3d)
             # Make sure image format is right and squeeze for 2D models
             if self.image_format == 'zyx' and len(im.shape) > 2:
                 im = np.transpose(im, [2, 0, 1])
@@ -185,7 +191,7 @@ class InferenceDataSet(keras.utils.Sequence):
         else:
             im_stack = np.stack(im_stack, axis=self.n_dims - 2)
         # Make sure all images have the same dtype
-        im_stack = im_stack.astype(np.float32)
+        im_stack = im_stack.astype(np.float64)
         return im_stack
 
     def __getitem__(self, index):
@@ -204,12 +210,14 @@ class InferenceDataSet(keras.utils.Sequence):
             input_dir=self.image_dir,
             cur_row=cur_row,
             channel_ids=self.input_channels,
+            depth=self.depth,
             normalize=True,
         )
         target_stack = self._get_image(
             input_dir=self.target_dir,
             cur_row=cur_row,
             channel_ids=self.target_channels,
+            depth=self.target_depth,
             normalize=self.normalize,
         )
         # Add batch dimension

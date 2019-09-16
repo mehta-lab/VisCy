@@ -38,7 +38,6 @@ class TestImageTilerNonUniform(unittest.TestCase):
                         slice_idx=z,
                         time_idx=t,
                         pos_idx=self.pos_idx1,
-                        ext='.png',
                     )
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
@@ -59,7 +58,6 @@ class TestImageTilerNonUniform(unittest.TestCase):
                         slice_idx=z,
                         time_idx=t,
                         pos_idx=self.pos_idx2,
-                        ext='.png',
                     )
                     with warnings.catch_warnings():
                         warnings.simplefilter("ignore")
@@ -148,6 +146,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
                             slice_idx=z,
                             time_idx=t,
                             pos_idx=7,
+                            ext='.npy',
                         )
                         tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row+5,
                                                                col, col+5)
@@ -166,6 +165,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
                         slice_idx=1,
                         time_idx=t,
                         pos_idx=8,
+                        ext='.npy',
                     )
                     tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row + 5,
                                                             col, col + 5)
@@ -221,6 +221,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
                                 slice_idx=z,
                                 time_idx=t,
                                 pos_idx=7,
+                                ext='.npy',
                             )
                             tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row+5,
                                                                     col, col+5)
@@ -240,6 +241,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
                             slice_idx=1,
                             time_idx=t,
                             pos_idx=8,
+                            ext='.npy',
                         )
                         tile_id = '_r{}-{}_c{}-{}_sl0-3'.format(row, row + 5,
                                                                 col, col + 5)
@@ -288,6 +290,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
                     slice_idx=z,
                     time_idx=t,
                     pos_idx=self.pos_idx1,
+                    ext='.npy',
                 )
                 np.save(os.path.join(mask_dir, im_name), cur_im)
                 cur_meta = {'channel_idx': 3,

@@ -59,7 +59,7 @@ def create_save_mask(input_fnames,
     :param bool normalize_im: indicator to normalize image based on z-score or not
     :return dict cur_meta for each mask
     """
-    im_stack = tile_utils.read_imstack(
+    im_stack = image_utils.read_imstack(
         input_fnames,
         flat_field_fname,
         normalize_im=normalize_im,
@@ -165,7 +165,7 @@ def tile_and_save(input_fnames,
     :return: pd.DataFrame from a list of dicts with metadata
     """
     try:
-        input_image = tile_utils.read_imstack(
+        input_image = image_utils.read_imstack(
             input_fnames=input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,
@@ -246,7 +246,7 @@ def crop_at_indices_save(input_fnames,
     """
 
     try:
-        input_image = tile_utils.read_imstack(
+        input_image = image_utils.read_imstack(
             input_fnames=input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,

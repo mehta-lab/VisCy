@@ -3,128 +3,7 @@ import os
 import numpy as np
 import pandas as pd
 
-from micro_dl.utils import normalize as normalize, aux_utils as aux_utils
-from micro_dl.utils.image_utils import read_image, apply_flat_field_correction
-
-
-def read_imstack(input_fnames,
-                 flat_field_fname=None,
-                 hist_clip_limits=None,
-                 is_mask=False,
-                 normalize_im=True):
-    """
-    Read the images in the fnames and assembles a stack.
-    If images are masks, make sure they're boolean by setting >0 to True
-
-    :param tuple input_fnames: tuple of input fnames with full path
-    :param str flat_field_fname: fname of flat field image
-    :param tuple hist_clip_limits: limits for histogram clipping
-    :param bool is_mask: Indicator for if files contain masks
-    :param bool normalize_im: Whether to zscore normalize im stack
-    :return np.array: input stack flat_field correct and z-scored if regular
-        images, booleans if they're masks
-    """
-    im_stack = []
-    for idx, fname in enumerate(input_fnames):
-        im = read_image(fname)
-        if flat_field_fname is not None:
-            # multiple flat field images are passed in case of mask generation
-            if isinstance(flat_field_fname, (list, tuple)):
-                flat_field_image = np.load(flat_field_fname[idx])
-            else:
-                flat_field_image = np.load(flat_field_fname)
-            if not is_mask and not normalize_im:
-                im = apply_flat_field_correction(
-                    im,
-                    flat_field_image=flat_field_image,
-                )
-        im_stack.append(im)
-
-    input_image = np.stack(im_stack, axis=-1)
-    # remove singular dimension for 3D images
-    if len(input_image.shape) > 3:
-        input_image = np.squeeze(input_image)
-    if not is_mask:
-        if hist_clip_limits is not None:
-            input_image = normalize.hist_clipping(
-                input_image,
-                hist_clip_limits[0],
-                hist_clip_limits[1]
-            )
-        if normalize_im:
-            input_image = normalize.zscore(input_image)
-    else:
-        if input_image.dtype != bool:
-            input_image = input_image > 0
-    return input_image
-
-
-def preprocess_imstack(frames_metadata,
-                       input_dir,
-                       depth,
-                       time_idx,
-                       channel_idx,
-                       slice_idx,
-                       pos_idx,
-                       flat_field_im=None,
-                       hist_clip_limits=None,
-                       normalize_im=False):
-    """
-    Preprocess image given by indices: flatfield correction, histogram
-    clipping and z-score normalization is performed.
-
-    :param pd.DataFrame frames_metadata: DF with meta info for all images
-    :param str input_dir: dir containing input images
-    :param int depth: num of slices in stack if 2.5D or depth for 3D
-    :param int time_idx: Time index
-    :param int channel_idx: Channel index
-    :param int slice_idx: Slice (z) index
-    :param int pos_idx: Position (FOV) index
-    :param np.array flat_field_im: Flat field image for channel
-    :param list hist_clip_limits: Limits for histogram clipping (size 2)
-    :param bool normalize_im: indicator to normalize image based on z-score or not
-    :return np.array im: 3D preprocessed image
-    """
-    margin = 0 if depth == 1 else depth // 2
-    im_stack = []
-    for z in range(slice_idx - margin, slice_idx + margin + 1):
-        meta_idx = aux_utils.get_meta_idx(
-            frames_metadata,
-            time_idx,
-            channel_idx,
-            z,
-            pos_idx,
-        )
-        file_path = os.path.join(
-            input_dir,
-            frames_metadata.loc[meta_idx, "file_name"],
-        )
-        im = read_image(file_path)
-        # Only flatfield correct images that will be normalized
-        if flat_field_im is not None and not normalize_im:
-            im = apply_flat_field_correction(
-                im,
-                flat_field_image=flat_field_im,
-            )
-        im_stack.append(im)
-
-    if len(im.shape) == 3:
-        # each channel is tiled independently and stacked later in dataset cls
-        im_stack = im
-        assert depth == 1, 'more than one 3D volume gets read'
-    else:
-        # Stack images in same channel
-        im_stack = np.stack(im_stack, axis=2)
-    # normalize
-    if hist_clip_limits is not None:
-        im_stack = normalize.hist_clipping(
-            im_stack,
-            hist_clip_limits[0],
-            hist_clip_limits[1],
-        )
-    if normalize_im:
-        im_stack = normalize.zscore(im_stack)
-    return im_stack
+import micro_dl.utils.aux_utils as aux_utils
 
 
 def tile_image(input_image,
@@ -350,12 +229,15 @@ def write_tile(tile, save_dict, img_id):
     :return str op_fname: filename used for saving the tile with entire path
     """
 
-    file_name = aux_utils.get_im_name(time_idx=save_dict['time_idx'],
-                                      channel_idx=save_dict['channel_idx'],
-                                      slice_idx=save_dict['slice_idx'],
-                                      pos_idx=save_dict['pos_idx'],
-                                      int2str_len=save_dict['int2str_len'],
-                                      extra_field=img_id)
+    file_name = aux_utils.get_im_name(
+        time_idx=save_dict['time_idx'],
+        channel_idx=save_dict['channel_idx'],
+        slice_idx=save_dict['slice_idx'],
+        pos_idx=save_dict['pos_idx'],
+        int2str_len=save_dict['int2str_len'],
+        extra_field=img_id,
+        ext='.npy',
+    )
     op_fname = os.path.join(save_dict['save_dir'], file_name)
     if save_dict['image_format'] == 'zyx' and len(tile.shape) > 2:
         tile = np.transpose(tile, (2, 0, 1))

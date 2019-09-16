@@ -36,6 +36,42 @@ def test_ssim_metric():
     nose.tools.assert_less(ssim, 1)
 
 
+def test_accuracy_metric():
+    target = np.zeros((5, 10, 2))
+    target[:, :5, 0] = 255.
+    pred = np.zeros_like(target)
+    pred[:, :, 0] = 255.
+    acc = metrics.accuracy_metric(target=target, prediction=pred)
+    nose.tools.assert_equal(acc, 0.75)
+
+
+def test_dice_metric():
+    target = np.zeros((5, 10, 2)) + 255.
+    pred = np.zeros_like(target)
+    pred[:, :, 0] = 255.
+    dice = metrics.dice_metric(target=target, prediction=pred)
+    nose.tools.assert_equal(dice, 0.5)
+
+
+def test_binarize_array():
+    im = np.zeros((4, 3, 2))
+    im[..., 1] = 15.
+    im_bin = metrics.binarize_array(im)
+    nose.tools.assert_equal(len(im_bin), 24)
+    nose.tools.assert_equal(im_bin.max(), 1)
+
+
+def test_mask_to_bool():
+    metrics_list = ['acc', 'dice']
+    mask = np.zeros(im_shape)
+    mask[5:10, 5:10, :] = 1.
+    metrics_inst = metrics.MetricsEstimator(
+        metrics_list=metrics_list,
+    )
+    mask = metrics_inst.mask_to_bool(mask)
+    nose.tools.assert_equal(mask.dtype, 'bool')
+
+
 def test_xyz_metrics():
     metrics_list = ['ssim', 'corr', 'r2', 'mse', 'mae']
     pred_name = 'test_pred'
@@ -95,6 +131,37 @@ def test_xy_metrics_mask():
     nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 6))
     expected_list = [
         'corr', 'r2', 'vol_frac', 'corr_masked', 'r2_masked', 'pred_name',
+    ]
+    nose.tools.assert_list_equal(list(metrics_xy), expected_list)
+
+
+@nose.tools.raises(AssertionError)
+def test_xy_metrics_mask_and_segmentation():
+    metrics_list = ['corr', 'r2', 'dice']
+    metrics.MetricsEstimator(
+        metrics_list=metrics_list,
+        masked_metrics=True,
+    )
+
+
+def test_xy_metrics_segmentation():
+    metrics_list = ['acc', 'dice']
+    pred_name = 'test_pred'
+    mask = np.zeros_like(target_im)
+    mask[5:10, 5:10, :] = 1.
+
+    metrics_inst = metrics.MetricsEstimator(
+        metrics_list=metrics_list,
+    )
+    metrics_inst.estimate_xy_metrics(
+        target=target_im,
+        prediction=mask,
+        pred_name=pred_name,
+    )
+    metrics_xy = metrics_inst.get_metrics_xy()
+    nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 3))
+    expected_list = [
+        'acc', 'dice', 'pred_name',
     ]
     nose.tools.assert_list_equal(list(metrics_xy), expected_list)
 

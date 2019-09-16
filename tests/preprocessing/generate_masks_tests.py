@@ -53,7 +53,6 @@ class TestMaskProcessor(unittest.TestCase):
                 channel_idx=1,
                 slice_idx=z,
                 pos_idx=self.pos_ids,
-                ext='.png',
             )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -71,7 +70,6 @@ class TestMaskProcessor(unittest.TestCase):
                 channel_idx=2,
                 slice_idx=z,
                 pos_idx=self.pos_ids,
-                ext='.png',
             )
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
@@ -172,7 +170,6 @@ class TestMaskProcessor(unittest.TestCase):
                 channel_idx=channel_ids,
                 slice_idx=z,
                 pos_idx=pos_ids[0],
-                ext='.png',
             )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             self.sph_object[:, :, z].astype('uint8'))
@@ -186,7 +183,6 @@ class TestMaskProcessor(unittest.TestCase):
                 channel_idx=channel_ids,
                 slice_idx=z,
                 pos_idx=pos_ids[1],
-                ext='.png',
             )
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             rec[:, :, z].astype('uint8'))

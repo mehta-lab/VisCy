@@ -8,7 +8,7 @@ import yaml
 
 import micro_dl.inference.evaluation_metrics as metrics
 import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.tile_utils as tile_utils
+import micro_dl.utils.image_utils as image_utils
 
 
 def parse_args():
@@ -187,10 +187,10 @@ def compute_metrics(model_dir,
                 pred_fname = os.path.join(pred_dir, pred_fname)
                 pred_fnames.append(pred_fname)
 
-            target_stack = tile_utils.read_imstack(
+            target_stack = image_utils.read_imstack(
                 input_fnames=tuple(target_fnames),
             )
-            pred_stack = tile_utils.read_imstack(
+            pred_stack = image_utils.read_imstack(
                 input_fnames=tuple(pred_fnames),
                 normalize_im=False,
             )

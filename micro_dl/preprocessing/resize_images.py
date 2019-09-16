@@ -164,11 +164,14 @@ class ImageResizer:
                         if end_idx > self.slice_ids[-1]:
                             end_idx = self.slice_ids[-1] + 1
                             start_idx = end_idx - num_slices_subvolume
-                        op_fname = aux_utils.get_im_name(time_idx,
-                                                         channel_idx,
-                                                         start_idx,
-                                                         pos_idx,
-                                                         extra_field=sc_str)
+                        op_fname = aux_utils.get_im_name(
+                            time_idx,
+                            channel_idx,
+                            start_idx,
+                            pos_idx,
+                            extra_field=sc_str,
+                            ext='.npy',
+                        )
                         write_fpath = os.path.join(self.resize_dir, op_fname)
                         mp_args.append((time_idx,
                                         pos_idx,

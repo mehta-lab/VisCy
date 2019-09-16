@@ -3,8 +3,9 @@ import os
 import pandas as pd
 
 import micro_dl.utils.tile_utils as tile_utils
-from micro_dl.utils import aux_utils as aux_utils
-from micro_dl.utils.mp_utils import mp_tile_save, mp_crop_save
+import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.image_utils as image_utils
+import micro_dl.utils.mp_utils as mp_utils
 
 
 class ImageTilerUniform:
@@ -435,7 +436,7 @@ class ImageTilerUniform:
                         if tile_indices is None:
                             # tile and save first image
                             # get meta data and tile_indices
-                            im = tile_utils.preprocess_imstack(
+                            im = image_utils.preprocess_imstack(
                                 frames_metadata=self.frames_metadata,
                                 input_dir=self.input_dir,
                                 depth=self.channel_depth[channel_idx],
@@ -460,7 +461,7 @@ class ImageTilerUniform:
                                     tile_size=self.tile_size,
                                     step_size=self.step_size,
                                     return_index=True,
-                                    save_dict=save_dict
+                                    save_dict=save_dict,
                                 )
                         else:
                             cur_args = self.get_crop_tile_args(
@@ -473,7 +474,7 @@ class ImageTilerUniform:
                                 normalize_im=self.normalize_channels[list_idx],
                             )
                             fn_args.append(cur_args)
-        tiled_meta_df_list = mp_crop_save(
+        tiled_meta_df_list = mp_utils.mp_crop_save(
             fn_args,
             workers=self.num_workers,
         )
@@ -547,7 +548,7 @@ class ImageTilerUniform:
                         mask_fn_args.append(cur_args)
 
             # tile_image uses min_fraction assuming input_image is a bool
-            mask_meta_df_list = mp_tile_save(
+            mask_meta_df_list = mp_utils.mp_tile_save(
                 mask_fn_args,
                 workers=self.num_workers,
             )
@@ -590,7 +591,7 @@ class ImageTilerUniform:
                                 normalize_im=self.normalize_channels[i],
                             )
                             fn_args.append(cur_args)
-        tiled_meta_df_list = mp_crop_save(
+        tiled_meta_df_list = mp_utils.mp_crop_save(
             fn_args,
             workers=self.num_workers,
         )

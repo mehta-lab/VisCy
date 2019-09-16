@@ -3,6 +3,7 @@ import functools
 import numpy as np
 import pandas as pd
 from skimage.measure import compare_ssim as ssim
+import sklearn.metrics
 from scipy.stats import pearsonr
 
 
@@ -44,7 +45,6 @@ def mse_metric(target, prediction):
     :param np.array prediction: model prediction
     :return float mean squared error
     """
-
     return np.mean((target - prediction) ** 2)
 
 
@@ -56,7 +56,6 @@ def mae_metric(target, prediction):
     :param np.array prediction: model prediction
     :return float mean absolute error
     """
-
     return np.mean(np.abs(target - prediction))
 
 
@@ -68,7 +67,6 @@ def r2_metric(target, prediction):
     :param np.array prediction: model prediction
     :return float coefficient of determination
     """
-
     ss_res = np.sum((target - prediction) ** 2)
     ss_tot = np.sum((target - np.mean(target)) ** 2)
     cur_r2 = 1 - (ss_res / (ss_tot + 1e-8))
@@ -83,11 +81,11 @@ def corr_metric(target, prediction):
     :param np.array prediction: model prediction
     :return float Pearson correlation
     """
-
     cur_corr = pearsonr(target.flatten(), prediction.flatten())[0]
     return cur_corr
 
 
+@mask_decorator
 def ssim_metric(target, prediction, mask=None):
     """SSIM of target and prediction
 
@@ -95,17 +93,59 @@ def ssim_metric(target, prediction, mask=None):
     :param np.array prediction: model prediction
     :return float/list ssim and ssim_masked
     """
-
     if mask is None:
-        cur_ssim = ssim(target, prediction,
-                        data_range=target.max() - target.min())
+        cur_ssim = ssim(
+            target,
+            prediction,
+            data_range=target.max() - target.min(),
+        )
         return cur_ssim
     else:
-        cur_ssim, cur_ssim_img = ssim(target, prediction,
-                                      data_range=target.max() - target.min(),
-                                      full=True)
+        cur_ssim, cur_ssim_img = ssim(
+            target,
+            prediction,
+            data_range=target.max() - target.min(),
+            full=True,
+        )
         cur_ssim_masked = np.mean(cur_ssim_img[mask])
         return [cur_ssim, cur_ssim_masked]
+
+
+def accuracy_metric(target, prediction):
+    """Accuracy of binary target and prediction.
+    Not using mask decorator for binary data evaluation.
+
+    :param np.array target: ground truth array
+    :param np.array prediction: model prediction
+    :return float Accuracy: Accuracy for binarized data
+    """
+    target_bin = binarize_array(target)
+    pred_bin = binarize_array(prediction)
+    return sklearn.metrics.accuracy_score(target_bin, pred_bin)
+
+
+def dice_metric(target, prediction):
+    """Dice similarity coefficient (F1 score) of binary target and prediction.
+    Reports global metric.
+    Not using mask decorator for binary data evaluation.
+
+    :param np.array target: ground truth array
+    :param np.array prediction: model prediction
+    :return float dice: Dice for binarized data
+    """
+    target_bin = binarize_array(target)
+    pred_bin = binarize_array(prediction)
+    return sklearn.metrics.f1_score(target_bin, pred_bin, average='micro')
+
+
+def binarize_array(im):
+    """Binarize image
+
+    :param np.array im: Prediction or target array
+    :return np.array im_bin: Flattened and binarized array
+    """
+    im_bin = (im.flatten() / im.max()) > .5
+    return im_bin.astype(np.uint8)
 
 
 class MetricsEstimator:
@@ -122,18 +162,19 @@ class MetricsEstimator:
 
         :param list metrics_list: list of strings with name of metrics
             Currently avaiable metrics:
-            'ssim' - structual similarity index
-            'corr' = correlation
-            'r2' - R squared (coefficient of determination
-            'mse' - Mean squared error
-            'mae' - Mean absolute error
-            TODO: Add accuracy and Dice
+            'ssim' - Structual similarity index
+            'corr' - Correlation
+            'r2' -   R squared (coefficient of determination
+            'mse' -  Mean squared error
+            'mae' -  Mean absolute error
+            'acc' -  Accuracy (for binary data, no masks)
+            'dice' - Dice similarity coefficient (for binary data, no masks)
         :param bool masked_metrics: get the metrics for the masked region
         """
 
-        available_metrics = {'ssim', 'corr', 'r2', 'mse', 'mae'}
+        available_metrics = {'ssim', 'corr', 'r2', 'mse', 'mae', 'acc', 'dice'}
         assert set(metrics_list).issubset(available_metrics), \
-            'only ssim, r2, correlation, mse and mae are currently supported'
+            'only ssim, r2, corr, mse, mae, acc, dice are currently supported'
         self.metrics_list = metrics_list
         self.pd_col_names = metrics_list.copy()
         self.masked_metrics = masked_metrics
@@ -141,6 +182,10 @@ class MetricsEstimator:
         self.metrics_xy = None
         self.metrics_xz = None
         self.metrics_yz = None
+        # No masking for evaluating segmentations (which are masks)
+        if 'acc' in metrics_list or 'dice' in metrics_list:
+            assert not self.masked_metrics, \
+                "Don't use masked metrics if evaluating segmentation"
 
         if self.masked_metrics:
             self.pd_col_names.append('vol_frac')
@@ -155,6 +200,8 @@ class MetricsEstimator:
             'r2_metric': r2_metric,
             'corr_metric': corr_metric,
             'ssim_metric': ssim_metric,
+            'acc_metric': accuracy_metric,
+            'dice_metric': dice_metric,
         }
 
     def get_metrics_xyz(self):
@@ -172,6 +219,20 @@ class MetricsEstimator:
     def get_metrics_yz(self):
         """Return yz metrics"""
         return self.metrics_yz
+
+    @staticmethod
+    def mask_to_bool(mask):
+        """
+        If mask exists and is not boolean, convert.
+        Assume mask values == 0 is background
+
+        :param np.array mask: Mask
+        :return np.array mask: Mask with boolean dtype
+        """
+        if mask is not None:
+            if mask.dtype != 'bool':
+                mask = mask > 0
+        return mask
 
     @staticmethod
     def assert_input(target,
@@ -247,6 +308,7 @@ class MetricsEstimator:
         :param str pred_name: filename used for saving model prediction
         :param np.array mask: binary mask with foreground / background
         """
+        mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
         self.metrics_xyz = pd.DataFrame(columns=self.pd_col_names)
         metrics_row = self.compute_metrics_row(
@@ -275,6 +337,7 @@ class MetricsEstimator:
         :param str/list pred_name: filename(s) used for saving model prediction
         :param np.array mask: binary mask with foreground / background
         """
+        mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
         if len(target.shape) == 2:
             target = target[..., np.newaxis]
@@ -310,6 +373,7 @@ class MetricsEstimator:
         :param str pred_name: filename used for saving model prediction
         :param np.array mask: binary mask with foreground / background
         """
+        mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
         assert len(target.shape) == 3, 'Dataset is assumed to be 3D'
         self.metrics_xz = pd.DataFrame(columns=self.pd_col_names)
@@ -343,6 +407,7 @@ class MetricsEstimator:
         :param str pred_name: filename used for saving model prediction
         :param np.array mask: binary mask with foreground / background
         """
+        mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
         assert len(target.shape) == 3, 'Dataset is assumed to be 3D'
         self.metrics_yz = pd.DataFrame(columns=self.pd_col_names)

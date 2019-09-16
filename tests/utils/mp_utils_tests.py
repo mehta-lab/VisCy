@@ -124,11 +124,12 @@ class TestMpUtilsOtsu(TestMpUtilsBaseClass):
                 mask_type='otsu',
                 mask_ext='.png'
             )
-            fname = aux_utils.get_im_name(time_idx=self.time_ids,
-                                          channel_idx=3,
-                                          slice_idx=sl_idx,
-                                          pos_idx=self.pos_ids,
-                                          ext='.png')
+            fname = aux_utils.get_im_name(
+                time_idx=self.time_ids,
+                channel_idx=3,
+                slice_idx=sl_idx,
+                pos_idx=self.pos_ids,
+            )
             exp_meta = {'channel_idx': 3,
                         'slice_idx': sl_idx,
                         'time_idx': 0,
@@ -224,11 +225,12 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
                 mask_type='borders_weight_loss_map',
                 mask_ext='.png'
             )
-            fname = aux_utils.get_im_name(time_idx=self.time_ids,
-                                          channel_idx=2,
-                                          slice_idx=sl_idx,
-                                          pos_idx=self.pos_ids,
-                                          ext='.png')
+            fname = aux_utils.get_im_name(
+                time_idx=self.time_ids,
+                channel_idx=2,
+                slice_idx=sl_idx,
+                pos_idx=self.pos_ids,
+            )
             exp_meta = {'channel_idx': 2,
                         'slice_idx': sl_idx,
                         'time_idx': 0,

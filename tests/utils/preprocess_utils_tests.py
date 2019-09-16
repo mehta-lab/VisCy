@@ -34,7 +34,6 @@ class TestPreprocessUtils(unittest.TestCase):
                     slice_idx=self.slice_idx,
                     time_idx=self.time_idx,
                     pos_idx=p,
-                    ext='.png',
                 )
                 input_meta = input_meta.append(
                     aux_utils.parse_idx_from_name(im_name),
@@ -52,7 +51,6 @@ class TestPreprocessUtils(unittest.TestCase):
                 slice_idx=self.slice_idx,
                 time_idx=self.time_idx,
                 pos_idx=p,
-                ext='.png',
             )
             # Indexing can be different
             mask_name = 'mask_{}.png'.format(p + 1)

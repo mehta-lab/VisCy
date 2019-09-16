@@ -20,7 +20,6 @@ for s in range(3):
             slice_idx=s,
             time_idx=time_idx,
             pos_idx=p,
-            ext='.png',
         )
         meta_df = meta_df.append(
             aux_utils.parse_idx_from_name(im_temp),
@@ -87,7 +86,6 @@ def test_get_im_name():
         slice_idx=3,
         pos_idx=4,
         extra_field='hej',
-        ext='.png',
         int2str_len=1,
     )
     nose.tools.assert_equal(im_name, 'im_c2_z3_t1_p4_hej.png')
@@ -95,7 +93,7 @@ def test_get_im_name():
 
 def test_get_im_name_default():
     im_name = aux_utils.get_im_name()
-    nose.tools.assert_equal(im_name, 'im.npy')
+    nose.tools.assert_equal(im_name, 'im.png')
 
 
 def test_sort_meta_by_channel():

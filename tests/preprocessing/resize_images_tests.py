@@ -35,7 +35,6 @@ class TestResizeImages(unittest.TestCase):
                     slice_idx=self.slice_idx,
                     time_idx=self.time_idx,
                     pos_idx=p,
-                    ext='.png',
                 )
                 cv2.imwrite(os.path.join(self.temp_path, im_name),
                             self.im + c * 100)
@@ -127,7 +126,6 @@ class TestResizeImages(unittest.TestCase):
                     slice_idx=s,
                     time_idx=self.time_idx,
                     pos_idx=self.pos_idx,
-                    ext='.png',
                 )
                 cv2.imwrite(os.path.join(self.temp_path, im_name),
                             self.im + c * 100)

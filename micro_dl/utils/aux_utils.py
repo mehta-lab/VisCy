@@ -97,7 +97,6 @@ def get_meta_idx(frames_metadata,
     :param int pos_idx: Position (FOV) index
     :return: int pos_idx: Row position matching indices above
     """
-
     frame_idx = frames_metadata.index[
         (frames_metadata['channel_idx'] == channel_idx) &
         (frames_metadata['time_idx'] == time_idx) &
@@ -111,7 +110,7 @@ def get_im_name(time_idx=None,
                 slice_idx=None,
                 pos_idx=None,
                 extra_field=None,
-                ext='.npy',
+                ext='.png',
                 int2str_len=3):
     """
     Create an image name given parameters and extension
@@ -121,7 +120,7 @@ def get_im_name(time_idx=None,
     :param int slice_idx: Slice (z) index
     :param int pos_idx: Position (FOV) index
     :param str extra_field: Any extra string you want to include in the name
-    :param str ext: Extension, e.g. '.png'
+    :param str ext: Extension, e.g. '.png' or '.npy'
     :param int int2str_len: Length of string of the converted integers
     :return st im_name: Image file name
     """

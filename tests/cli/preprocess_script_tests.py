@@ -39,7 +39,6 @@ class TestPreprocessScript(unittest.TestCase):
                         slice_idx=z,
                         time_idx=self.time_idx,
                         pos_idx=p,
-                        ext='.png',
                     )
                     cv2.imwrite(
                         os.path.join(self.image_dir, im_name),
@@ -70,7 +69,6 @@ class TestPreprocessScript(unittest.TestCase):
                     slice_idx=z,
                     time_idx=self.time_idx,
                     pos_idx=p,
-                    ext='.png',
                 )
                 cv2.imwrite(
                     os.path.join(self.input_mask_dir, im_name),
@@ -167,7 +165,6 @@ class TestPreprocessScript(unittest.TestCase):
                     slice_idx=z,
                     time_idx=self.time_idx,
                     pos_idx=p,
-                    ext='.png',
                 )
                 im = cv2.imread(
                     os.path.join(mask_dir, im_name),
@@ -354,8 +351,16 @@ class TestPreprocessScript(unittest.TestCase):
     def test_pre_process_resize3d(self):
         cur_config = self.pp_config
         cur_config['resize'] = {
-            'scale_factor': [2, 1, 1],
+            'scale_factor': [1, 1.5, 1],
             'resize_3d': True,
+        }
+        cur_config['tile'] = {
+            'tile_size': [10, 10],
+            'step_size': [10, 10],
+            'depths': [1, 1, 1],
+            'mask_depth': 1,
+            'image_format': 'zyx',
+            'normalize_channels': [True, True, True],
         }
         out_config, runtime = pp.pre_process(cur_config, self.base_config)
 
@@ -364,15 +369,34 @@ class TestPreprocessScript(unittest.TestCase):
             out_config['resize']['resize_dir'],
             os.path.join(self.output_dir, 'resized_images')
         )
+        # Load a resized image and assert shape
+        im_path = os.path.join(
+            out_config['resize']['resize_dir'],
+            'im_c000_z000_t000_p007_1.0-1.5-1.0.npy',
+        )
+        im = np.load(im_path)
+        # shape should be 30, 20*1.5, z=6)
+        self.assertTupleEqual(im.shape, (30, 30, 6))
+        self.assertTrue(im.dtype == np.float64)
+
         self.assertEqual(
             out_config['masks']['mask_dir'],
             os.path.join(self.output_dir, 'mask_channels_3')
         )
         self.assertEqual(out_config['masks']['mask_channel'], 4)
+
         self.assertEqual(
             out_config['tile']['tile_dir'],
             os.path.join(self.output_dir, 'tiles_10-10_step_10-10'),
         )
+        im_path = os.path.join(
+            out_config['tile']['tile_dir'],
+            'im_c000_z000_t000_p008_r0-10_c0-10_sl0-6.npy'
+        )
+        # A tile channels first should have shape (6, 10, 10)
+        tile = np.load(im_path)
+        self.assertTupleEqual(tile.shape, (6, 10, 10))
+        self.assertTrue(tile.dtype == np.float64)
 
     def test_pre_process_nonisotropic(self):
         base_config = self.base_config

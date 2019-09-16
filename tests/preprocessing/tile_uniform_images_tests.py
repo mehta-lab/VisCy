@@ -1,11 +1,10 @@
+import cv2
 import nose.tools
 import numpy as np
 import os
 import pandas as pd
-import skimage.io as sk_im_io
 from testfixtures import TempDirectory
 import unittest
-import warnings
 
 import micro_dl.preprocessing.tile_uniform_images as tile_images
 import micro_dl.utils.aux_utils as aux_utils
@@ -38,14 +37,11 @@ class TestImageTilerUniform(unittest.TestCase):
                 slice_idx=z,
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx1,
-                ext='.png',
             )
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                sk_im_io.imsave(
-                    os.path.join(self.temp_path, im_name),
-                    self.im,
-                )
+            cv2.imwrite(
+                os.path.join(self.temp_path, im_name),
+                self.im,
+            )
             frames_meta = frames_meta.append(
                 aux_utils.parse_idx_from_name(im_name),
                 ignore_index=True,
@@ -57,14 +53,11 @@ class TestImageTilerUniform(unittest.TestCase):
                 slice_idx=z,
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx2,
-                ext='.png',
             )
-            with warnings.catch_warnings():
-                warnings.simplefilter("ignore")
-                sk_im_io.imsave(
-                    os.path.join(self.temp_path, im_name),
-                    self.im2,
-                )
+            cv2.imwrite(
+                os.path.join(self.temp_path, im_name),
+                self.im2,
+            )
             frames_meta = frames_meta.append(
                 aux_utils.parse_idx_from_name(im_name),
                 ignore_index=True,
@@ -129,6 +122,7 @@ class TestImageTilerUniform(unittest.TestCase):
                 slice_idx=z + 15,
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx1,
+                ext='.npy',
             )
             np.save(os.path.join(mask_dir, im_name), cur_im)
             cur_meta = {'channel_idx': 3,
@@ -258,6 +252,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     slice_idx=z,
                     pos_idx=self.pos_idx1,
                     extra_field=cur_img_id,
+                    ext='.npy',
                 )
                 pos1_meta = {'channel_idx': self.channel_idx,
                              'slice_idx': z,
@@ -273,6 +268,7 @@ class TestImageTilerUniform(unittest.TestCase):
                     slice_idx=z,
                     pos_idx=self.pos_idx2,
                     extra_field=cur_img_id,
+                    ext='.npy',
                 )
                 pos2_meta = {'channel_idx': self.channel_idx,
                              'slice_idx': z,
