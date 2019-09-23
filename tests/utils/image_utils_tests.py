@@ -86,6 +86,34 @@ def test_rescale_volume_vrong_dims():
     image_utils.rescale_nd_image(nd_image, [1.2, 1.8])
 
 
+def test_center_crop_to_shape():
+    im = np.zeros((5, 10, 15))
+    output_shape = [5, 6, 9]
+    im_center = image_utils.center_crop_to_shape(im, output_shape)
+    nose.tools.assert_tuple_equal(im_center.shape, (5, 6, 9))
+
+
+def test_center_crop_to_shape_2d():
+    im = np.zeros((2, 5, 10))
+    output_shape = [3, 7]
+    im_center = image_utils.center_crop_to_shape(im, output_shape)
+    nose.tools.assert_tuple_equal(im_center.shape, (2, 3, 7))
+
+
+def test_center_crop_to_shape_2d_xyx():
+    im = np.zeros((5, 10, 2))
+    output_shape = [3, 7]
+    im_center = image_utils.center_crop_to_shape(im, output_shape, 'xyz')
+    nose.tools.assert_tuple_equal(im_center.shape, (3, 7, 2))
+
+
+@nose.tools.raises(AssertionError)
+def test_center_crop_to_shape_2d_too_big():
+    im = np.zeros((2, 5, 10))
+    output_shape = [7, 7]
+    image_utils.center_crop_to_shape(im, output_shape)
+
+
 class TestImageUtils(unittest.TestCase):
 
     def setUp(self):
@@ -155,6 +183,18 @@ class TestImageUtils(unittest.TestCase):
         TempDirectory.cleanup_all()
         nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
 
+    def test_read_image(self):
+        file_path = os.path.join(
+            self.temp_path,
+            self.frames_meta['file_name'][0],
+        )
+        im = image_utils.read_image(file_path)
+        np.testing.assert_array_equal(im, self.sph[..., 0])
+
+    def test_read_image_npy(self):
+        im = image_utils.read_image(self.sph_fname)
+        np.testing.assert_array_equal(im, self.sph)
+
     def test_read_imstack(self):
         """Test read_imstack"""
 
@@ -177,7 +217,6 @@ class TestImageUtils(unittest.TestCase):
 
     def test_preprocess_imstack(self):
         """Test preprocess_imstack"""
-        print(self.frames_meta)
         im_stack = image_utils.preprocess_imstack(
             self.frames_meta,
             self.temp_path,

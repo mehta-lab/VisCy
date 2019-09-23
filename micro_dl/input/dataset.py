@@ -194,7 +194,7 @@ class BaseDataSet(keras.utils.Sequence):
         # Stack images channels first
         image_volume = np.stack(image_volume)
         if image_volume.dtype == bool:
-            image_volume = image_volume.astype(np.float64)
+            image_volume = image_volume.astype(np.float32)
         elif normalize:
             image_volume = (image_volume - np.mean(image_volume)) / \
                            np.std(image_volume)

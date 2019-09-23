@@ -161,7 +161,7 @@ class MetricsEstimator:
         generate one global 3D metric.
 
         :param list metrics_list: list of strings with name of metrics
-            Currently avaiable metrics:
+            Currently available metrics:
             'ssim' - Structual similarity index
             'corr' - Correlation
             'r2' -   R squared (coefficient of determination

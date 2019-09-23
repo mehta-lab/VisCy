@@ -183,8 +183,8 @@ class TestInferenceDataSet(unittest.TestCase):
         # input stack should be normalized, not target
         self.assertEqual(input_stack.max(), 0.0)
         self.assertEqual(target_stack.max(), 1)
-        self.assertEqual(input_stack.dtype, np.float64)
-        self.assertEqual(target_stack.dtype, np.float64)
+        self.assertEqual(input_stack.dtype, np.float32)
+        self.assertEqual(target_stack.dtype, np.float32)
 
     def test__getitem__regression(self):
         dataset_config = {
@@ -207,8 +207,8 @@ class TestInferenceDataSet(unittest.TestCase):
         # input stack should be normalized, not target
         self.assertEqual(input_stack.max(), 0.0)
         self.assertEqual(target_stack.max(), 0.0)
-        self.assertEqual(input_stack.dtype, np.float64)
-        self.assertEqual(target_stack.dtype, np.float64)
+        self.assertEqual(input_stack.dtype, np.float32)
+        self.assertEqual(target_stack.dtype, np.float32)
 
 
 class TestInferenceDataSet2p5D(unittest.TestCase):
@@ -369,8 +369,8 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         # input stack should be normalized, not target
         self.assertEqual(input_stack.max(), 0.0)
         self.assertEqual(target_stack.max(), 1)
-        self.assertEqual(input_stack.dtype, np.float64)
-        self.assertEqual(target_stack.dtype, np.float64)
+        self.assertEqual(input_stack.dtype, np.float32)
+        self.assertEqual(target_stack.dtype, np.float32)
 
     def test__getitem__regression(self):
         dataset_config = {
@@ -393,5 +393,5 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         # input stack should be normalized, not target
         self.assertEqual(input_stack.max(), 0.0)
         self.assertEqual(target_stack.max(), 0.0)
-        self.assertEqual(input_stack.dtype, np.float64)
-        self.assertEqual(target_stack.dtype, np.float64)
+        self.assertEqual(input_stack.dtype, np.float32)
+        self.assertEqual(target_stack.dtype, np.float32)

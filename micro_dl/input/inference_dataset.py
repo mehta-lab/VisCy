@@ -191,7 +191,7 @@ class InferenceDataSet(keras.utils.Sequence):
         else:
             im_stack = np.stack(im_stack, axis=self.n_dims - 2)
         # Make sure all images have the same dtype
-        im_stack = im_stack.astype(np.float64)
+        im_stack = im_stack.astype(np.float32)
         return im_stack
 
     def __getitem__(self, index):

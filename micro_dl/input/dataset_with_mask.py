@@ -76,7 +76,7 @@ class DataSetWithMask(BaseDataSet):
             # If target is boolean (segmentation masks), convert to float
 
             if cur_target.dtype == bool:
-                cur_target = cur_target.astype(np.float64)
+                cur_target = cur_target.astype(np.float32)
             if self.normalize:
                 cur_input = (cur_input - np.mean(cur_input)) /\
                              np.std(cur_input)

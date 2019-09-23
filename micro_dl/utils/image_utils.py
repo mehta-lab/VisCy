@@ -180,6 +180,45 @@ def fit_polynomial_surface_2D(sample_coords,
     return poly_surface
 
 
+def center_crop_to_shape(input_image, output_shape, image_format='zyx'):
+    """Center crop the image to a given shape
+
+    :param np.array input_image: input image to be cropped
+    :param list output_shape: desired crop shape
+    :param str image_format: Image format; zyx or xyz
+    :return np.array center_block: Center of input image with output shape
+    """
+
+    input_shape = np.array(input_image.shape)
+    singleton_dims = np.where(input_shape == 1)[0]
+    input_image = np.squeeze(input_image)
+    modified_shape = output_shape.copy()
+    if len(input_image.shape) == len(output_shape) + 1:
+        # This means we're dealing with multichannel 2D
+        if image_format == 'zyx':
+            modified_shape.insert(0, input_image.shape[0])
+        else:
+            modified_shape.append(input_image.shape[-1])
+    assert np.all(np.array(modified_shape) <= np.array(input_image.shape)), \
+        'output shape is larger than image shape, use resize or rescale'
+
+    start_0 = (input_image.shape[0] - modified_shape[0]) // 2
+    start_1 = (input_image.shape[1] - modified_shape[1]) // 2
+    if len(input_image.shape) > 2:
+        start_2 = (input_image.shape[2] - modified_shape[2]) // 2
+        center_block = input_image[
+                       start_0: start_0 + modified_shape[0],
+                       start_1: start_1 + modified_shape[1],
+                       start_2: start_2 + modified_shape[2]]
+    else:
+        center_block = input_image[
+                       start_0: start_0 + modified_shape[0],
+                       start_1: start_1 + modified_shape[1]]
+    for idx in singleton_dims:
+        center_block = np.expand_dims(center_block, axis=idx)
+    return center_block
+
+
 def read_image(file_path):
     """
     Read 2D grayscale image from file.
@@ -320,26 +359,3 @@ def preprocess_imstack(frames_metadata,
         im_stack = normalize.zscore(im_stack)
     return im_stack
 
-
-def center_crop_to_shape(input_image, output_shape):
-    """Center crop the image to a given shape
-
-    :param np.array input_image: input image to be cropped
-    :param list output_shape: desired crop shape
-    """
-
-    input_shape = np.array(input_image.shape)
-    singleton_dims = np.where(input_shape == 1)[0]
-    input_image = np.squeeze(input_image)
-    assert np.all(np.array(output_shape) <= np.array(input_image.shape)), \
-        'output shape is larger than image shape, use resize or rescale'
-
-    start_0 = (input_image.shape[0] - output_shape[0]) // 2
-    start_1 = (input_image.shape[1] - output_shape[1]) // 2
-    start_2 = (input_image.shape[2] - output_shape[2]) // 2
-    center_block = input_image[start_0: start_0 + output_shape[0],
-                   start_1: start_1 + output_shape[1],
-                   start_2: start_2 + output_shape[2]]
-    for idx in singleton_dims:
-        center_block = np.expand_dims(center_block, axis=idx)
-    return center_block
