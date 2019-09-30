@@ -31,12 +31,13 @@ class DataSetWithMask(BaseDataSet):
         :param str image_format: Tile shape order: 'xyz' or 'zyx'
         """
 
-        super().__init__(tile_dir,
-                         input_fnames,
-                         target_fnames,
-                         dataset_config,
-                         batch_size,
-                         image_format)
+        super().__init__(tile_dir=tile_dir,
+                         input_fnames=input_fnames,
+                         target_fnames=target_fnames,
+                         dataset_config=dataset_config,
+                         batch_size=batch_size,
+                         image_format=image_format)
+
         self.mask_fnames = mask_fnames
         # list label_weights: weight for each label
         self.label_weights = None
@@ -44,7 +45,10 @@ class DataSetWithMask(BaseDataSet):
             self.label_weights = dataset_config['label_weights']
 
     def __getitem__(self, index):
-        """Get a batch of data
+        """
+        Get a batch of data. Concatenate mask with target image.
+        These will be separated again when computing the loss, it's just
+        a backward way of being able to add weights/masks for loss in Keras.
 
         :param int index: batch index
         :return: np.ndarrays input_image and target_image of shape
@@ -52,12 +56,13 @@ class DataSetWithMask(BaseDataSet):
          [batch_size, z, x, y] for shape order zyx,
          otherwise [..., x, y, z]
         """
-
         start_idx = index * self.batch_size
         end_idx = (index + 1) * self.batch_size
         if end_idx >= self.num_samples:
             end_idx = self.num_samples
-
+        # Whether to normalize outputs
+        norm_output = self.model_task is not 'segmentation' and self.normalize
+        # Loop through batch indices
         input_image = []
         target_image = []
         aug_idx = 0
@@ -68,32 +73,28 @@ class DataSetWithMask(BaseDataSet):
 
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
-            cur_input = super()._get_volume(cur_input_fnames.split(','),
-                                            aug_idx)
-            cur_target = super()._get_volume(cur_target_fnames.split(','),
-                                             aug_idx)
-
-            # If target is boolean (segmentation masks), convert to float
-
-            if cur_target.dtype == bool:
-                cur_target = cur_target.astype(np.float32)
-            if self.normalize:
-                cur_input = (cur_input - np.mean(cur_input)) /\
-                             np.std(cur_input)
-                # Only normalize target if we're dealing with regression
-                if self.model_task is not 'segmentation':
-                    cur_target = (cur_target - np.mean(cur_target)) /\
-                                 np.std(cur_target)
-
-            # the mask is based on sum of channel images
-            cur_mask = super()._get_volume(cur_mask_fnames.split(','),
-                                           aug_idx)
+            cur_input = super()._get_volume(
+                fname_list=cur_input_fnames.split(','),
+                normalize=self.normalize,
+                aug_idx=aug_idx,
+            )
+            cur_target = super()._get_volume(
+                fname_list=cur_target_fnames.split(','),
+                normalize=norm_output,
+                aug_idx=aug_idx,
+            )
+            cur_mask = super()._get_volume(
+                fname_list=cur_mask_fnames.split(','),
+                normalize=False,
+                aug_idx=aug_idx,
+            )
             if self.label_weights is not None:
                 wtd_mask = np.zeros(cur_mask.shape)
                 for label_idx in range(len(self.label_weights)):
                     wtd_mask += (cur_mask == label_idx) * \
                                 self.label_weights[label_idx]
                 cur_mask = wtd_mask
+            # Concatenate target and mask to one target
             cur_target = np.concatenate((cur_target, cur_mask), axis=0)
 
             input_image.append(cur_input)

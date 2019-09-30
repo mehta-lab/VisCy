@@ -12,7 +12,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def setUp(self):
         """
-        Set up a directory for tiling with flatfield, no mask
+        Set up a directory with input and target tiles
         """
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
@@ -68,7 +68,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_init(self):
         """
-        Test image tiler on frames temporary dir
+        Test dataset init assignments
         """
         nose.tools.assert_equal(self.data_inst.tile_dir, self.temp_path)
         self.assertListEqual(
@@ -79,25 +79,62 @@ class TestBaseDataSet(unittest.TestCase):
             self.target_fnames.tolist(),
             self.data_inst.target_fnames.tolist(),
         )
-        nose.tools.assert_equal(self.data_inst.batch_size, self.batch_size)
-        nose.tools.assert_true(self.data_inst.shuffle)
-        nose.tools.assert_equal(
-            self.data_inst.num_samples,
-            len(self.input_fnames),
+        self.assertEqual(self.data_inst.batch_size, self.batch_size)
+        self.assertEqual(self.data_inst.num_samples, 4)
+        self.assertEqual(self.data_inst.num_epoch_samples, 4)
+        self.assertTrue(self.data_inst.shuffle)
+        self.assertEqual(self.data_inst.num_samples, len(self.input_fnames))
+        self.assertTrue(self.data_inst.augmentations)
+        self.assertEqual(self.data_inst.model_task, 'regression')
+        self.assertEqual(self.data_inst.random_seed, 42)
+        self.assertFalse(self.data_inst.normalize)
+
+    def test_init_settings(self):
+        dataset_config = {
+            'augmentations': False,
+            'random_seed': 42,
+            'normalize': True,
+            'model_task': 'segmentation',
+            'shuffle': False,
+            'train_fraction': .5,
+            'squeeze': True,
+        }
+        # Instantiate class
+        data_inst = dataset.BaseDataSet(
+            tile_dir=self.temp_path,
+            input_fnames=self.input_fnames,
+            target_fnames=self.target_fnames,
+            dataset_config=dataset_config,
+            batch_size=self.batch_size,
+            image_format='zyx',
         )
-        nose.tools.assert_true(self.data_inst.augmentations)
-        nose.tools.assert_equal(self.data_inst.model_task, 'regression')
-        nose.tools.assert_equal(self.data_inst.random_seed, 42)
-        nose.tools.assert_false(self.data_inst.normalize)
+        self.assertEqual(data_inst.tile_dir, self.temp_path)
+        self.assertListEqual(
+            self.input_fnames.tolist(),
+            data_inst.input_fnames.tolist(),
+        )
+        self.assertListEqual(
+            self.target_fnames.tolist(),
+            data_inst.target_fnames.tolist(),
+        )
+        self.assertEqual(data_inst.batch_size, self.batch_size)
+        self.assertEqual(data_inst.num_samples, 4)
+        self.assertEqual(data_inst.num_epoch_samples, 2)
+        # Must shuffle if using a train fraction
+        self.assertTrue(data_inst.shuffle)
+        self.assertFalse(data_inst.augmentations)
+        self.assertEqual(data_inst.model_task, 'segmentation')
+        self.assertEqual(data_inst.random_seed, 42)
+        self.assertTrue(data_inst.normalize)
 
     def test__len__(self):
         nbr_batches = self.data_inst.__len__()
         expected_batches = len(self.input_fnames) / self.batch_size
-        nose.tools.assert_equal(nbr_batches, expected_batches)
+        self.assertEqual(nbr_batches, expected_batches)
 
     def test_get_steps_per_epoch(self):
         steps = self.data_inst.get_steps_per_epoch()
-        nose.tools.assert_equal(steps, 2)
+        self.assertEqual(steps, 2)
 
     def test_augment_image_asis(self):
         trans_im = self.data_inst._augment_image(self.im, 0)
@@ -203,7 +240,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_get_volume(self):
         image_volume = self.data_inst._get_volume(
-            self.input_fnames,
+            self.input_fnames.tolist(),
             normalize=False,
         )
         # There are 4 input images of shape (5, 7, 3)

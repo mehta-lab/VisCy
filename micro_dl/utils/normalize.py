@@ -47,7 +47,6 @@ def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
      histogram bin, if > this limit, the voxel intensities are redistributed).
      if None, default=0.01
     """
-
     nrows, ncols = input_image.shape
     if kernel_size is not None:
         if isinstance(kernel_size, int):
@@ -58,7 +57,8 @@ def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
             raise ValueError('kernel size invalid: not an int / list / tuple')
 
     if clip_limit is not None:
-        assert clip_limit >= 0 and clip_limit <= 1
+        assert 0 <= clip_limit <= 1, \
+            "Clip limit {} is out of range [0, 1]".format(clip_limit)
 
     adapt_eq_image = equalize_adapthist(
         input_image, kernel_size=kernel_size, clip_limit=clip_limit

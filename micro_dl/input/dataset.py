@@ -4,6 +4,8 @@ import keras
 import numpy as np
 import os
 
+import micro_dl.utils.normalize as norm
+
 
 class BaseDataSet(keras.utils.Sequence):
     """Base class for input and target images
@@ -29,7 +31,6 @@ class BaseDataSet(keras.utils.Sequence):
         Tiles will be loaded as is, and shape order will be determined
         from the preprocessing config file which is saved in your training
         data dir as preprocessing_info.json.
-        TODO: Test with multiple channel tiles
 
         :param str tile_dir: directory containing training image tiles
         :param pd.Series input_fnames: pd.Series with each row containing
@@ -59,9 +60,9 @@ class BaseDataSet(keras.utils.Sequence):
         # Whether or not to do augmentations
         self.augmentations = False
         if 'augmentations' in dataset_config:
+            assert isinstance(dataset_config['augmentations'], bool), \
+                'augmentation parameter should be boolean'
             self.augmentations = dataset_config['augmentations']
-        assert isinstance(self.augmentations, bool),\
-            'augmentation parameter should be boolean'
 
         # Whether to do zscore normalization on tile level
         self.normalize = False
@@ -73,37 +74,37 @@ class BaseDataSet(keras.utils.Sequence):
         # Whether to shuffle indices at the end of each epoch
         self.shuffle = True
         if 'shuffle' in dataset_config:
+            assert isinstance(dataset_config['shuffle'], bool), \
+                'shuffle parameter should be boolean'
             self.shuffle = dataset_config['shuffle']
-        assert isinstance(self.shuffle, bool),\
-            'shuffle parameter should be boolean'
 
         # Whether to only use a fraction of training data each epoch
         self.num_epoch_samples = self.num_samples
         if 'train_fraction' in dataset_config:
             train_fraction = dataset_config['train_fraction']
             assert 0. < train_fraction <= 1.,\
-                'Train fraction should be {0,1}, not {}'.format(train_fraction)
+                'Train fraction should be [0,1], not {}'.format(train_fraction)
             # You must shuffle if only using a fraction of the training data
             self.shuffle = True
             self.num_epoch_samples = int(self.num_samples * train_fraction)
-        self.steps_per_epoch = int(np.ceil(self.num_epoch_samples /
-                                           self.batch_size))
+        self.steps_per_epoch = int(np.ceil(
+            self.num_epoch_samples / self.batch_size,
+        ))
         # Declare row indices, will to an inital shuffle at the end of init`
         self.row_idx = np.arange(self.num_samples)
 
         # Whether to remove singleton dimensions from tiles (e.g. 2D models)
         self.squeeze = False
         if 'squeeze' in dataset_config:
+            assert isinstance(dataset_config['squeeze'], bool), \
+                'squeeze parameter should be boolean'
             self.squeeze = dataset_config['squeeze']
-        assert isinstance(self.squeeze, bool),\
-            'squeeze parameter should be boolean'
 
         # Whether to use fixed random seed (only recommended for testing)
-        random_seed = None
+        self.random_seed = None
         if 'random_seed' in dataset_config:
-            random_seed = dataset_config['random_seed']
-        self.random_seed = random_seed
-        np.random.seed(random_seed)
+            self.random_seed = dataset_config['random_seed']
+        np.random.seed(self.random_seed)
 
         self.on_epoch_end()
 
@@ -196,8 +197,7 @@ class BaseDataSet(keras.utils.Sequence):
         if image_volume.dtype == bool:
             image_volume = image_volume.astype(np.float32)
         elif normalize:
-            image_volume = (image_volume - np.mean(image_volume)) / \
-                           np.std(image_volume)
+            image_volume = norm.zscore(image_volume)
         return image_volume
 
     def __getitem__(self, index):
