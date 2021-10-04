@@ -61,7 +61,7 @@ class DataSetWithMask(BaseDataSet):
         if end_idx >= self.num_samples:
             end_idx = self.num_samples
         # Whether to normalize outputs
-        norm_output = self.model_task is not 'segmentation' and self.normalize
+        norm_output = self.model_task != 'segmentation' and self.normalize
         # Loop through batch indices
         input_image = []
         target_image = []
