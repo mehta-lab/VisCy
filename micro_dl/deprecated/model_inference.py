@@ -6,6 +6,7 @@ import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
 import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.train_utils as train_utils
+from micro_dl.inference.model_inference import load_model
 from micro_dl.utils.normalize import zscore
 from micro_dl.plotting.plot_utils import save_predicted_images
 
