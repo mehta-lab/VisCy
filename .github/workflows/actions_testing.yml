@@ -1,4 +1,4 @@
-name: unittests
+name: build
 
 on: [push]
 
@@ -38,6 +38,6 @@ jobs:
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v1
       with:
-        flags: unittests
+        flags: build
         name: codecov-umbrella
         fail_ci_if_error: true
