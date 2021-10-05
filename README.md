@@ -1,4 +1,4 @@
-[![Build Status](https://github.com/czbiohub/microDL/workflows/build/badge.svg)
+[![Build Status](https://github.com/czbiohub/microDL/workflows/build/badge.svg)]
 [![Code Coverage](https://codecov.io/gh/czbiohub/microDL/branch/master/graphs/badge.svg)](https://codecov.io/gh/czbiohub/microDL)
 
 # microDL
