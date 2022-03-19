@@ -1,10 +1,135 @@
 """Dataset classes"""
-
+import cv2
 import keras
 import numpy as np
 import os
-
+from scipy import ndimage
 import micro_dl.utils.normalize as norm
+
+
+
+
+def transform_matrix_offset_center(matrix, x, y):
+    o_x = float(x) / 2 - 0.5
+    o_y = float(y) / 2 - 0.5
+    offset_matrix = np.array([[1, 0, o_x], [0, 1, o_y], [0, 0, 1]])
+    reset_matrix = np.array([[1, 0, -o_x], [0, 1, -o_y], [0, 0, 1]])
+    transform_matrix = np.dot(np.dot(offset_matrix, matrix), reset_matrix)
+    return transform_matrix
+
+
+def apply_affine_transform(x, theta=0, tx=0, ty=0, shear=0, zx=1, zy=1,
+                           row_axis=1, col_axis=2, channel_axis=0,
+                           fill_mode='nearest', cval=0., order=1):
+    """Applies an affine transformation specified by the parameters given.
+    # Arguments
+        x: 3D numpy array - a 2D image with one or more channels.
+        theta: Rotation angle in degrees.
+        tx: Width shift.
+        ty: Heigh shift.
+        shear: Shear angle in degrees.
+        zx: Zoom in x direction.
+        zy: Zoom in y direction
+        row_axis: Index of axis for rows (aka Y axis) in the input image.
+                  Direction: left to right.
+        col_axis: Index of axis for columns (aka X axis) in the input image.
+                  Direction: top to bottom.
+        channel_axis: Index of axis for channels in the input image.
+        fill_mode: Points outside the boundaries of the input
+            are filled according to the given mode
+            (one of `{'constant', 'nearest', 'reflect', 'wrap'}`).
+        cval: Value used for points outside the boundaries
+            of the input if `mode='constant'`.
+        order: int, order of interpolation
+    # Returns
+        The transformed version of the input.
+    """
+    # Input sanity checks:
+    # 1. x must 2D image with one or more channels (i.e., a 3D tensor)
+    # 2. channels must be either first or last dimension
+    if np.unique([row_axis, col_axis, channel_axis]).size != 3:
+        raise ValueError("'row_axis', 'col_axis', and 'channel_axis'"
+                         " must be distinct")
+
+    # TODO: shall we support negative indices?
+    valid_indices = set([0, 1, 2])
+    actual_indices = set([row_axis, col_axis, channel_axis])
+    if actual_indices != valid_indices:
+        raise ValueError(
+            f"Invalid axis' indices: {actual_indices - valid_indices}")
+
+    if x.ndim != 3:
+        raise ValueError("Input arrays must be multi-channel 2D images.")
+    if channel_axis not in [0, 2]:
+        raise ValueError("Channels are allowed and the first and last dimensions.")
+
+    transform_matrix = None
+    if theta != 0:
+        theta = np.deg2rad(theta)
+        rotation_matrix = np.array([[np.cos(theta), -np.sin(theta), 0],
+                                    [np.sin(theta), np.cos(theta), 0],
+                                    [0, 0, 1]])
+        transform_matrix = rotation_matrix
+
+    if tx != 0 or ty != 0:
+        shift_matrix = np.array([[1, 0, tx],
+                                 [0, 1, ty],
+                                 [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = shift_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, shift_matrix)
+
+    if shear != 0:
+        shear = np.deg2rad(shear)
+        shear_matrix = np.array([[1, -np.sin(shear), 0],
+                                 [0, np.cos(shear), 0],
+                                 [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = shear_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, shear_matrix)
+
+    if zx != 1 or zy != 1:
+        zoom_matrix = np.array([[zx, 0, 0],
+                                [0, zy, 0],
+                                [0, 0, 1]])
+        if transform_matrix is None:
+            transform_matrix = zoom_matrix
+        else:
+            transform_matrix = np.dot(transform_matrix, zoom_matrix)
+
+    if transform_matrix is not None:
+        h, w = x.shape[row_axis], x.shape[col_axis]
+        transform_matrix = transform_matrix_offset_center(
+            transform_matrix, h, w)
+        x = np.rollaxis(x, channel_axis, 0)
+
+        # Matrix construction assumes that coordinates are x, y (in that order).
+        # However, regular numpy arrays use y,x (aka i,j) indexing.
+        # Possible solution is:
+        #   1. Swap the x and y axes.
+        #   2. Apply transform.
+        #   3. Swap the x and y axes again to restore image-like data ordering.
+        # Mathematically, it is equivalent to the following transformation:
+        # M' = PMP, where P is the permutation matrix, M is the original
+        # transformation matrix.
+        if col_axis > row_axis:
+            transform_matrix[:, [0, 1]] = transform_matrix[:, [1, 0]]
+            transform_matrix[[0, 1]] = transform_matrix[[1, 0]]
+        final_affine_matrix = transform_matrix[:2, :2]
+        final_offset = transform_matrix[:2, 2]
+
+        channel_images = [ndimage.interpolation.affine_transform(
+            x_channel,
+            final_affine_matrix,
+            final_offset,
+            order=order,
+            mode=fill_mode,
+            cval=cval) for x_channel in x]
+        x = np.stack(channel_images, axis=0)
+        x = np.rollaxis(x, 0, channel_axis + 1)
+    return x
 
 
 class BaseDataSet(keras.utils.Sequence):
@@ -46,7 +171,7 @@ class BaseDataSet(keras.utils.Sequence):
         self.target_fnames = target_fnames
         self.num_samples = len(self.input_fnames)
         self.batch_size = batch_size
-        assert image_format in {'xyz', 'zyx'},\
+        assert image_format in {'xyz', 'zyx'}, \
             "Image format should be xyz or zyx, not {}".format(image_format)
         self.image_format = image_format
 
@@ -59,16 +184,33 @@ class BaseDataSet(keras.utils.Sequence):
 
         # Whether or not to do augmentations
         self.augmentations = False
+        self.zoom_range = (1, 1)
+        self.rotate_range = 0
+        self.mean_jitter = 0
+        self.std_jitter = 0
+        self.noise_std = 0
+        self.blur_range = (0, 0)
+        self.shear_range = 0
         if 'augmentations' in dataset_config:
-            assert isinstance(dataset_config['augmentations'], bool), \
-                'augmentation parameter should be boolean'
-            self.augmentations = dataset_config['augmentations']
+            self.augmentations = True
+            if 'zoom_range' in dataset_config['augmentations']:
+                self.zoom_range = dataset_config['augmentations']['zoom_range']
+            if 'rotate_range' in dataset_config['augmentations']:
+                self.rotate_range = dataset_config['augmentations']['rotate_range']
+            if 'intensity_jitter' in dataset_config['augmentations']:
+                self.mean_jitter, self.std_jitter = dataset_config['augmentations']['intensity_jitter']
+            if 'noise_std' in dataset_config['augmentations']:
+                self.noise_std = dataset_config['augmentations']['noise_std']
+            if 'blur_range' in dataset_config['augmentations']:
+                self.blur_range = dataset_config['augmentations']['blur_range']
+            if 'shear_range' in dataset_config['augmentations']:
+                self.shear_range = dataset_config['augmentations']['shear_range']
 
         # Whether to do zscore normalization on tile level
         self.normalize = False
         if 'normalize' in dataset_config:
             self.normalize = dataset_config['normalize']
-        assert isinstance(self.normalize, bool),\
+        assert isinstance(self.normalize, bool), \
             'normalize parameter should be boolean'
 
         # Whether to shuffle indices at the end of each epoch
@@ -82,7 +224,7 @@ class BaseDataSet(keras.utils.Sequence):
         self.num_epoch_samples = self.num_samples
         if 'train_fraction' in dataset_config:
             train_fraction = dataset_config['train_fraction']
-            assert 0. < train_fraction <= 1.,\
+            assert 0. < train_fraction <= 1., \
                 'Train fraction should be [0,1], not {}'.format(train_fraction)
             # You must shuffle if only using a fraction of the training data
             self.shuffle = True
@@ -123,7 +265,17 @@ class BaseDataSet(keras.utils.Sequence):
         """
         return self.steps_per_epoch
 
-    def _augment_image(self, input_image, aug_idx):
+    def _augment_image(self,
+                       input_image,
+                       aug_idx,
+                       zoom=1,
+                       theta=0,
+                       mean_offset=0,
+                       std_scale=1,
+                       noise_std=0,
+                       blur_img=False,
+                       blur_sigma=0,
+                       shear=0):
         """Adds image augmentation among 6 possible options
 
         :param np.array input_image: input image to be transformed
@@ -173,9 +325,30 @@ class BaseDataSet(keras.utils.Sequence):
         else:
             msg = '{} not in allowed aug_idx: 0-5'.format(aug_idx)
             raise ValueError(msg)
+        if blur_img:
+            trans_image = cv2.GaussianBlur(trans_image, ksize=(0, 0), sigmaX=blur_sigma)
+        if noise_std != 0:
+            trans_image = trans_image + np.random.normal(scale=noise_std, size=trans_image.shape)
+        if not (mean_offset == 0 and std_scale == 1):
+            trans_image = norm.unzscore(trans_image, mean_offset, std_scale)
+        trans_image = apply_affine_transform(trans_image, zx=zoom, theta=theta,
+                                             zy=zoom, shear=shear, fill_mode='constant',
+                                             cval=0., order=1)
         return trans_image
 
-    def _get_volume(self, fname_list, normalize=True, aug_idx=0):
+    def _get_volume(self,
+                    fname_list,
+                    normalize=True,
+                    aug_idx=0,
+                    zoom=1,
+                    theta=0,
+                    mean_offset=0,
+                    std_scale=1,
+                    noise_std=0,
+                    blur_img=False,
+                    blur_sigma=0,
+                    shear=0,
+                    ):
         """
         Read tiles from fname_list and stack them into an image volume.
 
@@ -188,7 +361,16 @@ class BaseDataSet(keras.utils.Sequence):
         for fname in fname_list:
             cur_tile = np.load(os.path.join(self.tile_dir, fname))
             if self.augmentations:
-                cur_tile = self._augment_image(cur_tile, aug_idx)
+                cur_tile = self._augment_image(cur_tile,
+                                               aug_idx,
+                                               zoom=zoom,
+                                               theta=theta,
+                                               mean_offset=mean_offset,
+                                               std_scale=std_scale,
+                                               noise_std=noise_std,
+                                               blur_img=blur_img,
+                                               blur_sigma=blur_sigma,
+                                               shear=shear)
             if self.squeeze:
                 cur_tile = np.squeeze(cur_tile)
             image_volume.append(cur_tile)
@@ -224,22 +406,55 @@ class BaseDataSet(keras.utils.Sequence):
         input_image = []
         target_image = []
         aug_idx = 0
+        zoom = 1
+        theta = 0
+        mean_offset = 0
+        std_scale = 1
+        noise_std = 0
+        blur_img = False
+        blur_sigma = 0
+        shear = 0
         for idx in range(start_idx, end_idx, 1):
             cur_input_fnames = self.input_fnames.iloc[self.row_idx[idx]]
             cur_target_fnames = self.target_fnames.iloc[self.row_idx[idx]]
             # Select select int randomly that will represent augmentation type
             if self.augmentations:
                 aug_idx = np.random.choice([0, 1, 2, 3, 4, 5], 1)
-
+                zoom = np.random.uniform(self.zoom_range[0], self.zoom_range[1])
+                theta = np.random.uniform(-self.rotate_range, self.rotate_range)
+                mean_offset = np.random.uniform(-self.mean_jitter, self.mean_jitter)
+                std_scale = 1 + np.random.uniform(-self.std_jitter, self.std_jitter)
+                noise_std = np.random.uniform(0, self.noise_std)
+                shear = np.random.uniform(-self.shear_range, self.shear_range)
+                if not (self.blur_range[0] == 0 and self.blur_range[1] == 0):
+                    blur_img = np.random.choice([True, False], 1)[0]
+                    blur_sigma = np.random.uniform(self.blur_range[0], self.blur_range[1])
+            # only apply intensity jitter to input
             cur_input = self._get_volume(
                 fname_list=cur_input_fnames.split(','),
                 normalize=self.normalize,
                 aug_idx=aug_idx,
+                zoom=zoom,
+                theta=theta,
+                mean_offset=mean_offset,
+                std_scale=std_scale,
+                noise_std=noise_std,
+                blur_img=blur_img,
+                blur_sigma=blur_sigma,
+                shear=shear,
             )
             cur_target = self._get_volume(
                 fname_list=cur_target_fnames.split(','),
                 normalize=norm_output,
                 aug_idx=aug_idx,
+                zoom=zoom,
+                theta=theta,
+                shear=shear,
+                mean_offset=0,
+                std_scale=1,
+                noise_std=0,
+                blur_img=False,
+                blur_sigma=0,
             )
             input_image.append(cur_input)
             target_image.append(cur_target)
@@ -252,4 +467,3 @@ class BaseDataSet(keras.utils.Sequence):
         """Update indices and shuffle after each epoch"""
         if self.shuffle:
             np.random.shuffle(self.row_idx)
-

@@ -35,6 +35,15 @@ def mse_loss(y_true, y_pred, mean_loss=True):
     channel_axis = get_channel_axis(K.image_data_format())
     return K.mean(K.square(y_pred - y_true), axis=channel_axis)
 
+def latent_loss(dummy_ground_truth, outputs):
+    beta = 0.25
+    del dummy_ground_truth
+    z_e, z_q = tf.split(outputs, 2, axis=-1)
+    vq_loss = tf.reduce_mean((tf.stop_gradient(z_e) - z_q)**2)
+    commit_loss = tf.reduce_mean((z_e - tf.stop_gradient(z_q))**2)
+    latent_loss = tf.identity(vq_loss + beta * commit_loss, name="latent_loss")
+    return latent_loss
+
 
 def kl_divergence_loss(y_true, y_pred):
     """KL divergence loss

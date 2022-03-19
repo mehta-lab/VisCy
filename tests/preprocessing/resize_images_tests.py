@@ -138,7 +138,9 @@ class TestResizeImages(unittest.TestCase):
                                   'pos_idx': self.pos_idx,
                                   'channel_idx': c,
                                   'slice_idx': 0,
-                                  'file_name': op_fname})
+                                  'file_name': op_fname,
+                                  'mean': np.mean(self.im) + c * 100,
+                                  'std': float(0)})
         # Write metadata
         frames_meta.to_csv(
             os.path.join(self.temp_path, self.meta_name),
@@ -171,7 +173,9 @@ class TestResizeImages(unittest.TestCase):
                                       'pos_idx': self.pos_idx,
                                       'channel_idx': c,
                                       'slice_idx': s,
-                                      'file_name': op_fname})
+                                      'file_name': op_fname,
+                                      'mean': np.mean(self.im) + c * 100,
+                                      'std': float(0)})
 
         resize_inst.resize_volumes(num_slices_subvolume=3)
         saved_meta = pd.read_csv(os.path.join(self.output_dir,

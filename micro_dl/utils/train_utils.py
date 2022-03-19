@@ -61,14 +61,13 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
         if gpu_ids == -1:
             return -1, 0
         cur_mem_frac = check_gpu_availability(gpu_ids)
+        cur_mem_frac = cur_mem_frac[0]
         if not isinstance(gpu_mem_frac, type(None)):
-            if isinstance(gpu_mem_frac, float):
-                gpu_mem_frac = [gpu_mem_frac]
-            assert np.all(np.array(cur_mem_frac >= gpu_mem_frac)), \
-                ("Not enough memory available. Requested/current fractions:",
-                    "\n".join([str(c) + " / " + "{0:.4g}".format(m)
-                              for c, m in zip(gpu_mem_frac, cur_mem_frac)]))
-        return gpu_ids, cur_mem_frac[0]
+            assert cur_mem_frac >= gpu_mem_frac, \
+                "Not enough memory available. Requested/current fractions: {0:.4g}/{0:.4g}".format(
+                    gpu_mem_frac, cur_mem_frac)
+        print('Using GPU {} with memory fraction {}.'.format(gpu_ids, cur_mem_frac))
+        return gpu_ids, cur_mem_frac
 
     # User has not specified GPU ID, find the GPU with most memory available
     sp = subprocess.Popen(['nvidia-smi --query-gpu=index --format=csv'],

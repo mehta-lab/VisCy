@@ -108,7 +108,7 @@ class TestImageStitcher(unittest.TestCase):
         exp_stitched_img[4] = 3
         exp_stitched_img[5] = 3
 
-        self.stitch_inst_z.shape_3d = (6, 32, 32)
+        self.stitch_inst_z.im_shape = (6, 32, 32)
         self.stitch_inst_z.overlap_dict['overlap_shape'] = 1
         stitched_img = self.stitch_inst_z._stitch_along_z(
             tile_imgs_list=tile_imgs_list,
@@ -218,7 +218,7 @@ class TestImageStitcher(unittest.TestCase):
                               (0, 3, 4, 10, 0, 6),
                               (0, 3, 4, 10, 4, 10)]
 
-        self.stitch_inst_zyx.shape_3d = (3, 10, 10)
+        self.stitch_inst_zyx.im_shape = (3, 10, 10)
         self.stitch_inst_zyx.overlap_dict['overlap_shape'] = [1, 2, 2]
         stitched_img = self.stitch_inst_zyx._stitch_along_xyz(
             tile_imgs_list=tile_imgs_list,
@@ -238,7 +238,7 @@ class TestImageStitcher(unittest.TestCase):
         # Tile 4: Mean along 2 overlapping rows 4, 5:
         # 0.67 * 1.22 + 0.33 * 2, 0.67 * 1.44 + 0.33 * 2 = 1.48, 1.63
         # 0.33 * 1.11 + 0.67 * 2, 0.33 * 1.22 + 0.67 * 2 = 1.71, 1.74
-        exp_z1 = np.ones((10, 10))
+        exp_z1 = np.ones((10, 10), dtype=np.float32)
         exp_z1[:, 4:] = 2
         exp_z1[2:, 4] = 1.33
         exp_z1[2:, 5] = 1.67

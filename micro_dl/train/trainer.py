@@ -1,6 +1,7 @@
 """Keras trainer"""
 from keras import callbacks as keras_callbacks
 from keras import optimizers as keras_optimizers
+from keras import backend as K
 import os
 import time
 
@@ -54,12 +55,12 @@ class BaseKerasTrainer:
         self.num_target_channels = num_target_channels
         self.logger = self._init_train_logger()
 
-        workers = 4
-        if 'workers' in train_config:
-            workers = train_config['workers']
-            assert isinstance(workers, int) and workers > 0, \
-                'workers must be a positive integer'
-        self.workers = workers
+        num_workers = 4
+        if 'num_workers' in train_config:
+            num_workers = train_config['num_workers']
+            assert isinstance(num_workers, int) and num_workers > 0, \
+                'num_workers must be a positive integer'
+        self.num_workers = num_workers
 
         self.resume_training = False
         if 'resume' in train_config and train_config['resume']:
@@ -91,10 +92,10 @@ class BaseKerasTrainer:
         for cb_dict in callbacks_config:
             cb_cls = getattr(keras_callbacks, cb_dict)
             if cb_dict == 'ModelCheckpoint':
-                if callbacks_config[cb_dict]['save_best_only']:
-                    assert callbacks_config[cb_dict]['monitor'] == 'val_loss',\
-                        'cannot checkpoint best_model if monitor' \
-                        'is not val_loss'
+                # if callbacks_config[cb_dict]['save_best_only']:
+                #     assert callbacks_config[cb_dict]['monitor'] == 'val_loss',\
+                #         'cannot checkpoint best_model if monitor' \
+                #         'is not val_loss'
                 timestamp = time.strftime("%Y-%m-%d-%H-%M-%S",
                                           time.localtime())
                 model_name = '{}_{}.hdf5'.format('Model', timestamp)
@@ -232,10 +233,14 @@ class BaseKerasTrainer:
                                      epochs=self.epochs,
                                      steps_per_epoch=steps_per_epoch,
                                      callbacks=callbacks,
-                                     workers=self.workers,
+                                     workers=self.num_workers,
+                                     use_multiprocessing=True,
+                                     max_queue_size=24,
                                      verbose=1)
             time_el = time.time() - time_start
             self.logger.info("Training time: {}".format(time_el))
+            K.clear_session()
+            self.sess.close()
         except Exception as e:
             self.logger.error('problems with fit_generator: ' + str(e))
             raise

@@ -1,5 +1,5 @@
 import os
-
+from concurrent.futures import ThreadPoolExecutor
 import numpy as np
 import pandas as pd
 
@@ -17,7 +17,7 @@ def tile_image(input_image,
 
      USE MIN_FRACTION WITH INPUT_IMAGE.DTYPE=bool / MASKS
 
-    :param np.array input_image: input image to be tiled
+    :param np.array input_image: 3D input image to be tiled
     :param list/tuple/np array tile_size: size of the blocks to be tiled
      from the image
     :param list/tuple/np array step_size: size of the window shift. In case of
@@ -61,10 +61,16 @@ def tile_image(input_image,
                 use_tile = False
         return use_tile
 
-    def get_tile_meta(cropped_img, img_id, save_dict, row, col, sl_start=None):
+    def get_tile_meta(img_id, save_dict, row, col, sl_start=None):
         cur_metadata = None
         if save_dict is not None:
-            file_name = write_tile(cropped_img, save_dict, img_id)
+            file_name = aux_utils.get_im_name(time_idx=save_dict['time_idx'],
+                                              channel_idx=save_dict['channel_idx'],
+                                              slice_idx=save_dict['slice_idx'],
+                                              pos_idx=save_dict['pos_idx'],
+                                              int2str_len=save_dict['int2str_len'],
+                                              extra_field=img_id,
+                                              ext='.npy')
             cur_metadata = {'channel_idx': save_dict['channel_idx'],
                             'slice_idx': save_dict['slice_idx'],
                             'time_idx': save_dict['time_idx'],
@@ -77,17 +83,15 @@ def tile_image(input_image,
         return cur_metadata
 
     # Add to tile size and step size in case of 3D images
+    tile_3d = False
     im_shape = input_image.shape
-    im_depth = im_shape[2]
     if len(im_shape) == 3:
+        im_depth = im_shape[2]
         if len(tile_size) == 2:
-            tile_size.append(im_shape[2])
-            step_size.append(im_shape[2])
-            tile_3d = False
+            tile_size.append(im_depth)
+            step_size.append(im_depth)
         else:
-            if step_size[2] == im_depth:
-                tile_3d = False
-            else:
+            if not step_size[2] == im_depth:
                 tile_3d = True
 
     assert len(tile_size) == len(step_size),\
@@ -103,7 +107,8 @@ def tile_image(input_image,
     if n_dim == 3:
         n_slices = im_shape[2]
 
-    cropped_image_list = []
+    tiles_list = []
+    file_names_list = []
     cropping_index = []
     tiled_metadata = []
     for row in range(0, n_rows - tile_size[0] + step_size[0], step_size[0]):
@@ -134,29 +139,38 @@ def tile_image(input_image,
                                                   col: col + tile_size[1],
                                                   sl: sl + tile_size[2]]
                         if use_tile(cropped_img, min_fraction):
-                            cropped_image_list.append([cur_img_id, cropped_img])
+                            tiles_list.append(cropped_img)
                             cropping_index.append(cur_index)
-                            cur_tile_meta = get_tile_meta(cropped_img,
-                                                          cur_img_id,
+                            cur_tile_meta = get_tile_meta(cur_img_id,
                                                           save_dict,
                                                           row, col, sl)
                             tiled_metadata.append(cur_tile_meta)
                 else:
                     img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
             if use_tile(cropped_img, min_fraction) and not tile_3d:
-                cropped_image_list.append([img_id, cropped_img])
+
+                tiles_list.append(cropped_img)
                 cropping_index.append(cur_index)
-                cur_tile_meta = get_tile_meta(cropped_img,
-                                              img_id,
-                                              save_dict,
-                                              row, col)
-                tiled_metadata.append(cur_tile_meta)
+                if save_dict is not None:
+                    cur_tile_meta = get_tile_meta(img_id,
+                                                  save_dict,
+                                                  row, col)
+                    file_name = cur_tile_meta['file_name']
+                    tiled_metadata.append(cur_tile_meta)
+                    file_names_list.append(file_name)
+    # print('tiling takes {:02f} s'.format(time.time() - time_start))
+    # time_start = time.time()
+
+    # print('saving a tile takes {:02f} s'.format(time.time() - time_start))
     if save_dict is None:
         if return_index:
-            return cropped_image_list, cropping_index
-        return cropped_image_list
+            return tiles_list, cropping_index
+        return tiles_list
     else:
         # create and save meta csv
+        workers = 16
+        with ThreadPoolExecutor(workers) as ex:
+            ex.map(write_tile, tiles_list, file_names_list, [save_dict] * len(tiles_list))
         tile_meta_df = write_meta(tiled_metadata, save_dict)
         if return_index:
             return tile_meta_df, cropping_index
@@ -181,6 +195,7 @@ def crop_at_indices(input_image,
 
     n_dim = len(input_image.shape)
     tiles_list = []
+    file_names_list = []
     im_depth = input_image.shape[2]
     tiled_metadata = []
     for cur_idx in crop_indices:
@@ -197,9 +212,15 @@ def crop_at_indices(input_image,
                 img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
                 cropped_img = input_image[cur_idx[0]: cur_idx[1],
                                           cur_idx[2]: cur_idx[3], ...]
-
         if save_dict is not None:
-            file_name = write_tile(cropped_img, save_dict, img_id)
+            file_name = aux_utils.get_im_name(time_idx=save_dict['time_idx'],
+                                              channel_idx=save_dict['channel_idx'],
+                                              slice_idx=save_dict['slice_idx'],
+                                              pos_idx=save_dict['pos_idx'],
+                                              int2str_len=save_dict['int2str_len'],
+                                              extra_field=img_id,
+                                              ext='.npy')
+
             cur_metadata = {'channel_idx': save_dict['channel_idx'],
                             'slice_idx': save_dict['slice_idx'],
                             'time_idx': save_dict['time_idx'],
@@ -210,7 +231,11 @@ def crop_at_indices(input_image,
             if tile_3d:
                 cur_metadata['slice_start'] = cur_idx[4]
             tiled_metadata.append(cur_metadata)
-        tiles_list.append([img_id, cropped_img])
+        tiles_list.append(cropped_img)
+        file_names_list.append(file_name)
+    workers = 16
+    with ThreadPoolExecutor(workers) as ex:
+        ex.map(write_tile, tiles_list, file_names_list, [save_dict] * len(tiles_list))
     if save_dict is None:
         return tiles_list
     else:
@@ -218,7 +243,7 @@ def crop_at_indices(input_image,
         return tile_meta_df
 
 
-def write_tile(tile, save_dict, img_id):
+def write_tile(tile, file_name, save_dict):
     """
     Write tile function that can be called using threading.
 
@@ -229,19 +254,11 @@ def write_tile(tile, save_dict, img_id):
     :return str op_fname: filename used for saving the tile with entire path
     """
 
-    file_name = aux_utils.get_im_name(
-        time_idx=save_dict['time_idx'],
-        channel_idx=save_dict['channel_idx'],
-        slice_idx=save_dict['slice_idx'],
-        pos_idx=save_dict['pos_idx'],
-        int2str_len=save_dict['int2str_len'],
-        extra_field=img_id,
-        ext='.npy',
-    )
+
     op_fname = os.path.join(save_dict['save_dir'], file_name)
     if save_dict['image_format'] == 'zyx' and len(tile.shape) > 2:
         tile = np.transpose(tile, (2, 0, 1))
-    np.save(op_fname, tile, allow_pickle=True, fix_imports=True)
+    np.save(op_fname, tile, allow_pickle=False, fix_imports=False)
     return file_name
 
 

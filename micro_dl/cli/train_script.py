@@ -17,6 +17,7 @@ from micro_dl.inference.model_inference import load_model
 from micro_dl.train.trainer import BaseKerasTrainer
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.train_utils as train_utils
+import micro_dl.utils.preprocess_utils as preprocess_utils
 
 
 def parse_args():
@@ -182,24 +183,17 @@ def get_image_dir_format(dataset_config):
     # tile dir pass directly as data_dir
     tile_dir = dataset_config['data_dir']
     image_format = 'zyx'
-
-    # If the parent dir with tile dir, mask dir is passed as data_dir,
-    # it should contain a json with directory names
-    json_fname = os.path.join(dataset_config['data_dir'],
-                              'preprocessing_info.json')
-    if os.path.exists(json_fname):
-        preprocessing_info = aux_utils.read_json(json_filename=json_fname)
-
-        # Preprocessing_info is a list of jsons. Use the last json. If a tile
-        # (training data) dir is specified and exists in info json use that
-        recent_json = preprocessing_info[-1]
-        pp_config = recent_json['config']
-        if 'tile' in pp_config and 'tile_dir' in pp_config['tile']:
-            tile_dir = pp_config['tile']['tile_dir']
+    try:
+        preprocess_config = preprocess_utils.get_preprocess_config(os.path.dirname(tile_dir))
+        # if 'tile' in preprocess_config and 'tile_dir' in preprocess_config['tile']:
+        #     tile_dir = preprocess_config['tile']['tile_dir']
 
         # Get shape order from recent_json
-        if 'image_format' in pp_config['tile']:
-            image_format = pp_config['tile']['image_format']
+        if 'image_format' in preprocess_config['tile']:
+            image_format = preprocess_config['tile']['image_format']
+    except Exception as e:
+        print('Error while reading preprocess config: {}. '
+              'Use default image format "zyx"'.format(e))
 
     return tile_dir, image_format
 

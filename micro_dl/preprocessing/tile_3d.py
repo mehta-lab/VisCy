@@ -21,6 +21,8 @@ class ImageTilerUniform3D(ImageTilerUniform):
                  image_format='zyx',
                  num_workers=4,
                  int2str_len=3,
+                 normalize_im='stack',
+                 min_fraction=None,
                  tile_3d=True):
         """Init
 
@@ -44,6 +46,8 @@ class ImageTilerUniform3D(ImageTilerUniform):
                          image_format=image_format,
                          num_workers=num_workers,
                          int2str_len=int2str_len,
+                         normalize_im=normalize_im,
+                         min_fraction=min_fraction,
                          tile_3d=tile_3d)
 
         if isinstance(self.tile_size, list):

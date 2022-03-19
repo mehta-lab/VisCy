@@ -11,6 +11,27 @@ from skimage.transform import resize
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.normalize as normalize
 
+def im_bit_convert(im, bit=16, norm=False, limit=[]):
+    im = im.astype(np.float32, copy=False) # convert to float32 without making a copy to save memory
+    if norm:
+        if not limit:
+            limit = [np.nanmin(im[:]), np.nanmax(im[:])] # scale each image individually based on its min and max
+        im = (im-limit[0])/(limit[1]-limit[0])*(2**bit-1)
+    im = np.clip(im, 0, 2**bit-1) # clip the values to avoid wrap-around by np.astype
+    if bit == 8:
+        im = im.astype(np.uint8, copy=False) # convert to 8 bit
+    else:
+        im = im.astype(np.uint16, copy=False) # convert to 16 bit
+    return im
+
+def im_adjust(img, tol=1, bit=8):
+    """
+    Adjust contrast of the image
+
+    """
+    limit = np.percentile(img, [tol, 100 - tol])
+    im_adjusted = im_bit_convert(img, bit=bit, norm=True, limit=limit.tolist())
+    return im_adjusted
 
 def resize_image(input_image, output_shape):
     """Resize image to a specified shape
@@ -233,10 +254,9 @@ def read_image(file_path):
     if file_path[-3:] == 'npy':
         im = np.load(file_path)
     else:
-        try:
-            im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
-        except IOError as e:
-            raise e
+        im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
+        if im is None:
+            raise IOError('Image "{}" cannot be found.'.format(file_path))
     return im
 
 
@@ -244,7 +264,9 @@ def read_imstack(input_fnames,
                  flat_field_fname=None,
                  hist_clip_limits=None,
                  is_mask=False,
-                 normalize_im=True):
+                 normalize_im=None,
+                 zscore_mean=None,
+                 zscore_std=None):
     """
     Read the images in the fnames and assembles a stack.
     If images are masks, make sure they're boolean by setting >0 to True
@@ -254,6 +276,8 @@ def read_imstack(input_fnames,
     :param tuple hist_clip_limits: limits for histogram clipping
     :param bool is_mask: Indicator for if files contain masks
     :param bool normalize_im: Whether to zscore normalize im stack
+    :param float zscore_mean: mean for z-scoring the image
+    :param float zscore_std: std for z-scoring the image
     :return np.array: input stack flat_field correct and z-scored if regular
         images, booleans if they're masks
     """
@@ -284,8 +308,11 @@ def read_imstack(input_fnames,
                 hist_clip_limits[0],
                 hist_clip_limits[1]
             )
-        if normalize_im:
-            input_image = normalize.zscore(input_image)
+        if normalize_im is not None:
+            input_image = normalize.zscore(
+                input_image, mean=zscore_mean,
+                std=zscore_std
+            )
     else:
         if input_image.dtype != bool:
             input_image = input_image > 0
@@ -301,7 +328,8 @@ def preprocess_imstack(frames_metadata,
                        pos_idx,
                        flat_field_im=None,
                        hist_clip_limits=None,
-                       normalize_im=False):
+                       normalize_im='stack',
+                       ):
     """
     Preprocess image given by indices: flatfield correction, histogram
     clipping and z-score normalization is performed.
@@ -315,9 +343,18 @@ def preprocess_imstack(frames_metadata,
     :param int pos_idx: Position (FOV) index
     :param np.array flat_field_im: Flat field image for channel
     :param list hist_clip_limits: Limits for histogram clipping (size 2)
-    :param bool normalize_im: indicator to normalize image based on z-score or not
+    :param str or None normalize_im: options to z-score the image
     :return np.array im: 3D preprocessed image
     """
+
+    assert normalize_im in ['stack', 'dataset', 'volume', 'slice', None], \
+        "'normalize_im' can only be 'stack', 'dataset', 'volume', 'slice', or None"
+
+    metadata_ids, _ = aux_utils.validate_metadata_indices(
+        frames_metadata=frames_metadata,
+        slice_ids=-1,
+        uniform_structure=True
+    )
     margin = 0 if depth == 1 else depth // 2
     im_stack = []
     for z in range(slice_idx - margin, slice_idx + margin + 1):
@@ -333,11 +370,27 @@ def preprocess_imstack(frames_metadata,
             frames_metadata.loc[meta_idx, "file_name"],
         )
         im = read_image(file_path)
-        # Only flatfield correct images that will be normalized
-        if flat_field_im is not None and not normalize_im:
+        # Only flatfield correct images that won't be normalized
+        if flat_field_im is not None:
+            assert normalize_im in [None, 'stack'], \
+                "flat field correction currently only supports " \
+                "None or 'stack' option for 'normalize_im'"
             im = apply_flat_field_correction(
                 im,
                 flat_field_image=flat_field_im,
+            )
+
+        zscore_median = None
+        zscore_iqr = None
+        if normalize_im in ['dataset', 'volume', 'slice']:
+            zscore_median = frames_metadata.loc[meta_idx, 'zscore_median']
+            zscore_iqr = frames_metadata.loc[meta_idx, 'zscore_iqr']
+
+        if normalize_im is not None:
+            im = normalize.zscore(
+                im,
+                mean=zscore_median,
+                std=zscore_iqr
             )
         im_stack.append(im)
 
@@ -355,7 +408,31 @@ def preprocess_imstack(frames_metadata,
             hist_clip_limits[0],
             hist_clip_limits[1],
         )
-    if normalize_im:
-        im_stack = normalize.zscore(im_stack)
+
     return im_stack
+
+
+def grid_sample_pixel_values(im, grid_spacing):
+    """Sample pixel values in the input image at the grid. Any incomplete
+    grids (remainders of modulus operation) will be ignored.
+
+    :param np.array im: 2D image
+    :param int grid_spacing: spacing of the grid
+    :return int row_ids: row indices of the grids
+    :return int col_ids: column indices of the grids
+    :return np.array sample_values: sampled pixel values
+    """
+
+    im_shape = im.shape
+    assert grid_spacing < im_shape[0], "grid spacing larger than image height"
+    assert grid_spacing < im_shape[1], "grid spacing larger than image width"
+    # leave out the grid points on the edges
+    sample_coords = np.array(list(itertools.product(
+        np.arange(grid_spacing, im_shape[0], grid_spacing),
+        np.arange(grid_spacing, im_shape[1], grid_spacing))))
+    row_ids = sample_coords[:, 0]
+    col_ids = sample_coords[:, 1]
+    sample_values = im[row_ids, col_ids]
+    return row_ids, col_ids, sample_values
+
 

@@ -24,15 +24,15 @@ RUN sudo apt-get update && sudo apt-get install -y --no-install-recommends \
          graphviz \
          vim && \
 
-wget -O ~/get-pip.py \
-    https://bootstrap.pypa.io/get-pip.py && \
-python3.6 ~/get-pip.py && \
-
-# keras
-pip install --upgrade --no-cache-dir keras==2.1.6 && \
+#wget -O ~/get-pip.py \
+#    https://bootstrap.pypa.io/pip/3.6/get-pip.py && \
+#python3.6 ~/get-pip.py && \
+#
+## keras
+#pip install --upgrade --no-cache-dir keras==2.1.6 && \
 
 # Jupyter
-pip install --upgrade --no-cache-dir jupyter && \
+#pip install --upgrade --no-cache-dir jupyter && \
 
 # Cleanup
 sudo apt-get clean && \
@@ -41,8 +41,13 @@ sudo rm -rf /var/lib/apt/lists/*
 
 # Install pip packages from requirements text file
 
-ADD requirements_docker.txt /tmp/requirements.txt
-RUN pip install -r /tmp/requirements.txt
+#ADD requirements_docker.txt /tmp/requirements.txt
+#RUN pip install -r /tmp/requirements.txt
+
+ADD conda_environment_docker.yml /tmp/conda.yml
+RUN conda update conda
+#RUN conda env create --file=/tmp/conda.yml && \
+RUN conda env update --name base --prune --file=/tmp/conda.yml
 
 WORKDIR ${WORK_DIR}
 ENV PYTHONPATH ${WORK_DIR}

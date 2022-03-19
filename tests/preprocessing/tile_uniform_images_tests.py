@@ -29,6 +29,7 @@ class TestImageTilerUniform(unittest.TestCase):
         self.pos_idx1 = 7
         self.pos_idx2 = 8
         self.int2str_len = 3
+        self.normalize_im = None
 
         # Write test images with 4 z and 2 pos idx
         for z in range(15, 20):
@@ -38,13 +39,18 @@ class TestImageTilerUniform(unittest.TestCase):
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx1,
             )
+
+            meta_row = aux_utils.parse_idx_from_name(
+                im_name)
+            meta_row['mean'] = np.nanmean(self.im)
+            meta_row['std'] = np.nanstd(self.im)
             cv2.imwrite(
                 os.path.join(self.temp_path, im_name),
                 self.im,
             )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name),
-                ignore_index=True,
+                meta_row,
+                ignore_index=True
             )
 
         for z in range(15, 20):
@@ -54,13 +60,18 @@ class TestImageTilerUniform(unittest.TestCase):
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx2,
             )
+
+            meta_row = aux_utils.parse_idx_from_name(
+                im_name)
+            meta_row['mean'] = np.nanmean(self.im2)
+            meta_row['std'] = np.nanstd(self.im2)
             cv2.imwrite(
                 os.path.join(self.temp_path, im_name),
                 self.im2,
             )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name),
-                ignore_index=True,
+                meta_row,
+                ignore_index=True
             )
 
         # Write metadata
@@ -93,6 +104,7 @@ class TestImageTilerUniform(unittest.TestCase):
             channel_ids=[1],
             normalize_channels=[True],
             flat_field_dir=self.flat_field_dir,
+            normalize_im=self.normalize_im,
         )
         exp_fnames = ['im_c001_z015_t005_p007.png',
                       'im_c001_z016_t005_p007.png',
@@ -336,9 +348,9 @@ class TestImageTilerUniform(unittest.TestCase):
         self.assertSetEqual(set(frames_meta.col_start.tolist()), {0, 4, 6})
 
         # Read and validate tiles
-        im_val = np.mean(norm_util.zscore(self.im / self.ff_im))
+        im_val = np.mean(norm_util.zscore(self.im / self.ff_im, mean=0, std=1))
         im_norm = im_val * np.ones((3, 5, 5))
-        im_val = np.mean(norm_util.zscore(self.im2 / self.ff_im))
+        im_val = np.mean(norm_util.zscore(self.im2 / self.ff_im, mean=0, std=1))
         im2_norm = im_val * np.ones((3, 5, 5))
         for i, row in frames_meta.iterrows():
             tile = np.load(os.path.join(tile_dir, row.file_name))

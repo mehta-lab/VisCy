@@ -1,0 +1,20 @@
+source1: 
+  dir: /CompMicro/Projects/brainarchitecture/2019_07_17_H78.1_GW23.5_1pctSap_DAPI_Fluoromyelin_ProlongGold_10X_Testing/SMS_20190717_1320_4_SMS_20190717_1320_4_fit_order2_registered
+  pos_ids: all
+source2: 
+  dir: /CompMicro/Projects/brainarchitecture/2019_07_17_H9_GW21_1pctSap_DAPI_Fluoromyelin_ProlongGold_10X_Training/SMS_20190717_1510_2_SMS_20190717_1510_2_fit_order2_registered
+  pos_ids: all
+source3: 
+  dir: /CompMicro/Projects/brainarchitecture/2019_06_21_GW20point5_594Fluoromyelin_10X_non_overlapping/SMS_20190621_1350_3_SMS_20190621_1350_3_fit_order2_registered
+  pos_ids: [12, 13, 30, 31, 32, 55, 56, 57, 58, 72, 73, 74, 75, 76, 77, 78, 79, 96, 97, 98, 99, 100, 101, 102, 103, 104, 115, 116, 117, 118, 119, 120, 121, 122, 123, 124, 139, 140, 141, 142, 143, 144, 145, 146, 147, 148, 161, 162, 163, 164, 165, 166, 167, 168, 169, 182, 183, 184, 185, 186, 187, 188, 189, 190, 206, 207, 208, 209, 210, 211, 212, 213, 225, 226, 227, 228]
+source4: 
+  dir: /CompMicro/Projects/brainarchitecture/2019_06_20_GW24_reimaging_594Fluoromyelin_10X_training_full_slice/SMS_20190620_1450_2_SMS_20190620_1450_2_fit_order2_registered/
+  pos_ids: [14, 15, 16, 17, 18, 19, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 58, 59, 60, 61, 62, 63, 67, 68, 69, 70, 71, 85, 86]
+
+destination: /CompMicro/Projects/brainarchitecture/train_pool_H9_H78_GW20_GW24
+name_parser: parse_sms_name
+num_workers: 64
+pool_mode: new
+
+
+

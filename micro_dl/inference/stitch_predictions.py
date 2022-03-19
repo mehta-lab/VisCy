@@ -3,9 +3,7 @@ import numpy as np
 
 
 class ImageStitcher:
-    """Stitch prediction images for 3D
-
-    USE PREDICT ON LARGER IMAGE FOR 2D AND 2.5D
+    """Stitch prediction images for large images
     """
 
     def __init__(self, tile_option,
@@ -21,8 +19,8 @@ class ImageStitcher:
         :param str data_format: channels_first or channels_last
         """
 
-        assert tile_option in ['tile_z', 'tile_xyz'], \
-            'tile_option not in [tile_z, tile_xyz]'
+        assert tile_option in ['tile_z', 'tile_xyz', 'tile_xy'], \
+            'tile_option not in [tile_z, tile_xyz, tile_xy]'
 
         allowed_overlap_opn = ['mean', 'any']
         assert ('overlap_operation' in overlap_dict and
@@ -33,26 +31,33 @@ class ImageStitcher:
         self.tile_option = tile_option
         self.overlap_dict = overlap_dict
         self.data_format = data_format
-
-        img_dim = [2, 3, 4] if self.data_format == 'channels_first' \
-            else [1, 2, 3]
-        self.img_dim = img_dim
-        if data_format == 'channels_first':
-            x_dim = 4 if image_format == 'zyx' else 2
-            z_dim = 2 if image_format == 'zyx' else 4
-            y_dim = 3
-        elif data_format == 'channels_last':
-            x_dim = 3 if image_format == 'zyx' else 1
-            z_dim = 1 if image_format == 'zyx' else 3
-            y_dim = 2
-
+        #TODO: always convert image dim to czyx inside the class and convert back after stitching
+        z_dim = None
+        if tile_option in ['tile_z', 'tile_xyz']:
+            if data_format == 'channels_first':
+                x_dim = 4 if image_format == 'zyx' else 2
+                z_dim = 2 if image_format == 'zyx' else 4
+                y_dim = 3
+            elif data_format == 'channels_last':
+                x_dim = 3 if image_format == 'zyx' else 1
+                z_dim = 1 if image_format == 'zyx' else 3
+                y_dim = 2
+            self.img_dim = [z_dim, y_dim, x_dim]
+            z_dim_3d = 0 if image_format == 'zyx' else 2
+            self.z_dim_3d = z_dim_3d
+            self.image_format = image_format
+        else:
+            if data_format == 'channels_first':
+                x_dim = 2
+                y_dim = 1
+            elif data_format == 'channels_last':
+                x_dim = 1
+                y_dim = 0
+            self.img_dim = [y_dim, x_dim]
+            self.overlap_dim = self.img_dim
         self.x_dim = x_dim
         self.y_dim = y_dim
         self.z_dim = z_dim
-
-        z_dim_3d = 0 if image_format == 'zyx' else 2
-        self.z_dim_3d = z_dim_3d
-        self.image_format = image_format
 
     def _place_block_z(self,
                        pred_block,
@@ -117,7 +122,7 @@ class ImageStitcher:
         :return np.array stitched_img: 3D image with blocks assembled in place
         """
 
-        stitched_img = np.zeros(self.shape_3d)
+        stitched_img = np.zeros(self.im_shape)
 
         if 'overlap_shape' in self.overlap_dict:
             assert isinstance(self.overlap_dict['overlap_shape'], int), \
@@ -228,7 +233,7 @@ class ImageStitcher:
         :return np.array stitched_img: 3D image with blocks assembled in place
         """
 
-        stitched_img = np.zeros(self.shape_3d)
+        stitched_img = np.zeros(self.im_shape, dtype=np.float32)
         assert self.data_format is not None, \
             'data format needed for stitching images along xyz'
         for idx, cur_tile in enumerate(tile_imgs_list):
@@ -241,12 +246,117 @@ class ImageStitcher:
                 raise Exception('error in _stitch_along_xyz:{}'.format(e))
         return stitched_img
 
-    def stitch_predictions(self, shape_3d,
+    def _place_block_xy(self,
+                        pred_block,
+                        pred_image,
+                        tile_idx):
+        """Place the current block prediction in the larger vol
+
+        pred_image mutated in-place. Tile predictions in 5D and stitched img
+        in 3D
+
+        :param np.array pred_block: current prediction block
+        :param np.array pred_image: full 3D prediction image with zeros
+        :param list tile_idx: tuple of len 6 with start, end indices for
+         three dimensions
+        """
+
+        overlap_shape = self.overlap_dict['overlap_shape']
+        overlap_operation = self.overlap_dict['overlap_operation']
+
+        def _init_block_img_idx(task='init'):
+            """Helper function to initialize slicing indices
+
+            :param str task: init - initialize with entire range; assign -
+             initialize with non-overlapping indices
+            """
+            # initialize all indices to :
+            idx_in_img = []  # 3D
+            idx_in_block = []  # 5D
+
+            for dim_idx in range(len(pred_image.shape)):
+                idx_in_block.append(np.s_[:])
+                idx_in_img.append(np.s_[:])
+            if task == 'assign':
+                for idx, dim in enumerate(self.img_dim):
+                    tile_dim = 2 * idx
+                    idx_in_img[dim] = np.s_[tile_idx[tile_dim]:
+                                            tile_idx[tile_dim + 1]]
+            return idx_in_block, idx_in_img
+        # print('pred_image.shape:', pred_image.shape)
+        # print('pred_block.shape:', pred_block.shape)
+        idx_in_block, idx_in_img = _init_block_img_idx()
+        # print(idx_in_block, idx_in_img)
+        # assign non-overlapping regions
+        for idx, dim in enumerate(self.img_dim):
+            tile_dim = 2 * idx
+            idx_in_img[dim] = \
+                np.s_[tile_idx[tile_dim] + overlap_shape[idx]:
+                        tile_idx[tile_dim + 1]]
+            idx_in_block[dim] = np.s_[overlap_shape[idx]:]
+        pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
+        idx_in_block, idx_in_img = _init_block_img_idx(task='assign')
+        for idx, dim in enumerate(self.overlap_dim):
+            tile_dim = 2 * idx
+            forward_wts = np.linspace(0, 1.0, overlap_shape[idx] + 2)[1:-1]
+            reverse_wts = forward_wts[::-1]
+            if tile_idx[tile_dim] > 0:
+                for overlap_idx in range(overlap_shape[idx]):
+                    idx_in_block[dim] = overlap_idx
+                    idx_in_img[dim] = tile_idx[tile_dim] + overlap_idx
+                    if overlap_operation == 'mean':
+                        # smoothly weight the two images in overlapping slices
+                        pred_image[tuple(idx_in_img)] = (
+                            reverse_wts[overlap_idx] * pred_image[tuple(idx_in_img)] +
+                            forward_wts[overlap_idx] * pred_block[tuple(idx_in_block)]
+                        )
+                    elif overlap_operation == 'any':
+                        pred_block[idx_in_img] = np.any(
+                            pred_image[idx_in_img], pred_block[idx_in_block]
+                        )
+            else:
+                idx_in_img[dim] = (
+                    np.s_[tile_idx[tile_dim]:
+                          tile_idx[tile_dim] + overlap_shape[idx]]
+                )
+                idx_in_block[dim] = np.s_[:overlap_shape[idx]]
+                pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
+            idx_in_img[dim] = np.s_[tile_idx[tile_dim] +
+                                    overlap_shape[idx]:
+                                       tile_idx[tile_dim + 1]]
+            idx_in_block[dim] = np.s_[overlap_shape[idx]:]
+        return
+
+    def _stitch_along_xy(self,
+                          tile_imgs_list,
+                          block_indices_list):
+        """Stitch images along XYZ with overlap
+
+        :param list tile_imgs_list: list with predicted tensors
+        :param list block_indices_list: list with tuples of (start, end) idx
+        :return np.array stitched_img: 3D image with blocks assembled in place
+        """
+
+        stitched_img = np.zeros(self.im_shape, dtype=np.float32)
+        assert self.data_format is not None, \
+            'data format needed for stitching images along xy'
+        for idx, cur_tile in enumerate(tile_imgs_list):
+            print('Stitching tile {}/{}...'.format(idx, len(tile_imgs_list)))
+            # try:
+            cur_crop_idx = block_indices_list[idx]
+            self._place_block_xy(pred_block=cur_tile,
+                                 pred_image=stitched_img,
+                                 tile_idx=cur_crop_idx)
+            # except Exception as e:
+            #     raise Exception('error in _stitch_along_xyz:{}'.format(e))
+        return stitched_img
+
+    def stitch_predictions(self, im_shape,
                            tile_imgs_list,
                            block_indices_list):
         """Stitch the predicted tiles /blocks for a 3d image
 
-        :param list shape_3d: shape of  3d image
+        :param list im_shape: shape of stitched pred image
         :param list tile_imgs_list: list of prediction images
         :param list block_indices_list: list of tuple/lists with indices for
          each prediction. Individual list of: len=2 when tile_z (start_slice,
@@ -259,13 +369,14 @@ class ImageStitcher:
             'missing tile/indices for sub tile/block: {}, {}'.format(
                 len(tile_imgs_list), len(block_indices_list)
             )
-        assert len(shape_3d) == 3, \
-            'only stitching 3D volume is currently supported'
-        self.shape_3d = shape_3d
+        self.im_shape = im_shape
 
         if self.tile_option == 'tile_z':
             stitched_img = self._stitch_along_z(tile_imgs_list,
                                                 block_indices_list)
+        elif self.tile_option == 'tile_xy':
+            stitched_img = self._stitch_along_xy(tile_imgs_list,
+                                                  block_indices_list)
         elif self.tile_option == 'tile_xyz':
             stitched_img = self._stitch_along_xyz(tile_imgs_list,
                                                   block_indices_list)

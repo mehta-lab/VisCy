@@ -11,6 +11,7 @@ import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.aux_utils as aux_utils
 
 
+
 class TestTileUtils(unittest.TestCase):
 
     def setUp(self):
@@ -49,12 +50,17 @@ class TestTileUtils(unittest.TestCase):
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx,
             )
+            meta_row = aux_utils.parse_idx_from_name(
+                im_name, self.df_columns)
+            meta_row['mean'] = np.nanmean(sph[:, :, z])
+            meta_row['std'] = np.nanstd(sph[:, :, z])
             cv2.imwrite(os.path.join(self.temp_path, im_name), sph[:, :, z])
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, self.df_columns),
+                meta_row,
                 ignore_index=True
             )
-
+        self.dataset_mean = frames_meta['mean'].mean()
+        self.dataset_std = frames_meta['std'].mean()
         # Write metadata
         frames_meta.to_csv(os.path.join(self.temp_path, meta_fname), sep=',')
         self.frames_meta = frames_meta
@@ -71,6 +77,8 @@ class TestTileUtils(unittest.TestCase):
             'channel_name': '3d_test',
             'file_name': 'im_c001_z000_t000_p001_3d.npy',
             'pos_idx': 1,
+            'mean': self.dataset_mean,
+            'std': self.dataset_std,
         }])
         self.meta_3d = meta_3d
 

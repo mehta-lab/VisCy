@@ -12,11 +12,13 @@ import pandas as pd
 import yaml
 
 DF_NAMES = ["channel_idx",
+            "pos_idx",
             "slice_idx",
             "time_idx",
             "channel_name",
+            "dir_name",
             "file_name",
-            "pos_idx"]
+            ]
 
 
 def import_object(module_name, obj_name, obj_type='class'):
@@ -61,7 +63,8 @@ def get_row_idx(frames_metadata,
                 time_idx,
                 channel_idx,
                 slice_idx=-1,
-                pos_idx=-1):
+                pos_idx=-1,
+                dir_names=None):
     """
     Get the indices for images with timepoint_idx and channel_idx
 
@@ -72,8 +75,13 @@ def get_row_idx(frames_metadata,
     :param int slice_idx: get info for this focal plane (2D)
     :param int pos_idx: Specify FOV (default to all if -1)
     """
+    if dir_names is None:
+        dir_names = frames_metadata['dir_name'].unique()
+    if not isinstance(dir_names, list):
+        dir_names = [dir_names]
     row_idx = ((frames_metadata['time_idx'] == time_idx) &
-               (frames_metadata['channel_idx'] == channel_idx))
+               (frames_metadata['channel_idx'] == channel_idx) &
+               frames_metadata['dir_name'].isin(dir_names))
     if slice_idx > -1:
         row_idx = (row_idx & (frames_metadata['slice_idx'] == slice_idx))
     if pos_idx > -1:
@@ -104,6 +112,27 @@ def get_meta_idx(frames_metadata,
         (frames_metadata["pos_idx"] == pos_idx)].tolist()
     return frame_idx[0]
 
+def get_sub_meta(frames_metadata,
+                 time_ids,
+                 channel_ids,
+                 slice_ids,
+                 pos_ids):
+    """
+    Get sliced metadata dataframe given variable indices
+
+    :param dataframe frames_metadata: Dataframe with column names given below
+    :param int time_ids: Timepoint indices
+    :param int channel_ids: Channel indices
+    :param int slice_ids: Slize (z) indices
+    :param int pos_ids: Position (FOV) indices
+    :return: int pos_ids: Row positions matching indices above
+    """
+    frames_meta_sub = frames_metadata[
+        (frames_metadata['channel_idx'].isin(channel_ids)) &
+        (frames_metadata['time_idx'].isin(time_ids)) &
+        (frames_metadata["slice_idx"].isin(slice_ids)) &
+        (frames_metadata["pos_idx"].isin(pos_ids))]
+    return frames_meta_sub
 
 def get_im_name(time_idx=None,
                 channel_idx=None,
@@ -139,6 +168,45 @@ def get_im_name(time_idx=None,
     im_name += ext
     return im_name
 
+def get_sms_im_name(time_idx=None,
+                    channel_name=None,
+                    slice_idx=None,
+                    pos_idx=None,
+                    extra_field=None,
+                    ext='.npy',
+                    int2str_len=3):
+    """
+    Create an image name given parameters and extension
+    This function is custom for the computational microscopy (SMS)
+    group, who has the following file naming convention:
+    File naming convention is assumed to be:
+        img_channelname_t***_p***_z***.tif
+    This function will alter list and dict in place.
+
+    :param int time_idx: Time index
+    :param str channel_name: Channel name
+    :param int slice_idx: Slice (z) index
+    :param int pos_idx: Position (FOV) index
+    :param str extra_field: Any extra string you want to include in the name
+    :param str ext: Extension, e.g. '.png'
+    :param int int2str_len: Length of string of the converted integers
+    :return st im_name: Image file name
+    """
+
+    im_name = "img"
+    if channel_name is not None:
+        im_name += "_" + str(channel_name)
+    if time_idx is not None:
+        im_name += "_t" + str(time_idx).zfill(int2str_len)
+    if pos_idx is not None:
+        im_name += "_p" + str(pos_idx).zfill(int2str_len)
+    if slice_idx is not None:
+        im_name += "_z" + str(slice_idx).zfill(int2str_len)
+    if extra_field is not None:
+        im_name += "_" + extra_field
+    im_name += ext
+
+    return im_name
 
 def sort_meta_by_channel(frames_metadata):
     """
@@ -448,7 +516,7 @@ def write_json(json_dict, json_filename):
     :param dict json_dict: Dictionary to be written
     :param str json_filename: Full path file name of json
     """
-    json_dump = json.dumps(json_dict)
+    json_dump = json.dumps(json_dict, indent=4)
     with open(json_filename, "w") as write_file:
         write_file.write(json_dump)
 

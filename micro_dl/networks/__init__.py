@@ -7,3 +7,4 @@ from .unet2D import UNet2D
 from .unet3D import UNet3D
 from .unet_stack_2D import UNetStackTo2D
 from .unet_stack_stack import UNetStackToStack
+from .vqnet import VQVAE

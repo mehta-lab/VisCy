@@ -11,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 import micro_dl.cli.generate_meta as generate_meta
+import micro_dl.utils.meta_utils as meta_utils
 
 
 class TestGenerateMeta(unittest.TestCase):
@@ -70,7 +71,7 @@ class TestGenerateMeta(unittest.TestCase):
             order='cztp',
             name_parser='parse_idx_from_name',
         )
-        generate_meta.meta_generator(args)
+        generate_meta.main(args)
         frames_meta = pd.read_csv(os.path.join(self.idx_dir, 'frames_meta.csv'))
         iterator = itertools.product(range(len(self.channel_names)), range(5, 10))
         for i, (c, z) in enumerate(iterator):
@@ -85,7 +86,7 @@ class TestGenerateMeta(unittest.TestCase):
             input=self.sms_dir,
             name_parser='parse_sms_name',
         )
-        generate_meta.meta_generator(args)
+        generate_meta.main(args)
         frames_meta = pd.read_csv(os.path.join(self.sms_dir, 'frames_meta.csv'))
         # This function sorts channel names
         sorted_names = natsort.natsorted(self.channel_names)
@@ -104,4 +105,4 @@ class TestGenerateMeta(unittest.TestCase):
             input=self.sms_dir,
             name_parser='nonexisting_function',
         )
-        generate_meta.meta_generator(args)
+        generate_meta.main(args)

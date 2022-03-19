@@ -1,6 +1,6 @@
 """Base class for U-net"""
 import tensorflow as tf
-from keras.layers import Activation, Input, UpSampling2D, UpSampling3D
+from keras.layers import Activation, Input, UpSampling2D, UpSampling3D, Lambda
 
 from micro_dl.networks.base_conv_net import BaseConvNet
 from micro_dl.networks.conv_blocks import conv_block, residual_conv_block, \
@@ -223,6 +223,9 @@ class BaseUNet(BaseConvNet):
         # ------------ output block ------------------------
         final_activation = self.config['final_activation']
         num_output_channels = self.config['num_target_channels']
+        temperature = 1
+        if 'temperature' in self.config:
+            temperature = self.config['temperature']
         conv_object = get_keras_layer(type='conv',
                                       num_dims=self.config['num_dims'])
         with tf.name_scope('output'):
@@ -232,5 +235,6 @@ class BaseUNet(BaseConvNet):
                 padding=self.config['padding'],
                 kernel_initializer=self.config['init'],
                 data_format=self.config['data_format'])(input_layer)
+            layer = Lambda(lambda x: x / temperature)(layer)
             outputs = Activation(final_activation)(layer)
         return inputs, outputs

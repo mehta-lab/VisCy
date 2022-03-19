@@ -7,7 +7,20 @@ import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
 import micro_dl.utils.masks as mask_utils
 import micro_dl.utils.tile_utils as tile_utils
+from micro_dl.utils.normalize import hist_clipping
+from micro_dl.utils.image_utils import im_adjust
 
+def mp_wrapper(fn, fn_args, workers):
+    """Create and save masks with multiprocessing
+
+    :param list of tuple fn_args: list with tuples of function arguments
+    :param int workers: max number of workers
+    :return: list of returned dicts from create_save_mask
+    """
+    with ProcessPoolExecutor(workers) as ex:
+        # can't use map directly as it works only with single arg functions
+        res = ex.map(fn, *zip(*fn_args))
+    return list(res)
 
 def mp_create_save_mask(fn_args, workers):
     """Create and save masks with multiprocessing
@@ -33,7 +46,7 @@ def create_save_mask(input_fnames,
                      int2str_len,
                      mask_type,
                      mask_ext,
-                     normalize_im=False):
+                     channel_thrs=None):
 
     """
     Create and save mask.
@@ -56,31 +69,40 @@ def create_save_mask(input_fnames,
      NPY files for otsu, unimodal masks, recommended to save as npy
      float64 for borders_weight_loss_map masks to avoid loss due to scaling it
      to uint8.
-    :param bool normalize_im: indicator to normalize image based on z-score or not
+    :param list channel_thrs: list of threshold for each channel to generate
+    binary masks. Only used when mask_type is 'dataset_otsu'
     :return dict cur_meta for each mask
     """
+    if mask_type == 'dataset otsu':
+        assert channel_thrs is not None, \
+            'channel threshold is required for mask_type="dataset otsu"'
     im_stack = image_utils.read_imstack(
         input_fnames,
         flat_field_fname,
-        normalize_im=normalize_im,
+        normalize_im=None,
     )
     masks = []
     for idx in range(im_stack.shape[-1]):
-        im = im_stack[..., idx]
+        im = im_stack[..., idx].astype('float32')
         if mask_type == 'otsu':
-            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius)
+            mask = mask_utils.create_otsu_mask(im, str_elem_radius)
         elif mask_type == 'unimodal':
-            mask = mask_utils.create_unimodal_mask(im.astype('float32'), str_elem_radius)
+            mask = mask_utils.create_unimodal_mask(im,  str_elem_radius)
+        elif mask_type == 'dataset otsu':
+            mask = mask_utils.create_otsu_mask(im, str_elem_radius, channel_thrs[idx])
         elif mask_type == 'borders_weight_loss_map':
             mask = mask_utils.get_unet_border_weight_map(im)
         masks += [mask]
     # Border weight map mask is a float mask not binary like otsu or unimodal,
     # so keep it as is (assumes only one image in stack)
+    fg_frac = None
     if mask_type == 'borders_weight_loss_map':
         mask = masks[0]
     else:
         masks = np.stack(masks, axis=-1)
-        mask = np.any(masks, axis=-1)
+        # mask = np.any(masks, axis=-1)
+        mask = np.mean(masks, axis=-1)
+        fg_frac = np.sum(mask) / mask.size
 
     # Create mask name for given slice, time and position
     file_name = aux_utils.get_im_name(
@@ -89,6 +111,16 @@ def create_save_mask(input_fnames,
         slice_idx=slice_idx,
         pos_idx=pos_idx,
         int2str_len=int2str_len,
+        ext=mask_ext,
+    )
+
+    overlay_name = aux_utils.get_im_name(
+        time_idx=time_idx,
+        channel_idx=mask_channel_idx,
+        slice_idx=slice_idx,
+        pos_idx=pos_idx,
+        int2str_len=int2str_len,
+        extra_field='overlay',
         ext=mask_ext,
     )
     if mask_ext == '.npy':
@@ -105,7 +137,18 @@ def create_save_mask(input_fnames,
             assert im_stack.shape[-1] == 1
             # Note: Border weight map mask should only be generated from one binary image
         else:
-            mask = mask.astype(np.uint8) * np.iinfo(np.uint8).max
+            mask = image_utils.im_bit_convert(mask, bit=8, norm=True)
+            mask = im_adjust(mask)
+            im_mean = np.mean(im_stack, axis=-1)
+            im_mean = hist_clipping(im_mean, 1, 99)
+            im_mean = \
+                cv2.convertScaleAbs(
+                    im_mean - np.min(im_mean),
+                  alpha=255 / (np.max(im_mean) - np.min(im_mean))
+                )
+            im_mask_overlay = np.stack([mask, im_mean, mask], axis=2)
+            cv2.imwrite(os.path.join(mask_dir, overlay_name), im_mask_overlay)
+
         cv2.imwrite(os.path.join(mask_dir, file_name), mask)
     else:
         raise ValueError("mask_ext can be '.npy' or '.png', not {}".format(mask_ext))
@@ -113,9 +156,15 @@ def create_save_mask(input_fnames,
                 'slice_idx': slice_idx,
                 'time_idx': time_idx,
                 'pos_idx': pos_idx,
-                'file_name': file_name}
+                'file_name': file_name,
+                'fg_frac': fg_frac,}
     return cur_meta
 
+def get_mask_meta_row(file_path, meta_row):
+    mask = image_utils.read_image(file_path)
+    fg_frac = np.sum(mask > 0) / mask.size
+    meta_row = {**meta_row, 'fg_frac': fg_frac}
+    return meta_row
 
 def mp_tile_save(fn_args, workers):
     """Tile and save with multiprocessing
@@ -144,7 +193,10 @@ def tile_and_save(input_fnames,
                   save_dir,
                   int2str_len=3,
                   is_mask=False,
-                  normalize_im=False):
+                  normalize_im=None,
+                  zscore_mean=None,
+                  zscore_std=None
+                  ):
     """Crop image into tiles at given indices and save
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -161,16 +213,19 @@ def tile_and_save(input_fnames,
     :param str save_dir: output dir to save tiles
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
-    :param bool normalize_im: Indicates if normalizing using z score is needed
     :return: pd.DataFrame from a list of dicts with metadata
     """
     try:
+        print('tile image t{:03d} p{:03d} z{:03d} c{:03d}...'
+              .format(time_idx, pos_idx, slice_idx, channel_idx))
         input_image = image_utils.read_imstack(
             input_fnames=input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,
             is_mask=is_mask,
-            normalize_im=normalize_im
+            normalize_im=normalize_im,
+            zscore_mean=zscore_mean,
+            zscore_std=zscore_std
         )
         save_dict = {'time_idx': time_idx,
                      'channel_idx': channel_idx,
@@ -225,7 +280,10 @@ def crop_at_indices_save(input_fnames,
                          int2str_len=3,
                          is_mask=False,
                          tile_3d=False,
-                         normalize_im=False):
+                         normalize_im=True,
+                         zscore_mean=None,
+                         zscore_std=None
+                         ):
     """Crop image into tiles at given indices and save
 
     :param tuple input_fnames: tuple of input fnames with full path
@@ -241,17 +299,20 @@ def crop_at_indices_save(input_fnames,
     :param int int2str_len: len of indices for creating file names
     :param bool is_mask: Indicates if files are masks
     :param bool tile_3d: indicator for tiling in 3D
-    :param bool normalize_im: Indicates if normalizing using z score is needed
     :return: pd.DataFrame from a list of dicts with metadata
     """
 
     try:
+        print('tile image t{:03d} p{:03d} z{:03d} c{:03d}...'
+              .format(time_idx, pos_idx, slice_idx, channel_idx))
         input_image = image_utils.read_imstack(
             input_fnames=input_fnames,
             flat_field_fname=flat_field_fname,
             hist_clip_limits=hist_clip_limits,
             is_mask=is_mask,
-            normalize_im=normalize_im
+            normalize_im=normalize_im,
+            zscore_mean=zscore_mean,
+            zscore_std=zscore_std
         )
         save_dict = {'time_idx': time_idx,
                      'channel_idx': channel_idx,
@@ -324,7 +385,8 @@ def mp_rescale_vol(fn_args, workers):
 
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
-        ex.map(rescale_vol_and_save, *zip(*fn_args))
+        res = ex.map(rescale_vol_and_save, *zip(*fn_args))
+    return list(res)
 
 
 def rescale_vol_and_save(time_idx,
@@ -370,3 +432,70 @@ def rescale_vol_and_save(time_idx,
     input_stack = np.stack(input_stack, axis=2)
     resc_vol = image_utils.rescale_nd_image(input_stack, scale_factor)
     np.save(output_fname, resc_vol, allow_pickle=True, fix_imports=True)
+    cur_metadata = {'time_idx': time_idx,
+                    'pos_idx': pos_idx,
+                    'channel_idx': channel_idx,
+                    'slice_idx': sl_start_idx,
+                    'file_name': os.path.basename(output_fname),
+                    'mean': np.mean(resc_vol),
+                    'std': np.std(resc_vol)}
+    return cur_metadata
+
+
+def mp_get_im_stats(fn_args, workers):
+    """Read and computes statistics of images with multiprocessing
+
+    :param list of tuple fn_args: list with tuples of function arguments
+    :param int workers: max number of workers
+    :return: list of returned df from get_im_stats
+    """
+
+    with ProcessPoolExecutor(workers) as ex:
+        # can't use map directly as it works only with single arg functions
+        res = ex.map(get_im_stats, fn_args)
+    return list(res)
+
+
+def get_im_stats(im_path):
+    """Read and computes statistics of images
+
+    """
+
+    im = image_utils.read_image(im_path)
+    meta_row = {
+        'mean': np.nanmean(im),
+        'std': np.nanstd(im)
+        }
+    return meta_row
+
+def mp_sample_im_pixels(fn_args, workers):
+    """Read and computes statistics of images with multiprocessing
+
+    :param list of tuple fn_args: list with tuples of function arguments
+    :param int workers: max number of workers
+    :return: list of returned df from get_im_stats
+    """
+
+    with ProcessPoolExecutor(workers) as ex:
+        # can't use map directly as it works only with single arg functions
+        res = ex.map(sample_im_pixels, *zip(*fn_args))
+    return list(res)
+
+
+def sample_im_pixels(im_path, grid_spacing, meta_row):
+    """Read and computes statistics of images
+
+    """
+
+    im = image_utils.read_image(im_path)
+    row_ids, col_ids, sample_values = \
+        image_utils.grid_sample_pixel_values(im, grid_spacing)
+
+    meta_rows = \
+        [{**meta_row,
+          'row_idx': row_idx,
+          'col_idx': col_idx,
+          'intensity': sample_value}
+          for row_idx, col_idx, sample_value
+          in zip(row_ids, col_ids, sample_values)]
+    return meta_rows

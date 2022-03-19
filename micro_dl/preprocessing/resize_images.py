@@ -141,7 +141,6 @@ class ImageResizer:
             sc_str = self.scale_factor
 
         mp_args = []
-        resized_metadata_list = []
         if num_slices_subvolume == -1:
             num_slices_subvolume = len(self.slice_ids)
         num_blocks = np.floor(
@@ -183,15 +182,9 @@ class ImageResizer:
                                         self.scale_factor,
                                         self.input_dir,
                                         ff_path))
-                        cur_metadata = {'time_idx': time_idx,
-                                        'pos_idx': pos_idx,
-                                        'channel_idx': channel_idx,
-                                        'slice_idx': start_idx,
-                                        'file_name': op_fname}
-                        resized_metadata_list.append(cur_metadata)
 
         # Multiprocessing of kwargs
-        mp_utils.mp_rescale_vol(mp_args, self.num_workers)
+        resized_metadata_list = mp_utils.mp_rescale_vol(mp_args, self.num_workers)
         resized_metadata_df = pd.DataFrame.from_dict(resized_metadata_list)
         resized_metadata_df.to_csv(
             os.path.join(self.resize_dir, 'frames_meta.csv'),

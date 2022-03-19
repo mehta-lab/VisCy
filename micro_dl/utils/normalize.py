@@ -3,7 +3,7 @@ import numpy as np
 from skimage.exposure import equalize_adapthist
 
 
-def zscore(input_image):
+def zscore(input_image, mean=None, std=None):
     """
     Performs z-score normalization. Adds epsilon in denominator for robustness
 
@@ -11,10 +11,27 @@ def zscore(input_image):
     :return: z score normalized image
     """
 
-    norm_img = (input_image - np.mean(input_image)) /\
-               (np.std(input_image) + np.finfo(float).eps)
+    if not mean:
+        mean = np.nanmean(input_image)
+    if not std:
+        std = np.nanstd(input_image)
+    norm_img = (input_image - mean.astype(np.float64)) /\
+               (std + np.finfo(float).eps)
     return norm_img
 
+
+def unzscore(im_norm, mean, std):
+    """
+    Revert z-score normalization applied during preprocessing. Necessary
+    before computing SSIM
+
+    :param input_image: input image for un-zscore
+    :return: image at its original scale
+    """
+
+    im = im_norm * (std + np.finfo(float).eps) + mean
+
+    return im
 
 def hist_clipping(input_image, min_percentile=2, max_percentile=98):
     """Clips and rescales histogram from min to max intensity percentiles

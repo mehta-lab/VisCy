@@ -11,7 +11,7 @@ def test_mae_loss():
     y_pred = np.zeros_like(y_true) + 2.
     y_true = tf.convert_to_tensor(y_true, dtype=tf.float32)
     y_pred = tf.convert_to_tensor(y_pred, dtype=tf.float32)
-    mae = losses.mae_loss(y_true, y_pred)
+    mae = losses.mae_loss(y_true, y_pred, mean_loss=True)
     with tf.Session() as sess:
         res = sess.run(mae)
         mae_expected = np.zeros((5, 10), np.float32)
@@ -25,7 +25,7 @@ def test_mse_loss():
     y_pred = np.zeros_like(y_true) + 2.
     y_true = tf.convert_to_tensor(y_true, dtype=tf.float32)
     y_pred = tf.convert_to_tensor(y_pred, dtype=tf.float32)
-    mse = losses.mse_loss(y_true, y_pred)
+    mse = losses.mse_loss(y_true, y_pred, mean_loss=True)
     with tf.Session() as sess:
         res = sess.run(mse)
         mse_expected = np.zeros((5, 10), np.float32)
@@ -94,7 +94,8 @@ def test_binary_crossentropy_loss():
     y_pred[:, :5, :] = 1.
     y_true = tf.convert_to_tensor(y_true, dtype=tf.float32)
     y_pred = tf.convert_to_tensor(y_pred, dtype=tf.float32)
-    binary_crossentropy_loss = losses.binary_crossentropy_loss(y_true, y_pred)
+    binary_crossentropy_loss = \
+        losses.binary_crossentropy_loss(y_true, y_pred, mean_loss=True)
     with tf.Session() as sess:
         res = sess.run(binary_crossentropy_loss)
         np.testing.assert_array_equal(res.shape, (1, 10))

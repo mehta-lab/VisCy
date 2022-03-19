@@ -6,6 +6,24 @@ import pandas as pd
 import micro_dl.utils.aux_utils as aux_utils
 
 
+def get_preprocess_config(data_dir):
+    # If the parent dir with tile dir, mask dir is passed as data_dir,
+    # it should contain a json with directory names
+    json_fname = os.path.join(data_dir,
+                              'preprocessing_info.json')
+    try:
+        preprocessing_info = aux_utils.read_json(json_filename=json_fname)
+
+        # Preprocessing_info is a list of jsons. Use the last json. If a tile
+        # (training data) dir is specified and exists in info json use that
+        recent_json = preprocessing_info[-1]
+        preprocess_config = recent_json['config']
+    except FileNotFoundError as e:
+        msg = 'No preprocessing config file found in {}. Error {}'.format(data_dir, e)
+        raise msg
+
+    return preprocess_config
+
 def validate_mask_meta(mask_dir,
                        input_dir,
                        csv_name=None,
@@ -60,12 +78,9 @@ def validate_mask_meta(mask_dir,
                     os.path.join(mask_dir, 'frames_meta.csv'),
                 )
                 mask_channel = np.unique(frames_meta['channel_idx'])
-                if isinstance(mask_channel, list):
-                    assert len(mask_channel) == 1,\
-                        "Found more than one mask channel: {}".format(mask_channel)
-                    mask_channel = mask_channel[0]
-                if type(mask_channel).__module__ == 'numpy':
-                    mask_channel = mask_channel.item()
+                assert len(mask_channel) == 1,\
+                    "Found more than one mask channel: {}".format(mask_channel)
+                mask_channel = mask_channel[0]
                 return mask_channel
             elif len(csv_name) == 1:
                 # Use the one existing csv name
@@ -110,5 +125,7 @@ def validate_mask_meta(mask_dir,
     out_meta.to_csv(meta_filename, sep=",")
 
     return mask_channel
+
+
 
 

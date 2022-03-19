@@ -1,6 +1,7 @@
 import numpy as np
 import os
 import pandas as pd
+import shutil
 
 import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.aux_utils as aux_utils
@@ -27,6 +28,8 @@ class ImageTilerUniform:
                  image_format='zyx',
                  num_workers=4,
                  int2str_len=3,
+                 normalize_im='stack',
+                 min_fraction=None,
                  tile_3d=False):
         """
         Tiles images.
@@ -62,10 +65,11 @@ class ImageTilerUniform:
         :param int int2str_len: number of characters for each idx to be used
             in file names
         :param bool tile_3d: Whether tiling is 3D or 2D
+         in file names
+        :param None or str normalize_im: normalization scheme for input images
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
-        self.normalize_channels = normalize_channels
         self.depths = depths
         self.tile_size = tile_size
         self.step_size = step_size
@@ -86,19 +90,11 @@ class ImageTilerUniform:
             self.str_tile_step,
         )
 
-        # If tile dir already exist, only tile channels not already present
         self.tiles_exist = False
-        # If tile dir already exist, things could get messy because we don't
-        # have any checks in place for how to add to existing tiles
-        try:
-            os.makedirs(self.tile_dir, exist_ok=False)
-            # make dir for saving indiv meta per image, could be used for
-            # tracking job success / fail
-            os.makedirs(os.path.join(self.tile_dir, 'meta_dir'),
-                        exist_ok=False)
-        except FileExistsError as e:
-            print("Tile dir exists. Only add untiled channels.")
-            self.tiles_exist = True
+        # Delete the old tile dir if it already exists
+        if os.path.exists(self.tile_dir):
+            shutil.rmtree(self.tile_dir)
+        os.makedirs(self.tile_dir)
 
         # make dir for saving individual meta per image, could be used for
         # tracking job success / fail
@@ -116,22 +112,13 @@ class ImageTilerUniform:
             pos_ids=pos_ids,
             uniform_structure=True
         )
+
         self.channel_ids = metadata_ids['channel_ids']
-        self.normalize_channels = normalize_channels
         self.time_ids = metadata_ids['time_ids']
         self.slice_ids = metadata_ids['slice_ids']
         self.pos_ids = metadata_ids['pos_ids']
-        self.normalize_channels = normalize_channels
-        # Determine which channels should be normalized in tiling
-        if self.normalize_channels == -1:
-            self.normalize_channels = [True] * len(self.channel_ids)
-        else:
-            assert len(self.normalize_channels) == len(self.channel_ids),\
-                "Channel ids {} and normalization list {} mismatch".format(
-                    self.channel_ids,
-                    self.normalize_channels,
-                )
-        # If more than one depth is specified, length must match channel ids
+        self.min_fraction = min_fraction
+
         if isinstance(self.depths, list):
             assert len(self.depths) == len(self.channel_ids),\
              "depths ({}) and channels ({}) length mismatch".format(
@@ -154,6 +141,30 @@ class ImageTilerUniform:
             slice_ids=self.slice_ids,
             depth=max_depth,
         )
+        self.frames_meta_sub = aux_utils.get_sub_meta(
+            frames_metadata=self.frames_metadata,
+            time_ids=self.time_ids,
+            channel_ids=self.channel_ids,
+            slice_ids=self.slice_ids,
+            pos_ids=self.pos_ids)
+
+        # Determine which channels should be normalized in tiling
+        if normalize_channels == -1:
+            self.normalize_channels = \
+                dict(zip(self.channel_ids, [normalize_im] * len(self.channel_ids)))
+        else:
+            assert len(normalize_channels) == len(self.channel_ids),\
+                "Channel ids {} and normalization list {} mismatch".format(
+                    self.channel_ids,
+                    self.normalize_channels,
+                )
+
+            normalize_channels = [normalize_im if flag else None for flag in normalize_channels]
+
+            self.normalize_channels = \
+                dict(zip(self.channel_ids, normalize_channels))
+                # If more than one depth is specified, length must match channel ids
+
 
     def get_tile_dir(self):
         """
@@ -333,8 +344,7 @@ class ImageTilerUniform:
                            task_type,
                            tile_indices=None,
                            mask_dir=None,
-                           min_fraction=None,
-                           normalize_im=False):
+                           ):
         """Gather arguments for cropping or tiling
 
         :param int channel_idx: channel index for current image
@@ -344,8 +354,6 @@ class ImageTilerUniform:
         :param str task_type: crop or tile
         :param list tile_indices: list of tile indices
         :param str mask_dir: dir containing image level masks
-        :param float min_fraction: min foreground volume fraction for use tile
-        :param bool normalize_im: indicator to normalize image based on z-score or not
         :return list cur_args: tuple of arguments for tiling
                 list tile_indices: tile indices for current image
         """
@@ -356,12 +364,15 @@ class ImageTilerUniform:
             pos_idx=pos_idx,
             mask_dir=mask_dir
         )
-
-        # no flat field correction for mask
+        # no flat field correction and normalization for masks
         flat_field_fname = None
         hist_clip_limits = None
+        zscore_median = None
+        zscore_iqr = None
         is_mask = False
+        normalize_im = None
         if mask_dir is None:
+            normalize_im = self.normalize_channels[channel_idx]
             if self.flat_field_dir is not None:
                 flat_field_fname = os.path.join(
                     self.flat_field_dir,
@@ -372,10 +383,19 @@ class ImageTilerUniform:
                 hist_clip_limits = tuple(
                     self.hist_clip_limits
                 )
+            frame_idx = aux_utils.get_meta_idx(
+                self.frames_metadata,
+                time_idx,
+                channel_idx,
+                slice_idx,
+                pos_idx,
+            )
+            if normalize_im in ['dataset', 'volume', 'slice']:
+                zscore_median, zscore_iqr = \
+                    self.frames_metadata.loc[frame_idx, ['zscore_median', 'zscore_iqr']].tolist()
         else:
             # Using masks, need to make sure they're bool
             is_mask = True
-
         if task_type == 'crop':
             cur_args = (tuple(input_fnames),
                         flat_field_fname,
@@ -390,7 +410,9 @@ class ImageTilerUniform:
                         self.int2str_len,
                         is_mask,
                         self.tile_3d,
-                        normalize_im)
+                        normalize_im,
+                        zscore_median,
+                        zscore_iqr)
         elif task_type == 'tile':
             cur_args = (tuple(input_fnames),
                         flat_field_fname,
@@ -401,12 +423,14 @@ class ImageTilerUniform:
                         slice_idx,
                         self.tile_size,
                         self.step_size,
-                        min_fraction,
+                        self.min_fraction,
                         self.image_format,
                         self.tile_dir,
                         self.int2str_len,
                         is_mask,
-                        normalize_im)
+                        normalize_im,
+                        zscore_median,
+                        zscore_iqr)
         return cur_args
 
     def tile_stack(self):
@@ -426,8 +450,6 @@ class ImageTilerUniform:
         tiled_meta0 = None
         fn_args = []
         for channel_idx in self.channel_ids:
-            # Find channel index position in channel_ids list
-            list_idx = self.channel_ids.index(channel_idx)
             # Perform flatfield correction if flatfield dir is specified
             flat_field_im = self._get_flat_field(channel_idx=channel_idx)
             for slice_idx in self.slice_ids:
@@ -446,7 +468,7 @@ class ImageTilerUniform:
                                 pos_idx=pos_idx,
                                 flat_field_im=flat_field_im,
                                 hist_clip_limits=self.hist_clip_limits,
-                                normalize_im=self.normalize_channels[list_idx],
+                                normalize_im=self.normalize_channels[channel_idx],
                             )
                             save_dict = {'time_idx': time_idx,
                                          'channel_idx': channel_idx,
@@ -471,7 +493,6 @@ class ImageTilerUniform:
                                 pos_idx,
                                 task_type='crop',
                                 tile_indices=tile_indices,
-                                normalize_im=self.normalize_channels[list_idx],
                             )
                             fn_args.append(cur_args)
         tiled_meta_df_list = mp_utils.mp_crop_save(
@@ -498,7 +519,6 @@ class ImageTilerUniform:
     def tile_mask_stack(self,
                         mask_dir,
                         mask_channel,
-                        min_fraction,
                         mask_depth=1):
         """
         Tiles images in the specified channels assuming there are masks
@@ -510,7 +530,6 @@ class ImageTilerUniform:
 
         :param str mask_dir: Directory containing masks
         :param int mask_channel: Channel number assigned to mask
-        :param float min_fraction: Minimum fraction of foreground in tiled masks
         :param int mask_depth: Depth for mask channel
         """
 
@@ -519,46 +538,38 @@ class ImageTilerUniform:
         self.mask_depth = mask_depth
 
         # tile and save masks
-        # if mask channel is already tiled
-        if self.tiles_exist and mask_channel in self.channel_ids:
-            mask_meta_df = pd.read_csv(
-                os.path.join(self.tile_dir, 'frames_meta.csv')
+        # TODO: different masks across timepoints (but MaskProcessor
+        # generates mask for tp=0 only)
+        mask_fn_args = []
+        id_df = self.frames_meta_sub[['time_idx', 'pos_idx', 'slice_idx']].drop_duplicates()
+        for id_row in id_df.to_numpy():
+            time_idx, pos_idx, slice_idx = id_row
+            # Evaluate mask, then channels.The masks will influence
+            # tiling indices, so it's not allowed to add masks to
+            # existing tiled data sets (indices will be retrieved
+            # from existing meta)
+            cur_args = self.get_crop_tile_args(
+                channel_idx=mask_channel,
+                time_idx=time_idx,
+                slice_idx=slice_idx,
+                pos_idx=pos_idx,
+                task_type='tile',
+                mask_dir=mask_dir,
             )
-        else:
-            # TODO: different masks across timepoints (but MaskProcessor
-            # generates mask for tp=0 only)
-            mask_fn_args = []
-            for slice_idx in self.slice_ids:
-                for time_idx in self.time_ids:
-                    for pos_idx in self.pos_ids:
-                        # Evaluate mask, then channels.The masks will influence
-                        # tiling indices, so it's not allowed to add masks to
-                        # existing tiled data sets (indices will be retrieved
-                        # from existing meta)
-                        cur_args = self.get_crop_tile_args(
-                            channel_idx=mask_channel,
-                            time_idx=time_idx,
-                            slice_idx=slice_idx,
-                            pos_idx=pos_idx,
-                            task_type='tile',
-                            mask_dir=mask_dir,
-                            min_fraction=min_fraction,
-                            normalize_im=False,
-                        )
-                        mask_fn_args.append(cur_args)
+            mask_fn_args.append(cur_args)
 
-            # tile_image uses min_fraction assuming input_image is a bool
-            mask_meta_df_list = mp_utils.mp_tile_save(
-                mask_fn_args,
-                workers=self.num_workers,
-            )
-            mask_meta_df = pd.concat(mask_meta_df_list, ignore_index=True)
-            # Finally, save all the metadata
-            mask_meta_df = mask_meta_df.sort_values(by=['file_name'])
-            mask_meta_df.to_csv(
-                os.path.join(self.tile_dir, 'frames_meta.csv'),
-                sep=',',
-            )
+        # tile_image uses min_fraction assuming input_image is a bool
+        mask_meta_df_list = mp_utils.mp_tile_save(
+            mask_fn_args,
+            workers=self.num_workers,
+        )
+        mask_meta_df = pd.concat(mask_meta_df_list, ignore_index=True)
+        # Finally, save all the metadata
+        mask_meta_df = mask_meta_df.sort_values(by=['file_name'])
+        mask_meta_df.to_csv(
+            os.path.join(self.tile_dir, 'frames_meta.csv'),
+            sep=',',
+        )
         # remove mask_channel from self.channel_ids if included
         _ = [self.channel_ids.pop(idx)
              for idx, val in enumerate(self.channel_ids)
@@ -568,29 +579,26 @@ class ImageTilerUniform:
              if val == mask_channel]
 
         fn_args = []
-        for slice_idx in self.slice_ids:
-            for time_idx in self.time_ids:
-                for pos_idx in np.unique(self.frames_metadata["pos_idx"]):
-                    # Loop through all channels and tile from indices
-                    cur_tile_indices = self._get_tile_indices(
-                        tiled_meta=mask_meta_df,
-                        time_idx=time_idx,
-                        channel_idx=mask_channel,
-                        pos_idx=pos_idx,
-                        slice_idx=slice_idx
+        for id_row in id_df.to_numpy():
+            time_idx, pos_idx, slice_idx = id_row
+            cur_tile_indices = self._get_tile_indices(
+                tiled_meta=mask_meta_df,
+                time_idx=time_idx,
+                channel_idx=mask_channel,
+                pos_idx=pos_idx,
+                slice_idx=slice_idx
+            )
+            if np.any(cur_tile_indices):
+                for i, channel_idx in enumerate(self.channel_ids):
+                    cur_args = self.get_crop_tile_args(
+                        channel_idx,
+                        time_idx,
+                        slice_idx,
+                        pos_idx,
+                        task_type='crop',
+                        tile_indices=cur_tile_indices,
                     )
-                    if np.any(cur_tile_indices):
-                        for i, channel_idx in enumerate(self.channel_ids):
-                            cur_args = self.get_crop_tile_args(
-                                channel_idx,
-                                time_idx,
-                                slice_idx,
-                                pos_idx,
-                                task_type='crop',
-                                tile_indices=cur_tile_indices,
-                                normalize_im=self.normalize_channels[i],
-                            )
-                            fn_args.append(cur_args)
+                    fn_args.append(cur_args)
         tiled_meta_df_list = mp_utils.mp_crop_save(
             fn_args,
             workers=self.num_workers,

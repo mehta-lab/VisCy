@@ -1,0 +1,17 @@
+model_dir: '/data/models'
+image_dir: '/data/kidney_tiles/resized_images'
+images:
+    image_format: 'zyx'
+    im_ext: '.npy'
+    crop_shape: [96, 2048, 2048]
+metrics:
+    metrics: ['r2', 'corr', 'ssim']
+    metrics_orientations: ['xy', 'xyz', 'xz', 'yz']
+masks:
+    mask_dir: '/data/kidney_tiles/mask_channels_2'
+    mask_type: 'metrics'
+    mask_channel: 9
+tile:
+    tile_shape: [96, 512, 512]
+    num_overlap: [0, 32, 32]
+    overlap_operation: 'mean'

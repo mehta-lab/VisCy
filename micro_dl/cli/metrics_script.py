@@ -8,8 +8,9 @@ import yaml
 
 import micro_dl.inference.evaluation_metrics as metrics
 import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.preprocess_utils as preprocess_utils
 import micro_dl.utils.image_utils as image_utils
-
+import micro_dl.utils.normalize as normalize
 
 def parse_args():
     """Parse command line arguments
@@ -63,6 +64,12 @@ def parse_args():
         nargs='*',
         help='Evaluate metrics along these orientations (xy, xz, yz, xyz)'
     )
+    parser.add_argument(
+        '--name_parser',
+        type=str,
+        default='parse_sms_name',
+        help="The function in aux_utils that will parse the file name for indices",
+    )
     return parser.parse_args()
 
 
@@ -70,7 +77,8 @@ def compute_metrics(model_dir,
                     image_dir,
                     metrics_list,
                     orientations_list,
-                    test_data=True):
+                    test_data=True,
+                    name_parser='parse_sms_name'):
     """
     Compute specified metrics for given orientations for predictions, which
     are assumed to be stored in model_dir/predictions. Targets are stored in
@@ -90,6 +98,7 @@ def compute_metrics(model_dir,
     config_name = os.path.join(model_dir, 'config.yml')
     with open(config_name, 'r') as f:
         config = yaml.safe_load(f)
+    preprocess_config = preprocess_utils.get_preprocess_config(config['dataset']['data_dir'])
     # Load frames metadata and determine indices
     frames_meta = pd.read_csv(os.path.join(image_dir, 'frames_meta.csv'))
 
@@ -102,11 +111,12 @@ def compute_metrics(model_dir,
         idx_fname = os.path.join(model_dir, 'split_samples.json')
         try:
             split_samples = aux_utils.read_json(idx_fname)
-            test_ids = split_samples['test']
+            test_ids = np.sort(split_samples['test'])
         except FileNotFoundError as e:
             print("No split_samples file. Will predict all images in dir.")
     else:
-        test_ids = np.unique(frames_meta[split_idx_name])
+        test_ids = np.sort(np.unique(frames_meta[split_idx_name]))
+
 
     # Find other indices to iterate over than split index name
     # E.g. if split is position, we also need to iterate over time and slice
@@ -116,7 +126,7 @@ def compute_metrics(model_dir,
 
     for id in iter_ids:
         if id != split_idx_name:
-            metadata_ids[id] = np.unique(test_meta[id])
+            metadata_ids[id] = np.sort(np.unique(test_meta[id]))
 
     # Create image subdirectory to write predicted images
     pred_dir = os.path.join(model_dir, 'predictions')
@@ -127,10 +137,16 @@ def compute_metrics(model_dir,
     depth = 1
     if 'depth' in config['network']:
         depth = config['network']['depth']
+    normalize_im = 'stack'
+    if 'normalize_im' in preprocess_config:
+        normalize_im = preprocess_config['normalize_im']
+    elif 'normalize_im' in preprocess_config['tile']:
+        normalize_im = preprocess_config['tile']['normalize_im']
 
     # Get channel name and extension for predictions
-    pred_fnames = [f for f in os.listdir(pred_dir) if f.startswith('im_')]
-    meta_row = aux_utils.parse_idx_from_name(pred_fnames[0])
+    parse_func = aux_utils.import_object('utils.aux_utils', name_parser, 'function')
+    pred_fnames = [f for f in os.listdir(pred_dir) if f.startswith('im')]
+    meta_row = parse_func(pred_fnames[0])
     pred_channel = meta_row['channel_idx']
     _, ext = os.path.splitext(pred_fnames[0])
 
@@ -162,8 +178,8 @@ def compute_metrics(model_dir,
     # Iterate over all indices for test data
     for time_idx in metadata_ids['time_idx']:
         for pos_idx in metadata_ids['pos_idx']:
-            target_fnames = []
-            pred_fnames = []
+            target_stack = []
+            pred_stack = []
             for slice_idx in metadata_ids['slice_idx']:
                 im_idx = aux_utils.get_meta_idx(
                     frames_metadata=frames_meta,
@@ -176,7 +192,9 @@ def compute_metrics(model_dir,
                     image_dir,
                     frames_meta.loc[im_idx, 'file_name'],
                 )
-                target_fnames.append(target_fname)
+                im_target = image_utils.read_image(target_fname)
+                im_target = im_target.astype(np.float32)
+
                 pred_fname = aux_utils.get_im_name(
                     time_idx=time_idx,
                     channel_idx=pred_channel,
@@ -185,24 +203,26 @@ def compute_metrics(model_dir,
                     ext=ext,
                 )
                 pred_fname = os.path.join(pred_dir, pred_fname)
-                pred_fnames.append(pred_fname)
+                im_pred = image_utils.read_image(pred_fname)
 
-            target_stack = image_utils.read_imstack(
-                input_fnames=tuple(target_fnames),
-            )
-            pred_stack = image_utils.read_imstack(
-                input_fnames=tuple(pred_fnames),
-                normalize_im=False,
-            )
+                # Un-zscore the predicted image. Necessary before computing SSIM
+                # if normalize_im is not None:
+                #     if normalize_im in ['dataset', 'volume', 'slice']:
+                #         zscore_median = frames_meta.loc[im_idx, 'zscore_median']
+                #         zscore_iqr = frames_meta.loc[im_idx, 'zscore_iqr']
+                #     else:
+                #         zscore_median = np.nanmean(im_target)
+                #         zscore_iqr = np.nanstd(im_target)
+                #     im_pred = normalize.unzscore(im_pred, zscore_median, zscore_iqr)
+                target_stack.append(im_target)
+                pred_stack.append(im_pred)
 
-            if depth == 1:
-                # Remove singular z dimension for 2D image
-                target_stack = np.squeeze(target_stack)
-                pred_stack = np.squeeze(pred_stack)
-            if target_stack.dtype == np.float64:
-                target_stack = target_stack.astype(np.float32)
+            target_stack = np.squeeze(np.dstack(target_stack)).astype(np.float32)
+            pred_stack = np.squeeze(np.stack(pred_stack, axis=-1)).astype(np.float32)
+
             pred_name = "t{}_p{}".format(time_idx, pos_idx)
             for orientation in orientations_list:
+                print('Compute {} metrics...'.format(orientation))
                 metric_fn = fn_mapping[orientation]
                 metric_fn(
                     target=target_stack,
@@ -230,4 +250,5 @@ if __name__ == '__main__':
         metrics_list=args.metrics,
         orientations_list=args.orientations,
         test_data=args.test_data,
+        name_parser=args.name_parser,
     )

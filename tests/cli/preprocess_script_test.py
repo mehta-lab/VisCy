@@ -40,12 +40,14 @@ class TestPreprocessScript(unittest.TestCase):
                         time_idx=self.time_idx,
                         pos_idx=p,
                     )
-                    cv2.imwrite(
-                        os.path.join(self.image_dir, im_name),
-                        self.im + c * 100,
-                    )
+                    im = self.im + c * 100
+                    cv2.imwrite(os.path.join(self.temp_path, im_name),
+                                im)
+                    meta_row = aux_utils.parse_idx_from_name(im_name)
+                    meta_row['mean'] = np.nanmean(im)
+                    meta_row['std'] = np.nanstd(im)
                     self.frames_meta = self.frames_meta.append(
-                        aux_utils.parse_idx_from_name(im_name),
+                        meta_row,
                         ignore_index=True,
                     )
         # Write metadata
@@ -93,7 +95,7 @@ class TestPreprocessScript(unittest.TestCase):
                            'correct': True},
             'masks': {'channels': [3],
                       'str_elem_radius': 3,
-                      'normalize_im': False},
+                      },
             'tile': {'tile_size': [10, 10],
                      'step_size': [10, 10],
                      'depths': [1, 1, 1],
@@ -101,6 +103,7 @@ class TestPreprocessScript(unittest.TestCase):
                      'image_format': 'zyx',
                      'normalize_channels': [True, True, True]
                      },
+            'normalize_im': 'stack'
         }
         # Create base config, generated party from pp_config in script
         self.base_config = {

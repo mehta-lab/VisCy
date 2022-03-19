@@ -131,7 +131,7 @@ def test_init_logger():
 
 def test_make_dataframe():
     test_meta = aux_utils.make_dataframe(3)
-    nose.tools.assert_tuple_equal(test_meta.shape, (3, 6))
+    nose.tools.assert_tuple_equal(test_meta.shape, (3, 7))
     nose.tools.assert_list_equal(list(test_meta), aux_utils.DF_NAMES)
 
 

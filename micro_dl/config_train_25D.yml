@@ -1,24 +1,26 @@
 dataset:
-    data_dir: '/data/image_tile_256-256_step_256-256'
+    data_dir: '/CompMicro/projects/virtualstaining/kidneyslice/2019_02_15_kidney_slice/MBL_DL_image_translation/temp/tile_small_25D/tiles_256-256_step_128-128'
     input_channels: [3]
     target_channels: [0]
-    train_fraction: 0.25
+    train_fraction: 1
     split_by_column: pos_idx
     model_task: 'regression'
     normalize: False
-    mask_channels: [2]
+    mask_channels: [4]
     random_seed: 42
     split_ratio:
         train: 0.7
         val: 0.15
         test: 0.15
+    augmentation: True
 verbose: 10
 trainer:
-    model_dir: '/home/models/tile256_bs16_mse'
-    batch_size: 32
-    max_epochs: 200
+    model_dir: '/CompMicro/projects/virtualstaining/kidneyslice/2019_02_15_kidney_slice/MBL_DL_image_translation/model25d/'
+    batch_size: 16
+    max_epochs: 5
     metrics: coeff_determination
-    loss: mean_squared_error
+    loss: mae_loss
+    num_workers: 32
     callbacks:
         EarlyStopping:
             mode: min
@@ -37,19 +39,19 @@ trainer:
         lr: 0.001
         name: Adam
 network:
-    class: UNet2D
+    class: UNetStackTo2D
     num_input_channels: 1
     data_format: 'channels_first'
     height: 256
     width: 256
-    depth: 1
+    depth: 5
     batch_norm: True
     pooling_type: average
     filter_size: 3
     activation:
         type: relu
     dropout: 0.2
-    num_filters_per_block: [16, 32, 48]
+    num_filters_per_block: [16, 32, 64, 128, 256]
     num_convs_per_block: 2
     block_sequence: conv-activation-bn
     skip_merge_type: concat

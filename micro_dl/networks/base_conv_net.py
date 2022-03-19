@@ -67,7 +67,7 @@ class BaseConvNet(metaclass=ABCMeta):
             network_config['dropout'] = 0.0
 
         dropout_prob = network_config['dropout']
-        assert 0.0 <= dropout_prob < 0.7, 'invalid dropout probability'
+        assert 0.0 <= dropout_prob < 1, 'invalid dropout probability'
         self.dropout_prob = dropout_prob
 
     @abstractmethod
