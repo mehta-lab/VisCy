@@ -18,6 +18,7 @@ dependencies:
   - PyYAML
   - tensorflow-gpu==1.13.1
   - testfixtures
+  - tqdm
   - scikit-image
   - scikit-learn
   - scipy

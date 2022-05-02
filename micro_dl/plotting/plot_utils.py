@@ -11,127 +11,109 @@ from micro_dl.utils.normalize import hist_clipping
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
-def save_predicted_images(input_batch,
-                          target_batch,
-                          pred_batch,
+def save_predicted_images(input_imgs,
+                          target_img,
+                          pred_img,
+                          metric,
                           output_dir,
-                          batch_idx=None,
                           output_fname=None,
                           ext='jpg',
                           clip_limits=1,
                           font_size=15):
     """
-    Saves a batch predicted image to output dir
-    Format: rows of [input, target, pred]
+    Save plots of predicted images to prediction-figures directory.
+    - Overlay of target & prediction
+    - Plot of input, target, prediction, and overlay of target & prediction
 
-    :param np.ndarray input_batch: expected shape [batch_size, n_channels,
-     x,y,z]
-    :param np.ndarray target_batch: target with the same shape of input_batch
-    :param np.ndarray pred_batch: output predicted by the model
+    :param np.ndarray input_imgs: input images [c,y,x]
+    :param np.ndarray target_img: target [y,x]
+    :param np.ndarray pred_img: output predicted by the model with same shape as input_img
+    :param pd.series metric: xy similarity metrics between prediction and target
     :param str output_dir: dir to store the output images/mosaics
-    :param int batch_idx: current batch number/index
     :param str output_fname: fname for saving collage
+    :param str ext: image format
     :param float clip_limits: top and bottom % of intensity to saturate
     :param int font_size: font size of the image title
     """
-
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
 
-    batch_size = len(input_batch)
-    if batch_size == 1:
-        assert output_fname is not None, 'need fname for saving image'
-        fname = os.path.join(output_dir, '{}.{}'.format(output_fname, ext))
+    n_rows = 2
+    n_cols = np.shape(input_imgs)[0] + 1
+    fig, ax = plt.subplots(n_rows, n_cols, squeeze=False)
+    ax = ax.flatten()
+    for axs in ax:
+        axs.axis('off')
+    fig.set_size_inches((12, 5 * n_rows))
+    axis_count = 0
+
+    # add input images to plot
+    for c, input_img in enumerate(input_imgs):
+        input_imgs[c] = hist_clipping(
+            input_img,
+            clip_limits,
+            100 - clip_limits,
+        )
+    for cur_im in input_imgs:
+        ax[axis_count].imshow(cur_im, cmap='gray')
+        ax[axis_count].axis('off')
+        ax[axis_count].set_title('Input', fontsize=font_size)
+        axis_count += 1
+
+    # add target image to plot
+    cur_target_chan = hist_clipping(
+        target_img,
+        clip_limits,
+        100 - clip_limits,
+    )
+    ax_target = ax[axis_count].imshow(cur_target_chan, cmap='gray')
+    ax[axis_count].axis('off')
+    divider = make_axes_locatable(ax[axis_count])
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar = plt.colorbar(ax_target, cax=cax, orientation='vertical')
+    ax[axis_count].set_title('Target', fontsize=font_size)
+    axis_count += 1
+
+    # add prediction to plot
+    ax_img = ax[axis_count].imshow(pred_img, cmap='gray')
+    ax[axis_count].axis('off')
+    divider = make_axes_locatable(ax[axis_count])
+    cax = divider.append_axes('right', size='5%', pad=0.05)
+    cbar = plt.colorbar(ax_img, cax=cax, orientation='vertical')
+    ax[axis_count].set_title('Prediction', fontsize=font_size)
+    axis_count += 1
+
+    # add overlay target - prediction
+    cur_target_8bit = convert_to_8bit(cur_target_chan)
+    cur_prediction_8bit = convert_to_8bit(pred_img)
+
+    cur_target_pred = np.stack([cur_target_8bit, cur_prediction_8bit,
+                                cur_target_8bit], axis=2)
+
+    ax[axis_count].imshow(cur_target_pred)
+    ax[axis_count].set_title('Overlay', fontsize=font_size)
+    axis_count += 1
+
+    # add metrics
+    for c, (metric_name, value) in enumerate(zip(list(metric.keys()), metric.values[0][0:-1]), 1):
+        plt.figtext(0.5, 0.001+c*0.015, metric_name + ": {:.4f}".format(value), ha="center", fontsize=12)
+
+    fname = os.path.join(output_dir, '{}.{}'.format(output_fname, ext))
+    fig.savefig(fname, dpi=300, bbox_inches='tight')
+    plt.close(fig)
+    fname = os.path.join(output_dir, '{}_overlay.{}'.format(output_fname, ext))
+    cv2.imwrite(fname, cur_target_pred)
 
 
-    # 3D images are better saved as movies/gif
-    # assume only 1 target and prediction channel
-    if batch_size != 1:
-        assert len(input_batch.shape) == 4, 'saves 2D images only'
-
-    for img_idx in range(batch_size):
-        cur_input = input_batch[img_idx]
-        cur_target = target_batch[img_idx]
-        cur_prediction = pred_batch[img_idx]
-        # print('cur_input.shape:', cur_input.shape)
-        # print('cur_target.shape:', cur_target.shape)
-        # print('cur_pred.shape:', cur_prediction.shape)
-        n_ip_channels = cur_input.shape[0]
-        n_op_channels = cur_target.shape[0]
-        n_subplot = n_ip_channels + 2 * n_op_channels + 1
-        # make aspect ratio = 1:1.6
-        n_rows = np.round(np.sqrt(n_subplot / 1.6)).astype(np.uint32)
-        n_cols = np.ceil(n_subplot / n_rows).astype(np.uint32)
-        fig, ax = plt.subplots(n_rows, n_cols, squeeze=False)
-        ax = ax.flatten()
-        for axs in ax:
-            axs.axis('off')
-        fig.set_size_inches((15, 5 * n_rows))
-        axis_count = 0
-        for channel_idx in range(n_ip_channels):
-            cur_im = hist_clipping(
-                cur_input[channel_idx],
-                clip_limits,
-                100 - clip_limits,
-            )
-            ax[axis_count].imshow(cur_im, cmap='gray')
-            ax[axis_count].axis('off')
-            if axis_count == 0:
-                ax[axis_count].set_title('Input', fontsize=font_size)
-            axis_count += 1
-        for channel_idx in range(n_op_channels):
-            cur_target_chan = hist_clipping(
-                cur_target[channel_idx],
-                clip_limits,
-                100 - clip_limits,
-            )
-            ax[axis_count].imshow(cur_target_chan, cmap='gray')
-            ax[axis_count].axis('off')
-            ax[axis_count].set_title('Target', fontsize=font_size)
-            axis_count += 1
-            # cur_pred_chan = hist_clipping(
-            #     cur_prediction[channel_idx],
-            #     clip_limits,
-            #     100 - clip_limits,
-            # )
-            cur_pred_chan = cur_prediction[channel_idx]
-            ax_img = ax[axis_count].imshow(cur_pred_chan, cmap='gray')
-            ax[axis_count].axis('off')
-
-            divider = make_axes_locatable(ax[axis_count])
-            cax = divider.append_axes('right', size='5%', pad=0.05)
-            cbar = plt.colorbar(ax_img, cax=cax, orientation='vertical')
-
-            ax[axis_count].set_title('Prediction', fontsize=font_size)
-            axis_count += 1
-            cur_target_pred = np.stack([cur_target_chan, cur_pred_chan,
-                                        cur_target_chan], axis=2)
-            # cur_target_pred = cv2.convertScaleAbs(cur_target_pred - np.min(cur_target_pred),
-            #                                       alpha=255 / (np.max(cur_target_pred)
-            #                                                    - np.min(cur_target_pred)))
-
-
-            cur_target_8bit = cv2.convertScaleAbs(cur_target_chan - np.min(cur_target_chan),
-                                                  alpha=255/(np.max(cur_target_chan)
-                                                        - np.min(cur_target_chan)))
-            cur_prediction_8bit = cv2.convertScaleAbs(cur_pred_chan - np.min(cur_pred_chan),
-                                                      alpha=255/(np.max(cur_pred_chan)
-                                                            - np.min(cur_pred_chan)))
-            cur_target_pred = np.stack([cur_target_8bit, cur_prediction_8bit,
-                                        cur_target_8bit], axis=2)
-
-            ax[axis_count].imshow(cur_target_pred)
-            ax[axis_count].set_title('Overlay', fontsize=font_size)
-            axis_count += 1
-        if batch_size != 1:
-            fname = os.path.join(
-                output_dir,
-                '{}.{}'.format(str(batch_idx * batch_size + img_idx), ext)
-            )
-        fig.savefig(fname, dpi=300, bbox_inches='tight')
-        plt.close(fig)
-        fname = os.path.join(output_dir, '{}_overlay.{}'.format(output_fname, ext))
-        cv2.imwrite(fname, cur_target_pred)
+def convert_to_8bit(img):
+    """
+    Scales, calculates absolute values, and convert the result to 8-bit.
+    :param np.array img: image
+    :param float alpha: scale factor
+    :return np.array img_8bit: image with 8bit values
+    """
+    img_8bit = cv2.convertScaleAbs(img - np.min(img), alpha=255/(np.max(img) - np.min(img)))
+    return img_8bit
 
 
 def save_center_slices(image_dir,
