@@ -9,8 +9,7 @@ import micro_dl.utils.aux_utils as aux_utils
 def get_preprocess_config(data_dir):
     # If the parent dir with tile dir, mask dir is passed as data_dir,
     # it should contain a json with directory names
-    json_fname = os.path.join(data_dir,
-                              'preprocessing_info.json')
+    json_fname = os.path.join(data_dir, 'preprocessing_info.json')
     try:
         preprocessing_info = aux_utils.read_json(json_filename=json_fname)
 
@@ -23,6 +22,7 @@ def get_preprocess_config(data_dir):
         raise msg
 
     return preprocess_config
+
 
 def validate_mask_meta(mask_dir,
                        input_dir,

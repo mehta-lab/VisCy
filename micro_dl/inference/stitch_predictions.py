@@ -77,7 +77,6 @@ class ImageStitcher:
         num_overlap = self.overlap_dict['overlap_shape']
         overlap_operation = self.overlap_dict['overlap_operation']
         z_dim = self.z_dim_3d
-
         # smoothly weight the two images in overlapping slices
         forward_wts = np.linspace(0, 1.0, num_overlap + 2)[1:-1]
         reverse_wts = forward_wts[::-1]
@@ -89,7 +88,6 @@ class ImageStitcher:
             idx_in_block.append(np.s_[:])
         idx_in_img[z_dim] = np.s_[start_idx + num_overlap: end_idx]
         idx_in_block[z_dim] = np.s_[num_overlap:]
-
         pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
         if start_idx > 0:
             for sl_idx in range(num_overlap):
@@ -121,9 +119,7 @@ class ImageStitcher:
         :param list block_indices_list: list with tuples of (start, end) idx
         :return np.array stitched_img: 3D image with blocks assembled in place
         """
-
         stitched_img = np.zeros(self.im_shape)
-
         if 'overlap_shape' in self.overlap_dict:
             assert isinstance(self.overlap_dict['overlap_shape'], int), \
                 'tile_z only supports an overlap of int slices along z'
@@ -143,7 +139,8 @@ class ImageStitcher:
                          pred_block,
                          pred_image,
                          crop_index):
-        """Place the current block prediction in the larger vol
+        """
+        Place the current block prediction in the larger vol
 
         pred_image mutated in-place. Tile predictions in 5D and stitched img
         in 3D
@@ -153,7 +150,6 @@ class ImageStitcher:
         :param list crop_index: tuple of len 6 with start, end indices for
          three dimensions
         """
-
         overlap_shape = self.overlap_dict['overlap_shape']
         overlap_operation = self.overlap_dict['overlap_operation']
 
@@ -166,7 +162,6 @@ class ImageStitcher:
             # initialize all indices to :
             idx_in_img = []  # 3D
             idx_in_block = []  # 5D
-
             for dim_idx in range(len(pred_block.shape)):
                 idx_in_block.append(np.s_[:])
                 if dim_idx < len(pred_image.shape):
@@ -184,6 +179,7 @@ class ImageStitcher:
                                        overlap_shape[idx_3D]:
                                        crop_index[idx_3D * 2 + 1]]
             idx_in_block[idx_5D] = np.s_[overlap_shape[idx_3D]:]
+
         pred_image[tuple(idx_in_img)] = pred_block[tuple(idx_in_block)]
 
         if self.image_format == 'zyx':
@@ -232,7 +228,6 @@ class ImageStitcher:
         :param list block_indices_list: list with tuples of (start, end) idx
         :return np.array stitched_img: 3D image with blocks assembled in place
         """
-
         stitched_img = np.zeros(self.im_shape, dtype=np.float32)
         assert self.data_format is not None, \
             'data format needed for stitching images along xyz'
@@ -244,6 +239,8 @@ class ImageStitcher:
                                       crop_index=cur_crop_idx)
             except Exception as e:
                 raise Exception('error in _stitch_along_xyz:{}'.format(e))
+
+        stitched_img = stitched_img[np.newaxis, np.newaxis, ...]
         return stitched_img
 
     def _place_block_xy(self,
@@ -283,10 +280,7 @@ class ImageStitcher:
                     idx_in_img[dim] = np.s_[tile_idx[tile_dim]:
                                             tile_idx[tile_dim + 1]]
             return idx_in_block, idx_in_img
-        # print('pred_image.shape:', pred_image.shape)
-        # print('pred_block.shape:', pred_block.shape)
         idx_in_block, idx_in_img = _init_block_img_idx()
-        # print(idx_in_block, idx_in_img)
         # assign non-overlapping regions
         for idx, dim in enumerate(self.img_dim):
             tile_dim = 2 * idx
@@ -351,10 +345,12 @@ class ImageStitcher:
             #     raise Exception('error in _stitch_along_xyz:{}'.format(e))
         return stitched_img
 
-    def stitch_predictions(self, im_shape,
+    def stitch_predictions(self,
+                           im_shape,
                            tile_imgs_list,
                            block_indices_list):
-        """Stitch the predicted tiles /blocks for a 3d image
+        """
+        Stitch the predicted tiles /blocks for a 3d image
 
         :param list im_shape: shape of stitched pred image
         :param list tile_imgs_list: list of prediction images
@@ -364,7 +360,6 @@ class ImageStitcher:
          dimension
         :return np.array stitched_img: tile_imgs_list stitched into a 3D image
         """
-
         assert len(tile_imgs_list) == len(block_indices_list), \
             'missing tile/indices for sub tile/block: {}, {}'.format(
                 len(tile_imgs_list), len(block_indices_list)

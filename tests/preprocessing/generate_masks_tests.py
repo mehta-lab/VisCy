@@ -98,34 +98,28 @@ class TestMaskProcessor(unittest.TestCase):
 
     def test_init(self):
         """Test init"""
-
+        self.assertEqual(self.mask_gen_inst.input_dir, self.temp_path)
+        self.assertEqual(self.mask_gen_inst.output_dir, self.output_dir)
         nose.tools.assert_equal(self.mask_gen_inst.mask_channel, 3)
-        nose.tools.assert_equal(self.mask_gen_inst.channel_ids, [1, 2])
-        nose.tools.assert_equal(self.mask_gen_inst.time_ids, 0)
-        nose.tools.assert_equal(self.mask_gen_inst.pos_ids, 1)
-        numpy.testing.assert_array_equal(self.mask_gen_inst.slice_ids,
-                                         [0, 1, 2, 3, 4, 5, 6, 7])
         nose.tools.assert_equal(
             self.mask_gen_inst.mask_dir,
             os.path.join(self.output_dir, 'mask_channels_1-2')
         )
+        self.assertListEqual(self.channel_ids, self.channel_ids)
         nose.tools.assert_equal(self.mask_gen_inst.nested_id_dict, None)
 
     def test_get_mask_dir(self):
         """Test get_mask_dir"""
-
         mask_dir = os.path.join(self.output_dir, 'mask_channels_1-2')
         nose.tools.assert_equal(self.mask_gen_inst.get_mask_dir(),
                                 mask_dir)
 
     def test_get_mask_channel(self):
         """Test get_mask_channel"""
-
         nose.tools.assert_equal(self.mask_gen_inst.get_mask_channel(), 3)
 
     def test_get_args_read_image(self):
         """Test _get_args_read_image"""
-
         ip_fnames, ff_fname = self.mask_gen_inst._get_args_read_image(
             time_idx=self.time_ids,
             channel_ids=self.channel_ids,
@@ -142,7 +136,6 @@ class TestMaskProcessor(unittest.TestCase):
 
     def test_generate_masks_uni(self):
         """Test generate masks"""
-
         self.mask_gen_inst.generate_masks(str_elem_radius=1)
         frames_meta = pd.read_csv(
             os.path.join(self.mask_gen_inst.get_mask_dir(), 'frames_meta.csv'),
@@ -157,7 +150,6 @@ class TestMaskProcessor(unittest.TestCase):
 
     def test_generate_masks_nonuni(self):
         """Test generate_masks with non-uniform structure"""
-
         rec = self.rec_object[:, :, 3:6]
         channel_ids = 0
         time_ids = 0

@@ -93,11 +93,13 @@ def compute_metrics(model_dir,
         (see evaluation_metrics)
     :param bool test_data: Uses test indices in split_samples.json,
     otherwise all indices
+    :param str name_parser: Type of name parser (default or parse_idx_from_name)
     """
     # Load config file
     config_name = os.path.join(model_dir, 'config.yml')
     with open(config_name, 'r') as f:
         config = yaml.safe_load(f)
+
     preprocess_config = preprocess_utils.get_preprocess_config(config['dataset']['data_dir'])
     # Load frames metadata and determine indices
     frames_meta = pd.read_csv(os.path.join(image_dir, 'frames_meta.csv'))
@@ -116,7 +118,6 @@ def compute_metrics(model_dir,
             print("No split_samples file. Will predict all images in dir.")
     else:
         test_ids = np.sort(np.unique(frames_meta[split_idx_name]))
-
 
     # Find other indices to iterate over than split index name
     # E.g. if split is position, we also need to iterate over time and slice

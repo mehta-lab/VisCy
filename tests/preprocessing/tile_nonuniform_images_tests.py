@@ -94,7 +94,7 @@ class TestImageTilerNonUniform(unittest.TestCase):
 
     def test_init(self):
         """Test init"""
-
+        self.assertIsNone(self.tile_inst.min_fraction)
         nose.tools.assert_equal(self.tile_inst.channel_ids, [1, 2])
         nose.tools.assert_list_equal(list(self.tile_inst.time_ids),
                                      [0, 1, 2])
@@ -181,7 +181,10 @@ class TestImageTilerNonUniform(unittest.TestCase):
         exp_meta_df = pd.DataFrame.from_dict(exp_meta)
         exp_meta_df = exp_meta_df.sort_values(by=['file_name'])
 
-        ch0_meta_df = self.tile_inst.tile_first_channel(ch0_ids, 3)
+        ch0_meta_df = self.tile_inst.tile_first_channel(
+            channel0_ids=ch0_ids,
+            channel0_depth=3,
+        )
         ch0_meta_df = ch0_meta_df.sort_values(by=['file_name'])
         # compare values of the returned and expected dfs
         np.testing.assert_array_equal(exp_meta_df.values, ch0_meta_df.values)
@@ -305,16 +308,16 @@ class TestImageTilerNonUniform(unittest.TestCase):
         self.tile_inst.pos_ids = [7]
 
         self.tile_inst.normalize_channels = [None, None, None, False]
-
+        self.tile_inst.min_fraction = 0.5
         self.tile_inst.tile_mask_stack(mask_dir,
                                        mask_channel=3,
-                                       min_fraction=0.5,
                                        mask_depth=3)
         nose.tools.assert_equal(self.tile_inst.mask_depth, 3)
 
-        frames_meta = pd.read_csv(os.path.join(self.tile_inst.tile_dir,
-                                               'frames_meta.csv'),
-                                  sep=',')
+        frames_meta = pd.read_csv(
+            os.path.join(self.tile_inst.tile_dir, 'frames_meta.csv'),
+            sep=',',
+        )
         # only 4 tiles have >= min_fraction. 4 tiles x 3 slices x 3 tps
         nose.tools.assert_equal(len(frames_meta), 36)
         nose.tools.assert_list_equal(

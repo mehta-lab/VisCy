@@ -89,22 +89,32 @@ def ssim_metric(target,
                 prediction,
                 mask=None,
                 win_size=21):
-    """SSIM of target and prediction
+    """
+    Structural similarity indiex (SSIM) of target and prediction.
+    Window size is not passed into function so make sure tiles
+    are never smaller than default win_size.
 
     :param np.array target: ground truth array
     :param np.array prediction: model prediction
+    :param np.array/None mask: Mask
     :param int win_size: window size for computing local SSIM
     :return float/list ssim and ssim_masked
     """
     if mask is None:
-        cur_ssim = ssim(target, prediction,
-                        win_size=win_size,
-                        data_range=target.max() - target.min())
+        cur_ssim = ssim(
+            target,
+            prediction,
+            win_size=win_size,
+            data_range=target.max() - target.min(),
+        )
         return cur_ssim
     else:
-        cur_ssim, cur_ssim_img = ssim(target, prediction,
-                                      data_range=target.max() - target.min(),
-                                      full=True)
+        cur_ssim, cur_ssim_img = ssim(
+            target,
+            prediction,
+            data_range=target.max() - target.min(),
+            full=True,
+        )
         cur_ssim_masked = np.mean(cur_ssim_img[mask])
         return [cur_ssim, cur_ssim_masked]
 
@@ -320,6 +330,8 @@ class MetricsEstimator:
             metrics_row,
             ignore_index=True,
         )
+        print('metrics xyz')
+        print(self.metrics_xyz)
 
     def estimate_xy_metrics(self,
                             target,

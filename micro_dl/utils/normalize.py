@@ -1,37 +1,40 @@
 """Image normalization related functions"""
 import numpy as np
+import sys
 from skimage.exposure import equalize_adapthist
 
 
-def zscore(input_image, mean=None, std=None):
+def zscore(input_image, im_mean=None, im_std=None):
     """
     Performs z-score normalization. Adds epsilon in denominator for robustness
 
-    :param input_image: input image for intensity normalization
-    :return: z score normalized image
+    :param np.array input_image: input image for intensity normalization
+    :param float/None im_mean: Image mean
+    :param float/None im_std: Image std
+    :return np.array norm_img: z score normalized image
     """
-
-    if not mean:
-        mean = np.nanmean(input_image)
-    if not std:
-        std = np.nanstd(input_image)
-    norm_img = (input_image - mean.astype(np.float64)) /\
-               (std + np.finfo(float).eps)
+    if not im_mean:
+        im_mean = np.nanmean(input_image)
+    if not im_std:
+        im_std = np.nanstd(input_image)
+    norm_img = (input_image - im_mean.astype(np.float64)) /\
+               (im_std + sys.float_info.epsilon)
     return norm_img
 
 
-def unzscore(im_norm, mean, std):
+def unzscore(im_norm, zscore_median, zscore_iqr):
     """
     Revert z-score normalization applied during preprocessing. Necessary
     before computing SSIM
 
-    :param input_image: input image for un-zscore
-    :return: image at its original scale
+    :param im_norm: Normalized image for un-zscore
+    :param zscore_median: Image median
+    :param zscore_iqr: Image interquartile range
+    :return im: image at its original scale
     """
-
-    im = im_norm * (std + np.finfo(float).eps) + mean
-
+    im = im_norm * (zscore_iqr + sys.float_info.epsilon) + zscore_median
     return im
+
 
 def hist_clipping(input_image, min_percentile=2, max_percentile=98):
     """Clips and rescales histogram from min to max intensity percentiles

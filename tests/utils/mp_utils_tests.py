@@ -112,8 +112,8 @@ class TestMpUtilsOtsu(TestMpUtilsBaseClass):
             input_fnames = [os.path.join(self.temp_path, fname)
                             for fname in input_fnames]
             cur_meta = mp_utils.create_save_mask(
-                tuple(input_fnames),
-                None,
+                input_fnames=tuple(input_fnames),
+                flat_field_fname=None,
                 str_elem_radius=1,
                 mask_dir=self.output_dir,
                 mask_channel_idx=3,
@@ -134,7 +134,10 @@ class TestMpUtilsOtsu(TestMpUtilsBaseClass):
                         'slice_idx': sl_idx,
                         'time_idx': 0,
                         'pos_idx': 1,
-                        'file_name': fname}
+                        'file_name': fname,
+                        }
+            # Not testing specific fg_frac values
+            cur_meta.pop('fg_frac')
             nose.tools.assert_dict_equal(cur_meta, exp_meta)
 
             op_fname = os.path.join(self.output_dir, fname)
@@ -190,7 +193,7 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
         self.params = [(20, 16, self.radius), (44, 16, self.radius), (47, 47, self.radius)]
         mask = np.zeros(shape, dtype=np.uint8)
         for i, (cx, cy, radius) in enumerate(self.params):
-            rr, cc = draw.circle(cx, cy, radius)
+            rr, cc = draw.disk((cx, cy), radius)
             mask[rr, cc] = i + 1
         mask = mask[:, :, np.newaxis]
         return mask
@@ -213,8 +216,8 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
             input_fnames = [os.path.join(self.temp_path, fname)
                             for fname in input_fnames]
             cur_meta = mp_utils.create_save_mask(
-                tuple(input_fnames),
-                None,
+                input_fnames=tuple(input_fnames),
+                flat_field_fname=None,
                 str_elem_radius=1,
                 mask_dir=self.output_dir,
                 mask_channel_idx=2,
@@ -235,7 +238,9 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
                         'slice_idx': sl_idx,
                         'time_idx': 0,
                         'pos_idx': 1,
-                        'file_name': fname}
+                        'file_name': fname,
+                        'fg_frac': None,
+                        }
             nose.tools.assert_dict_equal(cur_meta, exp_meta)
 
             op_fname = os.path.join(self.output_dir, fname)

@@ -172,6 +172,7 @@ def generate_masks(params_dict,
     mask_channel = mask_processor_inst.get_mask_channel()
     return mask_dir, mask_channel
 
+
 def generate_zscore_table(params_dict,
                           norm_dict,
                           mask_dir):
@@ -205,6 +206,7 @@ def tile_images(params_dict,
                 tile_dict,
                 resize_flag,
                 flat_field_dir,
+                tiles_exist=False,
                 ):
     """
     Tile images.
@@ -212,11 +214,13 @@ def tile_images(params_dict,
     :param dict params_dict: dict with keys: input_dir, output_dir, time_ids,
      channel_ids, pos_ids, slice_ids, int2strlen, uniform_struct, num_workers
     :param dict tile_dict: dict with tiling related keys: tile_size, step_size,
-     image_format, depths. optional: min_fraction, mask_channel, mask_dir,
+     image_format, depths, min_fraction. Optional: mask_channel, mask_dir,
      mask_depth, tile_3d
     :param bool resize_flag: indicator if resize related params in preprocess_config
      passed to pre_process()
     :param str/None flat_field_dir: dir with flat field correction images
+    :param bool tiles_exist: If tiling weights after other channels, make sure
+     previous tiles are not erased
     :return str tile_dir: dir with tiled images
     """
     # Check tile args
@@ -227,6 +231,10 @@ def tile_images(params_dict,
     hist_clip_limits = None
     if 'hist_clip_limits' in tile_dict:
         hist_clip_limits = tile_dict['hist_clip_limits']
+    # Set default minimum fraction to 0
+    min_fraction = 0.
+    if 'min_fraction' in tile_dict:
+        min_fraction = tile_dict['min_fraction']
     # setup tiling keyword arguments
     kwargs = {'input_dir': params_dict['input_dir'],
               'output_dir': params_dict['output_dir'],
@@ -241,11 +249,11 @@ def tile_images(params_dict,
               'hist_clip_limits': hist_clip_limits,
               'flat_field_dir': flat_field_dir,
               'num_workers': params_dict['num_workers'],
-              'int2str_len': params_dict['int2strlen'],
               'tile_3d': tile_3d,
               'int2str_len': params_dict['int2strlen'],
-              'min_fraction': tile_dict['min_fraction'],
+              'min_fraction': min_fraction,
               'normalize_im': params_dict['normalize_im'],
+              'tiles_exist': tiles_exist,
               }
 
     if params_dict['uniform_struct']:
@@ -352,18 +360,19 @@ def pre_process(preprocess_config):
                         normalize_channels,
                     )
 
-    req_params_dict = {'input_dir': input_dir,
-                   'output_dir': output_dir,
-                   'slice_ids': slice_ids,
-                   'time_ids': time_ids,
-                   'pos_ids': pos_ids,
-                   'channel_ids': channel_ids,
-                   'uniform_struct': uniform_struct,
-                   'int2strlen': int2str_len,
-                   'normalize_channels': normalize_channels,
-                   'num_workers': num_workers,
-                   'normalize_im': normalize_im,
-                   }
+    req_params_dict = {
+        'input_dir': input_dir,
+        'output_dir': output_dir,
+        'slice_ids': slice_ids,
+        'time_ids': time_ids,
+        'pos_ids': pos_ids,
+        'channel_ids': channel_ids,
+        'uniform_struct': uniform_struct,
+        'int2strlen': int2str_len,
+        'normalize_channels': normalize_channels,
+        'num_workers': num_workers,
+        'normalize_im': normalize_im,
+       }
 
     # -----------------Estimate flat field images--------------------
     flat_field_dir = None
@@ -432,7 +441,7 @@ def pre_process(preprocess_config):
                 flat_field_dir=flat_field_dir,
                 str_elem_radius=str_elem_radius,
                 mask_type=mask_type,
-                mask_channel=mask_channel,
+                mask_channel=None,
                 mask_ext=mask_ext,
             )
         elif 'mask_dir' in preprocess_config['masks']:
@@ -443,11 +452,12 @@ def pre_process(preprocess_config):
             mask_meta_fname = None
             if 'csv_name' in preprocess_config['masks']:
                 mask_meta_fname = preprocess_config['masks']['csv_name']
-            mask_meta = \
-            meta_utils.mask_meta_generator(mask_dir,
-                                             name_parser='parse_sms_name',
-                                             )
+            mask_meta = meta_utils.mask_meta_generator(
+                mask_dir,
+                name_parser='parse_sms_name',
+            )
             frames_meta = aux_utils.read_meta(req_params_dict['input_dir'])
+            # Automatically assign existing masks the next available channel number
             mask_meta['channel_idx'] += (frames_meta['channel_idx'].max() + 1)
             # use the first mask channel as the default mask for tiling
             mask_channel = int(mask_meta['channel_idx'].unique()[0])
@@ -531,6 +541,7 @@ def pre_process(preprocess_config):
                 tile_dict=weight_tile_config,
                 resize_flag=resize_flag,
                 flat_field_dir=None,
+                tiles_exist=True,
             )
         preprocess_config['tile']['tile_dir'] = tile_dir
 

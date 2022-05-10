@@ -70,6 +70,8 @@ class TestGenerateMeta(unittest.TestCase):
             input=self.idx_dir,
             order='cztp',
             name_parser='parse_idx_from_name',
+            num_workers=4,
+            normalize_im='stack',
         )
         generate_meta.main(args)
         frames_meta = pd.read_csv(os.path.join(self.idx_dir, 'frames_meta.csv'))
@@ -85,6 +87,8 @@ class TestGenerateMeta(unittest.TestCase):
         args = argparse.Namespace(
             input=self.sms_dir,
             name_parser='parse_sms_name',
+            order="cztp",
+            normalize_im='stack',
         )
         generate_meta.main(args)
         frames_meta = pd.read_csv(os.path.join(self.sms_dir, 'frames_meta.csv'))

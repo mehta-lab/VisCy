@@ -4,7 +4,7 @@ import numpy as np
 import micro_dl.inference.evaluation_metrics as metrics
 
 
-im_shape = (20, 25, 15)
+im_shape = (35, 45, 25)
 target_im = np.ones(im_shape)
 for i in range(4):
     target_im[..., i + 1] = i + 1
@@ -32,7 +32,7 @@ def test_corr_metric():
 
 
 def test_ssim_metric():
-    ssim = metrics.ssim_metric(target=target_im, prediction=pred_im)
+    ssim = metrics.ssim_metric(target=target_im, prediction=pred_im, win_size=5)
     nose.tools.assert_less(ssim, 1)
 
 

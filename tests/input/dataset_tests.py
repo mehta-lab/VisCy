@@ -45,7 +45,9 @@ class TestBaseDataSet(unittest.TestCase):
             np.save(os.path.join(self.temp_path, in_name), self.im + i)
             np.save(os.path.join(self.temp_path, out_name), self.im_target + i)
         dataset_config = {
-            'augmentations': True,
+            'augmentations': {
+                'noise_std': 0,
+            },
             'random_seed': 42,
             'normalize': False,
         }
@@ -85,13 +87,19 @@ class TestBaseDataSet(unittest.TestCase):
         self.assertTrue(self.data_inst.shuffle)
         self.assertEqual(self.data_inst.num_samples, len(self.input_fnames))
         self.assertTrue(self.data_inst.augmentations)
+        self.assertTupleEqual(self.data_inst.zoom_range, (1, 1))
+        self.assertEqual(self.data_inst.rotate_range, 0)
+        self.assertEqual(self.data_inst.mean_jitter, 0)
+        self.assertEqual(self.data_inst.std_jitter, 0)
+        self.assertEqual(self.data_inst.noise_std, 0)
+        self.assertTupleEqual(self.data_inst.blur_range, (0, 0))
+        self.assertEqual(self.data_inst.shear_range, 0)
         self.assertEqual(self.data_inst.model_task, 'regression')
         self.assertEqual(self.data_inst.random_seed, 42)
         self.assertFalse(self.data_inst.normalize)
 
     def test_init_settings(self):
         dataset_config = {
-            'augmentations': False,
             'random_seed': 42,
             'normalize': True,
             'model_task': 'segmentation',
@@ -254,8 +262,8 @@ class TestBaseDataSet(unittest.TestCase):
         im_in, im_target = self.data_inst.__getitem__(0)
         self.assertTupleEqual(im_in.shape, self.batch_shape)
         self.assertTupleEqual(im_target.shape, self.batch_shape)
-        # With a fixed random seed, augmentations and shuffles are the same
-        augmentations = [2, 4]
+        # With a fixed random seed, augmentations and shuffles stay the same
+        augmentations = [2, 2]
         shuf_ids = [1, 3]
         for i in range(2):
             # only compare self.im

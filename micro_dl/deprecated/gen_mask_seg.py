@@ -216,7 +216,6 @@ class MaskCreator:
                     cropped_image_data = tile_utils.crop_at_indices(
                         input_image=cur_mask,
                         crop_indices=crop_indices_dict[fname],
-                        isotropic=isotropic
                     )
                 else:
                     cropped_image_data = tile_utils.tile_image(

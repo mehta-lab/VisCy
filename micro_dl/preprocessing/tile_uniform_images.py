@@ -30,7 +30,8 @@ class ImageTilerUniform:
                  int2str_len=3,
                  normalize_im='stack',
                  min_fraction=None,
-                 tile_3d=False):
+                 tile_3d=False,
+                 tiles_exist=False):
         """
         Tiles images.
         If tile_dir already exist, it will check which channels are already
@@ -55,7 +56,7 @@ class ImageTilerUniform:
             indicating if channel should be normalized or not.
         :param int slice_ids: Index of which focal plane acquisition to
             use (for 2D). default=-1 for the whole z-stack
-        :param int pos_ids: Position (FOV) indices to use
+        :param list/int pos_ids: Position (FOV) indices to use
         :param list hist_clip_limits: lower and upper percentiles used for
             histogram clipping.
         :param str flat_field_dir: Flatfield directory. None if no flatfield
@@ -67,6 +68,8 @@ class ImageTilerUniform:
         :param bool tile_3d: Whether tiling is 3D or 2D
          in file names
         :param None or str normalize_im: normalization scheme for input images
+        :param bool tiles_exist: If tiles from channels/masks exist while tiling weights,
+            don't delete previously tiled channels
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -90,11 +93,12 @@ class ImageTilerUniform:
             self.str_tile_step,
         )
 
-        self.tiles_exist = False
-        # Delete the old tile dir if it already exists
-        if os.path.exists(self.tile_dir):
-            shutil.rmtree(self.tile_dir)
-        os.makedirs(self.tile_dir)
+        self.tiles_exist = tiles_exist
+        if tiles_exist is False:
+            # Delete the old tile dir if it already exists
+            if os.path.exists(self.tile_dir):
+                shutil.rmtree(self.tile_dir)
+        os.makedirs(self.tile_dir, exist_ok=True)
 
         # make dir for saving individual meta per image, could be used for
         # tracking job success / fail
@@ -156,7 +160,7 @@ class ImageTilerUniform:
             assert len(normalize_channels) == len(self.channel_ids),\
                 "Channel ids {} and normalization list {} mismatch".format(
                     self.channel_ids,
-                    self.normalize_channels,
+                    normalize_channels,
                 )
 
             normalize_channels = [normalize_im if flag else None for flag in normalize_channels]
@@ -164,7 +168,6 @@ class ImageTilerUniform:
             self.normalize_channels = \
                 dict(zip(self.channel_ids, normalize_channels))
                 # If more than one depth is specified, length must match channel ids
-
 
     def get_tile_dir(self):
         """
@@ -396,6 +399,7 @@ class ImageTilerUniform:
         else:
             # Using masks, need to make sure they're bool
             is_mask = True
+
         if task_type == 'crop':
             cur_args = (tuple(input_fnames),
                         flat_field_fname,

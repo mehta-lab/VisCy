@@ -53,7 +53,9 @@ class TestDataSetWithMask(unittest.TestCase):
             np.save(os.path.join(self.temp_path, out_name), self.im_target + i)
             np.save(os.path.join(self.temp_path, mask_name), self.im_mask)
         dataset_config = {
-            'augmentations': True,
+            'augmentations': {
+                'noise_std': 0,
+            },
             'random_seed': 42,
             'normalize': False,
             'squeeze': True,

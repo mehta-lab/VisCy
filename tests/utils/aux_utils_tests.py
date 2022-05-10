@@ -21,8 +21,11 @@ for s in range(3):
             time_idx=time_idx,
             pos_idx=p,
         )
+        # Now dataframes are assumed to have dir name in them
+        meta_row = aux_utils.parse_idx_from_name(im_temp)
+        meta_row['dir_name'] = 'temp_dir'
         meta_df = meta_df.append(
-            aux_utils.parse_idx_from_name(im_temp),
+            meta_row,
             ignore_index=True,
         )
 
@@ -50,6 +53,7 @@ def test_get_row_idx():
 
 
 def test_get_row_idx_slice():
+    aux_utils.parse_idx_from_name(im_temp)
     row_idx = aux_utils.get_row_idx(meta_df, time_idx, channel_idx, slice_idx=1)
     for i, val in row_idx.items():
         if meta_df.iloc[i].slice_idx == 1:

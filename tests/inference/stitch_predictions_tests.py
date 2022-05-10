@@ -224,11 +224,12 @@ class TestImageStitcher(unittest.TestCase):
             tile_imgs_list=tile_imgs_list,
             block_indices_list=block_indices_list
         )
+        stitched_img = np.squeeze(stitched_img)
 
         # the first slice is as is, no stitching
         exp_z0 = np.ones((10, 10))
         exp_z0[:, 4:] = 2
-        np.testing.assert_array_equal(stitched_img[0], exp_z0)
+        np.testing.assert_array_equal(stitched_img[0, ...], exp_z0)
 
         # second slice, place tile 1. Tile 2: Mean along 2 overlapping cols
         # 4,5 and rows 2-5 [0.67*1 + 0.33*2, 0.33*1 + 0.67*2 = 1.33, 1.67].

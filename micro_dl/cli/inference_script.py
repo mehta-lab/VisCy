@@ -91,7 +91,6 @@ def run_inference(config_fname,
         inference_inst.run_prediction()
 
 
-
 if __name__ == '__main__':
     args = parse_args()
     # Get GPU ID and memory fraction

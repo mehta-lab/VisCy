@@ -188,9 +188,10 @@ class TestImageTilerUniform(unittest.TestCase):
         )
 
     def test_tile_dir(self):
-        nose.tools.assert_equal(self.tile_inst.get_tile_dir(),
-                                os.path.join(self.output_dir,
-                                             "tiles_5-5_step_4-4"))
+        nose.tools.assert_equal(
+            self.tile_inst.get_tile_dir(),
+            os.path.join(self.output_dir, "tiles_5-5_step_4-4"),
+        )
 
     def test_get_dataframe(self):
         df = self.tile_inst._get_dataframe()
@@ -348,9 +349,9 @@ class TestImageTilerUniform(unittest.TestCase):
         self.assertSetEqual(set(frames_meta.col_start.tolist()), {0, 4, 6})
 
         # Read and validate tiles
-        im_val = np.mean(norm_util.zscore(self.im / self.ff_im, mean=0, std=1))
+        im_val = np.mean(self.im / self.ff_im)
         im_norm = im_val * np.ones((3, 5, 5))
-        im_val = np.mean(norm_util.zscore(self.im2 / self.ff_im, mean=0, std=1))
+        im_val = np.mean(self.im2 / self.ff_im)
         im2_norm = im_val * np.ones((3, 5, 5))
         for i, row in frames_meta.iterrows():
             tile = np.load(os.path.join(tile_dir, row.file_name))
@@ -370,7 +371,6 @@ class TestImageTilerUniform(unittest.TestCase):
             pos_idx=7,
             task_type='tile',
             mask_dir=self.mask_dir,
-            min_fraction=0.3
         )
 
         exp_fnames = ['im_c003_z015_t005_p007.npy',
@@ -390,7 +390,7 @@ class TestImageTilerUniform(unittest.TestCase):
         nose.tools.assert_equal(cur_args[6], 16)
         nose.tools.assert_list_equal(cur_args[7], self.tile_inst.tile_size)
         nose.tools.assert_list_equal(cur_args[8], self.tile_inst.step_size)
-        nose.tools.assert_equal(cur_args[9], 0.3)
+        nose.tools.assert_equal(cur_args[9], None)
         nose.tools.assert_equal(cur_args[10], 'zyx')
         nose.tools.assert_equal(cur_args[11], self.tile_inst.tile_dir)
         nose.tools.assert_equal(cur_args[12], self.int2str_len)
@@ -401,7 +401,7 @@ class TestImageTilerUniform(unittest.TestCase):
             time_idx=self.time_idx,
             slice_idx=16,
             pos_idx=7,
-            task_type='tile'
+            task_type='tile',
         )
         nose.tools.assert_list_equal(list(cur_args[0]), self.exp_fnames)
 
@@ -415,19 +415,29 @@ class TestImageTilerUniform(unittest.TestCase):
     def test_tile_mask_stack(self):
         """Test tile_mask_stack"""
 
-        self.tile_inst.pos_ids = [7]
-        self.tile_inst.normalize_channels = [True, True, True, True]
+        tile_inst = tile_images.ImageTilerUniform(
+            input_dir=self.temp_path,
+            output_dir=self.output_dir,
+            tile_size=[5, 5],
+            step_size=[4, 4],
+            depths=3,
+            channel_ids=[1],
+            pos_ids=[7],
+            normalize_channels=[True],
+            flat_field_dir=self.flat_field_dir,
+            normalize_im=self.normalize_im,
+            min_fraction=0.5,
+        )
 
         # use the saved masks to tile other channels
-        self.tile_inst.tile_mask_stack(
+        tile_inst.tile_mask_stack(
             mask_dir=self.mask_dir,
             mask_channel=3,
-            min_fraction=0.5,
-            mask_depth=3
+            mask_depth=3,
         )
 
         # Read and validate the saved metadata
-        tile_dir = self.tile_inst.get_tile_dir()
+        tile_dir = tile_inst.get_tile_dir()
         frames_meta = pd.read_csv(os.path.join(tile_dir, 'frames_meta.csv'))
 
         self.assertSetEqual(set(frames_meta.channel_idx.tolist()), {1, 3})

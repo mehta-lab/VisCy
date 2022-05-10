@@ -9,23 +9,27 @@ import micro_dl.plotting.plot_utils as plot_utils
 
 
 def test_save_predicted_images():
-    input_batch = np.zeros((1, 1, 15, 25), dtype=np.uint8)
-    target_batch = np.ones((1, 1, 15, 25), dtype=np.uint8)
-    pred_batch = np.ones((1, 1, 15, 25), dtype=np.uint8)
+    input_ims = np.zeros((2, 15, 25), dtype=np.uint8)
+    target_im = np.ones((15, 25), dtype=np.uint8)
+    pred_im = np.ones((15, 25), dtype=np.uint8)
     with TempDirectory() as tempdir:
         output_dir = tempdir.path
         output_fname = 'test_plot'
         plot_utils.save_predicted_images(
-            input_batch=input_batch,
-            target_batch=target_batch,
-            pred_batch=pred_batch,
+            input_imgs=input_ims,
+            target_img=target_im,
+            pred_img=pred_im,
+            metric=None,
             output_dir=output_dir,
             output_fname=output_fname,
         )
         fig_glob = glob.glob(os.path.join(output_dir, '*'))
-        nose.tools.assert_equal(len(fig_glob), 1)
+        fig_glob.sort()
+        nose.tools.assert_equal(len(fig_glob), 2)
         expected_fig = os.path.join(output_dir, 'test_plot.jpg')
         nose.tools.assert_equal(fig_glob[0], expected_fig)
+        expected_overlay = os.path.join(output_dir, 'test_plot_overlay.jpg')
+        nose.tools.assert_equal(fig_glob[1], expected_overlay)
 
 
 def test_save_center_slices():

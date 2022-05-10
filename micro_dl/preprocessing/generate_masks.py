@@ -4,8 +4,8 @@ import pandas as pd
 
 import micro_dl.utils.aux_utils as aux_utils
 from micro_dl.utils.mp_utils import mp_create_save_mask
-from micro_dl.utils.masks import get_unimodal_threshold
 from skimage.filters import threshold_otsu
+
 
 class MaskProcessor:
     """Generate masks from channels"""
@@ -58,6 +58,8 @@ class MaskProcessor:
         self.num_workers = num_workers
 
         self.frames_metadata = aux_utils.read_meta(self.input_dir)
+        if 'dir_name' not in self.frames_metadata.keys():
+            self.frames_metadata['dir_name'] = self.input_dir
         # Create a unique mask channel number so masks can be treated
         # as a new channel
         if mask_channel is None:
@@ -82,10 +84,13 @@ class MaskProcessor:
             slice_ids=metadata_ids['slice_ids'],
             pos_ids=metadata_ids['pos_ids'])
         self.channel_ids = metadata_ids['channel_ids']
+        output_channels = '-'.join(map(str, self.channel_ids))
+        if mask_type is 'borders_weight_loss_map':
+            output_channels = str(mask_channel)
         # Create mask_dir as a subdirectory of output_dir
         self.mask_dir = os.path.join(
             self.output_dir,
-            'mask_channels_' + '-'.join(map(str, self.channel_ids)),
+            'mask_channels_' + output_channels,
         )
         os.makedirs(self.mask_dir, exist_ok=True)
 
@@ -200,11 +205,13 @@ class MaskProcessor:
 
         # Loop through all the indices and create masks
         fn_args = []
-        id_df = self.frames_meta_sub[['dir_name', 'time_idx', 'pos_idx', 'slice_idx']].drop_duplicates()
+        id_df = self.frames_meta_sub[
+            ['dir_name', 'time_idx', 'pos_idx', 'slice_idx']
+        ].drop_duplicates()
         channel_thrs = None
         if self.uniform_struct:
             for id_row in id_df.to_numpy():
-                dir_idx, time_idx, pos_idx, slice_idx = id_row
+                dir_name, time_idx, pos_idx, slice_idx = id_row
                 input_fnames, ff_fname = self._get_args_read_image(
                     time_idx=time_idx,
                     channel_ids=self.channel_ids,
@@ -214,7 +221,7 @@ class MaskProcessor:
                 )
                 if self.mask_type == 'dataset otsu':
                     channel_thrs = self.channel_thr_df.loc[
-                        self.channel_thr_df['dir_name'] == dir_idx, 'intensity'].to_numpy()
+                        self.channel_thr_df['dir_name'] == dir_name, 'intensity'].to_numpy()
                 cur_args = (input_fnames,
                             ff_fname,
                             str_elem_radius,

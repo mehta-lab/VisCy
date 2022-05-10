@@ -185,7 +185,7 @@ def crop_at_indices(input_image,
 
     :param np.array input_image: input image for cropping
     :param list crop_indices: list of indices for cropping
-    :param dict save_dict: dict with keys: time_idx, channel_idx, slice_idx,
+    :param dict/None save_dict: dict with keys: time_idx, channel_idx, slice_idx,
      pos_idx, image_format and save_dir for generation output fname
     :param bool tile_3d: boolean flag for adding slice_start_idx to meta
     :return: if not saving tiles: a list with tuples of cropped image id of
@@ -196,8 +196,11 @@ def crop_at_indices(input_image,
     n_dim = len(input_image.shape)
     tiles_list = []
     file_names_list = []
+    ids_list = []
     im_depth = input_image.shape[2]
     tiled_metadata = []
+    file_name = None
+    cropped_img = None
     for cur_idx in crop_indices:
         img_id = 'r{}-{}_c{}-{}'.format(cur_idx[0], cur_idx[1],
                                         cur_idx[2], cur_idx[3])
@@ -213,14 +216,15 @@ def crop_at_indices(input_image,
                 cropped_img = input_image[cur_idx[0]: cur_idx[1],
                                           cur_idx[2]: cur_idx[3], ...]
         if save_dict is not None:
-            file_name = aux_utils.get_im_name(time_idx=save_dict['time_idx'],
-                                              channel_idx=save_dict['channel_idx'],
-                                              slice_idx=save_dict['slice_idx'],
-                                              pos_idx=save_dict['pos_idx'],
-                                              int2str_len=save_dict['int2str_len'],
-                                              extra_field=img_id,
-                                              ext='.npy')
-
+            file_name = aux_utils.get_im_name(
+                time_idx=save_dict['time_idx'],
+                channel_idx=save_dict['channel_idx'],
+                slice_idx=save_dict['slice_idx'],
+                pos_idx=save_dict['pos_idx'],
+                int2str_len=save_dict['int2str_len'],
+                extra_field=img_id,
+                ext='.npy',
+            )
             cur_metadata = {'channel_idx': save_dict['channel_idx'],
                             'slice_idx': save_dict['slice_idx'],
                             'time_idx': save_dict['time_idx'],
@@ -231,13 +235,16 @@ def crop_at_indices(input_image,
             if tile_3d:
                 cur_metadata['slice_start'] = cur_idx[4]
             tiled_metadata.append(cur_metadata)
+        else:
+            # If not saving, collect tile IDs
+            ids_list.append(img_id)
         tiles_list.append(cropped_img)
         file_names_list.append(file_name)
     workers = 16
     with ThreadPoolExecutor(workers) as ex:
         ex.map(write_tile, tiles_list, file_names_list, [save_dict] * len(tiles_list))
     if save_dict is None:
-        return tiles_list
+        return tiles_list, ids_list
     else:
         tile_meta_df = write_meta(tiled_metadata, save_dict)
         return tile_meta_df
@@ -248,18 +255,15 @@ def write_tile(tile, file_name, save_dict):
     Write tile function that can be called using threading.
 
     :param np.array tile: one tile
+    :param str file_name: File name for tile (must be .npy format)
     :param dict save_dict: dict with keys: time_idx, channel_idx, slice_idx,
-     pos_idx, image_format and save_dir for generation output fname
-    :param str img_id: tile related indices as string
     :return str op_fname: filename used for saving the tile with entire path
     """
-
-
     op_fname = os.path.join(save_dict['save_dir'], file_name)
     if save_dict['image_format'] == 'zyx' and len(tile.shape) > 2:
         tile = np.transpose(tile, (2, 0, 1))
     np.save(op_fname, tile, allow_pickle=False, fix_imports=False)
-    return file_name
+    return op_fname
 
 
 def write_meta(tiled_metadata, save_dict):

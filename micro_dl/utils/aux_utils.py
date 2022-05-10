@@ -74,9 +74,11 @@ def get_row_idx(frames_metadata,
     :param int channel_idx: get info for this channel
     :param int slice_idx: get info for this focal plane (2D)
     :param int pos_idx: Specify FOV (default to all if -1)
+    :param str dir_names: Directory names if not in dataframe?
+    :return row_idx: Row index in dataframe
     """
     if dir_names is None:
-        dir_names = frames_metadata['dir_name'].unique()
+        dir_names = frames_metadata['dir_name'].unique().tolist()
     if not isinstance(dir_names, list):
         dir_names = [dir_names]
     row_idx = ((frames_metadata['time_idx'] == time_idx) &
@@ -106,11 +108,12 @@ def get_meta_idx(frames_metadata,
     :return: int pos_idx: Row position matching indices above
     """
     frame_idx = frames_metadata.index[
-        (frames_metadata['channel_idx'] == channel_idx) &
-        (frames_metadata['time_idx'] == time_idx) &
-        (frames_metadata["slice_idx"] == slice_idx) &
-        (frames_metadata["pos_idx"] == pos_idx)].tolist()
+        (frames_metadata['channel_idx'] == int(channel_idx)) &
+        (frames_metadata['time_idx'] == int(time_idx)) &
+        (frames_metadata["slice_idx"] == int(slice_idx)) &
+        (frames_metadata["pos_idx"] == int(pos_idx))].tolist()
     return frame_idx[0]
+
 
 def get_sub_meta(frames_metadata,
                  time_ids,
@@ -134,6 +137,7 @@ def get_sub_meta(frames_metadata,
         (frames_metadata["pos_idx"].isin(pos_ids))]
     return frames_meta_sub
 
+
 def get_im_name(time_idx=None,
                 channel_idx=None,
                 slice_idx=None,
@@ -153,20 +157,20 @@ def get_im_name(time_idx=None,
     :param int int2str_len: Length of string of the converted integers
     :return st im_name: Image file name
     """
-
     im_name = "im"
     if channel_idx is not None:
-        im_name += "_c" + str(channel_idx).zfill(int2str_len)
+        im_name += "_c" + str(int(channel_idx)).zfill(int2str_len)
     if slice_idx is not None:
-        im_name += "_z" + str(slice_idx).zfill(int2str_len)
+        im_name += "_z" + str(int(slice_idx)).zfill(int2str_len)
     if time_idx is not None:
-        im_name += "_t" + str(time_idx).zfill(int2str_len)
+        im_name += "_t" + str(int(time_idx)).zfill(int2str_len)
     if pos_idx is not None:
-        im_name += "_p" + str(pos_idx).zfill(int2str_len)
+        im_name += "_p" + str(int(pos_idx)).zfill(int2str_len)
     if extra_field is not None:
         im_name += "_" + extra_field
     im_name += ext
     return im_name
+
 
 def get_sms_im_name(time_idx=None,
                     channel_name=None,
@@ -184,7 +188,7 @@ def get_sms_im_name(time_idx=None,
     This function will alter list and dict in place.
 
     :param int time_idx: Time index
-    :param str channel_name: Channel name
+    :param str/None channel_name: Channel name
     :param int slice_idx: Slice (z) index
     :param int pos_idx: Position (FOV) index
     :param str extra_field: Any extra string you want to include in the name
@@ -207,6 +211,7 @@ def get_sms_im_name(time_idx=None,
     im_name += ext
 
     return im_name
+
 
 def sort_meta_by_channel(frames_metadata):
     """
@@ -365,6 +370,7 @@ def make_dataframe(nbr_rows=None, df_names=DF_NAMES):
     and standard column names defined below
 
     :param [None, int] nbr_rows: The number of rows in the dataframe
+    :param list df_names: Dataframe column names
     :return dataframe frames_meta: Empty dataframe with given
         indices and column names
     """
@@ -397,6 +403,8 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
         frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
         raise IOError('cannot read metadata csv file: {}'.format(e))
+    # Replace NaNs with None
+    frames_metadata = frames_metadata.mask(frames_metadata.isna(), None)
     return frames_metadata
 
 

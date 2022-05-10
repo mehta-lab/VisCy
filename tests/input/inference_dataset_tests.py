@@ -66,6 +66,16 @@ class TestInferenceDataSet(unittest.TestCase):
         # Select inference split of dataset
         self.split_col_ids = ('pos_idx', [1, 3])
         # Make configs with fields necessary for inference dataset
+        self.inference_config = {
+            'model_dir': 'model_dir',
+            'model_fname': 'dummy_weights.hdf5',
+            'image_dir': 'image_dir',
+            'data_split': 'test',
+            'images': {
+                'image_format': 'zyx',
+                'image_ext': '.npy',
+            },
+        }
         dataset_config = {
             'input_channels': [2],
             'target_channels': [self.mask_channel],
@@ -82,10 +92,11 @@ class TestInferenceDataSet(unittest.TestCase):
         # Instantiate class
         self.data_inst = inference_dataset.InferenceDataSet(
             image_dir=self.image_dir,
+            inference_config=self.inference_config,
             dataset_config=dataset_config,
             network_config=self.network_config,
-            preprocess_config=self.preprocess_config,
             split_col_ids=self.split_col_ids,
+            preprocess_config=self.preprocess_config,
             mask_dir=self.mask_dir,
         )
 
@@ -203,6 +214,7 @@ class TestInferenceDataSet(unittest.TestCase):
         # Instantiate class
         data_inst = inference_dataset.InferenceDataSet(
             image_dir=self.image_dir,
+            inference_config=self.inference_config,
             dataset_config=dataset_config,
             network_config=self.network_config,
             preprocess_config=self.preprocess_config,
@@ -279,6 +291,16 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         # Select inference split of dataset
         self.split_col_ids = ('pos_idx', [1, 3])
         # Make configs with fields necessary for inference dataset
+        self.inference_config = {
+            'model_dir': 'model_dir',
+            'model_fname': 'dummy_weights.hdf5',
+            'image_dir': 'image_dir',
+            'data_split': 'test',
+            'images': {
+                'image_format': 'zyx',
+                'image_ext': '.npy',
+            },
+        }
         dataset_config = {
             'input_channels': [2],
             'target_channels': [self.mask_channel],
@@ -295,6 +317,7 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         # Instantiate class
         self.data_inst = inference_dataset.InferenceDataSet(
             image_dir=self.image_dir,
+            inference_config=self.inference_config,
             dataset_config=dataset_config,
             network_config=self.network_config,
             preprocess_config=self.preprocess_config,
@@ -398,6 +421,7 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         # Instantiate class
         data_inst = inference_dataset.InferenceDataSet(
             image_dir=self.image_dir,
+            inference_config=self.inference_config,
             dataset_config=dataset_config,
             network_config=self.network_config,
             preprocess_config=self.preprocess_config,

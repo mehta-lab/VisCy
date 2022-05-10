@@ -11,7 +11,6 @@ import micro_dl.utils.tile_utils as tile_utils
 import micro_dl.utils.aux_utils as aux_utils
 
 
-
 class TestTileUtils(unittest.TestCase):
 
     def setUp(self):
@@ -38,10 +37,21 @@ class TestTileUtils(unittest.TestCase):
         sph = sph.astype('uint8')
         self.sph = sph
 
+        self.input_image = self.sph[:, :, 3:6]
+        self.tile_size = [16, 16]
+        self.step_size = [8, 8]
+
         self.channel_idx = 1
         self.time_idx = 0
         self.pos_idx = 1
         self.int2str_len = 3
+        self.crop_indices = [
+            (0, 16, 8, 24, 0, 3),
+            (8, 24, 0, 16, 0, 3),
+            (8, 24, 8, 24, 0, 3),
+            (8, 24, 16, 32, 0, 3),
+            (16, 32, 8, 24, 0, 3),
+        ]
 
         for z in range(sph.shape[2]):
             im_name = aux_utils.get_im_name(
@@ -91,34 +101,35 @@ class TestTileUtils(unittest.TestCase):
 
     def test_tile_image(self):
         """Test tile_image"""
-
-        input_image = self.sph[:, :, 3:6]
-        tile_size = [16, 16]
-        step_size = [8, 8]
         # returns at tuple of (img_id, tile)
-        tiled_image_list = tile_utils.tile_image(
-            input_image,
-            tile_size=tile_size,
-            step_size=step_size,
+        tiles_list, cropping_index = tile_utils.tile_image(
+            input_image=self.input_image,
+            tile_size=self.tile_size,
+            step_size=self.step_size,
+            return_index=True,
         )
-        nose.tools.assert_equal(len(tiled_image_list), 9)
+        nose.tools.assert_equal(len(tiles_list), 9)
         c = 0
         for row in range(0, 17, 8):
             for col in range(0, 17, 8):
-                id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(
-                    row, row + tile_size[0], col, col + tile_size[1], 0, 3
+                expected_idx = (
+                    row,
+                    row + self.tile_size[0],
+                    col,
+                    col + self.tile_size[1],
                 )
-                nose.tools.assert_equal(id_str, tiled_image_list[c][0])
-                tile = input_image[row:row + tile_size[0],
-                                   col: col + tile_size[1], ...]
-                numpy.testing.assert_array_equal(tile, tiled_image_list[c][1])
+                nose.tools.assert_equal(expected_idx, cropping_index[c])
+                tile = self.input_image[row:row + self.tile_size[0],
+                                   col: col + self.tile_size[1], ...]
+                numpy.testing.assert_array_equal(tile, tiles_list[c])
                 c += 1
 
+    def test_tile_image_return_index(self):
         # returns tuple_list, cropping_index
         _, tile_index = tile_utils.tile_image(
-            input_image,
-            tile_size=tile_size,
-            step_size=step_size,
+            self.input_image,
+            tile_size=self.tile_size,
+            step_size=self.step_size,
             return_index=True,
         )
         exp_tile_index = [(0, 16, 0, 16), (0, 16, 8, 24),
@@ -129,6 +140,7 @@ class TestTileUtils(unittest.TestCase):
 
         numpy.testing.assert_equal(exp_tile_index, tile_index)
 
+    def test_tile_image_save_dict(self):
         # save tiles in place and return meta_df
         tile_dir = os.path.join(self.temp_path, 'tile_dir')
         os.makedirs(tile_dir, exist_ok=True)
@@ -142,16 +154,21 @@ class TestTileUtils(unittest.TestCase):
                      'int2str_len': 3,
                      'save_dir': tile_dir}
         tile_meta_df = tile_utils.tile_image(
-            input_image,
-            tile_size=tile_size,
-            step_size=step_size,
+            self.input_image,
+            tile_size=self.tile_size,
+            step_size=self.step_size,
             save_dict=save_dict,
         )
         tile_meta = []
         for row in range(0, 17, 8):
             for col in range(0, 17, 8):
                 id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(
-                    row, row + tile_size[0], col, col + tile_size[1], 0, 3
+                    row,
+                    row + self.tile_size[0],
+                    col,
+                    col + self.tile_size[1],
+                    0,
+                    3,
                 )
                 cur_fname = aux_utils.get_im_name(
                     time_idx=self.time_idx,
@@ -176,12 +193,13 @@ class TestTileUtils(unittest.TestCase):
         exp_tile_meta_df = exp_tile_meta_df.sort_values(by=['file_name'])
         pd.testing.assert_frame_equal(tile_meta_df, exp_tile_meta_df)
 
+    def test_tile_image_mask(self):
         # use mask and min_fraction to select tiles to retain
-        input_image_bool = input_image > 128
+        input_image_bool = self.input_image > 128
         _, tile_index = tile_utils.tile_image(
             input_image_bool,
-            tile_size=tile_size,
-            step_size=step_size,
+            tile_size=self.tile_size,
+            step_size=self.step_size,
             min_fraction=0.3,
             return_index=True,
         )
@@ -191,17 +209,19 @@ class TestTileUtils(unittest.TestCase):
                           (16, 32, 8, 24)]
         numpy.testing.assert_array_equal(tile_index, exp_tile_index)
 
+    def test_tile_image_3d(self):
         # tile_3d
         input_image = self.sph
         tile_size = [16, 16, 6]
         step_size = [8, 8, 4]
         # returns at tuple of (img_id, tile)
-        tiled_image_list = tile_utils.tile_image(
+        tiles_list, cropping_index = tile_utils.tile_image(
             input_image,
             tile_size=tile_size,
             step_size=step_size,
+            return_index=True,
         )
-        nose.tools.assert_equal(len(tiled_image_list), 18)
+        nose.tools.assert_equal(len(tiles_list), 18)
         c = 0
         for row in range(0, 17, 8):
             for col in range(0, 17, 8):
@@ -211,40 +231,45 @@ class TestTileUtils(unittest.TestCase):
                     else:
                         sl_start_end = [2, 8]
 
-                    id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(
-                        row, row + tile_size[0], col, col + tile_size[1],
-                        sl_start_end[0], sl_start_end[1]
+                    expected_idx = (
+                        row,
+                        row + tile_size[0],
+                        col,
+                        col + tile_size[1],
+                        sl_start_end[0],
+                        sl_start_end[1],
                     )
-                    nose.tools.assert_equal(id_str, tiled_image_list[c][0])
+                    nose.tools.assert_equal(expected_idx, cropping_index[c])
                     tile = input_image[row:row + tile_size[0],
                                        col: col + tile_size[1],
                                        sl_start_end[0]: sl_start_end[1]]
-                    numpy.testing.assert_array_equal(tile,
-                                                     tiled_image_list[c][1])
+                    numpy.testing.assert_array_equal(
+                        tile,
+                        tiles_list[c],
+                    )
                     c += 1
 
     def test_crop_at_indices(self):
         """Test crop_at_indices"""
-
-        crop_indices = [(0, 16, 8, 24, 0, 3),
-                        (8, 24, 0, 16, 0, 3), (8, 24, 8, 24, 0, 3),
-                        (8, 24, 16, 32, 0, 3),
-                        (16, 32, 8, 24, 0, 3)]
         input_image = self.sph[:, :, 3:6]
-
         # return tuple_list
-        tiles_list = tile_utils.crop_at_indices(input_image, crop_indices)
-        for idx, cur_idx in enumerate(crop_indices):
+        tiles_list, ids_list = tile_utils.crop_at_indices(
+            input_image=input_image,
+            crop_indices=self.crop_indices,
+        )
+        for idx, cur_idx in enumerate(self.crop_indices):
             tile = input_image[cur_idx[0]: cur_idx[1],
                                cur_idx[2]: cur_idx[3],
                                cur_idx[4]: cur_idx[5]]
             id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(cur_idx[0], cur_idx[1],
                                                     cur_idx[2], cur_idx[3],
                                                     cur_idx[4], cur_idx[5])
-            nose.tools.assert_equal(id_str, tiles_list[idx][0])
-            numpy.testing.assert_array_equal(tiles_list[idx][1], tile)
+            nose.tools.assert_equal(id_str, ids_list[idx])
+            numpy.testing.assert_array_equal(tiles_list[idx], tile)
 
+    def test_crop_at_indices_save_dict(self):
         # save tiles in place and return meta_df
+        input_image = self.sph[:, :, 3:6]
         tile_dir = os.path.join(self.temp_path, 'tile_dir')
         os.makedirs(tile_dir, exist_ok=True)
         meta_dir = os.path.join(tile_dir, 'meta_dir')
@@ -259,12 +284,12 @@ class TestTileUtils(unittest.TestCase):
 
         tile_meta_df = tile_utils.crop_at_indices(
             input_image,
-            crop_indices,
+            self.crop_indices,
             save_dict=save_dict,
         )
         exp_tile_meta = []
 
-        for idx, cur_idx in enumerate(crop_indices):
+        for idx, cur_idx in enumerate(self.crop_indices):
             id_str = 'r{}-{}_c{}-{}_sl{}-{}'.format(cur_idx[0], cur_idx[1],
                                                     cur_idx[2], cur_idx[3],
                                                     cur_idx[4], cur_idx[5])
@@ -306,13 +331,12 @@ class TestTileUtils(unittest.TestCase):
 
         input_image = self.sph[:, :, 3:6]
         cur_tile = input_image[8: 24, 8: 24, 0: 3]
-        img_id = 'r8-24_c8-24_sl0-3'
-        fname = tile_utils.write_tile(cur_tile, save_dict, img_id)
+        tile_name = 'im_c001_z004_t000_p001_r8-24_c8-24_sl0-3.npy'
+        op_fname = tile_utils.write_tile(cur_tile, tile_name, save_dict)
 
-        exp_fname = '{}_{}.npy'.format('im_c001_z004_t000_p001', img_id)
-        nose.tools.assert_equal(fname, exp_fname)
-        fpath = os.path.join(tile_dir, fname)
-        nose.tools.assert_equal(os.path.exists(fpath), True)
+        exp_path = os.path.join(tile_dir, tile_name)
+        nose.tools.assert_equal(op_fname, exp_path)
+        nose.tools.assert_equal(os.path.exists(exp_path), True)
 
     def test_write_meta(self):
         """Test write_meta"""

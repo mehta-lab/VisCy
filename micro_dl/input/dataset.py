@@ -7,8 +7,6 @@ from scipy import ndimage
 import micro_dl.utils.normalize as norm
 
 
-
-
 def transform_matrix_offset_center(matrix, x, y):
     o_x = float(x) / 2 - 0.5
     o_y = float(y) / 2 - 0.5
@@ -163,6 +161,7 @@ class BaseDataSet(keras.utils.Sequence):
         :param pd.Series target_fnames: pd.Series with each row containing
          filenames for one target
         :param dict dataset_config: Dataset part of the main config file
+            Can contain a subset augmentations with args see line 186
         :param int batch_size: num of datasets in each batch
         :param str image_format: Tile shape order: 'xyz' or 'zyx'
         """

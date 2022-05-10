@@ -94,9 +94,9 @@ def get_unimodal_threshold(input_image):
 
 
 def create_unimodal_mask(input_image, str_elem_size=3, kernel_size=3):
-    """Create a mask with unimodal thresholding and morphological operations
-
-    unimodal thresholding seems to oversegment, erode it by a fraction
+    """
+    Create a mask with unimodal thresholding and morphological operations.
+    Unimodal thresholding seems to oversegment, erode it by a fraction
 
     :param np.array input_image: generate masks from this image
     :param int str_elem_size: size of the structuring element. typically 3, 5

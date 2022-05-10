@@ -155,14 +155,14 @@ class TestImageUtils(unittest.TestCase):
             cv2.imwrite(os.path.join(self.temp_path, im_name), sph[:, :, z])
             meta_row = aux_utils.parse_idx_from_name(
                 im_name, self.df_columns)
-            meta_row['mean'] = np.nanmean(sph[:, :, z])
-            meta_row['std'] = np.nanstd(sph[:, :, z])
+            meta_row['zscore_median'] = np.nanmean(sph[:, :, z])
+            meta_row['zscore_iqr'] = np.nanstd(sph[:, :, z])
             self.frames_meta = self.frames_meta.append(
                 meta_row,
                 ignore_index=True
             )
-        self.dataset_mean = self.frames_meta['mean'].mean()
-        self.dataset_std = self.frames_meta['std'].mean()
+        self.dataset_mean = self.frames_meta['zscore_median'].mean()
+        self.dataset_std = self.frames_meta['zscore_iqr'].mean()
         # Write metadata
         self.frames_meta.to_csv(os.path.join(self.temp_path, meta_fname), sep=',')
         # Write 3D sphere data
@@ -178,6 +178,8 @@ class TestImageUtils(unittest.TestCase):
             'channel_name': '3d_test',
             'file_name': 'im_c001_z000_t000_p001_3d.npy',
             'pos_idx': 1,
+            'zscore_median': np.nanmean(sph),
+            'zscore_iqr': np.nanstd(sph)
         }])
         self.meta_3d = meta_3d
 
@@ -200,23 +202,28 @@ class TestImageUtils(unittest.TestCase):
         im = image_utils.read_image(self.sph_fname)
         np.testing.assert_array_equal(im, self.sph)
 
-
     def test_read_imstack(self):
         """Test read_imstack"""
 
         fnames = self.frames_meta['file_name'][:3]
         fnames = [os.path.join(self.temp_path, fname) for fname in fnames]
         # non-boolean
-        im_stack = image_utils.read_imstack(fnames,
-                                           zscore_mean=self.dataset_mean,
-                                           zscore_std=self.dataset_std)
-        exp_stack = normalize.zscore(self.sph[:, :, :3],
-                           mean=self.dataset_mean,
-                           std=self.dataset_std)
+        im_stack = image_utils.read_imstack(
+            input_fnames=fnames,
+            normalize_im=True,
+            zscore_mean=self.dataset_mean,
+            zscore_std=self.dataset_std,
+        )
+        exp_stack = normalize.zscore(
+            self.sph[:, :, :3],
+            im_mean=self.dataset_mean,
+            im_std=self.dataset_std,
+        )
         np.testing.assert_equal(im_stack.shape, (32, 32, 3))
-        np.testing.assert_array_equal(exp_stack[:, :, :3],
-                                         im_stack)
-
+        np.testing.assert_array_equal(
+            exp_stack[:, :, :3],
+            im_stack,
+        )
         # read a 3D image
         im_stack = image_utils.read_imstack([self.sph_fname])
         np.testing.assert_equal(im_stack.shape, (32, 32, 8))
@@ -227,35 +234,43 @@ class TestImageUtils(unittest.TestCase):
 
     def test_preprocess_imstack(self):
         """Test preprocess_imstack"""
-
-        im_stack = image_utils.preprocess_imstack(self.frames_meta,
-                                                 self.temp_path,
-                                                 depth=3,
-                                                 time_idx=self.time_ids,
-                                                 channel_idx=self.channel_ids,
-                                                 slice_idx=2,
-                                                 pos_idx=self.pos_ids,
-                                                 normalize_im='dataset')
-
+        im_stack = image_utils.preprocess_imstack(
+            frames_metadata=self.frames_meta,
+            input_dir=self.temp_path,
+            depth=3,
+            time_idx=self.time_idx,
+            channel_idx=self.channel_idx,
+            slice_idx=2,
+            pos_idx=self.pos_idx,
+            normalize_im='dataset',
+        )
         np.testing.assert_equal(im_stack.shape, (32, 32, 3))
-        exp_stack = normalize.zscore(self.sph[:, :, 1:4],
-                           mean=self.dataset_mean,
-                           std=self.dataset_std)
+        exp_stack = np.zeros((32, 32, 3))
+        # Right now the code normalizes on a z slice basis for all
+        # normalization schemes
+        for z in range(exp_stack.shape[2]):
+            exp_stack[..., z] = normalize.zscore(self.sph[..., z + 1])
         np.testing.assert_array_equal(im_stack, exp_stack)
 
+    def test_preprocess_imstack_3d(self):
         # preprocess a 3D image
-        im_stack = image_utils.preprocess_imstack(self.meta_3d,
-                                                 self.temp_path,
-                                                 depth=1,
-                                                 time_idx=0,
-                                                 channel_idx=1,
-                                                 slice_idx=0,
-                                                 pos_idx=1,
-                                                 normalize_im='dataset')
+        im_stack = image_utils.preprocess_imstack(
+            frames_metadata=self.meta_3d,
+            input_dir=self.temp_path,
+            depth=1,
+            time_idx=0,
+            channel_idx=1,
+            slice_idx=0,
+            pos_idx=1,
+            normalize_im='dataset',
+        )
         np.testing.assert_equal(im_stack.shape, (32, 32, 8))
-        exp_stack = normalize.zscore(self.sph,
-                           mean=self.dataset_mean,
-                           std=self.dataset_std)
+        # Normalization for 3D image is done on the entire volume
+        exp_stack = normalize.zscore(
+            self.sph,
+            im_mean=np.nanmean(self.sph),
+            im_std=np.nanstd(self.sph),
+        )
         np.testing.assert_array_equal(im_stack, exp_stack)
 
 

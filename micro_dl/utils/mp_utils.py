@@ -2,6 +2,7 @@ import cv2
 from concurrent.futures import ProcessPoolExecutor
 import numpy as np
 import os
+import sys
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
@@ -9,6 +10,7 @@ import micro_dl.utils.masks as mask_utils
 import micro_dl.utils.tile_utils as tile_utils
 from micro_dl.utils.normalize import hist_clipping
 from micro_dl.utils.image_utils import im_adjust
+
 
 def mp_wrapper(fn, fn_args, workers):
     """Create and save masks with multiprocessing
@@ -21,6 +23,7 @@ def mp_wrapper(fn, fn_args, workers):
         # can't use map directly as it works only with single arg functions
         res = ex.map(fn, *zip(*fn_args))
     return list(res)
+
 
 def mp_create_save_mask(fn_args, workers):
     """Create and save masks with multiprocessing
@@ -54,7 +57,7 @@ def create_save_mask(input_fnames,
     generated then added together.
 
     :param tuple input_fnames: tuple of input fnames with full path
-    :param str flat_field_fname: fname of flat field image
+    :param str/None flat_field_fname: fname of flat field image
     :param int str_elem_radius: size of structuring element used for binary
      opening. str_elem: disk or ball
     :param str mask_dir: dir to save masks
@@ -71,7 +74,8 @@ def create_save_mask(input_fnames,
      to uint8.
     :param list channel_thrs: list of threshold for each channel to generate
     binary masks. Only used when mask_type is 'dataset_otsu'
-    :return dict cur_meta for each mask
+    :return dict cur_meta for each mask. fg_frac is added to metadata
+            - how is it used?
     """
     if mask_type == 'dataset otsu':
         assert channel_thrs is not None, \
@@ -83,13 +87,13 @@ def create_save_mask(input_fnames,
     )
     masks = []
     for idx in range(im_stack.shape[-1]):
-        im = im_stack[..., idx].astype('float32')
+        im = im_stack[..., idx]
         if mask_type == 'otsu':
-            mask = mask_utils.create_otsu_mask(im, str_elem_radius)
+            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius)
         elif mask_type == 'unimodal':
-            mask = mask_utils.create_unimodal_mask(im,  str_elem_radius)
+            mask = mask_utils.create_unimodal_mask(im.astype('float32'),  str_elem_radius)
         elif mask_type == 'dataset otsu':
-            mask = mask_utils.create_otsu_mask(im, str_elem_radius, channel_thrs[idx])
+            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius, channel_thrs[idx])
         elif mask_type == 'borders_weight_loss_map':
             mask = mask_utils.get_unet_border_weight_map(im)
         masks += [mask]
@@ -102,7 +106,7 @@ def create_save_mask(input_fnames,
         masks = np.stack(masks, axis=-1)
         # mask = np.any(masks, axis=-1)
         mask = np.mean(masks, axis=-1)
-        fg_frac = np.sum(mask) / mask.size
+        fg_frac = np.mean(mask)
 
     # Create mask name for given slice, time and position
     file_name = aux_utils.get_im_name(
@@ -141,10 +145,10 @@ def create_save_mask(input_fnames,
             mask = im_adjust(mask)
             im_mean = np.mean(im_stack, axis=-1)
             im_mean = hist_clipping(im_mean, 1, 99)
-            im_mean = \
-                cv2.convertScaleAbs(
-                    im_mean - np.min(im_mean),
-                  alpha=255 / (np.max(im_mean) - np.min(im_mean))
+            im_alpha = 255 / (np.max(im_mean) - np.min(im_mean) + sys.float_info.epsilon)
+            im_mean = cv2.convertScaleAbs(
+                im_mean - np.min(im_mean),
+                alpha=im_alpha,
                 )
             im_mask_overlay = np.stack([mask, im_mean, mask], axis=2)
             cv2.imwrite(os.path.join(mask_dir, overlay_name), im_mask_overlay)
@@ -160,11 +164,13 @@ def create_save_mask(input_fnames,
                 'fg_frac': fg_frac,}
     return cur_meta
 
+
 def get_mask_meta_row(file_path, meta_row):
     mask = image_utils.read_image(file_path)
     fg_frac = np.sum(mask > 0) / mask.size
     meta_row = {**meta_row, 'fg_frac': fg_frac}
     return meta_row
+
 
 def mp_tile_save(fn_args, workers):
     """Tile and save with multiprocessing
@@ -410,7 +416,7 @@ def rescale_vol_and_save(time_idx,
     :param str output_fname: output_fname
     :param float/list scale_factor: scale factor for resizing
     :param str input_dir: input dir for 2D images
-    :param str ff_path: path to flat field correction image
+    :param str/None ff_path: path to flat field correction image
     """
 
     input_stack = []

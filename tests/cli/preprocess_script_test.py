@@ -92,7 +92,8 @@ class TestPreprocessScript(unittest.TestCase):
             'num_workers': 4,
             'flat_field': {'estimate': True,
                            'block_size': 2,
-                           'correct': True},
+                           'correct': True,
+                           },
             'masks': {'channels': [3],
                       'str_elem_radius': 3,
                       },
@@ -101,9 +102,10 @@ class TestPreprocessScript(unittest.TestCase):
                      'depths': [1, 1, 1],
                      'mask_depth': 1,
                      'image_format': 'zyx',
-                     'normalize_channels': [True, True, True]
+                     'normalize_channels': [True, True, True],
                      },
-            'normalize_im': 'stack'
+            'normalize': {'normalize_im': 'stack',
+                          },
         }
         # Create base config, generated party from pp_config in script
         self.base_config = {
@@ -116,7 +118,7 @@ class TestPreprocessScript(unittest.TestCase):
             'uniform_struct': True,
             'int2strlen': 3,
             'num_workers': 4,
-            'normalize_channels': [True, True, True]
+            'normalize_channels': [True, True, True],
         }
 
     def tearDown(self):
@@ -127,7 +129,7 @@ class TestPreprocessScript(unittest.TestCase):
         nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
 
     def test_pre_process(self):
-        out_config, runtime = pp.pre_process(self.pp_config, self.base_config)
+        out_config, runtime = pp.pre_process(self.pp_config)
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
             self.base_config['input_dir'],
@@ -155,6 +157,7 @@ class TestPreprocessScript(unittest.TestCase):
         mask_dir = out_config['masks']['mask_dir']
         mask_meta = aux_utils.read_meta(mask_dir)
         mask_names = os.listdir(mask_dir)
+        mask_names = [mn for mn in mask_names if 'overlay' not in mn]
         mask_names.pop(mask_names.index('frames_meta.csv'))
         # Validate that all masks are there
         self.assertEqual(
@@ -213,12 +216,12 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertListEqual(
             list(tile_meta),
             ['channel_idx',
-             'col_start',
+             'slice_idx',
+             'time_idx',
              'file_name',
              'pos_idx',
              'row_start',
-             'slice_idx',
-             'time_idx']
+             'col_start']
         )
         self.assertListEqual(
             tile_meta.row_start.unique().tolist(),
@@ -247,18 +250,18 @@ class TestPreprocessScript(unittest.TestCase):
             'mask_channel': self.input_mask_channel,
         }
         cur_config['make_weight_map'] = True
-        out_config, runtime = pp.pre_process(cur_config, self.base_config)
+        out_config, runtime = pp.pre_process(cur_config)
 
         # Check weights dir
         self.assertEqual(
             out_config['weights']['weights_dir'],
-            os.path.join(self.output_dir, 'mask_channels_111')
+            os.path.join(self.output_dir, 'mask_channels_5')
         )
         weights_meta = aux_utils.read_meta(out_config['weights']['weights_dir'])
         # Check indices
         self.assertListEqual(
             weights_meta.channel_idx.unique().tolist(),
-            [112],
+            [5],
         )
         self.assertListEqual(
             weights_meta.pos_idx.unique().tolist(),
@@ -273,9 +276,10 @@ class TestPreprocessScript(unittest.TestCase):
             [self.time_idx],
         )
         # Load one weights file and check contents
+        print(os.listdir(out_config['weights']['weights_dir']))
         im = np.load(os.path.join(
             out_config['weights']['weights_dir'],
-            'im_c112_z002_t000_p007.npy',
+            'im_c005_z002_t000_p007.npy',
         ))
         self.assertTupleEqual(im.shape, (30, 20))
         self.assertTrue(im.dtype == np.float64)
@@ -288,7 +292,7 @@ class TestPreprocessScript(unittest.TestCase):
         # Check indices
         self.assertListEqual(
             tile_meta.channel_idx.unique().tolist(),
-            [0, 1, 3, 111, 112],
+            [0, 1, 3, 4, 5],
         )
         self.assertListEqual(
             tile_meta.pos_idx.unique().tolist(),
@@ -302,10 +306,17 @@ class TestPreprocessScript(unittest.TestCase):
             tile_meta.time_idx.unique().tolist(),
             [self.time_idx],
         )
+        # Load a weight tile
+        im = np.load(os.path.join(
+            tile_dir,
+            'im_c005_z002_t000_p008_r0-10_c10-20_sl0-1.npy',
+        ))
+        self.assertTupleEqual(im.shape, (1, 10, 10))
+        self.assertTrue(im.dtype == np.float)
         # Load one tile
         im = np.load(os.path.join(
             tile_dir,
-            'im_c111_z002_t000_p008_r0-10_c10-20_sl0-1.npy',
+            'im_c004_z002_t000_p008_r0-10_c10-20_sl0-1.npy',
         ))
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == bool)
@@ -317,7 +328,7 @@ class TestPreprocessScript(unittest.TestCase):
             'resize_3d': False,
         }
         cur_config['make_weight_map'] = False
-        out_config, runtime = pp.pre_process(cur_config, self.base_config)
+        out_config, runtime = pp.pre_process(cur_config)
 
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
@@ -365,7 +376,7 @@ class TestPreprocessScript(unittest.TestCase):
             'image_format': 'zyx',
             'normalize_channels': [True, True, True],
         }
-        out_config, runtime = pp.pre_process(cur_config, self.base_config)
+        out_config, runtime = pp.pre_process(cur_config)
 
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
@@ -404,7 +415,7 @@ class TestPreprocessScript(unittest.TestCase):
     def test_pre_process_nonisotropic(self):
         base_config = self.base_config
         base_config['uniform_struct'] = False
-        out_config, runtime = pp.pre_process(self.pp_config, base_config)
+        out_config, runtime = pp.pre_process(self.pp_config)
 
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
