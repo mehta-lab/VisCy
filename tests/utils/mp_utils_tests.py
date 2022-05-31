@@ -1,3 +1,4 @@
+import cv2
 import nose.tools
 import numpy as np
 import numpy.testing
@@ -254,3 +255,42 @@ class TestMpUtilsBorderWeightMap(TestMpUtilsBaseClass):
             for x_coord in range(self.params[0][0] + self.radius, self.params[1][0] - self.radius):
                 distance_near_intersection = weight_map[x_coord, y_coord]
                 nose.tools.assert_equal(max_weight_map, distance_near_intersection)
+
+
+def test_mp_sample_im_pixels():
+    with TempDirectory() as tempdir:
+        temp_path = tempdir.path
+        im = np.zeros((20, 30), np.uint8) + 50
+        im1_path = os.path.join(temp_path, 'im1.tif')
+        im2_path = os.path.join(temp_path, 'im2.tif')
+        ff_path = os.path.join(temp_path, 'ff.npy')
+        cv2.imwrite(im1_path, im)
+        cv2.imwrite(im2_path, im + 100)
+        np.save(ff_path, im / 2, allow_pickle=True, fix_imports=True)
+        meta_row = pd.DataFrame(
+            [[2, 1, 0, 3]],
+            columns=['time_idx', 'channel_idx', 'pos_idx', 'slice_idx'],
+        )
+        fn_args = [
+            (im1_path, ff_path, 10, meta_row),
+            (im2_path, ff_path, 10, meta_row),
+        ]
+        res = mp_utils.mp_sample_im_pixels(fn_args, 1)
+        nose.tools.assert_equal(len(res), 2)
+        # There should be row_idx=10 and col_idx=10, 20 for both images
+        # and intensity for flatfield corrected images for im1 and im2
+        # should be 50/25=2 and 150/25=6
+        im1_res = res[0]
+        nose.tools.assert_equal(im1_res[0]['row_idx'], 10)
+        nose.tools.assert_equal(im1_res[0]['col_idx'], 10)
+        nose.tools.assert_equal(im1_res[0]['intensity'], 2.0)
+        nose.tools.assert_equal(im1_res[1]['row_idx'], 10)
+        nose.tools.assert_equal(im1_res[1]['col_idx'], 20)
+        nose.tools.assert_equal(im1_res[1]['intensity'], 2.0)
+        im2_res = res[1]
+        nose.tools.assert_equal(im2_res[0]['row_idx'], 10)
+        nose.tools.assert_equal(im2_res[0]['col_idx'], 10)
+        nose.tools.assert_equal(im2_res[0]['intensity'], 6.0)
+        nose.tools.assert_equal(im2_res[1]['row_idx'], 10)
+        nose.tools.assert_equal(im2_res[1]['col_idx'], 20)
+        nose.tools.assert_equal(im2_res[1]['intensity'], 6.0)

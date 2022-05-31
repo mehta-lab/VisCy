@@ -47,7 +47,6 @@ def save_predicted_images(input_imgs,
         axs.axis('off')
     fig.set_size_inches((12, 5 * n_rows))
     axis_count = 0
-
     # add input images to plot
     for c, input_img in enumerate(input_imgs):
         input_imgs[c] = hist_clipping(

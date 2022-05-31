@@ -343,7 +343,6 @@ class ImagePredictor:
             if isinstance(num_overlap, list) and \
                     self.config['network']['class'] != 'UNet3D':
                 num_overlap = self.num_overlap[-1]
-
             overlap_dict = {
                 'overlap_shape': num_overlap,
                 'overlap_operation': self.tile_params['overlap_operation']
@@ -396,6 +395,7 @@ class ImagePredictor:
         num_overlap = self.num_overlap
         if isinstance(self.num_overlap, list):
             num_overlap = self.num_overlap[-1]
+
         num_blocks = np.ceil(
             num_z / (num_slices - num_overlap)
         ).astype('int')
@@ -499,15 +499,14 @@ class ImagePredictor:
                  im_target,
                  meta_row):
         """
-    Revert z-score normalization applied during preprocessing. Necessary
-    before computing SSIM
+        Revert z-score normalization applied during preprocessing. Necessary
+        before computing SSIM
 
-    :param im_pred: Prediction image, normalized image for un-zscore
-    :param im_target: Target image to compute stats from
-    :param pd.DataFrame meta_row: Metadata row for image
-    :return im_pred: image at its original scale
-    """
-
+        :param im_pred: Prediction image, normalized image for un-zscore
+        :param im_target: Target image to compute stats from
+        :param pd.DataFrame meta_row: Metadata row for image
+        :return im_pred: image at its original scale
+        """
         if self.normalize_im is not None:
             if self.normalize_im in ['dataset', 'volume', 'slice'] \
                 and ('zscore_median' in meta_row and
@@ -526,7 +525,7 @@ class ImagePredictor:
                         im_pred,
                         metric,
                         meta_row,
-                        pred_chan_name=None,
+                        pred_chan_name=np.nan,
                         ):
         """
         Save predicted images with image extension given in init.
@@ -536,9 +535,13 @@ class ImagePredictor:
         :param np.array im_pred: 2D / 3D predicted image
         :param pd.series metric: xy similarity metrics between prediction and target
         :param pd.DataFrame meta_row: Row of meta dataframe containing sample
-        :param str/None pred_chan_name: Predicted channel name
+        :param str/NaN pred_chan_name: Predicted channel name
         """
-        if pred_chan_name is None:
+        if pd.isnull(pred_chan_name):
+            if 'channel_name' in meta_row:
+                pred_chan_name = meta_row['channel_name']
+
+        if pd.isnull(pred_chan_name):
             im_name = aux_utils.get_im_name(
                 time_idx=meta_row['time_idx'],
                 channel_idx=meta_row['channel_idx'],
@@ -577,7 +580,7 @@ class ImagePredictor:
             raise ValueError(
                 'Unsupported file extension: {}'.format(self.image_ext),
             )
-        if self.save_figs and self.image_ext != '.npy':
+        if self.save_figs and len(im_target.shape) == 2:
             # save predicted images assumes 2D
             fig_dir = os.path.join(self.pred_dir, 'figures')
             os.makedirs(self.pred_dir, exist_ok=True)
@@ -692,7 +695,7 @@ class ImagePredictor:
         """
         Run prediction on 2D or 2.5D on indices given by metadata row.
 
-        :param list chan_slice_meta: Inference meta rows
+        :param pd.DataFrame chan_slice_meta: Inference meta rows
         :return np.array pred_stack: Prediction
         :return np.array target_stack: Target
         :return np.array/list mask_stack: Mask for metrics (empty list if
@@ -859,6 +862,7 @@ class ImagePredictor:
         pred_image = pred_image.astype(np.float32)
         target_image = target_image.astype(np.float32)
         cur_row = self.inf_frames_meta.iloc[iteration_rows.index[0]]
+
         if self.model_task == 'regression':
             pred_image = self.unzscore(
                 pred_image,
@@ -869,10 +873,12 @@ class ImagePredictor:
         pred_image = pred_image[0, ...]
         target_image = target_image[0, ...]
         input_image = input_image[0, ...]
+
         if self.image_format == 'zyx':
             input_image = np.transpose(input_image, [0, 2, 3, 1])
             pred_image = np.transpose(pred_image, [0, 2, 3, 1])
             target_image = np.transpose(target_image, [0, 2, 3, 1])
+
         # get mask
         mask_image = None
         if self.masks_dict is not None:
@@ -907,7 +913,6 @@ class ImagePredictor:
                 pred_image, target_image, mask_image, input_image = self.predict_2d(
                     chan_slice_meta,
                 )
-
             for c, chan_idx in enumerate(self.target_channels):
                 pred_names = []
                 slice_ids = chan_slice_meta.loc[chan_slice_meta['channel_idx'] == chan_idx, 'slice_idx'].to_list()

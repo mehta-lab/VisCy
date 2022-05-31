@@ -306,7 +306,6 @@ class TestImageTilerNonUniform(unittest.TestCase):
         mask_meta_df.to_csv(os.path.join(mask_dir, 'frames_meta.csv'), sep=',')
 
         self.tile_inst.pos_ids = [7]
-
         self.tile_inst.normalize_channels = [None, None, None, False]
         self.tile_inst.min_fraction = 0.5
         self.tile_inst.tile_mask_stack(mask_dir,

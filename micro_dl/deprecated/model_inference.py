@@ -104,11 +104,12 @@ class ModelEvaluator:
                                      fname)
             cur_image = np.load(cur_fname)
             if flat_field_dir is not None:
-                ff_fname = os.path.join(flat_field_dir,
-                                        'flat-field_channel-{}.npy'.format(ch))
-                ff_image = np.load(ff_fname)
+                ff_path = os.path.join(
+                    flat_field_dir,
+                    'flat-field_channel-{}.npy'.format(ch),
+                )
                 cur_image = image_utils.apply_flat_field_correction(
-                    cur_image, flat_field_image=ff_image)
+                    cur_image, flat_field_path=ff_path)
             cur_image = zscore(cur_image)
             cur_images.append(cur_image)
         cur_images = np.stack(cur_images)

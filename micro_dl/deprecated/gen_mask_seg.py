@@ -138,7 +138,8 @@ class MaskCreator:
 
                     if self.correct_flat_field:
                         cur_image = image_utils.apply_flat_field_correction(
-                            cur_image, flat_field_image=cur_flat_field
+                            cur_image,
+                            flat_field_image=cur_flat_field,
                         )
                     mask = micro_dl.utils.masks.create_otsu_mask(
                         cur_image, str_elem_size=str_elem_radius

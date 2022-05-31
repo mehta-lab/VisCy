@@ -173,7 +173,7 @@ def get_im_name(time_idx=None,
 
 
 def get_sms_im_name(time_idx=None,
-                    channel_name=None,
+                    channel_name=np.nan,
                     slice_idx=None,
                     pos_idx=None,
                     extra_field=None,
@@ -188,7 +188,7 @@ def get_sms_im_name(time_idx=None,
     This function will alter list and dict in place.
 
     :param int time_idx: Time index
-    :param str/None channel_name: Channel name
+    :param str/NaN channel_name: Channel name
     :param int slice_idx: Slice (z) index
     :param int pos_idx: Position (FOV) index
     :param str extra_field: Any extra string you want to include in the name
@@ -198,7 +198,7 @@ def get_sms_im_name(time_idx=None,
     """
 
     im_name = "img"
-    if channel_name is not None:
+    if np.isnan(channel_name):
         im_name += "_" + str(channel_name)
     if time_idx is not None:
         im_name += "_t" + str(time_idx).zfill(int2str_len)
@@ -389,7 +389,7 @@ def make_dataframe(nbr_rows=None, df_names=DF_NAMES):
 def read_meta(input_dir, meta_fname='frames_meta.csv'):
     """
     Read metadata file, which is assumed to be named 'frames_meta.csv'
-    in given directory
+    in given directory.
 
     :param str input_dir: Directory containing data and metadata
     :param str meta_fname: Metadata file name
@@ -403,8 +403,7 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
         frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
         raise IOError('cannot read metadata csv file: {}'.format(e))
-    # Replace NaNs with None
-    frames_metadata = frames_metadata.mask(frames_metadata.isna(), None)
+
     return frames_metadata
 
 
@@ -558,7 +557,7 @@ def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
         "Order needs 4 unique values, not {}".format(order)
     meta_row = dict.fromkeys(df_names)
     # Channel name can't be retrieved from image name
-    meta_row["channel_name"] = None
+    meta_row["channel_name"] = np.nan
     meta_row["file_name"] = im_name
     # Find all integers in name string
     ints = re.findall(r'\d+', im_name)

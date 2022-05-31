@@ -105,7 +105,7 @@ class MaskProcessor:
         self.ints_metadata = None
         self.channel_thr_df = None
         if mask_type == 'dataset otsu':
-            self.ints_metadata = aux_utils.read_meta(self.input_dir, 'ints_meta.csv')
+            self.ints_metadata = aux_utils.read_meta(self.input_dir, 'intensity_meta.csv')
             self.channel_thr_df = self.get_channel_thr_df()
         # for channel_idx in channel_ids:
         #     row_idxs = self.ints_metadata['channel_idx'] == channel_idx

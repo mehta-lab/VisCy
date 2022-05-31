@@ -38,7 +38,7 @@ def pool_dataset(config):
     num_workers = pool_config['num_workers']
     pool_mode = pool_config['pool_mode']
     frames_meta_dst_path = os.path.join(dst_dir, 'frames_meta.csv')
-    ints_meta_dst_path = os.path.join(dst_dir, 'ints_meta.csv')
+    ints_meta_dst_path = os.path.join(dst_dir, 'intensity_meta.csv')
     pos_idx_cur = 0
     os.makedirs(dst_dir, exist_ok=True)
     if os.path.exists(frames_meta_dst_path) and pool_mode == 'add':

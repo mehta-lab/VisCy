@@ -110,3 +110,40 @@ class TestGenerateMeta(unittest.TestCase):
             name_parser='nonexisting_function',
         )
         generate_meta.main(args)
+
+    def test_generate_intensity_meta(self):
+        args = argparse.Namespace(
+            input=self.sms_dir,
+            name_parser='parse_sms_name',
+            order="cztp",
+            normalize_im='dataset',
+            num_workers=4,
+            block_size=10,
+        )
+        generate_meta.main(args)
+        # Check intensity data
+        ints_meta = pd.read_csv(
+            os.path.join(self.sms_dir, 'intensity_meta.csv'),
+        )
+        expected_cols = ['channel_idx',
+                         'pos_idx',
+                         'slice_idx',
+                         'time_idx',
+                         'channel_name',
+                         'dir_name',
+                         'file_name',
+                         'row_idx',
+                         'col_idx',
+                         'intensity']
+        self.assertListEqual(list(ints_meta)[1:], expected_cols)
+        # With block size 10 and image size 30x20 there should be 2 points
+        # per image and there's 20 images
+        self.assertEqual(ints_meta.shape[0], 40)
+        # Check values in metadata, every other idx should be (10,10) and (20, 10)
+        for idx in range(0, 40, 2):
+            row_even = ints_meta.iloc[idx]
+            self.assertEqual(row_even['row_idx'], 10)
+            self.assertEqual(row_even['col_idx'], 10)
+            row_uneven = ints_meta.iloc[idx + 1]
+            self.assertEqual(row_uneven['row_idx'], 20)
+            self.assertEqual(row_uneven['col_idx'], 10)

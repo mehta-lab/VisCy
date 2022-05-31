@@ -369,10 +369,9 @@ def resize_and_save(**kwargs):
 
     im = image_utils.read_image(kwargs['file_path'])
     if kwargs['ff_path'] is not None:
-        ff_image = np.load(kwargs['ff_path'])
         im = image_utils.apply_flat_field_correction(
             im,
-            flat_field_image=ff_image
+            flat_field_patjh=kwargs['ff_path'],
         )
     im_resized = image_utils.rescale_image(
         im=im,
@@ -429,10 +428,9 @@ def rescale_vol_and_save(time_idx,
         cur_fname = frames_metadata.loc[meta_idx, 'file_name']
         cur_img = image_utils.read_image(os.path.join(input_dir, cur_fname))
         if ff_path is not None:
-            ff_image = np.load(ff_path)
             cur_img = image_utils.apply_flat_field_correction(
                 cur_img,
-                flat_field_image=ff_image
+                flat_field_path=ff_path,
             )
         input_stack.append(cur_img)
     input_stack = np.stack(input_stack, axis=2)
@@ -459,20 +457,25 @@ def mp_get_im_stats(fn_args, workers):
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(get_im_stats, fn_args)
+        for r in res:
+            print(r)
     return list(res)
 
 
 def get_im_stats(im_path):
-    """Read and computes statistics of images
-
     """
+    Read and computes statistics of images
 
+    :param str im_path: Full path to image
+    :return dict meta_row: Dict with intensity data for image
+    """
     im = image_utils.read_image(im_path)
     meta_row = {
         'mean': np.nanmean(im),
         'std': np.nanstd(im)
         }
     return meta_row
+
 
 def mp_sample_im_pixels(fn_args, workers):
     """Read and computes statistics of images with multiprocessing
@@ -488,12 +491,26 @@ def mp_sample_im_pixels(fn_args, workers):
     return list(res)
 
 
-def sample_im_pixels(im_path, grid_spacing, meta_row):
-    """Read and computes statistics of images
-
+def sample_im_pixels(im_path, ff_path, grid_spacing, meta_row):
     """
+    Read and computes statistics of images for each point in a grid.
+    Grid spacing determines distance in pixels between grid points
+    for rows and cols.
+    Applies flatfield correction prior to intensity sampling if flatfield
+    path is specified.
 
+    :param str im_path: Full path to image
+    :param str ff_path: Full path to flatfield image corresponding to image
+    :param int grid_spacing: Distance in pixels between sampling points
+    :param dict meta_row: Metadata row for image
+    :return list meta_rows: Dicts with intensity data for each grid point
+    """
     im = image_utils.read_image(im_path)
+    if ff_path is not None:
+        im = image_utils.apply_flat_field_correction(
+            input_image=im,
+            flat_field_path=ff_path,
+        )
     row_ids, col_ids, sample_values = \
         image_utils.grid_sample_pixel_values(im, grid_spacing)
 
@@ -502,6 +519,6 @@ def sample_im_pixels(im_path, grid_spacing, meta_row):
           'row_idx': row_idx,
           'col_idx': col_idx,
           'intensity': sample_value}
-          for row_idx, col_idx, sample_value
-          in zip(row_ids, col_ids, sample_values)]
+         for row_idx, col_idx, sample_value
+         in zip(row_ids, col_ids, sample_values)]
     return meta_rows

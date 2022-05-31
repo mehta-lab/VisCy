@@ -46,6 +46,7 @@ class TestPreprocessScript(unittest.TestCase):
                     meta_row = aux_utils.parse_idx_from_name(im_name)
                     meta_row['mean'] = np.nanmean(im)
                     meta_row['std'] = np.nanstd(im)
+                    meta_row['dir_name'] = self.image_dir
                     self.frames_meta = self.frames_meta.append(
                         meta_row,
                         ignore_index=True,
@@ -241,6 +242,51 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == np.float64)
 
+    def test_pre_process_no_meta(self):
+        # Remove frames metadata and make sure it regenerates
+        os.remove(os.path.join(self.image_dir, 'frames_meta.csv'))
+        out_config, runtime = pp.pre_process(self.pp_config)
+        self.assertIsInstance(runtime, np.float)
+        self.assertEqual(
+            self.base_config['input_dir'],
+            self.image_dir,
+        )
+        frames_meta = aux_utils.read_meta(self.image_dir)
+        self.assertTupleEqual(frames_meta.shape, (72, 8))
+
+    def test_pre_process_intensity_meta(self):
+        cur_config = self.pp_config
+        # Use preexisiting masks with more than one class, otherwise
+        # weight map generation doesn't work
+        cur_config['normalize'] = {
+            'normalize_im': 'volume',
+            'min_fraction': .1,
+        }
+        cur_config['metadata'] = {
+            'block_size': 10,
+        }
+        out_config, runtime = pp.pre_process(cur_config)
+        intensity_meta = aux_utils.read_meta(self.image_dir, 'intensity_meta.csv')
+        expected_rows = [
+            'channel_idx',
+            'pos_idx',
+            'slice_idx',
+            'time_idx',
+            'channel_name',
+            'dir_name',
+            'file_name',
+            'mean',
+            'std',
+            'row_idx',
+            'col_idx',
+            'intensity',
+            'fg_frac',
+            'zscore_median',
+            'zscore_iqr',
+            'intensity_norm',
+        ]
+        self.assertListEqual(list(intensity_meta), expected_rows)
+
     def test_pre_process_weight_maps(self):
         cur_config = self.pp_config
         # Use preexisiting masks with more than one class, otherwise
@@ -276,7 +322,6 @@ class TestPreprocessScript(unittest.TestCase):
             [self.time_idx],
         )
         # Load one weights file and check contents
-        print(os.listdir(out_config['weights']['weights_dir']))
         im = np.load(os.path.join(
             out_config['weights']['weights_dir'],
             'im_c005_z002_t000_p007.npy',

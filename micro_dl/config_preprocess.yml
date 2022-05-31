@@ -21,10 +21,12 @@ masks:
     mask_type: 'unimodal'
     mask_ext: '.png'
 make_weight_map: False
-
 tile:
     tile_size: [256, 256]
     step_size: [128, 128]
     depths: [1, 1, 1, 1]
     image_format: 'zyx'
     min_fraction: 0.25
+metadata:
+    order: 'cztp'
+    name_parser: 'parse_sms_name'

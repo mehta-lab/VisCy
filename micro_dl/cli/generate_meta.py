@@ -37,6 +37,12 @@ def parse_args():
         help="number of workers for multiprocessing",
     )
     parser.add_argument(
+        '--block_size',
+        type=int,
+        default=256,
+        help="Pixel block size for intensity sampling",
+    )
+    parser.add_argument(
         '--normalize_im',
         type=str,
         default='stack',
@@ -46,19 +52,40 @@ def parse_args():
 
 
 def main(parsed_args):
-    meta_utils.frames_meta_generator(parsed_args.input,
-                                     parsed_args.order,
-                                     parsed_args.name_parser,
-                                     )
+    """
+    Generate metadata for each file by interpreting the file name.
+    Writes found data in frames_metadata.csv in input directory.
+    Assumed default file naming convention is:
+    dir_name
+    |
+    |- im_c***_z***_t***_p***.png
+    |- im_c***_z***_t***_p***.png
+
+    c is channel
+    z is slice in stack (z)
+    t is time
+    p is position (FOV)
+
+    Other naming convention is:
+    img_channelname_t***_p***_z***.tif for parse_sms_name
+
+    :param argparse parsed_args: Input arguments
+    """
+    # Collect metadata for all image files
+    meta_utils.frames_meta_generator(
+        input_dir=parsed_args.input,
+        order=parsed_args.order,
+        name_parser=parsed_args.name_parser,
+    )
+    # Compute intensity stats for all images
     if parsed_args.normalize_im in ['dataset', 'volume', 'slice']:
-        meta_utils.ints_meta_generator(parsed_args.input,
-                                       parsed_args.order,
-                                       parsed_args.name_parser,
-                                       parsed_args.num_workers,
-                                       )
+        meta_utils.ints_meta_generator(
+            input_dir=parsed_args.input,
+            num_workers=parsed_args.num_workers,
+            block_size=parsed_args.block_size,
+        )
 
 
 if __name__ == '__main__':
     parsed_args = parse_args()
     main(parsed_args)
-
