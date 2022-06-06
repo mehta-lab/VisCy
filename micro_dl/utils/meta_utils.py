@@ -101,10 +101,12 @@ def ints_meta_generator(
         if flat_field_dir is not None:
             channel_idx = meta_row['channel_idx']
             if isinstance(channel_idx, (int, float)) and channel_idx in channel_ids:
-                ff_path = os.path.join(
-                    flat_field_dir,
-                    'flat-field_channel-{}.npy'.format(channel_idx)
-                )
+                ff_name = 'flat-field_channel-{}.npy'.format(channel_idx)
+                if ff_name in os.listdir(flat_field_dir):
+                    ff_path = os.path.join(
+                        flat_field_dir,
+                        ff_name,
+                    )
         mp_fn_args.append((im_path, ff_path, block_size, meta_row))
 
     im_ints_list = mp_utils.mp_sample_im_pixels(mp_fn_args, num_workers)

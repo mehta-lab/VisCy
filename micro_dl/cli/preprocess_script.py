@@ -113,20 +113,21 @@ def get_required_params(preprocess_config):
     return required_params
 
 
-def flat_field_correct(required_params, block_size):
-    """Estimate flat_field_images
+def flat_field_correct(required_params, block_size, flat_field_channels):
+    """
+    Estimate flat_field_images in given channels.
 
     :param dict required_params: dict with keys: input_dir, output_dir, time_ids,
      channel_ids, pos_ids, slice_ids, int2strlen, uniform_struct, num_workers
     :param int block_size: Specify block size if different from default (32 pixels)
+    :param list flat_field_channels: Channels in which to estimate flatfields.
     :return str flat_field_dir: full path of dir with flat field correction
      images
     """
-
     flat_field_inst = FlatFieldEstimator2D(
         input_dir=required_params['input_dir'],
         output_dir=required_params['output_dir'],
-        channel_ids=required_params['channel_ids'],
+        channel_ids=flat_field_channels,
         slice_ids=required_params['slice_ids'],
         block_size=block_size,
     )
@@ -148,11 +149,9 @@ def resize_images(required_params,
     :param int num_slices_subvolume: num of slices to be included in each
      volume. If -1, include all slices in slice_ids
     :param bool resize_3d: indicator for resize 2d or 3d
-    :param str flat_field_dir: dir with flat field correction images. if None,
-     does not correct for illumination changes
-    :return:
-     str resize_dir: dir with resized images
-     int, list: slice_ids corrected for gaps due to 3d. For ex.
+    :param str/None flat_field_dir: Directory containing flatfields
+    :return str resize_dir: dir with resized images
+    :return int/list slice_ids: corrected for gaps due to 3d. For ex.
       slice_ids=[0,1,...8] and num_slices_subvolume=3, returned
       slice_ids=[0, 2, 4, 6]
     """
@@ -173,7 +172,7 @@ def resize_images(required_params,
         pos_ids=required_params['pos_ids'],
         int2str_len=required_params['int2strlen'],
         num_workers=required_params['num_workers'],
-        flat_field_dir=flat_field_dir
+        flat_field_dir=flat_field_dir,
     )
 
     if resize_3d:
@@ -188,8 +187,8 @@ def resize_images(required_params,
 
 def generate_masks(required_params,
                    mask_from_channel,
-                   flat_field_dir,
                    str_elem_radius,
+                   flat_field_dir,
                    mask_type,
                    mask_channel,
                    mask_ext,
@@ -202,9 +201,9 @@ def generate_masks(required_params,
         channel_ids, pos_ids, slice_ids, int2strlen, uniform_struct, num_workers
     :param int/list mask_from_channel: generate masks from sum of these
         channels
-    :param str/None flat_field_dir: dir with flat field correction images
     :param int str_elem_radius: structuring element size for morphological
         opening
+    :param str/None flat_field_dir: dir with flat field correction images
     :param str mask_type: string to map to masking function. otsu or unimodal
         or borders_weight_loss_map
     :param int/None mask_channel: channel num assigned to mask channel. I
@@ -212,7 +211,6 @@ def generate_masks(required_params,
          NPY files
     :param str/None mask_dir: If creating weight maps from mask directory,
         specify mask dir
-    :param bool normalize_im: indicator to normalize image based on z-score or not
     :return str mask_dir: Directory with created masks
     :return int mask_channel: Channel number assigned to masks
     """
@@ -241,11 +239,7 @@ def generate_masks(required_params,
         mask_ext=mask_ext,
     )
 
-    correct_flat_field = False
-    if flat_field_dir is not None:
-        correct_flat_field = True
     mask_processor_inst.generate_masks(
-        correct_flat_field=correct_flat_field,
         str_elem_radius=str_elem_radius,
     )
     mask_dir = mask_processor_inst.get_mask_dir()
@@ -457,20 +451,48 @@ def pre_process(preprocess_config):
 
     # -----------------Estimate flat field images--------------------
     flat_field_dir = None
+    flat_field_channels = []
     if 'flat_field' in preprocess_config:
-        if 'estimate' in preprocess_config['flat_field'] and \
-                preprocess_config['flat_field']['estimate']:
+        # If flat_field_channels aren't specified, correct all channel_ids
+        flat_field_channels = required_params['channel_ids']
+        if 'flat_field_channels' in preprocess_config['flat_field']:
+            flat_field_channels = preprocess_config['flat_field']['flat_field_channels']
+        # Check that flatfield channels is subset of channel_ids
+        assert set(flat_field_channels).issubset(required_params['channel_ids']), \
+            "Flatfield channels {} is not a subset of channel_ids".format(flat_field_channels)
+        #  Method options: 'estimate' (from input) or 'from_file' (load pre-saved)
+        flat_field_method = 'estimate'
+        if 'method' in preprocess_config['flat_field']:
+            flat_field_method = preprocess_config['flat_field']['method']
+        assert flat_field_method in {'estimate', 'from_file'}, \
+            "Method should be estimate or from_file (use existing)"
+        if flat_field_method is 'estimate':
             assert 'flat_field_dir' not in preprocess_config['flat_field'], \
                 'estimate_flat_field or use images in flat_field_dir.'
             block_size = None
             if 'block_size' in preprocess_config['flat_field']:
                 block_size = preprocess_config['flat_field']['block_size']
-            flat_field_dir = flat_field_correct(required_params, block_size)
+            flat_field_dir = flat_field_correct(
+                required_params,
+                block_size,
+                flat_field_channels,
+            )
             preprocess_config['flat_field']['flat_field_dir'] = flat_field_dir
 
-        elif 'correct' in preprocess_config['flat_field'] and \
-                preprocess_config['flat_field']['correct']:
+        elif flat_field_method is 'from_file':
+            assert 'flat_field_dir' in preprocess_config['flat_field'], \
+                'flat_field_dir must exist if using from_file as flat_field method.'
             flat_field_dir = preprocess_config['flat_field']['flat_field_dir']
+            # Check that all flatfield channels are present
+            existing_channels = []
+            for ff_name in os.listdir(flat_field_dir):
+                # Naming convention is: flat-field-channel_c.npy
+                if ff_name[:10] == 'flat-field':
+                    print('channel', int(ff_name[-5]))
+                    existing_channels.append(int(ff_name[-5]))
+            assert set(existing_channels) == set(flat_field_channels), \
+                "Expected flatfield channels {}, and saved channels {} " \
+                "mismatch".format(flat_field_channels, existing_channels)
 
     # -------Compute intensities for flatfield corrected images-------
     if required_params['normalize_im'] in ['dataset', 'volume', 'slice']:

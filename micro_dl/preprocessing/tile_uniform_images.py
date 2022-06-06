@@ -207,12 +207,15 @@ class ImageTilerUniform:
         """
         flat_field_im = None
         if self.flat_field_dir is not None:
-            flat_field_im = np.load(
-                os.path.join(
-                    self.flat_field_dir,
-                    'flat-field_channel-{}.npy'.format(channel_idx),
+            try:
+                flat_field_im = np.load(
+                    os.path.join(
+                        self.flat_field_dir,
+                        'flat-field_channel-{}.npy'.format(channel_idx),
+                    )
                 )
-            )
+            except FileNotFoundError:
+                print("Flatfield not found for channel {}, returning None".format(channel_idx))
         return flat_field_im
 
     def _get_tile_indices(self, tiled_meta,

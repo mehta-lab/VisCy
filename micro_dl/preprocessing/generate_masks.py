@@ -144,8 +144,7 @@ class MaskProcessor:
                              time_idx,
                              channel_ids,
                              slice_idx,
-                             pos_idx,
-                             correct_flat_field):
+                             pos_idx):
         """
         Read image from t, c, p and s indices. All indices are singular
         except channel which can be a list
@@ -154,8 +153,6 @@ class MaskProcessor:
         :param list channel_ids: channel ids to use for generating mask
         :param int slice_idx: Slice index
         :param int pos_idx: Position index
-        :param bool correct_flat_field: bool indicator to correct for flat
-            field
         :return np.array im: image corresponding to the given channel indices
             and flatfield corrected
         """
@@ -174,31 +171,34 @@ class MaskProcessor:
             input_fnames.append(file_path)
 
         flat_field_fname = None
-        if correct_flat_field:
+        if self.flat_field_dir is not None:
             if isinstance(channel_idx, (int, float)):
-                flat_field_fname = os.path.join(
-                    self.flat_field_dir,
-                    'flat-field_channel-{}.npy'.format(channel_idx)
-                )
+                ff_name = 'flat-field_channel-{}.npy'.format(channel_idx)
+                if ff_name in os.listdir(self.flat_field_dir):
+                    flat_field_fname = os.path.join(
+                        self.flat_field_dir,
+                        ff_name,
+                    )
             elif isinstance(channel_idx, (tuple, list)):
                 flat_field_fname = []
                 for ch_idx in channel_idx:
-                    flat_field_fname.append(os.path.join(
-                        self.flat_field_dir,
-                        'flat-field_channel-{}.npy'.format(ch_idx)
-                    ))
+                    ff_name = 'flat-field_channel-{}.npy'.format(ch_idx)
+                    if ff_name in os.listdir(self.flat_field_dir):
+                        flat_field_fname.append(os.path.join(
+                            self.flat_field_dir,
+                            ff_name,
+                        ))
+                    else:
+                        flat_field_fname.append(None)
         return tuple(input_fnames), flat_field_fname
 
     def generate_masks(self,
-                       correct_flat_field=False,
                        str_elem_radius=5):
         """
         Generate masks from flat-field corrected flurophore images.
         The sum of flurophore channels is thresholded to generate a foreground
         mask.
 
-        :param bool correct_flat_field: bool indicator to correct for flat
-         field or not
         :param int str_elem_radius: Radius of structuring element for
          morphological operations
         """
@@ -217,7 +217,6 @@ class MaskProcessor:
                     channel_ids=self.channel_ids,
                     slice_idx=slice_idx,
                     pos_idx=pos_idx,
-                    correct_flat_field=correct_flat_field,
                 )
                 if self.mask_type == 'dataset otsu':
                     channel_thrs = self.channel_thr_df.loc[
@@ -245,7 +244,6 @@ class MaskProcessor:
                             channel_ids=self.channel_ids,
                             slice_idx=sl_idx,
                             pos_idx=pos_idx,
-                            correct_flat_field=correct_flat_field,
                         )
                         cur_args = (input_fnames,
                                     ff_fname,

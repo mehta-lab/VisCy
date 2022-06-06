@@ -27,6 +27,7 @@ class TestPreprocessScript(unittest.TestCase):
         self.time_idx = 0
         self.pos_ids = [7, 8, 10]
         self.channel_ids = [0, 1, 2, 3]
+        self.flat_field_channels = [0, 1]
         self.slice_ids = [0, 1, 2, 3, 4, 5]
         self.im = 1500 * np.ones((30, 20), dtype=np.uint16)
         self.im[10:20, 5:15] = 3000
@@ -91,9 +92,9 @@ class TestPreprocessScript(unittest.TestCase):
             'input_dir': self.image_dir,
             'channel_ids': [0, 1, 3],
             'num_workers': 4,
-            'flat_field': {'estimate': True,
+            'flat_field': {'method': 'estimate',
                            'block_size': 2,
-                           'correct': True,
+                           'flat_field_channels': self.flat_field_channels,
                            },
             'masks': {'channels': [3],
                       'str_elem_radius': 3,
@@ -184,13 +185,16 @@ class TestPreprocessScript(unittest.TestCase):
         # Check flatfield images
         ff_dir = out_config['flat_field']['flat_field_dir']
         ff_names = os.listdir(ff_dir)
-        self.assertEqual(len(ff_names), 3)
-        for processed_channel in [0, 1, 3]:
-            expected_name = "flat-field_channel-{}.npy".format(processed_channel)
-            self.assertTrue(expected_name in ff_names)
+        ff_names.sort()
+        for i, ff_name in enumerate(ff_names):
+            expected_name = 'flat-field_channel-{}.npy'.format(
+                self.flat_field_channels[i],
+            )
+            self.assertEqual(ff_name, expected_name)
             im = np.load(os.path.join(ff_dir, expected_name))
             self.assertTrue(im.dtype == np.float64)
             self.assertTupleEqual(im.shape, (30, 20))
+
         # Check tiles
         tile_dir = out_config['tile']['tile_dir']
         tile_meta = aux_utils.read_meta(tile_dir)
@@ -365,6 +369,63 @@ class TestPreprocessScript(unittest.TestCase):
         ))
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == bool)
+
+    def test_pre_process_flat_field_from_file(self):
+        cur_config = self.pp_config
+        flat_field_dir = os.path.join(self.output_dir,
+                                      'flat_field_images')
+        os.makedirs(flat_field_dir, exist_ok=True)
+        for ff_channel in self.flat_field_channels:
+            ff_name = 'flat-field_channel-{}.npy'.format(ff_channel)
+            np.save(
+                os.path.join(flat_field_dir, ff_name),
+                self.im / self.im.max(),
+            )
+        cur_config['flat_field'] = {
+            'method': 'from_file',
+            'flat_field_dir': flat_field_dir,
+            'flat_field_channels': self.flat_field_channels,
+        }
+        out_config, runtime = pp.pre_process(cur_config)
+
+    @nose.tools.raises(AssertionError)
+    def test_pre_process_flat_field_wrong_channels(self):
+        cur_config = self.pp_config
+        flat_field_dir = os.path.join(self.output_dir,
+                                      'flat_field_images')
+        os.makedirs(flat_field_dir, exist_ok=True)
+        np.save(
+            os.path.join(flat_field_dir, 'flat-field_channel-5.npy'),
+            self.im,
+        )
+        cur_config['flat_field'] = {
+            'method': 'from_file',
+            'flat_field_dir': flat_field_dir,
+            'flat_field_channels': self.flat_field_channels,
+        }
+        out_config, runtime = pp.pre_process(cur_config)
+
+    @nose.tools.raises(AssertionError)
+    def test_pre_process_flat_field_no_dir(self):
+        cur_config = self.pp_config
+        cur_config['flat_field'] = {
+            'method': 'from_file',
+            'flat_field_channels': self.flat_field_channels,
+        }
+        out_config, runtime = pp.pre_process(cur_config)
+
+    @nose.tools.raises(AssertionError)
+    def test_pre_process_flat_field_no_files(self):
+        cur_config = self.pp_config
+        flat_field_dir = os.path.join(self.output_dir,
+                                      'flat_field_images')
+        os.makedirs(flat_field_dir, exist_ok=True)
+        cur_config['flat_field'] = {
+            'method': 'from_file',
+            'flat_field_dir': flat_field_dir,
+            'flat_field_channels': self.flat_field_channels,
+        }
+        out_config, runtime = pp.pre_process(cur_config)
 
     def test_pre_process_resize2d(self):
         cur_config = self.pp_config

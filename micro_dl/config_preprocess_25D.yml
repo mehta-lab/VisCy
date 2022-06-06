@@ -5,8 +5,8 @@ channel_ids: [0, 1, 2, 3]
 slice_ids: [10, 11, 12, 13, 14, 15]
 pos_ids: [3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
 num_workers: 1
-#flat_field:
-#    estimate: True
+flat_field:
+    method: 'estimate'
 #resize:
 #    scale_factor: 2
 #    resize_3d: False

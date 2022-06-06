@@ -125,7 +125,6 @@ class TestMaskProcessor(unittest.TestCase):
             channel_ids=self.channel_ids,
             slice_idx=5,
             pos_idx=self.pos_ids,
-            correct_flat_field=False,
         )
         exp_fnames = ['im_c001_z005_t000_p001.png',
                       'im_c002_z005_t000_p001.png']

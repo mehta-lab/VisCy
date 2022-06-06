@@ -21,7 +21,8 @@ class ImageResizer:
                  pos_ids=-1,
                  int2str_len=3,
                  num_workers=4,
-                 flat_field_dir=None):
+                 flat_field_dir=None,
+                 flat_field_channels=[]):
         """
         :param str input_dir: Directory with image frames
         :param str output_dir: Base output directory
@@ -34,6 +35,7 @@ class ImageResizer:
         :param int int2str_len: Length of str when converting ints
         :param int num_workers: number of workers for multiprocessing
         :param str flat_field_dir: dir with flat field images
+        :param list flat_field_channels: Channels to apply flatfield correction
         """
         self.input_dir = input_dir
         self.output_dir = output_dir
@@ -55,6 +57,7 @@ class ImageResizer:
         self.channel_ids = metadata_ids['channel_ids']
         self.slice_ids = metadata_ids['slice_ids']
         self.pos_ids = metadata_ids['pos_ids']
+        self.flat_field_channels = flat_field_channels
 
         # Create resize_dir as a subdirectory of output_dir
         self.resize_dir = os.path.join(
@@ -100,16 +103,19 @@ class ImageResizer:
                         file_path = os.path.join(self.input_dir, file_name)
                         write_path = os.path.join(self.resize_dir, file_name)
                         ff_path = None
-                        if self.flat_field_dir is not None:
-                            ff_path = os.path.join(
-                                self.flat_field_dir,
-                                'flat-field_channel-{}.npy'.format(channel_idx)
-                            )
+                        if self.flat_field_dir is not None and \
+                            channel_idx in self.flat_field_channels:
+                            ff_name = 'flat-field_channel-{}.npy'.format(channel_idx)
+                            if ff_name in os.listdir(self.flat_field_dir):
+                                ff_path = os.path.join(
+                                    self.flat_field_dir,
+                                    ff_name,
+                                )
                         kwargs = {
                             'file_path': file_path,
                             'write_path': write_path,
                             'scale_factor': self.scale_factor,
-                            'ff_path': ff_path
+                            'ff_path': ff_path,
                         }
                         mp_args.append(kwargs)
                         resized_metadata = resized_metadata.append(
@@ -151,10 +157,12 @@ class ImageResizer:
                 for channel_idx in self.channel_ids:
                     ff_path = None
                     if self.flat_field_dir is not None:
-                        ff_path = os.path.join(
-                            self.flat_field_dir,
-                            'flat-field_channel-{}.npy'.format(channel_idx)
-                        )
+                        ff_name = 'flat-field_channel-{}.npy'.format(channel_idx)
+                        if ff_name in os.listdir(self.flat_field_dir):
+                            ff_path = os.path.join(
+                                self.flat_field_dir,
+                                ff_name,
+                            )
                     for block_idx in range(num_blocks):
                         idx = self.slice_ids[0] + \
                               block_idx * (num_slices_subvolume - 1)

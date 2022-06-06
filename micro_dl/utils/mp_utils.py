@@ -415,7 +415,7 @@ def rescale_vol_and_save(time_idx,
     :param str output_fname: output_fname
     :param float/list scale_factor: scale factor for resizing
     :param str input_dir: input dir for 2D images
-    :param str/None ff_path: path to flat field correction image
+    :param str/None ff_path: path to flat field image
     """
 
     input_stack = []

@@ -285,15 +285,19 @@ def read_imstack(input_fnames,
         im = read_image(fname)
         if flat_field_fname is not None:
             # multiple flat field images are passed in case of mask generation
-            if isinstance(flat_field_fname, (list, tuple)):
-                flat_field_image = np.load(flat_field_fname[idx])
-            else:
-                flat_field_image = np.load(flat_field_fname)
-            if not is_mask and not normalize_im:
-                im = apply_flat_field_correction(
-                    im,
-                    flat_field_image=flat_field_image,
-                )
+            try:
+                if isinstance(flat_field_fname, (list, tuple)):
+                    if flat_field_fname is not None:
+                        flat_field_image = np.load(flat_field_fname[idx])
+                else:
+                    flat_field_image = np.load(flat_field_fname)
+                if not is_mask and not normalize_im:
+                    im = apply_flat_field_correction(
+                        im,
+                        flat_field_image=flat_field_image,
+                    )
+            except FileNotFoundError:
+                print("Flatfield image not found, correction not applied.")
         im_stack.append(im)
 
     input_image = np.stack(im_stack, axis=-1)
