@@ -184,7 +184,7 @@ def get_sms_im_name(time_idx=None,
     This function is custom for the computational microscopy (SMS)
     group, who has the following file naming convention:
     File naming convention is assumed to be:
-        img_channelname_t***_p***_z***.tif
+        img_channelname_t***_p***_z***_extrafield.tif
     This function will alter list and dict in place.
 
     :param int time_idx: Time index
@@ -194,11 +194,11 @@ def get_sms_im_name(time_idx=None,
     :param str extra_field: Any extra string you want to include in the name
     :param str ext: Extension, e.g. '.png'
     :param int int2str_len: Length of string of the converted integers
-    :return st im_name: Image file name
+    :return str im_name: Image file name
     """
 
     im_name = "img"
-    if np.isnan(channel_name):
+    if not pd.isnull(channel_name):
         im_name += "_" + str(channel_name)
     if time_idx is not None:
         im_name += "_t" + str(time_idx).zfill(int2str_len)

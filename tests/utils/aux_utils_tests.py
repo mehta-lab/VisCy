@@ -95,6 +95,32 @@ def test_get_im_name():
     nose.tools.assert_equal(im_name, 'im_c2_z3_t1_p4_hej.png')
 
 
+def test_get_sms_im_name():
+    im_name = aux_utils.get_sms_im_name(
+        time_idx=0,
+        channel_name='phase',
+        slice_idx=10,
+        pos_idx=100,
+        extra_field='blub',
+        ext='.png',
+        int2str_len=3,
+    )
+    nose.tools.assert_equal(im_name, 'img_phase_t000_p100_z010_blub.png')
+
+
+def test_get_sms_im_name_nones():
+    im_name = aux_utils.get_sms_im_name(
+        time_idx=0,
+        channel_name=None,
+        slice_idx=None,
+        pos_idx=10,
+        extra_field=None,
+        ext='.jpg',
+        int2str_len=2,
+    )
+    nose.tools.assert_equal(im_name, 'img_t00_p10.jpg')
+
+
 def test_get_im_name_default():
     im_name = aux_utils.get_im_name()
     nose.tools.assert_equal(im_name, 'im.png')
