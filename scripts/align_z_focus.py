@@ -61,7 +61,7 @@ def get_sms_im_name(time_idx=None,
     if pos_idx is not None:
         im_name += "_p" + str(pos_idx).zfill(int2str_len)
     if slice_idx is not None:
-        im_name += "_z" + str(slice_idx).zfill(int2str_len)
+        im_name += "_z" + str(slice_idx.astype('int64')).zfill(int2str_len)
     if extra_field is not None:
         im_name += "_" + extra_field
     im_name += ext
