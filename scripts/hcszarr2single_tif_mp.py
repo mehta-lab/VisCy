@@ -10,7 +10,7 @@ from waveorder.io.reader import WaveorderReader
 import pprint
 import time
 from concurrent.futures import ProcessPoolExecutor
-
+from natsort import natsorted
 
 def write_img(img, output_dir, img_name):
     """only supports recon_order image name format currently"""
@@ -33,7 +33,7 @@ def get_position_map(zarr_dir, zarr_name):
     """
     position_map = {}
     c = 0
-    for col in os.listdir(zarr_dir + zarr_name + '/Row_0'):
+    for col in natsorted(os.listdir(zarr_dir + zarr_name + '/Row_0')):
         if col.startswith('.'):
             continue
         col_dir = zarr_dir + zarr_name + '/Row_0/' + col
