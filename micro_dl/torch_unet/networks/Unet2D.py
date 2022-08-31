@@ -1,19 +1,33 @@
-# Last edit: Christian Foley, 08/26/2022
+# Last edit: Christian Foley, 08/30/2022
 
 import torch
 import torch.nn as nn
-from layers.ConvBlock import *
+from micro_dl.torch_unet.networks.layers.ConvBlock2D import *
 
 class Unet2d(nn.Module):
+    def __name__(self):
+        return 'Unet2d'
+    
     def __init__(self, in_channels = 1, out_channels = 1, out_xy = (256,256), residual = False, down = 'avgpool', up = 'bilinear',
                  activation = 'relu', num_blocks = 4, task = 'seg', num_filters = []):
         '''
-        Instance of 2D Unet. Implemented with variable input/output channels and depth (block numbers).
+        Instance of 2D Unet. Implementedfor e with variable input/output channels and depth (block numbers).
         Follows 2D UNet Architecture: 
             1) Unet: https://arxiv.org/pdf/1505.04597.pdf
             2) residual Unet: https://arxiv.org/pdf/1711.10684.pdf
         
-        TODO: parameter documentation
+        Parameters
+            - in_channels -> int: number of feature channels in
+            - out_channels -> int: number of feature channels out
+            - out_xyz -> tuple(int, int, int): dimension of z, x, y channels in output
+            - residual -> boolean: see name
+            - down -> token{'avgpool','maxpool','conv'}: type of downsampling in encoder path
+            - up -> token{'bilinear','tconv','conv'}: type of upsampling in decoder path
+            - activation -> token{'relu','elu','selu','leakyrelu'}: activation function to use in convolutional blocks
+            - num_blocks -> int: number of convolutional blocks on encoder and decoder paths
+            - num_filters -> list[int]: list of filters/feature levels at each conv block depth
+            - task -> token{'recon','seg','reg'}: network task (for virtual staining this is regression)
+            
         '''
         
         super(Unet2d, self).__init__()
@@ -28,6 +42,9 @@ class Unet2d(nn.Module):
             self.num_filters = num_filters
         else:
             self.num_filters = [pow(2,i)*16 for i in range(num_blocks + 1)]
+            self.num_filters
+        forward_filters = [in_channels] + self.num_filters
+        backward_filters = [self.num_filters[-(i+1)] + self.num_filters[-(i+2)] for i in range(len(self.num_filters)) if i < len(self.num_filters) - 1] + [out_channels]
 
             
         #----- Downsampling steps -----#
@@ -41,6 +58,8 @@ class Unet2d(nn.Module):
         elif down == 'conv':
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement.
+        self.register_modules(self.down_list, 'down_samp')
+        
         
         #----- Upsampling steps -----#
         self.up_list = []
@@ -54,31 +73,35 @@ class Unet2d(nn.Module):
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement
         
+        
         #----- Convolutional blocks -----# Forward Filters [16, 32, 64, 128, 256] -> Backward Filters [128+256, 64+128, 32+64, 16+32, 1]
         self.down_conv_blocks = []
-        forward_filters = [in_channels] + self.num_filters
         for i in range(num_blocks):
-            self.down_conv_blocks.append(ConvBlock(forward_filters[i], forward_filters[i+1], residual = self.residual, activation = activation))
+            self.down_conv_blocks.append(ConvBlock2D(forward_filters[i], forward_filters[i+1], residual = self.residual, activation = activation))
+        self.register_modules(self.down_conv_blocks, 'down_conv_block')
         
-        self.bottom_transition_block = ConvBlock(self.num_filters[-2], self.num_filters[-1])
+        self.bottom_transition_block = ConvBlock2D(self.num_filters[-2], self.num_filters[-1], residual = self.residual, activation = activation)
 
         self.up_conv_blocks = []
-        backward_filters = [self.num_filters[-(i+1)] + self.num_filters[-(i+2)] for i in range(len(self.num_filters)) if i < len(self.num_filters) - 1] + [out_channels]
         for i in range(num_blocks):
-            self.up_conv_blocks.append(ConvBlock(backward_filters[i], forward_filters[-(i+2)], residual = self.residual, activation = activation))
+            self.up_conv_blocks.append(ConvBlock2D(backward_filters[i], forward_filters[-(i+2)], residual = self.residual, activation = activation))
+        self.register_modules(self.up_conv_blocks, 'up_conv_block')            
+            
             
         #----- Network-level residual-----#
         if self.residual:
-            self.conv_resid = ConvBlock(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+            self.conv_resid = ConvBlock2D(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
         else:
-            self.conv_resid = ConvBlock(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+            self.conv_resid = ConvBlock2D(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+        
         
         #----- Terminal Block and Activation Layer -----#
+        # 
         if self.task == 'reg':
-            self.terminal_block = ConvBlock(forward_filters[1], out_channels, residual = self.residual, activation = 'linear', num_layers = 1)
+            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels, residual = self.residual, activation = 'linear', num_layers = 1)
             self.linear_activation = nn.Linear(*self.out_xy)
         else:
-            self.terminal_block = ConvBlock(forward_filters[1], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels, residual = self.residual, activation = activation, num_layers = 1)
         
     def forward(self, x):
         '''
@@ -117,7 +140,7 @@ class Unet2d(nn.Module):
     
     def model(self):
         '''
-        Allows calling of parameters inside ConvBlock object: 'model.model().parameters()'
+        Allows calling of parameters inside ConvBlock2D object: 'model.model().parameters()'
 
         Sequential order:
             => num_block 2D convolutional blocks, with downsampling in between (encoder)
@@ -157,5 +180,12 @@ class Unet2d(nn.Module):
         if self.task == 'reg':
             layers.append(self.linear_activation)
         
-        
         return nn.Sequential(*layers)
+    
+    def register_modules(self, module_list, name):
+        '''
+        Helper function that registers modules stored in a list to the model object.
+        Used to enable model graph creation with non-sequential model types
+        '''
+        for i, module in enumerate(module_list):
+            self.add_module(f'{name}_{str(i)}', module)
