@@ -20,7 +20,7 @@ class Unet25d(nn.Module):
         Architecture takes in stack of 2d inputs given as a 3d tensor and returns a 2d interpretation. Learns 3d information based upon input stack, but 
         speeds up training by compressing 3d information before the decoding path. Uses interruption conv layers in the Unet skip paths to compress
         information with z-channel convolution.
-        a
+        
         Parameters
             - in_channels -> int: number of feature channels in
             - out_channels -> int: number of feature channels out
@@ -72,16 +72,6 @@ class Unet25d(nn.Module):
         self.up_list = []
         for i in range(num_blocks):
             self.up_list.append(nn.Upsample(scale_factor=(1,2,2), mode = up_mode))
-            
-#         if up == 'bilinear':
-#             for i in range(num_blocks):
-#                 self.up_list.append(lambda x: nn.functional.interpolate(x, mode=up, scale_factor=2))
-#         elif up == 'conv':
-#             raise NotImplementedError('Not yet implemented!')
-#             #TODO: implement
-#         elif up == 'tconv':
-#             raise NotImplementedError('Not yet implemented!')
-#             #TODO: implement
         
         
         #----- Convolutional blocks -----# Forward Filters [1, 16, 32, 64, 128, 256] -> Backward Filters [128+256, 64+128, 32+64, 16+32, 1]
@@ -139,9 +129,9 @@ class Unet25d(nn.Module):
             - x -> Torch.tensor: input image stack
             
         Call order:
-            => num_block 2D convolutional blocks, with downsampling in between (encoder)
-            => num_block 2D convolutional blocks, with upsampling between them (decoder)
+            => num_block 3D convolutional blocks, with downsampling in between (encoder)
             => skip connections between corresponding blocks on encoder and decoder paths
+            => num_block 2D (3d with 1 z-channel) convolutional blocks, with upsampling between them (decoder)
             => terminal block collapses to output dimensions
 
         '''

@@ -37,10 +37,15 @@ def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, ep
         #get input/target
         sample = minibatch[0][0].to(device).float()
         target = minibatch[1][0].to(device).float()
+        mask = minibatch[2][0].to(device).float()
+        
+        # mask sample to get input and target
+        input_ = torch.mul(sample, mask)
+        target_ = torch.mul(target, mask)
         
         #run through model
-        output = model(sample)
-        loss = criterion(output, target)
+        output = model(input_)
+        loss = criterion(output, target_)
         test_loss.append(loss.item())
         
         #save filters (remember to take off gpu)
@@ -73,7 +78,7 @@ def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, ep
         plt.show()
     
     if save_folder:
-        save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample)
+        save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample, device)
         
     #set model back to train mode
     model.train()
@@ -81,7 +86,7 @@ def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, ep
     return avg_loss
 
 
-def save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample):
+def save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample, device):
     '''
     Utility function for saving pytorch model after a test cycle.
     '''
@@ -89,7 +94,7 @@ def save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, samp
         os.makedirs(save_folder)
         
     #write tensorboard graph
-    writer.add_graph(model, sample)
+    writer.add_graph(model, torch.tensor(sample, dtype=torch.float32).to(device))
     
     #save model
     save_file = str(f'saved_model_ep_{epoch}_testloss_{avg_loss:.4f}.pt')
@@ -107,6 +112,7 @@ def save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, samp
     plt.savefig(os.path.join(save_folder, f'test_histogram_epoch__{epoch}.png'))
     plt.close(f)
     
+
 def show_progress_bar(dataloader, current, process = 'training'):
     '''
     Utility function to print tensorflow-like progress bar.
