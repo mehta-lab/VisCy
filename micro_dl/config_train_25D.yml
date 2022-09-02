@@ -1,5 +1,5 @@
 dataset:
-    data_dir: '/gpfs/CompMicro/projects/Rickettsia/2022_RickettsiaAnalysis_Soorya/3_Cell_Image_Preprocessing/VirtualStainingMicroDL_KidneyMBL/Preprocessed_temp_2/'
+    data_dir: '/hpc/projects/CompMicro/projects/virtualstaining/MBL_DL_image_translation/temp/tile_small_25D/tiles_256-256_step_128-128'
     input_channels: [3]
     target_channels: [0]
     train_fraction: 1
@@ -15,7 +15,7 @@ dataset:
     augmentation: True
 verbose: 10
 trainer:
-    model_dir: '/gpfs/CompMicro/projects/virtualstaining/kidneyslice/2019_02_15_kidney_slice/kidney_translation_models/model25d/'
+    model_dir: '/hpc/projects/compmicro/projects/virtualstaining/torch_microDL_models/Unet25d'
     batch_size: 16
     max_epochs: 5
     metrics: coeff_determination
