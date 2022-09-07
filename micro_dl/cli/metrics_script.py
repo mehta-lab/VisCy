@@ -77,13 +77,15 @@ def compute_metrics(model_dir,
                     image_dir,
                     metrics_list,
                     orientations_list,
+                    output_dir = None,
                     test_data=True,
                     name_parser='parse_sms_name'):
     """
     Compute specified metrics for given orientations for predictions, which
     are assumed to be stored in model_dir/predictions. Targets are stored in
     image_dir.
-    Writes metrics csv files for each orientation in model_dir/predictions.
+    Writes metrics csv files for each orientation in model_dir/predictions if
+    output_dir unspecified else output_dir/predictions.
 
     :param str model_dir: Assumed to contain config, split_samples.json and
         subdirectory predictions/
@@ -91,10 +93,14 @@ def compute_metrics(model_dir,
     :param list metrics_list: See inference/evaluation_metrics.py for options
     :param list orientations_list: Any subset of {xy, xz, yz, xyz}
         (see evaluation_metrics)
+    :param str model_dir: Directory to write metrics to, if none specied set to 
+        output_dir
     :param bool test_data: Uses test indices in split_samples.json,
-    otherwise all indices
+        otherwise all indices
     :param str name_parser: Type of name parser (default or parse_idx_from_name)
     """
+
+    
     # Load config file
     config_name = os.path.join(model_dir, 'config.yml')
     with open(config_name, 'r') as f:
@@ -130,7 +136,9 @@ def compute_metrics(model_dir,
             metadata_ids[id] = np.sort(np.unique(test_meta[id]))
 
     # Create image subdirectory to write predicted images
-    pred_dir = os.path.join(model_dir, 'predictions')
+    if not output_dir:
+        output_dir = model_dir
+    pred_dir = os.path.join(output_dir, 'predictions')
 
     target_channel = config['dataset']['target_channels'][0]
 

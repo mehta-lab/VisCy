@@ -186,11 +186,11 @@ class Normalize(object):
     def __call__(self, sample):
         if type(sample) == type(np.asarray([1,1])):
             sample = sample/np.max(sample)
-        elif type(sample) == type(toTensor(np.asarray([1,1]))):
+        elif type(sample) == type(ToTensor(np.asarray([1,1]))):
             sample = sample.numpy()
-            sample = toTensor(sample)
+            sample = ToTensor(sample)
         else:
-            raise Exception('unhandled sample type. Try numpy.ndarray or torch.tensor')
+            raise Exception('Unhandled sample type. Try numpy.ndarray or torch.tensor')
         return sample
     
     

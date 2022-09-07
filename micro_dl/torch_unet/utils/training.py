@@ -5,7 +5,10 @@ import os
 import sys
 import time
 
-def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, epoch = None, save_folder = None, writer = None, device = torch.device('cuda')):
+import micro_dl.torch_unet.utils.model as model_utils
+
+def run_test(test_dataloader, model, criterion, mask = True, plot = True, plot_num = 2, epoch = None,
+             save_folder = None, writer = None, device = torch.device('cuda')):
     '''
     Runs test on all samples in a test_dataloader. Equivalent to one epoch on test data without updating weights.
     Runs metrics on the test results (given in criterion) and saves the results in a save folder, if specified.
@@ -35,13 +38,15 @@ def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, ep
         show_progress_bar(test_dataloader, current, process = 'testing')
         
         #get input/target
-        sample = minibatch[0][0].to(device).float()
-        target = minibatch[1][0].to(device).float()
-        mask = minibatch[2][0].to(device).float()
-        
-        # mask sample to get input and target
-        input_ = torch.mul(sample, mask)
-        target_ = torch.mul(target, mask)
+        input_ = minibatch[0][0].to(device).float()
+        target_ = minibatch[1][0].to(device).float()
+        sample, target = input_, target_
+        if mask:
+            mask = minibatch[2][0].to(device).float()
+
+            # mask sample to get input and target
+            input_ = torch.mul(input_, mask)
+            target_ = torch.mul(target_, mask)
         
         #run through model
         output = model(input_)
@@ -78,39 +83,12 @@ def run_test(test_dataloader, model, criterion, *, plot = True, plot_num = 2, ep
         plt.show()
     
     if save_folder:
-        save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample, device)
+        model_utils.save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample, device)
         
     #set model back to train mode
     model.train()
     
     return avg_loss
-
-
-def save_model(model, epoch, save_folder, test_loss, avg_loss, fig, writer, sample, device):
-    '''
-    Utility function for saving pytorch model after a test cycle.
-    '''
-    if not os.path.exists(save_folder):
-        os.makedirs(save_folder)
-        
-    #write tensorboard graph
-    writer.add_graph(model, torch.tensor(sample, dtype=torch.float32).to(device))
-    
-    #save model
-    save_file = str(f'saved_model_ep_{epoch}_testloss_{avg_loss:.4f}.pt')
-    torch.save(model.state_dict(), os.path.join(save_folder, save_file))
-    
-    #save prediction
-    f = plt.figure()
-    plt.savefig(os.path.join(save_folder, f'prediction_epoch_{epoch}.png'))
-    plt.close(f)
-    
-    #save testloss histogram
-    f, ax = plt.subplots(1,1, figsize = (10,5))
-    ax.hist(test_loss, bins = 20)
-    ax.set_title('test loss histogram')
-    plt.savefig(os.path.join(save_folder, f'test_histogram_epoch__{epoch}.png'))
-    plt.close(f)
     
 
 def show_progress_bar(dataloader, current, process = 'training'):
