@@ -55,7 +55,7 @@ class TorchDataset(Dataset):
             self.test_dataset = None
             self.val_dataset = None
         else:
-            config = aux_utils.read_config('../micro_dl/config_train_25D.yml')
+            config = aux_utils.read_config(train_config)
             
             dataset_config, trainer_config = config['dataset'], config['trainer']
             tile_dir, image_format = train.get_image_dir_format(dataset_config)

@@ -18,6 +18,7 @@ def run_test(test_dataloader, model, criterion, mask = True, plot = True, plot_n
         test_dataloader -> Dataloader object: dataloader from which to draw samples
         model -> torch.nn.Module: see name
         criterion -> torch loss function: criterion by which to evaluate performance
+        mask -> Boolean: whether to apply mask to inputs and outputs before evaluation
         plot -> Boolean: whether to plot outputs
         plot_num -> int: number of rows to plot, between 2 and test_dataloader.__len__()
         epoch -> int: see name
@@ -41,10 +42,10 @@ def run_test(test_dataloader, model, criterion, mask = True, plot = True, plot_n
         input_ = minibatch[0][0].to(device).float()
         target_ = minibatch[1][0].to(device).float()
         sample, target = input_, target_
+        
+        # if mask provided, mask sample to get input and target
         if mask:
-            mask = minibatch[2][0].to(device).float()
-
-            # mask sample to get input and target
+            mask_ = minibatch[2][0].to(device).float()
             input_ = torch.mul(input_, mask)
             target_ = torch.mul(target_, mask)
         

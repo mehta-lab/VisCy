@@ -3,7 +3,7 @@ import micro_dl.torch_unet.networks.Unet2D as Unet2D
 
 def model_init(network_config):
     '''
-    initializes network model from a configuration file
+    Initializes network model from a configuration dictionary.
     
     Params:
         - network_config -> dictionary: dict containing the configuration parameters for the model
@@ -12,7 +12,8 @@ def model_init(network_config):
         model = Unet25D.Unet25d(in_channels = network_config['in_channels'],
                                 out_channels = network_config['out_channels'], 
                                 residual = network_config['residual'],
-                                task = network_config['task'])
+                                task = network_config['task'],
+                                out_zxy = network_config['out_size'])
     elif network_config['architecture'] == '2D':
         model = Unet2D.Unet2d(in_channels = network_config['in_channels'],
                                 out_channels = network_config['out_channels'], 

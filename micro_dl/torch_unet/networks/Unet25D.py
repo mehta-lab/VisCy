@@ -32,7 +32,7 @@ class Unet25d(nn.Module):
             - up_mode -> token{see link}: type of upsampling in decoder path (https://pytorch.org/docs/stable/generated/torch.nn.Upsample.html)
             - activation -> token{'relu','elu','selu','leakyrelu'}: activation function to use in convolutional blocks
             - num_blocks -> int: number of convolutional blocks on encoder and decoder paths
-            - num_filters -> list[int]: list of filters/feature levels at each conv block depth
+            - num_filters -> list[int]: sequence of filters/feature levels at each conv block depth
             - task -> token{'recon','seg','reg'}: network task (for virtual staining this is regression)
             - bottom_block_spatial -> boolean: whether or not the bottom feature compression block learns spatial information as well
             
@@ -117,8 +117,8 @@ class Unet25d(nn.Module):
         #----- Terminal Block and Activation Layer -----#
         if self.task == 'reg':
             self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = False, activation = 'linear', norm = 'none', num_layers = 1)
-            self.linear_activation = nn.Linear(out_zxy[-2], out_zxy[-1])
-            #when called with activation = 'linear' ConvBlock3D does not include activation
+#             self.linear_activation = nn.Linear(out_zxy[-2], out_zxy[-1])
+            #when called with activation = 'linear' ConvBlock3D does not include activation aka allows passthrough
         else:
             self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = self.residual, activation = activation, num_layers = 1)
             
@@ -126,13 +126,15 @@ class Unet25d(nn.Module):
     def forward(self, x):
         '''
         Forward call of network
-            - x -> Torch.tensor: input image stack
             
         Call order:
             => num_block 3D convolutional blocks, with downsampling in between (encoder)
             => skip connections between corresponding blocks on encoder and decoder paths
             => num_block 2D (3d with 1 z-channel) convolutional blocks, with upsampling between them (decoder)
             => terminal block collapses to output dimensions
+        
+        Params:
+            - x -> torch.tensor: input image stack
 
         '''
         #encoder
@@ -157,8 +159,8 @@ class Unet25d(nn.Module):
         
         # output channel collapsing layer
         x = self.terminal_block(x)
-        if self.task == 'reg':
-            x = self.linear_activation(x)
+#         if self.task == 'reg':
+#             x = self.linear_activation(x)
         
         return x
             
@@ -166,6 +168,10 @@ class Unet25d(nn.Module):
         '''
         Helper function that registers modules stored in a list to the model object.
         Used to enable model graph creation with non-sequential model types and dynamic layer numbers
+        
+        Params:
+            - module_list -> list[torch.nn.module]: list of modules present in the network
+            - name -> str: name to register module under
         '''
         for i, module in enumerate(module_list):
             self.add_module(f'{name}_{str(i)}', module)
