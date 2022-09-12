@@ -11,8 +11,10 @@ class Unet25d(nn.Module):
     def __name__(self):
         return 'Unet25d'
     
-    def __init__(self, in_channels = 1, out_channels = 1, in_stack_depth = 5, out_stack_depth = 1, out_zxy = (1, 256,256), residual = False, down_mode = 'avgpool',
-                 up_mode = 'trilinear', activation = 'relu', num_blocks = 4, num_filters = [], task = 'seg', bottom_block_spatial = False):
+    def __init__(self, in_channels = 1, out_channels = 1, in_stack_depth = 5, out_stack_depth = 1, conv_mode = 'valid',
+                 xy_kernel_size = (3,3), out_zxy = (1, 256,256), residual = False, down_mode = 'avgpool',
+                 up_mode = 'trilinear', activation = 'relu', num_blocks = 4, num_block_layers = 3,
+                 num_filters = [], task = 'seg', bottom_block_spatial = False):
         '''
         Instance of 2.5D Unet. 
         1.) https://elifesciences.org/articles/55502
@@ -26,12 +28,15 @@ class Unet25d(nn.Module):
             - out_channels -> int: number of feature channels out
             - input_stack_depth -> int: depth of input
             - output_stack_depth -> int: depth of output
+            - conv_mode -> token{'valid', 'same'}: type of convolution to use in blocks
+            - xy_kernel_size -> tuple(int, int): size of x and y dimensions of conv kernels in blocks
             - out_xyz -> tuple(int, int, int): dimension of z, x, y channels in output
             - residual -> boolean: see name
             - down_mode -> token{'avgpool', 'maxpool', 'conv'}: type of downsampling in encoder path
             - up_mode -> token{see link}: type of upsampling in decoder path (https://pytorch.org/docs/stable/generated/torch.nn.Upsample.html)
-            - activation -> token{'relu','elu','selu','leakyrelu'}: activation function to use in convolutional blocks
+            - activation -> token{'relu', 'elu', 'selu', 'leakyrelu'}: activation function to use in convolutional blocks
             - num_blocks -> int: number of convolutional blocks on encoder and decoder paths
+            - num_block_layers -> int: number of layers per block
             - num_filters -> list[int]: sequence of filters/feature levels at each conv block depth
             - task -> token{'recon','seg','reg'}: network task (for virtual staining this is regression)
             - bottom_block_spatial -> boolean: whether or not the bottom feature compression block learns spatial information as well
@@ -43,6 +48,13 @@ class Unet25d(nn.Module):
         self.out_zxy = out_zxy
         self.task = task
         self.bottom_block_spatial = bottom_block_spatial
+        self.ks = xy_kernel_size
+        
+        if conv_mode == 'same':
+            self.block_padding = 'same'
+        elif conv_mode == 'valid':
+            raise NotImplementedError('Current valid implementation is unstable. Use \'same\' convolution.')
+            self.block_padding = 'valid_stack'
         
         #----- Standardize Filter Sequence -----#
         if len(num_filters) != 0:
@@ -77,22 +89,26 @@ class Unet25d(nn.Module):
         #----- Convolutional blocks -----# Forward Filters [1, 16, 32, 64, 128, 256] -> Backward Filters [128+256, 64+128, 32+64, 16+32, 1]
         self.down_conv_blocks = []
         for i in range(num_blocks):
-            self.down_conv_blocks.append(ConvBlock3D(forward_filters[i], forward_filters[i+1], kernel_size = (3,3,3),
-                                                     residual = self.residual, activation = activation))
+            self.down_conv_blocks.append(ConvBlock3D(forward_filters[i], forward_filters[i+1],
+                                                     dropout = True, residual = self.residual, activation = activation,
+                                                     kernel_size = (3, self.ks[0], self.ks[1]), num_layers = num_block_layers,
+                                                     padding = self.block_padding))
         self.register_modules(self.down_conv_blocks, 'down_conv_block')
         
         if self.bottom_block_spatial:
-            #warning, residual must be false or dimensionality breaks. Fix later
+            #TODO: residual must be false or dimensionality breaks. Fix later
             self.bottom_transition_block = ConvBlock3D(self.num_filters[-2], self.num_filters[-1], num_layers = 1, residual = False,
-                                                   kernel_size = (1 + in_stack_depth - out_stack_depth, 3, 3), padding = (0,1,1))
+                                                   kernel_size = (1 + in_stack_depth - out_stack_depth, self.ks[0], self.ks[1]), padding = (0,1,1))
         else:
             self.bottom_transition_block = nn.Conv3d(self.num_filters[-2], self.num_filters[-1],
-                                                   kernel_size = (1 + in_stack_depth - out_stack_depth,1,1), padding = 0)
+                                                   kernel_size = (1 + in_stack_depth - out_stack_depth, 1, 1), padding = 0)
 
         self.up_conv_blocks = []
         for i in range(num_blocks):
-            self.up_conv_blocks.append(ConvBlock3D(backward_filters[i], forward_filters[-(i+2)], kernel_size = (1,3,3),
-                                                   residual = self.residual, activation = activation))
+            self.up_conv_blocks.append(ConvBlock3D(backward_filters[i], forward_filters[-(i+2)], 
+                                                   dropout = True, residual = self.residual, activation = activation,
+                                                   kernel_size = (1, self.ks[0], self.ks[1]), num_layers = num_block_layers,
+                                                   padding = self.block_padding))
         self.register_modules(self.up_conv_blocks, 'up_conv_block')   
         
         
@@ -100,12 +116,12 @@ class Unet25d(nn.Module):
         self.skip_conv_layers = []
         for i in range(num_blocks):
             self.skip_conv_layers.append(nn.Conv3d(forward_filters[i+1], forward_filters[i+1],
-                                                   kernel_size = (1 + in_stack_depth - out_stack_depth,1,1), padding = 0))
+                                                   kernel_size = (1 + in_stack_depth - out_stack_depth, 1, 1), padding = 'valid'))
         self.register_modules(self.skip_conv_layers, 'skip_conv_layer')
         
         
         #----- Network-level residual-----#
-        # Note: unused at the moment
+        # Note: unused/deprecated. remove next revision
         if self.residual:
             self.conv_resid = ConvBlock3D(self.num_filters[0], out_channels, residual = self.residual, kernel_size = (1,3,3),
                                           activation = activation, num_layers = 1)
@@ -116,11 +132,12 @@ class Unet25d(nn.Module):
         
         #----- Terminal Block and Activation Layer -----#
         if self.task == 'reg':
-            self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = False, activation = 'linear', norm = 'none', num_layers = 1)
-#             self.linear_activation = nn.Linear(out_zxy[-2], out_zxy[-1])
-            #when called with activation = 'linear' ConvBlock3D does not include activation aka allows passthrough
+            self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = False, activation = 'linear',
+                                              kernel_size = (1,3,3), norm = 'none', num_layers = 1, padding = 'same')
+            #when called with activation = 'linear' ConvBlock3D does not include activation (aka allows passthrough)
         else:
-            self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+            self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = self.residual,
+                                              activation = activation, kernel_size = (1,3,3), num_layers = 1, padding = 'same')
             
             
     def forward(self, x):
@@ -143,24 +160,26 @@ class Unet25d(nn.Module):
             x = self.down_conv_blocks[i](x)
             skip_tensors.append(x)
             x = self.down_list[i](x)
+            print(x.shape)
         
         #transition block
         x = self.bottom_transition_block(x)
+        print(x.shape)
         
         #skip interruptions
         for i in range(self.num_blocks):
             skip_tensors[i] = self.skip_conv_layers[i](skip_tensors[i])
-        
+        print([s.shape for s in skip_tensors])
         #decoder
         for i in range(self.num_blocks):
+            print(x.shape)
             x = self.up_list[i](x)
+            print(x.shape)
             x = torch.cat([x, skip_tensors[-1*(i+1)]], 1)
             x = self.up_conv_blocks[i](x)            
         
         # output channel collapsing layer
         x = self.terminal_block(x)
-#         if self.task == 'reg':
-#             x = self.linear_activation(x)
         
         return x
             

@@ -1,0 +1,69 @@
+dataset:
+  augmentation: true
+  data_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/data/2022_09_07_Soorya_KidneyRickettsia/tile_25D/tiles_256-256_step_128-128
+  input_channels:
+  - 3
+  mask_channels:
+  - 4
+  model_task: regression
+  normalize: false
+  random_seed: 42
+  split_by_column: pos_idx
+  split_ratio:
+    test: 0.15
+    train: 0.7
+    val: 0.15
+  target_channels:
+  - 0
+  train_fraction: 1
+network:
+  activation:
+    type: relu
+  batch_norm: true
+  block_sequence: conv-activation-bn
+  class: UNetStackTo2D
+  data_format: channels_first
+  depth: 5
+  dropout: 0.2
+  filter_size: 3
+  final_activation: linear
+  height: 2048
+  num_convs_per_block: 2
+  num_filters_per_block:
+  - 16
+  - 32
+  - 64
+  - 128
+  - 256
+  num_input_channels: 1
+  num_target_channels: 1
+  pooling_type: average
+  residual: true
+  skip_merge_type: concat
+  upsampling: bilinear
+  width: 2048
+trainer:
+  batch_size: 16
+  callbacks:
+    EarlyStopping:
+      mode: min
+      monitor: val_loss
+      patience: 50
+      verbose: true
+    ModelCheckpoint:
+      mode: min
+      monitor: val_loss
+      save_best_only: true
+      verbose: true
+    TensorBoard:
+      histogram_freq: 0
+      verbose: true
+  loss: mae_loss
+  max_epochs: 5
+  metrics: coeff_determination
+  model_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/models/tensorflow_models/Unet25d/MBL_DL_pretrained_2021_09_29
+  num_workers: 32
+  optimizer:
+    lr: 0.001
+    name: Adam
+verbose: 10

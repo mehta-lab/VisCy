@@ -1,6 +1,6 @@
 dataset:
   augmentation: true
-  data_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/data/2022_09_07_Soorya_KidneyRickettsia/tile_25D/tiles_256-256_step_128-128
+  data_dir: /gpfs/CompMicro/projects/virtualstaining/torch_microDL/data/2022_09_07_Soorya_KidneyRickettsia/tile_25D/tiles_256-256_step_128-128
   input_channels:
   - 3
   mask_channels:
@@ -61,7 +61,7 @@ trainer:
   loss: mae_loss
   max_epochs: 5
   metrics: coeff_determination
-  model_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/models/pytorch_models/Unet25d
+  model_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/models/tensorflow_models/Unet25d/MBL_DL_pretrained_2021_09_29
   num_workers: 32
   optimizer:
     lr: 0.001

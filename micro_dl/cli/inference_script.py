@@ -56,14 +56,17 @@ def run_inference(config_fname,
 
     with open(config_fname, 'r') as f:
         inference_config = yaml.safe_load(f)
+        
     # Load train config from model dir
     train_config_fname = glob.glob(
         os.path.join(inference_config['model_dir'], '*.yml')
     )
+    
     assert len(train_config_fname) == 1, \
         '{} train config yaml found in model directory. Number of train config file can only be 1.'.format(len(train_config_fname))
     with open(train_config_fname[0], 'r') as f:
         train_config = yaml.safe_load(f)
+        
     preprocess_config = None
     if 'preprocess_dir' in inference_config:
         preprocess_config = preprocess_utils.get_preprocess_config(inference_config['preprocess_dir'])

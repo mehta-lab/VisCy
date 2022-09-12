@@ -1,6 +1,6 @@
-model_dir: '/gpfs/CompMicro/projects/virtualstaining/kidneyslice/2019_02_15_kidney_slice/kidney_translation_models/model25d/'
-image_dir: '/gpfs/CompMicro/projects/Rickettsia/2022_RickettsiaAnalysis_Soorya/3_Cell_Image_Preprocessing/VirtualStainingMicroDL_KidneyMBL/data/'
-preprocess_dir: '/gpfs/CompMicro/projects/Rickettsia/2022_RickettsiaAnalysis_Soorya/3_Cell_Image_Preprocessing/VirtualStainingMicroDL_KidneyMBL/Preprocessed_temp_2'
+model_dir: '/gpfs/CompMicro/projects/virtualstaining/torch_microDL/models/tensorflow_models/Unet25d/MBL_DL_pretrained_2021_09_29'
+image_dir: '/gpfs/CompMicro/projects/virtualstaining/torch_microDL/data/2022_09_07_Soorya_KidneyRickettsia/data'
+preprocess_dir: '/gpfs/CompMicro/projects/virtualstaining/torch_microDL/data/2022_09_07_Soorya_KidneyRickettsia/tile_25D'
 dataset:
   input_channels: [3]
   target_channels: [0]

@@ -16,7 +16,8 @@ def load_model_torch(model_dir, network_config):
         - network_config -> dict: model configuration dictionary
     '''
     model = model_utils.model_init(network_config)
-    model.load_state_dict(torch.load(model_dir))
+    readout = model.load_state_dict(torch.load(model_dir))
+    print(readout)
     return model
 
 
@@ -30,7 +31,7 @@ def predict_large_image_torch(model, input_image):
     
     Params:
         - model -> Torch.nn.Module: trained model to use for prediction
-        - input_image -> numpy.ndarray or torch.Tensor: large (>256 x 256) input image
+        - input_image -> numpy.ndarray or torch.Tensor: large (> 256x256) input image
     
     '''
     assert len(input_image.shape) in [4, 5],''.join('Invalid image shape: only 4D and 5D inputs - 2D / 3D',

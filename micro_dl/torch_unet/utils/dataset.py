@@ -137,7 +137,7 @@ class TorchDataset(Dataset):
             if targ == list or targ == tuple:
                 return (sample_input, *sample_target)
             else:
-                return (sample_input, sample_target)            
+                return (sample_input, sample_target)
     
     
 class Resize(object):
@@ -176,21 +176,6 @@ class RandTile(object):
         randy = np.random.randint(0, y_shape - self.tile_size[0])
         
         sample = sample[randy:randy+self.tile_size[0], randx:randx+self.tile_size[1]]
-        return sample
-    
-    
-class Normalize(object):
-    '''
-    Transformation. Normalizes input sample to max value
-    '''
-    def __call__(self, sample):
-        if type(sample) == type(np.asarray([1,1])):
-            sample = sample/np.max(sample)
-        elif type(sample) == type(ToTensor(np.asarray([1,1]))):
-            sample = sample.numpy()
-            sample = ToTensor(sample)
-        else:
-            raise Exception('Unhandled sample type. Try numpy.ndarray or torch.tensor')
         return sample
     
     
@@ -278,5 +263,48 @@ class GenerateMasks(object):
         masks = ToTensor()(np.asarray(masks)).unsqueeze(1).unsqueeze(1)
         
         return [original_sample, masks]
+
+class Normalize(object):
+    '''
+    Normalizes the sample sample according to the mode in init:
+    
+    Params:
+        - mode -> token{'one', 'max', 'zero'}: type of normalization to apply
+                        - one: normalizes sample values proportionally between 0 and 1
+                        - zeromax: centers sample around zero according to half of its normalized (between -1 and 1) maximum
+                        - median: centers samples around zero, according to their respective median, then normalizes (between -1 and 1)
+                        - mean: centers samples around zero, according to their respective means, then normalizes (between -1 and 1)
+    '''
+    def __init__(self, mode = 'max'):
+        self.mode = mode
+    def __call__(self, sample, scaling = 1):
+        '''
+        Forward call of Normalize
+        Params:
+            - sample -> torch.Tensor or numpy.ndarray: sample to normalize
+            - scaling -> float: value to scale output normalization by
+        '''
+        #determine module
+        if isinstance(sample, torch.Tensor):
+            module = torch
+        elif isinstance(sample, np.ndarray):
+            module = np
+        else:
+            raise NotImplementedError('Only numpy array and torch tensor inputs handled.')
         
-        
+        #apply normalization
+        if self.mode == 'one':
+            sample = (sample - module.min(sample))/(module.max(sample) - module.min(sample))
+        elif self.mode == 'zeromax':
+            sample = (sample - module.min(sample))/(module.max(sample) - module.min(sample))
+            sample = sample - module.max(sample)/2
+        elif self.mode == 'median':
+            sample = (sample - module.median(sample))
+            sample = sample / module.max(module.abs(sample))
+        elif self.mode == 'mean':
+            sample = (sample - module.mean(sample))
+            sample = sample / module.max(module.abs(sample))
+        else:
+            raise NotImplementedError(f'Unhandled mode type: \'{self.mode}\'.')
+
+        return sample * scaling
