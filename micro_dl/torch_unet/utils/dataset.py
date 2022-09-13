@@ -329,46 +329,46 @@ class RandomNoise(object):
             pt = True
             sample = sample.detach().cpu().numpy()
 
-        if noise_typ == "gauss":
-            row,col,ch= image.shape
+        if self.noise_type == "gauss":
+            row,col,ch= sample.shape
             mean = 0
             var = 0.1
             sigma = var**0.5
             gauss = np.random.normal(mean,sigma,(row,col,ch))
             gauss = gauss.reshape(row,col,ch)
-            noisy = image + gauss
+            noisy = sample + gauss
             return noisy
         
-        elif noise_typ == "s&p":
-            row,col,ch = image.shape
+        elif self.noise_type == "s&p":
+            row,col,ch = sample.shape
             s_vs_p = 0.5
             amount = 0.004
-            out = np.copy(image)
+            out = np.copy(sample)
             
             # Salt mode
-            num_salt = np.ceil(amount * image.size * s_vs_p)
+            num_salt = np.ceil(amount * sample.size * s_vs_p)
             coords = [np.random.randint(0, i - 1, int(num_salt))
-                  for i in image.shape]
+                  for i in sample.shape]
             out[coords] = 1
 
             # Pepper mode
-            num_pepper = np.ceil(amount* image.size * (1. - s_vs_p))
+            num_pepper = np.ceil(amount* sample.size * (1. - s_vs_p))
             coords = [np.random.randint(0, i - 1, int(num_pepper))
-                  for i in image.shape]
+                  for i in sample.shape]
             out[coords] = 0
             return out
         
-        elif noise_typ == "poisson":
-            vals = len(np.unique(image))
+        elif self.noise_typ == "poisson":
+            vals = len(np.unique(sample))
             vals = 2 ** np.ceil(np.log2(vals))
-            noisy = np.random.poisson(image * vals) / float(vals)
+            noisy = np.random.poisson(sample * vals) / float(vals)
             return noisy
         
-        elif noise_typ =="speckle":
-            row,col,ch = image.shape
+        elif self.noise_typ =="speckle":
+            row,col,ch = sample.shape
             gauss = np.random.randn(row,col,ch)
             gauss = gauss.reshape(row,col,ch)        
-            noisy = image + image * gauss
+            noisy = sample + sample * gauss
             return noisy
         
         if pt:
