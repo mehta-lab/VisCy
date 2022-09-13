@@ -232,7 +232,7 @@ class MetricsEstimator:
     def mask_to_bool(mask):
         """
         If mask exists and is not boolean, convert.
-        Assume mask values == 0 is background
+        Assume mask values == 0 is background.
 
         :param np.array mask: Mask
         :return np.array mask: Mask with boolean dtype

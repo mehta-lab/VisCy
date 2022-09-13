@@ -61,7 +61,7 @@ trainer:
   loss: mae_loss
   max_epochs: 5
   metrics: coeff_determination
-  model_dir: /hpc/projects/compmicro/projects/virtualstaining/torch_microDL/models/tensorflow_models/Unet25d/MBL_DL_pretrained_2021_09_29
+  model_dir: /hpc/projects/CompMicro/projects/virtualstaining/tf_microDL/models/2019_02_15_KidneyTissue_DLMBL_subset/model25d_20220908
   num_workers: 32
   optimizer:
     lr: 0.001

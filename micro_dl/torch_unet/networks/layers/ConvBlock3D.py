@@ -178,9 +178,7 @@ class ConvBlock3D(nn.Module):
         x_0 = x
         
         for i in range(self.num_layers):
-            print(f'input {i} shape: {x.shape}')
             x = self.conv_list[i](x)
-            print(f'output {i} shape: {x.shape}')
             if self.dropout:
                 x = self.drop_list[i](x)
             if self.norm_list[i]:
