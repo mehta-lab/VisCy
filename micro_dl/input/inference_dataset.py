@@ -250,8 +250,8 @@ class InferenceDataSet(keras.utils.Sequence):
         cur_row = self.inf_frames_meta.iloc[index]
         # binarize the target images for segmentation task
         is_mask = False
-        # if self.model_task == 'segmentation':
-        #     is_mask = True
+        if self.model_task == 'segmentation':
+            is_mask = True
         # Get input and target stacks for inference
         input_stack = self._get_image(
             input_dir=self.image_dir,

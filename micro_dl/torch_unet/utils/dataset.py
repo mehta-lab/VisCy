@@ -1,4 +1,5 @@
 #frameworks
+from ast import Assert
 import torch
 from torch.utils.data import Dataset
 import numpy as np
@@ -35,15 +36,19 @@ class TorchDataset(Dataset):
     speeds up training time.
     
     '''
-    def __init__(self, train_config, tf_dataset = None, transforms=None, target_transforms=None):
+    def __init__(self, train_config = None, tf_dataset = None, transforms=None, target_transforms=None):
         '''
         Init object.
         Params:
             train_config -> str: path to .yml config file from which to create BaseDataSet object if none given
-            tf_dataset -> micro_dl.inpuit.dataset.BaseDataSet: tensorflow-based dataset from which to convert
-            transforms -> Transform object: transforms to be applied to every sample *after tf_dataset transforms*
-            target_transforms -> Transform object: transforms to be applied to every target *after tf_dataset transforms*
+            tf_dataset -> micro_dl.input.dataset.BaseDataSet: tensorflow-based dataset containing samples to convert
+            transforms -> iterable(Transform object): transforms to be applied to every sample 
+                                                      *after tf_dataset transforms*
+            target_transforms -> iterable(Transform object): transforms to be applied to every target 
+                                                             *after tf_dataset transforms*
         '''
+        assert train_config or tf_dataset, 'Must provide either train config file or tf dataset'
+
         self.tf_dataset = None
         self.transforms = transforms
         self.target_transforms = target_transforms
@@ -81,12 +86,25 @@ class TorchDataset(Dataset):
                                             target_transforms = self.target_transforms)
             
     def __len__(self):
+        '''
+        Returns number of sample (or sample stack)/target pairs in dataset
+        '''
         if self.tf_dataset:
             return len(self.tf_dataset)
         else:
             return sum([1 if self.train_dataset else 0, 1 if self.test_dataset else 0, 1 if self.val_dataset else 0])
 
     def __getitem__(self, idx):
+        '''
+        If acting as a dataset object, returns the sample target pair at 'idx'
+        in dataset, after applying augment/transformations to sample/target pairs.
+        
+        If acting as a dataset container object, returns subsidary dataset
+        objects.
+        
+        Params:
+            - idx: index of dataset item to transform and return
+        '''
         # if acting as dataset object
         if self.tf_dataset:
             if self.sample_cache[idx]:
@@ -123,9 +141,20 @@ class TorchDataset(Dataset):
                 return keys[idx]
             else:
                 raise KeyError(f'This object is a container. Acceptable keys:{[k for k in keys]}')
-                return
             
     def unpack(self, sample_input, sample_target):
+        ''' 
+        Helper function for unpacking tuples returned by some transformation objects
+        (e.g. GenerateMasks) into outputs.
+        
+        Unpacking before returning allows transformation functions which produce variable amounts of
+        additional tensor information to pack that information in tuples with the sample and target
+        tensors. 
+        
+        Params:
+            - sample_input -> torch.Tensor or tuple(torch.Tensor): input sample to unpack
+            - sample_target -> torch.Tensor or tuple(torch.Tensor): target sample to unpack
+        '''
         inp, targ = type(sample_input), type(sample_target)
         
         if inp == list or inp == tuple:
@@ -138,8 +167,9 @@ class TorchDataset(Dataset):
                 return (sample_input, *sample_target)
             else:
                 return (sample_input, sample_target)
-    
-    
+
+
+
 class Resize(object):
     '''
     Transformation. Resises called sample to 'output_size'.
@@ -163,10 +193,11 @@ class RandTile(object):
     '''
     def __init__(self, tile_size = (256,256), input_format = 'zxy'):
         self.tile_size = tile_size
+        self.input_format = input_format
     def __call__(self,sample):
-        if input_format == 'zxy':
+        if self.input_format == 'zxy':
             x_ind, y_ind= -2, -1
-        elif input_format == 'xyz':
+        elif self.input_format == 'xyz':
             x_ind, y_ind = -3, -2
         
         x_shape, y_shape = sample.shape[x_ind], sample.shape[y_ind]

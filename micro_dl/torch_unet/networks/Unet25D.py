@@ -84,7 +84,7 @@ class Unet25d(nn.Module):
         #----- Upsampling steps -----#
         self.up_list = []
         for i in range(num_blocks):
-            self.up_list.append(nn.Upsample(scale_factor=(1,2,2), mode = up_mode))
+            self.up_list.append(nn.Upsample(scale_factor=(1,2,2), mode = up_mode, align_corners=False))
         
         
         #----- Convolutional blocks -----# Forward Filters [1, 16, 32, 64, 128, 256] -> Backward Filters [128+256, 64+128, 32+64, 16+32, 1]
@@ -133,8 +133,10 @@ class Unet25d(nn.Module):
         
         #----- Terminal Block and Activation Layer -----#
         if self.task == 'reg':
+            #TODO: change kernel_size back to (1,3,3)
             self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = False, activation = 'linear',
-                                              kernel_size = (1,3,3), norm = 'none', num_layers = 1, padding = 'same')
+                                              kernel_size = (3,3,3), norm = 'none', num_layers = 1, padding = 'same')
+            self.linear_activation = nn.Linear(256, 256) #out_zxy[-2], out_zxy[-1])
             #when called with activation = 'linear' ConvBlock3D does not include activation (aka allows passthrough)
         else:
             self.terminal_block = ConvBlock3D(forward_filters[1], out_channels, residual = self.residual,

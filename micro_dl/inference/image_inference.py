@@ -26,7 +26,9 @@ class ImagePredictor:
                  inference_config,
                  preprocess_config=None,
                  gpu_id=-1,
-                 gpu_mem_frac=None):
+                 gpu_mem_frac=None,
+                 framework = 'tf',
+                 torch_predictor = None):
         """Init
 
         :param dict train_config: Training config dict with params related
@@ -133,6 +135,7 @@ class ImagePredictor:
         self.name_format = 'ctzp'
         if 'name_format' in images_dict:
             self.name_format = images_dict['name_format']
+            
         # Create image subdirectory to write predicted images
         self.pred_dir = os.path.join(self.model_dir, self.save_folder_name)
         if 'save_to_image_dir' in inference_config:
@@ -255,12 +258,19 @@ class ImagePredictor:
                 gpu_ids=gpu_id,
                 gpu_mem_frac=gpu_mem_frac,
             )
-        # create model and load weights
-        self.model = inference.load_model(
-            network_config=self.config['network'],
-            model_fname=os.path.join(self.model_dir, model_fname),
-            predict=True,
-        )
+        
+        # create model and load weights, depending on initiation framework.
+        self.framework = framework
+        assert self.framework in {'tf', 'torch'}, 'Framework must be either \'torch\' or \'tf\'.'
+        if self.framework == 'tf':
+            self.model = inference.load_model(
+                network_config=self.config['network'],
+                model_fname=os.path.join(self.model_dir, model_fname),
+            )
+        elif self.framework == 'torch':
+            assert torch_predictor, 'torch framework requires torch_predictor object'
+            self.torch_predictor = torch_predictor
+
 
     def _get_split_ids(self, data_split='test'):
         """
@@ -381,7 +391,8 @@ class ImagePredictor:
         return cur_block
 
     def _predict_sub_block_z(self, input_image):
-        """Predict sub blocks along z
+        """
+        Predict sub blocks along z, given some image's entire xy plane.
 
         :param np.array input_image: 5D tensor with the entire 3D volume
         :return list pred_ims - list of predicted sub blocks
@@ -420,7 +431,9 @@ class ImagePredictor:
     def _predict_sub_block_xy(self,
                               input_image,
                               crop_indices):
-        """Predict sub blocks along xyz
+        """
+        Predict sub blocks along xy, specifically when generating a 2d
+        prediction by spatial tiling and stitching.
 
         :param np.array input_image: 5D tensor with the entire 3D volume
         :param list crop_indices: list of crop indices: min/max xyz
@@ -469,7 +482,9 @@ class ImagePredictor:
     def _predict_sub_block_xyz(self,
                                input_image,
                                crop_indices):
-        """Predict sub blocks along xyz
+        """
+        Predict sub blocks along xyz, particularly when predicting a 3d
+        volume along three dimensions.
 
         :param np.array input_image: 5D tensor with the entire 3D volume
         :param list crop_indices: list of crop indices: min/max xyz
@@ -500,7 +515,10 @@ class ImagePredictor:
                  meta_row):
         """
         Revert z-score normalization applied during preprocessing. Necessary
-        before computing SSIM
+        before computing SSIM.
+        
+        Used for models tasked with regression to reintroduce dynamic range
+        into the model predictions.
 
         :param im_pred: Prediction image, normalized image for un-zscore
         :param im_target: Target image to compute stats from
@@ -694,6 +712,15 @@ class ImagePredictor:
     def predict_2d(self, chan_slice_meta):
         """
         Run prediction on 2D or 2.5D on indices given by metadata row.
+        
+        Reads in images from the inference dataset object, which performs normalization on
+        the images based on values calculated in preprocessing and stored in frames_mets.csv.
+        
+        Prediction is done over an entire image or over each tile and stitched together,
+        as specified by data/model structure.
+        
+        For regression models, post-processes images by reversing the z-score normalization
+        to reintroduce dynamic range removed in normalization.
 
         :param pd.DataFrame chan_slice_meta: Inference meta rows
         :return np.array pred_stack: Prediction
@@ -701,6 +728,7 @@ class ImagePredictor:
         :return np.array/list mask_stack: Mask for metrics (empty list if
          not using masked metrics)
         """
+        assert self.framework in {'tf', 'torch'}, 'Framework must be \'tf\' or \'torch\'.'
         input_stack = []
         pred_stack = []
         target_stack = []
@@ -723,34 +751,43 @@ class ImagePredictor:
                         self.image_format,
                     )
                 if self.tile_option == 'tile_xy':
-                    step_size = (np.array(self.tile_params['tile_shape']) -
-                                 np.array(self.num_overlap))
+                    if self.framework == 'tf':
+                        step_size = (np.array(self.tile_params['tile_shape']) -
+                                    np.array(self.num_overlap))
 
-                    # TODO tile_image works for 2D/3D imgs, modify for multichannel
-                    _, crop_indices = tile_utils.tile_image(
-                        input_image=np.squeeze(cur_target),
-                        tile_size=self.tile_params['tile_shape'],
-                        step_size=step_size,
-                        return_index=True
-                    )
-                    pred_block_list = self._predict_sub_block_xy(
-                        cur_input,
-                        crop_indices,
-                    )
-                    pred_image = self.stitch_inst.stitch_predictions(
-                        cur_target[0].shape,
-                        pred_block_list,
-                        crop_indices,
-                    )
+                        # TODO tile_image works for 2D/3D imgs, modify for multichannel
+                        _, crop_indices = tile_utils.tile_image(
+                            input_image=np.squeeze(cur_target),
+                            tile_size=self.tile_params['tile_shape'],
+                            step_size=step_size,
+                            return_index=True
+                        )
+                        pred_block_list = self._predict_sub_block_xy(
+                            cur_input,
+                            crop_indices,
+                        )
+                        pred_image = self.stitch_inst.stitch_predictions(
+                            cur_target[0].shape,
+                            pred_block_list,
+                            crop_indices,
+                        )
+                    elif self.framework == 'torch':
+                        #TODO: implement tiled inference in pytorch
+                        raise NotImplementedError('Tiling prediction for pytorch not implemented')
                 else:
-                    pred_image = inference.predict_large_image(
-                        model=self.model,
-                        input_image=cur_input,
-                    )
+                    if self.framework == 'tf':
+                        pred_image = inference.predict_large_image(
+                            model=self.model,
+                            input_image=cur_input,
+                        )
+                    elif self.framework == 'torch':
+                        pred_image = self.torch_predictor.predict_large_image(
+                            input_image=cur_input,
+                        )
                 # add batch dimension
                 if len(pred_image.shape) < 4:
                     pred_image = pred_image[np.newaxis, ...]
-
+                # if regression undo normalization to recover dynamic range
                 for i, chan_idx in enumerate(self.target_channels):
                     meta_row = chan_meta.loc[chan_meta['channel_idx'] == chan_idx, :].squeeze()
                     if self.model_task == 'regression':
@@ -797,7 +834,7 @@ class ImagePredictor:
                 mask_stack = np.transpose(mask_stack, [1, 2, 3, 0])
 
         return pred_stack, target_stack, mask_stack, input_stack
-
+    
     def predict_3d(self, iteration_rows):
         """
         Run prediction in 3D on images with 3D shape.
@@ -893,18 +930,31 @@ class ImagePredictor:
             mask_image = mask_image[np.newaxis, ...]
 
         return pred_image, target_image, mask_image, input_image
-
+            
     def run_prediction(self):
-        """Run prediction for entire 2D image or a 3D stack"""
+        """
+        Run prediction for entire set of 2D images or a 3D image stacks
+        
+        Prediction procedure depends on format of input and desired prediction (2D or 3D).
+        Generates metrics, if specified in parent object initiation, for each prediction
+        channel, channel-wise.
+        
+        Saves image predictions by individual channel and prediction metrics in separate
+        files. z*** position specified in saved prediction name represents prediction channel.
+        
+        """
         id_df = self.inf_frames_meta[['time_idx', 'pos_idx']].drop_duplicates()
         pbar = tqdm(id_df.to_numpy())
+        #for each image, one per row of df
         for id_row_idx, id_row in enumerate(id_df.to_numpy()):
+            #run prediction on image
             time_idx, pos_idx = id_row
             pbar.set_description('time {} position {}'.format(time_idx, pos_idx))
             chan_slice_meta = self.inf_frames_meta[
                 (self.inf_frames_meta['time_idx'] == time_idx) &
                 (self.inf_frames_meta['pos_idx'] == pos_idx)
                 ]
+            
             if self.config['network']['class'] == 'UNet3D':
                 pred_image, target_image, mask_image, input_image = self.predict_3d(
                     chan_slice_meta,
@@ -913,6 +963,8 @@ class ImagePredictor:
                 pred_image, target_image, mask_image, input_image = self.predict_2d(
                     chan_slice_meta,
                 )
+            
+            #separate predictions by channel (type)
             for c, chan_idx in enumerate(self.target_channels):
                 pred_names = []
                 slice_ids = chan_slice_meta.loc[chan_slice_meta['channel_idx'] == chan_idx, 'slice_idx'].to_list()
@@ -925,6 +977,8 @@ class ImagePredictor:
                         ext='',
                     )
                     pred_names.append(pred_name)
+                
+                #generate metrics channel-wise
                 if self.metrics_inst is not None:
                     if not self.mask_metrics:
                         mask = None
@@ -936,7 +990,6 @@ class ImagePredictor:
                         pred_fnames=pred_names,
                         mask=mask,
                     )
-
                 with tqdm(total=len(chan_slice_meta['slice_idx'].unique()), desc='z-stack saving', leave=False) as pbar_s:
                     for z, z_idx in enumerate(chan_slice_meta['slice_idx'].unique()):
                         meta_row = chan_slice_meta[
