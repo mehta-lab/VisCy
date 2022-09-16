@@ -39,3 +39,8 @@ training: <br>
   mask: True or False (Whether or not to use masking in training. This is almost always True)<br>
   mask_type: 'rosin'/'unimodal' or 'otsu' (Masking type if above param is True)<br>
   device: 'gpu' or 'cpu'(Device to run training and inference on. Almost always 'gpu')<br>
+  <br>
+  <br>
+
+Example config files can be found in this directory:
+/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2019_02_15_KidneyTissue_DLMBL_subset
