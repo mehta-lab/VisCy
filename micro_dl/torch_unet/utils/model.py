@@ -4,7 +4,7 @@ import os
 import torch
 import matplotlib.pyplot as plt
 
-def model_init(network_config):
+def model_init(network_config, device = torch.device('cuda')):
     '''
     Initializes network model from a configuration dictionary.
     
@@ -26,7 +26,7 @@ def model_init(network_config):
                                 task = network_config['task'])
     else:
         raise NotImplementedError('Only 2.5D and 2D architectures available.')
-    model.cuda()
+    model.to(device)
     
     return model
     

@@ -13,23 +13,31 @@ class TorchPredictor():
     Params:
         - model -> nn.module: trained model using gpu parameters
         - network_config -> dict: model configuration dictionary. parameters can be found in torch_unet.utils.readme.md
+        - device -> torch.device: device to run inference on
     '''
-    def __init__(self, model = None, network_config = None) -> None:
+    def __init__(self, model = None, network_config = None, device = None) -> None:
         self.model = model
         self.network_config = network_config
+        self.device = device
         
     def load_model_torch(self) -> None:
         '''
         Initializes a model according to the network configuration dictionary used to train it, and loads the 
         parameters saved in model_dir into the model's state dict.
         '''
-        model = model_utils.model_init(self.network_config)
+        model = model_utils.model_init(self.network_config, device=self.device)
         
         model_dir = self.network_config['model_dir']
         readout = model.load_state_dict(torch.load(model_dir))
-        print(readout)
+        print(f'PyTorch model load status: {readout}')
         self.model = model
     
+    def predict_image(self, input_image, model = None):
+        '''
+        Alias for predict_large_image if 2.5D; 2.5D torch model is xy generalizable
+        '''
+        return self.predict_large_image(input_image, model=model)
+
     def predict_large_image(self, input_image, model = None):
         '''
         Runs prediction on entire image field of view. xy size is configurable, but it must be
@@ -42,11 +50,11 @@ class TorchPredictor():
         assert self.model != None or model != None, 'model must be specified in initiation or prediction call'
         if model == None:
             model = self.model
-        img_tensor = ds.ToTensor()(input_image)
+        img_tensor = ds.ToTensor(device=self.device)(input_image)
         pred = model(img_tensor)
         return pred.detach().cpu().numpy()
 
-    def predict_large_image_torch(self, input_image, model = None):
+    def predict_large_image_tiling(self, input_image, model = None):
         '''
         Takes large image (or image stack) as a numpy array and returns prediction for it, block-wise.
         
@@ -61,7 +69,7 @@ class TorchPredictor():
         assert len(input_image.shape) in [4, 5],'Invalid image shape: only 4D and 5D inputs - 2D / 3D images with channel and batch dim allowed'
         
         if type(input_image) != type(torch.rand(1,1)):
-            input_image = ds.ToTensor()(input_image)
+            input_image = ds.ToTensor(device=self.device)(input_image)
         
         #generate tiles
         tiles = self.tile_large_image_torch(input_image)
@@ -76,7 +84,7 @@ class TorchPredictor():
         
         return output_image.detach().cpu().numpy()
 
-    def tile_large_image_torch(self, input_image, tile_size = (256,256), stride = 128):
+    def tile_large_image(self, input_image, tile_size = (256,256), stride = 128):
         #TODO: implement tiling with a stride.
         '''
         Takes large input image as and returns dictionary of tiles of that image.
@@ -90,7 +98,6 @@ class TorchPredictor():
         
         assert img_shape[0] % tile_size[0] and img_shape[1] % tile_size[1], ''.join('For downsampling reasons, image input size',
                                                                                     'must be multiple of tile input size')
-        
         img_dict = {}
         for i in range(img_shape[-2]//tile_size[0]):
             row = []
@@ -100,7 +107,7 @@ class TorchPredictor():
             img_dict[i] = row
         return img_dict
         
-    def stitch_image_tiles_torch(self, tiles, output_size, stride = 128):
+    def stitch_image_tiles(self, tiles, output_size, stride = 128):
         #TODO: Implement stride and stitching using center of FoV only
         #      Offer option for averaging versus completely overriding overlap
         '''

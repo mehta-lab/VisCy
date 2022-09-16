@@ -1,4 +1,6 @@
 Training and inference can be performed by using the code in this module, or through the command line (see [scripts](../cli/))<br>
+The dependencies required to run these ```torch_*.py``` scripts are saved in the conda environment ```torch_conda_environment.yml``` <br>
+in the microDL home directory. <br>
 <br>
 You can get started by pulling the repository and running these commands in the microDL directory:<br>
 ```export PYTHONPATH="${PYTHONPATH}:$(pwd)"``` <br>
@@ -15,7 +17,9 @@ preprocess_config_path: absolute path to preprocessing config file used in data 
 train_config_path: absolute path to train config file containing all parameters given in example <br>
 inference_config_path: absolute path to inference config file containing all parameters given in example <br>
 &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;* Note that inference runs exactly like tensorflow inference, so all config params are the same except <br> 
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; it **must** use **data_split: all**, and a **save_folder_name** directory where predictions will be saved <br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; it **must** use **data_split: all**, and *should* specify a **save_folder_name** directory where predictions  <br>
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; will be saved. If no **save_folder_name** directory is specified, the inference script will automatically save
+&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp; parralel to the ```data``` folder specified by ```preprocess_config.yml```
 model: <br>
   architecture: 2.5D or 2D (2D currently unstable. Pleasre use 2.5D)<br>
   conv_mode: same (must be same. to be removed in next push) <br>

@@ -19,7 +19,25 @@ import micro_dl.plotting.plot_utils as plot_utils
 
 
 class ImagePredictor:
-    """Infer on larger images"""
+    """
+    Inference on larger images.
+    Methods in this class provide functionality for performing inference on 
+    large (x,y > 256,256) images through direct inference in 2 and 3 dimensions,
+    or by tiling in 2 or 3 dimensions along xy and z axes. 
+    
+    Inference is performed by first initalizing an InferenceDataset object which 
+    loads samples and performs normalization according to the tile-specific 
+    normalization values acquired during preprocessing. 
+    
+    Actual inference is performed by either a tensorflow '.hdf5' model specified 
+    in config files, or a trained '.pt' pytorch model loaded into a TorchPredictor
+    object provided through torch_predictor.
+    
+    After inference is performed on samples acquired from InferenceDataset object,
+    dynamic range is return by denormalizing the outputs if the model task is reg-
+    ression.
+    
+    """
 
     def __init__(self,
                  train_config,
@@ -74,6 +92,11 @@ class ImagePredictor:
         :param int gpu_id: GPU number to use. -1 for debugging (no GPU)
         :param float/None gpu_mem_frac: Memory fractions to use corresponding
             to gpu_ids
+        :param str framework: framework is either 'tf' or 'torch'. This governs
+            the backend model type that performs the inference. If framework is
+            'torch', torch_predictor object must be provided
+        :param TorchPredictor torch_predictor: predictor object which handles
+            transporting data to a PyTorch model for inference.
         """
         # Use model_dir from inference config if present, otherwise use train
         if 'model_dir' in inference_config:
@@ -86,7 +109,10 @@ class ImagePredictor:
         else:
             self.save_folder_name = 'predictions'
         
+        #assert that model weights are specified
         self.framework = framework
+        if self.framework == 'torch':
+            assert torch_predictor != None, "Torch framework requires TorchPredictor"
         if self.framework == 'tf':
             if 'model_fname' in inference_config:
                 model_fname = inference_config['model_fname']
@@ -420,10 +446,17 @@ class ImagePredictor:
             cur_block = self._get_sub_block_z(input_image,
                                               start_idx,
                                               end_idx)
-            pred_block = inference.predict_large_image(
-                model=self.model,
-                input_image=cur_block,
-            )
+            if self.framework == 'tf':
+                pred_block = inference.predict_large_image(
+                    model=self.model,
+                    input_image=cur_block,
+                )
+            elif self.framework == 'torch':
+                pred_block = self.torch_predictor.predict_large_image(
+                    input_image=cur_block
+                )
+            else:
+                raise Exception('self.framework must be either \'tf\' or \'torch\'')
             # reduce predictions from 5D to 3D for simplicity
             pred_ims.append(np.squeeze(pred_block))
             start_end_idx.append((start_idx, end_idx))
@@ -461,11 +494,17 @@ class ImagePredictor:
                     cur_block = input_image[:, crop_idx[0]: crop_idx[1],
                                 crop_idx[2]: crop_idx[3],
                                 :]
-
-            pred_block = inference.predict_large_image(
-                model=self.model,
-                input_image=cur_block,
-            )
+            if self.framework == 'tf':
+                pred_block = inference.predict_large_image(
+                    model=self.model,
+                    input_image=cur_block,
+                )
+            elif self.framework == 'torch':
+                pred_block = self.torch_predictor.predict_large_image(
+                    input_image=cur_block
+                )
+            else:
+                raise Exception('self.framework must be either \'tf\' or \'torch\'')
             # remove b & z dimention, prediction of 2D and 2.5D has only single z
             if self.data_format == 'channels_first':
                 if len(pred_block.shape) == 5:  # bczyx
@@ -501,11 +540,17 @@ class ImagePredictor:
                 cur_block = input_image[:, crop_idx[0]: crop_idx[1],
                             crop_idx[2]: crop_idx[3],
                             crop_idx[4]: crop_idx[5], :]
-
-            pred_block = inference.predict_large_image(
-                model=self.model,
-                input_image=cur_block,
-            )
+            if self.framework == 'tf':
+                pred_block = inference.predict_large_image(
+                    model=self.model,
+                    input_image=cur_block,
+                )
+            elif self.framework == 'torch':
+                pred_block = self.torch_predictor.predict_large_image(
+                    input_image=cur_block
+                )
+            else:
+                raise Exception('self.framework must be either \'tf\' or \'torch\'')
             # retain the full 5D tensor to experiment for multichannel case
             pred_ims.append(pred_block)
         return pred_ims
@@ -752,29 +797,25 @@ class ImagePredictor:
                         self.image_format,
                     )
                 if self.tile_option == 'tile_xy':
-                    if self.framework == 'tf':
-                        step_size = (np.array(self.tile_params['tile_shape']) -
-                                    np.array(self.num_overlap))
+                    step_size = (np.array(self.tile_params['tile_shape']) -
+                                np.array(self.num_overlap))
 
-                        # TODO tile_image works for 2D/3D imgs, modify for multichannel
-                        _, crop_indices = tile_utils.tile_image(
-                            input_image=np.squeeze(cur_target),
-                            tile_size=self.tile_params['tile_shape'],
-                            step_size=step_size,
-                            return_index=True
-                        )
-                        pred_block_list = self._predict_sub_block_xy(
-                            cur_input,
-                            crop_indices,
-                        )
-                        pred_image = self.stitch_inst.stitch_predictions(
-                            cur_target[0].shape,
-                            pred_block_list,
-                            crop_indices,
-                        )
-                    elif self.framework == 'torch':
-                        #TODO: implement tiled inference in pytorch
-                        raise NotImplementedError('Tiling prediction for pytorch not implemented')
+                    # TODO tile_image works for 2D/3D imgs, modify for multichannel
+                    _, crop_indices = tile_utils.tile_image(
+                        input_image=np.squeeze(cur_target),
+                        tile_size=self.tile_params['tile_shape'],
+                        step_size=step_size,
+                        return_index=True
+                    )
+                    pred_block_list = self._predict_sub_block_xy(
+                        cur_input,
+                        crop_indices,
+                    )
+                    pred_image = self.stitch_inst.stitch_predictions(
+                        cur_target[0].shape,
+                        pred_block_list,
+                        crop_indices,
+                    )
                 else:
                     if self.framework == 'tf':
                         pred_image = inference.predict_large_image(
@@ -785,6 +826,8 @@ class ImagePredictor:
                         pred_image = self.torch_predictor.predict_large_image(
                             input_image=cur_input,
                         )
+                    else:
+                        raise Exception('self.framework must be either \'tf\' or \'torch\'')
                 # add batch dimension
                 if len(pred_image.shape) < 4:
                     pred_image = pred_image[np.newaxis, ...]
@@ -865,10 +908,17 @@ class ImagePredictor:
             inf_shape = self.tile_params['inf_shape']
             center_block = image_utils.center_crop_to_shape(input_image, inf_shape)
             target_image = image_utils.center_crop_to_shape(target_image, inf_shape)
-            pred_image = inference.predict_large_image(
-                model=self.model,
-                input_image=center_block,
-            )
+            if self.framework == 'tf':
+                pred_image = inference.predict_large_image(
+                    model=self.model,
+                    input_image=center_block,
+                )
+            elif self.framework == 'torch':
+                pred_image = self.torch_predictor.predict_large_image(
+                    input_image=center_block
+                )
+            else:
+                raise Exception('self.framework must be either \'tf\' or \'torch\'')
         elif self.tile_option == 'tile_z':
             pred_block_list, start_end_idx = \
                 self._predict_sub_block_z(input_image)

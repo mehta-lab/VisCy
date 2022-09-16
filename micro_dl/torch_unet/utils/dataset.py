@@ -231,10 +231,11 @@ class ChooseBands(object):
     def __init__(self, bands = (0, 30), input_format = 'zxy'):
         assert input_format in {'zxy', 'xyz'}, 'unacceptable input format; try \'zxy\' or \'xyz\''
         self.bands = bands
+        self.input_format = input_format
     def __call__(self, sample):
-        if input_format == 'zxy':
+        if self.input_format == 'zxy':
             sample = sample[...,self.bands[0]:self.bands[1],:,:]
-        elif input_format == 'xyz':
+        elif self.input_format == 'xyz':
             sample = sample[...,self.bands[0]:self.bands[1]]
         return sample
     

@@ -180,12 +180,12 @@ class TorchTrainer():
             
             #run testing cycle every 'testing_stride' epochs
             if i % self.training_config['testing_stride'] == 0:
-                test_loss = self.run_test(current)
+                test_loss = self.run_test(i)
                 test_loss_list.append(test_loss/self.test_dataloader.__len__())
                 
             # save model every 'save_model_stride' epochs
-            if i % self.training_config['save_model_stride'] == 0:
-                self.save_model(current, test_loss, input_)
+            if i % self.training_config['save_model_stride'] == 0 or i == self.training_config['epochs'] - 1:
+                self.save_model(i, test_loss, input_)
                 
             print(f'\t Training loss: {train_loss_list[-1]}')
             if i % 1 == 0:
