@@ -35,14 +35,14 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    torch_inference_config = read_config(args.config)
+    torch_config = read_config(args.config)
     
     #read configuration parameters and metadata
-    preprocess_config = read_config(torch_inference_config['preprocess_config_path'])
-    train_config = read_config(torch_inference_config['train_config_path'])
-    inference_config = read_config(torch_inference_config['inference_config_path'])
+    preprocess_config = read_config(torch_config['preprocess_config_path'])
+    train_config = read_config(torch_config['train_config_path'])
+    inference_config = read_config(torch_config['inference_config_path'])
     
-    network_config = torch_inference_config['model']
+    network_config = torch_config['model']
 
     #instantiate and prep TorchPredictor interfacing object
     torch_predictor = torch_inference_utils.TorchPredictor(network_config = network_config)

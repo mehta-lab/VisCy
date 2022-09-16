@@ -257,13 +257,14 @@ class GenerateMasks(object):
     
     Params:
         - masking_type -> token{'rosin', 'otsu'}: type of thresholding to apply:
-                                                    1.) Rosin: https://users.cs.cf.ac.uk/Paul.Rosin/resources/papers/unimodal2.pdf
+                                                    1.) Rosin/unimodal: https://users.cs.cf.ac.uk/Paul.Rosin/resources/papers/unimodal2.pdf
                                                     2.) Otsu: https://en.wikipedia.org/wiki/Otsu%27s_method
         - clipping -> Boolean: whether or not to clip the extraneous values in the data before thresholding
         - clip_amount -> int, tuple: amount to clip from both ends of brighness histogram as a percentage (%)
+                                     If clipping==True but clip_amount == 0, clip for default amount (2%)
     '''
     def __init__(self, masking_type = 'rosin', clipping = False, clip_amount = 0):
-        assert masking_type in {'rosin', 'otsu'}, 'Unaccepted masking type.'
+        assert masking_type in {'rosin', 'unimodal', 'otsu'}, f'Unaccepted masking type: {masking_type}'
         self.masking_type = masking_type
         self.clipping = clipping
         self.clip_amount = clip_amount
@@ -279,14 +280,17 @@ class GenerateMasks(object):
             if type(self.clip_amount) == tuple:
                 sample = norm_utils.hist_clipping(sample, self.clip_amount[0], 100 - self.clip_amount[1])
             else:
-                sample = norm_utils.hist_clipping(sample, self.clip_amount, 100 - self.clip_amount)
+                if self.clip_amount != 0:
+                    sample = norm_utils.hist_clipping(sample, self.clip_amount, 100 - self.clip_amount)
+                else:
+                    sample = norm_utils.hist_clipping(sample)
         
         #generate masks
         masks = []
         for i in range(sample.shape[0]):
             if self.masking_type == 'otsu':
                 masks.append(mask_utils.create_otsu_mask(sample[i,0,0]))
-            elif self.masking_type == 'rosin':
+            elif self.masking_type == 'rosin' or self.masking_type == 'unimodal':
                 masks.append(mask_utils.create_unimodal_mask(sample[i,0,0]))
             else:
                 raise NotImplementedError(f'Masking type {self.masking_type} not implemented.')

@@ -85,16 +85,18 @@ class ImagePredictor:
             self.save_folder_name = inference_config['save_folder_name']
         else:
             self.save_folder_name = 'predictions'
-
-        if 'model_fname' in inference_config:
-            model_fname = inference_config['model_fname']
-        else:
-            # If model filename not listed, grab latest one
-            fnames = [f for f in os.listdir(inference_config['model_dir'])
-                      if f.endswith('.hdf5')]
-            assert len(fnames) > 0, 'No weight files found in model dir'
-            fnames = natsort.natsorted(fnames)
-            model_fname = fnames[-1]
+        
+        self.framework = framework
+        if self.framework == 'tf':
+            if 'model_fname' in inference_config:
+                model_fname = inference_config['model_fname']
+            else:
+                # If model filename not listed, grab latest one
+                fnames = [f for f in os.listdir(inference_config['model_dir'])
+                        if f.endswith('.hdf5')]
+                assert len(fnames) > 0, 'No weight files found in model dir'
+                fnames = natsort.natsorted(fnames)
+                model_fname = fnames[-1]
 
         self.config = train_config
         self.model_dir = model_dir
@@ -260,7 +262,6 @@ class ImagePredictor:
             )
         
         # create model and load weights, depending on initiation framework.
-        self.framework = framework
         assert self.framework in {'tf', 'torch'}, 'Framework must be either \'torch\' or \'tf\'.'
         if self.framework == 'tf':
             self.model = inference.load_model(
