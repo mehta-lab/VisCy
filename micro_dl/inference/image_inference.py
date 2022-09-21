@@ -37,6 +37,9 @@ class ImagePredictor:
     dynamic range is return by denormalizing the outputs if the model task is reg-
     ression.
     
+    Metrics are calculated by use of a MetricEstimator object, which calculates, 
+    and indexes metrics for successive images.
+    
     """
 
     def __init__(self,
@@ -301,7 +304,11 @@ class ImagePredictor:
 
     def _get_split_ids(self, data_split='test'):
         """
-        Get the indices for data_split
+        Get the indices for data_split. Used to determine which images to run
+        inference on to avoid validating on training data.
+        
+        Indices returned refer to full-image sample FoV slices, rather than
+        spatial indices of image tiles.
 
         :param str data_split: in [train, val, test]
         :return list inference_ids: Indices for inference given data split
@@ -395,7 +402,8 @@ class ImagePredictor:
                          input_image,
                          start_z_idx,
                          end_z_idx):
-        """Get the sub block along z given start and end slice indices
+        """
+        Get the sub block along z given start and end slice indices
 
         :param np.array input_image: 5D tensor with the entire 3D volume
         :param int start_z_idx: start slice for the current block
@@ -524,7 +532,8 @@ class ImagePredictor:
                                crop_indices):
         """
         Predict sub blocks along xyz, particularly when predicting a 3d
-        volume along three dimensions.
+        volume along three dimensions. Sub blocks are cubic chunks out 
+        of entire 3D volume of specified xyz shape.
 
         :param np.array input_image: 5D tensor with the entire 3D volume
         :param list crop_indices: list of crop indices: min/max xyz
@@ -592,7 +601,12 @@ class ImagePredictor:
                         pred_chan_name=np.nan,
                         ):
         """
-        Save predicted images with image extension given in init.
+        Save predicted images with image extension given in init. 
+        
+        Note: images and predictions stored as float values are 
+        compressed into uint16 before figure generation. Some loss
+        of information may occur during compression for extremely
+        low-value data.
 
         :param np.array im_input: Input image
         :param np.array im_target: Target image
@@ -723,7 +737,7 @@ class ImagePredictor:
 
     def get_mask(self, cur_row, transpose=False):
         """
-        Get mask, either from image or mask dir
+        Get mask, read either from image or mask dir
 
         :param pd.Series/dict cur_row: row containing indices
         :param bool transpose: Changes image format from xyz to zxy
@@ -779,9 +793,10 @@ class ImagePredictor:
         pred_stack = []
         target_stack = []
         mask_stack = []
-        # going through z for given p & t
+        # going through z slices for given position and time
         with tqdm(total=len(chan_slice_meta['slice_idx'].unique()), desc='z-stack prediction', leave=False) as pbar:
             for z_idx in chan_slice_meta['slice_idx'].unique():
+                #get input image and target
                 chan_meta = chan_slice_meta[chan_slice_meta['slice_idx'] == z_idx]
                 cur_input, cur_target = \
                     self.dataset_inst.__getitem__(chan_meta.index[0])
@@ -796,6 +811,8 @@ class ImagePredictor:
                         self.crop_shape,
                         self.image_format,
                     )
+                
+                #pass to network for prediction
                 if self.tile_option == 'tile_xy':
                     step_size = (np.array(self.tile_params['tile_shape']) -
                                 np.array(self.num_overlap))
@@ -828,10 +845,12 @@ class ImagePredictor:
                         )
                     else:
                         raise Exception('self.framework must be either \'tf\' or \'torch\'')
+                
                 # add batch dimension
                 if len(pred_image.shape) < 4:
                     pred_image = pred_image[np.newaxis, ...]
-                # if regression undo normalization to recover dynamic range
+                
+                # if regression task, undo normalization to recover dynamic range
                 for i, chan_idx in enumerate(self.target_channels):
                     meta_row = chan_meta.loc[chan_meta['channel_idx'] == chan_idx, :].squeeze()
                     if self.model_task == 'regression':
