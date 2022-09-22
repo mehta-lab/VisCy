@@ -1,5 +1,6 @@
 """Dataset class / generator for inference only"""
 
+import warnings
 import keras
 import numpy as np
 import os
@@ -10,6 +11,7 @@ import micro_dl.utils.image_utils as image_utils
 
 
 class InferenceDataSet(keras.utils.Sequence):
+    warnings.warn('InferenceDataSet class to be replaced with gunpowder in 2.1.0')
     """Dataset class for model inference"""
 
     def __init__(self,

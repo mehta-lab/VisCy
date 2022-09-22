@@ -96,6 +96,6 @@ if __name__ == '__main__':
     torch_predictor.load_model_torch()
         
     #instantiate ImagePredictor object and run inference
-    image_predictor = image_inf.ImagePredictor(train_config, inference_config, preprocess_config,
-                                              framework='torch', torch_predictor=torch_predictor)
+    image_predictor = image_inf.ImagePredictor(train_config, inference_config, torch_predictor, 
+                                               preprocess_config = preprocess_config)
     image_predictor.run_prediction()

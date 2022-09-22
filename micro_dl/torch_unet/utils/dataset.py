@@ -59,6 +59,7 @@ class TorchDataset(Dataset):
             self.train_dataset = None
             self.test_dataset = None
             self.val_dataset = None
+            self.mask = True
         else:
             config = aux_utils.read_config(train_config)
             
@@ -302,7 +303,7 @@ class GenerateMasks(object):
 
 class Normalize(object):
     '''
-    Normalizes the sample sample according to the mode in init:
+    Normalizes the sample sample according to the mode in init.
     
     Params:
         - mode -> token{'one', 'max', 'zero'}: type of normalization to apply

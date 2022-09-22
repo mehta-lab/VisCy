@@ -149,6 +149,7 @@ def create_datasets(df_meta,
 
 
 def create_network(network_config, gpu_id):
+    raise DeprecationWarning('Tensorflow networks are no longer supported as of 2.0.0')
     """Create an instance of the network
 
     :param dict network_config: dict with network related params

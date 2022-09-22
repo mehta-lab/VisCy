@@ -45,11 +45,8 @@ class ImagePredictor:
     def __init__(self,
                  train_config,
                  inference_config,
-                 preprocess_config=None,
-                 gpu_id=-1,
-                 gpu_mem_frac=None,
-                 framework = 'tf',
-                 torch_predictor = None):
+                 torch_predictor,
+                 preprocess_config=None):
         """Init
 
         :param dict train_config: Training config dict with params related
@@ -102,6 +99,7 @@ class ImagePredictor:
             transporting data to a PyTorch model for inference.
         """
         # Use model_dir from inference config if present, otherwise use train
+        #TODO this complexity is un-needed. Specify model_dir only once
         if 'model_dir' in inference_config:
             model_dir = inference_config['model_dir']
         else:
@@ -110,28 +108,15 @@ class ImagePredictor:
         if 'save_folder_name' in inference_config:
             self.save_folder_name = inference_config['save_folder_name']
         else:
+            #TODO make this an absolute path dependent on model_dir. currently convoluted
             self.save_folder_name = 'predictions'
-        
-        #assert that model weights are specified
-        self.framework = framework
-        if self.framework == 'torch':
-            assert torch_predictor != None, "Torch framework requires TorchPredictor"
-        if self.framework == 'tf':
-            if 'model_fname' in inference_config:
-                model_fname = inference_config['model_fname']
-            else:
-                # If model filename not listed, grab latest one
-                fnames = [f for f in os.listdir(inference_config['model_dir'])
-                        if f.endswith('.hdf5')]
-                assert len(fnames) > 0, 'No weight files found in model dir'
-                fnames = natsort.natsorted(fnames)
-                model_fname = fnames[-1]
 
         self.config = train_config
         self.model_dir = model_dir
         self.image_dir = inference_config['image_dir']
 
         # Set default for data split, determine column name and indices
+        #TODO remove these parameters from config. drop support for variability
         data_split = 'test'
         if 'data_split' in inference_config:
             data_split = inference_config['data_split']
@@ -151,6 +136,7 @@ class ImagePredictor:
             flat_field_dir = images_dict['flat_field_dir']
 
         # Set defaults
+        #TODO remove some of these parameters from config
         self.image_format = 'zyx'
         if 'image_format' in images_dict:
             self.image_format = images_dict['image_format']
@@ -210,6 +196,7 @@ class ImagePredictor:
                 mask_dir = self.mask_dir
 
         normalize_im = 'stack'
+        #TODO standardize this parameter into the master config file.
         if preprocess_config is not None:
             if 'normalize' in preprocess_config:
                 if 'normalize_im' in preprocess_config['normalize']:
@@ -220,7 +207,9 @@ class ImagePredictor:
                 normalize_im = preprocess_config['tile']['normalize_im']
 
         self.normalize_im = normalize_im
+        
         # Handle 3D volume inference settings
+        # TODO remove! dropping support for 3d inference
         self.num_overlap = 0
         self.stitch_inst = None
         self.tile_option = None
@@ -236,6 +225,7 @@ class ImagePredictor:
             if self.config['network']['class'] != 'UNet3D':
                 crop2base = False
             # Make image ext npy default for 3D
+
         # Create dataset instance
         self.dataset_inst = InferenceDataSet(
             image_dir=self.image_dir,
@@ -249,8 +239,10 @@ class ImagePredictor:
             flat_field_dir=flat_field_dir,
             crop2base=crop2base,
         )
+        
         # create an instance of MetricsEstimator
-        self.inf_frames_meta = self.dataset_inst.get_iteration_meta()
+        #TODO in 2.1.0 this metadata will be stored in .zarr keys
+        self.inf_frames_meta = self.dataset_inst.get_iteration_meta() 
         self.target_channels = self.dataset_inst.target_channels
         if self.pred_chan_names is not None:
             assert len(self.target_channels) == len(self.pred_chan_names), \
@@ -264,8 +256,7 @@ class ImagePredictor:
         if 'metrics' in inference_config:
             self.metrics_dict = inference_config['metrics']
         if self.metrics_dict is not None:
-            assert 'metrics' in self.metrics_dict, \
-                'Must specify with metrics to use'
+            assert 'metrics' in self.metrics_dict, 'Must specify with metrics to use'
             self.metrics_inst = MetricsEstimator(
                 metrics_list=self.metrics_dict['metrics'],
                 masked_metrics=self.mask_metrics,
@@ -273,33 +264,16 @@ class ImagePredictor:
             self.metrics_orientations = ['xy']
             available_orientations = ['xy', 'xyz', 'xz', 'yz']
             if 'metrics_orientations' in self.metrics_dict:
-                self.metrics_orientations = \
-                    self.metrics_dict['metrics_orientations']
-                assert set(self.metrics_orientations). \
-                    issubset(available_orientations), \
+                self.metrics_orientations = self.metrics_dict['metrics_orientations']
+                assert set(self.metrics_orientations).issubset(available_orientations), \
                     'orientation not in [xy, xyz, xz, yz]'
         self.df_xy = pd.DataFrame()
         self.df_xyz = pd.DataFrame()
         self.df_xz = pd.DataFrame()
         self.df_yz = pd.DataFrame()
-
-        # Set session if not debug
-        if gpu_id >= 0:
-            self.sess = set_keras_session(
-                gpu_ids=gpu_id,
-                gpu_mem_frac=gpu_mem_frac,
-            )
         
-        # create model and load weights, depending on initiation framework.
-        assert self.framework in {'tf', 'torch'}, 'Framework must be either \'torch\' or \'tf\'.'
-        if self.framework == 'tf':
-            self.model = inference.load_model(
-                network_config=self.config['network'],
-                model_fname=os.path.join(self.model_dir, model_fname),
-            )
-        elif self.framework == 'torch':
-            assert torch_predictor, 'torch framework requires torch_predictor object'
-            self.torch_predictor = torch_predictor
+        # create model and load weights
+        self.torch_predictor = torch_predictor
 
 
     def _get_split_ids(self, data_split='test'):
@@ -314,6 +288,7 @@ class ImagePredictor:
         :return list inference_ids: Indices for inference given data split
         :return str split_col: Dataframe column name, which was split in training
         """
+        #TODO handle config parameter in master config
         split_col = self.config['dataset']['split_by_column']
         frames_meta = aux_utils.read_meta(self.image_dir)
         inference_ids = np.unique(frames_meta[split_col]).tolist()
@@ -331,6 +306,7 @@ class ImagePredictor:
         return split_col, inference_ids
 
     def _assign_3d_inference(self):
+        raise DeprecationWarning('3d inference no longer supported in 2.0.0')
         """
         Assign inference options for 3D volumes
 
@@ -402,6 +378,7 @@ class ImagePredictor:
                          input_image,
                          start_z_idx,
                          end_z_idx):
+        raise DeprecationWarning('3d inference no longer supported in 2.0.0')
         """
         Get the sub block along z given start and end slice indices
 
@@ -426,6 +403,7 @@ class ImagePredictor:
         return cur_block
 
     def _predict_sub_block_z(self, input_image):
+        raise DeprecationWarning('3d inference no longer supported in 2.0.0')
         """
         Predict sub blocks along z, given some image's entire xy plane.
 
@@ -473,11 +451,12 @@ class ImagePredictor:
     def _predict_sub_block_xy(self,
                               input_image,
                               crop_indices):
+        
         """
         Predict sub blocks along xy, specifically when generating a 2d
         prediction by spatial tiling and stitching.
 
-        :param np.array input_image: 5D tensor with the entire 3D volume
+        :param np.array input_image: 5D tensor with the entire 3D image stack
         :param list crop_indices: list of crop indices: min/max xyz
         :return list pred_ims - list of predicted sub blocks
         """
@@ -502,17 +481,9 @@ class ImagePredictor:
                     cur_block = input_image[:, crop_idx[0]: crop_idx[1],
                                 crop_idx[2]: crop_idx[3],
                                 :]
-            if self.framework == 'tf':
-                pred_block = inference.predict_large_image(
-                    model=self.model,
-                    input_image=cur_block,
-                )
-            elif self.framework == 'torch':
-                pred_block = self.torch_predictor.predict_large_image(
-                    input_image=cur_block
-                )
-            else:
-                raise Exception('self.framework must be either \'tf\' or \'torch\'')
+            pred_block = self.torch_predictor.predict_large_image(
+                input_image=cur_block
+            )
             # remove b & z dimention, prediction of 2D and 2.5D has only single z
             if self.data_format == 'channels_first':
                 if len(pred_block.shape) == 5:  # bczyx
@@ -530,6 +501,7 @@ class ImagePredictor:
     def _predict_sub_block_xyz(self,
                                input_image,
                                crop_indices):
+        raise DeprecationWarning('3d inference no longer supported in 2.0.0')
         """
         Predict sub blocks along xyz, particularly when predicting a 3d
         volume along three dimensions. Sub blocks are cubic chunks out 
@@ -788,7 +760,6 @@ class ImagePredictor:
         :return np.array/list mask_stack: Mask for metrics (empty list if
          not using masked metrics)
         """
-        assert self.framework in {'tf', 'torch'}, 'Framework must be \'tf\' or \'torch\'.'
         input_stack = []
         pred_stack = []
         target_stack = []
@@ -817,7 +788,6 @@ class ImagePredictor:
                     step_size = (np.array(self.tile_params['tile_shape']) -
                                 np.array(self.num_overlap))
 
-                    # TODO tile_image works for 2D/3D imgs, modify for multichannel
                     _, crop_indices = tile_utils.tile_image(
                         input_image=np.squeeze(cur_target),
                         tile_size=self.tile_params['tile_shape'],
@@ -834,17 +804,9 @@ class ImagePredictor:
                         crop_indices,
                     )
                 else:
-                    if self.framework == 'tf':
-                        pred_image = inference.predict_large_image(
-                            model=self.model,
-                            input_image=cur_input,
+                    pred_image = self.torch_predictor.predict_large_image(
+                        input_image=cur_input
                         )
-                    elif self.framework == 'torch':
-                        pred_image = self.torch_predictor.predict_large_image(
-                            input_image=cur_input,
-                        )
-                    else:
-                        raise Exception('self.framework must be either \'tf\' or \'torch\'')
                 
                 # add batch dimension
                 if len(pred_image.shape) < 4:
@@ -899,6 +861,7 @@ class ImagePredictor:
         return pred_stack, target_stack, mask_stack, input_stack
     
     def predict_3d(self, iteration_rows):
+        raise DeprecationWarning('3d inference no longer supported in 2.0.0') 
         """
         Run prediction in 3D on images with 3D shape.
 

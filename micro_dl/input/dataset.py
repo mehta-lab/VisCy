@@ -1,4 +1,5 @@
 """Dataset classes"""
+import warnings
 import cv2
 import keras
 import numpy as np
@@ -131,7 +132,9 @@ def apply_affine_transform(x, theta=0, tx=0, ty=0, shear=0, zx=1, zy=1,
 
 
 class BaseDataSet(keras.utils.Sequence):
-    """Base class for input and target images
+    warnings.warn('Warning: tf-dependent BaseDataSet to be replaced with GunPowder in 2.1.0')
+    """
+    Base class for input and target images
 
     https://www.tensorflow.org/api_docs/python/tf/keras/utils/Sequence
     https://stanford.edu/~shervine/blog/keras-how-to-generate-data-on-the-fly.html

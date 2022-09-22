@@ -9,6 +9,7 @@ from micro_dl.utils.aux_utils import get_channel_axis
 
 
 def mae_loss(y_true, y_pred, mean_loss=True):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Mean absolute error
 
     Keras losses by default calculate metrics along axis=-1, which works with
@@ -23,6 +24,7 @@ def mae_loss(y_true, y_pred, mean_loss=True):
 
 
 def mse_loss(y_true, y_pred, mean_loss=True):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Mean squared loss
 
     :param y_true: Ground truth
@@ -36,6 +38,7 @@ def mse_loss(y_true, y_pred, mean_loss=True):
     return K.mean(K.square(y_pred - y_true), axis=channel_axis)
 
 def latent_loss(dummy_ground_truth, outputs):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     beta = 0.25
     del dummy_ground_truth
     z_e, z_q = tf.split(outputs, 2, axis=-1)
@@ -46,6 +49,7 @@ def latent_loss(dummy_ground_truth, outputs):
 
 
 def kl_divergence_loss(y_true, y_pred):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """KL divergence loss
     D(y||y') = sum(p(y)*log(p(y)/p(y'))
 
@@ -60,6 +64,7 @@ def kl_divergence_loss(y_true, y_pred):
 
 
 def dssim_loss(y_true, y_pred):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Structural dissimilarity loss + L1 loss
     DSSIM is defined as (1-SSIM)/2
     https://en.wikipedia.org/wiki/Structural_similarity
@@ -73,6 +78,7 @@ def dssim_loss(y_true, y_pred):
 
 
 def ms_ssim_loss(y_true, y_pred):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """
     Multiscale structural dissimilarity loss + L1 loss
     Uses the same combination weight as the original paper by Wang et al.:
@@ -89,6 +95,7 @@ def ms_ssim_loss(y_true, y_pred):
 
 
 def _split_ytrue_mask(y_true, n_channels):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Split the mask concatenated with y_true
 
     :param keras.tensor y_true: if channels_first, ytrue has shape [batch_size,
@@ -110,6 +117,7 @@ def _split_ytrue_mask(y_true, n_channels):
 
 
 def masked_loss(loss_fn, n_channels):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Converts a loss function to mask weighted loss function
 
     Loss is multiplied by mask. Mask could be binary, discrete or float.
@@ -146,6 +154,7 @@ def masked_loss(loss_fn, n_channels):
 
 
 def dice_coef_loss(y_true, y_pred):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """
     The Dice loss function is defined by 1 - DSC
     since the DSC is in the range [0,1] where 1 is perfect overlap
@@ -159,6 +168,7 @@ def dice_coef_loss(y_true, y_pred):
 
 
 def binary_crossentropy_loss(y_true, y_pred, mean_loss=True):
+    raise DeprecationWarning('This loss function is no longer supported as of 2.0.0')
     """Binary cross entropy loss
     :param y_true: Ground truth
     :param y_pred: Prediction

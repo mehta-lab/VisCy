@@ -5,6 +5,7 @@ import micro_dl.utils.aux_utils as aux_utils
 
 
 def load_model(network_config, model_fname, predict=False):
+    raise DeprecationWarning('Tensorflow models are no longer supported as of 2.0.0')
     """Load the model from model_dir
 
     Due to the lambda layer only model weights are saved and not the model
@@ -31,6 +32,7 @@ def load_model(network_config, model_fname, predict=False):
 
 
 def predict_large_image(model, input_image):
+    raise DeprecationWarning('Tensorflow models are no longer supported as of 2.0.0')
     """Predict on an image larger than the one it was trained on
 
     All networks with U-net like architecture in this repo, use downsampling of

@@ -1,4 +1,5 @@
 """Utility functions used for training"""
+import warnings
 from keras import backend as K, losses as keras_losses, \
     metrics as keras_metrics
 import numpy as np
@@ -57,7 +58,7 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
     if not isinstance(gpu_ids, type(None)):
         # Currently only supporting one GPU as input
         if not isinstance(gpu_ids, int):
-            raise NotImplementedError
+            raise NotImplementedError('Currently gpu id specification must be int')
         if gpu_ids == -1:
             return -1, 0
         cur_mem_frac = check_gpu_availability(gpu_ids)
@@ -93,6 +94,7 @@ def select_gpu(gpu_ids=None, gpu_mem_frac=None):
 
 
 def set_keras_session(gpu_ids, gpu_mem_frac):
+    raise DeprecationWarning('Keras sessions are no longer supported as of 2.0.0')
     """Set the Keras session"""
 
     assert K.backend() == 'tensorflow'
@@ -113,6 +115,7 @@ def set_keras_session(gpu_ids, gpu_mem_frac):
 
 
 def get_loss(loss_str):
+    raise DeprecationWarning('Tensorflow losses are no longer supported as of 2.0.0')
     """Get loss type from config"""
 
     def _get_one_loss(cur_loss_str):
@@ -144,6 +147,8 @@ def get_metrics(metrics_list):
 
     for m in metrics_list:
         if hasattr(keras_metrics, m):
+            warnings.warn(f'metric {m} dependent on keras, tensorflow 1.1')
+            #TODO implement keras metrics in torch
             cur_metric_cls = getattr(keras_metrics, m)
         elif hasattr(custom_metrics, m):
             cur_metric_cls = getattr(custom_metrics, m)

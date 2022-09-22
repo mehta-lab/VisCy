@@ -1,9 +1,12 @@
 """Custom metrics"""
+import warnings
 import keras.backend as K
 import tensorflow as tf
 
 
 def coeff_determination(y_true, y_pred):
+    warnings.warn('coeff_determination dependent on keras')
+    #TODO implement in torch
     """
     R^2 Goodness of fit, using as a proxy for accuracy in regression
 
@@ -18,6 +21,8 @@ def coeff_determination(y_true, y_pred):
 
 
 def binary_accuracy(y_true, y_pred):
+    warnings.warn('binary_accuracy dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """Calculates the mean accuracy rate across all predictions for binary
     classification problems.
     """
@@ -25,6 +30,9 @@ def binary_accuracy(y_true, y_pred):
 
 
 def mask_accuracy(n_channels):
+    warnings.warn('mask_accuracy metric dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
+    
     """split y_true into y_true and mask
 
     For masked_loss there's an added function/method to split
@@ -51,6 +59,8 @@ def mask_accuracy(n_channels):
 
 
 def mask_coeff_determination(n_channels):
+    warnings.warn('mask_coeff_determination dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """split y_true into y_true and mask
 
     For masked_loss there's an added function/method to split
@@ -77,6 +87,8 @@ def mask_coeff_determination(n_channels):
 
 
 def dice_coef(y_true, y_pred, smooth=1.):
+    warnings.warn('dice_coef metric dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """
     This is a global non-binary Dice similarity coefficient (DSC)
     with smoothing.
@@ -112,6 +124,8 @@ def flip_dimensions(func):
     :param func: Function to be decorated
     """
     def wrap_function(y_true, y_pred):
+        warnings.warn('wrap_function dependent on keras, tensorflow 1.1')
+        #TODO implement in torch
         """
         Shifts dimensions to channels last if applicable, before
         calling func.
@@ -132,6 +146,8 @@ def flip_dimensions(func):
 
 
 def _get_max_min_val(y_true, y_pred):
+    warnings.warn('max_min_val metric dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """
     Get intensity range and min of ground truth and prediction
 
@@ -149,6 +165,8 @@ def _get_max_min_val(y_true, y_pred):
 
 @flip_dimensions
 def ssim(y_true, y_pred):
+    warnings.warn('ssim metric dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """
     Structural similarity
     Tensorflow does not support SSIM for 3D images. Need a different
@@ -166,6 +184,8 @@ def ssim(y_true, y_pred):
 
 @flip_dimensions
 def ms_ssim(y_true, y_pred):
+    warnings.warn('ms_ssim metric dependent on tensorflow 1.1')
+    #TODO implement in torch
     """
     MS-SSIM for 2D images over batches.
     Tensorflow uses average pooling for each scale, so your tensor
@@ -196,6 +216,8 @@ def ms_ssim(y_true, y_pred):
 
 
 def pearson_corr(y_true, y_pred):
+    warnings.warn('pearson_corr metric dependent on keras, tensorflow 1.1')
+    #TODO implement in torch
     """Pearson correlation
     :param tensor y_true: Labeled ground truth
     :param tensor y_pred: Predicted label,

@@ -10,6 +10,7 @@ from micro_dl.utils.network_utils import get_keras_layer
 
 
 class BaseUNet(BaseConvNet):
+    raise DeprecationWarning('Tensorflow models are no longer supported as of 2.0.0')
     """Base U-net implementation
 
     1) Unet: https://arxiv.org/pdf/1505.04597.pdf
