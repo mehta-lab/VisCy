@@ -8,7 +8,7 @@ import numpy as np
 # convolutional block
 class ConvBlock3D(nn.Module):
     def __init__(self, in_filters, out_filters, dropout=False, norm = 'batch', residual=True, activation='relu',
-                 transpose=False, kernel_size = (3,3,3), num_layers = 3, filter_steps = 'first', padding = 'same'):
+                 transpose=False, kernel_size = (3,3,3), num_layers = 3, filter_steps = 'first'):
 
         '''
         Convolutional block for lateral layers in Unet. This block only accepts tensors of dimensions in order [...,z,x,y]
@@ -21,26 +21,28 @@ class ConvBlock3D(nn.Module):
         This is done to allow for dynamic layer number specification in the conv blocks, which
         allows us to change the parameter numbers of the network.
         
+        Only 'same' convolutional padding is supported, as the conv blocks are intended for deep
+        Unets. 
+        padding -> token{'same', 'valid', 'valid_stack'} or tuple(int) or int: padding to use in convolution layers.
+                                -> 'same': pads with same convolution
+                                -> 'valid': pads for valid convolution on all dimensions
+                                -> 'valid_stack': pads for valid convolution on xy dims (-1, -2), 
+                                                same on z dim (-3).
+                                -> tuple (int): pads above and below dimensions according to tuple-specified length
+                                -> int: pads above and below all dimensions according to int length
+        
         Params:
             - in_filters -> int: number of images in in stack
             - out_filters -> int: number of images in out stack
             - dropout -> float: dropout probability (False = 0)
-            - norm -> token{'batch', 'instance', 'mixed'}: normalization type
+            - norm -> token{'batch', 'instance'}: normalization type
             - residual -> boolean: as name
             - activation -> token{'relu', 'leakyrelu', 'elu', 'selu'}: activation function
-            - final_activation -> token{'linear', 'nonlinear'}: final layer activation, 'linear' for regression tasks
-            - transpose -> boolean: as name
+            - transpose -> boolean: whether to use normal or transpose convolution
             - kernel_size -> int or tuple: convolutional kernel size
-            - num_layers -> int: as name
+            - num_layers -> int: number of convolutional layers in block
             - filter_steps -> token{'linear','first','last'}: determines where in the block the filters inflate
                                                             channels (learn abstraction info)
-            - padding -> token{'same', 'valid', 'valid_stack'} or tuple(int) or int: padding to use in convolution layers.
-                                                -> 'same': pads with same convolution
-                                                -> 'valid': pads for valid convolution on all dimensions
-                                                -> 'valid_stack': pads for valid convolution on xy dims (-1, -2), 
-                                                                same on z dim (-3).
-                                                -> tuple (int): pads above and below dimensions according to tuple-specified length
-                                                -> int: pads above and below all dimensions according to int length
         '''
 
         super(ConvBlock3D, self).__init__()
@@ -56,9 +58,9 @@ class ConvBlock3D(nn.Module):
         self.filter_steps = filter_steps
         
         #---- Handle Padding ----#
-        self.pad_type = padding
-        self.padding = padding
-        if padding == 'valid_stack':
+        self.pad_type = 'same'
+        self.padding = 'same'
+        if self.padding == 'valid_stack':
             ks = kernel_size
             self.padding = (ks[0]//2, 0, 0)
         
@@ -68,25 +70,36 @@ class ConvBlock3D(nn.Module):
             for i in range(self.num_layers):
                 self.drop_list.append(nn.Dropout2d(int(self.dropout)))
         
+        #---- Init linear filter steps ----#
+        steps = np.linspace(in_filters, out_filters, num_layers+1).astype(int)
+        
         
         #----- Init Normalization Layers -----#
         #      => note: prefer batch normalization, but normalization can be mixed
         #
         self.norm_list = [None for i in range(num_layers)]
-        if norm != 'none':
-            if norm == 'batch':
-                for i in range(self.num_layers):
-                    self.norm_list[i] = nn.BatchNorm3d(out_filters)
-            elif norm == 'instance':
-                for i in range(self.num_layers):
-                    self.norm_list[i] = nn.InstanceNorm3d(out_filters, affine=True)
-            elif norm == 'mixed':
-                for i in range(self.num_layers):
-                    if i < self.num_layers//2:
-                        self.norm_list[i] = nn.BatchNorm3d(out_filters)
+        if self.norm == 'batch':
+            for i in range(self.num_layers):
+                if self.filter_steps == 'linear':
+                    self.norm_list[i] = nn.BatchNorm3d(steps[i+1])
+                elif self.filter_steps == 'first':
+                    self.norm_list[i] = nn.BatchNorm3d(steps[-1])
+                elif self.filter_steps == 'last':
+                    if i < self.num_layers - 1:
+                        self.norm_list[i] = nn.BatchNorm3d(steps[0])
                     else:
-                        self.norm_list[i] = nn.InstanceNorm3d(out_filters, affine=True)
-
+                        self.norm_list[i] = nn.BatchNorm3d(steps[-1])
+        elif self.norm == 'instance':
+            for i in range(self.num_layers):
+                if self.filter_steps == 'linear':
+                    self.norm_list[i] = nn.InstanceNorm3d(steps[i+1])
+                elif self.filter_steps == 'first':
+                    self.norm_list[i] = nn.InstanceNorm3d(steps[-1])
+                elif self.filter_steps == 'last':
+                    if i < self.num_layers - 1:
+                        self.norm_list[i] = nn.InstanceNorm3d(steps[0])
+                    else:
+                        self.norm_list[i] = nn.InstanceNorm3d(steps[-1])
         self.register_modules(self.norm_list, f'{norm}_norm')
         
         
@@ -101,50 +114,68 @@ class ConvBlock3D(nn.Module):
         #-------#
         
         self.conv_list = []
-        steps = np.linspace(in_filters, out_filters, num_layers).astype(int)
         if self.filter_steps == 'linear':
-            if self.transpose:
-                for i in range(self.num_layers):
-                    depth_pair = (steps[i], steps[i+1]) if i+1 < num_layers else (steps[i],steps[i])
-                    self.conv_list.append(nn.ConvTranspose3d(depth_pair[0], depth_pair[1], kernel_size=kernel_size, padding=self.padding))
-            else:
-                for i in range(self.num_layers):
-                    depth_pair = (steps[i], steps[i+1]) if i+1 < num_layers else (steps[i],steps[i])
-                    self.conv_list.append(nn.Conv3d(depth_pair[0], depth_pair[1], kernel_size=kernel_size, padding=self.padding))
+            for i in range(self.num_layers):
+                depth_pair = (steps[i], steps[i+1]) if i+1 < num_layers else (steps[i],steps[-1])
+                if self.transpose:
+                    self.conv_list.append(nn.ConvTranspose3d(depth_pair[0], depth_pair[1], 
+                                                            kernel_size=kernel_size, 
+                                                            padding=self.padding))
+                else:
+                    self.conv_list.append(nn.Conv3d(depth_pair[0], depth_pair[1], 
+                                                kernel_size=kernel_size, 
+                                                padding=self.padding))      
                     
         elif self.filter_steps == 'first':
             if self.transpose:
                 for i in range(self.num_layers):
                     if i == 0:
-                        self.conv_list.append(nn.ConvTranspose3d(in_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.ConvTranspose3d(in_filters, out_filters, 
+                                                                 kernel_size=kernel_size, 
+                                                                 padding=self.padding))
                     else:
-                        self.conv_list.append(nn.ConvTranspose3d(out_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.ConvTranspose3d(out_filters, out_filters, 
+                                                                 kernel_size=kernel_size, 
+                                                                 padding=self.padding))
             else:
                 for i in range(self.num_layers):
                     if i == 0:
-                        self.conv_list.append(nn.Conv3d(in_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.Conv3d(in_filters, out_filters, 
+                                                        kernel_size=kernel_size, 
+                                                        padding=self.padding))
                     else:
-                        self.conv_list.append(nn.Conv3d(out_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.Conv3d(out_filters, out_filters, 
+                                                        kernel_size=kernel_size, 
+                                                        padding=self.padding))
                         
         elif self.filter_steps == 'last':
             if self.transpose:
                 for i in range(self.num_layers):
                     if i == self.num_layers-1:
-                        self.conv_list.append(nn.ConvTranspose3d(in_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.ConvTranspose3d(in_filters, out_filters, 
+                                                                 kernel_size=kernel_size, 
+                                                                 padding=self.padding))
                     else:
-                        self.conv_list.append(nn.ConvTranspose3d(out_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.ConvTranspose3d(in_filters, in_filters, 
+                                                                 kernel_size=kernel_size, 
+                                                                 padding=self.padding))
             else:
                 for i in range(self.num_layers):
                     if i == self.num_layers-1:
-                        self.conv_list.append(nn.Conv3d(in_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.Conv3d(in_filters, out_filters, 
+                                                        kernel_size=kernel_size, 
+                                                        padding=self.padding))
                     else:
-                        self.conv_list.append(nn.Conv3d(out_filters, out_filters, kernel_size=kernel_size, padding=self.padding))
+                        self.conv_list.append(nn.Conv3d(in_filters, in_filters, 
+                                                        kernel_size=kernel_size, 
+                                                        padding=self.padding))
         self.register_modules(self.conv_list, 'Conv3d')
         
     
         #----- Init Residual Layer -----#
         # Note that convolution is only used in residual layer when block is shrinking feature space (decoder)
-        self.resid_conv = nn.Conv3d(self.in_filters, self.out_filters, kernel_size=1, padding=0)
+        # Placed inside list to hide from PyTorch -- Not a learnable parameter
+        self.resid_conv = [nn.Conv3d(self.in_filters, self.out_filters, kernel_size=1, padding=0)]
         
         
         #----- Init Activation Layers -----#
@@ -176,7 +207,6 @@ class ConvBlock3D(nn.Module):
         '''
         
         x_0 = x
-        
         for i in range(self.num_layers):
             x = self.conv_list[i](x)
             if self.dropout:
@@ -190,7 +220,7 @@ class ConvBlock3D(nn.Module):
         if self.residual:
             #pad feature dimension
             if self.in_filters > self.out_filters:
-                x_0 = self.resid_conv(x_0)
+                x_0 = self.resid_conv[0](x_0)
             elif self.in_filters < self.out_filters:
                 x_0 = F.pad(x_0, (*[0]*6, self.out_filters-self.in_filters,*[0]*3), mode = 'constant', value = 0)
                 

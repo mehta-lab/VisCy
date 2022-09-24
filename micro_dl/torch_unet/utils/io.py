@@ -22,14 +22,17 @@ def unique_tags(directory):
             tags[unique_tag + '.' + f_type] += 1
     return tags
 
-def show_progress_bar(dataloader, current, process = 'training'):
+def show_progress_bar(dataloader, current, process = 'training', interval = 1):
     '''
     Utility function to print tensorflow-like progress bar.
     
-    :param TorchDataloader dataloader: dataloader currently being processed
+    :param iterable dataloader: dataloader currently being processed
     :param int current: current index in dataloader
     :param str proces: current process being performed
+    :param int interval: interval at which to update progress bar
     '''
+    if current % interval != 0:
+        return
     current += 1
     bar_length = 50
     fraction_computed = current/dataloader.__len__()
@@ -38,7 +41,7 @@ def show_progress_bar(dataloader, current, process = 'training'):
     loading_string = '='*int(bar_length*fraction_computed) + '>' + '_'*int(bar_length*(1-fraction_computed))
     output_string = f'\t {process} {current}/{dataloader.__len__()} [{loading_string}] ({int(fraction_computed * 100)}%)'
     
-    if fraction_computed < 1:
+    if fraction_computed < (dataloader.__len__() - interval)/dataloader.__len__():
         print(output_string, end='\r')
     else:
         print(output_string)
