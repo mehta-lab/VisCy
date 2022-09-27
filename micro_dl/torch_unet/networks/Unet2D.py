@@ -86,7 +86,7 @@ class Unet2d(nn.Module):
         self.up_list = []
         if up_mode == 'bilinear':
             for i in range(num_blocks):
-                self.up_list.append(lambda x: nn.Upsample(x, mode=up_mode, scale_factor=2, align_corners=False))
+                self.up_list.append(nn.Upsample(mode=up_mode, scale_factor=2, align_corners=False))
         elif up_mode == 'conv':
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement

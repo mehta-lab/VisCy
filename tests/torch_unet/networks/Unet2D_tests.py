@@ -1,4 +1,3 @@
-# %%
 import collections
 import torch
 import numpy as np
@@ -222,16 +221,3 @@ class TestUnet2d(unittest.TestCase):
         Runs test with every possible block configuration. 
         '''
         self._all_test_configurations(test = 'failing')
-
-# %%
-tester = TestUnet2d()
-print('testing failing...')
-tester.test_failing()
-# %%
-print('testing passing...')
-tester.test_passing()
-# %%
-print('testing residual...')
-tester.test_residual()
-
-# %%
