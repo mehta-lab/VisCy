@@ -8,8 +8,16 @@ class Unet2d(nn.Module):
     def __name__(self):
         return 'Unet2d'
     
-    def __init__(self, in_channels = 1, out_channels = 1, out_xy = (256,256), residual = False, down = 'avgpool', up = 'bilinear',
-                 activation = 'relu', num_blocks = 4, task = 'seg', num_filters = []):
+    def __init__(self,
+                 in_channels = 1,
+                 out_channels = 1,
+                 kernel_size = (3,3),
+                 residual = False, 
+                 dropout = 0.2,
+                 num_blocks = 4,
+                 num_block_layers = 3,
+                 num_filters = [],
+                 task = 'seg'):
         '''
         Instance of 2D Unet. Implementedfor e with variable input/output channels and depth (block numbers).
         Follows 2D UNet Architecture: 
@@ -19,22 +27,35 @@ class Unet2d(nn.Module):
         Parameters
             - in_channels -> int: number of feature channels in
             - out_channels -> int: number of feature channels out
-            - out_xyz -> tuple(int, int, int): dimension of z, x, y channels in output
+            - kernel_size -> int or tuple(int, int): size of x and y dimensions of conv kernels in blocks
             - residual -> boolean: see name
-            - down -> token{'avgpool','maxpool','conv'}: type of downsampling in encoder path
-            - up -> token{'bilinear','tconv','conv'}: type of upsampling in decoder path
+            - down_mode -> token{'avgpool','maxpool','conv'}: type of downsampling in encoder path
+            - up_mode -> token{'bilinear','tconv','conv'}: type of upsampling in decoder path
             - activation -> token{'relu','elu','selu','leakyrelu'}: activation function to use in convolutional blocks
             - num_blocks -> int: number of convolutional blocks on encoder and decoder paths
+            - num_block_layers -> int: number of layers per block
             - num_filters -> list[int]: list of filters/feature levels at each conv block depth
             - task -> token{'recon','seg','reg'}: network task (for virtual staining this is regression)
+            - bottom_block_spatial -> boolean: whether or not the bottom feature compression block learns spatial information as well
             
         '''
         
         super(Unet2d, self).__init__()
-        self.num_blocks = num_blocks
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
         self.residual = residual
+        self.dropout = dropout
+        self.num_blocks = num_blocks
+        self.num_block_layers = num_block_layers
         self.task = task
-        self.out_xy = out_xy
+        
+         #----- set static parameters -----#
+        self.block_padding = 'same'
+        down_mode = 'avgpool' #TODO set static avgpool
+        up_mode = 'bilinear' #TODO set static trilinear
+        activation = 'relu' #TODO set static relu
+        self.bottom_block_spatial = False #TODO set static
         
         #----- Standardize Filter Sequence -----#
         if len(num_filters) != 0:
@@ -49,13 +70,13 @@ class Unet2d(nn.Module):
             
         #----- Downsampling steps -----#
         self.down_list = []
-        if down == 'maxpool':
+        if down_mode == 'maxpool':
             for i in range(num_blocks):
                 self.down_list.append(nn.MaxPool2d(kernel_size=2))
-        elif down == 'avgpool':
+        elif down_mode == 'avgpool':
             for i in range(num_blocks):
                 self.down_list.append(nn.AvgPool2d(kernel_size=2))
-        elif down == 'conv':
+        elif down_mode == 'conv':
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement.
         self.register_modules(self.down_list, 'down_samp')
@@ -63,45 +84,51 @@ class Unet2d(nn.Module):
         
         #----- Upsampling steps -----#
         self.up_list = []
-        if up == 'bilinear':
+        if up_mode == 'bilinear':
             for i in range(num_blocks):
-                self.up_list.append(lambda x: nn.functional.interpolate(x, mode=up, scale_factor=2))
-        elif up == 'conv':
+                self.up_list.append(lambda x: nn.Upsample(x, mode=up_mode, scale_factor=2, align_corners=False))
+        elif up_mode == 'conv':
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement
-        elif up == 'tconv':
+        elif up_mode == 'tconv':
             raise NotImplementedError('Not yet implemented!')
             #TODO: implement
+        else:
+            raise NotImplementedError(f'Upsampling mode \'{up_mode}\' not supported.')
         
         
         #----- Convolutional blocks -----# Forward Filters [16, 32, 64, 128, 256] -> Backward Filters [128+256, 64+128, 32+64, 16+32, 1]
         self.down_conv_blocks = []
         for i in range(num_blocks):
-            self.down_conv_blocks.append(ConvBlock2D(forward_filters[i], forward_filters[i+1], residual = self.residual, activation = activation))
+            self.down_conv_blocks.append(ConvBlock2D(forward_filters[i], forward_filters[i+1], 
+                                                     dropout=self.dropout, residual = self.residual, activation = activation,
+                                                     kernel_size = self.kernel_size, num_layers=self.num_block_layers))
         self.register_modules(self.down_conv_blocks, 'down_conv_block')
         
-        self.bottom_transition_block = ConvBlock2D(self.num_filters[-2], self.num_filters[-1], residual = self.residual, activation = activation)
+        self.bottom_transition_block = ConvBlock2D(self.num_filters[-2], self.num_filters[-1], 
+                                                   dropout=self.dropout, residual = self.residual, activation = activation,
+                                                   kernel_size = self.kernel_size, num_layers=self.num_block_layers)
 
         self.up_conv_blocks = []
         for i in range(num_blocks):
-            self.up_conv_blocks.append(ConvBlock2D(backward_filters[i], forward_filters[-(i+2)], residual = self.residual, activation = activation))
+            self.up_conv_blocks.append(ConvBlock2D(backward_filters[i], forward_filters[-(i+2)],
+                                                   dropout=self.dropout, residual = self.residual, activation = activation,
+                                                   kernel_size = self.kernel_size, num_layers=self.num_block_layers))
         self.register_modules(self.up_conv_blocks, 'up_conv_block')            
-            
-            
-        #----- Network-level residual-----#
-        if self.residual:
-            self.conv_resid = ConvBlock2D(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
-        else:
-            self.conv_resid = ConvBlock2D(self.num_filters[0], out_channels, residual = self.residual, activation = activation, num_layers = 1)
         
         
         #----- Terminal Block and Activation Layer -----#
         # 
         if self.task == 'reg':
-            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels, residual = self.residual, activation = 'linear', num_layers = 1)
-            self.linear_activation = nn.Linear(*self.out_xy)
+            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels,
+                                              dropout = self.dropout, residual = self.residual,
+                                              activation = 'linear', num_layers = 1, norm='none',
+                                              kernel_size=self.kernel_size)
         else:
-            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels, residual = self.residual, activation = activation, num_layers = 1)
+            self.terminal_block = ConvBlock2D(forward_filters[1], out_channels,
+                                              dropout = self.dropout, residual = self.residual,
+                                              activation = activation, num_layers = 1, norm='none',
+                                              kernel_size=self.kernel_size)
         
     def forward(self, x):
         '''
@@ -115,6 +142,11 @@ class Unet2d(nn.Module):
             => terminal block collapses to output dimensions
 
         '''
+        #handle input exceptions
+        assert x.shape[-1] == x.shape[-2], 'Input must be square in xy'
+        assert x.shape[-3] == self.in_channels, f'Input channels must equal network' \
+            f'input channels: {self.in_channels}'
+        
         #encoder
         skip_tensors = []
         for i in range(self.num_blocks):
@@ -133,8 +165,6 @@ class Unet2d(nn.Module):
         
         # output channel collapsing layer
         x = self.terminal_block(x)
-        if self.task == 'reg':
-            x = self.linear_activation(x)
         
         return x
     

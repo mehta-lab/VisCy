@@ -45,6 +45,18 @@ class ConvBlock2D(nn.Module):
         self.num_layers = num_layers
         self.filter_steps = filter_steps
         
+        #---- Handle Kernel ----#
+        ks = kernel_size
+        if isinstance(ks, int):
+            assert ks%2==1, 'Kernel dims must be odd'
+        elif isinstance(ks, tuple):
+            for i in range(len(ks)):
+                assert ks[i]%2==1,'Kernel dims must be odd'
+            assert i == 1, 'kernel_size length must be 2'
+        else:
+            raise AttributeError("'kernel_size' must be either int or tuple")
+        self.kernel_size = kernel_size
+        
         #----- Init Dropout -----#
         if self.dropout:
             self.drop_list = []
@@ -179,6 +191,8 @@ class ConvBlock2D(nn.Module):
         elif self.activation == 'selu':
             for i in range(self.num_layers):
                 self.act_list.append(nn.SELU())
+        elif self.activation != 'linear':
+            raise NotImplementedError(f'Activation type {self.activation} not supported.')
         self.register_modules(self.act_list, f'{self.activation}_act')
     
     def forward(self, x):

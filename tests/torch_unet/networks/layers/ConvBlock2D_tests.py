@@ -30,10 +30,10 @@ class TestConvBlock2D(unittest.TestCase):
         self.configs = {'dropout': (False, 0.25),
                         'norm': ('batch', 'instance'),
                         'residual': (False, True),
-                        'activation': ('relu', 'leakyrelu', 'elu', 'selu'),
+                        'activation': ('relu', 'leakyrelu', 'selu'),
                         'transpose': [False], # True yields padding error in pytorch 1.10
-                        'kernel_size': (1,3,(3,3),(5,3)),
-                        'num_layers': (1,3,5),
+                        'kernel_size': (1,(3,3),(5,3)),
+                        'num_layers': (1,5),
                         'filter_steps': ('linear','first','last')}
     
     def _get_outputs(self, kwargs):
@@ -58,7 +58,8 @@ class TestConvBlock2D(unittest.TestCase):
             input_, output = input_.detach().numpy(), output.detach().numpy()
             exp_out = output
             return input_, output, exp_out
-        except:
+        except Exception as e:
+            self.excep = e
             input_.detach().numpy()
             return input_, np.asarray([0]), np.asarray([1])
         
@@ -91,7 +92,8 @@ class TestConvBlock2D(unittest.TestCase):
                 inputs.append(input_)
                 outputs.append(output)
                 exp_out_shapes.append(exp_out_shape)
-            except:
+            except Exception as e:
+                self.excep = e
                 inputs.append(input_)
                 outputs.append(False)
                 exp_out_shapes.append(exp_out_shape if pass_ else False)
@@ -122,7 +124,8 @@ class TestConvBlock2D(unittest.TestCase):
             resid_block = ConvBlock2D(in_filters, out_filters, *resid_kwargs)
             
             return block.parameters(), resid_block.parameters()
-        except:
+        except Exception as e:
+            self.excep = e
             return None, None
     
     def _all_test_configurations(self, test, verbose = True):
@@ -157,6 +160,7 @@ class TestConvBlock2D(unittest.TestCase):
                     np.testing.assert_array_equal(out_shapes, exp_out_shapes, fail_message)
                 except:
                     failed_tests[i].append(args)
+                    failed_tests[i].append(self.excep)
             if test == 'failing':
                 #test failing shapes
                 _, outputs, exp_out_shapes = self._get_input_shapes(args, False)
@@ -168,6 +172,7 @@ class TestConvBlock2D(unittest.TestCase):
                     np.testing.assert_array_equal(out_shapes, exp_out_shapes, fail_message)
                 except:
                     failed_tests[i].append(args)
+                    failed_tests[i].append(self.excep)
             if test == 'residual':
                 #test residual
                 resid_index = 2
@@ -178,6 +183,7 @@ class TestConvBlock2D(unittest.TestCase):
                         np.testing.assert_equal(len(list(params)), len(list(resid_params)), fail_message)
                     except:
                         failed_tests[i].append(args)
+                        failed_tests[i].append(self.excep)
             
             io_utils.show_progress_bar(configs_list, i, process = 'testing', interval = 10)
             
@@ -192,7 +198,7 @@ class TestConvBlock2D(unittest.TestCase):
     
     def test_residual(self):
         '''
-        Test residual functionality 2D
+        Test residual functionality 2D ConvBlock
         
         Test that residual blocks do not contain additional parameters
         Runs test with every possible block configuration. 
@@ -201,7 +207,7 @@ class TestConvBlock2D(unittest.TestCase):
     
     def test_passing(self):
         '''
-        Test passing input functionality 2D
+        Test passing input functionality 2D ConvBlock
         
         Test input-output functionality and expected output shape of all passing input shapes.
         Runs test with every possible block configuration. 
@@ -210,7 +216,7 @@ class TestConvBlock2D(unittest.TestCase):
         
     def test_failing(self):
         '''
-        Test failing input handling 2D
+        Test failing input handling 2D ConvBlock
         
         Checks to see if all failing input types are caught by conv block. 
         Runs test with every possible block configuration. 

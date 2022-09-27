@@ -8,7 +8,7 @@ import numpy as np
 # convolutional block
 class ConvBlock3D(nn.Module):
     def __init__(self, in_filters, out_filters, dropout=False, norm = 'batch', residual=True, activation='relu',
-                 transpose=False, kernel_size = (3,3,3), num_layers = 3, filter_steps = 'first'):
+                 transpose=False, kernel_size = (3,3,3), num_layers = 3, filter_steps = 'first', padding = None):
 
         '''
         Convolutional block for lateral layers in Unet. This block only accepts tensors of dimensions in order [...,z,x,y]
@@ -43,6 +43,8 @@ class ConvBlock3D(nn.Module):
             - num_layers -> int: number of convolutional layers in block
             - filter_steps -> token{'linear','first','last'}: determines where in the block the filters inflate
                                                             channels (learn abstraction info)
+            - padding -> tuple(int,int,int): Overrides use of 'same' convolutional padding (if necessary for 
+                                            transition block) with padding in z,y,x dimensions respectively
         '''
 
         super(ConvBlock3D, self).__init__()
@@ -54,12 +56,28 @@ class ConvBlock3D(nn.Module):
         self.activation = activation
         self.transpose = transpose
         self.num_layers = num_layers
-        self.kernel_size = kernel_size
         self.filter_steps = filter_steps
+        
+        #---- Handle Kernel ----#
+        ks = kernel_size
+        if isinstance(ks, int):
+            assert ks%2==1, 'Kernel dims must be odd'
+        elif isinstance(ks, tuple):
+            for i in range(len(ks)):
+                assert ks[i]%2==1,'Kernel dims must be odd'
+            assert i == 2, 'kernel_size length must be 3'
+        else:
+            raise AttributeError("'kernel_size' must be either int or tuple")
+        self.kernel_size = kernel_size
         
         #---- Handle Padding ----#
         self.pad_type = 'same'
-        self.padding = 'same'
+        if not padding:
+            self.padding = 'same'
+        else:
+            self.padding = padding
+        
+        #note: deprecated
         if self.padding == 'valid_stack':
             ks = kernel_size
             self.padding = (ks[0]//2, 0, 0)
@@ -192,6 +210,8 @@ class ConvBlock3D(nn.Module):
         elif self.activation == 'selu':
             for i in range(self.num_layers):
                 self.act_list.append(nn.SELU())
+        elif self.activation != 'linear':
+            raise NotImplementedError(f'Activation type {self.activation} not supported.')
         self.register_modules(self.act_list, f'{self.activation}_act')
     
     def forward(self, x):
@@ -205,6 +225,10 @@ class ConvBlock3D(nn.Module):
             if input channels are greater than output channels, we use a 1x1 convolution on input to get desired feature channels
             if input channels are less than output channels, we zero-pad input channels to output channel size
         '''
+        
+        #--- Handle Kernel ---#
+        assert x.shape[-2] >= self.kernel_size[-2], f'Input depth of size {x.shape} tensor' \
+            f'must be greater than or equal to z size of kernel: {self.kernel_size}'
         
         x_0 = x
         for i in range(self.num_layers):

@@ -31,10 +31,10 @@ class TestConvBlock3D(unittest.TestCase):
         self.configs = {'dropout': (False, 0.25),
                         'norm': ('batch', 'instance'),
                         'residual': (True, False),
-                        'activation': ('relu', 'leakyrelu', 'elu', 'selu'),
+                        'activation': ('relu', 'leakyrelu', 'selu'),
                         'transpose': [False], # True yields padding error in pytorch 1.10
                         'kernel_size': (1,(3,3,3),(3,3,5)),
-                        'num_layers': (1,3,5),
+                        'num_layers': (1,5),
                         'filter_steps': ('linear','first','last')}
     
     def _get_outputs(self, kwargs):
@@ -194,7 +194,7 @@ class TestConvBlock3D(unittest.TestCase):
     
     def test_residual(self):
         '''
-        Test residual functionality 3D
+        Test residual functionality 3D ConvBlock
         
         Test that residual blocks do not contain additional parameters
         Runs test with every possible block configuration. 
@@ -203,7 +203,7 @@ class TestConvBlock3D(unittest.TestCase):
     
     def test_passing(self):
         '''
-        Test passing input functionality 3D
+        Test passing input functionality 3D ConvBlock
         
         Test input-output functionality and expected output shape of all passing input shapes.
         Runs test with every possible block configuration. 
@@ -212,7 +212,7 @@ class TestConvBlock3D(unittest.TestCase):
         
     def test_failing(self):
         '''
-        Test failing input handling 3D
+        Test failing input handling 3D ConvBlock
         
         Checks to see if all failing input types are caught by conv block. 
         Runs test with every possible block configuration. 
