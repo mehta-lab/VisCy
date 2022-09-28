@@ -193,7 +193,7 @@ class ConvBlock3D(nn.Module):
         #----- Init Residual Layer -----#
         # Note that convolution is only used in residual layer when block is shrinking feature space (decoder)
         # Placed inside list to hide from PyTorch -- Not a learnable parameter
-        self.resid_conv = [nn.Conv3d(self.in_filters, self.out_filters, kernel_size=1, padding=0)]
+        self.resid_conv = nn.Conv3d(self.in_filters, self.out_filters, kernel_size=1, padding=0)
         
         
         #----- Init Activation Layers -----#
@@ -244,7 +244,7 @@ class ConvBlock3D(nn.Module):
         if self.residual:
             #pad feature dimension
             if self.in_filters > self.out_filters:
-                x_0 = self.resid_conv[0](x_0)
+                x_0 = self.resid_conv(x_0)
             elif self.in_filters < self.out_filters:
                 x_0 = F.pad(x_0, (*[0]*6, self.out_filters-self.in_filters,*[0]*3), mode = 'constant', value = 0)
                 

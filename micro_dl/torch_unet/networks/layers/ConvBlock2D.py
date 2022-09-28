@@ -172,9 +172,9 @@ class ConvBlock2D(nn.Module):
         
         #----- Init Residual Layer -----#
         # Note that convolution is only used in residual layer when block is shrinking feature space (decoder)
-        self.resid_conv = [nn.Conv2d(self.in_filters, self.out_filters, 
+        self.resid_conv = nn.Conv2d(self.in_filters, self.out_filters, 
                                      kernel_size=1, 
-                                     padding=0)]
+                                     padding=0)
         
         
         #----- Init Activation Layers -----#
@@ -221,7 +221,7 @@ class ConvBlock2D(nn.Module):
         #residual summation comes before final activation layer
         if self.residual:
             if self.in_filters > self.out_filters:
-                x_0 = self.resid_conv[0](x_0)
+                x_0 = self.resid_conv(x_0)
             elif self.in_filters < self.out_filters:
                 x_0 = F.pad(x_0, (*[0]*4, self.out_filters-self.in_filters,*[0]*3), mode = 'constant', value = 0)
             x = torch.add(x_0, x)

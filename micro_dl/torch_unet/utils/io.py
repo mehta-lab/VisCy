@@ -31,11 +31,12 @@ def show_progress_bar(dataloader, current, process = 'training', interval = 1):
     :param str proces: current process being performed
     :param int interval: interval at which to update progress bar
     '''
-    if current % interval != 0:
-        return
     current += 1
     bar_length = 50
     fraction_computed = current/dataloader.__len__()
+    
+    if current % interval != 0 and fraction_computed < 1:
+        return
     
     pointer = '>' if fraction_computed < 1 else '='
     loading_string = '='*int(bar_length*fraction_computed) + '>' + '_'*int(bar_length*(1-fraction_computed))

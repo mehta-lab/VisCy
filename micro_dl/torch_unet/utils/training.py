@@ -1,3 +1,4 @@
+from platform import architecture
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -156,13 +157,20 @@ class TorchTrainer():
                 io_utils.show_progress_bar(self.train_dataloader, current)
                 
                 #get sample and target (remember we remove the extra batch dimension)
-                input_ = minibatch[0][0].to(self.device).float()
-                target_ = minibatch[1][0].to(self.device).float()
-                mask = minibatch[2][0].to(self.device).float()
+                if self.network_config['architecture'] == '2D': #TODO this is temporary fix. resolve this
+                    input_ = minibatch[0][0].to(self.device).float()[...,0,:,:]
+                    target_ = minibatch[1][0].to(self.device).float()[...,0,:,:]
+                else:
+                    input_ = minibatch[0][0].to(self.device).float()
+                    target_ = minibatch[1][0].to(self.device).float()
                 
                 #if specified mask sample to get input and target
                 #TODO: change caching to include masked inputs since masks never change
                 if self.training_config['mask']:
+                    if self.network_config['architecture'] == '2D':
+                        mask = minibatch[2][0].to(self.device).float()[...,0,:,:]
+                    else:
+                        mask = minibatch[2][0].to(self.device).float()
                     input_ = torch.mul(input_, mask)
                     target_ = torch.mul(target_, mask)
 
@@ -229,13 +237,20 @@ class TorchTrainer():
             io_utils.show_progress_bar(self.test_dataloader, current, process = 'testing')
             
             #get input/target
-            input_ = minibatch[0][0].to(self.device).float()
-            target_ = minibatch[1][0].to(self.device).float()
+            if self.network_config['architecture'] == '2D': #TODO this is temporary fix. resolve this
+                input_ = minibatch[0][0].to(self.device).float()[...,0,:,:]
+                target_ = minibatch[1][0].to(self.device).float()[...,0,:,:]
+            else:
+                input_ = minibatch[0][0].to(self.device).float()
+                target_ = minibatch[1][0].to(self.device).float()
             sample, target = input_, target_
             
             # if mask provided, mask sample to get input and target
             if mask_override:
-                mask_ = minibatch[2][0].to(self.device).float()
+                if self.network_config['architecture'] == '2D':
+                    mask_ = minibatch[2][0].to(self.device).float()[...,0,:,:]
+                else:
+                    mask_ = minibatch[2][0].to(self.device).float()
                 input_ = torch.mul(input_, mask_)
                 target_ = torch.mul(target_, mask_)
             
@@ -255,13 +270,14 @@ class TorchTrainer():
         avg_loss = np.sum(test_loss)/self.test_dataloader.__len__()
         
         #save test figures
+        arch = self.network_config['architecture']
         fig, ax = plt.subplots(1,3,figsize = (18,6))
-        ax[0].imshow(np.mean(samples.pop(), 2)[0,0], cmap = 'gray')
+        ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else np.mean(samples.pop(), 2)[0], cmap = 'gray')
         ax[0].set_title('mean input phase image')
-        ax[1].imshow(targets.pop()[0,0,0])
+        ax[1].imshow(targets.pop()[0,0,0] if arch == '2.5D' else targets.pop()[0,0])
         ax[1].set_title('target')
         ax[2].set_title('prediction')
-        ax[2].imshow(outputs.pop()[0,0,0])
+        ax[2].imshow(outputs.pop()[0,0,0] if arch == '2.5D' else outputs.pop()[0,0])
         for i in range(3):
             ax[i].axis('off')
         plt.tight_layout()
