@@ -139,7 +139,7 @@ class Unet25d(nn.Module):
                                               activation = activation, kernel_size = (1,3,3), num_layers = 1)
             
             
-    def forward(self, x):
+    def forward(self, x, validate_input=False):
         '''
         Forward call of network
             
@@ -151,17 +151,20 @@ class Unet25d(nn.Module):
         
         Params:
             - x -> torch.tensor: input image stack
+            - validate_input -> bool: Deactivates assertions which are redundat if forward pass is being traced by
+                                tensorboard writer. 
 
         '''
         #handle input exceptions
-        assert x.shape[-1] == x.shape[-2], 'Input must be square in xy'
-        assert x.shape[-4] == self.in_channels, f'Input channels must equal network' \
-            f'input channels: {self.in_channels}'
+        if validate_input:
+            assert x.shape[-1] == x.shape[-2], 'Input must be square in xy'
+            assert x.shape[-4] == self.in_channels, f'Input channels must equal network' \
+                f'input channels: {self.in_channels}'
         
         #encoder
         skip_tensors = []
         for i in range(self.num_blocks):
-            x = self.down_conv_blocks[i](x)
+            x = self.down_conv_blocks[i](x, validate_input = validate_input)
             skip_tensors.append(x)
             x = self.down_list[i](x)
         
@@ -176,7 +179,7 @@ class Unet25d(nn.Module):
         for i in range(self.num_blocks):
             x = self.up_list[i](x)
             x = torch.cat([x, skip_tensors[-1*(i+1)]], 1)
-            x = self.up_conv_blocks[i](x)            
+            x = self.up_conv_blocks[i](x, validate_input = validate_input)            
         
         # output channel collapsing layer
         x = self.terminal_block(x)

@@ -172,6 +172,7 @@ class ConvBlock2D(nn.Module):
         
         #----- Init Residual Layer -----#
         # Note that convolution is only used in residual layer when block is shrinking feature space (decoder)
+        # Unregistered -- Not a learnable parameter
         self.resid_conv = nn.Conv2d(self.in_filters, self.out_filters, 
                                      kernel_size=1, 
                                      padding=0)
@@ -195,7 +196,7 @@ class ConvBlock2D(nn.Module):
             raise NotImplementedError(f'Activation type {self.activation} not supported.')
         self.register_modules(self.act_list, f'{self.activation}_act')
     
-    def forward(self, x):
+    def forward(self, x, validate_input = False):
         '''
         Forward call of convolutional block
             - x -> Torch.tensor: sample image stack
@@ -205,8 +206,14 @@ class ConvBlock2D(nn.Module):
         Residual blocks:
             if input channels are greater than output channels, we use a 1x1 convolution on input to get desired feature channels
             if input channels are less than output channels, we zero-pad input channels to output channel size
+            
+        Params:
+            - x -> torch.tensor: input tensor
+            - validate_input -> bool: Deactivates assertions which are redundat if forward pass is being traced by
+                                tensorboard writer. 
         '''
-        assert x.shape[-1] == x.shape[-2], 'Input to conv_block must be square'
+        if validate_input:
+            assert x.shape[-1] == x.shape[-2], 'Input to conv_block must be square'
         
         x_0 = x
         for i in range(self.num_layers):

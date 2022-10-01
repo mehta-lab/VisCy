@@ -44,6 +44,8 @@ class TorchTrainer():
             self.optimizer = optim.Adam
         else:
             self.optimizer = optim.SGD
+        #lr scheduler
+        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau
         #loss
         assert self.training_config['loss'] in {'mse', 'l1', 'cossim','cel'}, f'loss not supported. Try one of' \
             '\'mse\', \'mae\', \'cossim\', \'l1\''
@@ -56,8 +58,10 @@ class TorchTrainer():
         elif self.training_config['loss'] == 'cel':
             self.criterion = nn.CrossEntropyLoss()
         #device
-        assert self.training_config['device'] in {'cpu','gpu'}, 'device must be cpu or gpu'
-        if self.training_config['device'] == 'gpu':
+        assert self.training_config['device'] in {'cpu','gpu', *range(4)}, 'device must be cpu or gpu'
+        if isinstance(self.training_config['device'], int):
+            self.device = torch.device(f"cuda:{self.training_config['device']}")
+        elif self.training_config['device'] == 'gpu':
             self.device = torch.device('cuda')
         else:
             self.device = torch.device('cpu')
@@ -79,8 +83,8 @@ class TorchTrainer():
             readout = model.load_state_dict(torch.load(model_dir))
             print(readout)
         self.model = model
-        if self.training_config['device'] == 'gpu':
-            self.model.cuda()
+        
+        self.model.to(self.device)
         
     def generate_dataloaders(self) -> None:
         '''
@@ -141,9 +145,10 @@ class TorchTrainer():
         self.get_save_location()
         self.writer = SummaryWriter(log_dir = self.save_folder)
         
-        #init optimizer
+        #init optimizer and scheduler
         self.model.train()
         self.optimizer = self.optimizer(self.model.parameters(), lr = self.training_config['learning_rate'])
+        self.scheduler = self.scheduler(self.optimizer, patience = 10, mode='min', factor = 0.11)
         
         #train
         train_loss_list = []
@@ -157,25 +162,18 @@ class TorchTrainer():
                 io_utils.show_progress_bar(self.train_dataloader, current)
                 
                 #get sample and target (remember we remove the extra batch dimension)
-                if self.network_config['architecture'] == '2D': #TODO this is temporary fix. resolve this
-                    input_ = minibatch[0][0].to(self.device).float()[...,0,:,:]
-                    target_ = minibatch[1][0].to(self.device).float()[...,0,:,:]
-                else:
-                    input_ = minibatch[0][0].to(self.device).float()
-                    target_ = minibatch[1][0].to(self.device).float()
+                input_ = minibatch[0][0].to(self.device).float()
+                target_ = minibatch[1][0].to(self.device).float()
                 
                 #if specified mask sample to get input and target
                 #TODO: change caching to include masked inputs since masks never change
                 if self.training_config['mask']:
-                    if self.network_config['architecture'] == '2D':
-                        mask = minibatch[2][0].to(self.device).float()[...,0,:,:]
-                    else:
-                        mask = minibatch[2][0].to(self.device).float()
+                    mask = minibatch[2][0].to(self.device).float()
                     input_ = torch.mul(input_, mask)
                     target_ = torch.mul(target_, mask)
 
                 #run through model
-                output = self.model(input_)
+                output = self.model(input_, validate_input = True)
                 loss = self.criterion(output, target_)
                 train_loss += loss.item()
                 
@@ -183,7 +181,8 @@ class TorchTrainer():
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                
+            
+            self.scheduler.step(self.run_test(validate_mode=True))
             train_loss_list.append(train_loss/self.train_dataloader.__len__())
             
             #run testing cycle every 'testing_stride' epochs
@@ -201,7 +200,7 @@ class TorchTrainer():
             print(f'\t Epoch time: {time.time() - epoch_time}, Total_time: {time.time() - start}')
             print(' ')
         
-        #save loss figures
+        #save loss figures (overwrites previous)
         print(f'\t Training complete. Time taken: {time.time()-start}')
         print(f'\t Training results and testing predictions saved at: \n\t\t{self.save_folder}')
         fig = plt.figure(figsize = (14,7))
@@ -213,7 +212,7 @@ class TorchTrainer():
 
         self.writer.close()
     
-    def run_test(self, epoch, mask_override = False):
+    def run_test(self, epoch = 0, mask_override = False, validate_mode = False):
         '''
         Runs test on all samples in a test_dataloader. Equivalent to one epoch on test data without updating weights.
         Runs metrics on the test results (given in criterion) and saves the results in a save folder, if specified.
@@ -221,7 +220,8 @@ class TorchTrainer():
         Assumes that all tensors are on the GPU. If not, tensor devices can be specified through 'device' parameter.
 
         :param int epoch: training epoch test was run at
-        :param str mask_override: overrides the masking parameter for testing
+        :param bool mask_override: overrides the masking parameter for testing (for segmentation)
+        :param bool validate_mode: run in validation mode to just produce loss (for lr scheduler)
         :return float avg_loss: average testing loss per sample of entire test set
         '''
         #set the model to evaluation mode
@@ -232,30 +232,30 @@ class TorchTrainer():
         samples = []
         targets = []
         outputs = []
-        for current, minibatch in enumerate(self.test_dataloader):
-            #pretty printing
-            io_utils.show_progress_bar(self.test_dataloader, current, process = 'testing')
+        
+        #determine data source
+        if not validate_mode:
+            dataloader = self.test_dataloader
+        else:
+            dataloader = self.val_dataloader
+        
+        for current, minibatch in enumerate(dataloader):
+            if not validate_mode:
+                io_utils.show_progress_bar(dataloader, current, process = 'testing')
             
             #get input/target
-            if self.network_config['architecture'] == '2D': #TODO this is temporary fix. resolve this
-                input_ = minibatch[0][0].to(self.device).float()[...,0,:,:]
-                target_ = minibatch[1][0].to(self.device).float()[...,0,:,:]
-            else:
-                input_ = minibatch[0][0].to(self.device).float()
-                target_ = minibatch[1][0].to(self.device).float()
+            input_ = minibatch[0][0].to(self.device).float()
+            target_ = minibatch[1][0].to(self.device).float()
             sample, target = input_, target_
             
             # if mask provided, mask sample to get input and target
             if mask_override:
-                if self.network_config['architecture'] == '2D':
-                    mask_ = minibatch[2][0].to(self.device).float()[...,0,:,:]
-                else:
-                    mask_ = minibatch[2][0].to(self.device).float()
+                mask_ = minibatch[2][0].to(self.device).float()
                 input_ = torch.mul(input_, mask_)
                 target_ = torch.mul(target_, mask_)
             
             #run through model
-            output = self.model(input_)
+            output = self.model(input_, validate_input = True)
             loss = self.criterion(output, target_)
             test_loss.append(loss.item())
             
@@ -265,28 +265,29 @@ class TorchTrainer():
                 samples.append(rem(sample))
                 targets.append(rem(target))
                 outputs.append(rem(output))
-        
-        #get avg loss per sample from total loss
-        avg_loss = np.sum(test_loss)/self.test_dataloader.__len__()
-        
-        #save test figures
-        arch = self.network_config['architecture']
-        fig, ax = plt.subplots(1,3,figsize = (18,6))
-        ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else np.mean(samples.pop(), 2)[0], cmap = 'gray')
-        ax[0].set_title('mean input phase image')
-        ax[1].imshow(targets.pop()[0,0,0] if arch == '2.5D' else targets.pop()[0,0])
-        ax[1].set_title('target')
-        ax[2].set_title('prediction')
-        ax[2].imshow(outputs.pop()[0,0,0] if arch == '2.5D' else outputs.pop()[0,0])
-        for i in range(3):
-            ax[i].axis('off')
-        plt.tight_layout()
-        plt.savefig(os.path.join(self.save_folder, f'prediction_epoch_{epoch}.png'))
-        if self.plot:
-            plt.show()
+                
+        if not validate_mode:
+            #save test figures
+            arch = self.network_config['architecture']
+            fig, ax = plt.subplots(1,3,figsize = (18,6))
+            ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0], cmap = 'gray')
+            ax[0].set_title('mean input phase image')
+            ax[1].imshow(targets.pop()[0,0,0] if arch == '2.5D' else targets.pop()[0,0])
+            ax[1].set_title('target')
+            ax[2].set_title('prediction')
+            ax[2].imshow(outputs.pop()[0,0,0] if arch == '2.5D' else outputs.pop()[0,0])
+            for i in range(3):
+                ax[i].axis('off')
+            plt.tight_layout()
+            plt.savefig(os.path.join(self.save_folder, f'prediction_epoch_{epoch}.png'))
+            if self.plot:
+                plt.show()
         
         #set back to training mode
         self.model.train()
+        
+        #return average loss
+        avg_loss = np.sum(test_loss)/dataloader.__len__()
         return avg_loss 
 
     def save_model(self, epoch, avg_loss, sample):

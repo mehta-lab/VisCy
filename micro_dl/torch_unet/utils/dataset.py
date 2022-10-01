@@ -70,8 +70,8 @@ class TorchDataset(Dataset):
             tiles_meta = aux_utils.sort_meta_by_channel(tiles_meta)
             
             masked_loss = False
-            if masked_loss in trainer_config:
-                masked_loss = trainer_config['masked_loss']
+            # if 'masked_loss' in trainer_config:
+            #     masked_loss = trainer_config['masked_loss']
 
             all_datasets, split_samples = train.create_datasets(tiles_meta, tile_dir, dataset_config, 
                                                                 trainer_config, image_format, masked_loss)

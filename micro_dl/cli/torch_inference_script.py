@@ -1,3 +1,4 @@
+#%%
 import os
 import yaml
 import datetime
@@ -69,7 +70,7 @@ def check_save_folder(inf_cfig, prep_cfig):
             os.makedirs(save_dir)
         prep_cfig['save_folder_name'] = save_dir
         print(f'No save folder specified in inference config: automatically saving predictions in : \n\t{save_dir}')
-
+__name__ = 0
 if __name__ == '__main__':
     args = parse_args()
     torch_config = read_config(args.config)
@@ -99,3 +100,28 @@ if __name__ == '__main__':
     image_predictor = image_inf.ImagePredictor(train_config, inference_config, torch_predictor, 
                                                preprocess_config = preprocess_config)
     image_predictor.run_prediction()
+
+#%%
+torch_config = read_config('/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/09_30_2022_15_09/torch_config_2D.yml')
+#torch_config = read_config('/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2019_02_15_KidneyTissue_DLMBL_subset/09_30_2022_12_06/torch_config_25D.yml')
+device = torch.device('cuda:0')
+
+#read configuration parameters and metadata
+preprocess_config = read_config(torch_config['preprocess_config_path'])
+train_config = read_config(torch_config['train_config_path'])
+inference_config = read_config(torch_config['inference_config_path'])
+
+network_config = torch_config['model']
+
+#if no save_folder_name specified, automatically incur saving in data folder
+check_save_folder(inference_config, preprocess_config)
+
+#instantiate and prep TorchPredictor interfacing object
+torch_predictor = torch_inference_utils.TorchPredictor(network_config = network_config, device = device)
+torch_predictor.load_model_torch()
+    
+#instantiate ImagePredictor object and run inference
+image_predictor = image_inf.ImagePredictor(train_config, inference_config, torch_predictor, 
+                                            preprocess_config = preprocess_config)
+image_predictor.run_prediction()
+# %%

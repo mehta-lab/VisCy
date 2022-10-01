@@ -130,7 +130,7 @@ class Unet2d(nn.Module):
                                               activation = activation, num_layers = 1, norm='none',
                                               kernel_size=self.kernel_size)
         
-    def forward(self, x):
+    def forward(self, x, validate_input = False):
         '''
         Forward call of network
             - x -> Torch.tensor: input image stack
@@ -140,17 +140,22 @@ class Unet2d(nn.Module):
             => num_block 2D convolutional blocks, with upsampling between them (decoder)
             => skip connections between corresponding blocks on encoder and decoder paths
             => terminal block collapses to output dimensions
-
+            
+        Params:
+            - x -> torch.tensor: input image
+            - validate_input -> bool: Deactivates assertions which are redundat if forward pass is being traced by
+                                tensorboard writer. 
         '''
         #handle input exceptions
-        assert x.shape[-1] == x.shape[-2], 'Input must be square in xy'
-        assert x.shape[-3] == self.in_channels, f'Input channels must equal network' \
-            f'input channels: {self.in_channels}'
+        if validate_input:
+            assert x.shape[-1] == x.shape[-2], 'Input must be square in xy'
+            assert x.shape[-3] == self.in_channels, f'Input channels must equal network' \
+                f' input channels: {self.in_channels}'
         
         #encoder
         skip_tensors = []
         for i in range(self.num_blocks):
-            x = self.down_conv_blocks[i](x)
+            x = self.down_conv_blocks[i](x, validate_input = validate_input)
             skip_tensors.append(x)
             x = self.down_list[i](x)
         
@@ -161,7 +166,7 @@ class Unet2d(nn.Module):
         for i in range(self.num_blocks):
             x = self.up_list[i](x)
             x = torch.cat([x, skip_tensors[-1*(i+1)]], 1)
-            x = self.up_conv_blocks[i](x)
+            x = self.up_conv_blocks[i](x, validate_input = validate_input)
         
         # output channel collapsing layer
         x = self.terminal_block(x)

@@ -42,7 +42,7 @@ def show_progress_bar(dataloader, current, process = 'training', interval = 1):
     loading_string = '='*int(bar_length*fraction_computed) + '>' + '_'*int(bar_length*(1-fraction_computed))
     output_string = f'\t {process} {current}/{dataloader.__len__()} [{loading_string}] ({int(fraction_computed * 100)}%)'
     
-    if fraction_computed < (dataloader.__len__() - interval)/dataloader.__len__():
+    if fraction_computed <= (dataloader.__len__() - interval)/dataloader.__len__():
         print(output_string, end='\r')
     else:
         print(output_string)

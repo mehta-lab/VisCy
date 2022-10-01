@@ -50,8 +50,14 @@ class TorchPredictor():
         assert self.model != None or model != None, 'model must be specified in initiation or prediction call'
         if model == None:
             model = self.model
-        img_tensor = ds.ToTensor(device=self.device)(input_image)
-        pred = model(img_tensor)
+            
+        if self.network_config['architecture'] == '2.5D':
+            img_tensor = ds.ToTensor(device=self.device)(input_image)
+            pred = model(img_tensor)
+        elif self.network_config['architecture'] == '2D':
+            img_tensor = ds.ToTensor(device=self.device)(input_image)[...,0,:,:]
+            pred = torch.unsqueeze(model(img_tensor), -2)
+            
         return pred.detach().cpu().numpy()
 
     def predict_large_image_tiling(self, input_image, model = None):
