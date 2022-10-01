@@ -56,7 +56,7 @@ class TorchPredictor():
             pred = model(img_tensor)
         elif self.network_config['architecture'] == '2D':
             img_tensor = ds.ToTensor(device=self.device)(input_image)[...,0,:,:]
-            pred = torch.unsqueeze(model(img_tensor), -2)
+            pred = torch.unsqueeze(model(img_tensor), -3)
             
         return pred.detach().cpu().numpy()
 

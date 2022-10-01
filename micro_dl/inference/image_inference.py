@@ -106,10 +106,9 @@ class ImagePredictor:
             model_dir = train_config['trainer']['model_dir']
 
         if 'save_folder_name' in inference_config:
-            self.save_folder_name = inference_config['save_folder_name']
+            self.pred_dir = inference_config['save_folder_name']
         else:
-            #TODO make this an absolute path dependent on model_dir. currently convoluted
-            self.save_folder_name = 'predictions'
+            self.pred_dir = os.path.join(self.model_dir, self.save_folder_name)
 
         self.config = train_config
         self.model_dir = model_dir
@@ -154,7 +153,6 @@ class ImagePredictor:
             self.name_format = images_dict['name_format']
             
         # Create image subdirectory to write predicted images
-        self.pred_dir = os.path.join(self.model_dir, self.save_folder_name)
         if 'save_to_image_dir' in inference_config:
             if inference_config['save_to_image_dir']:
                 self.pred_dir = os.path.join(self.image_dir, os.path.basename(model_dir))
@@ -846,7 +844,7 @@ class ImagePredictor:
         target_stack = np.concatenate(target_stack, axis=0)
         # Stack images and transpose (metrics assumes cyxz format)
         if self.image_format == 'zyx':
-            if self.input_depth > 1:
+            if self.input_depth > 0:
                 input_stack = input_stack[:, :, self.input_depth // 2, :, :]
                 pred_stack = pred_stack[:, :, 0, :, :]
                 target_stack = target_stack[:, :, 0, :, :]

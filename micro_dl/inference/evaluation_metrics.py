@@ -2,7 +2,7 @@
 import functools
 import numpy as np
 import pandas as pd
-from skimage.measure import compare_ssim as ssim
+from skimage.metrics import structural_similarity as ssim
 import sklearn.metrics
 from scipy.stats import pearsonr
 
