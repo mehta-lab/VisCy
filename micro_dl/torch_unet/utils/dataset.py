@@ -122,9 +122,9 @@ class TorchDataset(Dataset):
                 
                 #match num dims as safety check
                 samp_dims, targ_dims = len(sample_input.shape), len(sample_target.shape)
-                for i in range(max(0,len(samp_dims - targ_dims))):
+                for i in range(max(0, samp_dims - targ_dims)):
                     sample_target = np.expand_dims(sample_target, 1)
-                for i in range(max(0,len(targ_dims - samp_dims))):
+                for i in range(max(0, targ_dims - samp_dims)):
                     sample_input = np.expand_dims(sample_input, 1)
                 
                 if self.transforms:
