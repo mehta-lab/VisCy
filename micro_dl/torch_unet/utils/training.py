@@ -273,7 +273,7 @@ class TorchTrainer():
                 samples.append(rem(sample))
                 targets.append(rem(target))
                 outputs.append(rem(output))
-                
+            break
         if not validate_mode:
             #save test figures
             arch = self.network_config['architecture']
@@ -290,7 +290,7 @@ class TorchTrainer():
             plt.savefig(os.path.join(self.save_folder, f'prediction_epoch_{epoch}.png'))
             if self.plot:
                 plt.show()
-        
+            
         #set back to training mode
         self.model.train()
         

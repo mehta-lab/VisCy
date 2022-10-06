@@ -15,7 +15,7 @@ class Unet2d(nn.Module):
                  residual = False, 
                  dropout = 0.2,
                  num_blocks = 4,
-                 num_block_layers = 3,
+                 num_block_layers = 2,
                  num_filters = [],
                  task = 'seg'):
         '''

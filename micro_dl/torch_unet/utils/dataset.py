@@ -115,7 +115,14 @@ class TorchDataset(Dataset):
                 sample = self.tf_dataset[idx]
                 sample_input = sample[0]
                 sample_target = sample[1]
-
+                
+                #match num dims as safety check
+                samp_dims, targ_dims = len(sample_input.shape), len(sample_target.shape)
+                for i in range(max(0,len(samp_dims - targ_dims))):
+                    sample_target = np.expand_dims(sample_target, 1)
+                for i in range(max(0,len(targ_dims - samp_dims))):
+                    sample_input = np.expand_dims(sample_input, 1)
+                
                 if self.transforms:
                     for transform in self.transforms:
                         sample_input = transform(sample_input)

@@ -308,21 +308,21 @@ class BaseDataSet(keras.utils.Sequence):
             trans_image = np.rot90(
                 input_image,
                 k=1,
-                axes=(0 + add_dim, 1 + add_dim),
+                axes=(-2, -1),
             )
         elif aug_idx == 4:
             # rot in plane defined by axis=(0, 1) or (1,2)
             trans_image = np.rot90(
                 input_image,
                 k=2,
-                axes=(0 + add_dim, 1 + add_dim),
+                axes=(-2, -1),#(0 + add_dim, 1 + add_dim),
             )
         elif aug_idx == 5:
             # rot in plane defined by axis=(0, 1) or (1,2)
             trans_image = np.rot90(
                 input_image,
                 k=3,
-                axes=(0 + add_dim, 1 + add_dim),
+                axes=(-2, -1),#(0 + add_dim, 1 + add_dim),
             )
         else:
             msg = '{} not in allowed aug_idx: 0-5'.format(aug_idx)
