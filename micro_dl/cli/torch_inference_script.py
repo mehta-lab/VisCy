@@ -56,7 +56,7 @@ def check_save_folder(inference_config, preprocess_config):
         now = str(datetime.datetime.now()).replace(' ', '_').replace(':','_').replace('-','_')[:-10]
         save_dir = os.path.join(preprocess_config['input_dir'], f'../prediction_{now}')
         
-        if os.path.exists(save_dir):
+        if not os.path.exists(save_dir):
             os.makedirs(save_dir)
         preprocess_config['save_folder_name'] = save_dir
         print(f'No save folder specified in inference config: automatically saving predictions in : \n\t{save_dir}')
