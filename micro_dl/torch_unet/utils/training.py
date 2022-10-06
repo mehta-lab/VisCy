@@ -1,15 +1,14 @@
 from platform import architecture
-import matplotlib.pyplot as plt
+import datetime
 import numpy as np
+import os
+import matplotlib.pyplot as plt
+import time
 
+from torch.utils.tensorboard import SummaryWriter
 import torch
 import torch.optim as optim
 import torch.nn as nn
-
-import os
-import time
-from torch.utils.tensorboard import SummaryWriter
-import datetime
 
 import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.torch_unet.utils.dataset as ds
@@ -18,7 +17,7 @@ import micro_dl.utils.aux_utils as aux_utils
 
 
 class TorchTrainer():
-    '''
+    """
     TorchTrainer object which handles all the procedures involved with training a pytorch model.
     The trainer uses a the model.py and dataset.py utility modules to instantiate and load a model and
     training data by passing them through the existing tensorflow dataset creators and reformatting
@@ -26,7 +25,7 @@ class TorchTrainer():
     
     Functionality of the class can be achieved without specifying full torch_config. However, full
     functionality requires full configuration file.
-    '''
+    """
     def __init__(self, torch_config):
         self.torch_config = torch_config
         self.network_config = self.torch_config['model']
@@ -48,8 +47,8 @@ class TorchTrainer():
         #lr scheduler
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau
         #loss
-        assert self.training_config['loss'] in {'mse', 'l1', 'cossim','cel'}, f'loss not supported. Try one of' \
-            '\'mse\', \'mae\', \'cossim\', \'l1\''
+        assert self.training_config['loss'] in {'mse', 'l1', 'cossim','cel'}, f'loss not supported. ' \
+            'Try one of \'mse\', \'mae\', \'cossim\', \'l1\''
         if self.training_config['loss'] == 'mse':
             self.criterion = nn.MSELoss()
         elif self.training_config['loss'] == 'l1':
@@ -70,12 +69,12 @@ class TorchTrainer():
         self.plot = False
     
     def load_model(self, init_dir = False) -> None:
-        '''
-        Initializes a model according to the network configuration dictionary used to train it, and, if provided,
-        loads the parameters saved in init_dir into the model's state dict.
+        """
+        Initializes a model according to the network configuration dictionary used to train it, and,
+        if provided, loads the parameters saved in init_dir into the model's state dict.
         
         :param str init_dir: directory containing model weights and biases
-        '''
+        """
         assert self.network_config != None, 'Network configuration must be initiated to load model'
         model = model_utils.model_init(self.network_config)
         
@@ -88,7 +87,7 @@ class TorchTrainer():
         self.model.to(self.device)
         
     def generate_dataloaders(self) -> None:
-        '''
+        """
         Helper that generates train, test, validation torch dataloaders for loading samples
         into network for training and testing. 
         
@@ -96,7 +95,7 @@ class TorchTrainer():
         If specified in initiation, config provided in call will be prioritized.
         
         :param pd.dataframe torch_config: configuration dataframe with model & training init parameters
-        '''
+        """
         assert self.torch_config != None, 'torch_config must be specified in object' \
             'initiation '
             
@@ -123,11 +122,11 @@ class TorchTrainer():
         self.split_samples = torch_data_container.split_samples_metadata
     
     def get_save_location(self):
-        '''
+        """
         Initates save folder if not already initated. 
-        Directory is named depending on time of training. All training/testing information is saved to this
-        directory.
-        '''
+        Directory is named depending on time of training. All training/testing information is
+        saved to this directory.
+        """
         now = str(datetime.datetime.now()).replace(' ', '_').replace(':','_').replace('-','_')[:-10]
         self.save_folder = os.path.join(self.training_config['save_dir'], f'training_model_{now}')
         if not os.path.exists(self.save_folder):
@@ -135,14 +134,14 @@ class TorchTrainer():
         
     
     def train(self):
-        '''
+        """
         Run training loop for model, according to parameters set in self.network_config.
         
-        Dataloaders and models must already be initatied. Training results and progress are saved in 
-        save_dir specified in 'training' section of torch_config each time a test is run.
-        '''
-        assert self.train_dataloader and self.test_dataloader and self.val_dataloader, 'Dataloaders must be initated. ' \
-            'Try \'object_name\'.generate_dataloaders()'
+        Dataloaders and models must already be initatied. Training results and progress are saved
+        in save_dir specified in 'training' section of torch_config each time a test is run.
+        """
+        assert self.train_dataloader and self.test_dataloader and self.val_dataloader, 'Dataloaders ' \
+            ' must be initated. Try \'object_name\'.generate_dataloaders()'
         assert self.model, 'Model must be initiated. Try \'object_name\'.load_model()'
         
         #init io and saving
@@ -155,8 +154,12 @@ class TorchTrainer():
         
         #init optimizer and scheduler
         self.model.train()
-        self.optimizer = self.optimizer(self.model.parameters(), lr = self.training_config['learning_rate'])
-        self.scheduler = self.scheduler(self.optimizer, patience = 10, mode='min', factor = 0.11)
+        self.optimizer = self.optimizer(self.model.parameters(),
+                                        lr = self.training_config['learning_rate'])
+        self.scheduler = self.scheduler(self.optimizer,
+                                        patience = 10,
+                                        mode='min',
+                                        factor = 0.11)
         
         #train
         train_loss_list = []
@@ -221,17 +224,19 @@ class TorchTrainer():
         self.writer.close()
     
     def run_test(self, epoch = 0, mask_override = False, validate_mode = False):
-        '''
-        Runs test on all samples in a test_dataloader. Equivalent to one epoch on test data without updating weights.
-        Runs metrics on the test results (given in criterion) and saves the results in a save folder, if specified.
+        """
+        Runs test on all samples in a test_dataloader. Equivalent to one epoch on test data without
+        updating weights. Runs metrics on the test results (given in criterion) and saves the results
+        in a save folder, if specified.
         
-        Assumes that all tensors are on the GPU. If not, tensor devices can be specified through 'device' parameter.
+        Assumes that all tensors are on the GPU. If not, tensor devices can be specified through
+        'device' parameter in torch config.
 
         :param int epoch: training epoch test was run at
         :param bool mask_override: overrides the masking parameter for testing (for segmentation)
         :param bool validate_mode: run in validation mode to just produce loss (for lr scheduler)
         :return float avg_loss: average testing loss per sample of entire test set
-        '''
+        """
         #set the model to evaluation mode
         self.model.eval()
         
@@ -278,7 +283,8 @@ class TorchTrainer():
             #save test figures
             arch = self.network_config['architecture']
             fig, ax = plt.subplots(1,3,figsize = (18,6))
-            ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0], cmap = 'gray')
+            ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0],
+                                    cmap = 'gray')
             ax[0].set_title('mean input phase image')
             ax[1].imshow(targets.pop()[0,0,0] if arch == '2.5D' else targets.pop()[0,0])
             ax[1].set_title('target')
@@ -299,14 +305,14 @@ class TorchTrainer():
         return avg_loss 
 
     def save_model(self, epoch, avg_loss, sample):
-        '''
-        Utility function for saving pytorch model after a test cycle. Parameters are used directly in test cycle.
+        """
+        Utility function for saving pytorch model after a test cycle. Parameters are used directly
+        in test cycle.
         
-        Params:
-            - epoch -> int: see name
-            - avg_loss -> float: average loss of each cample in testing cycle at epoch 'epoch'
-            - sample -> torch.tensor: sample input to model (for tensorboard creation)
-        '''
+        :param int epoch: see name
+        :param float avg_loss: average loss of each cample in testing cycle at epoch 'epoch'
+        :param torch.tensor sample: sample input to model (for tensorboard creation)
+        """
         #write tensorboard graph
         if isinstance(sample, torch.Tensor):
             self.writer.add_graph(self.model, sample.to(self.device))

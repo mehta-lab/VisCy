@@ -5,12 +5,12 @@ import torch
 import matplotlib.pyplot as plt
 
 def model_init(network_config, device = torch.device('cuda')):
-    '''
+    """
     Initializes network model from a configuration dictionary.
     
-    Params:
-        - network_config -> dictionary: dict containing the configuration parameters for the model
-    '''
+    :param dict network_config: dict containing the configuration parameters for the model
+    :param torch.device device: device to store model parameters on (must be same as data)
+    """
 
     if network_config['architecture'] == '2.5D':
         model = Unet25D.Unet25d(in_channels = network_config['in_channels'],

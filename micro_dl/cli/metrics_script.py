@@ -93,7 +93,7 @@ def compute_metrics(model_dir,
     :param list metrics_list: See inference/evaluation_metrics.py for options
     :param list orientations_list: Any subset of {xy, xz, yz, xyz}
         (see evaluation_metrics)
-    :param str model_dir: Directory to write metrics to, if none specied set to 
+    :param str/None model_dir: Directory to write metrics to, if none specied set to 
         output_dir
     :param bool test_data: Uses test indices in split_samples.json,
         otherwise all indices

@@ -6,25 +6,26 @@ import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.torch_unet.utils.dataset as ds
 
 class TorchPredictor():
-    '''
+    """
     Instance of TorchPredictor which performs all of the compatibility functions required to
     run prediction on an image given a trained pytorch model
     
     Params:
-        - model -> nn.module: trained model using gpu parameters
-        - network_config -> dict: model configuration dictionary. parameters can be found in torch_unet.utils.readme.md
-        - device -> torch.device: device to run inference on
-    '''
+    :param torch.nn.module model: trained model for prediction
+    :param dict network_config: model configuration dictionary. parameters can be found 
+                                in torch_unet.utils.readme.md
+    :param torch.device device: device to run inference on
+    """
     def __init__(self, model = None, network_config = None, device = None) -> None:
         self.model = model
         self.network_config = network_config
         self.device = device
         
     def load_model_torch(self) -> None:
-        '''
-        Initializes a model according to the network configuration dictionary used to train it, and loads the 
-        parameters saved in model_dir into the model's state dict.
-        '''
+        """
+        Initializes a model according to the network configuration dictionary used
+        to train it, and loads the parameters saved in model_dir into the model's state dict.
+        """
         model = model_utils.model_init(self.network_config, device=self.device)
         
         model_dir = self.network_config['model_dir']
@@ -33,21 +34,25 @@ class TorchPredictor():
         self.model = model
     
     def predict_image(self, input_image, model = None):
-        '''
+        """
         Alias for predict_large_image if 2.5D; 2.5D torch model is xy generalizable
-        '''
+        
+        :param numpy.ndarray input_image: image for prediction
+        :param torch.nn.module model: trained model
+        """
         return self.predict_large_image(input_image, model=model)
 
     def predict_large_image(self, input_image, model = None):
-        '''
+        """
         Runs prediction on entire image field of view. xy size is configurable, but it must be
         a power of 2.
         
         Params:
-            - input_image -> numpy.ndarray or torch.Tensor: input image or image stack on which to run prediction
-            - model -> Torch.nn.Module: trained model to use for prediction
-        '''
-        assert self.model != None or model != None, 'model must be specified in initiation or prediction call'
+        :param numpy.ndarray/torch.Tensor input_image: input image or image stack on which
+                                                        to run prediction
+        :param Torch.nn.Module model: trained model to use for prediction
+        """
+        assert self.model != None or model != None, 'must specify model in init or prediction call'
         if model == None:
             model = self.model
             
@@ -61,18 +66,20 @@ class TorchPredictor():
         return pred.detach().cpu().numpy()
 
     def predict_large_image_tiling(self, input_image, model = None):
-        '''
-        Takes large image (or image stack) as a numpy array and returns prediction for it, block-wise.
+        """
+        Takes large image (or image stack) as a numpy array and returns prediction for it,
+        block-wise.
         
-        Note: only accepts input_image inputs of sizes that are powers of 2 (due to downsampling). Please crop 
-        non-power-of-two length images.
+        Note: only accepts input_image inputs of sizes that are powers of 2 (due to downsampling).
+        Please crop non-power-of-two length images.
         
-        Params:
-            - input_image -> numpy.ndarray or torch.Tensor: large (xy > 256x256) input image or image stack
-            - model -> Torch.nn.Module: trained model to use for prediction
+        :param numpy.ndarray/torch.Tensor input_image: large (xy > 256x256) input image or
+                                                        image stack
+        :param torch.nn.Module model: trained model to use for prediction
         
-        '''
-        assert len(input_image.shape) in [4, 5],'Invalid image shape: only 4D and 5D inputs - 2D / 3D images with channel and batch dim allowed'
+        """
+        assert len(input_image.shape) in [4, 5],''.join('Invalid image shape: only 4D and 5D',
+                                'inputs - 2D / 3D images with channel and batch dim allowed')
         
         if type(input_image) != type(torch.rand(1,1)):
             input_image = ds.ToTensor(device=self.device)(input_image)
@@ -86,29 +93,35 @@ class TorchPredictor():
                 
                 tiles[key][ind] = prediction
         #stitich predictions
-        output_image = self.stitch_image_tiles_torch(tiles, (input_image.shape[-2], input_image.shape[-1]))
+        output_image = self.stitch_image_tiles_torch(tiles,
+                                                     (input_image.shape[-2],
+                                                      input_image.shape[-1]))
         
         return output_image.detach().cpu().numpy()
 
     def tile_large_image(self, input_image, tile_size = (256,256), stride = 128):
-        #TODO: implement tiling with a stride.
-        '''
+        #TODO: readability + implement tiling with a stride.
+        """
+        NOTE: This function is redundant and may be removed, depending on ongoing design choices
+        
         Takes large input image as and returns dictionary of tiles of that image.
         dictionaries are indexed by row number of each tile (tile-sized rows),
         and contains list of all tiles of that row.
         
-        Params:
-            input_image
-        '''
+        :param input_image
+        :param tuple(int, int) tile_size: size of tiles to 
+        """
         img_shape = input_image.shape
-        
-        assert img_shape[0] % tile_size[0] and img_shape[1] % tile_size[1], ''.join('For downsampling reasons, image input size',
-                                                                                    'must be multiple of tile input size')
+
+        s1, s2 = img_shape[0] % tile_size[0], img_shape[1] % tile_size[1]
+        assert s1 + s2 == 0 , ''.join('For downsampling reasons, image input size',
+                                        'must be multiple of tile input size')
         img_dict = {}
         for i in range(img_shape[-2]//tile_size[0]):
             row = []
             for j in range(img_shape[-1]//tile_size[1]):
-                img_tile = input_image[...,i*tile_size[0]:(i+1)*tile_size[0], j*tile_size[0]:(j+1)*tile_size[0]]
+                img_tile = input_image[...,i*tile_size[0]:(i+1)*tile_size[0],
+                                       j*tile_size[0]:(j+1)*tile_size[0]]
                 row.append(img_tile)
             img_dict[i] = row
         return img_dict
@@ -116,14 +129,18 @@ class TorchPredictor():
     def stitch_image_tiles(self, tiles, output_size, stride = 128):
         #TODO: Implement stride and stitching using center of FoV only
         #      Offer option for averaging versus completely overriding overlap
-        '''
+        """
+        NOTE: This function is redundant and may be removed, depending on ongoing design choices
+
         Takes in dictionary of tiles in,
         and returns the tiles stitched together along x and y dimensions.
         
         Params:
-            tiles -> dict: format {row_index: [row of torch.tensor tiles], ..., row_index: [row of torch.tensor tiles]} 
-            output_size -> tuple (int, int): expected x-y size of output tensor
-        '''
+        :param dict tiles: dict of tiles for stitching:
+                            format {row_index: [row of torch.tensor tiles],
+                            ..., row_index: [row of torch.tensor tiles]} 
+        :param tuple(int, int) output_size: expected x-y size of output tensor
+        """
         
         output_tensor = []
         for key in tiles:

@@ -1,52 +1,50 @@
-#frameworks
-from ast import Assert
+import cv2
+import collections
+import numpy as np
+import os
+import pandas as pd
 import torch
 from torch.utils.data import Dataset
-import numpy as np
-import cv2
 
-#io
-import os
-import sys
-from PIL import Image
-import pandas as pd
-
-#tools
-import collections
-from collections.abc import Iterable
-
-#microDL dependencies
-import micro_dl.cli.train_script as train
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.masks as mask_utils
 import micro_dl.utils.normalize as norm_utils
+import micro_dl.cli.train_script as train
 
 class TorchDataset(Dataset): 
-    '''
+    """
     Based off of torch.utils.data.Dataset: 
         - https://pytorch.org/docs/stable/data.html
         
-    Custom dataset class that draws samples from a  'micro_dl.input.dataset.BaseDataSet' object, and converts them to pytorch
-    inputs.
+    Custom dataset class that draws samples from a  'micro_dl.input.dataset.BaseDataSet' object,
+    and converts them to PyTorch inputs.
     
-    Also takes lists of transformation classes. Transformations should be primarily designed for data refactoring and type conversion,
-    since augmentations are already applied to tensorflow BaseDataSet object.
+    Also takes lists of transformation classes. Transformations should be primarily designed for
+    data refactoring and type conversion, since augmentations are already applied to tensorflow
+    BaseDataSet object.
     
-    The dataset object will cache samples so that the processing required to produce samples does not need to be repeated. This drastically
-    speeds up training time.
+    The dataset object will cache samples so that the processing required to produce samples
+    does not need to be repeated. This drastically speeds up training time.
     
-    '''
-    def __init__(self, train_config = None, tf_dataset = None, transforms=None, target_transforms=None, caching = False):
-        '''
+    """
+    def __init__(self,
+                 train_config = None,
+                 tf_dataset = None,
+                 transforms=None,
+                 target_transforms=None,
+                 caching = False):
+        """
         Init object.
         Params:
-            train_config -> str: path to .yml config file from which to create BaseDataSet object if none given
-            tf_dataset -> micro_dl.input.dataset.BaseDataSet: tensorflow-based dataset containing samples to convert
-            transforms -> iterable(Transform object): transforms to be applied to every sample 
+        :param str train_config -> str: path to .yml config file from which to create BaseDataSet
+                                        object if none given
+        :param micro_dl.input.dataset.BaseDataSet tf_dataset: tensorflow-based dataset
+                                                                containing samples to convert
+        :param iterable(Transform object) transforms: transforms to be applied to every sample 
                                                       *after tf_dataset transforms*
-            target_transforms -> iterable(Transform object): transforms to be applied to every target 
-                                                             *after tf_dataset transforms*
-        '''
+        :param iterable(Transform object)target_transforms: transforms to be applied to every
+                                                            target *after tf_dataset transforms*
+        """
         assert train_config or tf_dataset, 'Must provide either train config file or tf dataset'
 
         self.tf_dataset = None
@@ -72,41 +70,47 @@ class TorchDataset(Dataset):
             
             masked_loss = False
 
-            all_datasets, split_samples = train.create_datasets(tiles_meta, tile_dir, dataset_config, 
-                                                                trainer_config, image_format, masked_loss)
+            all_datasets, split_samples = train.create_datasets(tiles_meta,
+                                                                tile_dir,
+                                                                dataset_config, 
+                                                                trainer_config,
+                                                                image_format,
+                                                                masked_loss)
             
-            self.train_dataset = TorchDataset(None, tf_dataset = all_datasets['df_train'],
-                                                 transforms = self.transforms,
-                                                 target_transforms = self.target_transforms)
-            self.test_dataset = TorchDataset(None, tf_dataset = all_datasets['df_test'],
+            self.train_dataset = TorchDataset(None,
+                                              tf_dataset = all_datasets['df_train'],
+                                              transforms = self.transforms,
+                                              target_transforms = self.target_transforms)
+            self.test_dataset = TorchDataset(None,
+                                             tf_dataset = all_datasets['df_test'],
                                              transforms = self.transforms,
                                              target_transforms = self.target_transforms)
-            self.val_dataset = TorchDataset(None, tf_dataset = all_datasets['df_val'],
+            self.val_dataset = TorchDataset(None,
+                                            tf_dataset = all_datasets['df_val'],
                                             transforms = self.transforms,
                                             target_transforms = self.target_transforms)
             
             self.split_samples_metadata = split_samples
             
     def __len__(self):
-        '''
+        """
         Returns number of sample (or sample stack)/target pairs in dataset
-        '''
+        """
         if self.tf_dataset:
             return len(self.tf_dataset)
         else:
             return sum([1 if self.train_dataset else 0, 1 if self.test_dataset else 0, 1 if self.val_dataset else 0])
 
     def __getitem__(self, idx):
-        '''
+        """
         If acting as a dataset object, returns the sample target pair at 'idx'
         in dataset, after applying augment/transformations to sample/target pairs.
         
         If acting as a dataset container object, returns subsidary dataset
         objects.
         
-        Params:
-            - idx: index of dataset item to transform and return
-        '''
+        :param int idx: index of dataset item to transform and return
+        """
         # if acting as dataset object
         if self.tf_dataset:
             if self.sample_cache[idx] and self.caching:
@@ -152,7 +156,7 @@ class TorchDataset(Dataset):
                 raise KeyError(f'This object is a container. Acceptable keys:{[k for k in keys]}')
             
     def unpack(self, sample_input, sample_target):
-        ''' 
+        """ 
         Helper function for unpacking tuples returned by some transformation objects
         (e.g. GenerateMasks) into outputs.
         
@@ -160,10 +164,9 @@ class TorchDataset(Dataset):
         additional tensor information to pack that information in tuples with the sample and target
         tensors. 
         
-        Params:
-            - sample_input -> torch.Tensor or tuple(torch.Tensor): input sample to unpack
-            - sample_target -> torch.Tensor or tuple(torch.Tensor): target sample to unpack
-        '''
+        :param torch.tensor/tuple(torch.tensor) sample_input: input sample to unpack
+        :param torch.tensor/tuple(torch.tensor) sample_target: target sample to unpack
+        """
         inp, targ = type(sample_input), type(sample_target)
         
         if inp == list or inp == tuple:
@@ -177,13 +180,26 @@ class TorchDataset(Dataset):
             else:
                 return (sample_input, sample_target)
 
+    
+class ToTensor(object):
+    """
+    Transformation. Converts input to torch.Tensor and returns. By default also places tensor
+    on gpu.
+    """
+    def __init__(self, device = torch.device('cuda')):
+        self.device = device
+    def __call__(self, sample):
+        sample = torch.tensor(sample.copy(), dtype=torch.float32).to(self.device)
+        return sample
 
 class Resize(object):
-    '''
-    Transformation. Resises called sample to 'output_size'.
+    """
+    NOTE: this function is currently unused (and already superceded). I wrote this to provide
+    options for transforms performed after the dataloader. These should be removedas they will
+    be superceded by gunpowder.
     
-    Note: Dangerous. Actually transforms data instead of cropping.
-    '''
+    Transformation. Resises called sample to 'output_size'.
+    """
     def __init__(self, output_size = (256, 256)):
         self.output_size = output_size
     def __call__(self, sample):
@@ -191,15 +207,16 @@ class Resize(object):
         sample = cv2.resize(sample, self.output_size)
         return sample
 
-    
 class RandTile(object):
-    '''
-    ******BROKEN*******
-    Transformation. Selects and returns random tile size 'tile_size' from input.
+    """
+    NOTE: this function is currently unused (and already superceded). I wrote this to provide
+    options for transforms performed after the dataloader. These should be removedas they will
+    be superceded by gunpowder.
     
-    Note: some issues matching the target. Need to rethink implementation. Not necessary if preprocessing is tiling images anyways.
-    '''
+    Transformation. Selects and returns random tile size 'tile_size' from input.
+    """
     def __init__(self, tile_size = (256,256), input_format = 'zxy'):
+        Warning('RandTile is unrecommended for preprocessed data')
         self.tile_size = tile_size
         self.input_format = input_format
     def __call__(self,sample):
@@ -217,11 +234,13 @@ class RandTile(object):
         sample = sample[randy:randy+self.tile_size[0], randx:randx+self.tile_size[1]]
         return sample
     
-    
 class RandFlip(object):
-    '''
+    """
+    NOTE: this function is currently unused (and already superceded). I wrote this to provide
+    options for transforms performed after the dataloader. These should be removedas they will
+    be superceded by gunpowder.
     Transformation. Flips input in random direction and returns.
-    '''
+    """
     def __call__(self, sample):
         rand = np.random.randint(0,2,2)
         if rand[0]==1:
@@ -230,53 +249,37 @@ class RandFlip(object):
             sample = np.fliplr(sample)
         return sample
     
-    
-class ChooseBands(object):
-    '''
-    Transformation. Selects specified z (or lambda) band range from 3d input image.
-    Note: input format should be
-    '''
-    def __init__(self, bands = (0, 30), input_format = 'zxy'):
-        assert input_format in {'zxy', 'xyz'}, 'unacceptable input format; try \'zxy\' or \'xyz\''
-        self.bands = bands
-        self.input_format = input_format
-    def __call__(self, sample):
-        if self.input_format == 'zxy':
-            sample = sample[...,self.bands[0]:self.bands[1],:,:]
-        elif self.input_format == 'xyz':
-            sample = sample[...,self.bands[0]:self.bands[1]]
-        return sample
-    
-    
-class ToTensor(object):
-    '''
-    Transformation. Converts input to torch.Tensor and returns. By default also places tensor on gpu.
-    '''
-    def __init__(self, device = torch.device('cuda')):
-        self.device = device
-    def __call__(self, sample):
-        sample = torch.tensor(sample.copy(), dtype=torch.float32).to(self.device)
-        return sample
-
-    
 class GenerateMasks(object):
-    '''
-    Appends target channel thresholding based masks for each sample to the sample in a third channel, ordered respective to the order of each sample within its minibatch.
+    """
+    NOTE: this function is currently unused (and already superceded). I wrote this to provide
+    options for transforms performed after the dataloader. These should be removedas they will
+    be superceded by gunpowder.
+    
+    Appends target channel thresholding based masks for each sample to the sample in a third
+    channel, ordered respective to the order of each sample within its minibatch.
+    
     Masks generated are torch tensors.
     
-    Params:
-        - masking_type -> token{'rosin', 'otsu'}: type of thresholding to apply:
-                                                    1.) Rosin/unimodal: https://users.cs.cf.ac.uk/Paul.Rosin/resources/papers/unimodal2.pdf
-                                                    2.) Otsu: https://en.wikipedia.org/wiki/Otsu%27s_method
-        - clipping -> Boolean: whether or not to clip the extraneous values in the data before thresholding
-        - clip_amount -> int, tuple: amount to clip from both ends of brighness histogram as a percentage (%)
-                                     If clipping==True but clip_amount == 0, clip for default amount (2%)
-    '''
-    def __init__(self, masking_type = 'rosin', clipping = False, clip_amount = 0):
-        assert masking_type in {'rosin', 'unimodal', 'otsu'}, f'Unaccepted masking type: {masking_type}'
+    :param str masking_type: type of thresholding to apply:
+                                1.) Rosin/unimodal: https://users.cs.cf.ac.uk/Paul.Rosin/resources/papers/unimodal2.pdf
+                                2.) Otsu: https://en.wikipedia.org/wiki/Otsu%27s_method
+    :param bool clipping: whether or not to clip the extraneous values in the data before
+                                    thresholding
+    :param int/tiple clip_amount: amount to clip from both ends of brightness histogram
+                                    as a percentage (%) if clipping==True but clip_amount == 0,
+                                    clip for default amount (2%)
+    """
+    def __init__(self,
+                 masking_type = 'rosin',
+                 clipping = False,
+                 clip_amount = 0):
+        
+        assert masking_type in {'rosin', 'unimodal', 'otsu'}, f'Unaccepted masking' \
+            'type: {masking_type}'
         self.masking_type = masking_type
         self.clipping = clipping
         self.clip_amount = clip_amount
+        
     def __call__(self, sample):
         original_sample = sample
         
@@ -287,10 +290,14 @@ class GenerateMasks(object):
         # clip top and bottom 2% of images for better thresholding
         if self.clipping:
             if type(self.clip_amount) == tuple:
-                sample = norm_utils.hist_clipping(sample, self.clip_amount[0], 100 - self.clip_amount[1])
+                sample = norm_utils.hist_clipping(sample,
+                                                  self.clip_amount[0],
+                                                  100 - self.clip_amount[1])
             else:
                 if self.clip_amount != 0:
-                    sample = norm_utils.hist_clipping(sample, self.clip_amount, 100 - self.clip_amount)
+                    sample = norm_utils.hist_clipping(sample,
+                                                      self.clip_amount,
+                                                      100 - self.clip_amount)
                 else:
                     sample = norm_utils.hist_clipping(sample)
         
@@ -309,25 +316,32 @@ class GenerateMasks(object):
         return [original_sample, masks]
 
 class Normalize(object):
-    '''
-    Normalizes the sample sample according to the mode in init.
+    """
+    NOTE: this function is currently unused. I wrote this to provide options
+    for transforms performed after the dataloader. These should be removed
+    as they will be superceded by gunpowder.
     
+    Normalizes the sample sample according to the mode in init.
+
     Params:
-        - mode -> token{'one', 'max', 'zero'}: type of normalization to apply
-                        - one: normalizes sample values proportionally between 0 and 1
-                        - zeromax: centers sample around zero according to half of its normalized (between -1 and 1) maximum
-                        - median: centers samples around zero, according to their respective median, then normalizes (between -1 and 1)
-                        - mean: centers samples around zero, according to their respective means, then normalizes (between -1 and 1)
-    '''
+    :param str mode: type of normalization to apply
+            - one: normalizes sample values proportionally between 0 and 1
+            - zeromax: centers sample around zero according to half of its
+                        normalized (between -1 and 1) maximum
+            - median: centers samples around zero, according to their respective
+                        median, then normalizes (between -1 and 1)
+            - mean: centers samples around zero, according to their respective
+                        means, then normalizes (between -1 and 1)
+    """
     def __init__(self, mode = 'max'):
         self.mode = mode
     def __call__(self, sample, scaling = 1):
-        '''
+        """
         Forward call of Normalize
         Params:
             - sample -> torch.Tensor or numpy.ndarray: sample to normalize
             - scaling -> float: value to scale output normalization by
-        '''
+        """
         #determine module
         if isinstance(sample, torch.Tensor):
             module = torch
@@ -355,16 +369,17 @@ class Normalize(object):
     
 
 class RandomNoise(object):
-    '''
+    """
+    NOTE: this function is currently unused. I wrote this to provide options
+    for transforms performed after the dataloader. These should be removed
+    as they will be superceded by gunpowder.
+    
     Augmentation for applying random noise. High variance.
     
-    Params:
-        - noise_type -> token{'gauss', 's&p', 'poisson', 'speckle'}: type of noise to apply (see token names)
-        - sample -> numpy.ndarray or torch.tensor: input sample
-    
-    returns:
-        - noisy sample of type input type
-    '''
+    :param str noise_type: type of noise to apply: 'gauss', 's&p', 'poisson', 'speckle'
+    :param numpy.ndarray/torch.tensor sample: input sample
+    :return numpy.ndarray/torch.tensor: noisy sample of type input type
+    """
     def __init__(self, noise_type):
         self.noise_type = noise_type
     def __call__(self, sample):

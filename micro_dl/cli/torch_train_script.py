@@ -1,20 +1,9 @@
-import yaml
 import argparse
+import yaml
 
+import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.torch_unet.utils.training as train
 
-
-def read_config(config_path):
-    '''
-    One-line to safely open config files for argument reading
-    
-    :param str config_path: abs or relative path to configuration file
-    
-    :return dict config: a dictionary of config information read from input file
-    '''
-    with open(config_path, 'r') as f:
-        config = yaml.safe_load(f)
-    return config
 
 def parse_args():
     """
@@ -39,7 +28,7 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    torch_config = read_config(args.config)
+    torch_config = aux_utils.read_config(args.config)
     network_config = torch_config['model']
     training_config = torch_config['training']
     
