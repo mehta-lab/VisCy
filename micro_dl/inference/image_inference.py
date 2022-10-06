@@ -98,6 +98,9 @@ class ImagePredictor:
         :param TorchPredictor torch_predictor: predictor object which handles
             transporting data to a PyTorch model for inference.
         """
+        # create model and load weights
+        self.torch_predictor = torch_predictor
+        
         # Use model_dir from inference config if present, otherwise use train
         #TODO this complexity is un-needed. Specify model_dir only once
         if 'model_dir' in inference_config:
@@ -108,6 +111,7 @@ class ImagePredictor:
         if 'save_folder_name' in inference_config:
             self.pred_dir = inference_config['save_folder_name']
         else:
+            raise AssertionError('save_folder_name must be specified in inference config')
             self.pred_dir = os.path.join(self.model_dir, self.save_folder_name)
 
         self.config = train_config
@@ -270,8 +274,7 @@ class ImagePredictor:
         self.df_xz = pd.DataFrame()
         self.df_yz = pd.DataFrame()
         
-        # create model and load weights
-        self.torch_predictor = torch_predictor
+        
 
 
     def _get_split_ids(self, data_split='test'):
@@ -294,7 +297,9 @@ class ImagePredictor:
             return split_col, inference_ids
 
         try:
-            split_fname = os.path.join(self.model_dir, 'split_samples.json')
+            split_dir_name = os.path.join(self.torch_predictor.network_config['model_dir'], os.pardir)
+            split_dir_name = '/'.join(self.torch_predictor.network_config['model_dir'].split('/')[:-1])
+            split_fname = os.path.join(split_dir_name, 'split_samples.json')
             split_samples = aux_utils.read_json(split_fname)
             inference_ids = split_samples[data_split]
         except FileNotFoundError as e:

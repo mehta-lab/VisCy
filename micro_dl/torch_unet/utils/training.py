@@ -14,6 +14,7 @@ import datetime
 import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.torch_unet.utils.dataset as ds
 import micro_dl.torch_unet.utils.io as io_utils
+import micro_dl.utils.aux_utils as aux_utils
 
 
 class TorchTrainer():
@@ -106,17 +107,20 @@ class TorchTrainer():
             target_transforms.append(ds.GenerateMasks(self.training_config['mask_type']))
         
         #init dataset container and pull dataset split objects
+        caching = self.training_config['caching'] if 'caching' in self.training_config else False
         torch_data_container = ds.TorchDataset(self.torch_config['train_config_path'],
                                             transforms=transforms,
-                                            target_transforms=target_transforms)
+                                            target_transforms=target_transforms,
+                                            caching = caching)
         train_dataset = torch_data_container['train']
         test_dataset = torch_data_container['test']
         val_dataset = torch_data_container['val']
         
-        #init dataloaders
+        #init dataloaders and split metadata
         self.train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset, shuffle=True)
         self.test_dataloader = torch.utils.data.DataLoader(dataset = test_dataset, shuffle=True)
         self.val_dataloader = torch.utils.data.DataLoader(dataset = val_dataset, shuffle=True)
+        self.split_samples = torch_data_container.split_samples_metadata
     
     def get_save_location(self):
         '''
@@ -128,6 +132,7 @@ class TorchTrainer():
         self.save_folder = os.path.join(self.training_config['save_dir'], f'training_model_{now}')
         if not os.path.exists(self.save_folder):
             os.makedirs(self.save_folder)
+        
     
     def train(self):
         '''
@@ -144,6 +149,9 @@ class TorchTrainer():
         start = time.time()
         self.get_save_location()
         self.writer = SummaryWriter(log_dir = self.save_folder)
+        
+        split_idx_fname = os.path.join(self.save_folder, 'split_samples.json')
+        aux_utils.write_json(self.split_samples, split_idx_fname)
         
         #init optimizer and scheduler
         self.model.train()

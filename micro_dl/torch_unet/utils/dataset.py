@@ -36,7 +36,7 @@ class TorchDataset(Dataset):
     speeds up training time.
     
     '''
-    def __init__(self, train_config = None, tf_dataset = None, transforms=None, target_transforms=None):
+    def __init__(self, train_config = None, tf_dataset = None, transforms=None, target_transforms=None, caching = False):
         '''
         Init object.
         Params:
@@ -52,6 +52,7 @@ class TorchDataset(Dataset):
         self.tf_dataset = None
         self.transforms = transforms
         self.target_transforms = target_transforms
+        self.caching = caching
         
         if tf_dataset != None:
             self.tf_dataset = tf_dataset
@@ -70,8 +71,6 @@ class TorchDataset(Dataset):
             tiles_meta = aux_utils.sort_meta_by_channel(tiles_meta)
             
             masked_loss = False
-            # if 'masked_loss' in trainer_config:
-            #     masked_loss = trainer_config['masked_loss']
 
             all_datasets, split_samples = train.create_datasets(tiles_meta, tile_dir, dataset_config, 
                                                                 trainer_config, image_format, masked_loss)
@@ -85,6 +84,8 @@ class TorchDataset(Dataset):
             self.val_dataset = TorchDataset(None, tf_dataset = all_datasets['df_val'],
                                             transforms = self.transforms,
                                             target_transforms = self.target_transforms)
+            
+            self.split_samples_metadata = split_samples
             
     def __len__(self):
         '''
@@ -108,7 +109,7 @@ class TorchDataset(Dataset):
         '''
         # if acting as dataset object
         if self.tf_dataset:
-            if self.sample_cache[idx]:
+            if self.sample_cache[idx] and self.caching:
                 assert len(self.sample_cache[idx]) > 0, 'Sample caching error'
             else:
                 sample = self.tf_dataset[idx]
@@ -168,7 +169,6 @@ class TorchDataset(Dataset):
                 return (sample_input, *sample_target)
             else:
                 return (sample_input, sample_target)
-
 
 
 class Resize(object):
