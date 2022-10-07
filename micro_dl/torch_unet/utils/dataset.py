@@ -111,9 +111,12 @@ class TorchDataset(Dataset):
         
         :param int idx: index of dataset item to transform and return
         """
+        # clear cuda cache to prevent memory overflowing
+        torch.cuda.empty_cache()
+        
         # if acting as dataset object
         if self.tf_dataset:
-            if self.sample_cache[idx] and self.caching:
+            if self.sample_cache[idx]:
                 assert len(self.sample_cache[idx]) > 0, 'Sample caching error'
             else:
                 sample = self.tf_dataset[idx]
@@ -136,8 +139,11 @@ class TorchDataset(Dataset):
                         sample_target = transform(sample_target)
 
                 #depending on the transformation we might return lists or tuples, which we must unpack
-                self.sample_cache[idx] = self.unpack(sample_input, sample_target)
-        
+                if self.caching:
+                    self.sample_cache[idx] = self.unpack(sample_input, sample_target)
+                else:
+                    return self.unpack(sample_input, sample_target)
+
             return self.sample_cache[idx]
         
         # if acting as container object of dataset objects
