@@ -4,7 +4,6 @@ import yaml
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.torch_unet.utils.training as train
 
-
 def parse_args():
     """
     Parse command line arguments
@@ -26,7 +25,6 @@ def parse_args():
     args = parser.parse_args()
     return args
 
-__name__ = 0
 if __name__ == '__main__':
     args = parse_args()
     torch_config = aux_utils.read_config(args.config)
