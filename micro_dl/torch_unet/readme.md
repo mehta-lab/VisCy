@@ -42,8 +42,6 @@ The ```torch_config.yml``` config file contains the parameters for model initiat
 
 &nbsp;&nbsp; **architecture:** <span style="color:cyan"> 2.5D or 2D</span> (2D currently unstable. Pleasre use 2.5D)
 
-&nbsp;&nbsp; **conv_mode:** <span style="color:cyan"> same </span> (must be same. to be removed in next push)
-
 &nbsp;&nbsp; **in_channels:** <span style="color:cyan"> 1 </span> (number of channels in. If only using phase images, this is 1)
 
 &nbsp;&nbsp; **out_channels:** <span style="color:cyan"> 1 </span> (If only predicting fluorescence, this is 1)
