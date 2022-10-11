@@ -14,8 +14,9 @@ class ConvBlock2D(nn.Module):
                  activation='relu',
                  transpose=False,
                  kernel_size = 3,
-                 num_layers = 3,
-                 filter_steps = 'first'):
+                 num_repeats = 3,
+                 filter_steps = 'first',
+                 layer_order = 'can'):
 
         """
         Convolutional block for lateral layers in Unet
@@ -36,9 +37,10 @@ class ConvBlock2D(nn.Module):
         :param str activation: activation function: 'relu', 'leakyrelu', 'elu', 'selu' 
         :param bool transpose: as name
         :param int/tuple kernel_size: convolutional kernel size
-        :param int num_layers: as name
+        :param int num_repeats: number of times the layer_order layer sequence is repeated in the block
         :param str filter_steps: determines where in the block the filters inflate channels (learn
                                     abstraction information): 'linear','first','last'
+        :param str layer_order: order of conv, norm, and act layers in block: 'can', 'cna', 'nca', etc
         """
 
         super(ConvBlock2D, self).__init__()
@@ -49,8 +51,9 @@ class ConvBlock2D(nn.Module):
         self.residual = residual
         self.activation = activation
         self.transpose = transpose
-        self.num_layers = num_layers
+        self.num_repeats = num_repeats
         self.filter_steps = filter_steps
+        self.layer_order = layer_order
         
         #---- Handle Kernel ----#
         ks = kernel_size
@@ -67,37 +70,37 @@ class ConvBlock2D(nn.Module):
         #----- Init Dropout -----#
         if self.dropout:
             self.drop_list = []
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 self.drop_list.append(nn.Dropout2d(int(self.dropout)))
         
         #---- Init linear filter steps ----#
-        steps = np.linspace(in_filters, out_filters, num_layers+1).astype(int)
+        steps = np.linspace(in_filters, out_filters, num_repeats+1).astype(int)
         
         #----- Init Normalization Layers -----#
         # The parameters governing the initiation logic flow are:
         #                 self.norm
-        #                 self.num_layers
+        #                 self.num_repeats
         #                 self.filter_steps
-        self.norm_list = [None for i in range(num_layers)]
+        self.norm_list = [None for i in range(num_repeats)]
         if self.norm == 'batch':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 if self.filter_steps == 'linear':
                     self.norm_list[i] = nn.BatchNorm2d(steps[i+1])
                 elif self.filter_steps == 'first':
                     self.norm_list[i] = nn.BatchNorm2d(steps[-1])
                 elif self.filter_steps == 'last':
-                    if i < self.num_layers - 1:
+                    if i < self.num_repeats - 1:
                         self.norm_list[i] = nn.BatchNorm2d(steps[0])
                     else:
                         self.norm_list[i] = nn.BatchNorm2d(steps[-1])
         elif self.norm == 'instance':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 if self.filter_steps == 'linear':
                     self.norm_list[i] = nn.InstanceNorm2d(steps[i+1])
                 elif self.filter_steps == 'first':
                     self.norm_list[i] = nn.InstanceNorm2d(steps[-1])
                 elif self.filter_steps == 'last':
-                    if i < self.num_layers - 1:
+                    if i < self.num_repeats - 1:
                         self.norm_list[i] = nn.InstanceNorm2d(steps[0])
                     else:
                         self.norm_list[i] = nn.InstanceNorm2d(steps[-1])
@@ -108,15 +111,15 @@ class ConvBlock2D(nn.Module):
         # init conv layers and determine transposition during convolution
         # The parameters governing the initiation logic flow are:
         #                 self.transpose
-        #                 self.num_layers
+        #                 self.num_repeats
         #                 self.filter_steps
         # See above for definitions.
         #-------#
         
         self.conv_list = []
         if self.filter_steps == 'linear': #learn progressively over steps
-            for i in range(self.num_layers):
-                depth_pair = (steps[i], steps[i+1]) if i+1 < num_layers else (steps[i], steps[-1])
+            for i in range(self.num_repeats):
+                depth_pair = (steps[i], steps[i+1]) if i+1 < num_repeats else (steps[i], steps[-1])
                 if self.transpose:
                     self.conv_list.append(nn.ConvTranspose2d(depth_pair[0],
                                                              depth_pair[1], 
@@ -131,7 +134,7 @@ class ConvBlock2D(nn.Module):
         elif self.filter_steps == 'first': #learn in the first convolution
             if self.transpose:
                 raise NotImplementedError('PyTorch-side problem with \'same\' padding in ConvTranspose2d.')
-                for i in range(self.num_layers):
+                for i in range(self.num_repeats):
                     if i == 0:
                         self.conv_list.append(nn.ConvTranspose2d(in_filters,
                                                                  out_filters, 
@@ -142,7 +145,7 @@ class ConvBlock2D(nn.Module):
                                                                  kernel_size=kernel_size, 
                                                                  padding='same'))
             else:
-                for i in range(self.num_layers):
+                for i in range(self.num_repeats):
                     if i == 0:
                         self.conv_list.append(nn.Conv2d(in_filters,
                                                         out_filters, 
@@ -157,8 +160,8 @@ class ConvBlock2D(nn.Module):
         elif self.filter_steps == 'last': #learn in the last convolution
             if self.transpose:
                 raise NotImplementedError('Problem with \'same\' padding in ConvTranspose2d.')
-                for i in range(self.num_layers):
-                    if i == self.num_layers-1:
+                for i in range(self.num_repeats):
+                    if i == self.num_repeats-1:
                         self.conv_list.append(nn.ConvTranspose2d(in_filters,
                                                                  out_filters, 
                                                                  kernel_size=kernel_size, 
@@ -169,8 +172,8 @@ class ConvBlock2D(nn.Module):
                                                                  kernel_size=kernel_size, 
                                                                  padding='same'))
             else:
-                for i in range(self.num_layers):
-                    if i == self.num_layers-1:
+                for i in range(self.num_repeats):
+                    if i == self.num_repeats-1:
                         self.conv_list.append(nn.Conv2d(in_filters,
                                                         out_filters, 
                                                         kernel_size=kernel_size, 
@@ -193,16 +196,16 @@ class ConvBlock2D(nn.Module):
         #----- Init Activation Layers -----#
         self.act_list = []
         if self.activation == 'relu':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 self.act_list.append(nn.ReLU())
         elif self.activation == 'leakyrelu':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 self.act_list.append(nn.LeakyReLU())
         elif self.activation == 'elu':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 self.act_list.append(nn.ELU())
         elif self.activation == 'selu':
-            for i in range(self.num_layers):
+            for i in range(self.num_repeats):
                 self.act_list.append(nn.SELU())
         elif self.activation != 'linear':
             raise NotImplementedError(f'Activation type {self.activation} not supported.')
@@ -211,8 +214,15 @@ class ConvBlock2D(nn.Module):
     def forward(self, x, validate_input = False):
         """
         Forward call of convolutional block
-            
-        Layer order:   convolution -> normalization -> activation
+        
+        Order of layers within the block is defined by the 'layer_order' parameter, which is a string of
+        'c's, 'a's and 'n's in reference to convolution, activation, and normalization layers. This sequence
+        is repeated num_repeats times.
+        
+        Recommended layer order:   convolution -> normalization -> activation
+        
+        Regardless of layer order, the final layer sequence in the block always ends in activation. This
+        allows for usage of passthrough layers or a final output activation function determined separately.
         
         Residual blocks:
             if input channels are greater than output channels, we use a 1x1 convolution on
@@ -228,14 +238,18 @@ class ConvBlock2D(nn.Module):
             assert x.shape[-1] == x.shape[-2], 'Input to conv_block must be square'
         
         x_0 = x
-        for i in range(self.num_layers):
-            x = self.conv_list[i](x)
-            if self.dropout:
-                x = self.drop_list[i](x)
-            if self.norm_list[i]:
-                x = self.norm_list[i](x)
-            if i < self.num_layers - 1:
-                x = self.act_list[i](x)
+        for i in range(self.num_repeats):
+            order = list(self.layer_order)
+            while(len(order) > 0):
+                layer = order.pop(0)
+                if layer == 'c':
+                    x = self.conv_list[i](x)
+                    if self.dropout:
+                        x = self.drop_list[i](x)
+                elif layer == 'a' and i < self.num_repeats - 1:
+                    x = self.act_list[i](x)
+                elif layer == 'n' and self.norm_list[i]:
+                    x = self.norm_list[i](x)
         
         #residual summation comes before final activation layer
         if self.residual:
@@ -267,7 +281,7 @@ class ConvBlock2D(nn.Module):
         """
         layers = []
         
-        for i in range(self.num_layers):
+        for i in range(self.num_repeats):
             layers.append(self.conv_list[i])
             if self.dropout:
                 layers.append(self.drop_list[i])

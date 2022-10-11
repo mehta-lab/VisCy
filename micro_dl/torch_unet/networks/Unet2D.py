@@ -103,7 +103,7 @@ class Unet2d(nn.Module):
                                                      residual = self.residual,
                                                      activation = activation,
                                                      kernel_size = self.kernel_size,
-                                                     num_layers=self.num_block_layers))
+                                                     num_repeats=self.num_block_layers))
         self.register_modules(self.down_conv_blocks, 'down_conv_block')
         
         self.bottom_transition_block = ConvBlock2D(self.num_filters[-2],
@@ -112,7 +112,7 @@ class Unet2d(nn.Module):
                                                    residual = self.residual,
                                                    activation = activation,
                                                    kernel_size = self.kernel_size,
-                                                   num_layers=self.num_block_layers)
+                                                   num_repeats=self.num_block_layers)
 
         self.up_conv_blocks = []
         for i in range(num_blocks):
@@ -122,7 +122,7 @@ class Unet2d(nn.Module):
                                                    residual = self.residual,
                                                    activation = activation,
                                                    kernel_size = self.kernel_size,
-                                                   num_layers=self.num_block_layers))
+                                                   num_repeats=self.num_block_layers))
         self.register_modules(self.up_conv_blocks, 'up_conv_block')            
         
         
@@ -133,7 +133,7 @@ class Unet2d(nn.Module):
                                               dropout = self.dropout,
                                               residual = self.residual,
                                               activation = 'linear',
-                                              num_layers = 1,
+                                              num_repeats = 1,
                                               norm='none',
                                               kernel_size=self.kernel_size)
         else:
@@ -142,7 +142,7 @@ class Unet2d(nn.Module):
                                               dropout = self.dropout,
                                               residual = self.residual,
                                               activation = activation,
-                                              num_layers = 1,
+                                              num_repeats = 1,
                                               norm='none',
                                               kernel_size=self.kernel_size)
         

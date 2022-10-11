@@ -19,7 +19,7 @@ class Unet25d(nn.Module):
                  residual = False, 
                  dropout = 0.2,
                  num_blocks = 4,
-                 num_block_layers = 3,
+                 num_block_layers = 2,
                  num_filters = [], 
                  task = 'seg'):
         """
@@ -39,7 +39,7 @@ class Unet25d(nn.Module):
         :param bool residual: see name
         :param float dropout: probability of dropout, between 0 and 0.5
         :param int num_blocks: number of convolutional blocks on encoder and decoder paths
-        :param int num_block_layers: number of layers per block
+        :param int num_block_layers: number of layer sequences repeated per block
         :param list[int] num_filters: list of filters/feature levels at each conv block depth
         :param str task: network task (for virtual staining this is regression): 'seg','reg'             
         """
@@ -102,14 +102,14 @@ class Unet25d(nn.Module):
                                                      kernel_size = (3,
                                                                     self.ks[0],
                                                                     self.ks[1]),
-                                                     num_layers = num_block_layers))
+                                                     num_repeats = num_block_layers))
         self.register_modules(self.down_conv_blocks, 'down_conv_block')
         
         if self.bottom_block_spatial:
             #TODO: residual must be false or dimensionality breaks. Fix later
             self.bottom_transition_block = ConvBlock3D(self.num_filters[-2],
                                                        self.num_filters[-1],
-                                                       num_layers = 1,
+                                                       num_repeats = 1,
                                                        residual = False,
                                                        kernel_size = (1 + in_stack_depth - out_stack_depth,
                                                                       self.ks[0],
@@ -131,7 +131,7 @@ class Unet25d(nn.Module):
                                                    residual = self.residual,
                                                    activation = activation,
                                                    kernel_size = (1, self.ks[0], self.ks[1]),
-                                                   num_layers = num_block_layers))
+                                                   num_repeats = num_block_layers))
         self.register_modules(self.up_conv_blocks, 'up_conv_block')   
         
         
@@ -155,7 +155,7 @@ class Unet25d(nn.Module):
                                               residual = False, activation = 'linear',
                                               kernel_size = (1,3,3),
                                               norm = 'none',
-                                              num_layers = 1)
+                                              num_repeats = 1)
             
             #TODO This line is for compatibility with a previous model. remove before release
             self.linear_activation = nn.Linear(256, 256) 
@@ -166,7 +166,7 @@ class Unet25d(nn.Module):
                                               residual = self.residual,
                                               activation = activation,
                                               kernel_size = (1,3,3),
-                                              num_layers = 1)
+                                              num_repeats = 1)
             
     def forward(self, x, validate_input=False):
         """
@@ -180,7 +180,7 @@ class Unet25d(nn.Module):
             => terminal block collapses to output dimensions
 
         :param torch.tensor x: input image
-        :param bool validate_input: Deactivates assertions which are redundat if forward pass
+        :param bool validate_input: Deactivates assertions which are redundant if forward pass
                                     is being traced by tensorboard writer. 
         """
         #handle input exceptions
