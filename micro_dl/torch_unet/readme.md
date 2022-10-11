@@ -97,5 +97,5 @@ Make sure that these parameters are changed to reflect your session. This will p
 **Inference:**
 
 * **inference_config_path** (in torch_config) - Make sure this is pointing to *your* tf inference config
-* **save_folder_name** (in config_inference.yml) - Where the inference predictions and metrics will be saved
+* **save_folder_name** (in config_inference.yml) - Where the inference predictions and metrics will be saved. If not global, dir path will be created with `training_model_yyyy_mm_dd_hh_mm` dir as root.
 * **model_dir** (in torch_config/model) - You want this to point to the ```.pt``` model file you just trained

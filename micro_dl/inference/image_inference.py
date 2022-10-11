@@ -101,22 +101,24 @@ class ImagePredictor:
         # create model and load weights
         self.torch_predictor = torch_predictor
         
-        # Use model_dir from inference config if present, otherwise use train
-        #TODO this complexity is un-needed. Specify model_dir only once
-        if 'model_dir' in inference_config:
-            model_dir = inference_config['model_dir']
+        # Use model_dir from torch config.
+        if 'model_dir' in self.torch_predictor.network_config:
+            model_dir = self.torch_predictor.network_config['model_dir'] 
         else:
-            model_dir = train_config['trainer']['model_dir']
-
-        if 'save_folder_name' in inference_config:
-            self.pred_dir = inference_config['save_folder_name']
-        else:
-            raise AssertionError('save_folder_name must be specified in inference config')
-            self.pred_dir = os.path.join(self.model_dir, self.save_folder_name)
-
+            raise AssertionError('model_dir must be specified in torch config for inference')
+        
         self.config = train_config
         self.model_dir = model_dir
         self.image_dir = inference_config['image_dir']
+
+        if 'save_folder_name' in inference_config:
+            if inference_config['save_folder_name'][0] == '/':
+                self.pred_dir = inference_config['save_folder_name']
+            else:
+                parent_dir = '/'.join(self.model_dir.split('/')[:-1])
+                self.pred_dir = os.path.join(parent_dir, inference_config['save_folder_name'])
+        else:
+            raise AssertionError('save_folder_name must be specified in inference config')
 
         # Set default for data split, determine column name and indices
         #TODO remove these parameters from config. drop support for variability
@@ -274,8 +276,6 @@ class ImagePredictor:
         self.df_xz = pd.DataFrame()
         self.df_yz = pd.DataFrame()
         
-        
-
 
     def _get_split_ids(self, data_split='test'):
         """
@@ -1082,3 +1082,6 @@ class ImagePredictor:
                     sep=',',
                     index=False,
                 )
+        
+        #output save dirs
+        print(f'Predictions and figures saved at: {self.pred_dir}')
