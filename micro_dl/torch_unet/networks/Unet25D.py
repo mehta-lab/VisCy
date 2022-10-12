@@ -152,18 +152,16 @@ class Unet25d(nn.Module):
             self.terminal_block = ConvBlock3D(forward_filters[1],
                                               out_channels,
                                               dropout = self.dropout,
-                                              residual = False, activation = 'linear',
+                                              residual = False,
+                                              activation = 'linear',
                                               kernel_size = (1,3,3),
                                               norm = 'none',
                                               num_repeats = 1)
-            
-            #TODO This line is for compatibility with a previous model. remove before release
-            self.linear_activation = nn.Linear(256, 256) 
         else:
             self.terminal_block = ConvBlock3D(forward_filters[1],
                                               out_channels, 
                                               dropout = self.dropout,
-                                              residual = self.residual,
+                                              residual = False,
                                               activation = activation,
                                               kernel_size = (1,3,3),
                                               num_repeats = 1)

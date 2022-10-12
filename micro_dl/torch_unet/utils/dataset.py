@@ -59,6 +59,7 @@ class TorchDataset(Dataset):
             self.test_dataset = None
             self.val_dataset = None
             self.mask = True
+            self.last_idx = -1
         else:
             config = aux_utils.read_config(train_config)
             
@@ -111,9 +112,11 @@ class TorchDataset(Dataset):
         
         :param int idx: index of dataset item to transform and return
         """
-        # clear cuda cache to prevent memory overflowing
-        torch.cuda.empty_cache()
-        
+        # remove the tensor accessed last time from cuda memory
+        if self.caching and self.last_idx != -1:
+            del self.sample_cache[self.last_idx]
+            self.last_idx = idx
+            
         # if acting as dataset object
         if self.tf_dataset:
             if self.sample_cache[idx]:
@@ -140,11 +143,11 @@ class TorchDataset(Dataset):
 
                 #depending on the transformation we might return lists or tuples, which we must unpack
                 if self.caching:
-                    self.sample_cache[idx] = self.unpack(sample_input, sample_target)
+                    self.sample_cache[idx] = tuple(map(lambda x: x.cpu(), self.unpack(sample_input, sample_target)))
                 else:
                     return self.unpack(sample_input, sample_target)
 
-            return self.sample_cache[idx]
+            return tuple(map(lambda x: x.to(torch.device('cuda')), self.sample_cache[idx]))
         
         # if acting as container object of dataset objects
         else:
@@ -195,7 +198,10 @@ class ToTensor(object):
     def __init__(self, device = torch.device('cuda')):
         self.device = device
     def __call__(self, sample):
-        sample = torch.tensor(sample.copy(), dtype=torch.float32).to(self.device)
+        if isinstance(sample, torch.Tensor):
+            sample = sample.to(self.device)
+        else:
+            sample = torch.tensor(sample, dtype=torch.float32).to(self.device)
         return sample
 
 class Resize(object):

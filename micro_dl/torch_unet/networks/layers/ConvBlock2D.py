@@ -219,7 +219,7 @@ class ConvBlock2D(nn.Module):
         'c's, 'a's and 'n's in reference to convolution, activation, and normalization layers. This sequence
         is repeated num_repeats times.
         
-        Recommended layer order:   convolution -> normalization -> activation
+        Recommended layer order:   convolution -> activation -> normalization
         
         Regardless of layer order, the final layer sequence in the block always ends in activation. This
         allows for usage of passthrough layers or a final output activation function determined separately.
@@ -235,7 +235,12 @@ class ConvBlock2D(nn.Module):
                                     traced by tensorboard writer. 
         """
         if validate_input:
-            assert x.shape[-1] == x.shape[-2], 'Input to conv_block must be square'
+            if isinstance(self.kernel_size, int):
+                assert x.shape[-1] > self.kernel_size and x.shape[-2] > self.kernel_size, f'Input size'\
+                    f' {x.shape} too small for kernel of size {self.kernel_size}'
+            elif isinstance(self.kernel_size, tuple):
+                assert x.shape[-1] > self.kernel_size[-1] and x.shape[-2] > self.kernel_size[-2], f'Input size'\
+                    f' {x.shape} too small for kernel of size {self.kernel_size}'
         
         x_0 = x
         for i in range(self.num_repeats):
@@ -246,12 +251,13 @@ class ConvBlock2D(nn.Module):
                     x = self.conv_list[i](x)
                     if self.dropout:
                         x = self.drop_list[i](x)
-                elif layer == 'a' and i < self.num_repeats - 1:
-                    x = self.act_list[i](x)
+                elif layer == 'a':
+                    if i < self.num_repeats - 1 or self.activation != 'linear':
+                        x = self.act_list[i](x)
                 elif layer == 'n' and self.norm_list[i]:
                     x = self.norm_list[i](x)
         
-        #residual summation comes before final activation layer
+        #residual summation after final activation/normalization
         if self.residual:
             if self.in_filters > self.out_filters:
                 x_0 = self.resid_conv(x_0)
@@ -261,10 +267,6 @@ class ConvBlock2D(nn.Module):
                             mode = 'constant',
                             value = 0)
             x = torch.add(x_0, x)
-            
-        #last activation could be linear in prediction block
-        if self.activation != 'linear':
-            x = self.act_list[-1](x)
         
         return x
     

@@ -13,35 +13,6 @@ import micro_dl.inference.image_inference as image_inf
 import micro_dl.torch_unet.utils.inference as torch_inference_utils
 import micro_dl.utils.train_utils as train_utils
 
-def parse_args():
-    """
-    Parse command line arguments
-    In python namespaces are implemented as dictionaries
-    
-    :return: namespace containing the arguments passed.
-    """
-    parser = argparse.ArgumentParser()
-    parser.add_argument(
-        '--gpu',
-        type=int,
-        default=None,
-        help=('Optional: specify the gpu to use: 0,1,...',
-              ', -1 for debugging. Default: pick best GPU'),
-    )
-    parser.add_argument(
-        '--gpu_mem_frac',
-        type=float,
-        default=None,
-        help='Optional: specify gpu memory fraction to use',
-    )
-    parser.add_argument(
-        '--config',
-        type=str,
-        help='path to yaml configuration file',
-    )
-    args = parser.parse_args()
-    return args
-
 def check_save_folder(inference_config, preprocess_config):
     """
     Helper method to ensure that save folder exists.

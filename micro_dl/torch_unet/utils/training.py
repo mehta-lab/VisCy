@@ -192,6 +192,7 @@ class TorchTrainer():
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+                break
             
             self.scheduler.step(self.run_test(validate_mode=True))
             train_loss_list.append(train_loss/self.train_dataloader.__len__())
@@ -283,7 +284,7 @@ class TorchTrainer():
             #save test figures
             arch = self.network_config['architecture']
             fig, ax = plt.subplots(1,3,figsize = (18,6))
-            ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0],
+            ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0,0],
                                     cmap = 'gray')
             ax[0].set_title('mean input phase image')
             ax[1].imshow(targets.pop()[0,0,0] if arch == '2.5D' else targets.pop()[0,0])

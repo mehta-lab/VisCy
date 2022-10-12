@@ -232,7 +232,7 @@ class ConvBlock3D(nn.Module):
         'c's, 'a's and 'n's in reference to convolution, activation, and normalization layers. This sequence
         is repeated num_repeats times.
         
-        Recommended layer order:   convolution -> normalization -> activation
+        Recommended layer order:   convolution -> activation -> normalization
         
         Regardless of layer order, the final layer sequence in the block always ends in activation. This
         allows for usage of passthrough layers or a final output activation function determined separately.
@@ -247,7 +247,6 @@ class ConvBlock3D(nn.Module):
         :param bool validate_input: Deactivates assertions which are redundat if forward pass is being
                                     traced by tensorboard writer. 
         """
-        
         #--- Handle Kernel ---#
         if validate_input:
             assert x.shape[-2] >= self.kernel_size[-2], f'Input depth of size {x.shape} tensor' \
@@ -262,14 +261,15 @@ class ConvBlock3D(nn.Module):
                     x = self.conv_list[i](x)
                     if self.dropout:
                         x = self.drop_list[i](x)
-                elif layer == 'a' and i < self.num_repeats - 1:
-                    x = self.act_list[i](x)
+                elif layer == 'a':
+                    if i < self.num_repeats - 1 or self.activation != 'linear':
+                        x = self.act_list[i](x)
                 elif layer == 'n' and self.norm_list[i]:
                     x = self.norm_list[i](x)
         
-        #residual summation comes before final activation layer
+        #residual summation comes after final activation/normalization
         if self.residual:
-            #pad feature dimension
+            #pad/collapse feature dimension
             if self.in_filters > self.out_filters:
                 x_0 = self.resid_conv(x_0)
             elif self.in_filters < self.out_filters:
@@ -281,10 +281,6 @@ class ConvBlock3D(nn.Module):
                 x_0 = x_0[..., lost[0]:x_0.shape[-2] - lost[0], lost[1]:x_0.shape[-1] - lost[1]]
                 
             x = torch.add(x, x_0)
-        
-        #last activation could be linear in prediction block
-        if self.activation != 'linear':
-            x = self.act_list[-1](x)
         
         return x
     
