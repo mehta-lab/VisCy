@@ -192,7 +192,6 @@ class TorchTrainer():
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
-                break
             
             self.scheduler.step(self.run_test(validate_mode=True))
             train_loss_list.append(train_loss/self.train_dataloader.__len__())
