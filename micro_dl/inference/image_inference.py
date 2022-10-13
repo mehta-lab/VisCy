@@ -5,15 +5,13 @@ import numpy as np
 import os
 import pandas as pd
 from tqdm import tqdm
+from pathlib import Path
 
 from micro_dl.input.inference_dataset import InferenceDataSet
-import micro_dl.inference.model_inference as inference
 from micro_dl.inference.evaluation_metrics import MetricsEstimator
-from micro_dl.inference.stitch_predictions import ImageStitcher
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
 import micro_dl.utils.tile_utils as tile_utils
-from micro_dl.utils.train_utils import set_keras_session
 import micro_dl.utils.normalize as normalize
 import micro_dl.plotting.plot_utils as plot_utils
 
@@ -92,9 +90,6 @@ class ImagePredictor:
         :param int gpu_id: GPU number to use. -1 for debugging (no GPU)
         :param float/None gpu_mem_frac: Memory fractions to use corresponding
             to gpu_ids
-        :param str framework: framework is either 'tf' or 'torch'. This governs
-            the backend model type that performs the inference. If framework is
-            'torch', torch_predictor object must be provided
         :param TorchPredictor torch_predictor: predictor object which handles
             transporting data to a PyTorch model for inference.
         """
@@ -118,7 +113,9 @@ class ImagePredictor:
                 parent_dir = '/'.join(self.model_dir.split('/')[:-1])
                 self.pred_dir = os.path.join(parent_dir, inference_config['save_folder_name'])
         else:
-            raise AssertionError('save_folder_name must be specified in inference config')
+            print('No save_folder_name specified... saving predictions to image_dir.')
+            self.pred_dir = os.path.join(self.image_dir, os.path.basename(model_dir))
+        os.makedirs(self.pred_dir, exist_ok=True)
 
         # Set default for data split, determine column name and indices
         #TODO remove these parameters from config. drop support for variability
@@ -157,12 +154,6 @@ class ImagePredictor:
         self.name_format = 'ctzp'
         if 'name_format' in images_dict:
             self.name_format = images_dict['name_format']
-            
-        # Create image subdirectory to write predicted images
-        if 'save_to_image_dir' in inference_config:
-            if inference_config['save_to_image_dir']:
-                self.pred_dir = os.path.join(self.image_dir, os.path.basename(model_dir))
-        os.makedirs(self.pred_dir, exist_ok=True)
 
         self.save_figs = True
         if 'save_figs' in inference_config:
@@ -297,9 +288,8 @@ class ImagePredictor:
             return split_col, inference_ids
 
         try:
-            split_dir_name = os.path.join(self.torch_predictor.network_config['model_dir'], os.pardir)
-            split_dir_name = '/'.join(self.torch_predictor.network_config['model_dir'].split('/')[:-1])
-            split_fname = os.path.join(split_dir_name, 'split_samples.json')
+            split_fname = os.path.join(Path(self.torch_predictor.network_config['model_dir']).parent,
+                                       'split_samples.json')
             split_samples = aux_utils.read_json(split_fname)
             inference_ids = split_samples[data_split]
         except FileNotFoundError as e:
@@ -310,146 +300,15 @@ class ImagePredictor:
 
     def _assign_3d_inference(self):
         raise DeprecationWarning('3d inference no longer supported in 2.0.0')
-        """
-        Assign inference options for 3D volumes
-
-        tile_z - 2d/3d predictions on full xy extent, stitch predictions along
-            z axis
-        tile_xyz - 2d/3d prediction on sub-blocks, stitch predictions along xyz
-        infer_on_center - infer on center block
-        """
-        # assign zdim if not Unet2D
-        if self.image_format == 'zyx':
-            self.z_dim = 2 if self.data_format == 'channels_first' else 1
-        elif self.image_format == 'xyz':
-            self.z_dim = 4 if self.data_format == 'channels_first' else 3
-
-        if 'num_slices' in self.tile_params and self.tile_params['num_slices'] > 1:
-            self.tile_option = 'tile_z'
-            assert self.tile_params['num_slices'] >= self.input_depth, \
-                'inference num of slices < num of slices used for training. ' \
-                'Inference on reduced num of slices gives sub optimal results. \n' \
-                'Train slices: {}, inference slices: {}'.format(
-                    self.input_depth, self.tile_params['num_slices'],
-                )
-            num_slices = self.tile_params['num_slices']
-
-            assert self.config['network']['class'] == 'UNet3D', \
-                'currently stitching predictions available for 3D models only'
-            network_depth = len(
-                self.config['network']['num_filters_per_block']
-            )
-            min_num_slices = 2 ** (network_depth - 1)
-            assert num_slices >= min_num_slices, \
-                'Insufficient number of slices {} for the network ' \
-                'depth {}'.format(num_slices, network_depth)
-            self.num_overlap = self.tile_params['num_overlap'] \
-                if 'num_overlap' in self.tile_params else 0
-        elif 'tile_shape' in self.tile_params:
-            if self.config['network']['class'] == 'UNet3D':
-                self.tile_option = 'tile_xyz'
-                self.num_overlap = self.tile_params['num_overlap'] \
-                    if 'num_overlap' in self.tile_params else [0, 0, 0]
-                if isinstance(self.num_overlap, int):
-                    self.num_overlap = self.num_overlap * [1, 1, 1]
-            else:
-                self.tile_option = 'tile_xy'
-            self.num_overlap = self.tile_params['num_overlap'] \
-                if 'num_overlap' in self.tile_params else [0, 0, 0]
-        elif 'inf_shape' in self.tile_params:
-            self.tile_option = 'infer_on_center'
-            self.num_overlap = 0
-
-        # create an instance of ImageStitcher
-        if self.tile_option in ['tile_z', 'tile_xyz', 'tile_xy']:
-            num_overlap = self.num_overlap
-            if isinstance(num_overlap, list) and \
-                    self.config['network']['class'] != 'UNet3D':
-                num_overlap = self.num_overlap[-1]
-            overlap_dict = {
-                'overlap_shape': num_overlap,
-                'overlap_operation': self.tile_params['overlap_operation']
-            }
-            self.stitch_inst = ImageStitcher(
-                tile_option=self.tile_option,
-                overlap_dict=overlap_dict,
-                image_format=self.image_format,
-                data_format=self.data_format
-            )
 
     def _get_sub_block_z(self,
                          input_image,
                          start_z_idx,
                          end_z_idx):
         raise DeprecationWarning('3d inference no longer supported in 2.0.0')
-        """
-        Get the sub block along z given start and end slice indices
-
-        :param np.array input_image: 5D tensor with the entire 3D volume
-        :param int start_z_idx: start slice for the current block
-        :param int end_z_idx: end slice for the current block
-        :return np.array cur_block: sub block / volume
-        """
-
-        if self.image_format == 'xyz' and \
-                self.data_format == 'channels_first':
-            cur_block = input_image[:, :, :, :, start_z_idx: end_z_idx]
-        elif self.image_format == 'xyz' and \
-                self.data_format == 'channels_last':
-            cur_block = input_image[:, :, :, start_z_idx: end_z_idx, :]
-        elif self.image_format == 'zyx' and \
-                self.data_format == 'channels_first':
-            cur_block = input_image[:, :, start_z_idx: end_z_idx, :, :]
-        elif self.image_format == 'zyx' and \
-                self.data_format == 'channels_last':
-            cur_block = input_image[:, start_z_idx: end_z_idx, :, :, :]
-        return cur_block
 
     def _predict_sub_block_z(self, input_image):
         raise DeprecationWarning('3d inference no longer supported in 2.0.0')
-        """
-        Predict sub blocks along z, given some image's entire xy plane.
-
-        :param np.array input_image: 5D tensor with the entire 3D volume
-        :return list pred_ims - list of predicted sub blocks
-         list start_end_idx - list of tuples with start and end z indices
-        """
-
-        pred_ims = []
-        start_end_idx = []
-        num_z = input_image.shape[self.z_dim]
-        num_slices = self.tile_params['num_slices']
-        num_overlap = self.num_overlap
-        if isinstance(self.num_overlap, list):
-            num_overlap = self.num_overlap[-1]
-
-        num_blocks = np.ceil(
-            num_z / (num_slices - num_overlap)
-        ).astype('int')
-        for block_idx in range(num_blocks):
-            start_idx = block_idx * (num_slices - num_overlap)
-            end_idx = start_idx + num_slices
-            if end_idx >= num_z:
-                end_idx = num_z
-                start_idx = end_idx - num_slices
-            cur_block = self._get_sub_block_z(input_image,
-                                              start_idx,
-                                              end_idx)
-            if self.framework == 'tf':
-                pred_block = inference.predict_large_image(
-                    model=self.model,
-                    input_image=cur_block,
-                )
-            elif self.framework == 'torch':
-                pred_block = self.torch_predictor.predict_large_image(
-                    input_image=cur_block
-                )
-            else:
-                raise Exception('self.framework must be either \'tf\' or \'torch\'')
-            # reduce predictions from 5D to 3D for simplicity
-            pred_ims.append(np.squeeze(pred_block))
-            start_end_idx.append((start_idx, end_idx))
-        return pred_ims, start_end_idx
 
     def _predict_sub_block_xy(self,
                               input_image,
@@ -505,39 +364,6 @@ class ImagePredictor:
                                input_image,
                                crop_indices):
         raise DeprecationWarning('3d inference no longer supported in 2.0.0')
-        """
-        Predict sub blocks along xyz, particularly when predicting a 3d
-        volume along three dimensions. Sub blocks are cubic chunks out 
-        of entire 3D volume of specified xyz shape.
-
-        :param np.array input_image: 5D tensor with the entire 3D volume
-        :param list crop_indices: list of crop indices: min/max xyz
-        :return list pred_ims - list of predicted sub blocks
-        """
-        pred_ims = []
-        for crop_idx in crop_indices:
-            if self.data_format == 'channels_first':
-                cur_block = input_image[:, :, crop_idx[0]: crop_idx[1],
-                            crop_idx[2]: crop_idx[3],
-                            crop_idx[4]: crop_idx[5]]
-            else:
-                cur_block = input_image[:, crop_idx[0]: crop_idx[1],
-                            crop_idx[2]: crop_idx[3],
-                            crop_idx[4]: crop_idx[5], :]
-            if self.framework == 'tf':
-                pred_block = inference.predict_large_image(
-                    model=self.model,
-                    input_image=cur_block,
-                )
-            elif self.framework == 'torch':
-                pred_block = self.torch_predictor.predict_large_image(
-                    input_image=cur_block
-                )
-            else:
-                raise Exception('self.framework must be either \'tf\' or \'torch\'')
-            # retain the full 5D tensor to experiment for multichannel case
-            pred_ims.append(pred_block)
-        return pred_ims
 
     def unzscore(self,
                  im_pred,
@@ -617,7 +443,7 @@ class ImagePredictor:
             im_pred = np.clip(im_pred, 0, 65535)
             im_pred = im_pred.astype(np.uint16)
         else:
-            # assuming segmentation output is probability maps
+            # Assuming segmentation output is probability maps
             im_pred = im_pred.astype(np.float32)
         # Check file format
         if self.image_ext in ['.png', '.tif']:
@@ -768,9 +594,10 @@ class ImagePredictor:
         target_stack = []
         mask_stack = []
         # going through z slices for given position and time
-        with tqdm(total=len(chan_slice_meta['slice_idx'].unique()), desc='z-stack prediction', leave=False) as pbar:
+        with tqdm(total=len(chan_slice_meta['slice_idx'].unique()),
+                  desc='z-stack prediction', leave=False) as pbar:
             for z_idx in chan_slice_meta['slice_idx'].unique():
-                #get input image and target
+                # get input image and target
                 chan_meta = chan_slice_meta[chan_slice_meta['slice_idx'] == z_idx]
                 cur_input, cur_target = \
                     self.dataset_inst.__getitem__(chan_meta.index[0])
@@ -786,7 +613,7 @@ class ImagePredictor:
                         self.image_format,
                     )
                 
-                #pass to network for prediction
+                # pass to network for prediction
                 if self.tile_option == 'tile_xy':
                     step_size = (np.array(self.tile_params['tile_shape']) -
                                 np.array(self.num_overlap))
@@ -849,10 +676,10 @@ class ImagePredictor:
         target_stack = np.concatenate(target_stack, axis=0)
         # Stack images and transpose (metrics assumes cyxz format)
         if self.image_format == 'zyx':
-            if self.input_depth > 0:
-                input_stack = input_stack[:, :, self.input_depth // 2, :, :]
-                pred_stack = pred_stack[:, :, 0, :, :]
-                target_stack = target_stack[:, :, 0, :, :]
+            input_stack = input_stack[:, :, self.input_depth // 2, :, :]
+            pred_stack = pred_stack[:, :, 0, :, :]
+            target_stack = target_stack[:, :, 0, :, :]
+            
             input_stack = np.transpose(input_stack,  [1, 2, 3, 0])
             pred_stack = np.transpose(pred_stack, [1, 2, 3, 0])
             target_stack = np.transpose(target_stack, [1, 2, 3, 0])
@@ -865,107 +692,6 @@ class ImagePredictor:
     
     def predict_3d(self, iteration_rows):
         raise DeprecationWarning('3d inference no longer supported in 2.0.0') 
-        """
-        Run prediction in 3D on images with 3D shape.
-
-        :param list iteration_rows: Inference meta rows
-        :return np.array pred_stack: Prediction
-        :return np.array/list mask_stack: Mask for metrics
-        """
-        crop_indices = None
-        assert len(iteration_rows) == 1, \
-            'more than one matching row found for position ' \
-            '{}'.format(iteration_rows.pos_idx)
-        input_image, target_image = \
-            self.dataset_inst.__getitem__(iteration_rows.index[0])
-        # If crop shape is defined in images dict
-        if self.crop_shape is not None:
-            input_image = image_utils.center_crop_to_shape(
-                input_image,
-                self.crop_shape,
-            )
-            target_image = image_utils.center_crop_to_shape(
-                target_image,
-                self.crop_shape,
-            )
-        inf_shape = None
-        if self.tile_option == 'infer_on_center':
-            inf_shape = self.tile_params['inf_shape']
-            center_block = image_utils.center_crop_to_shape(input_image, inf_shape)
-            target_image = image_utils.center_crop_to_shape(target_image, inf_shape)
-            if self.framework == 'tf':
-                pred_image = inference.predict_large_image(
-                    model=self.model,
-                    input_image=center_block,
-                )
-            elif self.framework == 'torch':
-                pred_image = self.torch_predictor.predict_large_image(
-                    input_image=center_block
-                )
-            else:
-                raise Exception('self.framework must be either \'tf\' or \'torch\'')
-        elif self.tile_option == 'tile_z':
-            pred_block_list, start_end_idx = \
-                self._predict_sub_block_z(input_image)
-            pred_image = self.stitch_inst.stitch_predictions(
-                np.squeeze(input_image).shape,
-                pred_block_list,
-                start_end_idx,
-            )
-        elif self.tile_option == 'tile_xyz':
-            step_size = (np.array(self.tile_params['tile_shape']) -
-                         np.array(self.num_overlap))
-            if crop_indices is None:
-                # TODO tile_image works for 2D/3D imgs, modify for multichannel
-                _, crop_indices = tile_utils.tile_image(
-                    input_image=np.squeeze(input_image),
-                    tile_size=self.tile_params['tile_shape'],
-                    step_size=step_size,
-                    return_index=True
-                )
-            pred_block_list = self._predict_sub_block_xyz(
-                input_image,
-                crop_indices,
-            )
-            pred_image = self.stitch_inst.stitch_predictions(
-                np.squeeze(input_image).shape,
-                pred_block_list,
-                crop_indices,
-            )
-        pred_image = pred_image.astype(np.float32)
-        target_image = target_image.astype(np.float32)
-        cur_row = self.inf_frames_meta.iloc[iteration_rows.index[0]]
-
-        if self.model_task == 'regression':
-            pred_image = self.unzscore(
-                pred_image,
-                target_image,
-                cur_row,
-            )
-        # 3D uses zyx, estimate metrics expects xyz, keep c
-        pred_image = pred_image[0, ...]
-        target_image = target_image[0, ...]
-        input_image = input_image[0, ...]
-
-        if self.image_format == 'zyx':
-            input_image = np.transpose(input_image, [0, 2, 3, 1])
-            pred_image = np.transpose(pred_image, [0, 2, 3, 1])
-            target_image = np.transpose(target_image, [0, 2, 3, 1])
-
-        # get mask
-        mask_image = None
-        if self.masks_dict is not None:
-            mask_image = self.get_mask(cur_row, transpose=True)
-            if inf_shape is not None:
-                mask_image = image_utils.center_crop_to_shape(
-                    mask_image,
-                    inf_shape,
-                )
-            if self.image_format == 'zyx':
-                mask_image = np.transpose(mask_image, [1, 2, 0])
-            mask_image = mask_image[np.newaxis, ...]
-
-        return pred_image, target_image, mask_image, input_image
             
     def run_prediction(self):
         """
@@ -1003,7 +729,8 @@ class ImagePredictor:
             #separate predictions by channel (type)
             for c, chan_idx in enumerate(self.target_channels):
                 pred_names = []
-                slice_ids = chan_slice_meta.loc[chan_slice_meta['channel_idx'] == chan_idx, 'slice_idx'].to_list()
+                slice_ids = chan_slice_meta.loc[chan_slice_meta['channel_idx'] == chan_idx,
+                                                'slice_idx'].to_list()
                 for z_idx in slice_ids:
                     pred_name = aux_utils.get_im_name(
                         time_idx=time_idx,
@@ -1026,7 +753,8 @@ class ImagePredictor:
                         pred_fnames=pred_names,
                         mask=mask,
                     )
-                with tqdm(total=len(chan_slice_meta['slice_idx'].unique()), desc='z-stack saving', leave=False) as pbar_s:
+                with tqdm(total=len(chan_slice_meta['slice_idx'].unique()), desc='z-stack saving',
+                          leave=False) as pbar_s:
                     for z, z_idx in enumerate(chan_slice_meta['slice_idx'].unique()):
                         meta_row = chan_slice_meta[
                             (chan_slice_meta['channel_idx'] == chan_idx) &

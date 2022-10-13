@@ -37,16 +37,16 @@ class TorchTrainer():
         
         self.model = None
         
-        #init token specific parameters - optimizer, loss, device
-        #optimizer
+        # init token specific parameters - optimizer, loss, device
+        # optimizer
         assert self.training_config['optimizer'] in {'adam', 'sgd'}, 'optimizer must be \'adam\' or \'sgd\''
         if self.training_config['optimizer'] == 'adam':
             self.optimizer = optim.Adam
         else:
             self.optimizer = optim.SGD
-        #lr scheduler
+        # lr scheduler
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau
-        #loss
+        # loss
         assert self.training_config['loss'] in {'mse', 'l1', 'cossim','cel'}, f'loss not supported. ' \
             'Try one of \'mse\', \'mae\', \'cossim\', \'l1\''
         if self.training_config['loss'] == 'mse':
@@ -57,7 +57,7 @@ class TorchTrainer():
             self.criterion = nn.CosineSimilarity()
         elif self.training_config['loss'] == 'cel':
             self.criterion = nn.CrossEntropyLoss()
-        #device
+        # device
         assert self.training_config['device'] in {'cpu','gpu', *range(4)}, 'device must be cpu or gpu'
         if isinstance(self.training_config['device'], int):
             self.device = torch.device(f"cuda:{self.training_config['device']}")
@@ -65,7 +65,7 @@ class TorchTrainer():
             self.device = torch.device('cuda')
         else:
             self.device = torch.device('cpu')
-        #plotting
+        # plotting
         self.plot = False
     
     def load_model(self, init_dir = False) -> None:
@@ -99,13 +99,13 @@ class TorchTrainer():
         assert self.torch_config != None, 'torch_config must be specified in object' \
             'initiation '
             
-        #determine transforms/augmentations
+        # determine transforms/augmentations
         transforms = [ds.ToTensor()]
         target_transforms = [ds.ToTensor()]
         if self.training_config['mask']:
             target_transforms.append(ds.GenerateMasks(self.training_config['mask_type']))
         
-        #init dataset container and pull dataset split objects
+        # init dataset container and pull dataset split objects
         caching = self.training_config['caching'] if 'caching' in self.training_config else False
         torch_data_container = ds.TorchDataset(self.torch_config['train_config_path'],
                                             transforms=transforms,
@@ -115,7 +115,7 @@ class TorchTrainer():
         test_dataset = torch_data_container['test']
         val_dataset = torch_data_container['val']
         
-        #init dataloaders and split metadata
+        # init dataloaders and split metadata
         self.train_dataloader = torch.utils.data.DataLoader(dataset = train_dataset, shuffle=True)
         self.test_dataloader = torch.utils.data.DataLoader(dataset = test_dataset, shuffle=True)
         self.val_dataloader = torch.utils.data.DataLoader(dataset = val_dataset, shuffle=True)
@@ -144,7 +144,7 @@ class TorchTrainer():
             ' must be initated. Try \'object_name\'.generate_dataloaders()'
         assert self.model, 'Model must be initiated. Try \'object_name\'.load_model()'
         
-        #init io and saving
+        # init io and saving
         start = time.time()
         self.get_save_location()
         self.writer = SummaryWriter(log_dir = self.save_folder)
@@ -152,7 +152,7 @@ class TorchTrainer():
         split_idx_fname = os.path.join(self.save_folder, 'split_samples.json')
         aux_utils.write_json(self.split_samples, split_idx_fname)
         
-        #init optimizer and scheduler
+        # init optimizer and scheduler
         self.model.train()
         self.optimizer = self.optimizer(self.model.parameters(),
                                         lr = self.training_config['learning_rate'])
@@ -161,7 +161,7 @@ class TorchTrainer():
                                         mode='min',
                                         factor = 0.11)
         
-        #train
+        # train
         train_loss_list = []
         test_loss_list = []
         for i in range(self.training_config['epochs']):
@@ -169,26 +169,26 @@ class TorchTrainer():
             epoch_time = time.time()
             train_loss = 0
             for current, minibatch in enumerate(self.train_dataloader): 
-                #pretty printing
+                # pretty printing
                 io_utils.show_progress_bar(self.train_dataloader, current)
                 
-                #get sample and target (remember we remove the extra batch dimension)
+                # get sample and target (remember we remove the extra batch dimension)
                 input_ = minibatch[0][0].to(self.device).float()
                 target_ = minibatch[1][0].to(self.device).float()
                 
-                #if specified mask sample to get input and target
-                #TODO: change caching to include masked inputs since masks never change
+                # if specified mask sample to get input and target
+                # TODO: change caching to include masked inputs since masks never change
                 if self.training_config['mask']:
                     mask = minibatch[2][0].to(self.device).float()
                     input_ = torch.mul(input_, mask)
                     target_ = torch.mul(target_, mask)
 
-                #run through model
+                # run through model
                 output = self.model(input_, validate_input = True)
                 loss = self.criterion(output, target_)
                 train_loss += loss.item()
                 
-                #optimize on weights
+                # optimize on weights
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
@@ -196,7 +196,7 @@ class TorchTrainer():
             self.scheduler.step(self.run_test(validate_mode=True))
             train_loss_list.append(train_loss/self.train_dataloader.__len__())
             
-            #run testing cycle every 'testing_stride' epochs
+            # run testing cycle every 'testing_stride' epochs
             if i % self.training_config['testing_stride'] == 0:
                 test_loss = self.run_test(i)
                 test_loss_list.append(test_loss/self.test_dataloader.__len__())
@@ -211,7 +211,7 @@ class TorchTrainer():
             print(f'\t Epoch time: {time.time() - epoch_time}, Total_time: {time.time() - start}')
             print(' ')
         
-        #save loss figures (overwrites previous)
+        # save loss figures (overwrites previous)
         print(f'\t Training complete. Time taken: {time.time()-start}')
         print(f'\t Training results and testing predictions saved at: \n\t\t{self.save_folder}')
         fig = plt.figure(figsize = (14,7))
@@ -237,7 +237,7 @@ class TorchTrainer():
         :param bool validate_mode: run in validation mode to just produce loss (for lr scheduler)
         :return float avg_loss: average testing loss per sample of entire test set
         """
-        #set the model to evaluation mode
+        # set the model to evaluation mode
         self.model.eval()
         
         # Calculate the loss on the images in the test set
@@ -246,7 +246,7 @@ class TorchTrainer():
         targets = []
         outputs = []
         
-        #determine data source
+        # determine data source
         if not validate_mode:
             dataloader = self.test_dataloader
         else:
@@ -256,7 +256,7 @@ class TorchTrainer():
             if not validate_mode:
                 io_utils.show_progress_bar(dataloader, current, process = 'testing')
             
-            #get input/target
+            # get input/target
             input_ = minibatch[0][0].to(self.device).float()
             target_ = minibatch[1][0].to(self.device).float()
             sample, target = input_, target_
@@ -267,12 +267,12 @@ class TorchTrainer():
                 input_ = torch.mul(input_, mask_)
                 target_ = torch.mul(target_, mask_)
             
-            #run through model
+            # run through model
             output = self.model(input_, validate_input = True)
             loss = self.criterion(output, target_)
             test_loss.append(loss.item())
             
-            #save filters (remember to take off gpu)
+            # save filters (remember to take off gpu)
             rem = lambda x: x.detach().cpu().numpy()
             if current < 1:
                 samples.append(rem(sample))
@@ -280,7 +280,7 @@ class TorchTrainer():
                 outputs.append(rem(output))
 
         if not validate_mode:
-            #save test figures
+            # save test figures
             arch = self.network_config['architecture']
             fig, ax = plt.subplots(1,3,figsize = (18,6))
             ax[0].imshow(np.mean(samples.pop(), 2)[0,0] if arch == '2.5D' else samples.pop()[0,0],
@@ -297,10 +297,10 @@ class TorchTrainer():
             if self.plot:
                 plt.show()
             
-        #set back to training mode
+        # set back to training mode
         self.model.train()
         
-        #return average loss
+        # return average loss
         avg_loss = np.sum(test_loss)/dataloader.__len__()
         return avg_loss 
 
@@ -313,12 +313,12 @@ class TorchTrainer():
         :param float avg_loss: average loss of each cample in testing cycle at epoch 'epoch'
         :param torch.tensor sample: sample input to model (for tensorboard creation)
         """
-        #write tensorboard graph
+        # write tensorboard graph
         if isinstance(sample, torch.Tensor):
             self.writer.add_graph(self.model, sample.to(self.device))
         else:
             self.writer.add_graph(self.model, torch.tensor(sample, dtype=torch.float32).to(self.device))
         
-        #save model
+        # save model
         save_file = str(f'saved_model_ep_{epoch}_testloss_{avg_loss:.4f}.pt')
         torch.save(self.model.state_dict(), os.path.join(self.save_folder, save_file))
