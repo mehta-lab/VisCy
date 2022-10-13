@@ -199,7 +199,7 @@ class TorchTrainer():
             # run testing cycle every 'testing_stride' epochs
             if i % self.training_config['testing_stride'] == 0:
                 test_loss = self.run_test(i)
-                test_loss_list.append(test_loss/self.test_dataloader.__len__())
+                test_loss_list.append(test_loss)
                 
             # save model every 'save_model_stride' epochs
             if i % self.training_config['save_model_stride'] == 0 or i == self.training_config['epochs'] - 1:
@@ -225,9 +225,9 @@ class TorchTrainer():
     
     def run_test(self, epoch = 0, mask_override = False, validate_mode = False):
         """
-        Runs test on all samples in a test_dataloader. Equivalent to one epoch on test data without
-        updating weights. Runs metrics on the test results (given in criterion) and saves the results
-        in a save folder, if specified.
+        Runs test on all samples in a test_dataloader. Equivalent to one epoch on test/val data
+        without updating weights. Runs metrics on the test results (given in criterion) and saves
+        the results in a save folder, if specified.
         
         Assumes that all tensors are on the GPU. If not, tensor devices can be specified through
         'device' parameter in torch config.
@@ -241,7 +241,7 @@ class TorchTrainer():
         self.model.eval()
         
         # Calculate the loss on the images in the test set
-        test_loss = []
+        cycle_loss = 0
         samples = []
         targets = []
         outputs = []
@@ -270,7 +270,7 @@ class TorchTrainer():
             # run through model
             output = self.model(input_, validate_input = True)
             loss = self.criterion(output, target_)
-            test_loss.append(loss.item())
+            cycle_loss += loss.item()
             
             # save filters (remember to take off gpu)
             rem = lambda x: x.detach().cpu().numpy()
@@ -301,7 +301,7 @@ class TorchTrainer():
         self.model.train()
         
         # return average loss
-        avg_loss = np.sum(test_loss)/dataloader.__len__()
+        avg_loss = cycle_loss/dataloader.__len__()
         return avg_loss 
 
     def save_model(self, epoch, avg_loss, sample):

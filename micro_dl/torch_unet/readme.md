@@ -68,7 +68,7 @@ The ```torch_config.yml``` config file contains the parameters for model initiat
 
 &nbsp;&nbsp; **save_dir:** <span style="color:cyan"> absolute path </span> (path to directory in which training models and metrics will be saved)
 
-&nbsp;&nbsp; **mask:** <span style="color:cyan"> True or False </span> (Whether or not to use masking in training. This is almost always True)
+&nbsp;&nbsp; **mask:** <span style="color:cyan"> True or False </span> (Whether or not to use masking in training. This is almost always False, and only applies to segmentation models)
 
 &nbsp;&nbsp; **mask_type:** <span style="color:cyan"> 'rosin'/'unimodal' or 'otsu' </span> (Masking type if above param is True)
 
