@@ -22,7 +22,8 @@ class TestUnet2d(unittest.TestCase):
         #possible inputs and output shapes
         self.pass_inputs = {'standard': [torch.ones((1,1,256,256)), (1,1,256,256)],
                             'batch': [torch.ones((3,1,256,256)), (3,1,256,256)],
-                            'multichannel': [torch.ones((1,2,256,256)), (1,2,256,256)],}
+                            'multichannel': [torch.ones((1,1,256,256)), (1,2,256,256)],
+                            'multichannel_flat': [torch.ones((1,2,256,256)), (1,2,256,256)]}
         self.fail_inputs = {'nonsquare': [torch.ones((1,1,128,256)), (1,1,128,256)],
                             'wrong_dims': [torch.ones((1,1,1)), (1,1,1)]}
         #possible configurations

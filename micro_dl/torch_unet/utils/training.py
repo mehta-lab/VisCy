@@ -278,7 +278,7 @@ class TorchTrainer():
                 samples.append(rem(sample))
                 targets.append(rem(target))
                 outputs.append(rem(output))
-            break
+
         if not validate_mode:
             #save test figures
             arch = self.network_config['architecture']
