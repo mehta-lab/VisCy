@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 
-import micro_dl.inference.model_inference as inference
 import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.torch_unet.utils.dataset as ds
 

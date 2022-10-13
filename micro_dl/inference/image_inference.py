@@ -113,7 +113,7 @@ class ImagePredictor:
                 parent_dir = '/'.join(self.model_dir.split('/')[:-1])
                 self.pred_dir = os.path.join(parent_dir, inference_config['save_folder_name'])
         else:
-            print('No save_folder_name specified... saving predictions to image_dir.')
+            print(f'No save_folder_name specified... saving predictions to image_dir: \n\t{self.image_dir}')
             self.pred_dir = os.path.join(self.image_dir, os.path.basename(model_dir))
         os.makedirs(self.pred_dir, exist_ok=True)
 

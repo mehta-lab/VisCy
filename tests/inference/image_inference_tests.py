@@ -1,5 +1,4 @@
 import cv2
-import nose.tools
 import numpy as np
 import os
 import pandas as pd

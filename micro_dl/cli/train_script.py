@@ -13,7 +13,6 @@ import yaml
 from micro_dl.input.dataset import BaseDataSet
 from micro_dl.input import DataSetWithMask
 from micro_dl.input.training_table import BaseTrainingTable
-from micro_dl.inference.model_inference import load_model
 from micro_dl.train.trainer import BaseKerasTrainer
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.train_utils as train_utils
