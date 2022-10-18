@@ -290,39 +290,34 @@ class BaseDataSet(keras.utils.Sequence):
          5 - rotate 270 degrees in the xy-plane in the x toward y direction
         :return np.array image after transformation is applied
         """
-        # We need to flip over different dimensions depending on data format
-        add_dim = 0
-        if self.image_format == 'zyx' and not self.squeeze:
-            add_dim = 1
-
         if aug_idx == 0:
             return input_image
         elif aug_idx == 1:
-            # flip about axis=1 (which is row in numpy, hence about y)
-            trans_image = np.flip(input_image, 1 + add_dim)
+            # flip about y (if zxy) or x if (zyx))
+            trans_image = np.flip(input_image, -1)
         elif aug_idx == 2:
-            # flip about axis=0 (which is cols in numpy, hence about x)
-            trans_image = np.flip(input_image, 0 + add_dim)
+            # flip about x (if zxy) or y if (zyx))
+            trans_image = np.flip(input_image, -2)
         elif aug_idx == 3:
-            # rot in plane defined by axis=(0, 1) or (1,2)
+            # rot in plane defined by axis=(-2,-1)
             trans_image = np.rot90(
                 input_image,
                 k=1,
                 axes=(-2, -1),
             )
         elif aug_idx == 4:
-            # rot in plane defined by axis=(0, 1) or (1,2)
+            # rot in plane defined by axis=(-2,-1)
             trans_image = np.rot90(
                 input_image,
                 k=2,
-                axes=(-2, -1),#(0 + add_dim, 1 + add_dim),
+                axes=(-2, -1),
             )
         elif aug_idx == 5:
-            # rot in plane defined by axis=(0, 1) or (1,2)
+            # rot in plane defined by axis=(-2,-1)
             trans_image = np.rot90(
                 input_image,
                 k=3,
-                axes=(-2, -1),#(0 + add_dim, 1 + add_dim),
+                axes=(-2, -1),
             )
         else:
             msg = '{} not in allowed aug_idx: 0-5'.format(aug_idx)

@@ -27,9 +27,8 @@ class ImagePredictor:
     loads samples and performs normalization according to the tile-specific 
     normalization values acquired during preprocessing. 
     
-    Actual inference is performed by either a tensorflow '.hdf5' model specified 
-    in config files, or a trained '.pt' pytorch model loaded into a TorchPredictor
-    object provided through torch_predictor.
+    Actual inference is performed by a trained '.pt' pytorch model loaded into a
+    TorchPredictor object provided through torch_predictor.
     
     After inference is performed on samples acquired from InferenceDataset object,
     dynamic range is return by denormalizing the outputs if the model task is reg-
@@ -106,14 +105,16 @@ class ImagePredictor:
         self.model_dir = model_dir
         self.image_dir = inference_config['image_dir']
 
+        
         if 'save_folder_name' in inference_config:
             if inference_config['save_folder_name'][0] == '/':
                 self.pred_dir = inference_config['save_folder_name']
             else:
-                parent_dir = '/'.join(self.model_dir.split('/')[:-1])
-                self.pred_dir = os.path.join(parent_dir, inference_config['save_folder_name'])
+                self.pred_dir = os.path.join(Path(self.model_dir).parent,
+                                             inference_config['save_folder_name'])
         else:
-            print(f'No save_folder_name specified... saving predictions to image_dir: \n\t{self.image_dir}')
+            print(f'No save_folder_name specified... saving predictions to '\
+                'image_dir: \n\t{self.image_dir}')
             self.pred_dir = os.path.join(self.image_dir, os.path.basename(model_dir))
         os.makedirs(self.pred_dir, exist_ok=True)
 
@@ -217,8 +218,6 @@ class ImagePredictor:
         if 'tile' in inference_config:
             self.tile_params = inference_config['tile']
             self._assign_3d_inference()
-            if self.config['network']['class'] != 'UNet3D':
-                crop2base = False
             # Make image ext npy default for 3D
 
         # Create dataset instance
@@ -575,7 +574,7 @@ class ImagePredictor:
         Run prediction on 2D or 2.5D on indices given by metadata row.
         
         Reads in images from the inference dataset object, which performs normalization on
-        the images based on values calculated in preprocessing and stored in frames_mets.csv.
+        the images based on values calculated in preprocessing and stored in intensity_meta.csv.
         
         Prediction is done over an entire image or over each tile and stitched together,
         as specified by data/model structure.
