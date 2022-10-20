@@ -46,7 +46,8 @@ def check_save_folder(inference_config, preprocess_config):
 
 # %%
 config = "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_25D_A549Nucl.yml"
-torch_config = aux_utils.read_config(config)
+config_2D = "/hpc/projects/compmicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
+torch_config = aux_utils.read_config(config_2D)
 
 # Get GPU ID and memory fraction
 gpu_id, gpu_mem_frac = 0, 0.95
