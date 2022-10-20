@@ -28,51 +28,55 @@ The ```torch_config.yml``` config file contains the parameters for model initiat
 
 <br>
 
-**preprocess_config_path:** absolute path to preprocessing config file used in data preprocessing
+>(**mandatory**, <span style="color:yellow">optional</span>): description
 
-**train_config_path:** absolute path to train config file containing all parameters given in example
-
-**inference_config_path:** absolute path to inference config file containing all parameters given in example
-
-* Note that inference runs exactly like tensorflow inference, so all config params are the same except it *must* use **data_split: all**, and *should* specify a **save_folder_name** directory where predictions will be saved (this is best practice).
-
-* If no **save_folder_name** directory is specified, the inference script will automatically save parralel to the ```data``` folder specified by ```preprocess_config.yml```
-
-**model:**
-
-&nbsp;&nbsp; **architecture:** <span style="color:cyan"> 2.5D or 2D</span> (2D currently unstable. Pleasre use 2.5D)
-
-&nbsp;&nbsp; **in_channels:** <span style="color:cyan"> 1 </span> (number of channels in. If only using phase images, this is 1)
-
-&nbsp;&nbsp; **out_channels:** <span style="color:cyan"> 1 </span> (If only predicting fluorescence, this is 1)
-
-&nbsp;&nbsp; **residual:** <span style="color:cyan"> true </span> (whether network is residual)
-
-&nbsp;&nbsp; **task:** <span style="color:cyan"> reg </span> (regression or segmentation)
-
-&nbsp;&nbsp; **model_dir:** <span style="color:cyan"> absolute path </span> (Path to *saved pre-trained model*; this is used in inference and you can leave this field empty for training)
-
-**training:** 
-
-&nbsp;&nbsp; **epochs:** <span style="color:cyan"> 41 </span> (number of epochs to train)
-
-&nbsp;&nbsp; **learning_rate:** <span style="color:cyan"> 0.001 </span> (optimizer learning rate)
-
-&nbsp;&nbsp; **optimizer:** <span style="color:cyan"> adam or sgd </span> (optimizer choice)
-
-&nbsp;&nbsp; **loss:** <span style="color:cyan"> mse, l1, cossim (cosine similarity), cel (cross entropy) </span> (loss type to use for training and testing)
-
-&nbsp;&nbsp; **testing_stride:** <span style="color:cyan"> 1 </span> (stride by which to test. Runs validation on testing set every 'testing_stride' epochs)
-
-&nbsp;&nbsp; **save_model_stride:** <span style="color:cyan"> 10 </span> (stride by which to save model. Saves model weights every 'tsave_model_stride' epochs)
-
-&nbsp;&nbsp; **save_dir:** <span style="color:cyan"> absolute path </span> (path to directory in which training models and metrics will be saved)
-
-&nbsp;&nbsp; **mask:** <span style="color:cyan"> True or False </span> (Whether or not to use masking in training. This is almost always False, and only applies to segmentation models)
-
-&nbsp;&nbsp; **mask_type:** <span style="color:cyan"> 'rosin'/'unimodal' or 'otsu' </span> (Masking type if above param is True)
-
-&nbsp;&nbsp; **device:** <span style="color:cyan"> 'gpu' or 'cpu'</span> (Device to run training and inference on. Almost always 'gpu')
+>**preprocess_config_path:** absolute path to preprocessing config file used in data preprocessing
+>
+>**train_config_path:** absolute path to train config file containing all parameters given in example
+>
+>**inference_config_path:** absolute path to inference config file containing all parameters given in example
+>
+>* Note that inference runs exactly like tensorflow inference, so all config params are the same except it *must* use **data_split: all**, and *should* specify a **save_folder_name** directory where predictions will be saved (this is best practice).
+>
+>* If no **save_folder_name** directory is specified, the inference script will automatically save parralel to the ```data``` folder specified by ```preprocess_config.yml```
+>
+>**model:**
+>
+>&nbsp;&nbsp; **architecture:** <span style="color:cyan"> 2.5D or 2D</span> 
+>
+>&nbsp;&nbsp; **in_channels:** <span style="color:cyan"> 1 </span> (number of channels in. If only using phase images, this is 1)
+>
+>&nbsp;&nbsp; **out_channels:** <span style="color:cyan"> 1 </span> (If only predicting fluorescence, this is 1)
+>
+>&nbsp;&nbsp; **residual:** <span style="color:cyan"> true </span> (whether network is residual)
+>
+>&nbsp;&nbsp; **task:** <span style="color:cyan"> reg </span> (regression or segmentation)
+>
+>&nbsp;&nbsp; **model_dir:** <span style="color:cyan"> absolute path </span> (Path to *saved pre-trained model*; this is used in inference and you can leave this field empty for training)
+>
+>&nbsp;&nbsp; <span style="color:yellow">debug_mode:</span> <span style="color:cyan"> false </span> (If true, running inference will log (save feature maps for) the inference datapath of one input)
+>
+>**training:**
+>
+>&nbsp;&nbsp; **epochs:** <span style="color:cyan"> 41 </span> (number of epochs to train)
+>
+>&nbsp;&nbsp; **learning_rate:** <span style="color:cyan"> 0.001 </span> (optimizer learning rate)
+>
+>&nbsp;&nbsp; **optimizer:** <span style="color:cyan"> adam or sgd </span> (optimizer choice)
+>
+>&nbsp;&nbsp; **loss:** <span style="color:cyan"> mse, l1, cossim (cosine similarity), cel (cross entropy) </span> (loss type to use for training and testing)
+>
+>&nbsp;&nbsp; **testing_stride:** <span style="color:cyan"> 1 </span> (stride by which to test. Runs validation on testing set every 'testing_stride' epochs)
+>
+>&nbsp;&nbsp; **save_model_stride:** <span style="color:cyan"> 10 </span> (stride by which to save model. Saves model weights every 'tsave_model_stride' epochs)
+>
+>&nbsp;&nbsp; **save_dir:** <span style="color:cyan"> absolute path </span> (path to directory in which training models and metrics will be saved)
+>
+>&nbsp;&nbsp; **mask:** <span style="color:cyan"> True or False </span> (Whether or not to use masking in training. This is almost always False, and only applies to segmentation models)
+>
+>&nbsp;&nbsp; **mask_type:** <span style="color:cyan"> 'rosin'/'unimodal' or 'otsu' </span> (Masking type if above param is True)
+>
+>&nbsp;&nbsp; **device:** <span style="color:cyan"> 'gpu' or 'cpu' or int</span> (Device to run training and inference on. Almost always 'gpu' or 0)
 
 <br>
 
@@ -81,7 +85,9 @@ The ```torch_config.yml``` config file contains the parameters for model initiat
 Example config files can be found in this directory:
 ```/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2019_02_15_KidneyTissue_DLMBL_subset```
 
-## Important items to change
+<br>
+
+## Important parameters to look for
 
 Make sure that these parameters are changed to reflect your session. This will prevent file conflicts and overwriting.
 

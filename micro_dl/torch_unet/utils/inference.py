@@ -27,7 +27,13 @@ class TorchPredictor:
         Initializes a model according to the network configuration dictionary used
         to train it, and loads the parameters saved in model_dir into the model's state dict.
         """
-        model = model_utils.model_init(self.network_config, device=self.device)
+        debug_mode = False
+        if "debug_mode" in self.network_config:
+            debug_mode = self.network_config["debug_mode"]
+
+        model = model_utils.model_init(
+            self.network_config, device=self.device, debug_mode=debug_mode
+        )
 
         model_dir = self.network_config["model_dir"]
         readout = model.load_state_dict(torch.load(model_dir))

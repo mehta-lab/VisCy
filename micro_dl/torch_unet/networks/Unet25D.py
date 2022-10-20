@@ -1,9 +1,13 @@
+import datetime
+import os
+import time
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
 from micro_dl.torch_unet.networks.layers.ConvBlock3D import *
+import micro_dl.torch_unet.utils.logging as log
 
 
 class Unet25d(nn.Module):
@@ -44,6 +48,7 @@ class Unet25d(nn.Module):
         :param int num_block_layers: number of layer sequences repeated per block
         :param list[int] num_filters: list of filters/feature levels at each conv block depth
         :param str task: network task (for virtual staining this is regression): 'seg','reg'
+        :param str debug_mode: if true logs features at each step of architecture, must be manually set
         """
         super(Unet25d, self).__init__()
         self.in_channels = in_channels
@@ -55,15 +60,16 @@ class Unet25d(nn.Module):
         ), f"Dropout {dropout} not in allowed range: [0, 0.5]"
         self.dropout = dropout
         self.task = task
+        self.debug_mode = False
 
-        # ----- set static parameters -----#
+        # ----- set static parameters ----- #
         self.block_padding = "same"
         down_mode = "avgpool"  # TODO set static avgpool
         up_mode = "trilinear"  # TODO set static trilinear
         activation = "relu"  # TODO set static relu
         self.bottom_block_spatial = False  # TODO set static
 
-        # ----- Standardize Filter Sequence -----#
+        # ----- Standardize Filter Sequence ----- #
         if len(num_filters) != 0:
             assert len(num_filters) == num_blocks, (
                 "Length of num_filters must be equal to num_"
@@ -93,14 +99,14 @@ class Unet25d(nn.Module):
             # TODO: implement.
         self.register_modules(self.down_list, "down_samp")
 
-        # ----- Upsampling steps -----#
+        # ----- Upsampling steps ----- #
         self.up_list = []
         for i in range(num_blocks):
             self.up_list.append(
                 nn.Upsample(scale_factor=(1, 2, 2), mode=up_mode, align_corners=False)
             )
 
-        # ----- Convolutional blocks -----#
+        # ----- Convolutional blocks ----- #
         self.down_conv_blocks = []
         for i in range(num_blocks):
             self.down_conv_blocks.append(
@@ -153,7 +159,7 @@ class Unet25d(nn.Module):
             )
         self.register_modules(self.up_conv_blocks, "up_conv_block")
 
-        # ----- Skip Interruption Conv Blocks -----#
+        # ----- Skip Interruption Conv Blocks ----- #
         self.skip_conv_layers = []
         for i in range(num_blocks):
             self.skip_conv_layers.append(
@@ -166,7 +172,7 @@ class Unet25d(nn.Module):
             )
         self.register_modules(self.skip_conv_layers, "skip_conv_layer")
 
-        # ----- Terminal Block and Activation Layer -----#
+        # ----- Terminal Block and Activation Layer ----- #
         if self.task == "reg":
             self.terminal_block = ConvBlock3D(
                 forward_filters[1],
@@ -188,6 +194,9 @@ class Unet25d(nn.Module):
                 kernel_size=(1, 3, 3),
                 num_repeats=1,
             )
+
+        # ----- Feature Logging ----- #
+        self.log_save_folder = None
 
     def forward(self, x, validate_input=False):
         """
@@ -211,6 +220,7 @@ class Unet25d(nn.Module):
                 f"Input channels must equal network"
                 f"input channels: {self.in_channels}"
             )
+        self.log_feature(x, f"input")
 
         # encoder
         skip_tensors = []
@@ -218,22 +228,27 @@ class Unet25d(nn.Module):
             x = self.down_conv_blocks[i](x, validate_input=validate_input)
             skip_tensors.append(x)
             x = self.down_list[i](x)
+            self.log_feature(x, f"down_block_{i}")
 
         # transition block
         x = self.bottom_transition_block(x)
+        self.log_feature(x, f"bottom_block")
 
         # skip interruptions
         for i in range(self.num_blocks):
             skip_tensors[i] = self.skip_conv_layers[i](skip_tensors[i])
+            self.log_feature(skip_tensors[i], f"skip_block_{i}")
 
         # decoder
         for i in range(self.num_blocks):
             x = self.up_list[i](x)
             x = torch.cat([x, skip_tensors[-1 * (i + 1)]], 1)
             x = self.up_conv_blocks[i](x, validate_input=validate_input)
+            self.log_feature(x, f"up_block_{i}")
 
         # output channel collapsing layer
         x = self.terminal_block(x)
+        self.log_feature(x, f"output")
 
         return x
 
@@ -249,3 +264,46 @@ class Unet25d(nn.Module):
         """
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)
+
+    def log_feature(self, feature_map, name, log_save_folder=None):
+        """
+        If self.debug_mode, creates a visual of the given feature map, and saves it at
+        'log_save_folder'
+        If no log_save_folder specified, saves relative to working directory with timestamp.
+
+        Currently only saving in working directory is supported. This is meant to be an analysis
+        tool, and results should not be saved permanently.
+
+        :param torch.tensor feature_map: feature map to create visualization log of
+        :param str name: string
+        :param str log_save_folder
+        """
+        try:
+            if self.debug_mode:
+                if log_save_folder != None:
+                    self.log_save_folder = log_save_folder
+                elif log_save_folder == None and self.log_save_folder == None:
+                    # if first log, create logger and save folder
+                    now = datetime.datetime.now()
+                    self.log_save_folder = (
+                        f"feature_map_{now.year}_{now.month}_"
+                        f"{now.day}_{now.hour}_{now.minute}/"
+                    )
+                    self.logger = log.FeatureLogger(
+                        save_folder=self.log_save_folder,
+                        spatial_dims=3,
+                        grid_width=8,
+                    )
+                self.logger.log_feature_map(
+                    feature_map,
+                    name,
+                    dim_names=["batch", "channels"],
+                )
+        except Exception as e:
+            print(
+                "Features of one input logged. Results saved at:"
+                f"\n\t  {self.log_save_folder} \n"
+                "Will not log again to avoid overwrite."
+                "\n--- Ending Logging ---"
+            )
+            self.debug_mode = False
