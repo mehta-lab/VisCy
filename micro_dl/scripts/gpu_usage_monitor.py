@@ -5,8 +5,6 @@ import nvidia_smi
 import time
 import os
 
-import micro_dl.cli.torch_train_script as training
-
 
 def parse_args():
     """
@@ -20,19 +18,21 @@ def parse_args():
         "--mode",
         type=str,
         help=(
-            "listen or train. If training multithreaded, this script cannot"
+            "'listen' or 'train'. If training multithreaded, this script cannot"
             " run training, and can only be run simultaneously in listen mode"
         ),
     )
     parser.add_argument(
         "--config",
         type=str,
-        help="path to yaml configuration file",
+        default=None,
+        help="path to yaml configuration file. if --mode == 'train' must be provided",
     )
     parser.add_argument(
         "--gpu",
         type=int,
-        help="intended gpu device number",
+        default=None,
+        help="intended gpu device number for monitoring. by default all gpus will be summed",
     )
     parser.add_argument(
         "--save_dir",
@@ -48,23 +48,31 @@ def parse_args():
     return args
 
 
-def record_gpu_usage(usage_list, max_list):
+def record_gpu_usage(usage_list, max_list, gpu):
     """
     Records current gpu memory usage and limit and appends them to input
     lists in-place, respectively
 
     :param list total_usage: total gpu memory usage across all gpus in mb
     :param list possible: total gpu memory available
+    :param int gpu: gpu inde to record from
     """
     total_usage = 0
     available = 0
 
-    device_count = nvidia_smi.nvmlDeviceGetCount()
-    for i in range(device_count):
-        handle = nvidia_smi.nvmlDeviceGetHandleByIndex(i)
+    if gpu == None:
+        device_count = nvidia_smi.nvmlDeviceGetCount()
+        for i in range(device_count):
+            handle = nvidia_smi.nvmlDeviceGetHandleByIndex(i)
+            info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
+            total_usage += info.used
+            available += info.total
+    else:
+        handle = nvidia_smi.nvmlDeviceGetHandleByIndex(gpu)
         info = nvidia_smi.nvmlDeviceGetMemoryInfo(handle)
         total_usage += info.used
         available += info.total
+
     usage_list.append(total_usage)
     max_list.append(available)
 
@@ -109,6 +117,8 @@ def main():
 
     start = time.time()
     if args.mode != "listen":
+        import micro_dl.cli.torch_train_script as training
+
         p = multiprocessing.Process(
             target=training.main,
             name="training",
@@ -117,7 +127,12 @@ def main():
         p.start()
     print(f"--- Begin recording for {args.run_time} seconds ---")
     while time.time() - start < args.run_time:
-        record_gpu_usage(usage_list, max_list)
+        record_gpu_usage(usage_list, max_list, args.gpu)
+        print(
+            f"\tUsage: {usage_list[-1]/1000000:.2f}, Available:{max_list[-1]/1000000:.2f}",
+            end="\r",
+        )
+
         time_recorded.append(time.time() - start)
         time.sleep(0.1)  # record no faster than 10/second
 
@@ -125,10 +140,14 @@ def main():
         p.terminate()
         print("--- Terminate Training ---")
         p.join()
-
+    print(
+        f"\tRecorded {len(usage_list)} values over {time.time() - start:.2f} seconds."
+    )
+    print(f"\tPeak availability: {max(max_list)/1000000:.2f} mb")
+    print(f"\tPeak usage: {max(usage_list)/1000000:.2f} mb")
     print("--- Saving recording plots ---")
     plot_usage(usage_list, max_list, time_recorded, args.save_dir)
 
 
-if __name__ == "main":
+if __name__ == "__main__":
     main()
