@@ -70,14 +70,21 @@ class TorchPredictor:
             model = self.model
 
         if self.network_config["architecture"] == "2.5D":
+            if len(input_image.shape) != 5:
+                raise ValueError(
+                    f"2.5D unet must take 5D input data. Received {len(input_image.shape)}."
+                    " Check preprocessing config."
+                )
             img_tensor = ds.ToTensor(device=self.device)(input_image)
 
         elif self.network_config["architecture"] == "2D":
             # Torch Unet 2D takes 2 spatial dims, handle lingering 1 in z dim
-            if len(input_image.shape) == 5:
-                img_tensor = ds.ToTensor(device=self.device)(input_image)[..., 0, :, :]
-            elif len(input_image.shape) == 4:
-                img_tensor = ds.ToTensor(device=self.device)(input_image)
+            if len(input_image.shape) != 4:
+                raise ValueError(
+                    f"2D unet must take 4D input data. Received {len(input_image.shape)}."
+                    " Check preprocessing config."
+                )
+            img_tensor = ds.ToTensor(device=self.device)(input_image)
 
         pred = model(img_tensor)
         return pred.detach().cpu().numpy()

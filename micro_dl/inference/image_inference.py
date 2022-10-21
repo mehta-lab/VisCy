@@ -676,6 +676,9 @@ class ImagePredictor:
         input_stack = np.concatenate(input_stack, axis=0)
         pred_stack = np.concatenate(pred_stack, axis=0)  # zcyx
         target_stack = np.concatenate(target_stack, axis=0)
+
+        # Check that images were preprocessed properly
+
         # Stack images and transpose (metrics assumes cyxz format)
         if self.image_format == "zyx":
             if self.input_depth > 1:
