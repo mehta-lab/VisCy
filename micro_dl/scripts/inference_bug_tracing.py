@@ -1,4 +1,3 @@
-# %%
 import argparse
 import datetime
 import os
@@ -6,7 +5,7 @@ import torch
 import yaml
 import sys
 
-sys.path.insert(0, "/home/christian.foley/virtual_staining/code_revisions/microDL")
+sys.path.insert(0, "/home/christian.foley/virtual_staining/workspaces/microDL")
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.inference.image_inference as image_inf
@@ -44,34 +43,37 @@ def check_save_folder(inference_config, preprocess_config):
         )
 
 
-# %%
-config = "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_25D_A549Nucl.yml"
-config_2D = "/hpc/projects/compmicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
-torch_config = aux_utils.read_config(config_2D)
+if __name__ == "__main__":
+    config = "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_25D_A549Nucl.yml"
+    config_2D = "/hpc/projects/compmicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
+    torch_config = aux_utils.read_config(config_2D)
 
-# Get GPU ID and memory fraction
-gpu_id, gpu_mem_frac = 0, 0.95
-device = torch.device(gpu_id)
+    # Get GPU ID and memory fraction
+    gpu_id, gpu_mem_frac = 0, 0.95
+    device = torch.device(gpu_id)
 
-# read configuration parameters and metadata
-preprocess_config = aux_utils.read_config(torch_config["preprocess_config_path"])
-train_config = aux_utils.read_config(torch_config["train_config_path"])
-inference_config = aux_utils.read_config(torch_config["inference_config_path"])
+    # read configuration parameters and metadata
+    preprocess_config = aux_utils.read_config(torch_config["preprocess_config_path"])
+    train_config = aux_utils.read_config(torch_config["train_config_path"])
+    inference_config = aux_utils.read_config(torch_config["inference_config_path"])
 
-network_config = torch_config["model"]
+    network_config = torch_config["model"]
 
-# if no save_folder_name specified, automatically incur saving in data folder
-check_save_folder(inference_config, preprocess_config)
+    # if no save_folder_name specified, automatically incur saving in data folder
+    check_save_folder(inference_config, preprocess_config)
 
-# instantiate and prep TorchPredictor interfacing object
-torch_predictor = torch_inference_utils.TorchPredictor(
-    network_config=network_config, device=device
-)
-torch_predictor.load_model_torch()
+    # instantiate and prep TorchPredictor interfacing object
+    torch_predictor = torch_inference_utils.TorchPredictor(
+        network_config=network_config, device=device
+    )
+    torch_predictor.load_model_torch()
 
-# instantiate ImagePredictor object and run inference
-image_predictor = image_inf.ImagePredictor(
-    train_config, inference_config, torch_predictor, preprocess_config=preprocess_config
-)
-image_predictor.run_prediction()
+    # instantiate ImagePredictor object and run inference
+    image_predictor = image_inf.ImagePredictor(
+        train_config,
+        inference_config,
+        torch_predictor,
+        preprocess_config=preprocess_config,
+    )
+    image_predictor.run_prediction()
 # %%

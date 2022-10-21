@@ -77,7 +77,8 @@ The ```torch_config.yml``` config file contains the parameters for model initiat
 >&nbsp;&nbsp; **mask_type:** <span style="color:cyan"> 'rosin'/'unimodal' or 'otsu' </span> (Masking type if above param is True)
 >
 >&nbsp;&nbsp; **device:** <span style="color:cyan"> 'gpu' or 'cpu' or int</span> (Device to run training and inference on. Almost always 'gpu' or 0)
-
+>
+>&nbsp;&nbsp; <span style="color:yellow"> num_workers: </span> <span style="color:cyan"> int </span> (Number of CPU threads used for dataloading. By default will not parallelize dataloading. There is some overhead that needs to be done each epoch, so the recommended number is between 2 and 8 depending on the size of dataset.)
 <br>
 
 ## Example Config files

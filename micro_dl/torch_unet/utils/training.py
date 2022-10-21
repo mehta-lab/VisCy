@@ -10,6 +10,10 @@ import torch
 import torch.optim as optim
 import torch.nn as nn
 
+if __name__ == "__main__":
+    # This should exclusively be set in main file. Cannot set context twice
+    torch.multiprocessing.set_start_method("spawn")
+
 import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.torch_unet.utils.dataset as ds
 import micro_dl.torch_unet.utils.io as io_utils
@@ -130,20 +134,25 @@ class TorchTrainer:
             transforms=transforms,
             target_transforms=target_transforms,
             caching=caching,
+            device=self.device,
         )
         train_dataset = torch_data_container["train"]
         test_dataset = torch_data_container["test"]
         val_dataset = torch_data_container["val"]
 
         # init dataloaders and split metadata
+        workers = 0
+        if "num_workers" in self.training_config:
+            workers = self.training_config["num_workers"]
+
         self.train_dataloader = torch.utils.data.DataLoader(
-            dataset=train_dataset, shuffle=True
+            dataset=train_dataset, shuffle=True, num_workers=workers
         )
         self.test_dataloader = torch.utils.data.DataLoader(
-            dataset=test_dataset, shuffle=True
+            dataset=test_dataset, shuffle=True, num_workers=workers
         )
         self.val_dataloader = torch.utils.data.DataLoader(
-            dataset=val_dataset, shuffle=True
+            dataset=val_dataset, shuffle=True, num_workers=workers
         )
         self.split_samples = torch_data_container.split_samples_metadata
 
@@ -198,9 +207,14 @@ class TorchTrainer:
         train_loss_list = []
         test_loss_list = []
         for i in range(self.training_config["epochs"]):
-            print(f"Epoch {i}:")
+
+            # Setup epoch
             epoch_time = time.time()
             train_loss = 0
+
+            print(f"Epoch {i}:")
+            if "num_workers" in self.training_config:
+                print(f"Initializing {self.training_config['num_workers']} cpu workers")
             for current, minibatch in enumerate(self.train_dataloader):
                 # pretty printing
                 io_utils.show_progress_bar(self.train_dataloader, current)
@@ -294,6 +308,9 @@ class TorchTrainer:
             dataloader = self.test_dataloader
         else:
             dataloader = self.val_dataloader
+
+        if "num_workers" in self.training_config:
+            print(f"Initializing {self.training_config['num_workers']} cpu workers")
 
         for current, minibatch in enumerate(dataloader):
             if not validate_mode:
