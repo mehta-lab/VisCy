@@ -9,7 +9,7 @@ from torch.utils.data import Dataset
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.masks as mask_utils
 import micro_dl.utils.normalize as norm_utils
-import micro_dl.cli.train_script as train
+import micro_dl.utils.train_utils as train_utils
 
 
 class TorchDataset(Dataset):
@@ -79,14 +79,14 @@ class TorchDataset(Dataset):
             config = aux_utils.read_config(train_config)
 
             dataset_config, trainer_config = config["dataset"], config["trainer"]
-            tile_dir, image_format = train.get_image_dir_format(dataset_config)
+            tile_dir, image_format = train_utils.get_image_dir_format(dataset_config)
 
             tiles_meta = pd.read_csv(os.path.join(tile_dir, "frames_meta.csv"))
             tiles_meta = aux_utils.sort_meta_by_channel(tiles_meta)
 
             masked_loss = False
 
-            all_datasets, split_samples = train.create_datasets(
+            all_datasets, split_samples = train_utils.create_train_datasets(
                 tiles_meta,
                 tile_dir,
                 dataset_config,
