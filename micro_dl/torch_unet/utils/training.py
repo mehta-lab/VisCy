@@ -200,7 +200,7 @@ class TorchTrainer:
             self.model.parameters(), lr=self.training_config["learning_rate"]
         )
         self.scheduler = self.scheduler(
-            self.optimizer, patience=10, mode="min", factor=0.11
+            self.optimizer, patience=10, mode="min", factor=2
         )
 
         # train
