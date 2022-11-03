@@ -70,8 +70,8 @@ class TorchTrainer:
         assert self.training_config["device"] in {
             "cpu",
             "gpu",
-            *range(4),
-        }, "device must be cpu or gpu"
+            *range(torch.cuda.device_count()),
+        }, f"device must be cpu or gpu or within {range(torch.cuda.device_count())}"
         if isinstance(self.training_config["device"], int):
             self.device = torch.device(f"cuda:{self.training_config['device']}")
         elif self.training_config["device"] == "gpu":
@@ -96,7 +96,7 @@ class TorchTrainer:
         if init_dir:
             model_dir = self.network_config["model_dir"]
             readout = model.load_state_dict(torch.load(model_dir))
-            print(readout)
+            print("Initiating from pre-trained model: ", readout)
         self.model = model
 
         self.model.to(self.device)

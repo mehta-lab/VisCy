@@ -79,8 +79,8 @@ class Unet25d(nn.Module):
         else:
             self.num_filters = [pow(2, i) * 16 for i in range(num_blocks + 1)]
             self.num_filters
-        forward_filters = [in_channels] + self.num_filters
-        backward_filters = [
+        downsampling_filters = [in_channels] + self.num_filters
+        upsampling_filters = [
             self.num_filters[-(i + 1)] + self.num_filters[-(i + 2)]
             for i in range(len(self.num_filters))
             if i < len(self.num_filters) - 1
@@ -111,8 +111,8 @@ class Unet25d(nn.Module):
         for i in range(num_blocks):
             self.down_conv_blocks.append(
                 ConvBlock3D(
-                    forward_filters[i],
-                    forward_filters[i + 1],
+                    downsampling_filters[i],
+                    downsampling_filters[i + 1],
                     dropout=self.dropout,
                     residual=self.residual,
                     activation=activation,
@@ -148,8 +148,8 @@ class Unet25d(nn.Module):
         for i in range(num_blocks):
             self.up_conv_blocks.append(
                 ConvBlock3D(
-                    backward_filters[i],
-                    forward_filters[-(i + 2)],
+                    upsampling_filters[i],
+                    downsampling_filters[-(i + 2)],
                     dropout=self.dropout,
                     residual=self.residual,
                     activation=activation,
@@ -164,8 +164,8 @@ class Unet25d(nn.Module):
         for i in range(num_blocks):
             self.skip_conv_layers.append(
                 nn.Conv3d(
-                    forward_filters[i + 1],
-                    forward_filters[i + 1],
+                    downsampling_filters[i + 1],
+                    downsampling_filters[i + 1],
                     kernel_size=(1 + in_stack_depth - out_stack_depth, 1, 1),
                     padding="valid",
                 )
@@ -175,7 +175,7 @@ class Unet25d(nn.Module):
         # ----- Terminal Block and Activation Layer ----- #
         if self.task == "reg":
             self.terminal_block = ConvBlock3D(
-                forward_filters[1],
+                downsampling_filters[1],
                 out_channels,
                 dropout=self.dropout,
                 residual=False,
@@ -186,7 +186,7 @@ class Unet25d(nn.Module):
             )
         else:
             self.terminal_block = ConvBlock3D(
-                forward_filters[1],
+                downsampling_filters[1],
                 out_channels,
                 dropout=self.dropout,
                 residual=False,

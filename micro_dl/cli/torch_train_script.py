@@ -23,6 +23,7 @@ def parse_args():
     parser.add_argument(
         "--gpu",
         type=int,
+        default=-1,
         help="intended gpu device number",
     )
     args = parser.parse_args()
@@ -33,7 +34,7 @@ def main(args):
     torch_config = aux_utils.read_config(args.config)
 
     # If specified, override device selection
-    if isinstance(args.gpu, int):
+    if isinstance(args.gpu, int) and args.gpu >= 0:
         torch_config["training"]["device"] = args.gpu
     torch.multiprocessing.set_start_method("spawn")
 
