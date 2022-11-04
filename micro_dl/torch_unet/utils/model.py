@@ -9,8 +9,10 @@ def model_init(network_config, device=torch.device("cuda"), debug_mode=False):
     """
     Initializes network model from a configuration dictionary.
 
-    :param dict network_config: dict containing the configuration parameters for the model
-    :param torch.device device: device to store model parameters on (must be same as data)
+    :param dict network_config: dict containing the configuration parameters for
+                                the model
+    :param torch.device device: device to store model parameters on (must be same
+                                as data)
     """
 
     assert (
@@ -64,6 +66,9 @@ def define_model(model_class, model_defaults, config):
 
 class ModelDefaults:
     def __init__(self):
+        """
+        Parent class of the model defaults objects.
+        """
         self.in_channels = 1
         self.out_channels = 1
 
@@ -79,8 +84,11 @@ class ModelDefaults:
 class ModelDefaults2D(ModelDefaults):
     def __init__(self):
         """
-        Instance of default model 'abstract' class, containing all of the default
+        Instance of model defaults class, containing all of the default
         hyper-parameters for the 2D unet
+
+        All parameters in this default model CAN be accessed by name through
+        the model config
         """
         super(ModelDefaults, self).__init__()
 
@@ -97,7 +105,10 @@ class ModelDefaults25D(ModelDefaults):
     def __init__(self):
         """
         Instance of default model class, containing all of the default
-        hyper-parameters for the 2D unet
+        hyper-parameters for the 2D unet.
+
+        All parameters in this default model CAN be accessed by name through
+        the model config
         """
 
         self.in_stack_depth = 5
