@@ -42,6 +42,7 @@ class TorchDataset(Dataset):
         target_transforms=None,
         caching=False,
         device=torch.device("cuda"),
+        meta_dir="",
     ):
         """
         Init object.
@@ -55,6 +56,7 @@ class TorchDataset(Dataset):
         :param iterable(Transform object) target_transforms: transforms to be applied to every
                                                             target *after tf_dataset transforms*
         :param str device: device name, example: 'cuda:0' for gpu 0, 'cpu' for cpu.
+        :param str meta_dir: directory to save dataset selection metadata in
         """
         assert (
             train_config or tf_dataset
@@ -93,6 +95,7 @@ class TorchDataset(Dataset):
                 trainer_config,
                 image_format,
                 masked_loss,
+                meta_dir,
             )
 
             self.train_dataset = TorchDataset(

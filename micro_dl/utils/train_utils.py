@@ -41,7 +41,13 @@ def get_image_dir_format(dataset_config):
 
 
 def create_train_datasets(
-    df_meta, tile_dir, dataset_config, trainer_config, image_format, masked_loss
+    df_meta,
+    tile_dir,
+    dataset_config,
+    trainer_config,
+    image_format,
+    masked_loss,
+    meta_dir,
 ):
     """Create train, val and test datasets
 
@@ -53,6 +59,9 @@ def create_train_datasets(
     :param dict trainer_config: dict with params related to training
     :param str image_format: Tile shape order: 'xyz' or 'zyx'
     :param bool masked_loss: Whether or not to use masks
+    :param str meta_dir: actual directory of model to save split metadata to,
+                            different from config model dir as directory is
+                            generated with timestamp
     :return: Dict containing
      :BaseDataSet df_train: training dataset
      :BaseDataSet df_val: validation dataset
@@ -105,9 +114,7 @@ def create_train_datasets(
                     batch_size=trainer_config["batch_size"],
                     image_format=image_format,
                 )
-            metadata.to_csv(
-                os.path.join(trainer_config["model_dir"], csv_names[i]), sep=","
-            )
+            metadata.to_csv(os.path.join(meta_dir, csv_names[i]), sep=",")
             all_datasets[df_names[i]] = dataset
 
     return all_datasets, split_samples

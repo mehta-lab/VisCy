@@ -54,17 +54,20 @@ class TorchTrainer:
         # lr scheduler
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau
         # loss
-        assert self.training_config["loss"] in {"mse", "l1", "cossim", "mae"}, (
+        assert self.training_config["loss"] in {"mse", "l1", "cossim", "cel"}, (
             f"loss not supported. " "Try one of 'mse', 'mae', 'cossim', 'l1'"
         )
         if self.training_config["loss"] == "mse":
             self.criterion = nn.MSELoss()
-        elif self.training_config["loss"] in {"l1", "mae"}:
+        elif self.training_config["loss"] in {"mae", "l1"}:
             self.criterion = nn.L1Loss()
         elif self.training_config["loss"] == "cossim":
             self.criterion = nn.CosineSimilarity()
-        elif self.training_config["loss"] == "cel":
-            self.criterion = nn.CrossEntropyLoss()
+        else:
+            raise AttributeError(
+                f"Loss {self.training_config['loss']} not supported."
+                "Try one of 'mse', 'mae' or 'l1', 'cossim'"
+            )
         # device
         assert self.training_config["device"] in {
             "cpu",
@@ -113,6 +116,8 @@ class TorchTrainer:
         assert self.torch_config != None, (
             "torch_config must be specified in object" "initiation "
         )
+        # init directory for model and metadata storage
+        self.get_save_location()
 
         # determine transforms/augmentations
         transforms = [ds.ToTensor()]
@@ -130,6 +135,7 @@ class TorchTrainer:
             target_transforms=target_transforms,
             caching=caching,
             device=self.device,
+            model_dir=self.save_folder,
         )
         train_dataset = torch_data_container["train"]
         test_dataset = torch_data_container["test"]
@@ -183,7 +189,6 @@ class TorchTrainer:
 
         # init io and saving
         start = time.time()
-        self.get_save_location()
         self.writer = SummaryWriter(log_dir=self.save_folder)
 
         split_idx_fname = os.path.join(self.save_folder, "split_samples.json")
@@ -198,7 +203,9 @@ class TorchTrainer:
             self.optimizer, patience=3, mode="min", factor=0.5
         )
         self.early_stopper = EarlyStopping(
-            patience=40, verbose=False, path=self.save_folder
+            path=self.save_folder,
+            patience=20,
+            verbose=False,
         )
 
         # train
@@ -421,6 +428,7 @@ class TorchTrainer:
 class EarlyStopping:
     def __init__(
         self,
+        path,
         patience=7,
         verbose=False,
         delta=0,
@@ -428,7 +436,7 @@ class EarlyStopping:
     ):
         """
         Early stops the training if validation loss doesn't improve after a given patience.
-        Inspired by:
+        Adapted from:
             https://github.com/Bjarten/early-stopping-pytorch
 
         :param int patience: How long to wait after last time validation loss improved.
@@ -450,6 +458,7 @@ class EarlyStopping:
         self.val_loss_min = np.Inf
         self.delta = delta
         self.trace_func = trace_func
+        self.path = path
 
     def __call__(self, val_loss, model, epoch):
         """
