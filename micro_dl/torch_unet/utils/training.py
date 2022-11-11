@@ -120,8 +120,8 @@ class TorchTrainer:
         self.get_save_location()
 
         # determine transforms/augmentations
-        transforms = [ds.ToTensor()]
-        target_transforms = [ds.ToTensor()]
+        transforms = [ds.ToTensor(device=torch.device("cpu"))]
+        target_transforms = [ds.ToTensor(device=torch.device("cpu"))]
 
         # init dataset container and pull dataset split objects
         caching = (
@@ -135,7 +135,7 @@ class TorchTrainer:
             target_transforms=target_transforms,
             caching=caching,
             device=self.device,
-            model_dir=self.save_folder,
+            meta_dir=self.save_folder,
         )
         train_dataset = torch_data_container["train"]
         test_dataset = torch_data_container["test"]
