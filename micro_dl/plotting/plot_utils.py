@@ -2,7 +2,8 @@
 import cv2
 import glob
 import matplotlib
-matplotlib.use('Agg')
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import natsort
 import numpy as np
@@ -12,15 +13,17 @@ from micro_dl.utils.normalize import hist_clipping
 from mpl_toolkits.axes_grid1 import make_axes_locatable
 
 
-def save_predicted_images(input_imgs,
-                          target_img,
-                          pred_img,
-                          metric,
-                          output_dir,
-                          output_fname=None,
-                          ext='jpg',
-                          clip_limits=1,
-                          font_size=15):
+def save_predicted_images(
+    input_imgs,
+    target_img,
+    pred_img,
+    metric,
+    output_dir,
+    output_fname=None,
+    ext="jpg",
+    clip_limits=1,
+    font_size=15,
+):
     """
     Save plots of predicted images to prediction-figures directory.
     - Overlay of target & prediction
@@ -44,8 +47,8 @@ def save_predicted_images(input_imgs,
     fig, ax = plt.subplots(n_rows, n_cols, squeeze=False)
     ax = ax.flatten()
     for axs in ax:
-        axs.axis('off')
-    fig.set_size_inches((12, 5 * n_rows))
+        axs.axis("off")
+    fig.set_size_inches((5.2 * n_cols, 3.5 * n_rows))
     axis_count = 0
     # add input images to plot
     for c, input_img in enumerate(input_imgs):
@@ -55,9 +58,9 @@ def save_predicted_images(input_imgs,
             100 - clip_limits,
         )
     for cur_im in input_imgs:
-        ax[axis_count].imshow(cur_im, cmap='gray')
-        ax[axis_count].axis('off')
-        ax[axis_count].set_title('Input', fontsize=font_size)
+        ax[axis_count].imshow(cur_im, cmap="gray")
+        ax[axis_count].axis("off")
+        ax[axis_count].set_title("Input", fontsize=font_size)
         axis_count += 1
 
     # add target image to plot
@@ -66,41 +69,52 @@ def save_predicted_images(input_imgs,
         clip_limits,
         100 - clip_limits,
     )
-    ax_target = ax[axis_count].imshow(cur_target_chan, cmap='gray')
-    ax[axis_count].axis('off')
+    ax_target = ax[axis_count].imshow(cur_target_chan, cmap="gray")
+    ax[axis_count].axis("off")
     divider = make_axes_locatable(ax[axis_count])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = plt.colorbar(ax_target, cax=cax, orientation='vertical')
-    ax[axis_count].set_title('Target', fontsize=font_size)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = plt.colorbar(ax_target, cax=cax, orientation="vertical")
+    ax[axis_count].set_title("Target", fontsize=font_size)
     axis_count += 1
 
     # add prediction to plot
-    ax_img = ax[axis_count].imshow(pred_img, cmap='gray')
-    ax[axis_count].axis('off')
+    ax_img = ax[axis_count].imshow(pred_img, cmap="gray")
+    ax[axis_count].axis("off")
     divider = make_axes_locatable(ax[axis_count])
-    cax = divider.append_axes('right', size='5%', pad=0.05)
-    cbar = plt.colorbar(ax_img, cax=cax, orientation='vertical')
-    ax[axis_count].set_title('Prediction', fontsize=font_size)
+    cax = divider.append_axes("right", size="5%", pad=0.05)
+    cbar = plt.colorbar(ax_img, cax=cax, orientation="vertical")
+    ax[axis_count].set_title("Prediction", fontsize=font_size)
     axis_count += 1
 
     # add overlay target - prediction
     cur_target_8bit = convert_to_8bit(cur_target_chan)
     cur_prediction_8bit = convert_to_8bit(pred_img)
-    cur_target_pred = np.stack([cur_target_8bit, cur_prediction_8bit,
-                                cur_target_8bit], axis=2)
+    cur_target_pred = np.stack(
+        [cur_target_8bit, cur_prediction_8bit, cur_target_8bit], axis=2
+    )
 
     ax[axis_count].imshow(cur_target_pred)
-    ax[axis_count].set_title('Overlay', fontsize=font_size)
+    ax[axis_count].set_title("Overlay", fontsize=font_size)
     axis_count += 1
     # add metrics
     if metric is not None:
-        for c, (metric_name, value) in enumerate(zip(list(metric.keys()), metric.values[0][0:-1]), 1):
-            plt.figtext(0.5, 0.001+c*0.015, metric_name + ": {:.4f}".format(value), ha="center", fontsize=12)
+        for c, (metric_name, value) in enumerate(
+            zip(list(metric.keys()), metric.values[0][0:-1]), 1
+        ):
+            plt.figtext(
+                0.5,
+                0.001 + c * 0.015,
+                metric_name + ": {:.4f}".format(value),
+                ha="center",
+                fontsize=12,
+            )
 
-    fname = os.path.join(output_dir, '{}.{}'.format(output_fname, ext))
-    fig.savefig(fname, dpi=300, bbox_inches='tight')
+    fname = os.path.join(output_dir, "{}.{}".format(output_fname, ext))
+    fig.savefig(fname, dpi=300, bbox_inches="tight")
     plt.close(fig)
-    fname = os.path.join(output_dir, '{}_overlay.{}'.format(output_fname, ext))
+
+    # save JUST overlay
+    fname = os.path.join(output_dir, "{}_overlay.{}".format(output_fname, ext))
     cv2.imwrite(fname, cur_target_pred)
 
 
@@ -118,18 +132,20 @@ def convert_to_8bit(img):
     return img_8bit
 
 
-def save_center_slices(image_dir,
-                       pos_idx,
-                       save_path,
-                       mean_std=None,
-                       clip_limits=1,
-                       margin=20,
-                       z_scale=5,
-                       z_range=None,
-                       channel_str=None,
-                       font_size=15,
-                       color_map='gray',
-                       fig_title=None):
+def save_center_slices(
+    image_dir,
+    pos_idx,
+    save_path,
+    mean_std=None,
+    clip_limits=1,
+    margin=20,
+    z_scale=5,
+    z_range=None,
+    channel_str=None,
+    font_size=15,
+    color_map="gray",
+    fig_title=None,
+):
     """
     Given an image directory, loads a z-stack, plots the center cross-sections
     of xy, yz and xz planes with the larger xy section top left, yz top right
@@ -162,10 +178,9 @@ def save_center_slices(image_dir,
 
     # Remove a given nbr of slices from front and back of names
     if z_range is not None:
-        assert len(z_range) == 2, 'Z-range must consist of two values'
-        slice_names = slice_names[z_range[0]:z_range[1]]
-    assert len(slice_names) > 0, \
-        "Couldn't find images with given search criteria"
+        assert len(z_range) == 2, "Z-range must consist of two values"
+        slice_names = slice_names[z_range[0] : z_range[1]]
+    assert len(slice_names) > 0, "Couldn't find images with given search criteria"
 
     im_stack = []
     for im_z in slice_names:
@@ -177,47 +192,52 @@ def save_center_slices(image_dir,
         im_norm = im_stack / im_stack.std() * mean_std[0]
         im_norm = im_norm - im_norm.mean() + mean_std[1]
         # cutoff at 0
-        im_norm[im_norm < 0] = 0.
+        im_norm[im_norm < 0] = 0.0
         # Convert to uint16
         im_norm = im_norm.astype(np.uint16)
 
     # Add xy center slice to plot image (canvas)
     center_slice = hist_clipping(
         im_norm[..., int(len(slice_names) // 2)],
-        clip_limits, 100 - clip_limits,
+        clip_limits,
+        100 - clip_limits,
     )
     im_shape = im_stack.shape
     canvas = center_slice.max() * np.ones(
-        (im_shape[0] + im_shape[2] * z_scale + margin,
-         im_shape[1] + im_shape[2] * z_scale + margin),
+        (
+            im_shape[0] + im_shape[2] * z_scale + margin,
+            im_shape[1] + im_shape[2] * z_scale + margin,
+        ),
         dtype=np.uint16,
     )
-    canvas[0:im_shape[0], 0:im_shape[1]] = center_slice
+    canvas[0 : im_shape[0], 0 : im_shape[1]] = center_slice
     # add yz center slice
     yz_slice = hist_clipping(
         np.squeeze(im_norm[:, int(im_shape[1] // 2), :]),
-        clip_limits, 100 - clip_limits,
+        clip_limits,
+        100 - clip_limits,
     )
     yz_shape = yz_slice.shape
     yz_slice = cv2.resize(yz_slice, (yz_shape[1] * int(z_scale), yz_shape[0]))
-    canvas[0:yz_shape[0], im_shape[1] + margin:] = yz_slice
+    canvas[0 : yz_shape[0], im_shape[1] + margin :] = yz_slice
     # add xy center slice
     xy_slice = hist_clipping(
         np.squeeze(im_norm[int(im_shape[1] // 2), :, :]),
-        clip_limits, 100 - clip_limits,
+        clip_limits,
+        100 - clip_limits,
     )
     xy_shape = xy_slice.shape
     xy_slice = cv2.resize(xy_slice, (xy_shape[1] * int(z_scale), xy_shape[0]))
     # Need to rotate to fit this slice on the bottom of canvas
     xy_slice = np.rot90(xy_slice)
-    canvas[im_shape[0] + margin:, 0:xy_slice.shape[1]] = xy_slice
+    canvas[im_shape[0] + margin :, 0 : xy_slice.shape[1]] = xy_slice
 
     plt.imshow(canvas, cmap=color_map)
-    plt.axis('off')
+    plt.axis("off")
     if fig_title is not None:
         plt.title(fig_title, fontsize=font_size)
 
-    plt.savefig(save_path, dpi=300, bbox_inches='tight')
+    plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close()
 
 
@@ -231,13 +251,13 @@ def save_mask_overlay(input_image, mask, op_fname, alpha=0.7):
     :param int alpha: opacity/transparency for the mask overlay
     """
 
-    assert 0 <= alpha <= 1, 'alpha must be between 0 and 1'
+    assert 0 <= alpha <= 1, "alpha must be between 0 and 1"
     fig, ax = plt.subplots(1, 3)
     fig.set_size_inches((15, 5))
-    ax[0].imshow(input_image, cmap='gray')
-    ax[0].axis('off')
-    ax[1].imshow(mask, cmap='gray')
-    ax[1].axis('off')
+    ax[0].imshow(input_image, cmap="gray")
+    ax[0].axis("off")
+    ax[1].imshow(mask, cmap="gray")
+    ax[1].axis("off")
     # Convert image to uint8 color, scale to 255, and overlay a color contour
     im_rgb = input_image / input_image.max() * 255
     im_rgb = im_rgb.astype(np.uint8)
@@ -258,7 +278,7 @@ def save_mask_overlay(input_image, mask, op_fname, alpha=0.7):
     # Draw contours in green with linewidth 2
     im_rgb = cv2.drawContours(im_rgb, contours, -1, (0, 255, 0), 2)
     ax[2].imshow(im_rgb)
-    ax[2].axis('off')
+    ax[2].axis("off")
     fig.savefig(op_fname, dpi=250)
     plt.close(fig)
 
@@ -272,8 +292,9 @@ def save_plot(x, y, fig_fname, fig_labels=None):
     :param str fig_fname: File name including full path
     :param list fig_labels: Labels for x and y axes, and title
     """
-    assert len(x) == len(y),\
-        "x ({}) and y ({}) must be equal length".format(len(x), len(y))
+    assert len(x) == len(y), "x ({}) and y ({}) must be equal length".format(
+        len(x), len(y)
+    )
 
     fig = plt.figure(figsize=(8, 5))
     ax = fig.add_subplot(111)

@@ -69,8 +69,6 @@ class ModelDefaults:
         """
         Parent class of the model defaults objects.
         """
-        self.in_channels = 1
-        self.out_channels = 1
 
     def get(self, varname):
         """
@@ -91,7 +89,8 @@ class ModelDefaults2D(ModelDefaults):
         the model config
         """
         super(ModelDefaults, self).__init__()
-
+        self.in_channels = 1
+        self.out_channels = 1
         self.kernel_size = (3, 3)
         self.residual = False
         self.dropout = 0.2
@@ -110,7 +109,8 @@ class ModelDefaults25D(ModelDefaults):
         All parameters in this default model CAN be accessed by name through
         the model config
         """
-
+        self.in_channels = 1
+        self.out_channels = 1
         self.in_stack_depth = 5
         self.out_stack_depth = 1
         self.xy_kernel_size = (3, 3)

@@ -120,8 +120,8 @@ class TorchTrainer:
         self.get_save_location()
 
         # determine transforms/augmentations
-        transforms = [ds.ToTensor(device=torch.device("cpu"))]
-        target_transforms = [ds.ToTensor(device=torch.device("cpu"))]
+        transforms = [ds.ToTensor(device=torch.device("cuda"))]
+        target_transforms = [ds.ToTensor(device=torch.device("cuda"))]
 
         # init dataset container and pull dataset split objects
         caching = (

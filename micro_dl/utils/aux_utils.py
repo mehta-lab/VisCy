@@ -11,17 +11,18 @@ import re
 import pandas as pd
 import yaml
 
-DF_NAMES = ["channel_idx",
-            "pos_idx",
-            "slice_idx",
-            "time_idx",
-            "channel_name",
-            "dir_name",
-            "file_name",
-            ]
+DF_NAMES = [
+    "channel_idx",
+    "pos_idx",
+    "slice_idx",
+    "time_idx",
+    "channel_name",
+    "dir_name",
+    "file_name",
+]
 
 
-def import_object(module_name, obj_name, obj_type='class'):
+def import_object(module_name, obj_name, obj_type="class"):
     """Imports a class or function dynamically
 
     :param str module_name: modules such as input, utils, train etc
@@ -29,16 +30,16 @@ def import_object(module_name, obj_name, obj_type='class'):
     :param str obj_type: Object type (class or function)
     """
 
-    full_module_name = ".".join(('micro_dl', module_name))
+    full_module_name = ".".join(("micro_dl", module_name))
     try:
         module = importlib.import_module(full_module_name)
         obj = getattr(module, obj_name)
-        if obj_type == 'class':
-            assert inspect.isclass(obj),\
-                "Expected {} to be class".format(obj_name)
-        elif obj_type == 'function':
-            assert inspect.isfunction(obj),\
-                "Expected {} to be function".format(obj_name)
+        if obj_type == "class":
+            assert inspect.isclass(obj), "Expected {} to be class".format(obj_name)
+        elif obj_type == "function":
+            assert inspect.isfunction(obj), "Expected {} to be function".format(
+                obj_name
+            )
         return obj
     except ImportError:
         raise
@@ -53,18 +54,15 @@ def read_config(config_fname):
     :return: dict config: Configuration parameters
     """
 
-    with open(config_fname, 'r') as f:
+    with open(config_fname, "r") as f:
         config = yaml.safe_load(f)
 
     return config
 
 
-def get_row_idx(frames_metadata,
-                time_idx,
-                channel_idx,
-                slice_idx=-1,
-                pos_idx=-1,
-                dir_names=None):
+def get_row_idx(
+    frames_metadata, time_idx, channel_idx, slice_idx=-1, pos_idx=-1, dir_names=None
+):
     """
     Get the indices for images with timepoint_idx and channel_idx
 
@@ -78,25 +76,23 @@ def get_row_idx(frames_metadata,
     :return row_idx: Row index in dataframe
     """
     if dir_names is None:
-        dir_names = frames_metadata['dir_name'].unique().tolist()
+        dir_names = frames_metadata["dir_name"].unique().tolist()
     if not isinstance(dir_names, list):
         dir_names = [dir_names]
-    row_idx = ((frames_metadata['time_idx'] == time_idx) &
-               (frames_metadata['channel_idx'] == channel_idx) &
-               frames_metadata['dir_name'].isin(dir_names))
+    row_idx = (
+        (frames_metadata["time_idx"] == time_idx)
+        & (frames_metadata["channel_idx"] == channel_idx)
+        & frames_metadata["dir_name"].isin(dir_names)
+    )
     if slice_idx > -1:
-        row_idx = (row_idx & (frames_metadata['slice_idx'] == slice_idx))
+        row_idx = row_idx & (frames_metadata["slice_idx"] == slice_idx)
     if pos_idx > -1:
-        row_idx = (row_idx & (frames_metadata['pos_idx'] == pos_idx))
+        row_idx = row_idx & (frames_metadata["pos_idx"] == pos_idx)
 
     return row_idx
 
 
-def get_meta_idx(frames_metadata,
-                 time_idx,
-                 channel_idx,
-                 slice_idx,
-                 pos_idx):
+def get_meta_idx(frames_metadata, time_idx, channel_idx, slice_idx, pos_idx):
     """
     Get row index in metadata dataframe given variable indices
 
@@ -108,18 +104,15 @@ def get_meta_idx(frames_metadata,
     :return: int pos_idx: Row position matching indices above
     """
     frame_idx = frames_metadata.index[
-        (frames_metadata['channel_idx'] == int(channel_idx)) &
-        (frames_metadata['time_idx'] == int(time_idx)) &
-        (frames_metadata["slice_idx"] == int(slice_idx)) &
-        (frames_metadata["pos_idx"] == int(pos_idx))].tolist()
+        (frames_metadata["channel_idx"] == int(channel_idx))
+        & (frames_metadata["time_idx"] == int(time_idx))
+        & (frames_metadata["slice_idx"] == int(slice_idx))
+        & (frames_metadata["pos_idx"] == int(pos_idx))
+    ].tolist()
     return frame_idx[0]
 
 
-def get_sub_meta(frames_metadata,
-                 time_ids,
-                 channel_ids,
-                 slice_ids,
-                 pos_ids):
+def get_sub_meta(frames_metadata, time_ids, channel_ids, slice_ids, pos_ids):
     """
     Get sliced metadata dataframe given variable indices
 
@@ -131,20 +124,30 @@ def get_sub_meta(frames_metadata,
     :return: int pos_ids: Row positions matching indices above
     """
     frames_meta_sub = frames_metadata[
-        (frames_metadata['channel_idx'].isin(channel_ids)) &
-        (frames_metadata['time_idx'].isin(time_ids)) &
-        (frames_metadata["slice_idx"].isin(slice_ids)) &
-        (frames_metadata["pos_idx"].isin(pos_ids))]
+        (frames_metadata["channel_idx"].isin(channel_ids))
+        & (frames_metadata["time_idx"].isin(time_ids))
+        & (frames_metadata["slice_idx"].isin(slice_ids))
+        & (frames_metadata["pos_idx"].isin(pos_ids))
+    ]
+
+    assert not frames_meta_sub.empty, (
+        "Error: tried to pull empty subset of image slices from"
+        " 'frames_meta.csv'. It is likely that the time, channel, slice, or"
+        "pos indices you are trying to predict do not exist in the dataset "
+        "you specified."
+    )
     return frames_meta_sub
 
 
-def get_im_name(time_idx=None,
-                channel_idx=None,
-                slice_idx=None,
-                pos_idx=None,
-                extra_field=None,
-                ext='.png',
-                int2str_len=3):
+def get_im_name(
+    time_idx=None,
+    channel_idx=None,
+    slice_idx=None,
+    pos_idx=None,
+    extra_field=None,
+    ext=".png",
+    int2str_len=3,
+):
     """
     Create an image name given parameters and extension
 
@@ -172,13 +175,15 @@ def get_im_name(time_idx=None,
     return im_name
 
 
-def get_sms_im_name(time_idx=None,
-                    channel_name=np.nan,
-                    slice_idx=None,
-                    pos_idx=None,
-                    extra_field=None,
-                    ext='.npy',
-                    int2str_len=3):
+def get_sms_im_name(
+    time_idx=None,
+    channel_name=np.nan,
+    slice_idx=None,
+    pos_idx=None,
+    extra_field=None,
+    ext=".npy",
+    int2str_len=3,
+):
     """
     Create an image name given parameters and extension
     This function is custom for the computational microscopy (SMS)
@@ -245,8 +250,7 @@ def sort_meta_by_channel(frames_metadata):
         # TODO: Assert that all indices are the same for safety here
         # It should be taken care of by preprocessing, unless someone runs it
         # several times with different settings
-        channel_meta = pd.Series(channel_meta["file_name"].tolist(),
-                                 name=col_name)
+        channel_meta = pd.Series(channel_meta["file_name"].tolist(), name=col_name)
         sorted_metadata = pd.concat([sorted_metadata, channel_meta], axis=1)
 
     # Rename file name
@@ -254,17 +258,19 @@ def sort_meta_by_channel(frames_metadata):
         index=str,
         columns={"file_name": "file_name_{}".format(channel_ids[0])},
     )
-    if 'Unnamed: 0' in sorted_metadata.index:
+    if "Unnamed: 0" in sorted_metadata.index:
         sorted_metadata = sorted_metadata.drop(["index", "Unnamed: 0"], axis=1)
     return sorted_metadata
 
 
-def validate_metadata_indices(frames_metadata,
-                              time_ids=None,
-                              channel_ids=None,
-                              slice_ids=None,
-                              pos_ids=None,
-                              uniform_structure=True):
+def validate_metadata_indices(
+    frames_metadata,
+    time_ids=None,
+    channel_ids=None,
+    slice_ids=None,
+    pos_ids=None,
+    uniform_structure=True,
+):
     """
     Check the availability of indices provided timepoints, channels, positions
     and slices for all data.
@@ -287,10 +293,10 @@ def validate_metadata_indices(frames_metadata,
         or slices are present
     """
     meta_id_names = [
-        'channel_ids',
-        'slice_ids',
-        'time_ids',
-        'pos_ids',
+        "channel_ids",
+        "slice_ids",
+        "time_ids",
+        "pos_ids",
     ]
     id_list = [
         channel_ids,
@@ -299,10 +305,10 @@ def validate_metadata_indices(frames_metadata,
         pos_ids,
     ]
     col_names = [
-        'channel_idx',
-        'slice_idx',
-        'time_idx',
-        'pos_idx',
+        "channel_idx",
+        "slice_idx",
+        "time_idx",
+        "pos_idx",
     ]
     metadata_ids = {}
     for meta_id_name, ids, col_name in zip(meta_id_names, id_list, col_names):
@@ -314,24 +320,24 @@ def validate_metadata_indices(frames_metadata,
                     ids = [ids]
             all_ids = frames_metadata[col_name].unique()
             id_indicator = [i in all_ids for i in ids]
-            assert np.all(id_indicator),\
-                'Indices for {} not available'.format(col_name)
+            assert np.all(id_indicator), "Indices for {} not available".format(col_name)
             metadata_ids[meta_id_name] = ids
 
     tp_dict = None
     if not uniform_structure:
         tp_dict = {}
-        for tp_idx in metadata_ids['time_ids']:
+        for tp_idx in metadata_ids["time_ids"]:
             ch_dict = {}
-            for ch_idx in metadata_ids['channel_ids']:
+            for ch_idx in metadata_ids["channel_ids"]:
                 pos_dict = {}
-                for pos_idx in metadata_ids['pos_ids']:
-                    row_idx = ((frames_metadata['time_idx'] == tp_idx) &
-                               (frames_metadata['channel_idx'] == ch_idx) &
-                               (frames_metadata['pos_idx'] == pos_idx))
+                for pos_idx in metadata_ids["pos_ids"]:
+                    row_idx = (
+                        (frames_metadata["time_idx"] == tp_idx)
+                        & (frames_metadata["channel_idx"] == ch_idx)
+                        & (frames_metadata["pos_idx"] == pos_idx)
+                    )
                     if np.any(row_idx):
-                        cur_slice_ids = \
-                            frames_metadata[row_idx]['slice_idx'].unique()
+                        cur_slice_ids = frames_metadata[row_idx]["slice_idx"].unique()
                         pos_dict[pos_idx] = cur_slice_ids
                 ch_dict[ch_idx] = pos_dict
             tp_dict[tp_idx] = ch_dict
@@ -356,7 +362,7 @@ def init_logger(logger_name, log_fname, log_level):
 
     file_handler = logging.FileHandler(log_fname)
     formatter = logging.Formatter(
-        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
     )
     file_handler.setFormatter(formatter)
     file_handler.setLevel(log_level)
@@ -386,7 +392,7 @@ def make_dataframe(nbr_rows=None, df_names=DF_NAMES):
     return frames_meta
 
 
-def read_meta(input_dir, meta_fname='frames_meta.csv'):
+def read_meta(input_dir, meta_fname="frames_meta.csv"):
     """
     Read metadata file, which is assumed to be named 'frames_meta.csv'
     in given directory.
@@ -397,19 +403,16 @@ def read_meta(input_dir, meta_fname='frames_meta.csv'):
     :raise IOError: If metadata file isn't present
     """
     meta_fname = glob.glob(os.path.join(input_dir, meta_fname))
-    assert len(meta_fname) == 1, \
-        "Can't find metadata csv file in {}".format(input_dir)
+    assert len(meta_fname) == 1, "Can't find metadata csv file in {}".format(input_dir)
     try:
         frames_metadata = pd.read_csv(meta_fname[0], index_col=0)
     except IOError as e:
-        raise IOError('cannot read metadata csv file: {}'.format(e))
+        raise IOError("cannot read metadata csv file: {}".format(e))
 
     return frames_metadata
 
 
-def save_tile_meta(tiles_meta,
-                   cur_channel,
-                   tiled_dir):
+def save_tile_meta(tiles_meta, cur_channel, tiled_dir):
     """
     Save meta data for tiled images
 
@@ -418,19 +421,18 @@ def save_tile_meta(tiles_meta,
     :param int cur_channel: Channel being tiled
     :param str tiled_dir: Directory to save meta data in
     """
-    fname_header = 'fname_{}'.format(cur_channel)
+    fname_header = "fname_{}".format(cur_channel)
     cur_df = pd.DataFrame.from_records(
         tiles_meta,
-        columns=['time_idx', 'channel_idx', 'pos_idx',
-                 'slice_idx', fname_header]
+        columns=["time_idx", "channel_idx", "pos_idx", "slice_idx", fname_header],
     )
-    metadata_fname = os.path.join(tiled_dir, 'tiles_meta.csv')
+    metadata_fname = os.path.join(tiled_dir, "tiles_meta.csv")
     if cur_channel == 0:
         df = cur_df
     else:
-        df = pd.read_csv(metadata_fname, sep=',', index_col=0)
+        df = pd.read_csv(metadata_fname, sep=",", index_col=0)
         df[fname_header] = cur_df[fname_header]
-    df.to_csv(metadata_fname, sep=',')
+    df.to_csv(metadata_fname, sep=",")
 
 
 def validate_config(config_dict, params):
@@ -441,14 +443,14 @@ def validate_config(config_dict, params):
     :return: list with bool values indicating if param is present or not
     """
     params = np.array(params)
-    param_indicator = np.zeros(len(params), dtype='bool')
+    param_indicator = np.zeros(len(params), dtype="bool")
     for idx, exp_param in enumerate(params):
-        cur_indicator = (exp_param in config_dict) and \
-                        (config_dict[exp_param] is not None)
+        cur_indicator = (exp_param in config_dict) and (
+            config_dict[exp_param] is not None
+        )
         param_indicator[idx] = cur_indicator
     check = np.all(param_indicator)
-    msg = 'Params absent in network_config: {}'.\
-        format(params[param_indicator == 0])
+    msg = "Params absent in network_config: {}".format(params[param_indicator == 0])
     return check, msg
 
 
@@ -458,9 +460,10 @@ def get_channel_axis(data_format):
     :param str data_format: as named. [channels_last, channel_first]
     :return int channel_axis
     """
-    assert data_format in ['channels_first', 'channels_last'], \
-        'Invalid data format %s' % data_format
-    if data_format == 'channels_first':
+    assert data_format in ["channels_first", "channels_last"], (
+        "Invalid data format %s" % data_format
+    )
+    if data_format == "channels_first":
         channel_axis = 1
     else:
         channel_axis = -1
@@ -483,11 +486,12 @@ def adjust_slice_margins(slice_ids, depth):
     if depth > 1:
         margin = depth // 2
         nbr_slices = len(slice_ids)
-        assert nbr_slices > 2 * margin, \
-            "Insufficient slices ({}) for max depth {}".format(
-                nbr_slices, depth)
-        assert slice_ids[-1] - slice_ids[0] + 1 == nbr_slices, \
-            "Slice indices are not contiguous"
+        assert (
+            nbr_slices > 2 * margin
+        ), "Insufficient slices ({}) for max depth {}".format(nbr_slices, depth)
+        assert (
+            slice_ids[-1] - slice_ids[0] + 1 == nbr_slices
+        ), "Slice indices are not contiguous"
         # TODO: use itertools.groupby if non-contiguous data is a thing
         # np.unique is sorted so we can just remove first and last ids
         slice_ids = slice_ids[margin:-margin]
@@ -535,7 +539,7 @@ def get_sorted_names(dir_name):
     :param str dir_name: Image directory name
     :return list of strs im_names: Image names sorted according to indices
     """
-    im_names = [f for f in os.listdir(dir_name) if f.startswith('im')]
+    im_names = [f for f in os.listdir(dir_name) if f.startswith("im")]
     # Sort image names according to indices
     return natsort.natsorted(im_names)
 
@@ -553,20 +557,18 @@ def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
     :return dict meta_row: One row of metadata given image file name
     """
     order_list = list(order)
-    assert len(set(order_list)) == 4,\
-        "Order needs 4 unique values, not {}".format(order)
+    assert len(set(order_list)) == 4, "Order needs 4 unique values, not {}".format(
+        order
+    )
     meta_row = dict.fromkeys(df_names)
     # Channel name can't be retrieved from image name
     meta_row["channel_name"] = np.nan
     meta_row["file_name"] = im_name
     # Find all integers in name string
-    ints = re.findall(r'\d+', im_name)
+    ints = re.findall(r"\d+", im_name)
     assert len(ints) == 4, "Expected 4 integers, found {}".format(len(ints))
     # Assign indices based on ints and order
-    idx_dict = {"c": "channel_idx",
-                "z": "slice_idx",
-                "t": "time_idx",
-                "p": "pos_idx"}
+    idx_dict = {"c": "channel_idx", "z": "slice_idx", "t": "time_idx", "p": "pos_idx"}
     for i in idx_dict.keys():
         assert i in order_list, "{} not in order".format(i)
     for i, order_char in enumerate(order_list):
@@ -598,7 +600,7 @@ def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
 
     if len(str_split) > 4:
         # this means they have introduced additional _ in the file name
-        channel_name = '_'.join(str_split[:-3])
+        channel_name = "_".join(str_split[:-3])
     else:
         channel_name = str_split[0]
     # Add channel name and index
@@ -617,5 +619,3 @@ def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
         elif s.find("z") == 0 and len(s) == 4:
             meta_row["slice_idx"] = int(s[1:])
     return meta_row
-
-

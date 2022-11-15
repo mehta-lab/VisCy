@@ -1,3 +1,4 @@
+# %%
 import argparse
 import datetime
 import os
@@ -44,8 +45,22 @@ def check_save_folder(inference_config, preprocess_config):
 
 
 if __name__ == "__main__":
-    config = "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_25D_A549Nucl.yml"
-    config_2D = "/hpc/projects/compmicro/projects/virtualstaining/torch_microDL/config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
+    config_test = (
+        "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/"
+        "2019_02_15_KidneyTissue_full_dataset/11_02_2022_parameter_tuning/25D_Unet/"
+        "z5_phase+ret+orix+oriy_actin/"
+        "Stack5_fltr16_256_do20_otus_masked_MAE_4chan_phase+ret+orix+oriy_actin_pix_iqr_norm_tf10_pt20_torch_config.yml"
+    )
+    config = (
+        "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/"
+        "config_files/2022_09_27_A549_NuclStain/ptTest_Soorya_Christian/"
+        "torch_config_25D_A549Nucl.yml"
+    )
+    config_2D = (
+        "/hpc/projects/compmicro/projects/virtualstaining/"
+        "torch_microDL/config_files/2022_09_27_A549_NuclStain/"
+        "ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
+    )
     torch_config = aux_utils.read_config(config_2D)
 
     # Get GPU ID and memory fraction
