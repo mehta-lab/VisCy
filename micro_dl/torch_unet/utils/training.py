@@ -147,13 +147,22 @@ class TorchTrainer:
             workers = self.training_config["num_workers"]
 
         self.train_dataloader = torch.utils.data.DataLoader(
-            dataset=train_dataset, shuffle=True, num_workers=workers
+            dataset=train_dataset,
+            shuffle=True,
+            num_workers=workers,
+            persistent_workers=True if workers > 0 else False,
         )
         self.test_dataloader = torch.utils.data.DataLoader(
-            dataset=test_dataset, shuffle=True, num_workers=workers
+            dataset=test_dataset,
+            shuffle=True,
+            num_workers=workers,
+            persistent_workers=True if workers > 0 else False,
         )
         self.val_dataloader = torch.utils.data.DataLoader(
-            dataset=val_dataset, shuffle=True, num_workers=workers
+            dataset=val_dataset,
+            shuffle=True,
+            num_workers=workers,
+            persistent_workers=True if workers > 0 else False,
         )
         self.split_samples = torch_data_container.split_samples_metadata
 
@@ -202,9 +211,10 @@ class TorchTrainer:
         self.scheduler = self.scheduler(
             self.optimizer, patience=3, mode="min", factor=0.5
         )
+        # TODO: make this parameter configurable
         self.early_stopper = EarlyStopping(
             path=self.save_folder,
-            patience=20,
+            patience=3,
             verbose=False,
         )
 
@@ -223,10 +233,10 @@ class TorchTrainer:
             for current, minibatch in enumerate(self.train_dataloader):
                 # pretty printing
                 io_utils.show_progress_bar(self.train_dataloader, current)
-
+                torch.ones((1, 2)).cuda()
                 # get sample and target (remember we remove the extra batch dimension)
-                input_ = minibatch[0][0].to(self.device).float()
-                target_ = minibatch[1][0].to(self.device).float()
+                input_ = minibatch[0][0].cuda(device=self.device).float()
+                target_ = minibatch[1][0].cuda(device=self.device).float()
 
                 # run through model
                 output = self.model(input_, validate_input=True)

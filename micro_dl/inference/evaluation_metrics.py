@@ -24,16 +24,19 @@ def mask_decorator(metric_function):
          are np.arrays
         """
 
-        metric = metric_function(target=kwargs['target'],
-                                 prediction=kwargs['prediction'])
-        if 'mask' in kwargs:
-            mask = kwargs['mask']
-            cur_target = kwargs['target']
-            cur_pred = kwargs['prediction']
-            masked_metric = metric_function(target=cur_target[mask],
-                                            prediction=cur_pred[mask])
+        metric = metric_function(
+            target=kwargs["target"], prediction=kwargs["prediction"]
+        )
+        if "mask" in kwargs:
+            mask = kwargs["mask"]
+            cur_target = kwargs["target"]
+            cur_pred = kwargs["prediction"]
+            masked_metric = metric_function(
+                target=cur_target[mask], prediction=cur_pred[mask]
+            )
             return [metric, masked_metric]
         return metric
+
     return wrapper_metric_function
 
 
@@ -85,10 +88,7 @@ def corr_metric(target, prediction):
     return cur_corr
 
 
-def ssim_metric(target,
-                prediction,
-                mask=None,
-                win_size=21):
+def ssim_metric(target, prediction, mask=None, win_size=21):
     """
     Structural similarity indiex (SSIM) of target and prediction.
     Window size is not passed into function so make sure tiles
@@ -100,12 +100,20 @@ def ssim_metric(target,
     :param int win_size: window size for computing local SSIM
     :return float/list ssim and ssim_masked
     """
+    assert target.shape == prediction.shape, (
+        "target and prediction have different shapes:"
+        f"expected target shape {prediction.shape}, "
+        f"but got target shape {target.shape}"
+    )
+
+    multichannel = win_size > target.shape[-1]
     if mask is None:
         cur_ssim = ssim(
             target,
             prediction,
             win_size=win_size,
             data_range=target.max() - target.min(),
+            multichannel=multichannel,
         )
         return cur_ssim
     else:
@@ -114,6 +122,7 @@ def ssim_metric(target,
             prediction,
             data_range=target.max() - target.min(),
             full=True,
+            multichannel=multichannel,
         )
         cur_ssim_masked = np.mean(cur_ssim_img[mask])
         return [cur_ssim, cur_ssim_masked]
@@ -143,7 +152,7 @@ def dice_metric(target, prediction):
     """
     target_bin = binarize_array(target)
     pred_bin = binarize_array(prediction)
-    return sklearn.metrics.f1_score(target_bin, pred_bin, average='micro')
+    return sklearn.metrics.f1_score(target_bin, pred_bin, average="micro")
 
 
 def binarize_array(im):
@@ -152,16 +161,14 @@ def binarize_array(im):
     :param np.array im: Prediction or target array
     :return np.array im_bin: Flattened and binarized array
     """
-    im_bin = (im.flatten() / im.max()) > .5
+    im_bin = (im.flatten() / im.max()) > 0.5
     return im_bin.astype(np.uint8)
 
 
 class MetricsEstimator:
     """Estimate metrics for evaluating a trained model"""
 
-    def __init__(self,
-                 metrics_list,
-                 masked_metrics=False):
+    def __init__(self, metrics_list, masked_metrics=False):
         """
         Init. After instantiating the class you can call metrics estimation
         in xy, xz, yz and xyz orientations assuming images are of shape xyz.
@@ -180,9 +187,10 @@ class MetricsEstimator:
         :param bool masked_metrics: get the metrics for the masked region
         """
 
-        available_metrics = {'ssim', 'corr', 'r2', 'mse', 'mae', 'acc', 'dice'}
-        assert set(metrics_list).issubset(available_metrics), \
-            'only ssim, r2, corr, mse, mae, acc, dice are currently supported'
+        available_metrics = {"ssim", "corr", "r2", "mse", "mae", "acc", "dice"}
+        assert set(metrics_list).issubset(
+            available_metrics
+        ), "only ssim, r2, corr, mse, mae, acc, dice are currently supported"
         self.metrics_list = metrics_list
         self.pd_col_names = metrics_list.copy()
         self.masked_metrics = masked_metrics
@@ -191,25 +199,26 @@ class MetricsEstimator:
         self.metrics_xz = None
         self.metrics_yz = None
         # No masking for evaluating segmentations (which are masks)
-        if 'acc' in metrics_list or 'dice' in metrics_list:
-            assert not self.masked_metrics, \
-                "Don't use masked metrics if evaluating segmentation"
+        if "acc" in metrics_list or "dice" in metrics_list:
+            assert (
+                not self.masked_metrics
+            ), "Don't use masked metrics if evaluating segmentation"
 
         if self.masked_metrics:
-            self.pd_col_names.append('vol_frac')
+            self.pd_col_names.append("vol_frac")
             for metric in metrics_list:
-                cur_col_name = '{}_masked'.format(metric)
+                cur_col_name = "{}_masked".format(metric)
                 self.pd_col_names.append(cur_col_name)
 
-        self.pd_col_names.append('pred_name')
+        self.pd_col_names.append("pred_name")
         self.fn_mapping = {
-            'mae_metric': mae_metric,
-            'mse_metric': mse_metric,
-            'r2_metric': r2_metric,
-            'corr_metric': corr_metric,
-            'ssim_metric': ssim_metric,
-            'acc_metric': accuracy_metric,
-            'dice_metric': dice_metric,
+            "mae_metric": mae_metric,
+            "mse_metric": mse_metric,
+            "r2_metric": r2_metric,
+            "corr_metric": corr_metric,
+            "ssim_metric": ssim_metric,
+            "acc_metric": accuracy_metric,
+            "dice_metric": dice_metric,
         }
 
     def get_metrics_xyz(self):
@@ -238,38 +247,35 @@ class MetricsEstimator:
         :return np.array mask: Mask with boolean dtype
         """
         if mask is not None:
-            if mask.dtype != 'bool':
+            if mask.dtype != "bool":
                 mask = mask > 0
         return mask
 
     @staticmethod
-    def assert_input(target,
-                     prediction,
-                     pred_name,
-                     mask=None):
-        assert isinstance(pred_name, str), \
-            'more than one pred_name is passed. Only one target-pred pair ' \
-            'is handled per function call'
-        assert target.shape == prediction.shape, \
-            'The shape of target and prediction are not same: {}, {}'.format(
-                target.shape, prediction.shape
-            )
-        assert target.dtype == prediction.dtype, \
-            'The dtype of target and prediction are not same: {}, {}'.format(
-                target.dtype, prediction.dtype
-            )
+    def assert_input(target, prediction, pred_name, mask=None):
+        assert isinstance(pred_name, str), (
+            "more than one pred_name is passed. Only one target-pred pair "
+            "is handled per function call"
+        )
+        assert (
+            target.shape == prediction.shape
+        ), "The shape of target and prediction are not same: {}, {}".format(
+            target.shape, prediction.shape
+        )
+        assert (
+            target.dtype == prediction.dtype
+        ), "The dtype of target and prediction are not same: {}, {}".format(
+            target.dtype, prediction.dtype
+        )
         if mask is not None:
-            assert target.shape == mask.shape, \
-                'The shape of target and mask are not same: {}, {}'.format(
-                    target.shape, mask.shape
-                )
-            assert mask.dtype == 'bool', 'mask is not boolean'
+            assert (
+                target.shape == mask.shape
+            ), "The shape of target and mask are not same: {}, {}".format(
+                target.shape, mask.shape
+            )
+            assert mask.dtype == "bool", "mask is not boolean"
 
-    def compute_metrics_row(self,
-                            target,
-                            prediction,
-                            pred_name,
-                            mask):
+    def compute_metrics_row(self, target, prediction, pred_name, mask):
         """
         Compute one row in metrics dataframe.
 
@@ -280,9 +286,9 @@ class MetricsEstimator:
         :return: dict metrics_row: a row for a metrics dataframe
         """
         metrics_row = dict.fromkeys(self.pd_col_names)
-        metrics_row['pred_name'] = pred_name
+        metrics_row["pred_name"] = pred_name
         for metric_name in self.metrics_list:
-            metric_fn_name = '{}_metric'.format(metric_name)
+            metric_fn_name = "{}_metric".format(metric_name)
             metric_fn = self.fn_mapping[metric_fn_name]
             if self.masked_metrics:
                 cur_metric_list = metric_fn(
@@ -291,9 +297,9 @@ class MetricsEstimator:
                     mask=mask,
                 )
                 vol_frac = np.mean(mask)
-                metrics_row['vol_frac'] = vol_frac
+                metrics_row["vol_frac"] = vol_frac
                 metrics_row[metric_name] = cur_metric_list[0]
-                metric_name = '{}_masked'.format(metric_name)
+                metric_name = "{}_masked".format(metric_name)
                 metrics_row[metric_name] = cur_metric_list[1]
             else:
                 cur_metric = metric_fn(
@@ -303,11 +309,7 @@ class MetricsEstimator:
                 metrics_row[metric_name] = cur_metric
         return metrics_row
 
-    def estimate_xyz_metrics(self,
-                             target,
-                             prediction,
-                             pred_name,
-                             mask=None):
+    def estimate_xyz_metrics(self, target, prediction, pred_name, mask=None):
         """
         Estimate 3D metrics for the current input, target pair
 
@@ -330,14 +332,10 @@ class MetricsEstimator:
             metrics_row,
             ignore_index=True,
         )
-        print('metrics xyz')
+        print("metrics xyz")
         print(self.metrics_xyz)
 
-    def estimate_xy_metrics(self,
-                            target,
-                            prediction,
-                            pred_name,
-                            mask=None):
+    def estimate_xy_metrics(self, target, prediction, pred_name, mask=None):
         """
         Estimate metrics for the current input, target pair
         along each xy slice (in plane)
@@ -369,11 +367,7 @@ class MetricsEstimator:
                 ignore_index=True,
             )
 
-    def estimate_xz_metrics(self,
-                            target,
-                            prediction,
-                            pred_name,
-                            mask=None):
+    def estimate_xz_metrics(self, target, prediction, pred_name, mask=None):
         """
         Estimate metrics for the current input, target pair
         along each xz slice
@@ -385,7 +379,7 @@ class MetricsEstimator:
         """
         mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
-        assert len(target.shape) == 3, 'Dataset is assumed to be 3D'
+        assert len(target.shape) == 3, "Dataset is assumed to be 3D"
         self.metrics_xz = pd.DataFrame(columns=self.pd_col_names)
         # Loop through slices
         for slice_idx in range(target.shape[0]):
@@ -403,11 +397,7 @@ class MetricsEstimator:
                 ignore_index=True,
             )
 
-    def estimate_yz_metrics(self,
-                            target,
-                            prediction,
-                            pred_name,
-                            mask=None):
+    def estimate_yz_metrics(self, target, prediction, pred_name, mask=None):
         """
         Estimate metrics for the current input, target pair
         along each yz slice
@@ -419,7 +409,7 @@ class MetricsEstimator:
         """
         mask = self.mask_to_bool(mask)
         self.assert_input(target, prediction, pred_name, mask)
-        assert len(target.shape) == 3, 'Dataset is assumed to be 3D'
+        assert len(target.shape) == 3, "Dataset is assumed to be 3D"
         self.metrics_yz = pd.DataFrame(columns=self.pd_col_names)
         # Loop through slices
         for slice_idx in range(target.shape[1]):
