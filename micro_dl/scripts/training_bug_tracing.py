@@ -5,7 +5,7 @@ import os
 import sys
 import torch
 
-sys.path.insert(0, "/home/christian.foley/virtual_staining/workspaces/microDL")
+sys.path.insert(0, "/home/christian.foley/virtual_staining/code_revisions/microDL")
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.torch_unet.utils.training as train

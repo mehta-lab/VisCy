@@ -55,12 +55,12 @@ class TorchTrainer:
         # lr scheduler
         self.scheduler = optim.lr_scheduler.ReduceLROnPlateau
         # loss
-        assert self.training_config["loss"] in {"mse", "l1", "cossim", "cel"}, (
+        assert self.training_config["loss"] in {"mse", "l1", "cossim", "mae"}, (
             f"loss not supported. " "Try one of 'mse', 'mae', 'cossim', 'l1'"
         )
         if self.training_config["loss"] == "mse":
             self.criterion = nn.MSELoss()
-        elif self.training_config["loss"] == "l1":
+        elif self.training_config["loss"] in {"l1", "mae"}:
             self.criterion = nn.L1Loss()
         elif self.training_config["loss"] == "cossim":
             self.criterion = nn.CosineSimilarity()
@@ -118,10 +118,6 @@ class TorchTrainer:
         # determine transforms/augmentations
         transforms = [ds.ToTensor()]
         target_transforms = [ds.ToTensor()]
-        if self.training_config["mask"]:
-            target_transforms.append(
-                ds.GenerateMasks(self.training_config["mask_type"])
-            )
 
         # init dataset container and pull dataset split objects
         caching = (
@@ -223,13 +219,6 @@ class TorchTrainer:
                 input_ = minibatch[0][0].to(self.device).float()
                 target_ = minibatch[1][0].to(self.device).float()
 
-                # if specified mask sample to get input and target
-                # TODO: change caching to include masked inputs since masks never change
-                if self.training_config["mask"]:
-                    mask = minibatch[2][0].to(self.device).float()
-                    input_ = torch.mul(input_, mask)
-                    target_ = torch.mul(target_, mask)
-
                 # run through model
                 output = self.model(input_, validate_input=True)
                 loss = self.criterion(output, target_)
@@ -280,7 +269,7 @@ class TorchTrainer:
 
         self.writer.close()
 
-    def run_test(self, epoch=0, mask_override=False, validate_mode=False):
+    def run_test(self, epoch=0, validate_mode=False):
         """
         Runs test on all samples in a test_dataloader. Equivalent to one epoch on test/val data
         without updating weights. Runs metrics on the test results (given in criterion) and saves
@@ -290,7 +279,6 @@ class TorchTrainer:
         'device' parameter in torch config.
 
         :param int epoch: training epoch test was run at
-        :param bool mask_override: overrides the masking parameter for testing (for segmentation)
         :param bool validate_mode: run in validation mode to just produce loss (for lr scheduler)
         :return float avg_loss: average testing loss per sample of given data set
         """
@@ -324,12 +312,6 @@ class TorchTrainer:
             input_ = minibatch[0][0].to(self.device).float()
             target_ = minibatch[1][0].to(self.device).float()
             sample, target = input_, target_
-
-            # if mask provided, mask sample to get input and target
-            if mask_override:
-                mask_ = minibatch[2][0].to(self.device).float()
-                input_ = torch.mul(input_, mask_)
-                target_ = torch.mul(target_, mask_)
 
             # run through model
             output = self.model(input_, validate_input=True)
