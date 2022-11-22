@@ -120,8 +120,8 @@ class TorchTrainer:
         self.get_save_location()
 
         # determine transforms/augmentations
-        transforms = [ds.ToTensor(device=torch.device("cuda"))]
-        target_transforms = [ds.ToTensor(device=torch.device("cuda"))]
+        transforms = [ds.ToTensor()]
+        target_transforms = [ds.ToTensor()]
 
         # init dataset container and pull dataset split objects
         caching = (
@@ -134,7 +134,7 @@ class TorchTrainer:
             transforms=transforms,
             target_transforms=target_transforms,
             caching=caching,
-            device=self.device,
+            device="cpu",
             meta_dir=self.save_folder,
         )
         train_dataset = torch_data_container["train"]
@@ -233,7 +233,7 @@ class TorchTrainer:
             for current, minibatch in enumerate(self.train_dataloader):
                 # pretty printing
                 io_utils.show_progress_bar(self.train_dataloader, current)
-                torch.ones((1, 2)).cuda()
+
                 # get sample and target (remember we remove the extra batch dimension)
                 input_ = minibatch[0][0].cuda(device=self.device).float()
                 target_ = minibatch[1][0].cuda(device=self.device).float()
@@ -247,6 +247,9 @@ class TorchTrainer:
                 self.optimizer.zero_grad()
                 loss.backward()
                 self.optimizer.step()
+
+                if current == 10:
+                    break
 
             train_loss_list.append(train_loss / self.train_dataloader.__len__())
 
@@ -309,6 +312,9 @@ class TorchTrainer:
         :param bool validate_mode: run in validation mode to just produce loss (for lr scheduler)
         :return float avg_loss: average testing loss per sample of given data set
         """
+        # clear cache
+        torch.cuda.empty_cache()
+
         # set the model to evaluation mode
         self.model.eval()
 

@@ -41,7 +41,7 @@ class TorchDataset(Dataset):
         transforms=None,
         target_transforms=None,
         caching=False,
-        device=torch.device("cuda"),
+        device=torch.device("cpu"),
         meta_dir="",
     ):
         """
@@ -248,12 +248,12 @@ class TorchDataset(Dataset):
 class ToTensor(object):
     """
     Transformation. Converts input to torch.Tensor and returns. By default also places tensor
-    on gpu.
+    on cpu.
 
     :param torch.device device: device transport tensor to
     """
 
-    def __init__(self, device=torch.device("cuda")):
+    def __init__(self, device=torch.device("cpu")):
         self.device = device
 
     def __call__(self, sample):
