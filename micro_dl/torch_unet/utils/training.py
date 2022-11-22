@@ -248,9 +248,6 @@ class TorchTrainer:
                 loss.backward()
                 self.optimizer.step()
 
-                if current == 10:
-                    break
-
             train_loss_list.append(train_loss / self.train_dataloader.__len__())
 
             # regularize
