@@ -14,6 +14,8 @@ def model_init(network_config, device=torch.device("cuda"), debug_mode=False):
     :param torch.device device: device to store model parameters on (must be same
                                 as data)
     """
+    if device == "gpu":
+        device = "cuda"
 
     assert (
         "architecture" in network_config

@@ -77,7 +77,8 @@ def tile_image(input_image,
                             'file_name': file_name,
                             'pos_idx': save_dict['pos_idx'],
                             'row_start': row,
-                            'col_start': col}
+                            'col_start': col,
+                            'dir_name': save_dict['save_dir']}
             if sl_start is not None:
                 cur_metadata['slice_start'] = sl_start
         return cur_metadata
@@ -141,9 +142,13 @@ def tile_image(input_image,
                         if use_tile(cropped_img, min_fraction):
                             tiles_list.append(cropped_img)
                             cropping_index.append(cur_index)
-                            cur_tile_meta = get_tile_meta(cur_img_id,
-                                                          save_dict,
-                                                          row, col, sl)
+                            cur_tile_meta = get_tile_meta(
+                                cur_img_id,
+                                save_dict,
+                                row,
+                                col,
+                                sl,
+                            )
                             tiled_metadata.append(cur_tile_meta)
                 else:
                     img_id = '{}_sl{}-{}'.format(img_id, 0, im_depth)
@@ -184,7 +189,7 @@ def crop_at_indices(input_image,
     """Crop image into tiles at given indices
 
     :param np.array input_image: input image for cropping
-    :param list crop_indices: list of indices for cropping
+    :param list/tuple crop_indices: list of indices for cropping
     :param dict/None save_dict: dict with keys: time_idx, channel_idx, slice_idx,
      pos_idx, image_format and save_dir for generation output fname
     :param bool tile_3d: boolean flag for adding slice_start_idx to meta
@@ -231,7 +236,8 @@ def crop_at_indices(input_image,
                             'file_name': file_name,
                             'pos_idx': save_dict['pos_idx'],
                             'row_start': cur_idx[0],
-                            'col_start': cur_idx[2]}
+                            'col_start': cur_idx[2],
+                            'dir_name': save_dict['save_dir']}
             if tile_3d:
                 cur_metadata['slice_start'] = cur_idx[4]
             tiled_metadata.append(cur_metadata)

@@ -39,7 +39,7 @@ class TestResizeImages(unittest.TestCase):
                 cv2.imwrite(os.path.join(self.temp_path, im_name),
                             self.im + c * 100)
                 self.frames_meta = self.frames_meta.append(
-                    aux_utils.parse_idx_from_name(im_name),
+                    aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                     ignore_index=True,
                 )
         # Write metadata
@@ -117,6 +117,7 @@ class TestResizeImages(unittest.TestCase):
         # set up a volume with 5 slices, 2 channels
         slice_ids = [0, 1, 2, 3, 4]
         channel_ids = [2, 3]
+        resize_dir = os.path.join(self.output_dir, 'resized_images')
         frames_meta = aux_utils.make_dataframe()
         exp_meta_dict = []
         for c in channel_ids:
@@ -130,7 +131,7 @@ class TestResizeImages(unittest.TestCase):
                 cv2.imwrite(os.path.join(self.temp_path, im_name),
                             self.im + c * 100)
                 frames_meta = frames_meta.append(
-                    aux_utils.parse_idx_from_name(im_name),
+                    aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                     ignore_index=True,
                 )
             op_fname = 'im_c00{}_z000_t005_p007_3.3-0.8-1.0.npy'.format(c)
@@ -140,7 +141,9 @@ class TestResizeImages(unittest.TestCase):
                                   'slice_idx': 0,
                                   'file_name': op_fname,
                                   'mean': np.mean(self.im) + c * 100,
-                                  'std': float(0)})
+                                  'std': float(0),
+                                  'dir_name': resize_dir})
+        exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
         # Write metadata
         frames_meta.to_csv(
             os.path.join(self.temp_path, self.meta_name),
@@ -156,11 +159,7 @@ class TestResizeImages(unittest.TestCase):
 
         # save all slices in one volume
         resize_inst.resize_volumes()
-        saved_meta = pd.read_csv(os.path.join(self.output_dir,
-                                              'resized_images',
-                                              'frames_meta.csv'))
-        del saved_meta['Unnamed: 0']
-        exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
+        saved_meta = aux_utils.read_meta(resize_dir)
         pd.testing.assert_frame_equal(saved_meta, exp_meta_df)
 
         # num_slices_subvolume = 3, save vol chunks
@@ -175,12 +174,9 @@ class TestResizeImages(unittest.TestCase):
                                       'slice_idx': s,
                                       'file_name': op_fname,
                                       'mean': np.mean(self.im) + c * 100,
-                                      'std': float(0)})
-
-        resize_inst.resize_volumes(num_slices_subvolume=3)
-        saved_meta = pd.read_csv(os.path.join(self.output_dir,
-                                              'resized_images',
-                                              'frames_meta.csv'))
-        del saved_meta['Unnamed: 0']
+                                      'std': float(0),
+                                      'dir_name': resize_dir})
         exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
+        resize_inst.resize_volumes(num_slices_subvolume=3)
+        saved_meta = aux_utils.read_meta(resize_dir)
         pd.testing.assert_frame_equal(saved_meta, exp_meta_df)

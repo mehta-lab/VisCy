@@ -1,14 +1,17 @@
 """Auxiliary utility functions"""
 import glob
-import inspect
+import datetime
 import importlib
+import inspect
+import iohub.ngff as ngff
 import json
 import logging
 import natsort
 import numpy as np
 import os
-import re
 import pandas as pd
+import re
+import torch
 import yaml
 
 DF_NAMES = [
@@ -20,6 +23,29 @@ DF_NAMES = [
     "dir_name",
     "file_name",
 ]
+
+
+class MultiProcessProgressTracker(object):
+    """
+    Provides the ability to update progress
+
+    :param object: _description_
+    :type object: _type_
+    """
+
+
+def get_timestamp():
+    """
+    Returns a string of the current timestamp in the format:
+        YYYY_MM_DD_HH_mm
+    """
+    now = (
+        str(datetime.datetime.now())
+        .replace(" ", "_")
+        .replace(":", "_")
+        .replace("-", "_")[:-10]
+    )
+    return now
 
 
 def import_object(module_name, obj_name, obj_type="class"):
@@ -43,21 +69,6 @@ def import_object(module_name, obj_name, obj_type="class"):
         return obj
     except ImportError:
         raise
-
-
-def read_config(config_fname):
-    """Read the config file in yml format
-
-    TODO: validate config!
-
-    :param str config_fname: fname of config yaml with its full path
-    :return: dict config: Configuration parameters
-    """
-
-    with open(config_fname, "r") as f:
-        config = yaml.safe_load(f)
-
-    return config
 
 
 def get_row_idx(
@@ -99,7 +110,7 @@ def get_meta_idx(frames_metadata, time_idx, channel_idx, slice_idx, pos_idx):
     :param dataframe frames_metadata: Dataframe with column names given below
     :param int time_idx: Timepoint index
     :param int channel_idx: Channel index
-    :param int slice_idx: Slize (z) index
+    :param int slice_idx: Slice (z) index
     :param int pos_idx: Position (FOV) index
     :return: int pos_idx: Row position matching indices above
     """
@@ -117,12 +128,20 @@ def get_sub_meta(frames_metadata, time_ids, channel_ids, slice_ids, pos_ids):
     Get sliced metadata dataframe given variable indices
 
     :param dataframe frames_metadata: Dataframe with column names given below
-    :param int time_ids: Timepoint indices
-    :param int channel_ids: Channel indices
-    :param int slice_ids: Slize (z) indices
-    :param int pos_ids: Position (FOV) indices
+    :param int/list time_ids: Timepoint indices
+    :param int/list channel_ids: Channel indices
+    :param int/list slice_ids: Slize (z) indices
+    :param int/list pos_ids: Position (FOV) indices
     :return: int pos_ids: Row positions matching indices above
     """
+    if isinstance(channel_ids, (int, np.integer)):
+        channel_ids = [channel_ids]
+    if isinstance(time_ids, (int, np.integer)):
+        time_ids = [time_ids]
+    if isinstance(slice_ids, (int, np.integer)):
+        slice_ids = [slice_ids]
+    if isinstance(pos_ids, (int, np.integer)):
+        pos_ids = [pos_ids]
     frames_meta_sub = frames_metadata[
         (frames_metadata["channel_idx"].isin(channel_ids))
         & (frames_metadata["time_idx"].isin(time_ids))
@@ -264,84 +283,85 @@ def sort_meta_by_channel(frames_metadata):
 
 
 def validate_metadata_indices(
-    frames_metadata,
-    time_ids=None,
-    channel_ids=None,
-    slice_ids=None,
-    pos_ids=None,
-    uniform_structure=True,
+    zarr_dir,
+    time_ids=[],
+    channel_ids=[],
+    slice_ids=[],
+    pos_ids=[],
 ):
     """
     Check the availability of indices provided timepoints, channels, positions
-    and slices for all data.
+    and slices for all data, and returns only the available of the specified
+    indices.
+
     If input ids are None, the indices for that parameter will not be
     evaluated. If input ids are -1, all indices for that parameter will
     be returned.
 
-    :param pd.DataFrame frames_metadata: DF with columns time_idx,
-     channel_idx, slice_idx, pos_idx, file_name]
-    :param int/list time_ids: check availability of these timepoints in
-     frames_metadata
-    :param int/list channel_ids: check availability of these channels in
-     frames_metadata
-    :param int/list pos_ids: Check availability of positions in metadata
-    :param int/list slice_ids: Check availability of z slices in metadata
-    :param bool uniform_structure: bool indicator if unequal quantities in any
-     of the ids (channel, time, slice, pos)
-    :return dict metadata_ids: All indices found given input
+    Assumes uniform structure, as such structure is required for HCS compatibility
+
+    :param str zarr_dir: HCS-compatible zarr directory to validate indices against
+    :param list time_ids: check availability of these timepoints in image
+                                metadata
+    :param list channel_ids: check availability of these channels in image
+                                    metadata
+    :param list pos_ids: Check availability of positions in zarr_dir
+    :param list slice_ids: Check availability of z slices in image metadata
+
+    :return dict indices_metadata: All indices found given input
     :raise AssertionError: If not all channels, timepoints, positions
         or slices are present
     """
-    meta_id_names = [
-        "channel_ids",
-        "slice_ids",
-        "time_ids",
-        "pos_ids",
-    ]
-    id_list = [
-        channel_ids,
-        slice_ids,
-        time_ids,
-        pos_ids,
-    ]
-    col_names = [
-        "channel_idx",
-        "slice_idx",
-        "time_idx",
-        "pos_idx",
-    ]
-    metadata_ids = {}
-    for meta_id_name, ids, col_name in zip(meta_id_names, id_list, col_names):
-        if ids is not None:
-            if np.issubdtype(type(ids), np.integer):
-                if ids == -1:
-                    ids = frames_metadata[col_name].unique()
-                else:
-                    ids = [ids]
-            all_ids = frames_metadata[col_name].unique()
-            id_indicator = [i in all_ids for i in ids]
-            assert np.all(id_indicator), "Indices for {} not available".format(col_name)
-            metadata_ids[meta_id_name] = ids
 
-    tp_dict = None
-    if not uniform_structure:
-        tp_dict = {}
-        for tp_idx in metadata_ids["time_ids"]:
-            ch_dict = {}
-            for ch_idx in metadata_ids["channel_ids"]:
-                pos_dict = {}
-                for pos_idx in metadata_ids["pos_ids"]:
-                    row_idx = (
-                        (frames_metadata["time_idx"] == tp_idx)
-                        & (frames_metadata["channel_idx"] == ch_idx)
-                        & (frames_metadata["pos_idx"] == pos_idx)
-                    )
-                    if np.any(row_idx):
-                        cur_slice_ids = frames_metadata[row_idx]["slice_idx"].unique()
-                        pos_dict[pos_idx] = cur_slice_ids
-                ch_dict[ch_idx] = pos_dict
-            tp_dict[tp_idx] = ch_dict
-    return metadata_ids, tp_dict
+    def assert_unique_subset(subset, superset, name):
+        """
+        Helper function to allow for clean code:
+            Throws error if unique elements of subset are not a subset of
+            unique elements of superset.
+
+        Returns unique elements of subset if given a list. If subset is -1,
+        returns all unique elements of superset
+        """
+        if subset == -1:
+            subset = superset
+        if not (isinstance(subset, list) or isinstance(subset, tuple)):
+            subset = list(subset)
+        unique_subset = set(subset)
+        unique_superset = set(superset)
+        assert unique_subset.issubset(unique_superset), (
+            f"{name} in requested {name}: {unique_subset}"
+            f" not in available {name}: {unique_superset}"
+        )
+        return unique_subset
+
+    plate = ngff.open_ome_zarr(zarr_dir, layout='hcs', mode='r')
+    position_path, position = next(plate.positions())
+    
+    # read available channel indices from zarr store
+    available_time_ids = range(position.data.shape[0])
+    if isinstance(channel_ids, int):
+        available_channel_ids = range(len(plate.channel_names))
+    elif isinstance(channel_ids[0], int):
+        available_channel_ids = range(len(plate.channel_names))
+    else:
+        available_channel_ids = len(plate.channel_names)
+    available_slice_ids = range(position.data.shape[-3])
+    available_pos_ids = [x[0] for x in list(plate.positions())]
+
+    # enforce that requested indices are subsets of available indices
+    time_ids = assert_unique_subset(time_ids, available_time_ids, "slices")
+    channel_ids = assert_unique_subset(channel_ids, available_channel_ids, "channels")
+    slice_ids = assert_unique_subset(slice_ids, available_slice_ids, "slices")
+    pos_ids = assert_unique_subset(pos_ids, available_pos_ids, "positions")
+
+    indices_metadata = {
+        "time_ids": list(time_ids),
+        "channel_ids": list(channel_ids),
+        "slice_ids": list(slice_ids),
+        "pos_ids": list(pos_ids),
+    }
+    plate.close()
+    return indices_metadata
 
 
 def init_logger(logger_name, log_fname, log_level):
@@ -532,6 +552,31 @@ def write_json(json_dict, json_filename):
         write_file.write(json_dump)
 
 
+def read_config(config_fname):
+    """Read the config file in yml format
+
+    :param str config_fname: fname of config yaml with its full path
+    :return: dict config: Configuration parameters
+    """
+
+    with open(config_fname, "r") as f:
+        config = yaml.safe_load(f)
+
+    return config
+
+
+def write_yaml(yml_dict, yml_filename):
+    """
+    Writes dict as yml file.
+
+    :param dict yml_dict: Dictionary to be written
+    :param str yml_filename: Full path file name of yml
+    """
+    file_string = yaml.safe_dump(yml_dict)
+    with open(yml_filename, "w") as f:
+        f.write(file_string)
+
+
 def get_sorted_names(dir_name):
     """
     Get image names in directory and sort them by their indices
@@ -544,7 +589,7 @@ def get_sorted_names(dir_name):
     return natsort.natsorted(im_names)
 
 
-def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
+def parse_idx_from_name(im_name, df_names=DF_NAMES, dir_name=None, order="cztp"):
     """
     Assumes im_name is e.g. im_c***_z***_p***_t***.png,
     It doesn't care about the extension or the number of digits each index is
@@ -552,7 +597,8 @@ def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
     them by order. By default it assumes that the order is c, z, t, p.
 
     :param str im_name: Image name without path
-    :param list of strs df_names: Dataframe col names
+    :param list[strs] df_names: Dataframe col names
+    :param str dir_name: Directory path
     :param str order: Order in which c, z, t, p are given in the image (4 chars)
     :return dict meta_row: One row of metadata given image file name
     """
@@ -564,6 +610,8 @@ def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
     # Channel name can't be retrieved from image name
     meta_row["channel_name"] = np.nan
     meta_row["file_name"] = im_name
+    if dir_name is not None:
+        meta_row["dir_name"] = dir_name
     # Find all integers in name string
     ints = re.findall(r"\d+", im_name)
     assert len(ints) == 4, "Expected 4 integers, found {}".format(len(ints))
@@ -577,7 +625,7 @@ def parse_idx_from_name(im_name, df_names=DF_NAMES, order="cztp"):
     return meta_row
 
 
-def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
+def parse_sms_name(im_name, df_names=DF_NAMES, dir_name=None, channel_names=[]):
     """
     Parse metadata from file name or file path.
     This function is custom for the computational microscopy (SMS)
@@ -588,6 +636,7 @@ def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
 
     :param str im_name: File name or path
     :param list of strs df_names: Dataframe col names
+    :param str dir_name: Directory path
     :param list[str] channel_names: Expanding list of channel names
     :return dict meta_row: One row of metadata given image file name
     """
@@ -595,7 +644,10 @@ def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
     # Get rid of path if present
     im_name = os.path.basename(im_name)
     meta_row["file_name"] = im_name
-    im_name = im_name[:-4]
+    if dir_name is not None:
+        meta_row["dir_name"] = dir_name
+    # Remove extension
+    im_name = im_name.split(".")[0]
     str_split = im_name.split("_")[1:]
 
     if len(str_split) > 4:
@@ -619,3 +671,27 @@ def parse_sms_name(im_name, df_names=DF_NAMES, channel_names=[]):
         elif s.find("z") == 0 and len(s) == 4:
             meta_row["slice_idx"] = int(s[1:])
     return meta_row
+
+class ToTensor(object):
+    """
+    Transformation. Converts input to torch.Tensor and returns. By default also places tensor
+    on gpu.
+
+    :param torch.device device: device transport tensor to
+    """
+
+    def __init__(self, device=torch.device("cuda")):
+        self.device = device
+
+    def __call__(self, sample):
+        """
+        Perform transformation.
+
+        :param torch.tensor or numpy.ndarray sample: data to convert to tensor and place on device
+        :return torch.tensor sample: converted data on device
+        """
+        if isinstance(sample, torch.Tensor):
+            sample = sample.to(self.device)
+        else:
+            sample = torch.tensor(sample, dtype=torch.float32).to(self.device)
+        return sample

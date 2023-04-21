@@ -55,7 +55,10 @@ class TestMetricsScript(unittest.TestCase):
                         norm_im,
                     )
                 self.frames_meta = self.frames_meta.append(
-                    aux_utils.parse_idx_from_name(im_name),
+                    aux_utils.parse_idx_from_name(
+                        im_name=im_name,
+                        dir_name=self.image_dir,
+                    ),
                     ignore_index=True,
                 )
         # Write metadata

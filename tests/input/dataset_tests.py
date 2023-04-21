@@ -5,29 +5,32 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.input.dataset as dataset
+import micro_dl.input.transformations as transformations
 
 
 class TestBaseDataSet(unittest.TestCase):
-
     def setUp(self):
         """
         Set up a directory with input and target tiles
         """
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
-        self.input_fnames = pd.Series([
-            'in1.npy',
-            'in2.npy',
-            'in3.npy',
-            'in4.npy',
-        ])
-        self.target_fnames = pd.Series([
-            'out1.npy',
-            'out2.npy',
-            'out3.npy',
-            'out4.npy',
-        ])
+        self.input_fnames = pd.Series(
+            [
+                "in1.npy",
+                "in2.npy",
+                "in3.npy",
+                "in4.npy",
+            ]
+        )
+        self.target_fnames = pd.Series(
+            [
+                "out1.npy",
+                "out2.npy",
+                "out3.npy",
+                "out4.npy",
+            ]
+        )
         self.batch_size = 2
         # Normally, tiles would have the same shape in x, y but this helps
         # us test augmentations
@@ -40,25 +43,26 @@ class TestBaseDataSet(unittest.TestCase):
         # Batch size is 2, input images of shape (5, 7, 3)
         # stack adds singleton dimension
         self.batch_shape = (2, 1, 5, 7, 3)
-        for i, (in_name, out_name) in enumerate(zip(self.input_fnames,
-                                                    self.target_fnames)):
+        for i, (in_name, out_name) in enumerate(
+            zip(self.input_fnames, self.target_fnames)
+        ):
             np.save(os.path.join(self.temp_path, in_name), self.im + i)
             np.save(os.path.join(self.temp_path, out_name), self.im_target + i)
         dataset_config = {
-            'augmentations': {
-                'noise_std': 0,
+            "augmentations": {
+                "noise_std": 0,
             },
-            'random_seed': 42,
-            'normalize': False,
+            "random_seed": 42,
+            "normalize": False,
         }
         # Instantiate class
-        self.data_inst = dataset.BaseDataSet(
+        self.data_inst = transformations.BaseDataSet(
             tile_dir=self.temp_path,
             input_fnames=self.input_fnames,
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
-            image_format='xyz',
+            image_format="xyz",
         )
 
     def tearDown(self):
@@ -94,27 +98,27 @@ class TestBaseDataSet(unittest.TestCase):
         self.assertEqual(self.data_inst.noise_std, 0)
         self.assertTupleEqual(self.data_inst.blur_range, (0, 0))
         self.assertEqual(self.data_inst.shear_range, 0)
-        self.assertEqual(self.data_inst.model_task, 'regression')
+        self.assertEqual(self.data_inst.model_task, "regression")
         self.assertEqual(self.data_inst.random_seed, 42)
         self.assertFalse(self.data_inst.normalize)
 
     def test_init_settings(self):
         dataset_config = {
-            'random_seed': 42,
-            'normalize': True,
-            'model_task': 'segmentation',
-            'shuffle': False,
-            'train_fraction': .5,
-            'squeeze': True,
+            "random_seed": 42,
+            "normalize": True,
+            "model_task": "segmentation",
+            "shuffle": False,
+            "train_fraction": 0.5,
+            "squeeze": True,
         }
         # Instantiate class
-        data_inst = dataset.BaseDataSet(
+        data_inst = transformations.BaseDataSet(
             tile_dir=self.temp_path,
             input_fnames=self.input_fnames,
             target_fnames=self.target_fnames,
             dataset_config=dataset_config,
             batch_size=self.batch_size,
-            image_format='zyx',
+            image_format="zyx",
         )
         self.assertEqual(data_inst.tile_dir, self.temp_path)
         self.assertListEqual(
@@ -131,7 +135,7 @@ class TestBaseDataSet(unittest.TestCase):
         # Must shuffle if using a train fraction
         self.assertTrue(data_inst.shuffle)
         self.assertFalse(data_inst.augmentations)
-        self.assertEqual(data_inst.model_task, 'segmentation')
+        self.assertEqual(data_inst.model_task, "segmentation")
         self.assertEqual(data_inst.random_seed, 42)
         self.assertTrue(data_inst.normalize)
 
@@ -198,7 +202,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_lr_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.image_format = 'zyx'
+        self.data_inst.image_format = "zyx"
         trans_im = self.data_inst._augment_image(im_test, 1)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -208,7 +212,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_ud_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.image_format = 'zyx'
+        self.data_inst.image_format = "zyx"
         trans_im = self.data_inst._augment_image(im_test, 2)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -218,7 +222,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot90_channels_first(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.image_format = 'zyx'
+        self.data_inst.image_format = "zyx"
         trans_im = self.data_inst._augment_image(im_test, 3)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -228,7 +232,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot180_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.image_format = 'zyx'
+        self.data_inst.image_format = "zyx"
         trans_im = self.data_inst._augment_image(im_test, 4)
         for i in range(2):
             np.testing.assert_array_equal(
@@ -238,7 +242,7 @@ class TestBaseDataSet(unittest.TestCase):
 
     def test_augment_image_rot270_zyx(self):
         im_test = np.transpose(self.im, [2, 0, 1])
-        self.data_inst.image_format = 'zyx'
+        self.data_inst.image_format = "zyx"
         trans_im = self.data_inst._augment_image(im_test, 5)
         for i in range(2):
             np.testing.assert_array_equal(

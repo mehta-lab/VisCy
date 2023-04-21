@@ -11,6 +11,7 @@ dependencies:
   - matplotlib
   - natsort
   - nose
+  - numcodecs
   - numpy
   - opencv
   - pandas
@@ -22,4 +23,5 @@ dependencies:
   - scikit-image
   - scikit-learn
   - scipy
+  - zarr
   - keras==2.1.6

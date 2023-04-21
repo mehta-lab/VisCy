@@ -4,7 +4,7 @@ import yaml
 import torch
 
 import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.torch_unet.utils.training as train
+import micro_dl.training.training as train
 
 
 def parse_args():
@@ -36,7 +36,6 @@ def main(args):
     # If specified, override device selection
     if isinstance(args.gpu, int) and args.gpu >= 0:
         torch_config["training"]["device"] = args.gpu
-    torch.multiprocessing.set_start_method("spawn")
 
     # Instantiate training object
     trainer = train.TorchTrainer(torch_config)

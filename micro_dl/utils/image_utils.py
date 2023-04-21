@@ -5,23 +5,32 @@ import itertools
 import math
 import numpy as np
 import os
+import pandas as pd
 import sys
 from scipy.ndimage.interpolation import zoom
 from skimage.transform import resize
+import iohub.ngff as ngff
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.normalize as normalize
 
 
 def im_bit_convert(im, bit=16, norm=False, limit=[]):
-    im = im.astype(np.float32, copy=False) # convert to float32 without making a copy to save memory
+    im = im.astype(
+        np.float32, copy=False
+    )  # convert to float32 without making a copy to save memory
     if norm:
         if not limit:
             # scale each image individually based on its min and max
             limit = [np.nanmin(im[:]), np.nanmax(im[:])]
-        im = (im-limit[0]) / \
-            (limit[1]-limit[0] + sys.float_info.epsilon) * (2**bit-1)
-    im = np.clip(im, 0, 2**bit-1) # clip the values to avoid wrap-around by np.astype
+        im = (
+            (im - limit[0])
+            / (limit[1] - limit[0] + sys.float_info.epsilon)
+            * (2**bit - 1)
+        )
+    im = np.clip(
+        im, 0, 2**bit - 1
+    )  # clip the values to avoid wrap-around by np.astype
     if bit == 8:
         im = im.astype(np.uint8, copy=False)  # convert to 8 bit
     else:
@@ -31,8 +40,8 @@ def im_bit_convert(im, bit=16, norm=False, limit=[]):
 
 def im_adjust(img, tol=1, bit=8):
     """
-    Adjust contrast of the image
-
+    Stretches contrast of the image and converts to 'bit'-bit.
+    Useful for weight-maps in masking
     """
     limit = np.percentile(img, [tol, 100 - tol])
     im_adjusted = im_bit_convert(img, bit=bit, norm=True, limit=limit.tolist())
@@ -47,9 +56,9 @@ def resize_image(input_image, output_shape):
     :return: np.array, resized image
     """
 
-    msg = 'the output shape does not match the image dimension'
+    msg = "the output shape does not match the image dimension"
     assert len(output_shape) == len(input_image.shape), msg
-    assert input_image.dtype is not 'bool'
+    assert input_image.dtype != "bool"
 
     resized_image = resize(input_image, output_shape)
     return resized_image
@@ -65,13 +74,14 @@ def rescale_image(im, scale_factor):
     :return np.array: 2D image resized by scale factor
     """
 
-    assert scale_factor > 0,\
-        'Scale factor must be > 0, not {}'.format(scale_factor)
+    assert scale_factor > 0, "Scale factor must be > 0, not {}".format(scale_factor)
 
     im_shape = im.shape
     assert len(im_shape) == 2, "OpenCV only works with 2D images"
-    dsize = (int(round(im_shape[1] * scale_factor)),
-             int(round(im_shape[0] * scale_factor)))
+    dsize = (
+        int(round(im_shape[1] * scale_factor)),
+        int(round(im_shape[0] * scale_factor)),
+    )
 
     return cv2.resize(im, dsize=dsize)
 
@@ -90,15 +100,16 @@ def rescale_nd_image(input_volume, scale_factor):
     :return np.array res_volume: rescaled volume
     """
 
-    assert not input_volume.dtype == 'bool', \
-        'input image is binary, not ideal for spline interpolation'
+    assert (
+        not input_volume.dtype == "bool"
+    ), "input image is binary, not ideal for spline interpolation"
 
     if not isinstance(scale_factor, float):
-        assert len(input_volume.shape) == len(scale_factor), \
-            'Missing scale factor:' \
-            'scale_factor:{} != input_volume:{}'.format(
-                len(scale_factor), len(input_volume.shape)
-            )
+        assert len(input_volume.shape) == len(
+            scale_factor
+        ), "Missing scale factor:" "scale_factor:{} != input_volume:{}".format(
+            len(scale_factor), len(input_volume.shape)
+        )
 
     res_image = zoom(input_volume, scale_factor)
     return res_image
@@ -124,83 +135,15 @@ def crop2base(im, base=2):
     if x_shape < im_shape[0]:
         # Approximate center crop
         start_idx = (im_shape[0] - x_shape) // 2
-        im = im[start_idx:start_idx + x_shape, ...]
+        im = im[start_idx : start_idx + x_shape, ...]
     if y_shape < im_shape[1]:
         # Approximate center crop
         start_idx = (im_shape[1] - y_shape) // 2
-        im = im[:, start_idx:start_idx + y_shape, ...]
+        im = im[:, start_idx : start_idx + y_shape, ...]
     return im
 
 
-def resize_mask(input_image, target_size):
-    """Resample label/bool images"""
-    raise NotImplementedError
-
-
-def apply_flat_field_correction(input_image, **kwargs):
-    """Apply flat field correction.
-
-    :param np.array input_image: image to be corrected
-    Kwargs, either:
-        flat_field_image (np.float): flat_field_image for correction
-        flat_field_path (str): Full path to flatfield image
-    :return: np.array (float) corrected image
-    """
-    input_image = input_image.astype('float')
-    if 'flat_field_image' in kwargs:
-        corrected_image = input_image / kwargs['flat_field_image']
-    elif 'flat_field_path' in kwargs:
-        flat_field_image = np.load(kwargs['flat_field_path'])
-        corrected_image = input_image / flat_field_image
-    else:
-        print("Incorrect kwargs: {}, returning input image".format(kwargs))
-        corrected_image = input_image.copy()
-    return corrected_image
-
-
-def fit_polynomial_surface_2D(sample_coords,
-                              sample_values,
-                              im_shape,
-                              order=2,
-                              normalize=True):
-    """
-    Given coordinates and corresponding values, this function will fit a
-    2D polynomial of given order, then create a surface of given shape.
-
-    :param np.array sample_coords: 2D sample coords (nbr of points, 2)
-    :param np.array sample_values: Corresponding intensity values (nbr points,)
-    :param tuple im_shape:         Shape of desired output surface (height, width)
-    :param int order:              Order of polynomial (default 2)
-    :param bool normalize:         Normalize surface by dividing by its mean
-                                   for flatfield correction (default True)
-
-    :return np.array poly_surface: 2D surface of shape im_shape
-    """
-    assert (order + 1) ** 2 <= len(sample_values), \
-        "Can't fit a higher degree polynomial than there are sampled values"
-    # Number of coefficients in determined by order + 1 squared
-    orders = np.arange(order + 1)
-    variable_matrix = np.zeros((sample_coords.shape[0], (order + 1) ** 2))
-    variable_iterator = itertools.product(orders, orders)
-    for idx, (m, n) in enumerate(variable_iterator):
-        variable_matrix[:, idx] = sample_coords[:, 0] ** n * sample_coords[:, 1] ** m
-    # Least squares fit of the points to the polynomial
-    coeffs, _, _, _ = np.linalg.lstsq(variable_matrix, sample_values, rcond=-1)
-    # Create a grid of image (x, y) coordinates
-    x_mesh, y_mesh = np.meshgrid(np.linspace(0, im_shape[1] - 1, im_shape[1]),
-                                 np.linspace(0, im_shape[0] - 1, im_shape[0]))
-    # Reconstruct the surface from the coefficients
-    poly_surface = np.zeros(im_shape, np.float)
-    variable_iterator = itertools.product(orders, orders)
-    for coeff, (m, n) in zip(coeffs, variable_iterator):
-        poly_surface += coeff * x_mesh ** m * y_mesh ** n
-
-    if normalize:
-        poly_surface /= np.mean(poly_surface)
-    return poly_surface
-
-
-def center_crop_to_shape(input_image, output_shape, image_format='zyx'):
+def center_crop_to_shape(input_image, output_shape, image_format="zyx"):
     """Center crop the image to a given shape
 
     :param np.array input_image: input image to be cropped
@@ -215,206 +158,30 @@ def center_crop_to_shape(input_image, output_shape, image_format='zyx'):
     modified_shape = output_shape.copy()
     if len(input_image.shape) == len(output_shape) + 1:
         # This means we're dealing with multichannel 2D
-        if image_format == 'zyx':
+        if image_format == "zyx":
             modified_shape.insert(0, input_image.shape[0])
         else:
             modified_shape.append(input_image.shape[-1])
-    assert np.all(np.array(modified_shape) <= np.array(input_image.shape)), \
-        'output shape is larger than image shape, use resize or rescale'
+    assert np.all(
+        np.array(modified_shape) <= np.array(input_image.shape)
+    ), "output shape is larger than image shape, use resize or rescale"
 
     start_0 = (input_image.shape[0] - modified_shape[0]) // 2
     start_1 = (input_image.shape[1] - modified_shape[1]) // 2
     if len(input_image.shape) > 2:
         start_2 = (input_image.shape[2] - modified_shape[2]) // 2
         center_block = input_image[
-                       start_0: start_0 + modified_shape[0],
-                       start_1: start_1 + modified_shape[1],
-                       start_2: start_2 + modified_shape[2]]
+            start_0 : start_0 + modified_shape[0],
+            start_1 : start_1 + modified_shape[1],
+            start_2 : start_2 + modified_shape[2],
+        ]
     else:
         center_block = input_image[
-                       start_0: start_0 + modified_shape[0],
-                       start_1: start_1 + modified_shape[1]]
+            start_0 : start_0 + modified_shape[0], start_1 : start_1 + modified_shape[1]
+        ]
     for idx in singleton_dims:
         center_block = np.expand_dims(center_block, axis=idx)
     return center_block
-
-
-def read_image(file_path):
-    """
-    Read 2D grayscale image from file.
-    Checks file extension for npy and load array if true. Otherwise
-    reads regular image using OpenCV (png, tif, jpg, see OpenCV for supported
-    files) of any bit depth.
-
-    :param str file_path: Full path to image
-    :return array im: 2D image
-    :raise IOError if image can't be opened
-    """
-    if file_path[-3:] == 'npy':
-        im = np.load(file_path)
-    else:
-        im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
-        if im is None:
-            raise IOError('Image "{}" cannot be found.'.format(file_path))
-    return im
-
-
-def read_imstack(input_fnames,
-                 flat_field_fname=None,
-                 hist_clip_limits=None,
-                 is_mask=False,
-                 normalize_im=None,
-                 zscore_mean=None,
-                 zscore_std=None):
-    """
-    Read the images in the fnames and assembles a stack.
-    If images are masks, make sure they're boolean by setting >0 to True
-
-    :param tuple/list input_fnames: tuple of input fnames with full path
-    :param str flat_field_fname: fname of flat field image
-    :param tuple hist_clip_limits: limits for histogram clipping
-    :param bool is_mask: Indicator for if files contain masks
-    :param bool/None normalize_im: Whether to zscore normalize im stack
-    :param float zscore_mean: mean for z-scoring the image
-    :param float zscore_std: std for z-scoring the image
-    :return np.array: input stack flat_field correct and z-scored if regular
-        images, booleans if they're masks
-    """
-    im_stack = []
-    for idx, fname in enumerate(input_fnames):
-        im = read_image(fname)
-        if flat_field_fname is not None:
-            # multiple flat field images are passed in case of mask generation
-            try:
-                if isinstance(flat_field_fname, (list, tuple)):
-                    if flat_field_fname is not None:
-                        flat_field_image = np.load(flat_field_fname[idx])
-                else:
-                    flat_field_image = np.load(flat_field_fname)
-                if not is_mask and not normalize_im:
-                    im = apply_flat_field_correction(
-                        im,
-                        flat_field_image=flat_field_image,
-                    )
-            except FileNotFoundError:
-                print("Flatfield image not found, correction not applied.")
-        im_stack.append(im)
-
-    input_image = np.stack(im_stack, axis=-1)
-    # remove singular dimension for 3D images
-    if len(input_image.shape) > 3:
-        input_image = np.squeeze(input_image)
-    if not is_mask:
-        if hist_clip_limits is not None:
-            input_image = normalize.hist_clipping(
-                input_image,
-                hist_clip_limits[0],
-                hist_clip_limits[1]
-            )
-        if normalize_im is not None:
-            input_image = normalize.zscore(
-                input_image,
-                im_mean=zscore_mean,
-                im_std=zscore_std,
-            )
-    else:
-        if input_image.dtype != bool:
-            input_image = input_image > 0
-    return input_image
-
-
-def preprocess_imstack(frames_metadata,
-                       input_dir,
-                       depth,
-                       time_idx,
-                       channel_idx,
-                       slice_idx,
-                       pos_idx,
-                       flat_field_im=None,
-                       hist_clip_limits=None,
-                       normalize_im='stack',
-                       ):
-    """
-    Preprocess image given by indices: flatfield correction, histogram
-    clipping and z-score normalization is performed.
-
-    :param pd.DataFrame frames_metadata: DF with meta info for all images
-    :param str input_dir: dir containing input images
-    :param int depth: num of slices in stack if 2.5D or depth for 3D
-    :param int time_idx: Time index
-    :param int channel_idx: Channel index
-    :param int slice_idx: Slice (z) index
-    :param int pos_idx: Position (FOV) index
-    :param np.array flat_field_im: Flat field image for channel
-    :param list hist_clip_limits: Limits for histogram clipping (size 2)
-    :param str or None normalize_im: options to z-score the image
-    :return np.array im: 3D preprocessed image
-    """
-
-    assert normalize_im in ['stack', 'dataset', 'volume', 'slice', None], \
-        "'normalize_im' can only be 'stack', 'dataset', 'volume', 'slice', or None"
-
-    metadata_ids, _ = aux_utils.validate_metadata_indices(
-        frames_metadata=frames_metadata,
-        slice_ids=-1,
-        uniform_structure=True,
-    )
-    margin = 0 if depth == 1 else depth // 2
-    im_stack = []
-    for z in range(slice_idx - margin, slice_idx + margin + 1):
-        meta_idx = aux_utils.get_meta_idx(
-            frames_metadata,
-            time_idx,
-            channel_idx,
-            z,
-            pos_idx,
-        )
-        file_path = os.path.join(
-            input_dir,
-            frames_metadata.loc[meta_idx, "file_name"],
-        )
-        im = read_image(file_path)
-        # Only flatfield correct images that won't be normalized
-        if flat_field_im is not None:
-            assert normalize_im in [None, 'stack'], \
-                "flat field correction currently only supports " \
-                "None or 'stack' option for 'normalize_im'"
-            im = apply_flat_field_correction(
-                im,
-                flat_field_image=flat_field_im,
-            )
-
-        zscore_median = None
-        zscore_iqr = None
-        if normalize_im in ['dataset', 'volume', 'slice']:
-            if 'zscore_median' in frames_metadata:
-                zscore_median = frames_metadata.loc[meta_idx, 'zscore_median']
-            if 'zscore_iqr' in frames_metadata:
-                zscore_iqr = frames_metadata.loc[meta_idx, 'zscore_iqr']
-        if normalize_im is not None:
-            im = normalize.zscore(
-                im,
-                im_mean=zscore_median,
-                im_std=zscore_iqr,
-            )
-        im_stack.append(im)
-
-    if len(im.shape) == 3:
-        # each channel is tiled independently and stacked later in dataset cls
-        im_stack = im
-        assert depth == 1, 'more than one 3D volume gets read'
-    else:
-        # Stack images in same channel
-        im_stack = np.stack(im_stack, axis=2)
-    # normalize
-    if hist_clip_limits is not None:
-        im_stack = normalize.hist_clipping(
-            im_stack,
-            hist_clip_limits[0],
-            hist_clip_limits[1],
-        )
-
-    return im_stack
 
 
 def grid_sample_pixel_values(im, grid_spacing):
@@ -432,12 +199,273 @@ def grid_sample_pixel_values(im, grid_spacing):
     assert grid_spacing < im_shape[0], "grid spacing larger than image height"
     assert grid_spacing < im_shape[1], "grid spacing larger than image width"
     # leave out the grid points on the edges
-    sample_coords = np.array(list(itertools.product(
-        np.arange(grid_spacing, im_shape[0], grid_spacing),
-        np.arange(grid_spacing, im_shape[1], grid_spacing))))
+    sample_coords = np.array(
+        list(
+            itertools.product(
+                np.arange(grid_spacing, im_shape[0], grid_spacing),
+                np.arange(grid_spacing, im_shape[1], grid_spacing),
+            )
+        )
+    )
     row_ids = sample_coords[:, 0]
     col_ids = sample_coords[:, 1]
     sample_values = im[row_ids, col_ids]
     return row_ids, col_ids, sample_values
 
 
+def read_image(file_path):
+    """
+    Read 2D grayscale image from file.
+    Checks file extension for npy and load array if true. Otherwise
+    reads regular image using OpenCV (png, tif, jpg, see OpenCV for supported
+    files) of any bit depth.
+
+    :param str file_path: Full path to image
+    :return array im: 2D image
+    :raise IOError if image can't be opened
+    """
+    if file_path[-3:] == "npy":
+        im = np.load(file_path)
+    else:
+        im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
+        if im is None:
+            raise IOError('Image "{}" cannot be found.'.format(file_path))
+    return im
+
+
+def read_image_from_row(meta_row, dir_name=None):
+    """
+    Read 2D grayscale image from file.
+    Checks file extension for npy and load array if true. Otherwise
+    reads regular image using OpenCV (png, tif, jpg, see OpenCV for supported
+    files) of any bit depth.
+
+    :param pd.DataFrame meta_row: Row in metadata
+    :param str/None dir_name: Directory containing images (none if using frames meta dir_name)
+    :return array im: 2D image
+    :raise IOError if image can't be opened
+    """
+    if isinstance(meta_row, (pd.DataFrame, pd.Series)):
+        meta_row = meta_row.squeeze()
+    if dir_name is None:
+        dir_name = meta_row["dir_name"]
+    file_path = os.path.join(dir_name, meta_row["file_name"])
+    if file_path[-3:] == "npy":
+        im = np.load(file_path)
+    elif "zarr" in file_path[-5:]:
+        plate = ngff.open_ome_zarr(store_path=file_path, mode='r+')
+        # zarr_reader = io_utils.ZarrReader(file_path)
+        im = plate.data
+        # im = zarr_reader.get_image(
+        #     p=meta_row["pos_idx"],
+        #     t=meta_row["time_idx"],
+        #     c=meta_row["channel_idx"],
+        #     z=meta_row["slice_idx"],
+        # )
+    else:
+        # Assumes files are tiff or png
+        im = cv2.imread(file_path, cv2.IMREAD_ANYDEPTH)
+        if im is None:
+            raise IOError('Image "{}" cannot be found.'.format(file_path))
+    return im
+
+
+def preprocess_image(
+    im,
+    hist_clip_limits=None,
+    is_mask=False,
+    normalize_im=None,
+    zscore_mean=None,
+    zscore_std=None,
+):
+    """
+    Do histogram clipping, z score normalization, and potentially binarization.
+
+    :param np.array im: Image (stack)
+    :param tuple hist_clip_limits: Percentile histogram clipping limits
+    :param bool is_mask: True if mask
+    :param str/None normalize_im: Normalization, if any
+    :param float/None zscore_mean: Data mean
+    :param float/None zscore_std: Data std
+    """
+    # remove singular dimension for 3D images
+    if len(im.shape) > 3:
+        im = np.squeeze(im)
+    if not is_mask:
+        if hist_clip_limits is not None:
+            im = normalize.hist_clipping(im, hist_clip_limits[0], hist_clip_limits[1])
+        if normalize_im is not None:
+            im = normalize.zscore(
+                im,
+                im_mean=zscore_mean,
+                im_std=zscore_std,
+            )
+    else:
+        if im.dtype != bool:
+            im = im > 0
+    return im
+
+
+def read_imstack_from_meta(
+    frames_meta_sub,
+    dir_name=None,
+    hist_clip_limits=None,
+    is_mask=False,
+    normalize_im=None,
+    zscore_mean=None,
+    zscore_std=None,
+):
+    """
+    Read images (>1) from metadata rows and assembles a stack.
+    If images are masks, make sure they're boolean by setting >0 to True
+
+    :param pd.DataFrame frames_meta_sub: Selected subvolume to be read
+    :param str/None dir_name: Directory path (none if using dir in frames_meta)
+    :param tuple hist_clip_limits: Percentile limits for histogram clipping
+    :param bool is_mask: Indicator for if files contain masks
+    :param bool/None normalize_im: Whether to zscore normalize im stack
+    :param float zscore_mean: mean for z-scoring the image
+    :param float zscore_std: std for z-scoring the image
+    """
+    im_stack = []
+    meta_shape = frames_meta_sub.shape
+    nbr_images = meta_shape[0] if len(meta_shape) > 1 else 1
+    if nbr_images > 1:
+        for idx in range(meta_shape[0]):
+            meta_row = frames_meta_sub.iloc[idx]
+            im = read_image_from_row(meta_row, dir_name)
+            im_stack.append(im)
+    else:
+        # In case of series
+        im = read_image_from_row(frames_meta_sub, dir_name)
+        im_stack = [im]
+
+    input_image = np.stack(im_stack, axis=-1)
+    # Norm, hist clip, binarize for mask
+    input_image = preprocess_image(
+        input_image,
+        hist_clip_limits,
+        is_mask,
+        normalize_im,
+        zscore_mean,
+        zscore_std,
+    )
+    return input_image
+
+
+def read_imstack(
+    input_fnames,
+    hist_clip_limits=None,
+    is_mask=False,
+    normalize_im=None,
+    zscore_mean=None,
+    zscore_std=None,
+):
+    """
+    Read the images in the fnames and assembles a stack.
+    If images are masks, make sure they're boolean by setting >0 to True
+
+    :param tuple/list input_fnames: Paths to input files
+    :param tuple hist_clip_limits: limits for histogram clipping
+    :param bool is_mask: Indicator for if files contain masks
+    :param bool/None normalize_im: Whether to zscore normalize im stack
+    :param float zscore_mean: mean for z-scoring the image
+    :param float zscore_std: std for z-scoring the image
+    """
+    im_stack = []
+    input_image = np.stack(im_stack, axis=-1)
+    # Norm, hist clip, binarize for mask
+    input_image = preprocess_image(
+        input_image,
+        hist_clip_limits,
+        is_mask,
+        normalize_im,
+        zscore_mean,
+        zscore_std,
+    )
+    return input_image
+
+
+def preprocess_imstack(
+    frames_metadata,
+    depth,
+    time_idx,
+    channel_idx,
+    slice_idx,
+    pos_idx,
+    dir_name=None,
+    hist_clip_limits=None,
+    normalize_im="stack",
+):
+    """
+    Preprocess image given by indices:
+    histogram clipping and z-score normalization is performed.
+
+    :param pd.DataFrame frames_metadata: DF with meta info for all images
+    :param int depth: num of slices in stack if 2.5D or depth for 3D
+    :param int time_idx: Time index
+    :param int channel_idx: Channel index
+    :param int slice_idx: Slice (z) index
+    :param int pos_idx: Position (FOV) index
+    :param str/None dir_name: Image directory (none if using the frames_meta dir_name)
+    :param list hist_clip_limits: Limits for histogram clipping (size 2)
+    :param str or None normalize_im: options to z-score the image
+    :return np.array im: 3D preprocessed image
+    """
+    assert normalize_im in [
+        "stack",
+        "dataset",
+        "volume",
+        "slice",
+        None,
+    ], "'normalize_im' can only be 'stack', 'dataset', 'volume', 'slice', or None"
+
+    metadata_ids, _ = aux_utils.validate_metadata_indices(
+        frames_metadata=frames_metadata,
+        slice_ids=-1,
+        uniform_structure=True,
+    )
+    margin = 0 if depth == 1 else depth // 2
+    im_stack = []
+    for z in range(slice_idx - margin, slice_idx + margin + 1):
+        meta_idx = aux_utils.get_meta_idx(
+            frames_metadata,
+            time_idx,
+            channel_idx,
+            z,
+            pos_idx,
+        )
+        meta_row = frames_metadata.loc[meta_idx]
+        im = read_image_from_row(meta_row, dir_name)
+
+        zscore_median = None
+        zscore_iqr = None
+        if normalize_im in ["dataset", "volume", "slice"]:
+            if "zscore_median" in frames_metadata:
+                zscore_median = frames_metadata.loc[meta_idx, "zscore_median"]
+            if "zscore_iqr" in frames_metadata:
+                zscore_iqr = frames_metadata.loc[meta_idx, "zscore_iqr"]
+        if normalize_im is not None:
+            im = normalize.zscore(
+                im,
+                im_mean=zscore_median,
+                im_std=zscore_iqr,
+            )
+        im_stack.append(im)
+
+    if len(im.shape) == 3:
+        # each channel is tiled independently and stacked later in dataset cls
+        im_stack = im
+        assert depth == 1, "more than one 3D volume gets read"
+    else:
+        # Stack images in same channel
+        im_stack = np.stack(im_stack, axis=2)
+    # normalize
+    if hist_clip_limits is not None:
+        im_stack = normalize.hist_clipping(
+            im_stack,
+            hist_clip_limits[0],
+            hist_clip_limits[1],
+        )
+
+    return im_stack

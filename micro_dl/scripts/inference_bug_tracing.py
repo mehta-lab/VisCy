@@ -1,4 +1,4 @@
-# %%
+#%%
 import argparse
 import datetime
 import os
@@ -10,8 +10,10 @@ sys.path.insert(0, "/home/christian.foley/virtual_staining/workspaces/microDL")
 
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.inference.image_inference as image_inf
-import micro_dl.torch_unet.utils.inference as torch_inference_utils
+import micro_dl.inference.inference as torch_inference_utils
 import micro_dl.utils.train_utils as train_utils
+
+import micro_dl.cli.torch_inference_script as inference_script
 
 
 def check_save_folder(inference_config, preprocess_config):
@@ -28,12 +30,7 @@ def check_save_folder(inference_config, preprocess_config):
         assert "input_dir" in preprocess_config, (
             "Error in autosaving: 'input_dir'" "unspecified in preprocess config"
         )
-        now = (
-            str(datetime.datetime.now())
-            .replace(" ", "_")
-            .replace(":", "_")
-            .replace("-", "_")[:-10]
-        )
+        now = aux_utils.get_timestamp()
         save_dir = os.path.join(preprocess_config["input_dir"], f"../prediction_{now}")
 
         if not os.path.exists(save_dir):
@@ -44,6 +41,8 @@ def check_save_folder(inference_config, preprocess_config):
         )
 
 
+#%%
+__name__ == "__main__"
 if __name__ == "__main__":
     config_test = (
         "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/"
@@ -61,34 +60,19 @@ if __name__ == "__main__":
         "torch_microDL/config_files/2022_09_27_A549_NuclStain/"
         "ptTest_Soorya_Christian/torch_config_2D_A549Nucl.yml"
     )
-    torch_config = aux_utils.read_config(config_test)
-
-    # Get GPU ID and memory fraction
-    gpu_id, gpu_mem_frac = 0, 0.95
-    device = torch.device(gpu_id)
-
-    # read configuration parameters and metadata
-    preprocess_config = aux_utils.read_config(torch_config["preprocess_config_path"])
-    train_config = aux_utils.read_config(torch_config["train_config_path"])
-    inference_config = aux_utils.read_config(torch_config["inference_config_path"])
-
-    network_config = torch_config["model"]
-
-    # if no save_folder_name specified, automatically incur saving in data folder
-    check_save_folder(inference_config, preprocess_config)
-
-    # instantiate and prep TorchPredictor interfacing object
-    torch_predictor = torch_inference_utils.TorchPredictor(
-        network_config=network_config, device=device
+    config_recent = (
+        "/hpc/projects/CompMicro/projects/"
+        "virtualstaining/torch_microDL/config_files/"
+        "2022_11_01_VeroMemNuclStain/gunpowder_testing_12_13/"
+        "torch_config_Soorya_VeroA549_25D_mem.yml"
     )
-    torch_predictor.load_model_torch()
-
-    # instantiate ImagePredictor object and run inference
-    image_predictor = image_inf.ImagePredictor(
-        train_config,
-        inference_config,
-        torch_predictor,
-        preprocess_config=preprocess_config,
+    config_soorya_issue190 = (
+        "/hpc/projects/CompMicro/projects/"
+        "virtualstaining/torch_microDL/config_files/"
+        "2022_11_01_VeroMemNuclStain/gunpowder_testing_12_13/"
+        "torch_config_Soorya_VeroA549_25D_nucl.yml"
     )
-    image_predictor.run_prediction()
+
+    inference_script.main(config_soorya_issue190, gpu=0, gpu_mem_frac=0.1)
+
 # %%

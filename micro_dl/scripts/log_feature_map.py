@@ -5,7 +5,7 @@ import torch
 import sys
 
 sys.path.insert(0, "/home/christian.foley/virtual_staining/microDL")
-import micro_dl.torch_unet.utils.io as io
+import micro_dl.utils.cli_utils as cli_utils
 
 
 def main():
@@ -15,7 +15,7 @@ def main():
     print(data_tensor.shape)
 
     # run feature logger on test data
-    io.log_feature_map(
+    cli_utils.log_feature_map(
         data_tensor,
         "/home/christian.foley/virtual_staining/example_log/",
         dim_names=["batch", "channels"],

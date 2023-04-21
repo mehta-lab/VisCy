@@ -37,7 +37,9 @@ class TestInferenceDataSet(unittest.TestCase):
                 )
                 cv2.imwrite(os.path.join(self.image_dir, im_name), im + c * 10)
                 meta_row = aux_utils.parse_idx_from_name(
-                    im_name)
+                    im_name=im_name,
+                    dir_name=self.image_dir,
+                )
                 meta_row['zscore_median'] = 10
                 meta_row['zscore_iqr'] = 2
                 self.frames_meta = self.frames_meta.append(
@@ -58,7 +60,7 @@ class TestInferenceDataSet(unittest.TestCase):
             )
             cv2.imwrite(os.path.join(self.mask_dir, im_name), im + 1)
             self.mask_meta = self.mask_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.mask_dir),
                 ignore_index=True,
             )
         # Write frames meta to image dir too
@@ -113,7 +115,6 @@ class TestInferenceDataSet(unittest.TestCase):
         """
         self.assertEqual(self.data_inst.image_dir, self.image_dir)
         self.assertEqual(self.data_inst.target_dir, self.mask_dir)
-        self.assertIsNone(self.data_inst.flat_field_dir)
         self.assertEqual(self.data_inst.image_format, 'zyx')
         self.assertEqual(self.data_inst.model_task, 'segmentation')
         self.assertEqual(self.data_inst.depth, 1)
@@ -144,7 +145,7 @@ class TestInferenceDataSet(unittest.TestCase):
                 pos_idx=6,
             )
             temp_meta = temp_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name),
                 ignore_index=True,
             )
         self.data_inst.inf_frames_meta = temp_meta
@@ -175,17 +176,21 @@ class TestInferenceDataSet(unittest.TestCase):
         self.assertEqual(num_samples, 2)
 
     def test_get_image(self):
-        meta_row = dict.fromkeys(aux_utils.DF_NAMES)
-        meta_row['channel_idx'] = 2
-        meta_row['time_idx'] = self.time_idx
-        meta_row['slice_idx'] = self.slice_idx
-        meta_row['pos_idx'] = 3
+        im_name = aux_utils.get_im_name(
+            time_idx=self.time_idx,
+            channel_idx=2,
+            slice_idx=self.slice_idx,
+            pos_idx=3,
+        )
+        meta_row = aux_utils.parse_idx_from_name(
+            im_name=im_name,
+            dir_name=self.image_dir,
+        )
         im_stack = self.data_inst._get_image(
-            input_dir=self.image_dir,
             cur_row=meta_row,
             channel_ids=[2],
             depth=1,
-            normalize_im=self.preprocess_config['normalize_im']
+            normalize_im=self.preprocess_config['normalize_im'],
         )
         # Image shapes are cropped to nearest factor of two, channels first
         self.assertTupleEqual(im_stack.shape, (1, 8, 16))
@@ -261,7 +266,9 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
                     )
                     cv2.imwrite(os.path.join(self.image_dir, im_name), im + c * 10)
                     meta_row = aux_utils.parse_idx_from_name(
-                        im_name)
+                        im_name=im_name,
+                        dir_name=self.image_dir,
+                    )
                     meta_row['zscore_median'] = 10
                     meta_row['zscore_iqr'] = 2
                     self.frames_meta = self.frames_meta.append(
@@ -283,7 +290,7 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
                 )
                 cv2.imwrite(os.path.join(self.mask_dir, im_name), im + 1)
                 self.mask_meta = self.mask_meta.append(
-                    aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                    aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.mask_dir),
                     ignore_index=True,
             )
         # Write frames meta to image dir too
@@ -338,7 +345,6 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         """
         self.assertEqual(self.data_inst.image_dir, self.image_dir)
         self.assertEqual(self.data_inst.target_dir, self.mask_dir)
-        self.assertIsNone(self.data_inst.flat_field_dir)
         self.assertEqual(self.data_inst.image_format, 'zyx')
         self.assertEqual(self.data_inst.model_task, 'segmentation')
         self.assertEqual(self.data_inst.depth, 3)
@@ -382,13 +388,17 @@ class TestInferenceDataSet2p5D(unittest.TestCase):
         self.assertEqual(num_samples, 4)
 
     def test_get_image(self):
-        meta_row = dict.fromkeys(aux_utils.DF_NAMES)
-        meta_row['channel_idx'] = 2
-        meta_row['time_idx'] = self.time_idx
-        meta_row['slice_idx'] = 1
-        meta_row['pos_idx'] = 3
+        im_name = aux_utils.get_im_name(
+            time_idx=self.time_idx,
+            channel_idx=2,
+            slice_idx=1,
+            pos_idx=3,
+        )
+        meta_row = aux_utils.parse_idx_from_name(
+            im_name=im_name,
+            dir_name=self.image_dir,
+        )
         im_stack = self.data_inst._get_image(
-            input_dir=self.image_dir,
             cur_row=meta_row,
             channel_ids=[2],
             depth=3,

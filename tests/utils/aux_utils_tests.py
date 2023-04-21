@@ -22,8 +22,7 @@ for s in range(3):
             pos_idx=p,
         )
         # Now dataframes are assumed to have dir name in them
-        meta_row = aux_utils.parse_idx_from_name(im_temp)
-        meta_row['dir_name'] = 'temp_dir'
+        meta_row = aux_utils.parse_idx_from_name(im_name=im_temp, dir_name='temp_dir')
         meta_df = meta_df.append(
             meta_row,
             ignore_index=True,

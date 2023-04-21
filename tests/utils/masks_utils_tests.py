@@ -22,7 +22,6 @@ def test_get_unimodal_threshold():
 
 def test_unimodal_thresholding():
     input_image = gaussian(uni_thr_tst_image, 1)
-    print(input_image[10:20, 10:20])
     mask = masks_utils.create_unimodal_mask(
         input_image,
         str_elem_size=0)

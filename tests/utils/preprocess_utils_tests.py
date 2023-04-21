@@ -36,7 +36,7 @@ class TestPreprocessUtils(unittest.TestCase):
                     pos_idx=p,
                 )
                 input_meta = input_meta.append(
-                    aux_utils.parse_idx_from_name(im_name),
+                    aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.input_dir),
                     ignore_index=True,
                 )
         input_meta.to_csv(

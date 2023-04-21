@@ -46,7 +46,9 @@ class TestInferenceScript(unittest.TestCase):
                 )
                 cv2.imwrite(os.path.join(self.image_dir, im_name), self.im)
                 meta_row = aux_utils.parse_idx_from_name(
-                    im_name)
+                    im_name=im_name,
+                    dir_name=self.image_dir,
+                )
                 meta_row['zscore_median'] = 1500
                 meta_row['zscore_iqr'] = 1
                 self.frames_meta = self.frames_meta.append(

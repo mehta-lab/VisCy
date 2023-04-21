@@ -35,11 +35,6 @@ class TestMetaUtils(unittest.TestCase):
         self.input_meta = aux_utils.make_dataframe()
         # Make input meta
         for c in range(3):
-            ff_path = os.path.join(
-                self.ff_dir,
-                'flat-field_channel-{}.npy'.format(c)
-            )
-            np.save(ff_path, ff_im, allow_pickle=True, fix_imports=True)
             for p in range(5):
                 im_name = aux_utils.get_im_name(
                     channel_idx=c,
@@ -55,8 +50,7 @@ class TestMetaUtils(unittest.TestCase):
                     os.path.join(self.mask_dir, im_name),
                     self.mask,
                 )
-                meta_row = aux_utils.parse_idx_from_name(im_name)
-                meta_row['dir_name'] = self.input_dir
+                meta_row = aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.input_dir)
                 self.input_meta = self.input_meta.append(
                     meta_row,
                     ignore_index=True,
@@ -72,6 +66,7 @@ class TestMetaUtils(unittest.TestCase):
     def test_frames_meta_generator(self):
         frames_meta = meta_utils.frames_meta_generator(
             input_dir=self.input_dir,
+            file_format='png',
             name_parser='parse_idx_from_name',
         )
         for idx, row in frames_meta.iterrows():
@@ -106,31 +101,6 @@ class TestMetaUtils(unittest.TestCase):
             self.assertEqual(meta_im.loc[i, 'col_idx'], col_idx)
             self.assertEqual(meta_im.loc[i, 'row_idx'], 5)
             self.assertEqual(meta_im.loc[i, 'intensity'], 5)
-
-    def test_ints_meta_generator_flatfield(self):
-        # Write metadata
-        self.input_meta.to_csv(
-            os.path.join(self.input_dir, 'frames_meta.csv'),
-            sep=',',
-        )
-        meta_utils.ints_meta_generator(
-            input_dir=self.input_dir,
-            block_size=5,
-            flat_field_dir=self.ff_dir,
-        )
-        intensity_meta = pd.read_csv(
-            os.path.join(self.input_dir, 'intensity_meta.csv'),
-        )
-        # There's 15 images and each image should be sampled 3 times
-        self.assertEqual(intensity_meta.shape[0], 45)
-        # Check one image
-        meta_im = intensity_meta.loc[
-            intensity_meta['file_name'] == 'im_c000_z001_t002_p000.png',
-        ]
-        for i, col_idx in enumerate([5, 10, 15]):
-            self.assertEqual(meta_im.loc[i, 'col_idx'], col_idx)
-            self.assertEqual(meta_im.loc[i, 'row_idx'], 5)
-            self.assertEqual(meta_im.loc[i, 'intensity'], 2.5)
 
     def test_mask_meta_generator(self):
         self.input_meta.to_csv(

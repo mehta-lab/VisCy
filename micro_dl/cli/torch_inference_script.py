@@ -3,10 +3,11 @@ import datetime
 import os
 import torch
 import yaml
+import sys
+import zarr
 
 import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.inference.image_inference as image_inf
-import micro_dl.torch_unet.utils.inference as torch_inference_utils
+import micro_dl.inference.inference as torch_inference_utils
 import micro_dl.utils.train_utils as train_utils
 
 
@@ -72,38 +73,29 @@ def check_save_folder(inference_config, preprocess_config):
         )
 
 
+def main(config, gpu, gpu_mem_frac):
+    config = aux_utils.read_config(config)
+
+    if gpu is not None:
+        # Get GPU ID and memory fraction
+        gpu_id, gpu_mem_frac = train_utils.select_gpu(
+            gpu,
+            gpu_mem_frac,
+        )
+        device = torch.device(gpu_id)
+    else:
+        device = torch.device(config.get("device"))
+
+    # Initialize and run a predictor
+    torch_predictor = torch_inference_utils.TorchPredictor(
+        config=config,
+        device=device,
+    )
+
+    torch_predictor.load_model()
+    torch_predictor.run_inference()
+
+
 if __name__ == "__main__":
     args = parse_args()
-    torch_config = aux_utils.read_config(args.config)
-
-    # Get GPU ID and memory fraction
-    gpu_id, gpu_mem_frac = train_utils.select_gpu(
-        args.gpu,
-        args.gpu_mem_frac,
-    )
-    device = torch.device(gpu_id)
-
-    # read configuration parameters and metadata
-    preprocess_config = aux_utils.read_config(torch_config["preprocess_config_path"])
-    train_config = aux_utils.read_config(torch_config["train_config_path"])
-    inference_config = aux_utils.read_config(torch_config["inference_config_path"])
-
-    network_config = torch_config["model"]
-
-    # if no save_folder_name specified, automatically incur saving in data folder
-    check_save_folder(inference_config, preprocess_config)
-
-    # instantiate and prep TorchPredictor interfacing object
-    torch_predictor = torch_inference_utils.TorchPredictor(
-        network_config=network_config, device=device
-    )
-    torch_predictor.load_model_torch()
-
-    # instantiate ImagePredictor object and run inference
-    image_predictor = image_inf.ImagePredictor(
-        train_config,
-        inference_config,
-        torch_predictor,
-        preprocess_config=preprocess_config,
-    )
-    image_predictor.run_prediction()
+    main(args.config, args.gpu, args.gpu_mem_frac)

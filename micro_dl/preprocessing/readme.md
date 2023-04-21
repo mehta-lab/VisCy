@@ -16,7 +16,6 @@ The following settings can be adjusted in preprocessing using a config file (see
 * resize:
     * scale_factor(float/list): Scale factor for resizing 2D frames, e.g. to match resolution in z or resizing volumes
     * num_slices_subvolume (int): number of slices to be included in each subvolume, default=-1, includes all slices in           slice_ids
-* correct_flat_field: (bool) perform flatfield correction (2D data only)
 
 * masks:
     * channels: (list of ints) which channels should be used to generate masks from

@@ -1,284 +1,221 @@
-"""Dataset class / generator for inference only"""
-
-import warnings
-import keras
+import iohub.ngff as ngff
 import numpy as np
 import os
-import pandas as pd
+from torch.utils.data import Dataset
+import zarr
 
+import micro_dl.utils.normalize as normalize
 import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.image_utils as image_utils
 
 
-class InferenceDataSet(keras.utils.Sequence):
-    # warnings.warn('InferenceDataSet class to be replaced with gunpowder in 2.1.0')
-    """Dataset class for model inference"""
+class TorchInferenceDataset(Dataset):
+    """
+    Based off of torch.utils.data.Dataset:
+        - https://pytorch.org/docs/stable/data.html
+
+    Custom dataset class for used for inference. Lightweight, dependent upon IOhub to
+    read in data from an NGFF-HCS compatible zarr store and perform inference.
+
+    Predictions are written back to a zarr store inside the model directory, unless
+    specified elsewhere.
+    """
 
     def __init__(
         self,
-        image_dir,
-        inference_config,
-        dataset_config,
-        network_config,
-        split_col_ids,
-        preprocess_config=None,
-        image_format="zyx",
-        mask_dir=None,
-        flat_field_dir=None,
-        crop2base=True,
+        zarr_dir,
+        batch_pred_num,
+        sample_depth,
+        normalize_inputs,
+        norm_type,
+        norm_scheme,
+        device,
     ):
-        """Init
-
-        :param str image_dir: dir containing images AND NOT TILES!
-        :param dict dataset_config: dict with dataset related params
-        :param dict network_config: dict with network related params
-        :param tuple split_col_ids: How to split up the dataset for inference:
-         for frames_meta: (str split column name, list split row indices)
-        :param str image_format: xyz or zyx format
-        :param str/None mask_dir: If inference targets are masks stored in a
-         different directory than the image dir. Assumes the directory contains
-         a frames_meta.csv containing mask channels (which will be target channels
-          in the inference config) z, t, p indices matching the ones in image_dir
-        :param str flat_field_dir: Directory with flat field images
         """
-        self.image_dir = image_dir
-        self.target_dir = image_dir
-        self.frames_meta = aux_utils.read_meta(self.image_dir)
-        self.flat_field_dir = flat_field_dir
-        if mask_dir is not None:
-            self.target_dir = mask_dir
-            # Append mask meta to frames meta
-            mask_meta = aux_utils.read_meta(mask_dir)
-            self.frames_meta = self.frames_meta.append(
-                mask_meta,
-                ignore_index=True,
-            )
-        # Use only indices selected for inference
-        (split_col, split_ids) = split_col_ids
-        meta_ids = self.frames_meta[split_col].isin(split_ids)
-        self.frames_meta = self.frames_meta[meta_ids]
+        Initiate object for selecting and passing data to model for inference.
 
-        assert image_format in {
-            "xyz",
-            "zyx",
-        }, "Image format should be xyz or zyx, not {}".format(image_format)
-        self.image_format = image_format
+        :param str zarr_dir: path to zarr store
+        :param dict dataset_config: dict object of dataset_config
+        :param int batch_pred_num: number of predictions to do simultaneously if doing
+                            batch prediction
+        :param int sample_depth: depth in z of the stack for a single sample,
+                            likely equivalent to z depth of network these samples feed
+        :param bool normalize_inputs: whether to normalize samples returned
+        :param str norm_type: type of normalization that was used on data in training
+        :param str norm_scheme: scheme (breadth) of normalization used in training
+        :param torch.device device: device to send samples to before returning
+        """
+        self.zarr_dir = zarr_dir
+        self.normalize_inputs = normalize_inputs
+        self.norm_type = norm_type
+        self.norm_scheme = norm_scheme
+        self.device = device
 
-        # Check if model task (regression or segmentation) is specified
-        self.model_task = "regression"
-        if "model_task" in dataset_config:
-            self.model_task = dataset_config["model_task"]
-            assert self.model_task in {
-                "regression",
-                "segmentation",
-            }, "Model task must be either 'segmentation' or 'regression'"
-        normalize_im = "stack"
-        if preprocess_config is not None:
-            if "normalize" in preprocess_config:
-                if "normalize_im" in preprocess_config["normalize"]:
-                    normalize_im = preprocess_config["normalize"]["normalize_im"]
-            elif "normalize_im" in preprocess_config:
-                normalize_im = preprocess_config["normalize_im"]
-            elif "normalize_im" in preprocess_config["tile"]:
-                normalize_im = preprocess_config["tile"]["normalize_im"]
+        self.batch_pred_num = batch_pred_num
+        self.batch_stack_size = batch_pred_num + sample_depth - 1
+        self.sample_depth = sample_depth
+        self.channels = None
+        self.timesteps = None
 
-        self.normalize_im = normalize_im
-        # assume input and target channels are the same as training if not specified
-        self.input_channels = dataset_config["input_channels"]
-        self.target_channels = dataset_config["target_channels"]
-        slice_ids = self.frames_meta["slice_idx"].unique()
-        pos_ids = self.frames_meta["pos_idx"].unique()
-        time_ids = self.frames_meta["time_idx"].unique()
-        # overwrite default parameters from train config
-        if "dataset" in inference_config:
-            if "input_channels" in inference_config["dataset"]:
-                self.input_channels = inference_config["dataset"]["input_channels"]
-            if "target_channels" in inference_config["dataset"]:
-                self.target_channels = inference_config["dataset"]["target_channels"]
-            if "slice_ids" in inference_config["dataset"]:
-                slice_ids = inference_config["dataset"]["slice_ids"]
-            if "pos_ids" in inference_config["dataset"]:
-                pos_ids = inference_config["dataset"]["pos_ids"]
-            if "time_ids" in inference_config["dataset"]:
-                time_ids = inference_config["dataset"]["time_ids"]
-        if not set(self.target_channels) <= set(
-            self.frames_meta["channel_idx"].unique()
-        ):
-            ValueError(
-                'target channels are out of range. Add "mask" to config if target channel is mask'
-            )
-        # get a subset of frames meta for only one channel to easily
-        # extract indices (pos, time, slice) to iterate over
-        self.inf_frames_meta = aux_utils.get_sub_meta(
-            self.frames_meta,
-            time_ids=time_ids,
-            pos_ids=pos_ids,
-            slice_ids=slice_ids,
-            channel_ids=self.target_channels,
+        self.source_position = None
+        self.data_plate = ngff.open_ome_zarr(
+            store_path=zarr_dir,
+            layout="hcs",
+            mode="r",
         )
-
-        self.depth = 1
-        self.target_depth = 1
-        # adjust slice margins if stacktostack or stackto2d
-        network_cls = network_config["class"]
-        if network_cls in ["UNetStackTo2D", "UNetStackToStack"]:
-            self.depth = network_config["depth"]
-            self.adjust_slice_indices()
-
-        # if Unet2D 4D tensor, remove the singleton dimension, else 5D
-        self.squeeze = False
-        if network_cls == "UNet2D":
-            self.squeeze = True
-
-        self.im_3d = False
-        if network_cls == "UNet3D":
-            self.im_3d = True
-
-        self.data_format = "channels_first"
-        if "data_format" in network_config:
-            self.data_format = network_config["data_format"]
-
-        # check if sorted values look right
-        self.inf_frames_meta = self.inf_frames_meta.sort_values(
-            ["pos_idx", "slice_idx"],
-            ascending=[True, True],
-        )
-        self.inf_frames_meta = self.inf_frames_meta.reset_index(drop=True)
-        self.num_samples = len(self.inf_frames_meta)
-        self.crop2base = crop2base
-
-    def adjust_slice_indices(self):
-        """
-        Adjust slice indices if model is UNetStackTo2D or UNetStackToStack.
-        These networks will have a depth > 1.
-        Adjust inf_frames_meta only as we'll need all the indices to load
-        stack with depth > 1.
-        """
-        margin = self.depth // 2
-        # Drop indices on both margins
-        max_slice_idx = self.inf_frames_meta["slice_idx"].max() + 1
-        min_slice_idx = self.inf_frames_meta["slice_idx"].min()
-        drop_idx = list(range(max_slice_idx - margin, max_slice_idx)) + list(
-            range(min_slice_idx, min_slice_idx + margin)
-        )
-        df_drop_idx = self.inf_frames_meta.index[
-            self.inf_frames_meta["slice_idx"].isin(drop_idx),
-        ]
-        self.inf_frames_meta.drop(df_drop_idx, inplace=True)
-        # Drop indices below margin
-        df_drop_idx = self.inf_frames_meta.index[
-            self.inf_frames_meta["slice_idx"].isin(list(range(margin)))
-        ]
-        self.inf_frames_meta.drop(df_drop_idx, inplace=True)
-
-    def get_iteration_meta(self):
-        """
-        Get the dataframe containing indices for one channel for
-        inference iterations.
-
-        :return pandas Dataframe inf_frames_meta: Metadata and indices for
-         first target channel
-        """
-        return self.inf_frames_meta
 
     def __len__(self):
-        """
-        Get the total number of samples inference is performed on.
+        """Returns the number of valid center slices in position * number of timesteps"""
+        output_stack_slices = self.source_position.data.shape[-3] - (
+            self.sample_depth - 1
+        )
+        return output_stack_slices // self.batch_pred_num
 
-        :return int num_samples: Number of inference samples
+    def __getitem__(self, idx):
         """
-        return self.num_samples
+        Returns the requested channels and slices of the data at the current
+        source array.
 
-    def _get_image(
-        self, input_dir, cur_row, channel_ids, depth, normalize_im, is_mask=False
-    ):
-        """
-        Assemble one input or target tensor
+        Note: idx indexes into a mapping of timestep and center-z-slice. For example
+        if timestep 2 and z slice 4 of 10 is requested, idx should be:
+            2*10 + 4 = 24
 
-        :param str input_dir: Directory containing images or targets
-        :param pd.Series cur_row: Current row in frames_meta
-        :param int/list channel_ids: Channel indices
-        :param int depth: Stack depth
-        :param str normalize: normalization options for images
-        :return np.array (3D / 4D) im_stack: Image stack
+        :param int idx: index in timestep & center-z-slice mapping
+
+        :return torch.Tensor data: requested image stack as a tensor
+        :return list norm_statistics: (optional) list of normalization statistics
+                        dicts for each channel in the returned array
         """
-        im_stack = []
-        for channel_idx in channel_ids:
-            flat_field_im = None
-            if self.flat_field_dir is not None:
-                assert normalize_im in [None, "stack"], (
-                    "flat field correction currently only supports "
-                    "None or 'stack' option for 'normalize_im'"
-                )
-                flat_field_fname = os.path.join(
-                    self.flat_field_dir, "flat-field_channel-{}.npy".format(channel_idx)
-                )
-                flat_field_im = np.load(flat_field_fname)
-            # Load image with given indices
-            im = image_utils.preprocess_imstack(
-                frames_metadata=self.frames_meta,
-                input_dir=input_dir,
-                depth=depth,
-                time_idx=cur_row["time_idx"],
-                channel_idx=channel_idx,
-                slice_idx=cur_row["slice_idx"],
-                pos_idx=cur_row["pos_idx"],
-                flat_field_im=flat_field_im,
-                normalize_im=normalize_im,
-            )
-            # Crop image to nearest factor of two in xy
-            if self.crop2base:
-                im = image_utils.crop2base(im)  # crop_z=self.im_3d)
-            # Make sure image format is right and squeeze for 2D models
-            if self.image_format == "zyx" and len(im.shape) > 2:
-                im = np.transpose(im, [2, 0, 1])
-            if self.squeeze:
-                im = np.squeeze(im)
-            im_stack.append(im)
-        # stack for channel dimension
-        if self.data_format == "channels_first":
-            im_stack = np.stack(im_stack)
+        # idx -> time & center idx mapping
+        start_z = idx * self.batch_pred_num
+        end_z = start_z + self.batch_stack_size
+        if isinstance(self.channels, int):
+            self.channels = [self.channels]
+
+        # retrieve data from selected channels
+        chan_inds = [self.source_position.channel_names.index(c) for c in self.channels]
+        data = [
+            self.source_position.data[self.timestep, c, start_z:end_z, ...]
+            for c in chan_inds
+        ]
+        data = np.stack(data, 0)
+
+        # normalize and convert
+        norm_statistics = [
+            self._get_normalization_statistics(c)
+            for c in self.channels
+            if "mask" not in c
+        ]
+        if self.normalize_inputs:
+            data = self._normalize_multichan(data, norm_statistics)
+        data = aux_utils.ToTensor(self.device)(data)
+
+        return data, norm_statistics
+
+    def set_source_array(self, row, col, fov, timestep=None, channels=None):
+        """
+        Sets the source array in the zarr store at zarr_dir that this
+        dataset should pull from when __getitem__ is called.
+
+        :param str/int row_name: row_index of position
+        :param str/int col_name: colum index of position
+        :param str/int fov_name: field of view index
+        :param int timestep: (optional) timestep index to retrieve
+        :param tuple(str) channels: (optional) channels to retrieve
+
+        :return tuple shape: shape of expected output from this source
+        :return type dtype: dtype of expected output from this source
+        """
+        row, col, fov = map(str, [row, col, fov])
+        self.source_position = self.data_plate[row][col][fov]
+
+        self.timestep = 0
+        if timestep:
+            self.timesteps = timestep
+
+        channel_ids = tuple(range(self.source_position.data.shape[1]))
+        self.channels = [self.data_plate.channel_names[id] for id in channel_ids]
+        if channels:
+            self.channels = channels
+
+        shape, dtype = self.source_position.data.shape, self.source_position.data.dtype
+        return (
+            1,
+            len(self.channels),
+        ) + shape[-3:], dtype
+
+    def _get_normalization_statistics(self, channel_name):
+        """
+        Gets and returns the normalization statistics stored in the .zattrs of a
+        specific position.
+
+        :param str channel_name: name of channel
+        """
+        if self.norm_scheme == "dataset":
+            normalization_metadata = self.data_plate.zattrs["normalization"]
+            key = "dataset_statistics"
         else:
-            im_stack = np.stack(im_stack, axis=self.n_dims - 2)
-        # binarize the target images for segmentation task
-        if is_mask:
-            im_stack = im_stack > 0
-        # Make sure all images have the same dtype
-        im_stack = im_stack.astype(np.float32)
-        return im_stack
+            normalization_metadata = self.source_position.zattrs["normalization"]
+            key = "fov_statistics"
+        return normalization_metadata[channel_name][key]
 
-    def __getitem__(self, index):
+    def _normalize_multichan(self, data, normalization_meta, denorm=False):
         """
-        Get a batch of data, input and target stacks, for inference.
+        Given the list normalization meta for a specific multi-channel chunk of
+        data whose elements are each dicts of normalization statistics.
 
-        :param int index: Iteration index (looped through linearly in inference)
-        :return np.array input_stack: Input image stack with dimensionality
-            matching model
-        :return np.array target_stack: Target image stack for model inference
+        performs normalization on the entire stack as dictated by parameters in
+        dataset_config.
+
+        :param np.ndarray data: 4d numpy array (c, z, y, x)
+        :param list normalization_meta: list of channel norm statistics for array
+
+        :param np.ndarray normalized_data: normalized 4d numpy array (c,z,y,x)
         """
-        # Get indices for current inference iteration
-        cur_row = self.inf_frames_meta.iloc[index]
-        # binarize the target images for segmentation task
-        is_mask = False
-        if self.model_task == "segmentation":
-            is_mask = True
-        # Get input and target stacks for inference
-        input_stack = self._get_image(
-            input_dir=self.image_dir,
-            cur_row=cur_row,
-            channel_ids=self.input_channels,
-            depth=self.depth,
-            normalize_im=self.normalize_im,
-        )
-        target_stack = self._get_image(
-            input_dir=self.target_dir,
-            cur_row=cur_row,
-            channel_ids=self.target_channels,
-            depth=self.target_depth,
-            normalize_im=None,
-            is_mask=is_mask,
-        )
-        # Add batch dimension
-        input_stack = np.expand_dims(input_stack, axis=0)
-        target_stack = np.expand_dims(target_stack, axis=0)
-        return input_stack, target_stack
+        all_data = []
+        for i, channel_norm_meta in enumerate(normalization_meta):
+            channel_data = data[i]
+            normed_channel_data = self._normalize(
+                channel_data,
+                channel_norm_meta,
+                denorm=denorm,
+            )
+            all_data.append(normed_channel_data)
+
+        return np.stack(all_data, axis=0)
+
+    def _normalize(self, data, normalization_meta, denorm=False):
+        """
+        Given the normalization meta for a specific chunk of data in the format:
+        {
+            "iqr": some iqr,
+            "mean": some mean,
+            "median": some median,
+            "std": some std
+        }
+
+        zscores or un-zscores the data based upon the metadata and 'denorm'
+
+        :param np.ndarray data: 3d un-normalized input data
+        :param dict normalization_meta: dictionary of statistics containing precomputed
+                                    norm values for dataset and FOV
+        :param bool denorm: Whether to apply or revert zscoring on this data
+
+        :return np.ndarray normalized_data: denormed data of input data's shape and type
+        """
+        norm_type = self.norm_type
+        norm_function = normalize.unzscore if denorm else normalize.zscore
+
+        if norm_type == "median_and_iqr":
+            normalized_data = norm_function(
+                data,
+                normalization_meta["median"],
+                normalization_meta["iqr"],
+            )
+        elif norm_type == "mean_and_std":
+            normalized_data = norm_function(
+                data,
+                normalization_meta["mean"],
+                normalization_meta["std"],
+            )
+
+        return normalized_data

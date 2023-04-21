@@ -96,7 +96,7 @@ class ConvBlock3D(nn.Module):
         if self.dropout:
             self.drop_list = []
             for i in range(self.num_repeats):
-                self.drop_list.append(nn.Dropout2d(int(self.dropout)))
+                self.drop_list.append(nn.Dropout3d(int(self.dropout)))
         
         #---- Init linear filter steps ----#
         steps = np.linspace(in_filters, out_filters, num_repeats+1).astype(int)

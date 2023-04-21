@@ -13,7 +13,6 @@ import argparse
 import glob
 import time
 
-import micro_dl.preprocessing.estimate_flat_field as flat_field
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.cli.preprocess_script as preprocess_script
 
@@ -129,9 +128,6 @@ def get_base_preprocess():
         'slice_ids': [8,9,10,11,12],
         'pos_ids': [0, 1],
         'num_workers': 4,
-        'flat_field':
-            {'method': 'estimate',
-            'flat_field_channels': [0, 1, 2]},
         'normalize':
             {'normalize_im': 'dataset',
             'min_fraction': 0.25,

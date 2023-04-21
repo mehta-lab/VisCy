@@ -1,53 +1,66 @@
 import numpy as np
 import scipy.ndimage as ndimage
-import cv2
+from skimage.filters import threshold_otsu, gaussian, laplace
 from scipy.ndimage import binary_fill_holes
-from skimage.filters import threshold_otsu
-from skimage.feature import peak_local_max
-from skimage.morphology import disk, ball, binary_opening, binary_erosion, watershed
+from skimage.morphology import (
+    ball,
+    disk,
+    binary_opening,
+    remove_small_objects,
+    binary_dilation,
+)
 from micro_dl.utils.image_utils import im_adjust
 
 
-def create_otsu_mask(input_image,
-                     str_elem_size=3,
-                     thr=None,
-                     kernel_size=3,
-                     w_shed=False):
-    """Create a binary mask using morphological operations
+def create_otsu_mask(input_image, sigma=0.6):
 
-    Opening removes small objects in the foreground.
+    """Create a binary mask using morphological operations
+    :param np.array input_image: generate masks from this 3D image
+    :param float sigma: Gaussian blur standard deviation, increase in value increases blur
+    :return: volume mask of input_image, 3D np.array
+    """
+
+    input_image_blur = gaussian(input_image, sigma=sigma)
+
+    input_sz = input_image.shape
+    mid_slice_id = input_sz[0] // 2
+
+    thresh = threshold_otsu(input_image[mid_slice_id,:,:])
+    mask = input_image >= thresh
+
+    return mask
+
+
+def create_membrane_mask(input_image, str_elem_size=23, sigma=0.4, k_size=3, msize=120):
+    """Create a binary mask using Laplacian of Gaussian (LOG) feature detection
 
     :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the structuring element. typically 3, 5
+    :param int str_elem_size: size of the laplacian filter used for contarst enhancement, odd number.
+        Increase in value increases sensitivity of contrast enhancement
+    :param float sigma: Gaussian blur standard deviation
+    :param int k_size: disk/ball size for mask dilation, ball for 3D and disk for 2D data
+    :param int msize: size of small objects removed to clean segmentation
     :return: mask of input_image, np.array
     """
 
-    input_image = im_adjust(cv2.GaussianBlur(input_image, (kernel_size, kernel_size), 0))
-    input_image = im_adjust(input_image)
-    if thr is None:
-        if np.min(input_image) == np.max(input_image):
-            thr = np.unique(input_image)
-        else:
-            thr = 1.1 * threshold_otsu(input_image, nbins=128)
+    input_image_blur = gaussian(input_image, sigma=sigma)
+
+    input_Lapl = laplace(input_image_blur, ksize=str_elem_size)
+
+    thresh = threshold_otsu(input_Lapl)
+    mask_bin = input_Lapl >= thresh
+
     if len(input_image.shape) == 2:
-        str_elem = disk(str_elem_size)
+        str_elem = disk(k_size)
     else:
-        str_elem = ball(str_elem_size)
-    # remove small objects in mask
-    mask = input_image > thr
-    mask = binary_opening(mask, str_elem)
-    # mask = binary_fill_holes(mask)
-    if not w_shed:
-        return mask
-    dist = ndimage.distance_transform_edt(mask)
-    localMax = peak_local_max(dist, indices=False, min_distance=15,
-                              labels=mask)
-    # perform a connected component analysis on the local peaks
-    markers = ndimage.label(localMax, structure=np.ones((3, 3)))[0]
-    labels = watershed(-dist, markers, mask=mask, watershed_line=True)
-    mask = labels > 0
-    # mask = binary_erosion(mask, str_elem)
+        str_elem = ball(k_size)
+
+    mask_dilated = binary_dilation(mask_bin, str_elem)
+
+    mask = remove_small_objects(mask_dilated, min_size=msize)
+
     return mask
+
 
 def get_unimodal_threshold(input_image):
     """Determines optimal unimodal threshold
@@ -63,7 +76,7 @@ def get_unimodal_threshold(input_image):
     hist_counts, bin_edges = np.histogram(
         input_image,
         bins=256,
-        range=(input_image.min(), np.percentile(input_image, 99.5))
+        range=(input_image.min(), np.percentile(input_image, 99.5)),
     )
     bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
 
@@ -89,21 +102,23 @@ def get_unimodal_threshold(input_image):
         if per_dist > max_dist:
             best_threshold = x0
             max_dist = per_dist
-    assert best_threshold > -np.inf, 'Error in unimodal thresholding'
+    assert best_threshold > -np.inf, "Error in unimodal thresholding"
     return best_threshold
 
 
-def create_unimodal_mask(input_image, str_elem_size=3, kernel_size=3):
+def create_unimodal_mask(input_image, str_elem_size=3, sigma = 0.6):
     """
     Create a mask with unimodal thresholding and morphological operations.
     Unimodal thresholding seems to oversegment, erode it by a fraction
 
     :param np.array input_image: generate masks from this image
     :param int str_elem_size: size of the structuring element. typically 3, 5
+    :param float sigma: gaussian blur standard deviation
     :return mask of input_image, np.array
     """
 
-    input_image = im_adjust(cv2.GaussianBlur(input_image, (kernel_size, kernel_size), 0))
+    input_image = gaussian(input_image, sigma=sigma)
+    
     if np.min(input_image) == np.max(input_image):
         thr = np.unique(input_image)
     else:
@@ -113,7 +128,7 @@ def create_unimodal_mask(input_image, str_elem_size=3, kernel_size=3):
     else:
         str_elem = ball(str_elem_size)
     # remove small objects in mask
-    mask = input_image > thr
+    mask = input_image >= thr
     mask = binary_opening(mask, str_elem)
     mask = binary_fill_holes(mask)
     return mask
@@ -143,8 +158,10 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
     # labels from binary
     if annotation.dtype == bool:
         annotation = annotation.astype(np.uint8)
-    assert annotation.dtype in [np.uint8, np.uint16], (
-        "Expected data type uint, it is {}".format(annotation.dtype))
+    assert annotation.dtype in [
+        np.uint8,
+        np.uint16,
+    ], "Expected data type uint, it is {}".format(annotation.dtype)
 
     # cells instances for distance computation
     # 4 connected i.e default (cross-shaped)
@@ -156,8 +173,7 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
     unique_values = np.unique(labeled_array).tolist()
     weight_map = [0] * len(unique_values)
     for index, unique_value in enumerate(unique_values):
-        mask = np.zeros(
-            (annotation.shape[0], annotation.shape[1]), dtype=np.float64)
+        mask = np.zeros((annotation.shape[0], annotation.shape[1]), dtype=np.float64)
         mask[annotation == unique_value] = 1
         weight_map[index] = 1 / mask.sum()
 
@@ -170,24 +186,24 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
 
     # cells distance map
     border_loss_map = np.zeros(
-        (annotation.shape[0], annotation.shape[1]), dtype=np.float64)
+        (annotation.shape[0], annotation.shape[1]), dtype=np.float64
+    )
     distance_maps = np.zeros(
         (annotation.shape[0], annotation.shape[1], np.max(labeled_array)),
-        dtype=np.float64)
+        dtype=np.float64,
+    )
 
     if np.max(labeled_array) >= 2:
         for index in range(np.max(labeled_array)):
             mask = np.ones_like(labeled_array)
             mask[labeled_array == index + 1] = 0
-            distance_maps[:, :, index] = \
-                ndimage.distance_transform_edt(mask)
+            distance_maps[:, :, index] = ndimage.distance_transform_edt(mask)
     distance_maps = np.sort(distance_maps, 2)
     d1 = distance_maps[:, :, 0]
     d2 = distance_maps[:, :, 1]
-    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma ** 2)))
+    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma**2)))
 
-    zero_label = np.zeros(
-        (annotation.shape[0], annotation.shape[1]), dtype=np.float64)
+    zero_label = np.zeros((annotation.shape[0], annotation.shape[1]), dtype=np.float64)
     zero_label[labeled_array == 0] = 1
     border_loss_map = np.multiply(border_loss_map, zero_label)
 

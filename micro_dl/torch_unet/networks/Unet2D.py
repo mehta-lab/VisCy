@@ -50,7 +50,7 @@ class Unet2d(nn.Module):
         # ----- set static parameters -----#
         self.block_padding = "same"
         down_mode = "avgpool"  # TODO set static avgpool
-        up_mode = "bilinear"  # TODO set static trilinear
+        up_mode = "bilinear"  # TODO set static bilinear
         activation = "relu"  # TODO set static relu
         self.bottom_block_spatial = False  # TODO set static
 
@@ -63,7 +63,6 @@ class Unet2d(nn.Module):
             self.num_filters = num_filters
         else:
             self.num_filters = [pow(2, i) * 16 for i in range(num_blocks + 1)]
-            self.num_filters
         downsampling_filters = [in_channels] + self.num_filters
         upsampling_filters = [
             self.num_filters[-(i + 1)] + self.num_filters[-(i + 2)]
@@ -208,7 +207,7 @@ class Unet2d(nn.Module):
         x = self.terminal_block(x)
 
         return x
-
+    
     def register_modules(self, module_list, name):
         """
         Helper function that registers modules stored in a list to the model object so that the can

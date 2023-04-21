@@ -5,7 +5,7 @@ import os
 
 import torch
 
-from micro_dl.torch_unet.utils.io import save_figure
+from micro_dl.utils.cli_utils import save_figure
 from micro_dl.utils.normalize import hist_clipping
 
 

@@ -1,15 +1,10 @@
-import cv2
 from concurrent.futures import ProcessPoolExecutor
+import iohub.ngff as ngff
 import numpy as np
-import os
-import sys
+import scipy.stats
 
-import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
 import micro_dl.utils.masks as mask_utils
-import micro_dl.utils.tile_utils as tile_utils
-from micro_dl.utils.normalize import hist_clipping
-from micro_dl.utils.image_utils import im_adjust
 
 
 def mp_wrapper(fn, fn_args, workers):
@@ -25,8 +20,9 @@ def mp_wrapper(fn, fn_args, workers):
     return list(res)
 
 
-def mp_create_save_mask(fn_args, workers):
-    """Create and save masks with multiprocessing
+def mp_create_and_write_mask(fn_args, workers):
+    """Create and save masks with multiprocessing. For argument parameters
+    see mp_utils.create_and_write_mask.
 
     :param list of tuple fn_args: list with tuples of function arguments
     :param int workers: max number of workers
@@ -34,426 +30,219 @@ def mp_create_save_mask(fn_args, workers):
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
-        res = ex.map(create_save_mask, *zip(*fn_args))
+        res = ex.map(create_and_write_mask, *zip(*fn_args))
     return list(res)
 
 
-def create_save_mask(input_fnames,
-                     flat_field_fname,
-                     str_elem_radius,
-                     mask_dir,
-                     mask_channel_idx,
-                     time_idx,
-                     pos_idx,
-                     slice_idx,
-                     int2str_len,
-                     mask_type,
-                     mask_ext,
-                     channel_thrs=None):
-
+def add_channel(
+    position: ngff.Position,
+    new_channel_array,
+    new_channel_name,
+    overwrite_ok=False,
+):
     """
-    Create and save mask.
+    Adds a channels to the data array at position "position". Note that there is
+    only one 'tracked' data array in current HCS spec at each position. Also
+    updates the 'omero' channel-tracking metadata to track the new channel.
+
+    The 'new_channel_array' must match the dimensions of the current array in
+    all positions but the channel position (1) and have the same datatype
+
+    Note: to maintain HCS compatibility of the zarr store, all positions (wells)
+    must maintain arrays with congruent channels. That is, if you add a channel
+    to one position of an HCS compatible zarr store, an additional channel must
+    be added to every position in that store to maintain HCS compatibility.
+
+    :param Position zarr_dir: NGFF position node object
+    :param np.ndarray new_channel_array: array to add as new channel with matching
+                            dimensions (except channel dim) and dtype
+    :param str new_channel_name: name of new channel
+    :param bool overwrite_ok: if true, if a channel with the same name as
+                            'new_channel_name' is found, will overwrite
+    """
+    assert len(new_channel_array.shape) == len(position.data.shape) - 1, (
+        "New channel array must match all dimensions of the position array, "
+        "except in the inferred channel dimension: "
+        f"array shape: {position.data.shape}"
+        f", expected channel shape: {(position.data.shape[0], ) + position.data.shape[2:]}"
+        f", received channel shape: {new_channel_array.shape}"
+    )
+    # determine whether to overwrite or append
+    if new_channel_name in position.channel_names and overwrite_ok:
+        new_channel_index = list(position.channel_names).index(new_channel_name)
+    else:
+        new_channel_index = len(position.channel_names)
+        position.append_channel(new_channel_name, resize_arrays=True)
+
+    # replace or append channel
+    position["0"][:, new_channel_index] = new_channel_array
+
+
+def create_and_write_mask(
+    position: ngff.Position,
+    time_indices,
+    channel_indices,
+    structure_elem_radius,
+    mask_type,
+    mask_name,
+    verbose=False,
+):
+    # TODO: rewrite docstring
+    """
+    Create mask *for all depth slices* at each time and channel index specified
+    in this position, and save them both as an additional channel in the data array
+    of the given zarr store and a separate 'untracked' array with specified name.
+    If output_channel_index is specified as an existing channel index, will overwrite
+    this channel instead.
+
+    Saves custom metadata related to the mask creation in the well-level
+    .zattrs in the 'mask' field.
+
     When >1 channel are used to generate the mask, mask of each channel is
-    generated then added together.
+    generated then added together. Foreground fraction is calculated on
+    a timepoint-position basis. That is, it will be recorded as an average
+    foreground fraction over all slices in any given timepoint.
 
-    :param tuple input_fnames: tuple of input fnames with full path
-    :param str/None flat_field_fname: fname of flat field image
-    :param int str_elem_radius: size of structuring element used for binary
-     opening. str_elem: disk or ball
-    :param str mask_dir: dir to save masks
-    :param int mask_channel_idx: channel number of mask
-    :param int time_idx: time points to use for generating mask
-    :param int pos_idx: generate masks for given position / sample ids
-    :param int slice_idx: generate masks for given slice ids
-    :param int int2str_len: Length of str when converting ints
+
+    :param str zarr_dir: directory to HCS compatible zarr store for usage
+    :param str position_path: path within store to position to generate masks for
+    :param list time_indices: list of time indices for mask generation,
+                            if an index is skipped over, will populate with
+                            zeros
+    :param list channel_indices: list of channel indices for mask generation,
+                            if more than 1 channel specified, masks from all
+                            channels are aggregated
+    :param int structure_elem_radius: size of structuring element used for binary
+                            opening. str_elem: disk or ball
     :param str mask_type: thresholding type used for masking or str to map to
-     masking function
-    :param str mask_ext: '.npy' or '.png'. Save the mask as uint8 PNG or
-     NPY files for otsu, unimodal masks, recommended to save as npy
-     float64 for borders_weight_loss_map masks to avoid loss due to scaling it
-     to uint8.
-    :param list channel_thrs: list of threshold for each channel to generate
-    binary masks. Only used when mask_type is 'dataset_otsu'
-    :return dict cur_meta for each mask. fg_frac is added to metadata
-            - how is it used?
+                            masking function
+    :param str mask_name: name under which to save untracked copy of mask in
+                            position
+    :param bool verbose: whether this process should send updates to stdout
     """
-    if mask_type == 'dataset otsu':
-        assert channel_thrs is not None, \
-            'channel threshold is required for mask_type="dataset otsu"'
-    im_stack = image_utils.read_imstack(
-        input_fnames,
-        flat_field_fname,
-        normalize_im=None,
-    )
-    masks = []
-    for idx in range(im_stack.shape[-1]):
-        im = im_stack[..., idx]
-        if mask_type == 'otsu':
-            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius)
-        elif mask_type == 'unimodal':
-            mask = mask_utils.create_unimodal_mask(im.astype('float32'),  str_elem_radius)
-        elif mask_type == 'dataset otsu':
-            mask = mask_utils.create_otsu_mask(im.astype('float32'), str_elem_radius, channel_thrs[idx])
-        elif mask_type == 'borders_weight_loss_map':
-            mask = mask_utils.get_unet_border_weight_map(im)
-        masks += [mask]
-    # Border weight map mask is a float mask not binary like otsu or unimodal,
-    # so keep it as is (assumes only one image in stack)
-    fg_frac = None
-    if mask_type == 'borders_weight_loss_map':
-        mask = masks[0]
-    else:
-        masks = np.stack(masks, axis=-1)
-        # mask = np.any(masks, axis=-1)
-        mask = np.mean(masks, axis=-1)
-        fg_frac = np.mean(mask)
 
-    # Create mask name for given slice, time and position
-    file_name = aux_utils.get_im_name(
-        time_idx=time_idx,
-        channel_idx=mask_channel_idx,
-        slice_idx=slice_idx,
-        pos_idx=pos_idx,
-        int2str_len=int2str_len,
-        ext=mask_ext,
-    )
+    shape = position.data.shape
+    position_masks_shape = tuple([shape[0], len(channel_indices), *shape[2:]])
 
-    overlay_name = aux_utils.get_im_name(
-        time_idx=time_idx,
-        channel_idx=mask_channel_idx,
-        slice_idx=slice_idx,
-        pos_idx=pos_idx,
-        int2str_len=int2str_len,
-        extra_field='overlay',
-        ext=mask_ext,
-    )
-    if mask_ext == '.npy':
-        # Save mask for given channels, mask is 2D
-        np.save(os.path.join(mask_dir, file_name),
-                mask,
-                allow_pickle=True,
-                fix_imports=True)
-    elif mask_ext == '.png':
-        # Covert mask to uint8
-        # Border weight map mask is a float mask not binary like otsu or unimodal,
-        # so keep it as is
-        if mask_type == 'borders_weight_loss_map':
-            assert im_stack.shape[-1] == 1
-            # Note: Border weight map mask should only be generated from one binary image
-        else:
-            mask = image_utils.im_bit_convert(mask, bit=8, norm=True)
-            mask = im_adjust(mask)
-            im_mean = np.mean(im_stack, axis=-1)
-            im_mean = hist_clipping(im_mean, 1, 99)
-            im_alpha = 255 / (np.max(im_mean) - np.min(im_mean) + sys.float_info.epsilon)
-            im_mean = cv2.convertScaleAbs(
-                im_mean - np.min(im_mean),
-                alpha=im_alpha,
+    # calculate masks over every time index and channel slice
+    position_masks = np.zeros(position_masks_shape)
+    position_foreground_fractions = {}
+
+    for time_index in range(shape[0]):
+        timepoint_foreground_fraction = {}
+
+        for channel_index in channel_indices:
+            channel_name = position.channel_names[channel_index]
+            mask_array_chan_idx = channel_indices.index(channel_index)
+
+            if "mask" in channel_name:
+                print("\n")
+                if mask_type in channel_name:
+                    print(f"Found existing channel: '{channel_name}'.")
+                    print("You are likely creating duplicates, which is bad practice.")
+                print(f"Skipping mask channel '{channel_name}' for thresholding")
+            else:
+                # print progress update
+                if verbose:
+                    time_progress = f"time {time_index+1}/{shape[0]}"
+                    channel_progress = f"chan {channel_index}/{channel_indices}"
+                    position_progress = f"pos {position.zgroup.name}"
+                    p = (
+                        f"Computing masks slice [{position_progress}, {time_progress},"
+                        f" {channel_progress}]\n"
+                    )
+                    print(p)
+
+                # get mask for image slice or populate with zeros
+                if time_index in time_indices:
+
+                    mask = get_mask_slice(
+                        position_zarr=position.data,
+                        time_index=time_index,
+                        channel_index=channel_index,
+                        mask_type=mask_type,
+                        structure_elem_radius=structure_elem_radius,
+                    )
+                else:
+                    mask = np.zeros(shape[-2:])
+
+                position_masks[time_index, mask_array_chan_idx] = mask
+
+                # compute & record channel-wise foreground fractions
+                frame_foreground_fraction = float(
+                    np.mean(position_masks[time_index, mask_array_chan_idx]).item()
                 )
-            im_mask_overlay = np.stack([mask, im_mean, mask], axis=2)
-            cv2.imwrite(os.path.join(mask_dir, overlay_name), im_mask_overlay)
+                timepoint_foreground_fraction[channel_name] = frame_foreground_fraction
+        position_foreground_fractions[time_index] = timepoint_foreground_fraction
 
-        cv2.imwrite(os.path.join(mask_dir, file_name), mask)
-    else:
-        raise ValueError("mask_ext can be '.npy' or '.png', not {}".format(mask_ext))
-    cur_meta = {'channel_idx': mask_channel_idx,
-                'slice_idx': slice_idx,
-                'time_idx': time_idx,
-                'pos_idx': pos_idx,
-                'file_name': file_name,
-                'fg_frac': fg_frac,}
-    return cur_meta
+    # combine masks along channels and compute & record combined foreground fraction
+    position_masks = np.sum(position_masks, axis=1)
+    position_masks = np.where(position_masks > 0.5, 1, 0)
+    for time_index in time_indices:
+        frame_foreground_fraction = float(np.mean(position_masks[time_index]).item())
+        timepoint_foreground_fraction["combined_fraction"] = frame_foreground_fraction
 
-
-def get_mask_meta_row(file_path, meta_row):
-    mask = image_utils.read_image(file_path)
-    fg_frac = np.sum(mask > 0) / mask.size
-    meta_row = {**meta_row, 'fg_frac': fg_frac}
-    return meta_row
-
-
-def mp_tile_save(fn_args, workers):
-    """Tile and save with multiprocessing
-    https://stackoverflow.com/questions/42074501/python-concurrent-futures-processpoolexecutor-performance-of-submit-vs-map
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned df from tile_and_save
-    """
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(tile_and_save, *zip(*fn_args))
-    return list(res)
-
-
-def tile_and_save(input_fnames,
-                  flat_field_fname,
-                  hist_clip_limits,
-                  time_idx,
-                  channel_idx,
-                  pos_idx,
-                  slice_idx,
-                  tile_size,
-                  step_size,
-                  min_fraction,
-                  image_format,
-                  save_dir,
-                  int2str_len=3,
-                  is_mask=False,
-                  normalize_im=None,
-                  zscore_mean=None,
-                  zscore_std=None
-                  ):
-    """Crop image into tiles at given indices and save
-
-    :param tuple input_fnames: tuple of input fnames with full path
-    :param str flat_field_fname: fname of flat field image
-    :param tuple hist_clip_limits: limits for histogram clipping
-    :param int time_idx: time point of input image
-    :param int channel_idx: channel idx of input image
-    :param int slice_idx: slice idx of input image
-    :param int pos_idx: sample idx of input image
-    :param list tile_size: size of tile along row, col (& slices)
-    :param list step_size: step size along row, col (& slices)
-    :param float min_fraction: min foreground volume fraction for keep tile
-    :param str image_format: zyx / xyz
-    :param str save_dir: output dir to save tiles
-    :param int int2str_len: len of indices for creating file names
-    :param bool is_mask: Indicates if files are masks
-    :return: pd.DataFrame from a list of dicts with metadata
-    """
-    try:
-        print('tile image t{:03d} p{:03d} z{:03d} c{:03d}...'
-              .format(time_idx, pos_idx, slice_idx, channel_idx))
-        input_image = image_utils.read_imstack(
-            input_fnames=input_fnames,
-            flat_field_fname=flat_field_fname,
-            hist_clip_limits=hist_clip_limits,
-            is_mask=is_mask,
-            normalize_im=normalize_im,
-            zscore_mean=zscore_mean,
-            zscore_std=zscore_std
-        )
-        save_dict = {'time_idx': time_idx,
-                     'channel_idx': channel_idx,
-                     'pos_idx': pos_idx,
-                     'slice_idx': slice_idx,
-                     'save_dir': save_dir,
-                     'image_format': image_format,
-                     'int2str_len': int2str_len}
-
-        tile_meta_df = tile_utils.tile_image(
-            input_image=input_image,
-            tile_size=tile_size,
-            step_size=step_size,
-            min_fraction=min_fraction,
-            save_dict=save_dict,
-        )
-    except Exception as e:
-        err_msg = 'error in t_{}, c_{}, pos_{}, sl_{}'.format(
-            time_idx, channel_idx, pos_idx, slice_idx
-        )
-        err_msg = err_msg + str(e)
-        # TODO(Anitha) write to log instead
-        print(err_msg)
-        raise e
-    return tile_meta_df
-
-
-def mp_crop_save(fn_args, workers):
-    """Crop and save images with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned df from crop_at_indices_save
-    """
-
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(crop_at_indices_save, *zip(*fn_args))
-    return list(res)
-
-
-def crop_at_indices_save(input_fnames,
-                         flat_field_fname,
-                         hist_clip_limits,
-                         time_idx,
-                         channel_idx,
-                         pos_idx,
-                         slice_idx,
-                         crop_indices,
-                         image_format,
-                         save_dir,
-                         int2str_len=3,
-                         is_mask=False,
-                         tile_3d=False,
-                         normalize_im=True,
-                         zscore_mean=None,
-                         zscore_std=None
-                         ):
-    """Crop image into tiles at given indices and save
-
-    :param tuple input_fnames: tuple of input fnames with full path
-    :param str flat_field_fname: fname of flat field image
-    :param tuple hist_clip_limits: limits for histogram clipping
-    :param int time_idx: time point of input image
-    :param int channel_idx: channel idx of input image
-    :param int slice_idx: slice idx of input image
-    :param int pos_idx: sample idx of input image
-    :param tuple crop_indices: tuple of indices for cropping
-    :param str image_format: zyx or xyz
-    :param str save_dir: output dir to save tiles
-    :param int int2str_len: len of indices for creating file names
-    :param bool is_mask: Indicates if files are masks
-    :param bool tile_3d: indicator for tiling in 3D
-    :return: pd.DataFrame from a list of dicts with metadata
-    """
-
-    try:
-        print('tile image t{:03d} p{:03d} z{:03d} c{:03d}...'
-              .format(time_idx, pos_idx, slice_idx, channel_idx))
-        input_image = image_utils.read_imstack(
-            input_fnames=input_fnames,
-            flat_field_fname=flat_field_fname,
-            hist_clip_limits=hist_clip_limits,
-            is_mask=is_mask,
-            normalize_im=normalize_im,
-            zscore_mean=zscore_mean,
-            zscore_std=zscore_std
-        )
-        save_dict = {'time_idx': time_idx,
-                     'channel_idx': channel_idx,
-                     'pos_idx': pos_idx,
-                     'slice_idx': slice_idx,
-                     'save_dir': save_dir,
-                     'image_format': image_format,
-                     'int2str_len': int2str_len}
-
-        tile_meta_df = tile_utils.crop_at_indices(
-            input_image=input_image,
-            crop_indices=crop_indices,
-            save_dict=save_dict,
-            tile_3d=tile_3d,
-        )
-    except Exception as e:
-        err_msg = 'error in t_{}, c_{}, pos_{}, sl_{}'.format(
-            time_idx, channel_idx, pos_idx, slice_idx
-        )
-        err_msg = err_msg + str(e)
-        # TODO(Anitha) write to log instead
-        print(err_msg)
-        raise e
-
-    return tile_meta_df
-
-
-def mp_resize_save(mp_args, workers):
-    """
-    Resize and save images with multiprocessing
-
-    :param dict mp_args: Function keyword arguments
-    :param int workers: max number of workers
-    """
-    with ProcessPoolExecutor(workers) as ex:
-        {ex.submit(resize_and_save, **kwargs): kwargs for kwargs in mp_args}
-
-
-def resize_and_save(**kwargs):
-    """
-    Resizing images and saving them
-    :param kwargs: Keyword arguments:
-    str file_path: Path to input image
-    str write_path: Path to image to be written
-    float scale_factor: Scale factor for resizing
-    str ff_path: path to flat field correction image
-    """
-
-    im = image_utils.read_image(kwargs['file_path'])
-    if kwargs['ff_path'] is not None:
-        im = image_utils.apply_flat_field_correction(
-            im,
-            flat_field_patjh=kwargs['ff_path'],
-        )
-    im_resized = image_utils.rescale_image(
-        im=im,
-        scale_factor=kwargs['scale_factor'],
+    # save masks as additional channel
+    position_masks = position_masks.astype(position.data.dtype)
+    new_channel_name = channel_name + "_mask"
+    add_channel(
+        position=position,
+        new_channel_array=position_masks,
+        new_channel_name=new_channel_name,
+        overwrite_ok=True,
     )
-    # Write image
-    cv2.imwrite(kwargs['write_path'], im_resized)
 
 
-def mp_rescale_vol(fn_args, workers):
-    """Rescale and save image stacks with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
+def get_mask_slice(
+    position_zarr,
+    time_index,
+    channel_index,
+    mask_type,
+    structure_elem_radius,
+):
     """
+    Given a set of indices, mask type, and structuring element,
+    pulls an image slice from the given zarr array, computes the
+    requested mask and returns.
 
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(rescale_vol_and_save, *zip(*fn_args))
-    return list(res)
-
-
-def rescale_vol_and_save(time_idx,
-                         pos_idx,
-                         channel_idx,
-                         sl_start_idx,
-                         sl_end_idx,
-                         frames_metadata,
-                         output_fname,
-                         scale_factor,
-                         input_dir,
-                         ff_path):
-    """Rescale volumes and save
-
-    :param int time_idx: time point of input image
-    :param int pos_idx: sample idx of input image
-    :param int channel_idx: channel idx of input image
-    :param int sl_start_idx: start slice idx for the vol to be saved
-    :param int sl_end_idx: end slice idx for the vol to be saved
-    :param pd.Dataframe frames_metadata: metadata for the input slices
-    :param str output_fname: output_fname
-    :param float/list scale_factor: scale factor for resizing
-    :param str input_dir: input dir for 2D images
-    :param str/None ff_path: path to flat field image
+    :param zarr.Array position_zarr: zarr array of the desired position
+    :param time_index: see name
+    :param channel_index: see name
+    :param mask_type: see name,
+                    options are {otsu, unimodal, mem_detection, borders_weight_loss_map}
+    :param int structure_elem_radius: creation radius for the structuring
+                    element
+    :return np.ndarray mask: 2d mask for this slice
     """
+    # read and correct/preprocess slice
+    im = position_zarr[time_index, channel_index]
+    im = image_utils.preprocess_image(im, hist_clip_limits=(1, 99))
+    # generate mask for slice
+    if mask_type == "otsu":
+        mask = mask_utils.create_otsu_mask(im.astype("float32"))
+    elif mask_type == "unimodal":
+        mask = mask_utils.create_unimodal_mask(
+            im.astype("float32"), structure_elem_radius
+        )
+    elif mask_type == "mem_detection":
+        mask = mask_utils.create_membrane_mask(
+            im.astype("float32"),
+            structure_elem_radius,
+        )
+    elif mask_type == "borders_weight_loss_map":
+        mask = mask_utils.get_unet_border_weight_map(im)
+        mask = image_utils.im_adjust(mask).astype(position_zarr.dtype)
 
-    input_stack = []
-    for sl_idx in range(sl_start_idx, sl_end_idx):
-        meta_idx = aux_utils.get_meta_idx(frames_metadata,
-                                          time_idx,
-                                          channel_idx,
-                                          sl_idx,
-                                          pos_idx)
-        cur_fname = frames_metadata.loc[meta_idx, 'file_name']
-        cur_img = image_utils.read_image(os.path.join(input_dir, cur_fname))
-        if ff_path is not None:
-            cur_img = image_utils.apply_flat_field_correction(
-                cur_img,
-                flat_field_path=ff_path,
-            )
-        input_stack.append(cur_img)
-    input_stack = np.stack(input_stack, axis=2)
-    resc_vol = image_utils.rescale_nd_image(input_stack, scale_factor)
-    np.save(output_fname, resc_vol, allow_pickle=True, fix_imports=True)
-    cur_metadata = {'time_idx': time_idx,
-                    'pos_idx': pos_idx,
-                    'channel_idx': channel_idx,
-                    'slice_idx': sl_start_idx,
-                    'file_name': os.path.basename(output_fname),
-                    'mean': np.mean(resc_vol),
-                    'std': np.std(resc_vol)}
-    return cur_metadata
+    return mask
 
 
-def mp_get_im_stats(fn_args, workers):
+def mp_get_i_stats(fn_args, workers):
     """Read and computes statistics of images with multiprocessing
 
     :param list of tuple fn_args: list with tuples of function arguments
     :param int workers: max number of workers
     :return: list of returned df from get_im_stats
     """
-
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(get_im_stats, fn_args)
@@ -470,10 +259,40 @@ def get_im_stats(im_path):
     :return dict meta_row: Dict with intensity data for image
     """
     im = image_utils.read_image(im_path)
+    meta_row = {"mean": np.nanmean(im), "std": np.nanstd(im)}
+    return meta_row
+
+
+def mp_get_val_stats(fn_args, workers):
+    """
+    Computes statistics of numpy arrays with multiprocessing
+
+    :param list of tuple fn_args: list with tuples of function arguments
+    :param int workers: max number of workers
+    :return: list of returned df from get_im_stats
+    """
+    with ProcessPoolExecutor(workers) as ex:
+        # can't use map directly as it works only with single arg functions
+        res = ex.map(get_val_stats, fn_args)
+    return list(res)
+
+
+def get_val_stats(sample_values):
+    """
+    Computes the statistics of a numpy array and returns a dictionary
+    of metadata corresponding to input sample values.
+
+    :param list(float) sample_values: List of sample values at respective
+                                        indices
+    :return dict meta_row: Dict with intensity data for image
+    """
+
     meta_row = {
-        'mean': np.nanmean(im),
-        'std': np.nanstd(im)
-        }
+        "mean": float(np.nanmean(sample_values)),
+        "std": float(np.nanstd(sample_values)),
+        "median": float(np.nanmedian(sample_values)),
+        "iqr": float(scipy.stats.iqr(sample_values)),
+    }
     return meta_row
 
 
@@ -482,43 +301,48 @@ def mp_sample_im_pixels(fn_args, workers):
 
     :param list of tuple fn_args: list with tuples of function arguments
     :param int workers: max number of workers
-    :return: list of returned df from get_im_stats
+    :return: list of paths and corresponding returned df from get_im_stats
     """
 
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(sample_im_pixels, *zip(*fn_args))
-    return list(res)
+    return list(map(list, zip(*list(res))))
 
 
-def sample_im_pixels(im_path, ff_path, grid_spacing, meta_row):
+def sample_im_pixels(
+    position: ngff.Position,
+    grid_spacing,
+    channel,
+):
+    # TODO move out of mp utils into normalization utils
     """
     Read and computes statistics of images for each point in a grid.
     Grid spacing determines distance in pixels between grid points
     for rows and cols.
-    Applies flatfield correction prior to intensity sampling if flatfield
-    path is specified.
+    By default, samples from every time position and every z-depth, and
+    assumes that the data in the zarr store is stored in [T,C,Z,Y,X] format,
+    for time, channel, z, y, x.
 
-    :param str im_path: Full path to image
-    :param str ff_path: Full path to flatfield image corresponding to image
-    :param int grid_spacing: Distance in pixels between sampling points
-    :param dict meta_row: Metadata row for image
+    :param Position zarr_dir: NGFF position node object
+    :param int grid_spacing: spacing of sampling grid in x and y
+    :param int channel: channel to sample from
+
     :return list meta_rows: Dicts with intensity data for each grid point
     """
-    im = image_utils.read_image(im_path)
-    if ff_path is not None:
-        im = image_utils.apply_flat_field_correction(
-            input_image=im,
-            flat_field_path=ff_path,
-        )
-    row_ids, col_ids, sample_values = \
-        image_utils.grid_sample_pixel_values(im, grid_spacing)
+    image_zarr = position.data
 
-    meta_rows = \
-        [{**meta_row,
-          'row_idx': row_idx,
-          'col_idx': col_idx,
-          'intensity': sample_value}
-         for row_idx, col_idx, sample_value
-         in zip(row_ids, col_ids, sample_values)]
-    return meta_rows
+    all_sample_values = []
+    all_time_indices = list(range(image_zarr.shape[0]))
+    all_z_indices = list(range(image_zarr.shape[2]))
+
+    for time_index in all_time_indices:
+        for z_index in all_z_indices:
+            image_slice = image_zarr[time_index, channel, z_index, :, :]
+            _, _, sample_values = image_utils.grid_sample_pixel_values(
+                image_slice, grid_spacing
+            )
+            all_sample_values.append(sample_values)
+    sample_values = np.stack(all_sample_values, 0).flatten()
+
+    return position, sample_values

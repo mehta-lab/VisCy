@@ -7,6 +7,7 @@ import unittest
 
 import micro_dl.cli.preprocess_script as pp
 import micro_dl.utils.aux_utils as aux_utils
+import micro_dl.utils.io_utils as io_utils
 
 
 class TestPreprocessScript(unittest.TestCase):
@@ -20,6 +21,8 @@ class TestPreprocessScript(unittest.TestCase):
         self.image_dir = self.temp_path
         self.output_dir = os.path.join(self.temp_path, 'out_dir')
         self.tempdir.makedir(self.output_dir)
+        self.zarr_dir = os.path.join(self.temp_path, 'zarr_dir')
+        self.tempdir.makedir(self.zarr_dir)
         # Start frames meta file
         self.meta_name = 'frames_meta.csv'
         self.frames_meta = aux_utils.make_dataframe()
@@ -27,13 +30,23 @@ class TestPreprocessScript(unittest.TestCase):
         self.time_idx = 0
         self.pos_ids = [7, 8, 10]
         self.channel_ids = [0, 1, 2, 3]
-        self.flat_field_channels = [0, 1]
         self.slice_ids = [0, 1, 2, 3, 4, 5]
         self.im = 1500 * np.ones((30, 20), dtype=np.uint16)
         self.im[10:20, 5:15] = 3000
-
-        for c in self.channel_ids:
-            for p in self.pos_ids:
+        # Create the same data in zarr format
+        zarr_writer = io_utils.ZarrWriter(
+            save_dir=self.zarr_dir,
+        )
+        for p in self.pos_ids:
+            zarr_writer.create_zarr_root('test_name_pos{}'.format(p))
+            zarr_writer.init_array(
+                position=p,
+                data_shape=(1, 4, 6, 30, 20),
+                chunk_size=(1, 1, 1, 30, 20),
+                chan_names=['ch0', 'ch1', 'ch2', 'ch3'],
+                dtype='uint16',
+            )
+            for c in self.channel_ids:
                 for z in self.slice_ids:
                     im_name = aux_utils.get_im_name(
                         channel_idx=c,
@@ -44,10 +57,15 @@ class TestPreprocessScript(unittest.TestCase):
                     im = self.im + c * 100
                     cv2.imwrite(os.path.join(self.temp_path, im_name),
                                 im)
-                    meta_row = aux_utils.parse_idx_from_name(im_name)
+                    # Write zarr
+                    zarr_writer.write(im, p=p, t=0, c=c, z=z)
+                    # Create metadata
+                    meta_row = aux_utils.parse_idx_from_name(
+                        im_name=im_name,
+                        dir_name=self.image_dir,
+                    )
                     meta_row['mean'] = np.nanmean(im)
                     meta_row['std'] = np.nanstd(im)
-                    meta_row['dir_name'] = self.image_dir
                     self.frames_meta = self.frames_meta.append(
                         meta_row,
                         ignore_index=True,
@@ -79,7 +97,10 @@ class TestPreprocessScript(unittest.TestCase):
                     mask,
                 )
                 mask_meta = mask_meta.append(
-                    aux_utils.parse_idx_from_name(im_name),
+                    aux_utils.parse_idx_from_name(
+                        im_name=im_name,
+                        dir_name=self.input_mask_dir,
+                    ),
                     ignore_index=True,
                 )
         mask_meta.to_csv(
@@ -90,12 +111,9 @@ class TestPreprocessScript(unittest.TestCase):
         self.pp_config = {
             'output_dir': self.output_dir,
             'input_dir': self.image_dir,
+            'file_format': 'tiff',
             'channel_ids': [0, 1, 3],
             'num_workers': 4,
-            'flat_field': {'method': 'estimate',
-                           'block_size': 2,
-                           'flat_field_channels': self.flat_field_channels,
-                           },
             'masks': {'channels': [3],
                       'str_elem_radius': 3,
                       },
@@ -113,6 +131,7 @@ class TestPreprocessScript(unittest.TestCase):
         self.base_config = {
             'input_dir': self.image_dir,
             'output_dir': self.output_dir,
+            'file_format': 'tiff',
             'slice_ids': -1,
             'time_ids': -1,
             'pos_ids': -1,
@@ -140,10 +159,6 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(
             self.base_config['channel_ids'],
             self.pp_config['channel_ids'],
-        )
-        self.assertEqual(
-            out_config['flat_field']['flat_field_dir'],
-            os.path.join(self.output_dir, 'flat_field_images')
         )
         self.assertEqual(
             out_config['masks']['mask_dir'],
@@ -182,19 +197,6 @@ class TestPreprocessScript(unittest.TestCase):
                 self.assertTrue(im.dtype == 'uint8')
                 self.assertTrue(im_name in mask_names)
                 self.assertTrue(im_name in mask_meta['file_name'].tolist())
-        # Check flatfield images
-        ff_dir = out_config['flat_field']['flat_field_dir']
-        ff_names = os.listdir(ff_dir)
-        ff_names.sort()
-        for i, ff_name in enumerate(ff_names):
-            expected_name = 'flat-field_channel-{}.npy'.format(
-                self.flat_field_channels[i],
-            )
-            self.assertEqual(ff_name, expected_name)
-            im = np.load(os.path.join(ff_dir, expected_name))
-            self.assertTrue(im.dtype == np.float64)
-            self.assertTupleEqual(im.shape, (30, 20))
-
         # Check tiles
         tile_dir = out_config['tile']['tile_dir']
         tile_meta = aux_utils.read_meta(tile_dir)
@@ -226,7 +228,106 @@ class TestPreprocessScript(unittest.TestCase):
              'file_name',
              'pos_idx',
              'row_start',
-             'col_start']
+             'col_start',
+             'dir_name']
+        )
+        self.assertListEqual(
+            tile_meta.row_start.unique().tolist(),
+            [0, 10, 20],
+        )
+        self.assertListEqual(
+            tile_meta.col_start.unique().tolist(),
+            [0, 10],
+        )
+        # Read one tile and check format
+        # r = row start/end idx, c = column start/end, sl = slice start/end
+        # sl0-1 signifies depth of 1
+        im = np.load(os.path.join(
+            tile_dir,
+            'im_c001_z000_t000_p007_r10-20_c10-20_sl0-1.npy',
+        ))
+        self.assertTupleEqual(im.shape, (1, 10, 10))
+        self.assertTrue(im.dtype == np.float64)
+
+    def test_pre_process_zarr(self):
+        self.pp_config['input_dir'] = self.zarr_dir
+        self.pp_config['file_format'] = 'zarr'
+        out_config, runtime = pp.pre_process(self.pp_config)
+        self.assertIsInstance(runtime, np.float)
+        self.assertEqual(
+            self.base_config['channel_ids'],
+            self.pp_config['channel_ids'],
+        )
+        self.assertEqual(
+            out_config['masks']['mask_dir'],
+            os.path.join(self.output_dir, 'mask_channels_3')
+        )
+        self.assertEqual(
+            out_config['tile']['tile_dir'],
+            os.path.join(self.output_dir, 'tiles_10-10_step_10-10'),
+        )
+        # Make sure new mask channel assignment is correct
+        self.assertEqual(out_config['masks']['mask_channel'], 4)
+        # Check that masks are generated
+        mask_dir = out_config['masks']['mask_dir']
+        mask_meta = aux_utils.read_meta(mask_dir)
+        mask_names = os.listdir(mask_dir)
+        mask_names = [mn for mn in mask_names if 'overlay' not in mn]
+        mask_names.pop(mask_names.index('frames_meta.csv'))
+        # Validate that all masks are there
+        self.assertEqual(
+            len(mask_names),
+            len(self.slice_ids) * len(self.pos_ids),
+        )
+        for p in self.pos_ids:
+            for z in self.slice_ids:
+                im_name = aux_utils.get_im_name(
+                    channel_idx=out_config['masks']['mask_channel'],
+                    slice_idx=z,
+                    time_idx=self.time_idx,
+                    pos_idx=p,
+                )
+                im = cv2.imread(
+                    os.path.join(mask_dir, im_name),
+                    cv2.IMREAD_ANYDEPTH,
+                )
+                self.assertTupleEqual(im.shape, (30, 20))
+                self.assertTrue(im.dtype == 'uint8')
+                self.assertTrue(im_name in mask_names)
+                self.assertTrue(im_name in mask_meta['file_name'].tolist())
+        # Check tiles
+        tile_dir = out_config['tile']['tile_dir']
+        tile_meta = aux_utils.read_meta(tile_dir)
+        # 4 processed channels (0, 1, 3, 4), 6 tiles per image
+        expected_rows = 4 * 6 * len(self.slice_ids) * len(self.pos_ids)
+        self.assertEqual(tile_meta.shape[0], expected_rows)
+        # Check indices
+        self.assertListEqual(
+            tile_meta.channel_idx.unique().tolist(),
+            [0, 1, 3, 4],
+        )
+        self.assertListEqual(
+            tile_meta.pos_idx.unique().tolist(),
+            self.pos_ids,
+        )
+        self.assertListEqual(
+            tile_meta.slice_idx.unique().tolist(),
+            self.slice_ids,
+        )
+        self.assertListEqual(
+            tile_meta.time_idx.unique().tolist(),
+            [self.time_idx],
+        )
+        self.assertListEqual(
+            list(tile_meta),
+            ['channel_idx',
+             'slice_idx',
+             'time_idx',
+             'file_name',
+             'pos_idx',
+             'row_start',
+             'col_start',
+             'dir_name']
         )
         self.assertListEqual(
             tile_meta.row_start.unique().tolist(),
@@ -279,8 +380,6 @@ class TestPreprocessScript(unittest.TestCase):
             'channel_name',
             'dir_name',
             'file_name',
-            'mean',
-            'std',
             'row_idx',
             'col_idx',
             'intensity',
@@ -370,63 +469,6 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == bool)
 
-    def test_pre_process_flat_field_from_file(self):
-        cur_config = self.pp_config
-        flat_field_dir = os.path.join(self.output_dir,
-                                      'flat_field_images')
-        os.makedirs(flat_field_dir, exist_ok=True)
-        for ff_channel in self.flat_field_channels:
-            ff_name = 'flat-field_channel-{}.npy'.format(ff_channel)
-            np.save(
-                os.path.join(flat_field_dir, ff_name),
-                self.im / self.im.max(),
-            )
-        cur_config['flat_field'] = {
-            'method': 'from_file',
-            'flat_field_dir': flat_field_dir,
-            'flat_field_channels': self.flat_field_channels,
-        }
-        out_config, runtime = pp.pre_process(cur_config)
-
-    @nose.tools.raises(AssertionError)
-    def test_pre_process_flat_field_wrong_channels(self):
-        cur_config = self.pp_config
-        flat_field_dir = os.path.join(self.output_dir,
-                                      'flat_field_images')
-        os.makedirs(flat_field_dir, exist_ok=True)
-        np.save(
-            os.path.join(flat_field_dir, 'flat-field_channel-5.npy'),
-            self.im,
-        )
-        cur_config['flat_field'] = {
-            'method': 'from_file',
-            'flat_field_dir': flat_field_dir,
-            'flat_field_channels': self.flat_field_channels,
-        }
-        out_config, runtime = pp.pre_process(cur_config)
-
-    @nose.tools.raises(AssertionError)
-    def test_pre_process_flat_field_no_dir(self):
-        cur_config = self.pp_config
-        cur_config['flat_field'] = {
-            'method': 'from_file',
-            'flat_field_channels': self.flat_field_channels,
-        }
-        out_config, runtime = pp.pre_process(cur_config)
-
-    @nose.tools.raises(AssertionError)
-    def test_pre_process_flat_field_no_files(self):
-        cur_config = self.pp_config
-        flat_field_dir = os.path.join(self.output_dir,
-                                      'flat_field_images')
-        os.makedirs(flat_field_dir, exist_ok=True)
-        cur_config['flat_field'] = {
-            'method': 'from_file',
-            'flat_field_dir': flat_field_dir,
-            'flat_field_channels': self.flat_field_channels,
-        }
-        out_config, runtime = pp.pre_process(cur_config)
-
     def test_pre_process_resize2d(self):
         cur_config = self.pp_config
         cur_config['resize'] = {
@@ -497,7 +539,6 @@ class TestPreprocessScript(unittest.TestCase):
         im = np.load(im_path)
         # shape should be 30, 20*1.5, z=6)
         self.assertTupleEqual(im.shape, (30, 30, 6))
-        self.assertTrue(im.dtype == np.float64)
 
         self.assertEqual(
             out_config['masks']['mask_dir'],

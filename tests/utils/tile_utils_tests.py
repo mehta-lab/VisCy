@@ -19,13 +19,7 @@ class TestTileUtils(unittest.TestCase):
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
         meta_fname = 'frames_meta.csv'
-        self.df_columns = ['channel_idx',
-                           'slice_idx',
-                           'time_idx',
-                           'channel_name',
-                           'file_name',
-                           'pos_idx']
-        frames_meta = pd.DataFrame(columns=self.df_columns)
+        frames_meta = aux_utils.make_dataframe()
 
         x = np.linspace(-4, 4, 32)
         y = x.copy()
@@ -61,7 +55,9 @@ class TestTileUtils(unittest.TestCase):
                 pos_idx=self.pos_idx,
             )
             meta_row = aux_utils.parse_idx_from_name(
-                im_name, self.df_columns)
+                im_name=im_name,
+                dir_name=self.temp_path,
+            )
             meta_row['mean'] = np.nanmean(sph[:, :, z])
             meta_row['std'] = np.nanstd(sph[:, :, z])
             cv2.imwrite(os.path.join(self.temp_path, im_name), sph[:, :, z])
@@ -187,7 +183,8 @@ class TestTileUtils(unittest.TestCase):
                             'file_name': cur_fname,
                             'pos_idx': self.pos_idx,
                             'row_start': row,
-                            'col_start': col}
+                            'col_start': col,
+                            'dir_name': tile_dir}
                 tile_meta.append(cur_meta)
         exp_tile_meta_df = pd.DataFrame.from_dict(tile_meta)
         exp_tile_meta_df = exp_tile_meta_df.sort_values(by=['file_name'])
@@ -310,7 +307,8 @@ class TestTileUtils(unittest.TestCase):
                         'file_name': cur_fname,
                         'pos_idx': self.pos_idx,
                         'row_start': cur_idx[0],
-                        'col_start': cur_idx[2]}
+                        'col_start': cur_idx[2],
+                        'dir_name': tile_dir}
             exp_tile_meta.append(cur_meta)
         exp_tile_meta_df = pd.DataFrame.from_dict(exp_tile_meta)
         exp_tile_meta_df = exp_tile_meta_df.sort_values(by=['file_name'])

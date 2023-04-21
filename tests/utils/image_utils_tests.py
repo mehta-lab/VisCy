@@ -10,6 +10,7 @@ import unittest
 # Create a test image with a bright block to the right
 import micro_dl.utils.aux_utils as aux_utils
 import micro_dl.utils.image_utils as image_utils
+import micro_dl.utils.io_utils as io_utils
 import micro_dl.utils.normalize as normalize
 from tests.utils.masks_utils_tests import uni_thr_tst_image
 
@@ -49,20 +50,6 @@ def test_samescale_image():
     nose.tools.assert_equal(im_shape[1], test_shape[1])
     nose.tools.assert_equal(im_out[0, 0], test_im[0, 0])
     nose.tools.assert_equal(im_out[-1, -1], test_im[-1, -1])
-
-
-def test_fit_polynomial_surface():
-    flatfield = image_utils.fit_polynomial_surface_2D(
-        test_coords,
-        test_values,
-        im_shape=(10, 15),
-    )
-    # Since there's a bright block to the right, the left col should be
-    # < right col
-    nose.tools.assert_true(np.mean(flatfield[:, 0]) <
-                           np.mean(flatfield[:, -1]))
-    # Since flatfield is normalized, the mean should be close to one
-    nose.tools.assert_almost_equal(np.mean(flatfield), 1., places=3)
 
 
 def test_rescale_volume():
@@ -114,6 +101,17 @@ def test_center_crop_to_shape_2d_too_big():
     image_utils.center_crop_to_shape(im, output_shape)
 
 
+def test_grid_sample_pixel_values():
+    im = np.zeros((15, 20))
+    row_ids, col_ids, sample_values = image_utils.grid_sample_pixel_values(
+        im,
+        grid_spacing=5,
+    )
+    nose.tools.assert_list_equal(row_ids.tolist(), [5, 5, 5, 10, 10, 10])
+    nose.tools.assert_list_equal(col_ids.tolist(), [5, 10, 15, 5, 10, 15])
+    nose.tools.assert_list_equal(sample_values.tolist(), [0, 0, 0, 0, 0, 0])
+
+
 class TestImageUtils(unittest.TestCase):
 
     def setUp(self):
@@ -122,13 +120,7 @@ class TestImageUtils(unittest.TestCase):
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
         meta_fname = 'frames_meta.csv'
-        self.df_columns = ['channel_idx',
-                           'slice_idx',
-                           'time_idx',
-                           'channel_name',
-                           'file_name',
-                           'pos_idx']
-        self.frames_meta = pd.DataFrame(columns=self.df_columns)
+        self.frames_meta = aux_utils.make_dataframe()
 
         x = np.linspace(-4, 4, 32)
         y = x.copy()
@@ -147,41 +139,64 @@ class TestImageUtils(unittest.TestCase):
 
         for z in range(sph.shape[2]):
             im_name = aux_utils.get_im_name(
-                channel_idx=1,
+                channel_idx=self.channel_idx,
                 slice_idx=z,
                 time_idx=self.time_idx,
                 pos_idx=self.pos_idx,
             )
             cv2.imwrite(os.path.join(self.temp_path, im_name), sph[:, :, z])
-            meta_row = aux_utils.parse_idx_from_name(
-                im_name, self.df_columns)
+            meta_row = aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path)
             meta_row['zscore_median'] = np.nanmean(sph[:, :, z])
             meta_row['zscore_iqr'] = np.nanstd(sph[:, :, z])
             self.frames_meta = self.frames_meta.append(
                 meta_row,
                 ignore_index=True
             )
-        self.dataset_mean = self.frames_meta['zscore_median'].mean()
-        self.dataset_std = self.frames_meta['zscore_iqr'].mean()
+        self.dataset_mean = self.frames_meta['zscore_median'].median()
+        self.dataset_std = self.frames_meta['zscore_iqr'].median()
         # Write metadata
         self.frames_meta.to_csv(os.path.join(self.temp_path, meta_fname), sep=',')
-        # Write 3D sphere data
+        # Get a meta row for testing
+        meta_idx = aux_utils.get_meta_idx(
+            frames_metadata=self.frames_meta,
+            time_idx=self.time_idx,
+            channel_idx=self.channel_idx,
+            slice_idx=7,
+            pos_idx=self.pos_idx)
+        self.meta_row = self.frames_meta.loc[meta_idx]
+        # Write sph data as zarr
+        zarr_writer = io_utils.ZarrWriter(save_dir=self.temp_path)
+        zarr_data = np.zeros((2, 1, 2, 8, 32, 32))
+        # Fix dimensions to match to zarr format PTCZYX
+        zarr_data[1, 0, 1, ...] = np.moveaxis(self.sph, -1, 0)
+        for pos_idx in range(2):
+            zarr_writer.create_zarr_root('test_sphere_pos{}'.format(pos_idx))
+            zarr_writer.init_array(
+                position=pos_idx,
+                data_shape=(1, 2, 8, 32, 32),
+                chunk_size=(1, 1, 1, 32, 32),
+                chan_names=['channel1', 'channel2'],
+                dtype=zarr_data.dtype,
+            )
+            zarr_writer.write(zarr_data[pos_idx, ...], p=pos_idx)
+
+        # Write 3D sphere data as npy file
         self.sph_fname = os.path.join(
             self.temp_path,
             'im_c001_z000_t000_p001_3d.npy',
         )
         np.save(self.sph_fname, self.sph, allow_pickle=True, fix_imports=True)
-        meta_3d = pd.DataFrame.from_dict([{
+        self.meta_3d = pd.DataFrame.from_dict([{
             'channel_idx': 1,
             'slice_idx': 0,
             'time_idx': 0,
             'channel_name': '3d_test',
+            'dir_name': self.temp_path,
             'file_name': 'im_c001_z000_t000_p001_3d.npy',
             'pos_idx': 1,
             'zscore_median': np.nanmean(sph),
             'zscore_iqr': np.nanstd(sph)
         }])
-        self.meta_3d = meta_3d
 
     def tearDown(self):
         """
@@ -202,9 +217,69 @@ class TestImageUtils(unittest.TestCase):
         im = image_utils.read_image(self.sph_fname)
         np.testing.assert_array_equal(im, self.sph)
 
-    def test_read_imstack(self):
-        """Test read_imstack"""
+    def test_read_image_from_row(self):
+        im = image_utils.read_image_from_row(self.meta_row)
+        np.testing.assert_array_equal(im, self.sph[..., 7])
 
+    def test_read_image_from_row_dir_name(self):
+        im = image_utils.read_image_from_row(self.meta_row, self.temp_path)
+        np.testing.assert_array_equal(im, self.sph[..., 7])
+
+    def test_read_image_from_row_zarr(self):
+        meta_row = self.meta_row.copy()
+        meta_row['file_name'] = 'test_sphere_pos{}.zarr'.format(self.pos_idx)
+        im = image_utils.read_image_from_row(
+            meta_row=meta_row,
+        )
+        np.testing.assert_array_equal(im, self.sph[..., 7])
+
+    def test_preprocess_image(self):
+        im = np.zeros((5, 10, 15, 1))
+        im[:, :5, :, :] = 10
+        im_proc = image_utils.preprocess_image(
+            im,
+            hist_clip_limits=(0, 100),
+        )
+        self.assertEqual(np.mean(im), np.mean(im_proc))
+        self.assertTupleEqual(im_proc.shape, (5, 10, 15))
+
+    def test_preprocess_image_norm(self):
+        im = np.zeros((5, 10, 15))
+        im[:, :5, :] = 10
+        im_proc = image_utils.preprocess_image(
+            im,
+            normalize_im='dataset',
+        )
+        self.assertEqual(np.mean(im_proc), 0.0)
+        self.assertTupleEqual(im.shape, im_proc.shape)
+
+    def test_preprocess_image_mask(self):
+        im = np.zeros((5, 10, 15))
+        im[:, :5, :] = 10
+        im_proc = image_utils.preprocess_image(
+            im,
+            is_mask=True,
+        )
+        self.assertEqual(np.mean(im_proc), 0.5)
+        self.assertTupleEqual(im.shape, im_proc.shape)
+        self.assertTrue(im_proc.dtype == bool)
+
+    def test_read_imstack_from_meta(self):
+        im_stack = image_utils.read_imstack_from_meta(
+            frames_meta_sub=self.frames_meta,
+            dir_name=self.temp_path,
+            hist_clip_limits=(0, 100),
+        )
+        np.testing.assert_array_equal(im_stack, self.sph)
+
+    def test_read_imstack_from_meta_one_im(self):
+        im_stack = image_utils.read_imstack_from_meta(
+            frames_meta_sub=self.meta_row,
+            hist_clip_limits=(0, 100),
+        )
+        np.testing.assert_array_equal(np.squeeze(im_stack), self.sph[..., 7])
+
+    def test_read_imstack(self):
         fnames = self.frames_meta['file_name'][:3]
         fnames = [os.path.join(self.temp_path, fname) for fname in fnames]
         # non-boolean
@@ -236,12 +311,12 @@ class TestImageUtils(unittest.TestCase):
         """Test preprocess_imstack"""
         im_stack = image_utils.preprocess_imstack(
             frames_metadata=self.frames_meta,
-            input_dir=self.temp_path,
             depth=3,
             time_idx=self.time_idx,
             channel_idx=self.channel_idx,
             slice_idx=2,
             pos_idx=self.pos_idx,
+            dir_name=self.temp_path,
             normalize_im='dataset',
         )
         np.testing.assert_equal(im_stack.shape, (32, 32, 3))
@@ -256,7 +331,6 @@ class TestImageUtils(unittest.TestCase):
         # preprocess a 3D image
         im_stack = image_utils.preprocess_imstack(
             frames_metadata=self.meta_3d,
-            input_dir=self.temp_path,
             depth=1,
             time_idx=0,
             channel_idx=1,
@@ -272,5 +346,3 @@ class TestImageUtils(unittest.TestCase):
             im_std=np.nanstd(self.sph),
         )
         np.testing.assert_array_equal(im_stack, exp_stack)
-
-

@@ -15,7 +15,7 @@ from micro_dl.preprocessing.generate_masks import MaskProcessor
 class TestMaskProcessor(unittest.TestCase):
 
     def setUp(self):
-        """Set up a directory for mask generation, no flatfield"""
+        """Set up a directory for mask generation,"""
 
         self.tempdir = TempDirectory()
         self.temp_path = self.tempdir.path
@@ -61,7 +61,7 @@ class TestMaskProcessor(unittest.TestCase):
                     object1[:, :, z].astype('uint8'),
                 )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                 ignore_index=True
             )
         for z in range(rec.shape[2]):
@@ -78,7 +78,7 @@ class TestMaskProcessor(unittest.TestCase):
                     rec[:, :, z].astype('uint8'),
                 )
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                 ignore_index=True
             )
         # Write metadata
@@ -86,15 +86,16 @@ class TestMaskProcessor(unittest.TestCase):
                            sep=',')
 
         self.output_dir = os.path.join(self.temp_path, 'mask_dir')
-        self.mask_gen_inst = MaskProcessor(input_dir=self.temp_path,
-                                           output_dir=self.output_dir,
-                                           channel_ids=self.channel_ids)
+        self.mask_gen_inst = MaskProcessor(
+            input_dir=self.temp_path,
+            output_dir=self.output_dir,
+            channel_ids=self.channel_ids,
+        )
 
     def tearDown(self):
         """Tear down temporary folder and file structure"""
-
         TempDirectory.cleanup_all()
-        nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
+        self.assertFalse(os.path.isdir(self.temp_path))
 
     def test_init(self):
         """Test init"""
@@ -118,21 +119,6 @@ class TestMaskProcessor(unittest.TestCase):
         """Test get_mask_channel"""
         nose.tools.assert_equal(self.mask_gen_inst.get_mask_channel(), 3)
 
-    def test_get_args_read_image(self):
-        """Test _get_args_read_image"""
-        ip_fnames, ff_fname = self.mask_gen_inst._get_args_read_image(
-            time_idx=self.time_ids,
-            channel_ids=self.channel_ids,
-            slice_idx=5,
-            pos_idx=self.pos_ids,
-        )
-        exp_fnames = ['im_c001_z005_t000_p001.png',
-                      'im_c002_z005_t000_p001.png']
-        for idx, fname in enumerate(exp_fnames):
-            nose.tools.assert_equal(ip_fnames[idx],
-                                    os.path.join(self.temp_path, fname))
-        nose.tools.assert_equal(ff_fname, None)
-
     def test_generate_masks_uni(self):
         """Test generate masks"""
         self.mask_gen_inst.generate_masks(str_elem_radius=1)
@@ -143,7 +129,7 @@ class TestMaskProcessor(unittest.TestCase):
         # 8 slices and 3 channels
         exp_len = 8
         nose.tools.assert_equal(len(frames_meta), exp_len)
-        for idx in range(8):
+        for idx in range(exp_len):
             nose.tools.assert_equal('im_c003_z00{}_t000_p001.npy'.format(idx),
                                     frames_meta.iloc[idx]['file_name'])
 
@@ -165,7 +151,7 @@ class TestMaskProcessor(unittest.TestCase):
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             self.sph_object[:, :, z].astype('uint8'))
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                 ignore_index=True
             )
         for z in range(rec.shape[2]):
@@ -178,7 +164,7 @@ class TestMaskProcessor(unittest.TestCase):
             sk_im_io.imsave(os.path.join(self.temp_path, im_name),
                             rec[:, :, z].astype('uint8'))
             frames_meta = frames_meta.append(
-                aux_utils.parse_idx_from_name(im_name, aux_utils.DF_NAMES),
+                aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
                 ignore_index=True
             )
         # Write metadata

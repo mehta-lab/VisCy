@@ -62,7 +62,6 @@ class TestTrainingTable(unittest.TestCase):
                       'channel_name', 'dir_name', 'file_name_0',
                       'file_name_1', 'file_name_2', 'file_name_3']
 
-        print(list(self.table_inst.df_metadata))
         self.assertListEqual(list(self.table_inst.df_metadata), col_names)
         self.assertListEqual(
             self.table_inst.input_channels,

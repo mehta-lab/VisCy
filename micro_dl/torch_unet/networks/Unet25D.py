@@ -4,7 +4,6 @@ import time
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 
 from micro_dl.torch_unet.networks.layers.ConvBlock3D import *
 import micro_dl.torch_unet.utils.logging as log
@@ -61,13 +60,14 @@ class Unet25d(nn.Module):
         self.dropout = dropout
         self.task = task
         self.debug_mode = False
-
+        
         # ----- set static parameters ----- #
         self.block_padding = "same"
         down_mode = "avgpool"  # TODO set static avgpool
         up_mode = "trilinear"  # TODO set static trilinear
         activation = "relu"  # TODO set static relu
         self.bottom_block_spatial = False  # TODO set static
+        # TODO set conv_block layer order variable
 
         # ----- Standardize Filter Sequence ----- #
         if len(num_filters) != 0:
@@ -78,7 +78,6 @@ class Unet25d(nn.Module):
             self.num_filters = num_filters
         else:
             self.num_filters = [pow(2, i) * 16 for i in range(num_blocks + 1)]
-            self.num_filters
         downsampling_filters = [in_channels] + self.num_filters
         upsampling_filters = [
             self.num_filters[-(i + 1)] + self.num_filters[-(i + 2)]
@@ -200,7 +199,7 @@ class Unet25d(nn.Module):
 
     def forward(self, x, validate_input=False):
         """
-        Forward call of network
+        Forward call of network.
 
         Call order:
             => num_block 3D convolutional blocks, with downsampling in between (encoder)
@@ -249,9 +248,8 @@ class Unet25d(nn.Module):
         # output channel collapsing layer
         x = self.terminal_block(x)
         self.log_feature(x, f"output")
-
         return x
-
+    
     def register_modules(self, module_list, name):
         """
         Helper function that registers modules stored in a list to the model object so that the can

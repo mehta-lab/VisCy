@@ -17,7 +17,7 @@ def zscore(input_image, im_mean=None, im_std=None):
         im_mean = np.nanmean(input_image)
     if not im_std:
         im_std = np.nanstd(input_image)
-    norm_img = (input_image - im_mean.astype(np.float64)) /\
+    norm_img = (input_image - im_mean) /\
                (im_std + sys.float_info.epsilon)
     return norm_img
 
