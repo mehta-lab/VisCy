@@ -29,6 +29,7 @@ class TorchInferenceDataset(Dataset):
         norm_type,
         norm_scheme,
         device,
+        batched_view=True
     ):
         """
         Initiate object for selecting and passing data to model for inference.
@@ -43,6 +44,8 @@ class TorchInferenceDataset(Dataset):
         :param str norm_type: type of normalization that was used on data in training
         :param str norm_scheme: scheme (breadth) of normalization used in training
         :param torch.device device: device to send samples to before returning
+        :param bool strided_view: whether to return a strided view of z-stack as a 
+                            batch of inputs, defaults to True
         """
         self.zarr_dir = zarr_dir
         self.normalize_inputs = normalize_inputs
@@ -56,6 +59,7 @@ class TorchInferenceDataset(Dataset):
         self.channels = None
         self.timesteps = None
 
+        self.batched_view = batched_view
         self.source_position = None
         self.data_plate = ngff.open_ome_zarr(
             store_path=zarr_dir,
@@ -79,9 +83,10 @@ class TorchInferenceDataset(Dataset):
         if timestep 2 and z slice 4 of 10 is requested, idx should be:
             2*10 + 4 = 24
 
+        
         :param int idx: index in timestep & center-z-slice mapping
 
-        :return torch.Tensor data: requested image stack as a tensor
+        :return torch.Tensor data: requested image stack with strided view
         :return list norm_statistics: (optional) list of normalization statistics
                         dicts for each channel in the returned array
         """
@@ -99,16 +104,23 @@ class TorchInferenceDataset(Dataset):
         ]
         data = np.stack(data, 0)
 
-        # normalize and convert
+        # normalize 
         norm_statistics = [
             self._get_normalization_statistics(c)
             for c in self.channels
             if "mask" not in c
         ]
         if self.normalize_inputs:
-            data = self._normalize_multichan(data, norm_statistics)
+            data = self._normalize_multichan(data, norm_statistics)\
+                
+        # build batched view. 
+        # NOTE: This can be done with ".as_strided()", but is more 
+        #       readable this way for minimal cost
+        idx_range = self.batch_stack_size - self.sample_depth
+        data = np.stack([data[:,i:i+self.sample_depth,...] for i in range(idx_range)],0)
+        
+        #convert and return
         data = aux_utils.ToTensor(self.device)(data)
-
         return data, norm_statistics
 
     def set_source_array(self, row, col, fov, timestep=None, channels=None):

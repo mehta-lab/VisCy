@@ -289,10 +289,12 @@ class TorchPredictor:
                 )
                 dataloader = iter(DataLoader(self.dataset))
 
+                #TODO: change to only hold one batch in memory at a time
                 batch_predictions = []
                 for batch, _ in dataloader:
-                    batch_predictions.append(self.predict_image(batch))
-
+                    batch_pred = self.predict_image(batch[0]) #redundant batch dim
+                    batch_predictions.append(np.swapaxes(batch_pred, 0, 2)) 
+                
                 batch_predictions = np.squeeze(
                     np.concatenate(batch_predictions, -3), axis=0
                 )
