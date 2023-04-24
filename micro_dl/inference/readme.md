@@ -48,4 +48,39 @@ Some working config examples can be found at:
 /hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/config_files/2022_HEK_nuc_mem_Soorya/TestData_HEK_2022_04_16/
 ```
 
+# Single Sample Prediction
+It is sometimes the case that inference needs to be run on individual samples. This can be performed by using the `predict_image` method of the `TorchPredictor` object.
+
+Initializing the `TorchPredictor` object for this task requires a config dictionary specifying the model to use for prediction:
+> **model_dir:** `absolute path` (Path to parent directory of _pre-trained_ model to use for inference)
+>
+> **model_name:** `str` (name of model state dict "*.ckpt")
+
+A simple example:
+
+```python
+import numpy as np
+import sys
+sys.path.insert(0, "/pathtoyourinstallation/microDL") #change to your directory
+import micro_dl.inference.inference as inference
+
+config = {
+    "model_dir": "/hpc/projects/CompMicro/projects/virtualstaining/torch_microDL/models/2023_04_05_Phase2Nuc_HEK_lightning/shalin/lightning_logs/20230408-145505/", #example training dir
+    "model_name": "epoch=62-step=6048.ckpt", #example checkpoint
+}
+
+# Initialize and run a predictor
+torch_predictor = inference.TorchPredictor(
+    config=config,
+    device="cpu", #'cpu', 'cuda', 'cuda:(int)'
+    single_prediction=True,
+)
+torch_predictor.load_model()
+
+# load your sample and run predictor (random init for example)
+sample_input = np.random.rand(1,1,5,512,512)
+sample_prediction = torch_predictor.predict_image(sample_input)
+
+```
+
 #TODO: evaluation script and config

@@ -41,35 +41,41 @@ class TorchPredictor:
 
     Params:
     :param dict config: inference config file
+    :param torch.device device: device to perform prediction on
+    :param bool single_prediction: whether to initialize this object for
+                single_prediction only
     """
 
-    def __init__(self, config, device) -> None:
+    def __init__(self, config, device, single_prediction = False) -> None:
         self.config = config
-        self.positions = self.config["positions"]
-        self.input_channels = self.config["input_channels"]
-        self.time_indices = self.config["time_indices"]
-
-        self.model = None
         self.device = device
+        self.single_prediction = single_prediction
 
         # use params logged from training to set up model and dataset
-        self.read_model_params()
+        self.model = None
+        self._read_model_params()
 
         self.network_config = self.model_meta["model"]["model_config"]
         self.network_z_depth = self.network_config["in_stack_depth"]
 
-        self.dataset = inference_dataset.TorchInferenceDataset(
-            zarr_dir=self.config["zarr_dir"],
-            batch_pred_num=self.config["batch_size"],
-            normalize_inputs=self.config["normalize_inputs"],
-            norm_type=self.config["norm_type"],
-            norm_scheme=self.config["norm_scheme"],
-            sample_depth=self.network_z_depth,
-            device=self.device,
-        )
+        #initialize dataset reader
+        if not single_prediction:
+            self.positions = self.config["positions"]
+            self.input_channels = self.config["input_channels"]
+            self.time_indices = self.config["time_indices"]
+            
+            self.dataset = inference_dataset.TorchInferenceDataset(
+                zarr_dir=self.config["zarr_dir"],
+                batch_pred_num=self.config["batch_size"],
+                normalize_inputs=self.config["normalize_inputs"],
+                norm_type=self.config["norm_type"],
+                norm_scheme=self.config["norm_scheme"],
+                sample_depth=self.network_z_depth,
+                device=self.device,
+            )
 
-        # set output location
-        self.get_save_location()
+            # set output zarr store location
+            self._get_save_location()
 
     def load_model(self) -> None:
         """
@@ -103,48 +109,6 @@ class TorchPredictor:
         readout = model.load_state_dict(clean_state_dict)
         print(f"PyTorch model load status: {readout}")
         self.model = model
-
-    def read_model_params(self, model_dir=None):
-        """
-        Reads the model parameters from the given model dir and stores it as an attribute.
-        Use here is to allow for inference to 'intelligently' infer it's configuration
-        parameters from a model directory to reduce hassle on user.
-
-        :param str model_dir: global path to model directory in which 'model_metadata.yml'
-                        is stored. If not specified, infers from inference config.
-        """
-        if not model_dir:
-            model_dir = self.config["model_dir"]
-
-        model_meta_filename = os.path.join(model_dir, "config.yaml")
-        self.model_meta = aux_utils.read_config(model_meta_filename)
-
-    def get_save_location(self):
-        """
-        Sets save location as specified in config files.
-
-        Note: for save location to be different than training save location,
-        not only does inference/save_preds_to_model_dir need to be False,
-        but you must specify a new location in inference/custom_save_preds_dir
-
-        This is to encourage saving model inference with training models.
-
-        """
-        if self.config["save_preds_to_model_dir"]:
-            save_dir = self.config["model_dir"]
-        elif "custom_save_preds_dir" in self.config:
-            custom_save_dir = self.config["custom_save_preds_dir"]
-            save_dir = custom_save_dir
-        else:
-            raise ValueError(
-                "Must provide custom_save_preds_dir if save_preds_to"
-                "_model_dir is False."
-            )
-
-        now = aux_utils.get_timestamp()
-        self.save_folder = os.path.join(save_dir, "inference_predictions", f"{now}")
-        if not os.path.exists(self.save_folder):
-            os.makedirs(self.save_folder)
 
     def predict_image(
         self,
@@ -201,50 +165,6 @@ class TorchPredictor:
             pred.detach().cpu(), *(pads[1], pads[0]) + input_image.shape[-2:]
         ).numpy()
 
-    def _get_positions(self):
-        """
-        Positions should be specified in config in format:
-            positions:
-                row #:
-                    col #: [pos #, pos #, ...]
-                        ...
-                    ...
-        where row # and col # together indicate the well on the plate, and pos # indicates
-        the number of the position in the well.
-
-        :return dict positions: Returns dictionary tree specifying all the positions
-                            in the format written above
-        """
-        # Positions are specified
-        if isinstance(self.positions, dict):
-            print("Predicting on positions specified in inference config.")
-            return self.positions
-        else:
-            raise AttributeError(
-                "Invalid 'positions'. Expected dict of positions by rows and cols"
-                f" but got {self.positions}"
-            )
-
-    def new_empty_array(self, row_name, col_name, fov_name, shape, dtype):
-        """
-        Subroutine: builds an empty array for outputs in the specified position
-        of the specified shape and datatype
-        """
-        # get time indices, channels, z-depth of output
-        z_slices_output = shape[-3] - (self.network_z_depth - 1)
-        output_tcz = (len(self.time_indices), len(self.input_channels), z_slices_output)
-
-        output_position = self.output_writer.create_position(
-            row_name, col_name, fov_name
-        )
-        output_array = output_position.create_zeros(
-            name="0",
-            shape=output_tcz + shape[-2:],
-            dtype=dtype,
-            chunks=(1,) * (len(shape) - 2) + shape[-2:],
-        )
-        return output_array
-
     def run_inference(self):
         """
         Performs inference on the entire validation dataset.
@@ -252,6 +172,8 @@ class TorchPredictor:
         Model inputs are normalized before predictions are generated. Predictions are saved in an
         HCS-compatible zarr store in the specified output location.
         """
+        assert self.single_prediction == True, "Must be initialized for dataset prediction."
+        
         # init io and saving
         start = time.time()
         self.log_writer = SummaryWriter(log_dir=self.save_folder)
@@ -284,7 +206,7 @@ class TorchPredictor:
                 shape, dtype = self.dataset.set_source_array(
                     row_name, col_name, fov_name, time_idx, self.input_channels
                 )
-                output_array = self.new_empty_array(
+                output_array = self._new_empty_array(
                     row_name, col_name, fov_name, shape, dtype
                 )
                 dataloader = iter(DataLoader(self.dataset))
@@ -305,3 +227,89 @@ class TorchPredictor:
         self.output_writer.close()
         print(f"Done! Time taken: {time.time() - start:.2f}s")
         print(f"Predictions saved to {self.save_folder}")
+
+    def _get_positions(self):
+        """
+        Positions should be specified in config in format:
+            positions:
+                row #:
+                    col #: [pos #, pos #, ...]
+                        ...
+                    ...
+        where row # and col # together indicate the well on the plate, and pos # indicates
+        the number of the position in the well.
+
+        :return dict positions: Returns dictionary tree specifying all the positions
+                            in the format written above
+        """
+        # Positions are specified
+        if isinstance(self.positions, dict):
+            print("Predicting on positions specified in inference config.")
+            return self.positions
+        else:
+            raise AttributeError(
+                "Invalid 'positions'. Expected dict of positions by rows and cols"
+                f" but got {self.positions}"
+            )
+
+    def _new_empty_array(self, row_name, col_name, fov_name, shape, dtype):
+        """
+        Subroutine: builds an empty array for outputs in the specified position
+        of the specified shape and datatype
+        """
+        # get time indices, channels, z-depth of output
+        z_slices_output = shape[-3] - (self.network_z_depth - 1)
+        output_tcz = (len(self.time_indices), len(self.input_channels), z_slices_output)
+
+        output_position = self.output_writer.create_position(
+            row_name, col_name, fov_name
+        )
+        output_array = output_position.create_zeros(
+            name="0",
+            shape=output_tcz + shape[-2:],
+            dtype=dtype,
+            chunks=(1,) * (len(shape) - 2) + shape[-2:],
+        )
+        return output_array
+    
+    def _read_model_params(self, model_dir=None):
+        """
+        Reads the model parameters from the given model dir and stores it as an attribute.
+        Use here is to allow for inference to 'intelligently' infer it's configuration
+        parameters from a model directory to reduce hassle on user.
+
+        :param str model_dir: global path to model directory in which 'model_metadata.yml'
+                        is stored. If not specified, infers from inference config.
+        """
+        if not model_dir:
+            model_dir = self.config["model_dir"]
+
+        model_meta_filename = os.path.join(model_dir, "config.yaml")
+        self.model_meta = aux_utils.read_config(model_meta_filename)
+
+    def _get_save_location(self):
+        """
+        Sets save location as specified in config files.
+
+        Note: for save location to be different than training save location,
+        not only does inference/save_preds_to_model_dir need to be False,
+        but you must specify a new location in inference/custom_save_preds_dir
+
+        This is to encourage saving model inference with training models.
+
+        """
+        if self.config["save_preds_to_model_dir"]:
+            save_dir = self.config["model_dir"]
+        elif "custom_save_preds_dir" in self.config:
+            custom_save_dir = self.config["custom_save_preds_dir"]
+            save_dir = custom_save_dir
+        else:
+            raise ValueError(
+                "Must provide custom_save_preds_dir if save_preds_to"
+                "_model_dir is False."
+            )
+
+        now = aux_utils.get_timestamp()
+        self.save_folder = os.path.join(save_dir, "inference_predictions", f"{now}")
+        if not os.path.exists(self.save_folder):
+            os.makedirs(self.save_folder)
