@@ -46,7 +46,7 @@ class TorchPredictor:
                 single_prediction only
     """
 
-    def __init__(self, config, device, single_prediction = False) -> None:
+    def __init__(self, config, device, single_prediction=False) -> None:
         self.config = config
         self.device = device
         self.single_prediction = single_prediction
@@ -58,12 +58,12 @@ class TorchPredictor:
         self.network_config = self.model_meta["model"]["model_config"]
         self.network_z_depth = self.network_config["in_stack_depth"]
 
-        #initialize dataset reader
+        # initialize dataset reader
         if not single_prediction:
             self.positions = self.config["positions"]
             self.input_channels = self.config["input_channels"]
             self.time_indices = self.config["time_indices"]
-            
+
             self.dataset = inference_dataset.TorchInferenceDataset(
                 zarr_dir=self.config["zarr_dir"],
                 batch_pred_num=self.config["batch_size"],
@@ -172,8 +172,10 @@ class TorchPredictor:
         Model inputs are normalized before predictions are generated. Predictions are saved in an
         HCS-compatible zarr store in the specified output location.
         """
-        assert self.single_prediction == True, "Must be initialized for dataset prediction."
-        
+        assert (
+            self.single_prediction == False
+        ), "Must be initialized for dataset prediction."
+
         # init io and saving
         start = time.time()
         self.log_writer = SummaryWriter(log_dir=self.save_folder)
@@ -211,16 +213,19 @@ class TorchPredictor:
                 )
                 dataloader = iter(DataLoader(self.dataset))
 
-                #TODO: change to only hold one batch in memory at a time
-                batch_predictions = []
-                for batch, _ in dataloader:
-                    batch_pred = self.predict_image(batch[0]) #redundant batch dim
-                    batch_predictions.append(np.swapaxes(batch_pred, 0, 2)) 
-                
-                batch_predictions = np.squeeze(
-                    np.concatenate(batch_predictions, -3), axis=0
-                )
-                output_array[time_idx] = batch_predictions
+                # TODO: change to only hold one batch in memory at a time
+                # batch_predictions = []
+                for batch, z0, size, _ in dataloader:
+                    batch_pred = self.predict_image(batch[0])  # redundant batch dim
+                    batch_pred = np.squeeze(np.swapaxes(batch_pred, 0, 2), axis=0)
+                    output_array[time_idx, :, z0 : z0 + size, ...] = batch_pred
+
+                #     batch_predictions.append(np.swapaxes(batch_pred, 0, 2))
+
+                # batch_predictions = np.squeeze(
+                #     np.concatenate(batch_predictions, -3), axis=0
+                # )
+                # output_array[time_idx] = batch_predictions
 
         # write config to save dir
         aux_utils.write_yaml(self.config, os.path.join(self.save_folder, "config.yaml"))
@@ -271,7 +276,7 @@ class TorchPredictor:
             chunks=(1,) * (len(shape) - 2) + shape[-2:],
         )
         return output_array
-    
+
     def _read_model_params(self, model_dir=None):
         """
         Reads the model parameters from the given model dir and stores it as an attribute.
