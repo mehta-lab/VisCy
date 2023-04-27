@@ -213,19 +213,10 @@ class TorchPredictor:
                 )
                 dataloader = iter(DataLoader(self.dataset))
 
-                # TODO: change to only hold one batch in memory at a time
-                # batch_predictions = []
                 for batch, z0, size, _ in dataloader:
                     batch_pred = self.predict_image(batch[0])  # redundant batch dim
                     batch_pred = np.squeeze(np.swapaxes(batch_pred, 0, 2), axis=0)
                     output_array[time_idx, :, z0 : z0 + size, ...] = batch_pred
-
-                #     batch_predictions.append(np.swapaxes(batch_pred, 0, 2))
-
-                # batch_predictions = np.squeeze(
-                #     np.concatenate(batch_predictions, -3), axis=0
-                # )
-                # output_array[time_idx] = batch_predictions
 
         # write config to save dir
         aux_utils.write_yaml(self.config, os.path.join(self.save_folder, "config.yaml"))
