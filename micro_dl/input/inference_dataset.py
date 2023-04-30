@@ -107,12 +107,13 @@ class TorchInferenceDataset(Dataset):
         data = np.stack(data, 0)
 
         # normalize
-        norm_statistics = [
-            self._get_normalization_statistics(c)
-            for c in self.channels
-            if "mask" not in c
-        ]
+        norm_statistics = {}
         if self.normalize_inputs:
+            norm_statistics = [
+                self._get_normalization_statistics(c)
+                for c in self.channels
+                if "mask" not in c
+            ]
             data = self._normalize_multichan(data, norm_statistics)
         # build batched view.
         # NOTE: This can be done with ".as_strided()", but is more
