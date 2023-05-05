@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
-import micro_dl.input.inference_dataset as inference_dataset
+import micro_dl.inference.inference_dataset as inference_dataset
 import micro_dl.torch_unet.utils.model as model_utils
 import micro_dl.utils.aux_utils as aux_utils
 

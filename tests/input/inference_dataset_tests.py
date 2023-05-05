@@ -4,7 +4,7 @@ import os
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.input.inference_dataset as inference_dataset
+import micro_dl.inference.inference_dataset as inference_dataset
 import micro_dl.utils.aux_utils as aux_utils
 
 

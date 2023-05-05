@@ -1,8 +1,6 @@
 import iohub.ngff as ngff
 import numpy as np
-import os
 from torch.utils.data import Dataset
-import zarr
 
 import micro_dl.utils.normalize as normalize
 import micro_dl.utils.aux_utils as aux_utils
