@@ -22,6 +22,8 @@ class PhaseToNuc25D(LightningModule):
         loss_function: nn.Module = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        log_num_samples: int = 8,
+        example_input_yx_shape: Sequence[int] = (256, 256),
     ) -> None:
         """Regression U-Net module for virtual staining.
 
@@ -44,9 +46,13 @@ class PhaseToNuc25D(LightningModule):
         self.loss_function = loss_function if loss_function else F.mse_loss
         self.lr = lr
         self.schedule = schedule
+        self.log_num_samples = log_num_samples
         self.training_step_outputs = []
         self.validation_step_outputs = []
-        self.example_input_array = torch.rand(1, 1, 5, 256, 256)  # required to log the graph
+        # required to log the graph
+        self.example_input_array = torch.rand(
+            1, 1, (model_config.get("in_stack_depth") or 5), *example_input_yx_shape
+        )
 
     def forward(self, x):
         return self.model(x)
@@ -57,7 +63,7 @@ class PhaseToNuc25D(LightningModule):
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
         self.log(
-            "train_loss",
+            "loss/train",
             loss,
             on_step=True,
             on_epoch=True,
@@ -65,7 +71,7 @@ class PhaseToNuc25D(LightningModule):
             logger=True,
             batch_size=self.batch_size,
         )
-        if batch_idx % 16 == 0:
+        if batch_idx < self.log_num_samples:
             self.training_step_outputs.append(
                 self._detach_sample((source, target, pred))
             )
@@ -76,8 +82,8 @@ class PhaseToNuc25D(LightningModule):
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("val_loss", loss, batch_size=self.batch_size)
-        if batch_idx % 4 == 0:
+        self.log("loss/val", loss, batch_size=self.batch_size)
+        if batch_idx < self.log_num_samples:
             self.validation_step_outputs.append(
                 self._detach_sample((source, target, pred))
             )

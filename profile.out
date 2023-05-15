@@ -1,0 +1,53 @@
+
+*** PROFILER RESULTS ***
+load_batch (/home/ziwen.liu/microDL/micro_dl/scripts/profiling.py:23)
+function called 1 times
+
+         1543 function calls (1442 primitive calls) in 0.193 seconds
+
+   Ordered by: internal time
+   List reduced from 242 to 40 due to restriction <40>
+
+   ncalls  tottime  percall  cumtime  percall filename:lineno(function)
+        7    0.092    0.013    0.092    0.013 {method 'read' of '_io.BufferedReader' objects}
+        5    0.053    0.011    0.053    0.011 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/core.py:2223(_decode_chunk)
+        2    0.017    0.009    0.017    0.009 {method 'random_' of 'torch._C._TensorBase' objects}
+        5    0.009    0.002    0.062    0.012 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/core.py:1865(_process_chunk)
+        8    0.006    0.001    0.006    0.001 {built-in method posix.stat}
+        1    0.002    0.002    0.002    0.002 {method 'index' of 'list' objects}
+        1    0.002    0.002    0.005    0.005 /home/ziwen.liu/microDL/micro_dl/light/data.py:62(_find_window)
+        1    0.002    0.002    0.174    0.174 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/torch/utils/data/dataset.py:295(__getitem__)
+        7    0.001    0.000    0.001    0.000 {built-in method io.open}
+        1    0.001    0.001    0.166    0.166 /home/ziwen.liu/microDL/micro_dl/light/data.py:69(_read_img_window)
+        7    0.001    0.000    0.001    0.000 {method '__exit__' of '_io._IOBase' objects}
+        1    0.001    0.001    0.001    0.001 {built-in method builtins.sorted}
+        1    0.001    0.001    0.164    0.164 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/core.py:1252(_get_selection)
+        2    0.000    0.000    0.000    0.000 {method 'item' of 'torch._C._TensorBase' objects}
+     53/6    0.000    0.000    0.000    0.000 {built-in method _abc._abc_subclasscheck}
+        1    0.000    0.000    0.172    0.172 /home/ziwen.liu/microDL/micro_dl/light/data.py:80(__getitem__)
+        1    0.000    0.000    0.000    0.000 {method 'tolist' of 'torch._C._TensorBase' objects}
+        5    0.000    0.000    0.163    0.033 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/core.py:1961(_chunk_getitem)
+        1    0.000    0.000    0.000    0.000 {built-in method torch.floor_divide}
+        2    0.000    0.000    0.000    0.000 {built-in method torch.empty}
+        1    0.000    0.000    0.000    0.000 {built-in method torch.randperm}
+        1    0.000    0.000    0.000    0.000 {built-in method torch._C._get_operation_overload}
+      210    0.000    0.000    0.000    0.000 {built-in method builtins.isinstance}
+        1    0.000    0.000    0.000    0.000 {built-in method torch.from_numpy}
+        1    0.000    0.000    0.000    0.000 {built-in method torch._ops.profiler._record_function_enter_new}
+        6    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/indexing.py:361(__iter__)
+        1    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/torch/utils/data/dataloader.py:225(__init__)
+        1    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/torch/autograd/profiler.py:495(__exit__)
+        1    0.000    0.000    0.000    0.000 {built-in method builtins.compile}
+       21    0.000    0.000    0.000    0.000 {built-in method numpy.array}
+        1    0.000    0.000    0.000    0.000 {built-in method torch._ops.profiler.}
+        7    0.000    0.000    0.102    0.015 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/storage.py:1081(__getitem__)
+        7    0.000    0.000    0.095    0.014 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/zarr/storage.py:1045(_fromfile)
+        7    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/numcodecs/compat.py:70(ensure_contiguous_ndarray_like)
+        1    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/torch/_ops.py:239(__init__)
+       17    0.000    0.000    0.000    0.000 {method 'reshape' of 'numpy.ndarray' objects}
+       24    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/numcodecs/compat.py:13(ensure_ndarray_like)
+       24    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/numcodecs/ndarray_like.py:15(__instancecheck__)
+        1    0.000    0.000    0.018    0.018 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/torch/utils/data/dataloader.py:568(__init__)
+       15    0.000    0.000    0.000    0.000 /hpc/mydata/ziwen.liu/anaconda/2022.05/x86_64/envs/lit-monai/lib/python3.10/site-packages/numpy/core/numeric.py:1873(isscalar)
+
+
