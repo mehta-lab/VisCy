@@ -2,7 +2,7 @@
 seed_everything: true
 trainer:
   accelerator: auto
-  strategy: auto
+  strategy: auto # ddp_find_unused_parameters_true for more GPUs
   devices: auto
   num_nodes: 1
   precision: 32-true
@@ -36,7 +36,7 @@ trainer:
   detect_anomaly: false
   barebones: false
   plugins: null
-  sync_batchnorm: false
+  sync_batchnorm: true
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 model:

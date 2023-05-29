@@ -2,11 +2,49 @@ from re import M
 import numpy as np
 import time
 import os
+import datetime
 
 import torch
 
 from micro_dl.utils.cli_utils import save_figure
 from micro_dl.utils.normalize import hist_clipping
+
+
+def log_feature(feature_map, name, log_save_folder, debug_mode):
+    """
+    If self.debug_mode, creates a visual of the given feature map, and saves it at
+    'log_save_folder'
+    If no log_save_folder specified, saves relative to working directory with timestamp.
+
+    Currently only saving in working directory is supported. This is meant to be an analysis
+    tool, and results should not be saved permanently.
+
+    :param torch.tensor feature_map: feature map to create visualization log of
+    :param str name: string
+    :param str log_save_folder
+    """
+    try:
+        if debug_mode:
+            now = datetime.datetime.now()
+            log_save_folder = (
+                f"feature_map_{now.year}_{now.month}_"
+                f"{now.day}_{now.hour}_{now.minute}/"
+            )
+            logger = FeatureLogger(
+                save_folder=log_save_folder,
+                spatial_dims=3,
+                grid_width=8,
+            )
+            logger.log_feature_map(
+                feature_map,
+                name,
+                dim_names=["batch", "channels"],
+            )
+    except Exception as e:
+        print(
+            "Features of one input logged. Results saved at:"
+            f"\n\t  {log_save_folder}. Will not log to avoid overwrite. \n"
+        )
 
 
 class FeatureLogger:

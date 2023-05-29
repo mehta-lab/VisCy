@@ -64,6 +64,10 @@ class TorchPredictor:
             self.input_channels = self.config["input_channels"]
             self.time_indices = self.config["time_indices"]
 
+            scale_factor = 1
+            if "model_mag" in self.config and "source_mag" in self.config:
+                scale_factor = self.config["model_mag"] / self.config["source_mag"]
+
             self.dataset = inference_dataset.TorchInferenceDataset(
                 zarr_dir=self.config["zarr_dir"],
                 batch_pred_num=self.config["batch_size"],
@@ -71,6 +75,7 @@ class TorchPredictor:
                 norm_type=self.config["norm_type"],
                 norm_scheme=self.config["norm_scheme"],
                 sample_depth=self.network_z_depth,
+                scale_factor=scale_factor,
                 device=self.device,
             )
 
@@ -160,7 +165,7 @@ class TorchPredictor:
             img_tensor = aux_utils.ToTensor(device=self.device)(input_image)
 
         img_tensor, pads = _pad_input(img_tensor, num_blocks=model.num_blocks)
-        pred = model(img_tensor, validate_input=False)
+        pred = model(img_tensor)
         return TF.crop(
             pred.detach().cpu(), *(pads[1], pads[0]) + input_image.shape[-2:]
         ).numpy()
@@ -216,6 +221,7 @@ class TorchPredictor:
                 for batch, z0, size, _ in dataloader:
                     batch_pred = self.predict_image(batch[0])  # redundant batch dim
                     batch_pred = np.squeeze(np.swapaxes(batch_pred, 0, 2), axis=0)
+                    batch_pred = self.dataset._scale(batch_pred, unscale=True)
                     output_array[time_idx, :, z0 : z0 + size, ...] = batch_pred
 
         # write config to save dir

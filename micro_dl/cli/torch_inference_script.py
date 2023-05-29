@@ -8,8 +8,6 @@ import torch
 
 import micro_dl.inference.inference as torch_inference_utils
 import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.gpu_utils as gpu_utils
-
 
 def check_gpu_availability(gpu_id):
     """
@@ -180,7 +178,7 @@ def main(config, gpu, gpu_mem_frac):
 
     if gpu is not None:
         # Get GPU ID and memory fraction
-        gpu_id, gpu_mem_frac = gpu_utils.select_gpu(
+        gpu_id, gpu_mem_frac = select_gpu(
             gpu,
             gpu_mem_frac,
         )

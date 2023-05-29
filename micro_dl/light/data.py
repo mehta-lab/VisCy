@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import Any, Callable, Literal, Union, Iterable
+from typing import Any, Callable, Iterable, Literal, Union
 
 import numpy as np
 import torch
@@ -20,7 +20,6 @@ from monai.transforms import (
 )
 from numpy.typing import NDArray
 from torch.utils.data import DataLoader, Dataset
-
 
 Sample = dict[str, torch.Tensor]
 
@@ -294,12 +293,12 @@ class HCSDataModule(LightningDataModule):
                         prob=0.5,
                         rotate_range=(np.pi, 0, 0),
                         shear_range=(0, (0.05), (0.05)),
-                        scale_range=(0, 0.2, 0.2),
+                        scale_range=(0, 0.3, 0.3),
                     ),
-                    RandAdjustContrastd(keys=["source"], prob=0.1, gamma=(0.75, 1.5)),
+                    RandAdjustContrastd(keys=["source"], prob=0.3, gamma=(0.75, 1.5)),
                     RandGaussianSmoothd(
                         keys=["source"],
-                        prob=0.2,
+                        prob=0.3,
                         sigma_x=(0.05, 0.25),
                         sigma_y=(0.05, 0.25),
                         sigma_z=((0.05, 0.25)),

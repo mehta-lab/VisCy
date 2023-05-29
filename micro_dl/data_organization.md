@@ -1,10 +1,6 @@
 # Data Organization for Virtual Staining
 
-> This advisory only applies to data management on Biohub's compute infrastructure.
-> It is not normative for external users.
-
-Here we document the conventions for storing data, metadata, configs,
-and models during the development of the virtual staining pipeline.
+Here we document our conventions for storing data, metadata, configs, and models.
 
 ## Data flow in the pipeline
 
@@ -90,19 +86,21 @@ virtual_staining:
                     config.yaml
                 yyyymmdd-hhmmss:
                     ...
-            # evaluation of select models
-            evaluation: 
-                # configs for evaluation: checkpoint path, test data path, ground turth path, and choice of metrics.
-                evaluation_01.yaml
-                evaluation_02.yaml
-                ...
+            # Inference and/or Evaluation of selected models.
+            test: 
+                # config for prediction with test dataset.
+                test_<suffix>.yml # config used for inference, optionally copies ground truth and input for evaluation. This config will follow the lightning CLI/config format.
+
                 # inference output on test dataset, may include copies of input and ground truth to facilitate visualization of model performance. 
-                prediction_01.zarr
-                prediction_02.zarr
+                test_<suffix>.zarr # Not all test datasets need to have human curated ground truth.
                 ...
+
+                # config for evaluation: checkpoint path, test data path that have ground turth included, and choice of metrics.
+                evaluation_<suffix>.yaml
+                ...
+
                 # evaluation metrics
-                metrics_01.csv
-                metrics_02.csv
+                evaluation_metrics_<suffix>.csv
                 ...
                 # (optional) tensorboard logs generated to visualize distribution of metrics or specific samples of input, prediction, ground truth.
                 evaluation_logs: 
