@@ -236,33 +236,6 @@ def get_mask_slice(
     return mask
 
 
-def mp_get_i_stats(fn_args, workers):
-    """Read and computes statistics of images with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned df from get_im_stats
-    """
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(get_im_stats, fn_args)
-        for r in res:
-            print(r)
-    return list(res)
-
-
-def get_im_stats(im_path):
-    """
-    Read and computes statistics of images
-
-    :param str im_path: Full path to image
-    :return dict meta_row: Dict with intensity data for image
-    """
-    im = image_utils.read_image(im_path)
-    meta_row = {"mean": np.nanmean(im), "std": np.nanstd(im)}
-    return meta_row
-
-
 def mp_get_val_stats(fn_args, workers):
     """
     Computes statistics of numpy arrays with multiprocessing
