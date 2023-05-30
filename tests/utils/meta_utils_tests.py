@@ -6,8 +6,8 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.meta_utils as meta_utils
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.meta_utils as meta_utils
 
 
 class TestMetaUtils(unittest.TestCase):

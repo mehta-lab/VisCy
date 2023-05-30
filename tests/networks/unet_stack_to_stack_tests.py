@@ -6,7 +6,7 @@ import nose.tools
 import numpy as np
 import unittest
 
-from micro_dl.networks import UNetStackToStack
+from viscy.networks import UNetStackToStack
 
 
 class TestUNetStackToStack(unittest.TestCase):

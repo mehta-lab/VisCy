@@ -8,10 +8,10 @@ import unittest
 
 # Create a test image and its corresponding coordinates and values
 # Create a test image with a bright block to the right
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.image_utils as image_utils
-import micro_dl.utils.io_utils as io_utils
-import micro_dl.utils.normalize as normalize
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.image_utils as image_utils
+import viscy.utils.io_utils as io_utils
+import viscy.utils.normalize as normalize
 from tests.utils.masks_utils_tests import uni_thr_tst_image
 
 test_im = np.zeros((10, 15), np.uint16) + 100

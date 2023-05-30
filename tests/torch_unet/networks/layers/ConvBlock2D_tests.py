@@ -4,8 +4,8 @@ import numpy as np
 import itertools
 import unittest
 
-from micro_dl.torch_unet.networks.layers.ConvBlock2D import ConvBlock2D
-import micro_dl.utils.cli_utils as io_utils
+from viscy.torch_unet.networks.layers.ConvBlock2D import ConvBlock2D
+import viscy.utils.cli_utils as io_utils
 
 
 class TestConvBlock2D(unittest.TestCase):

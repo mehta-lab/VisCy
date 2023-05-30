@@ -8,8 +8,8 @@ from testfixtures import TempDirectory
 import unittest
 import warnings
 
-from micro_dl.utils import aux_utils as aux_utils
-from micro_dl.preprocessing.generate_masks import MaskProcessor
+from viscy.utils import aux_utils as aux_utils
+from viscy.preprocessing.generate_masks import MaskProcessor
 
 
 class TestMaskProcessor(unittest.TestCase):

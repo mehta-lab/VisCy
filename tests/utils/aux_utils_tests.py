@@ -6,7 +6,7 @@ import nose.tools
 import os
 from testfixtures import TempDirectory
 
-import micro_dl.utils.aux_utils as aux_utils
+import viscy.utils.aux_utils as aux_utils
 
 
 # Create test metadata table

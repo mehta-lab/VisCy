@@ -8,9 +8,9 @@ import unittest
 from unittest.mock import patch
 import yaml
 
-import micro_dl.cli.metrics_script as metrics_script
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.normalize as normalize
+import viscy.cli.metrics_script as metrics_script
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.normalize as normalize
 
 
 class TestMetricsScript(unittest.TestCase):

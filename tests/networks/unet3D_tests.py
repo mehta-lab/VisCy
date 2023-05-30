@@ -6,7 +6,7 @@ import nose.tools
 import numpy as np
 from keras import Model
 
-from micro_dl.networks import UNet3D
+from viscy.networks import UNet3D
 
 
 class TestUNet3D(unittest.TestCase):

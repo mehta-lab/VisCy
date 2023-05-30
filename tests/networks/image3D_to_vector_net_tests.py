@@ -4,7 +4,7 @@ import nose.tools
 import numpy as np
 import unittest
 
-from micro_dl.networks import Image3DToVectorNet
+from viscy.networks import Image3DToVectorNet
 
 
 class TestImage3DToVectorNet(unittest.TestCase):

@@ -4,8 +4,8 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.preprocess_utils as preprocess_utils
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.preprocess_utils as preprocess_utils
 
 
 class TestPreprocessUtils(unittest.TestCase):

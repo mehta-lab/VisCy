@@ -3,7 +3,7 @@ import numpy as np
 from skimage import draw
 from skimage.filters import gaussian
 
-import micro_dl.utils.masks as masks_utils
+import viscy.utils.masks as masks_utils
 
 
 uni_thr_tst_image = np.zeros((31, 31))

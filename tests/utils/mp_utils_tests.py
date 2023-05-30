@@ -10,11 +10,11 @@ from testfixtures import TempDirectory
 import unittest
 import warnings
 
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.mp_utils as mp_utils
-import micro_dl.utils.image_utils as image_utils
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.mp_utils as mp_utils
+import viscy.utils.image_utils as image_utils
 
-from micro_dl.utils.masks import create_otsu_mask
+from viscy.utils.masks import create_otsu_mask
 
 
 class TestMpUtilsBaseClass(unittest.TestCase):

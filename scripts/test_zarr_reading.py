@@ -13,8 +13,8 @@ import argparse
 import glob
 import time
 
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.cli.preprocess_script as preprocess_script
+import viscy.utils.aux_utils as aux_utils
+import viscy.cli.preprocess_script as preprocess_script
 
 def parse_args():
     """Parse command line arguments
