@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import Any, Callable, Iterable, Literal, Union
+from typing import Any, Callable, Iterable, Literal, TypedDict, Union
 
 import numpy as np
 import torch
@@ -12,6 +12,7 @@ from monai.data import set_track_meta
 from monai.transforms import (
     CenterSpatialCropd,
     Compose,
+    InvertibleTransform,
     MapTransform,
     RandAdjustContrastd,
     RandAffined,
@@ -21,30 +22,53 @@ from monai.transforms import (
 from numpy.typing import NDArray
 from torch.utils.data import DataLoader, Dataset
 
-Sample = dict[str, torch.Tensor]
+
+class ChannelMap(TypedDict, total=False):
+    source: str
+    # optional
+    target: str
 
 
-class NormalizeTargetd(MapTransform):
+class Sample(TypedDict, total=False):
+    index: tuple[str, int, int]
+    source: torch.Tensor
+    # optional
+    target: torch.Tensor
+
+
+class NormalizeSampled(MapTransform, InvertibleTransform):
     """Dictionary transform to only normalize target (fluorescence) channel.
 
     :param Union[str, Iterable[str]] keys: keys to normalize
     :param Plate plate: NGFF HCS plate object
-    :param str target_channel: name of the target channel
+    :param ChannelMap channels: source and target channel names
     """
 
     def __init__(
-        self, keys: Union[str, Iterable[str]], plate: Plate, target_channel: str
+        self,
+        keys: Union[str, Iterable[str]],
+        norm_meta: dict[str, str],
+        channels: ChannelMap,
     ) -> None:
+        if set(keys) > channels.keys():
+            raise KeyError(f"Keys to transform ({keys}) not in {channels.keys()}")
         super().__init__(keys, allow_missing_keys=False)
-        norm_meta = plate.zattrs["normalization"]
-        self.iqr = norm_meta[target_channel]["dataset_statistics"]["iqr"]
-        self.median = norm_meta[target_channel]["dataset_statistics"]["median"]
+        self.norm_meta = norm_meta
+        self.channels = channels
 
-    def __call__(self, data: Sample):
+    def _stat(self, key: str) -> dict:
+        return self.norm_meta[self.channels[key]]["dataset_statistics"]
+
+    def __call__(self, data: Sample) -> Sample:
         d = dict(data)
         for key in self.keys:
-            d[key] = (d[key] - self.median) / self.iqr
+            d[key] = (d[key] - self._stat(key)["median"]) / self._stat(key)["iqr"]
         return d
+
+    def inverse(self, data: Sample) -> Sample:
+        d = dict(data)
+        for key in self.keys:
+            d[key] = (d[key] * self._stat(key)["iqr"]) + self._stat(key)["median"]
 
 
 class SlidingWindowDataset(Dataset):
@@ -52,8 +76,8 @@ class SlidingWindowDataset(Dataset):
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
 
     :param list[Position] positions: FOVs to include in dataset
-    :param str source_channel: name of the source channel, e.g. 'Phase'
-    :param str target_channel: name of the target channel, e.g. 'Nuclei'
+    :param ChannelMap channels: source and target channel names,
+        e.g. ``{'source': 'Phase', 'target': 'Nuclei}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param Callable[[Sample], Sample] transform: a callable that transforms data,
         defaults to None
@@ -62,15 +86,18 @@ class SlidingWindowDataset(Dataset):
     def __init__(
         self,
         positions: list[Position],
-        source_channel: str,
-        target_channel: str,
+        channels: ChannelMap,
         z_window_size: int,
         transform: Callable[[Sample], Sample] = None,
     ) -> None:
         super().__init__()
         self.positions = positions
-        self.source_ch_idx = positions[0].get_channel_index(source_channel)
-        self.target_ch_idx = positions[0].get_channel_index(target_channel)
+        self.source_ch_idx = positions[0].get_channel_index(channels["source"])
+        self.target_ch_idx = (
+            positions[0].get_channel_index(channels["target"])
+            if "target" in channels
+            else None
+        )
         self.z_window_size = z_window_size
         self.transform = transform
         self._get_windows()
@@ -102,16 +129,17 @@ class SlidingWindowDataset(Dataset):
         z = tz - t * zs
         selection = (int(t), int(ch_idx), slice(z, z + self.z_window_size))
         data = img[selection][np.newaxis]
-        return torch.from_numpy(data)
+        return torch.from_numpy(data), (img.name, t, z)
 
     def __len__(self) -> int:
         return self._max_window
 
     def __getitem__(self, index: int) -> Sample:
         img, tz = self._find_window(index)
-        source = self._read_img_window(img, self.source_ch_idx, tz)
-        target = self._read_img_window(img, self.target_ch_idx, tz)
-        sample = {"source": source, "target": target}
+        source, sample_index = self._read_img_window(img, self.source_ch_idx, tz)
+        sample = {"source": source, "index": sample_index}
+        if self.target_ch_idx is not None:
+            sample["target"] = self._read_img_window(img, self.target_ch_idx, tz)
         if self.transform:
             sample = self.transform(sample)
         if isinstance(sample, list):
@@ -156,6 +184,7 @@ class HCSDataModule(LightningDataModule):
         yx_patch_size: tuple[int, int] = (256, 256),
         augment: bool = True,
         caching: bool = False,
+        normalize_source: bool = False,
     ):
         super().__init__()
         self.data_path = data_path
@@ -169,6 +198,7 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.augment = augment
         self.caching = caching
+        self.normalize_source = normalize_source
 
     def _cache(self, lazy_plate: Plate) -> Plate:
         """Decompress and store the images on local tempdir."""
@@ -201,15 +231,21 @@ class HCSDataModule(LightningDataModule):
         return Plate(group=zarr.open(mem_store, mode="r"))
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
-        if stage in (None, "fit", "validate"):
+        channels = {"source": self.source_channel}
+        dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
+        if stage in ("fit", "validate"):
+            dataset_settings["channels"]["target"] = self.target_channel
             plate = open_ome_zarr(self.data_path, mode="r")
             if self.caching:
                 plate = self._cache(plate)
             # disable metadata tracking in MONAI for performance
             set_track_meta(False)
             # define training stage transforms
+            norm_keys = ["target"]
+            if self.normalize_source:
+                norm_keys.append("source")
             normalize_transform = [
-                NormalizeTargetd("target", plate, self.target_channel)
+                NormalizeSampled(norm_keys, plate.zattrs["normalization"], channels)
             ]
             fit_transform = self._fit_transform()
             train_transform = Compose(
@@ -222,27 +258,41 @@ class HCSDataModule(LightningDataModule):
             positions = list(positions[i] for i in shuffled_indices)
             num_train_fovs = int(len(positions) * self.split_ratio)
             # train/val split
-            dataset_settings = dict(
-                source_channel=self.source_channel,
-                target_channel=self.target_channel,
-                z_window_size=self.z_window_size,
-            )
             self.train_dataset = SlidingWindowDataset(
                 positions[:num_train_fovs],
                 transform=train_transform,
                 **dataset_settings,
             )
             self.val_dataset = SlidingWindowDataset(
-                positions[num_train_fovs:],
-                transform=val_transform,
+                positions[num_train_fovs:], transform=val_transform, **dataset_settings
+            )
+        elif stage == "predict":
+            # track metadata for inverting transform
+            set_track_meta(True)
+            if self.caching:
+                logging.warning("Ignoring caching config in 'predict' stage.")
+            plate = open_ome_zarr(self.data_path, mode="r")
+            predict_transform = (
+                NormalizeSampled(norm_keys, plate.zattrs["normalization"], channels)
+                if self.normalize_source
+                else None
+            )
+            self.predict_dataset = SlidingWindowDataset(
+                [p for _, p in plate.positions()],
+                transform=predict_transform,
                 **dataset_settings,
             )
-        # test/predict stage
+        # test stage
         else:
             raise NotImplementedError(f"{stage} stage")
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
-        if self.target_2d and not isinstance(batch, torch.Tensor):
+        if (
+            self.trainer.training
+            and self.target_2d
+            and not isinstance(batch, torch.Tensor)
+        ):
+            # slice the center during training, skipping example input array
             batch["target"] = batch["target"][:, :, self.z_window_size // 2][:, :, None]
         return batch
 
@@ -262,6 +312,14 @@ class HCSDataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             persistent_workers=True,
+        )
+
+    def predict_dataloader(self):
+        return DataLoader(
+            self.predict_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
         )
 
     def _fit_transform(self):

@@ -1,5 +1,5 @@
 import numpy as np
-import micro_dl.inference.evaluation_metrics as inference_metrics
+import micro_dl.evaluation.evaluation_metrics as inference_metrics
 from torch.utils.tensorboard import SummaryWriter
 
 

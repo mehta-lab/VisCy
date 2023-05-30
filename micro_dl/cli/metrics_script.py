@@ -8,7 +8,7 @@ import iohub.ngff as ngff
 import argparse
 import pandas as pd
 
-import micro_dl.inference.evaluation_metrics as metrics
+import micro_dl.evaluation.evaluation_metrics as metrics
 import micro_dl.utils.aux_utils as aux_utils
 
 # %% read the below details from the config file

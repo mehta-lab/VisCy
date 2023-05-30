@@ -58,4 +58,5 @@ data:
   - 256
   augment: true
   caching: false
+  normalize_source: false
 ckpt_path: null

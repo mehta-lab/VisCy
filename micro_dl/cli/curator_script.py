@@ -9,7 +9,7 @@ import imageio as iio
 import iohub.ngff as ngff
 import argparse
 
-import micro_dl.inference.evaluation_metrics as metrics
+import micro_dl.evaluation.evaluation_metrics as metrics
 import micro_dl.utils.aux_utils as aux_utils
 # from waveorder.focus import focus_from_transverse_band
 

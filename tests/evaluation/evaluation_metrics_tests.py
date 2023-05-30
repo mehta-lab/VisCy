@@ -1,7 +1,7 @@
 import nose.tools
 import numpy as np
 
-import micro_dl.inference.evaluation_metrics as metrics
+import micro_dl.evaluation.evaluation_metrics as metrics
 
 
 im_shape = (35, 45, 25)

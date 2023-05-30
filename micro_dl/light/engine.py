@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
+from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
 from torch.optim.lr_scheduler import ConstantLR
 
@@ -89,6 +90,10 @@ class PhaseToNuc25D(LightningModule):
                 self._detach_sample((source, target, pred))
             )
 
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+        source = self._predict_pad(batch["source"])
+        return self._predict_pad.inverse(self.forward(source))
+
     def on_train_epoch_end(self):
         self._log_samples("train_samples", self.training_step_outputs)
         self.training_step_outputs = []
@@ -96,6 +101,12 @@ class PhaseToNuc25D(LightningModule):
     def on_validation_epoch_end(self):
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+
+    def on_predict_start(self):
+        """Pad the input shape to be divisible by the downsampling factor.
+        The inverse of this transform crops the prediction to original shape."""
+        down_factor = 2**self.model.num_blocks
+        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
