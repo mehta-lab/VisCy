@@ -5,7 +5,7 @@ import numpy as np
 import os
 from testfixtures import TempDirectory
 
-import micro_dl.plotting.plot_utils as plot_utils
+import viscy.plotting.plot_utils as plot_utils
 
 
 def test_save_predicted_images():

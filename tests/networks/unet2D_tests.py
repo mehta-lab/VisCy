@@ -5,7 +5,7 @@ import nose.tools
 import numpy as np
 import unittest
 
-from micro_dl.networks import UNet2D
+from viscy.networks import UNet2D
 
 
 class TestUNet2D(unittest.TestCase):

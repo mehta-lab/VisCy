@@ -4,8 +4,8 @@ import os
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.inference.inference_dataset as inference_dataset
-import micro_dl.utils.aux_utils as aux_utils
+import viscy.inference.inference_dataset as inference_dataset
+import viscy.utils.aux_utils as aux_utils
 
 
 class TestInferenceDataSet(unittest.TestCase):

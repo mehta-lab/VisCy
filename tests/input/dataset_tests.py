@@ -5,7 +5,7 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.input.transformations as transformations
+import viscy.input.transformations as transformations
 
 
 class TestBaseDataSet(unittest.TestCase):

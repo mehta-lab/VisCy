@@ -5,7 +5,7 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.input.dataset_with_mask as dataset_mask
+import viscy.input.dataset_with_mask as dataset_mask
 
 
 class TestDataSetWithMask(unittest.TestCase):

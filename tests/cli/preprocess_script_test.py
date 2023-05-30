@@ -5,9 +5,9 @@ import os
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.cli.preprocess_script as pp
-import micro_dl.utils.aux_utils as aux_utils
-import micro_dl.utils.io_utils as io_utils
+import viscy.cli.preprocess_script as pp
+import viscy.utils.aux_utils as aux_utils
+import viscy.utils.io_utils as io_utils
 
 
 class TestPreprocessScript(unittest.TestCase):

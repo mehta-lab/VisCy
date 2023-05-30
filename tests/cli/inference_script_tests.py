@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch
 import yaml
 
-import micro_dl.cli.inference_script as inference_script
-import micro_dl.utils.aux_utils as aux_utils
+import viscy.cli.inference_script as inference_script
+import viscy.utils.aux_utils as aux_utils
 
 
 class TestInferenceScript(unittest.TestCase):

@@ -6,9 +6,9 @@ import nose.tools
 import numpy as np
 import unittest
 
-from micro_dl.networks import conv_blocks as conv_blocks
-from micro_dl.utils.aux_utils import get_channel_axis
-from micro_dl.utils.network_utils import get_keras_layer
+from viscy.networks import conv_blocks as conv_blocks
+from viscy.utils.aux_utils import get_channel_axis
+from viscy.utils.network_utils import get_keras_layer
 
 
 class TestConvBlocks(unittest.TestCase):

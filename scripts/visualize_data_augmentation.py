@@ -14,9 +14,9 @@ import matplotlib.pyplot as plt
 sys.path.insert(0, "/home/shalin.mehta/code/microDL")
 
 import microDL.micro_dl.training.training as training
-import micro_dl.utils.aux_utils as aux_utils
+import viscy.utils.aux_utils as aux_utils
 import microDL.micro_dl.utils.cli_utils as torch_io_utils
-import micro_dl.plotting.plot_utils as plot_utils
+import viscy.plotting.plot_utils as plot_utils
 
 
 def visualize_dataloading(

@@ -7,8 +7,8 @@ import pandas as pd
 from testfixtures import TempDirectory
 import unittest
 
-import micro_dl.utils.tile_utils as tile_utils
-import micro_dl.utils.aux_utils as aux_utils
+import viscy.utils.tile_utils as tile_utils
+import viscy.utils.aux_utils as aux_utils
 
 
 class TestTileUtils(unittest.TestCase):

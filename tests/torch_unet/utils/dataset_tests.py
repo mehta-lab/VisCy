@@ -14,9 +14,9 @@ import sys
 
 sys.path.insert(0, "/home/christian.foley/virtual_staining/workspaces/microDL")
 
-import micro_dl.torch_unet.utils.dataset as dataset_utils
-import micro_dl.utils.io_utils as io_utils
-import micro_dl.cli.preprocess_script as preprocess_script
+import viscy.torch_unet.utils.dataset as dataset_utils
+import viscy.utils.io_utils as io_utils
+import viscy.cli.preprocess_script as preprocess_script
 
 
 class TestDataset(unittest.TestCase):

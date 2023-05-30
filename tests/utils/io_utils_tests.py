@@ -5,7 +5,7 @@ from testfixtures import TempDirectory
 import unittest
 import zarr
 
-import micro_dl.utils.io_utils as io_utils
+import viscy.utils.io_utils as io_utils
 
 
 class TestZarrReader(unittest.TestCase):

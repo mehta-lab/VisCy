@@ -4,8 +4,8 @@ import numpy as np
 import itertools
 import unittest
 
-from micro_dl.torch_unet.networks.Unet25D import Unet25d
-import micro_dl.utils.cli_utils as io_utils
+from viscy.torch_unet.networks.Unet25D import Unet25d
+import viscy.utils.cli_utils as io_utils
 
 
 class TestUnet25d(unittest.TestCase):
