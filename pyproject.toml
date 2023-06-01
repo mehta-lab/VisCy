@@ -13,6 +13,7 @@ dependencies = [
     "iohub==0.1.0.dev3",
     "torch>=2.0.0",
     "torchvision>=0.15.1",
+    "tensorboard>=2.13.0",
     "lightning>=2.0.1",
     "monai>=1.1.0",
     "jsonargparse[signatures]>=4.20.1",
