@@ -29,7 +29,7 @@ class VSLightningCLI(LightningCLI):
                 ),
                 "trainer.callbacks": [
                     {
-                        "class_path": "micro_dl.light.prediction_writer.HCSPredictionWriter",
+                        "class_path": "viscy.light.prediction_writer.HCSPredictionWriter",
                     }
                 ],
             }
