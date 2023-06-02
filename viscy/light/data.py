@@ -200,8 +200,10 @@ class HCSDataModule(LightningDataModule):
         self.caching = caching
         self.normalize_source = normalize_source
 
-    def _cache(self, lazy_plate: Plate) -> Plate:
-        """Decompress and store the images on local tempdir."""
+    def prepare_data(self):
+        if not self.caching:
+            self.tmp_zarr = None
+            return
         # setup logger
         logger = logging.getLogger(__name__)
         os.mkdir(self.trainer.logger.log_dir)
@@ -215,29 +217,28 @@ class HCSDataModule(LightningDataModule):
             tempfile.gettempdir(), os.path.basename(self.data_path)
         )
         logger.info(f"Caching dataset at {self.tmp_zarr}.")
-        mem_store = zarr.NestedDirectoryStore(self.tmp_zarr)
-        _, skipped, _ = zarr.copy(
-            lazy_plate.zgroup,
-            zarr.open(mem_store, mode="a"),
-            name="/",
-            log=logger.debug,
-            if_exists="skip_initialized",
-            compressor=None,
-        )
+        tmp_store = zarr.NestedDirectoryStore(self.tmp_zarr)
+        with open_ome_zarr(self.data_path, mode="r") as lazy_plate:
+            _, skipped, _ = zarr.copy(
+                lazy_plate.zgroup,
+                zarr.open(tmp_store, mode="a"),
+                name="/",
+                log=logger.debug,
+                if_exists="skip_initialized",
+                compressor=None,
+            )
         if skipped > 0:
             logger.warning(
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
-        return Plate(group=zarr.open(mem_store, mode="r"))
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         channels = {"source": self.source_channel}
         dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
             dataset_settings["channels"]["target"] = self.target_channel
-            plate = open_ome_zarr(self.data_path, mode="r")
-            if self.caching:
-                plate = self._cache(plate)
+            data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
+            plate = open_ome_zarr(data_path, mode="r")
             # disable metadata tracking in MONAI for performance
             set_track_meta(False)
             # define training stage transforms
