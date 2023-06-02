@@ -199,10 +199,10 @@ class HCSDataModule(LightningDataModule):
         self.augment = augment
         self.caching = caching
         self.normalize_source = normalize_source
+        self.tmp_zarr = None
 
     def prepare_data(self):
         if not self.caching:
-            self.tmp_zarr = None
             return
         # setup logger
         logger = logging.getLogger(__name__)
