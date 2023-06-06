@@ -139,7 +139,7 @@ class SlidingWindowDataset(Dataset):
         source, sample_index = self._read_img_window(img, self.source_ch_idx, tz)
         sample = {"source": source, "index": sample_index}
         if self.target_ch_idx is not None:
-            sample["target"] = self._read_img_window(img, self.target_ch_idx, tz)
+            sample["target"], _ = self._read_img_window(img, self.target_ch_idx, tz)
         if self.transform:
             sample = self.transform(sample)
         if isinstance(sample, list):
