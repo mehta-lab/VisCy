@@ -1,1 +1,1 @@
-"""DL package for microscopy"""
+"""Learning vision for cells"""
