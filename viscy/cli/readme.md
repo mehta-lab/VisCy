@@ -2,10 +2,10 @@
 
 ## Exporting models to ONNX
 
-If you wish to run inference via usage of the ONNXruntime, models can be exported to onnx using the `micro_dl/cli/onnx_export_script.py`. See below for an example usage of this script with 5-input-stack model:
+If you wish to run inference via usage of the ONNXruntime, models can be exported to onnx using the `viscy/cli/onnx_export_script.py`. See below for an example usage of this script with 5-input-stack model:
 
 ```bash
-python micro_dl/cli/onnx_export_script.py --model_path path/to/your/pt_model.pt --stack_depth 5 --export_path intended/path/to/model/export.onnx --test_input path/to/test/input.npy
+python viscy/cli/onnx_export_script.py --model_path path/to/your/pt_model.pt --stack_depth 5 --export_path intended/path/to/model/export.onnx --test_input path/to/test/input.npy
 ```
 
 **Some Notes:**

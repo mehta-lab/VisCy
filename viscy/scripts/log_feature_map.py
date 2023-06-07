@@ -4,9 +4,7 @@ import time
 import torch
 import sys
 
-sys.path.insert(0, "/home/christian.foley/virtual_staining/microDL")
-import viscy.utils.cli_utils as cli_utils
-
+from viscy.utils import cli_utils
 
 def main():
     # create test data

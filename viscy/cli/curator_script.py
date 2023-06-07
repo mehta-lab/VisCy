@@ -1,4 +1,4 @@
-# %% script to generate your ground truth directory for microDL prediction evaluation
+# %% script to generate your ground truth directory for viscy prediction evaluation
 # After inference, the predictions generated are stored as zarr store.
 # Evaluation metrics can be computed by comparison of prediction to human proof read ground truth.
 #

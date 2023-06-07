@@ -113,9 +113,11 @@ virtual_staining:
         ...
 ```
 
-## Data hierarchy (Gunpowder Framework) 
+## Data hierarchy (Gunpowder Framework)
+
 This data hierarchy is deprecated, and is documented for archiving purposes.
 The hierarchy organizes subdirectories of config files, models/training logs and data first according to the data related to the computational experiment, then by the specific experiment. Each set of config files should have a corresponding sibling-level training log, and parent-level dataset in their respective directories
+
 ```yaml
 # project root directory 
 torch_microDL:

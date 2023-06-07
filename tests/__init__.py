@@ -1,1 +1,1 @@
-"""Tests for micro_dl"""
+"""Tests for viscy"""

@@ -136,8 +136,8 @@ class TestInferenceScript(unittest.TestCase):
                     '--gpu', 1]):
             inference_script.parse_args()
 
-    @patch('micro_dl.inference.model_inference.load_model')
-    @patch('micro_dl.inference.model_inference.predict_large_image')
+    @patch('viscy.inference.model_inference.load_model')
+    @patch('viscy.inference.model_inference.predict_large_image')
     def test_run_inference(self, mock_predict, mock_model):
         mock_model.return_value = 'dummy_model'
         # Image shape is cropped to the nearest factor of 2

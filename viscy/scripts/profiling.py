@@ -4,10 +4,7 @@ from viscy.light.data import HCSDataModule
 from numcodecs import blosc
 from profilehooks import profile
 
-dataset = (
-    "/hpc/nodes/gpu-c-1/groups/cmanalysis.grp/microDL_SP/Input/TestData_HEK_2022_04_19/"
-    "no_pertubation_Phase1e-4_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50_NGFF.zarr"
-)
+dataset = "/path/to/dataset.zarr"
 
 
 dm = HCSDataModule(
