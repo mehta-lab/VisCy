@@ -22,7 +22,7 @@ class VSTrainer(Trainer):
     def export(
         self,
         model: LightningModule,
-        output_path: str,
+        export_path: str,
         ckpt_path: str,
         format="onnx",
         datamodule=None,
@@ -37,7 +37,7 @@ class VSTrainer(Trainer):
         model.load_state_dict(torch.load(ckpt_path)["state_dict"])
         model.eval()
         model.to_onnx(
-            output_path,
+            export_path,
             input_sample=model.example_input_array,
             export_params=True,
             opset_version=18,
@@ -59,7 +59,7 @@ class VSTrainer(Trainer):
                 },
             },
         )
-        logging.info(f"ONNX exported at {output_path}")
+        logging.info(f"ONNX exported at {export_path}")
 
 
 class PhaseToNuc25D(LightningModule):
