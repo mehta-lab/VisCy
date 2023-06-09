@@ -9,11 +9,13 @@ viscy --help
 ## Exporting models to ONNX
 
 Current implementation will export a checkpoint to ONNX IR version 9
-and OP set version 19 with:
+and OP set version 18 with:
 
 ```sh
 viscy export -c config.yaml
 ```
+
+Use argument `export_path` to configure where the output is stored.
 
 ### Notes
 
