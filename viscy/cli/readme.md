@@ -17,9 +17,8 @@ viscy export -c config.yaml
 
 ### Notes
 
-* For cpu sharing reasons, running an ONNX model
-requires a dedicated node on HPC OR a non-distributed system
-(for example a personal laptop or other device).
+* For CPU sharing reasons, running an ONNX model
+requires an exclusive node on HPC OR a non-distributed system (e.g. a PC).
 
 * Models must be located in a lighting training logs directory
 with a valid `config.yaml` in order to be initialized.

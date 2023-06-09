@@ -40,7 +40,7 @@ class VSTrainer(Trainer):
             output_path,
             input_sample=model.example_input_array,
             export_params=True,
-            opset_version=16,
+            opset_version=18,
             operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
             input_names=["input"],
             output_names=["output"],
