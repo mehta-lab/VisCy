@@ -1,18 +1,65 @@
+import logging
 from typing import Literal, Sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning.pytorch import LightningModule
+from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
+from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
 
 from viscy.torch_unet.networks.Unet25D import Unet25d
 from viscy.torch_unet.utils.model import ModelDefaults25D, define_model
+
+
+class VSTrainer(Trainer):
+    def export(
+        self,
+        model: LightningModule,
+        output_path: str,
+        ckpt_path: str,
+        format="onnx",
+        datamodule=None,
+        dataloaders=None,
+    ):
+        if dataloaders or datamodule:
+            logging.debug("Ignoring datamodule and dataloaders during export.")
+        if not format == "onnx":
+            raise NotImplementedError(f"Export format '{format}'")
+        model = _maybe_unwrap_optimized(model)
+        self.strategy._lightning_module = model
+        model.load_state_dict(torch.load(ckpt_path)["state_dict"])
+        model.eval()
+        model.to_onnx(
+            output_path,
+            input_sample=model.example_input_array,
+            export_params=True,
+            opset_version=16,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
+            input_names=["input"],
+            output_names=["output"],
+            dynamic_axes={
+                "input": {
+                    0: "batch_size",
+                    1: "channels",
+                    3: "num_rows",
+                    4: "num_cols",
+                },
+                "output": {
+                    0: "batch_size",
+                    1: "channels",
+                    3: "num_rows",
+                    4: "num_cols",
+                },
+            },
+        )
+        logging.info(f"ONNX exported at {output_path}")
 
 
 class PhaseToNuc25D(LightningModule):
@@ -52,7 +99,10 @@ class PhaseToNuc25D(LightningModule):
         self.validation_step_outputs = []
         # required to log the graph
         self.example_input_array = torch.rand(
-            1, 1, (model_config.get("in_stack_depth") or 5), *example_input_yx_shape
+            1,
+            1,
+            (model_config.get("in_stack_depth") or 5),
+            *example_input_yx_shape,
         )
 
     def forward(self, x):
@@ -104,7 +154,8 @@ class PhaseToNuc25D(LightningModule):
 
     def on_predict_start(self):
         """Pad the input shape to be divisible by the downsampling factor.
-        The inverse of this transform crops the prediction to original shape."""
+        The inverse of this transform crops the prediction to original shape.
+        """
         down_factor = 2**self.model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
@@ -126,7 +177,8 @@ class PhaseToNuc25D(LightningModule):
     @staticmethod
     def _detach_sample(imgs: Sequence[torch.Tensor]):
         return [
-            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1))) for img in imgs
+            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1)))
+            for img in imgs
         ]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):

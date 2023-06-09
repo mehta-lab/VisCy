@@ -1,24 +1,35 @@
 import warnings
 from datetime import datetime
+
 import torch
 from jsonargparse import lazy_instance
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
+
 from viscy.light.data import HCSDataModule
-from viscy.light.engine import PhaseToNuc25D
+from viscy.light.engine import PhaseToNuc25D, VSTrainer
 
 
 class VSLightningCLI(LightningCLI):
     """Extending lightning CLI arguments and defualts."""
 
+    @staticmethod
+    def subcommands() -> dict[str, set[str]]:
+        subcommands = LightningCLI.subcommands()
+        subcommands["export"] = {"model", "dataloaders", "datamodule"}
+        return subcommands
+
     def add_arguments_to_parser(self, parser):
-        # https://pytorch-lightning.readthedocs.io/en/1.6.0/api/pytorch_lightning.utilities.cli.html#pytorch_lightning.utilities.cli.LightningCLI.add_arguments_to_parser
         parser.link_arguments("data.batch_size", "model.batch_size")
-        parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
+        parser.link_arguments(
+            "data.yx_patch_size", "model.example_input_yx_shape"
+        )
         parser.link_arguments(
             "trainer.default_root_dir", "trainer.logger.init_args.save_dir"
         )
-        parser.link_arguments("model.model_config.architecture", "data.architecture")
+        parser.link_arguments(
+            "model.model_config.architecture", "data.architecture"
+        )
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -41,8 +52,11 @@ def main():
     # TODO: remove this after MONAI 1.2 release
     # https://github.com/Project-MONAI/MONAI/pull/6105
     with warnings.catch_warnings():
-        warnings.filterwarnings("ignore", category=UserWarning, message="TypedStorage")
+        warnings.filterwarnings(
+            "ignore", category=UserWarning, message="TypedStorage"
+        )
         _ = VSLightningCLI(
-            PhaseToNuc25D,
-            HCSDataModule,
+            model_class=PhaseToNuc25D,
+            datamodule_class=HCSDataModule,
+            trainer_class=VSTrainer,
         )
