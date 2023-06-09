@@ -289,7 +289,7 @@ class HCSDataModule(LightningDataModule):
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
         if (
-            self.trainer.training
+            (self.trainer.training or self.trainer.validating)
             and self.target_2d
             and not isinstance(batch, torch.Tensor)
         ):
