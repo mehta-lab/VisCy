@@ -49,14 +49,8 @@ class VSLightningCLI(LightningCLI):
 
 def main():
     torch.set_float32_matmul_precision("high")
-    # TODO: remove this after MONAI 1.2 release
-    # https://github.com/Project-MONAI/MONAI/pull/6105
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", category=UserWarning, message="TypedStorage"
-        )
-        _ = VSLightningCLI(
-            model_class=PhaseToNuc25D,
-            datamodule_class=HCSDataModule,
-            trainer_class=VSTrainer,
-        )
+    _ = VSLightningCLI(
+        model_class=PhaseToNuc25D,
+        datamodule_class=HCSDataModule,
+        trainer_class=VSTrainer,
+    )
