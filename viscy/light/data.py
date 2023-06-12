@@ -205,7 +205,12 @@ class HCSDataModule(LightningDataModule):
         if not self.caching:
             return
         # setup logger
-        logger = logging.getLogger(__name__)
+        logger = logging.getLogger("viscy_data")
+        logger.propagate = False
+        logger.setLevel(logging.DEBUG)
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(logging.INFO)
+        logger.addHandler(console_handler)
         os.mkdir(self.trainer.logger.log_dir)
         file_handler = logging.FileHandler(
             os.path.join(self.trainer.logger.log_dir, "data.log")
@@ -288,11 +293,9 @@ class HCSDataModule(LightningDataModule):
             raise NotImplementedError(f"{stage} stage")
 
     def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
-        if (
-            (self.trainer.training or self.trainer.validating)
-            and self.target_2d
-            and not isinstance(batch, torch.Tensor)
-        ):
+        if self.trainer.testing or self.trainer.predicting:
+            return batch
+        if self.target_2d and not isinstance(batch, torch.Tensor):
             # slice the center during training, skipping example input array
             batch["target"] = batch["target"][:, :, self.z_window_size // 2][:, :, None]
         return batch
