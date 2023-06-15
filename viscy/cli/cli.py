@@ -21,15 +21,11 @@ class VSLightningCLI(LightningCLI):
 
     def add_arguments_to_parser(self, parser):
         parser.link_arguments("data.batch_size", "model.batch_size")
-        parser.link_arguments(
-            "data.yx_patch_size", "model.example_input_yx_shape"
-        )
+        parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
         parser.link_arguments(
             "trainer.default_root_dir", "trainer.logger.init_args.save_dir"
         )
-        parser.link_arguments(
-            "model.model_config.architecture", "data.architecture"
-        )
+        parser.link_arguments("model.model_config.architecture", "data.architecture")
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -39,9 +35,7 @@ class VSLightningCLI(LightningCLI):
                     log_graph=True,
                 ),
                 "trainer.callbacks": [
-                    {
-                        "class_path": "viscy.light.prediction_writer.HCSPredictionWriter",
-                    }
+                    {"class_path": "viscy.light.predict_writer.HCSPredictionWriter",}
                 ],
             }
         )
@@ -52,9 +46,7 @@ def main():
     # TODO: remove this after MONAI 1.2 release
     # https://github.com/Project-MONAI/MONAI/pull/6105
     with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore", category=UserWarning, message="TypedStorage"
-        )
+        warnings.filterwarnings("ignore", category=UserWarning, message="TypedStorage")
         _ = VSLightningCLI(
             model_class=PhaseToNuc25D,
             datamodule_class=HCSDataModule,

@@ -21,25 +21,27 @@ class ConvBlock3D(nn.Module):
         padding=None,
     ):
         """
-        Convolutional block for lateral layers in Unet. This block only accepts tensors of dimensions in
+        Convolutional block for lateral layers in Unet.
+        This block only accepts tensors of dimensions in
         order [...,z,x,y] or [...,z,y,x]
 
         Format for layer initialization is as follows:
             if layer type specified
             => for number of layers
             => add layer to list of that layer type
-        This is done to allow for dynamic layer number specification in the conv blocks, which
-        allows us to change the parameter numbers of the network.
+        This is done to allow for dynamic layer number specification in the conv blocks,
+        which allows us to change the parameter numbers of the network.
 
-        Only 'same' convolutional padding is recommended, as the conv blocks are intended for deep
-        Unets. However padding can be specified as follows:
+        Only 'same' convolutional padding is recommended,
+        as the conv blocks are intended for deep Unets.
+        However padding can be specified as follows:
         padding -> token{'same', 'valid', 'valid_stack'} or tuple(int) or int:
-                        -> 'same': pads with same convolution
-                        -> 'valid': pads for valid convolution on all dimensions
-                        -> 'valid_stack': pads for valid convolution on xy dims (-1, -2),
-                                            same on z dim (-3).
-                        -> tuple (int): pads above and below dimensions according to tuple-specified length
-                        -> int: pads above and below all dimensions according to int length
+                    -> 'same': pads with same convolution
+                    -> 'valid': pads for valid convolution on all dimensions
+                    -> 'valid_stack': pads for valid convolution on xy dims (-1, -2),
+                        same on z dim (-3).
+                    -> tuple (int): pads above and below corresponding dimensions
+                    -> int: pads above and below all dimensions
 
         :param int in_filters: number of images in in stack
         :param int out_filters: number of images in out stack
@@ -50,12 +52,14 @@ class ConvBlock3D(nn.Module):
         :param bool transpose: as name
         :param int/tuple kernel_size: convolutional kernel size
         :param int num_repeats: as name
-        :param str filter_steps: determines where in the block the filters inflate channels (learn
-                                    abstraction information): 'linear','first','last'
-        :param str layer_order: order of conv, norm, and act layers in block: 'can', 'cna', etc
-                                NOTE: for now conv must always come first as required by norm
-                                      feature counts
-        :paramn str/tuple(int)/tuple/None padding: convolutional padding, see docstring for details
+        :param str filter_steps: determines where in the block
+            the filters inflate channels
+            (learn abstraction information): 'linear','first','last'
+        :param str layer_order: order of conv, norm, and act layers in block:
+            'can', 'cna', etc.
+            NOTE: for now conv must always come first as required by norm feature counts
+        :paramn str/tuple(int)/tuple/None padding: convolutional padding,
+            see docstring for details
         """
 
         super(ConvBlock3D, self).__init__()
@@ -213,7 +217,8 @@ class ConvBlock3D(nn.Module):
         self.register_modules(self.conv_list, "Conv3d")
 
         # ----- Init Residual Layer -----#
-        # Note that convolution is only used in residual layer when block is shrinking feature space
+        # Note that convolution is only used in residual layer
+        # when block is shrinking feature space
         # Unregistered -- Not a learnable parameter
         self.resid_conv = nn.Conv3d(
             self.in_filters, self.out_filters, kernel_size=1, padding=0
@@ -243,20 +248,23 @@ class ConvBlock3D(nn.Module):
         """
         Forward call of convolutional block
 
-        Order of layers within the block is defined by the 'layer_order' parameter, which is a string of
-        'c's, 'a's and 'n's in reference to convolution, activation, and normalization layers. This sequence
-        is repeated num_repeats times.
+        Order of layers within the block is defined by the 'layer_order' parameter,
+        which is a string of 'c's, 'a's and 'n's in reference to
+        convolution, activation, and normalization layers.
+        This sequence is repeated num_repeats times.
 
         Recommended layer order:   convolution -> activation -> normalization
 
-        Regardless of layer order, the final layer sequence in the block always ends in activation. This
-        allows for usage of passthrough layers or a final output activation function determined separately.
+        Regardless of layer order,
+        the final layer sequence in the block always ends in activation.
+        This allows for usage of passthrough layers
+        or a final output activation function determined separately.
 
         Residual blocks:
-            if input channels are greater than output channels, we use a 1x1 convolution on
-                input to get desired feature channels
-            if input channels are less than output channels, we zero-pad input channels to
-                output channel size
+            if input channels are greater than output channels,
+            we use a 1x1 convolution on input to get desired feature channels
+            if input channels are less than output channels,
+            we zero-pad input channels to output channel size
 
         :param torch.tensor x: input tensor
         """
@@ -304,14 +312,17 @@ class ConvBlock3D(nn.Module):
 
     def model(self):
         """
-        Allows calling of parameters inside ConvBlock object: 'ConvBlock.model().parameters()''
+        Allows calling of parameters inside ConvBlock object:
+        'ConvBlock.model().parameters()''
 
         Layer order:       convolution -> normalization -> activation
 
         We can make a list of layer modules and unpack them into nn.Sequential.
-        Note: this is distinct from the forward call because we want to use the forward call with
-                addition, since this is a residual block. The forward call performs the resid
-                calculation, and all the parameters can be seen by the optimizer when given this model.
+        Note: this is distinct from the forward call
+            because we want to use the forward call with addition,
+            since this is a residual block.
+            The forward call performs the residual calculation,
+            and all the parameters can be seen by the optimizer when given this model.
         """
         layers = []
 
@@ -328,12 +339,13 @@ class ConvBlock3D(nn.Module):
 
     def register_modules(self, module_list, name):
         """
-        Helper function that registers modules stored in a list to the model object so that the can
-        be seen by PyTorch optimizer.
+        Helper function that registers modules stored in a list to the model object
+        so that the can be seen by PyTorch optimizer.
 
-        Used to enable model graph creation with non-sequential model types and dynamic layer numbers
+        Used to enable model graph creation
+        with non-sequential model types and dynamic layer numbers
 
-        :param list(torch.nn.module) module_list: list of modules to register/make visible
+        :param list(torch.nn.module) module_list: list of modules to register
         :param str name: name of module type
         """
         for i, module in enumerate(module_list):

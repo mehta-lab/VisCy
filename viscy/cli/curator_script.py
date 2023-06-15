@@ -1,7 +1,8 @@
 # %% script to generate your ground truth directory for viscy prediction evaluation
 # After inference, the predictions generated are stored as zarr store.
-# Evaluation metrics can be computed by comparison of prediction to human proof read ground truth.
-#
+# Evaluation metrics can be computed by comparison of prediction
+# to human proof read ground truth.
+
 import numpy as np
 import os
 from PIL import Image
@@ -11,6 +12,7 @@ import argparse
 
 import viscy.evaluation.evaluation_metrics as metrics
 import viscy.utils.aux_utils as aux_utils
+
 # from waveorder.focus import focus_from_transverse_band
 
 # %% read the below details from the config file
@@ -26,9 +28,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--config",
-        type=str,
-        help="path to yaml configuration file",
+        "--config", type=str, help="path to yaml configuration file",
     )
     args = parser.parse_args()
     return args
@@ -36,7 +36,8 @@ def parse_args():
 
 def main(config):
     """
-    pick the focus slice from n_pos number of positions, cellpose segment, and save as tifs
+    pick the focus slice from n_pos number of positions, cellpose segment,
+    and save as TIFFs.
     also save segmentation input and label-free image as tifs for ground truth curation
     segment fluorescence predictions and store mask as new channel
     """
@@ -63,8 +64,7 @@ def main(config):
 
     ground_truth_subdir = "ground_truth"
     path_split_head_tail = os.path.split(pred_dir)
-    target_zarr_dir = path_split_head_tail[0]
-    zarr_name = path_split_head_tail[1]
+    target_zarr_dir, _zarr_name = path_split_head_tail[0]
 
     if not os.path.exists(os.path.join(target_zarr_dir, ground_truth_subdir)):
         os.mkdir(
@@ -82,7 +82,8 @@ def main(config):
                 assert len(PosList) > out_shape[0]
             except AssertionError:
                 print(
-                    "number of positions listed in config exceeds number of positions in dataset"
+                    "number of positions listed in config exceeds "
+                    "the number of positions in the dataset"
                 )
             pos = int(position.split("/")[-1])
             for gt_chan in ground_truth_chans:

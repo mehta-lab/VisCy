@@ -8,7 +8,7 @@ from skimage.morphology import disk, dilation, erosion
 from skimage.measure import label, regionprops
 from scipy.stats import pearsonr
 
-from cellpose import models, utils, io
+from cellpose import models
 from lapsolver import solve_dense
 
 
@@ -278,7 +278,10 @@ def POD_metric(target_bin, pred_bin):
 
     distance_threshold = np.mean(lab_targ_major_axis) / 2
 
-    # an uneven number of targ and pred yields zero entry row / column to make the unbalanced assignment problem balanced. The zero entries (=no realobjects) are set to nan to prevent them of being matched.
+    # an uneven number of targ and pred yields zero entry row / column
+    # to make the unbalanced assignment problem balanced.
+    # The zero entries (=no realobjects)
+    # are set to nan to prevent them of being matched.
     cost_matrix[cost_matrix == 0.0] = np.nan
 
     # LAPsolver for minimizing cost matrix of objects
@@ -371,7 +374,7 @@ class MetricsEstimator:
         }
         assert set(metrics_list).issubset(
             available_metrics
-        ), "only ssim, r2, corr, mse, mae, acc, dice, IoU, VI, POD are currently supported"
+        ), "only ssim, r2, corr, mse, mae, acc, dice, IoU, VI, POD are supported"
         self.metrics_list = metrics_list
         self.pd_col_names = metrics_list.copy()
         self.masked_metrics = masked_metrics
@@ -476,9 +479,7 @@ class MetricsEstimator:
             metric_fn = self.fn_mapping[metric_fn_name]
             if self.masked_metrics:
                 cur_metric_list = metric_fn(
-                    target=target,
-                    prediction=prediction,
-                    mask=mask,
+                    target=target, prediction=prediction, mask=mask,
                 )
                 vol_frac = np.mean(mask)
                 metrics_row["vol_frac"] = vol_frac
@@ -486,10 +487,7 @@ class MetricsEstimator:
                 metric_name = "{}_masked".format(metric_name)
                 metrics_row[metric_name] = cur_metric_list[1]
             else:
-                cur_metric = metric_fn(
-                    target=target,
-                    prediction=prediction,
-                )
+                cur_metric = metric_fn(target=target, prediction=prediction,)
                 metrics_row[metric_name] = cur_metric
         return metrics_row
 
@@ -506,16 +504,10 @@ class MetricsEstimator:
         self.assert_input(target, prediction, pred_name, mask)
         self.metrics_xyz = pd.DataFrame(columns=self.pd_col_names)
         metrics_row = self.compute_metrics_row(
-            target=target,
-            prediction=prediction,
-            pred_name=pred_name,
-            mask=mask,
+            target=target, prediction=prediction, pred_name=pred_name, mask=mask,
         )
         # Append to existing dataframe
-        self.metrics_xyz = self.metrics_xyz.append(
-            metrics_row,
-            ignore_index=True,
-        )
+        self.metrics_xyz = self.metrics_xyz.append(metrics_row, ignore_index=True,)
 
     def estimate_xy_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -544,10 +536,7 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_xy = self.metrics_xy.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_xy = self.metrics_xy.append(metrics_row, ignore_index=True,)
 
     def estimate_xz_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -574,10 +563,7 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_xz = self.metrics_xz.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_xz = self.metrics_xz.append(metrics_row, ignore_index=True,)
 
     def estimate_yz_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -604,7 +590,4 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_yz = self.metrics_yz.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_yz = self.metrics_yz.append(metrics_row, ignore_index=True,)

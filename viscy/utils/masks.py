@@ -14,7 +14,8 @@ from skimage.morphology import (
 def create_otsu_mask(input_image, sigma=0.6):
     """Create a binary mask using morphological operations
     :param np.array input_image: generate masks from this 3D image
-    :param float sigma: Gaussian blur standard deviation, increase in value increases blur
+    :param float sigma: Gaussian blur standard deviation,
+        increase in value increases blur
     :return: volume mask of input_image, 3D np.array
     """
 
@@ -31,10 +32,12 @@ def create_membrane_mask(input_image, str_elem_size=23, sigma=0.4, k_size=3, msi
     """Create a binary mask using Laplacian of Gaussian (LOG) feature detection
 
     :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the laplacian filter used for contarst enhancement, odd number.
+    :param int str_elem_size: size of the laplacian filter
+        used for contarst enhancement, odd number.
         Increase in value increases sensitivity of contrast enhancement
     :param float sigma: Gaussian blur standard deviation
-    :param int k_size: disk/ball size for mask dilation, ball for 3D and disk for 2D data
+    :param int k_size: disk/ball size for mask dilation,
+        ball for 3D and disk for 2D data
     :param int msize: size of small objects removed to clean segmentation
     :return: mask of input_image, np.array
     """
@@ -197,7 +200,7 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
     distance_maps = np.sort(distance_maps, 2)
     d1 = distance_maps[:, :, 0]
     d2 = distance_maps[:, :, 1]
-    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma**2)))
+    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma ** 2)))
 
     zero_label = np.zeros((annotation.shape[0], annotation.shape[1]), dtype=np.float64)
     zero_label[labeled_array == 0] = 1

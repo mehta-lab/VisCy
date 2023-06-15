@@ -1,12 +1,8 @@
-from genericpath import exists
 import os
-from pickletools import uint8
 from PIL import Image
 import collections
 import numpy as np
-import matplotlib.pyplot as plt
 import re
-import time
 import torch
 
 
@@ -65,13 +61,16 @@ def show_progress_bar(dataloader, current, process="training", interval=1):
     if current % interval != 0 and fraction_computed < 1:
         return
 
-    pointer = ">" if fraction_computed < 1 else "="
+    # pointer = ">" if fraction_computed < 1 else "="
     loading_string = (
         "=" * int(bar_length * fraction_computed)
         + ">"
         + "_" * int(bar_length * (1 - fraction_computed))
     )
-    output_string = f"\t {process} {current}/{dataloader.__len__()} [{loading_string}] ({int(fraction_computed * 100)}%)"
+    output_string = (
+        f"\t {process} {current}/{dataloader.__len__()} "
+        f"[{loading_string}] ({int(fraction_computed * 100)}%)"
+    )
 
     if fraction_computed <= (dataloader.__len__() - interval) / dataloader.__len__():
         print(" " * (bar_length + len(process) + 5), end="\r")

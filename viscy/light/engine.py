@@ -99,10 +99,7 @@ class PhaseToNuc25D(LightningModule):
         self.validation_step_outputs = []
         # required to log the graph
         self.example_input_array = torch.rand(
-            1,
-            1,
-            (model_config.get("in_stack_depth") or 5),
-            *example_input_yx_shape,
+            1, 1, (model_config.get("in_stack_depth") or 5), *example_input_yx_shape,
         )
 
     def forward(self, x):
@@ -156,7 +153,7 @@ class PhaseToNuc25D(LightningModule):
         """Pad the input shape to be divisible by the downsampling factor.
         The inverse of this transform crops the prediction to original shape.
         """
-        down_factor = 2**self.model.num_blocks
+        down_factor = 2 ** self.model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
@@ -177,8 +174,7 @@ class PhaseToNuc25D(LightningModule):
     @staticmethod
     def _detach_sample(imgs: Sequence[torch.Tensor]):
         return [
-            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1)))
-            for img in imgs
+            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1))) for img in imgs
         ]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):

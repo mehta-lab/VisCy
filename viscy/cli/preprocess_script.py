@@ -16,9 +16,7 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config",
-        type=str,
-        help="path to yaml configuration file",
+        "--config", type=str, help="path to yaml configuration file",
     )
     args = parser.parse_args()
     return args
@@ -43,7 +41,7 @@ def pre_process(torch_config):
      and mask_dir (the former is for generating masks from a channel)
     """
     time_start = time.time()
-    plate = ngff.open_ome_zarr(torch_config["zarr_dir"], layout='hcs', mode='r')
+    plate = ngff.open_ome_zarr(torch_config["zarr_dir"], layout="hcs", mode="r")
     preprocess_config = torch_config["preprocessing"]
 
     # ----------------- Generate normalization values -----------------

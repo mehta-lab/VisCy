@@ -30,14 +30,10 @@ def log_feature(feature_map, name, log_save_folder, debug_mode):
                 f"{now.day}_{now.hour}_{now.minute}/"
             )
             logger = FeatureLogger(
-                save_folder=log_save_folder,
-                spatial_dims=3,
-                grid_width=8,
+                save_folder=log_save_folder, spatial_dims=3, grid_width=8,
             )
             logger.log_feature_map(
-                feature_map,
-                name,
-                dim_names=["batch", "channels"],
+                feature_map, name, dim_names=["batch", "channels"],
             )
     except Exception:
         print(
@@ -86,11 +82,7 @@ class FeatureLogger:
         print("--- Initializing Logger ---")
 
     def log_feature_map(
-        self,
-        feature_map,
-        feature_name,
-        dim_names=[],
-        vmax=0,
+        self, feature_map, feature_name, dim_names=[], vmax=0,
     ):
         """
         Creates a log of figures the given feature map tensor at 'save_folder'.
@@ -132,11 +124,7 @@ class FeatureLogger:
         print(f"done. Took {time.time() - start:.2f} seconds")
 
     def map_feature_dims(
-        self,
-        feature_map,
-        save_as_grid,
-        vmax=0,
-        depth=0,
+        self, feature_map, save_as_grid, vmax=0, depth=0,
     ):
         """
         Recursive directory creation for organizing feature map logs
@@ -166,9 +154,7 @@ class FeatureLogger:
                 if feature_map.shape[0] == 1:
                     # if a single channel, can't save as grid
                     self.map_feature_dims(
-                        feature_map,
-                        save_as_grid=False,
-                        depth=depth,
+                        feature_map, save_as_grid=False, depth=depth,
                     )
                 else:
                     # grid saving
@@ -224,8 +210,7 @@ class FeatureLogger:
                             current_grid_row.append(map_slice)
                         feature_map_grid.append(
                             torch.cat(
-                                self.interleave_bars(current_grid_row, axis=1),
-                                dim=1,
+                                self.interleave_bars(current_grid_row, axis=1), dim=1,
                             )
                         )
                         feature_map_grid = torch.cat(
@@ -248,10 +233,7 @@ class FeatureLogger:
                     raise AttributeError("error in recursion")
                 os.makedirs(name, exist_ok=False)
                 self.map_feature_dims(
-                    feature_map[i],
-                    name,
-                    save_as_grid,
-                    depth=depth + 1,
+                    feature_map[i], name, save_as_grid, depth=depth + 1,
                 )
 
             if depth == 0 and not self.full_batch:

@@ -1,7 +1,8 @@
 # %% script to generate your ground truth directory for viscy prediction evaluation
 # After inference, the predictions generated are stored as zarr store.
-# Evaluation metrics can be computed by comparison of prediction to human proof read ground truth.
-#
+# Evaluation metrics can be computed by comparison of prediction to
+# human proof read ground truth.
+
 import os
 import imageio as iio
 import iohub.ngff as ngff
@@ -24,9 +25,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--config",
-        type=str,
-        help="path to yaml configuration file",
+        "--config", type=str, help="path to yaml configuration file",
     )
     args = parser.parse_args()
     return args
@@ -113,10 +112,7 @@ def main(config):
             pos_metric_list = []
             for metric_name in metrics_list:
                 metric_fn = metric_map[metric_name]
-                cur_metric_list = metric_fn(
-                    gt_mask,
-                    pred_mask[0],
-                )
+                cur_metric_list = metric_fn(gt_mask, pred_mask[0],)
                 pos_metric_list = pos_metric_list + cur_metric_list
 
             df_metrics.loc[pos] = pos_metric_list

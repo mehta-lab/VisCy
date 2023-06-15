@@ -1,10 +1,11 @@
-#%%
+# %%
 import numpy as np
 import time
 import torch
-import sys
+
 
 from viscy.utils import cli_utils
+
 
 def main():
     # create test data

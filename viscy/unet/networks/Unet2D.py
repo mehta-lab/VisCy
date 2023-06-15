@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from viscy.unet.networks.layers.ConvBlock2D import *
+from viscy.unet.networks.layers import ConvBlock2D
 
 
 class Unet2d(nn.Module):
@@ -21,20 +21,23 @@ class Unet2d(nn.Module):
         task="seg",
     ):
         """
-        Instance of 2D Unet. Implementedfor e with variable input/output channels and depth (block numbers).
+        2D Unet with variable input/output channels and depth (block numbers).
         Follows 2D UNet Architecture:
             1) Unet: https://arxiv.org/pdf/1505.04597.pdf
             2) residual Unet: https://arxiv.org/pdf/1711.10684.pdf
 
         :param int in_channels: number of feature channels in
         :param int out_channels: number of feature channels out
-        :param int/tuple(int,int) kernel_size: size of x and y dimensions of conv kernels in blocks
+        :param int/tuple(int,int) kernel_size: size of x and y dimensions
+            of conv kernels in blocks
         :param bool residual: see name
         :param float dropout: probability of dropout, between 0 and 0.5
-        :param int num_blocks: number of convolutional blocks on encoder and decoder paths
+        :param int num_blocks: number of convolutional blocks on encoder and decoder
         :param int num_block_layers: number of layers per block
-        :param list[int] num_filters: list of filters/feature levels at each conv block depth
-        :param str task: network task (for virtual staining this is regression): 'seg','reg'
+        :param list[int] num_filters: list of filters/feature levels
+            at each conv block depth
+        :param str task: network task (for virtual staining this is regression),
+            one of 'seg','reg'
         """
 
         super(Unet2d, self).__init__()
@@ -172,12 +175,12 @@ class Unet2d(nn.Module):
         Call order:
             => num_block 2D convolutional blocks, with downsampling in between (encoder)
             => num_block 2D convolutional blocks, with upsampling between them (decoder)
-            => skip connections between corresponding blocks on encoder and decoder paths
+            => skip connections between corresponding blocks on encoder and decoder
             => terminal block collapses to output dimensions
 
         :param torch.tensor x: input image
-        :param bool validate_input: Deactivates assertions which are redundat if forward pass
-                                    is being traced by tensorboard writer.
+        :param bool validate_input: Deactivates assertions which are redundant
+            if forward pass is being traced by tensorboard writer.
         """
         # handle input exceptions
         if validate_input:
@@ -207,15 +210,16 @@ class Unet2d(nn.Module):
         x = self.terminal_block(x)
 
         return x
-    
+
     def register_modules(self, module_list, name):
         """
-        Helper function that registers modules stored in a list to the model object so that the can
-        be seen by PyTorch optimizer.
+        Helper function that registers modules stored in a list to the model object
+        so that they can be seen by PyTorch optimizer.
 
-        Used to enable model graph creation with non-sequential model types and dynamic layer numbers
+        Used to enable model graph creation with
+        non-sequential model types and dynamic layer numbers
 
-        :param list(torch.nn.module) module_list: list of modules to register/make visible
+        :param list(torch.nn.module) module_list: list of modules to register
         :param str name: name of module type
         """
         for i, module in enumerate(module_list):

@@ -1,12 +1,7 @@
-import datetime
-import os
-import time
-import numpy as np
 import torch
 import torch.nn as nn
 
-from viscy.unet.networks.layers.ConvBlock3D import *
-import viscy.unet.utils.logging as log
+from viscy.unet.networks.layers import ConvBlock3D
 
 
 class Unet25d(nn.Module):
@@ -31,23 +26,30 @@ class Unet25d(nn.Module):
         Instance of 2.5D Unet.
         1.) https://elifesciences.org/articles/55502
 
-        Architecture takes in stack of 2d inputs given as a 3d tensor and returns a 2d interpretation.
-        Learns 3d information based upon input stack, but speeds up training by compressing 3d
-        information before the decoding path. Uses interruption conv layers in the Unet skip paths to
+        Architecture takes in stack of 2d inputs given as a 3d tensor
+        and returns a 2d interpretation.
+        Learns 3d information based upon input stack,
+        but speeds up training by compressing 3d information before the decoding path.
+        Uses interruption conv layers in the Unet skip paths to
         compress information with z-channel convolution.
 
         :param int in_channels: number of feature channels in (1 or more)
         :param int out_channels: number of feature channels out (1 or more)
         :param int input_stack_depth: depth of input stack in z
         :param int output_stack_depth: depth of output stack
-        :param int/tuple(int, int) xy_kernel_size: size of x and y dimensions of conv kernels in blocks
+        :param int/tuple(int, int) xy_kernel_size: size of x and y dimensions
+            of conv kernels in blocks
         :param bool residual: see name
         :param float dropout: probability of dropout, between 0 and 0.5
-        :param int num_blocks: number of convolutional blocks on encoder and decoder paths
+        :param int num_blocks: number of convolutional blocks
+            on encoder and decoder paths
         :param int num_block_layers: number of layer sequences repeated per block
-        :param list[int] num_filters: list of filters/feature levels at each conv block depth
-        :param str task: network task (for virtual staining this is regression): 'seg','reg'
-        :param str debug_mode: if true logs features at each step of architecture, must be manually set
+        :param list[int] num_filters: list of filters/feature levels
+            at each conv block depth
+        :param str task: network task (for virtual staining this is regression),
+            one of 'seg','reg'
+        :param str debug_mode: if true logs features at each step of architecture,
+            must be manually set
         """
         super(Unet25d, self).__init__()
         self.in_channels = in_channels
@@ -206,7 +208,7 @@ class Unet25d(nn.Module):
 
         Call order:
             => num_block 3D convolutional blocks, with downsampling in between (encoder)
-            => skip connections between corresponding blocks on encoder and decoder paths
+            => skip connections between corresponding blocks in encoder and decoder
             => num_block 2D (3d with 1 z-channel) convolutional blocks, with upsampling
                 between them (decoder)
             => terminal block collapses to output dimensions
@@ -240,12 +242,13 @@ class Unet25d(nn.Module):
 
     def register_modules(self, module_list, name):
         """
-        Helper function that registers modules stored in a list to the model object so that the can
-        be seen by PyTorch optimizer.
+        Helper function that registers modules stored in a list to the model object
+        so that the can be seen by PyTorch optimizer.
 
-        Used to enable model graph creation with non-sequential model types and dynamic layer numbers
+        Used to enable model graph creation with
+        non-sequential model types and dynamic layer numbers
 
-        :param list(torch.nn.module) module_list: list of modules to register/make visible
+        :param list(torch.nn.module) module_list: list of modules to register
         :param str name: name of module type
         """
         for i, module in enumerate(module_list):

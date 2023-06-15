@@ -19,10 +19,10 @@ def im_bit_convert(im, bit=16, norm=False, limit=[]):
         im = (
             (im - limit[0])
             / (limit[1] - limit[0] + sys.float_info.epsilon)
-            * (2**bit - 1)
+            * (2 ** bit - 1)
         )
     im = np.clip(
-        im, 0, 2**bit - 1
+        im, 0, 2 ** bit - 1
     )  # clip the values to avoid wrap-around by np.astype
     if bit == 8:
         im = im.astype(np.uint8, copy=False)  # convert to 8 bit
@@ -95,11 +95,7 @@ def preprocess_image(
         if hist_clip_limits is not None:
             im = normalize.hist_clipping(im, hist_clip_limits[0], hist_clip_limits[1])
         if normalize_im is not None:
-            im = normalize.zscore(
-                im,
-                im_mean=zscore_mean,
-                im_std=zscore_std,
-            )
+            im = normalize.zscore(im, im_mean=zscore_mean, im_std=zscore_std,)
     else:
         if im.dtype != bool:
             im = im > 0
