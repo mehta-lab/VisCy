@@ -1,5 +1,3 @@
-from re import M
-import numpy as np
 import time
 import os
 import datetime
@@ -16,8 +14,9 @@ def log_feature(feature_map, name, log_save_folder, debug_mode):
     'log_save_folder'
     If no log_save_folder specified, saves relative to working directory with timestamp.
 
-    Currently only saving in working directory is supported. This is meant to be an analysis
-    tool, and results should not be saved permanently.
+    Currently only saving in working directory is supported.
+    This is meant to be an analysis tool,
+    and results should not be saved permanently.
 
     :param torch.tensor feature_map: feature map to create visualization log of
     :param str name: string
@@ -40,7 +39,7 @@ def log_feature(feature_map, name, log_save_folder, debug_mode):
                 name,
                 dim_names=["batch", "channels"],
             )
-    except Exception as e:
+    except Exception:
         print(
             "Features of one input logged. Results saved at:"
             f"\n\t  {log_save_folder}. Will not log to avoid overwrite. \n"
@@ -185,10 +184,11 @@ class FeatureLogger:
                         else:
                             if feature_map.shape[0] % self.grid_width != 0:
                                 raise AttributeError(
-                                    f"Grid width {self.grid_width} must by divisor of number "
-                                    f"of channels {feature_map.shape[0]}"
+                                    f"Grid width {self.grid_width} must be a divisor "
+                                    f"of the number of channels {feature_map.shape[0]}"
                                 )
-                        # build grid by rows, interleaving bars for ease of visualization
+                        # build grid by rows
+                        # interleaving bars for ease of visualization
                         feature_map_grid = []
                         current_grid_row = []
 
@@ -207,7 +207,8 @@ class FeatureLogger:
                             # get 2d slice
                             map_slice = feature_map[channel_num, z_depth]
 
-                            # norm slice to (0,1) unless normalize_by_grid, which is done later
+                            # norm slice to (0,1) unless normalize_by_grid
+                            # which is done later
                             if not self.normalize_by_grid:
                                 map_slice = torch.tensor(
                                     hist_clipping(
@@ -243,7 +244,7 @@ class FeatureLogger:
                     name = os.path.join(
                         self.feature_save_folder, self.dim_names[depth] + f"_{i}"
                     )
-                except:
+                except Exception:
                     raise AttributeError("error in recursion")
                 os.makedirs(name, exist_ok=False)
                 self.map_feature_dims(
