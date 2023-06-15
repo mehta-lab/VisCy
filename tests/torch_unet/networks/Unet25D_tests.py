@@ -4,7 +4,7 @@ import numpy as np
 import itertools
 import unittest
 
-from viscy.torch_unet.networks.Unet25D import Unet25d
+from viscy.unet.networks.Unet25D import Unet25d
 import viscy.utils.cli_utils as io_utils
 
 

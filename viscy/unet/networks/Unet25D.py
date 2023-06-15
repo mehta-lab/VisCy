@@ -5,8 +5,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-from viscy.torch_unet.networks.layers.ConvBlock3D import *
-import viscy.torch_unet.utils.logging as log
+from viscy.unet.networks.layers.ConvBlock3D import *
+import viscy.unet.utils.logging as log
 
 
 class Unet25d(nn.Module):

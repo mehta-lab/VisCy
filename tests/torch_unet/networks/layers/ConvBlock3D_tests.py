@@ -4,7 +4,7 @@ import numpy as np
 import itertools
 import unittest
 
-from viscy.torch_unet.networks.layers.ConvBlock3D import ConvBlock3D
+from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 import viscy.utils.cli_utils as io_utils
 
 

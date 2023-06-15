@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from viscy.torch_unet.networks.layers.ConvBlock2D import *
+from viscy.unet.networks.layers.ConvBlock2D import *
 
 
 class Unet2d(nn.Module):
