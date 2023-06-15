@@ -9,23 +9,19 @@ from skimage.morphology import (
     remove_small_objects,
     binary_dilation,
 )
-from viscy.utils.image_utils import im_adjust
 
 
 def create_otsu_mask(input_image, sigma=0.6):
-
     """Create a binary mask using morphological operations
     :param np.array input_image: generate masks from this 3D image
     :param float sigma: Gaussian blur standard deviation, increase in value increases blur
     :return: volume mask of input_image, 3D np.array
     """
 
-    input_image_blur = gaussian(input_image, sigma=sigma)
-
     input_sz = input_image.shape
     mid_slice_id = input_sz[0] // 2
 
-    thresh = threshold_otsu(input_image[mid_slice_id,:,:])
+    thresh = threshold_otsu(input_image[mid_slice_id, :, :])
     mask = input_image >= thresh
 
     return mask
@@ -106,7 +102,7 @@ def get_unimodal_threshold(input_image):
     return best_threshold
 
 
-def create_unimodal_mask(input_image, str_elem_size=3, sigma = 0.6):
+def create_unimodal_mask(input_image, str_elem_size=3, sigma=0.6):
     """
     Create a mask with unimodal thresholding and morphological operations.
     Unimodal thresholding seems to oversegment, erode it by a fraction
@@ -118,7 +114,7 @@ def create_unimodal_mask(input_image, str_elem_size=3, sigma = 0.6):
     """
 
     input_image = gaussian(input_image, sigma=sigma)
-    
+
     if np.min(input_image) == np.max(input_image):
         thr = np.unique(input_image)
     else:
