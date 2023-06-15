@@ -28,7 +28,10 @@ class TestUnet25d(unittest.TestCase):
         }
         self.fail_inputs = {
             "nonsquare": [torch.ones((1, 1, 5, 128, 256)), (1, 1, 1, 128, 256)],
-            "nonsquare_arbitrary": [torch.ones((1, 1, 5, 128, 316)), (1, 1, 1, 128, 316)],
+            "nonsquare_arbitrary": [
+                torch.ones((1, 1, 5, 128, 316)),
+                (1, 1, 1, 128, 316),
+            ],
             "wrong_dims": [torch.ones((1, 1, 1, 1)), (1, 1, 1, 1)],
         }
         # possible configurations
