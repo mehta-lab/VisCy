@@ -1,4 +1,3 @@
-import nose.tools
 import numpy as np
 
 import viscy.evaluation.evaluation_metrics as metrics
@@ -13,7 +12,7 @@ pred_im = target_im.copy() + 2
 
 def test_mse_metric():
     mse = metrics.mse_metric(target=target_im, prediction=pred_im)
-    nose.tools.assert_equal(mse, 4)
+    assert mse == 4
 
 
 def test_mae_metric():

@@ -6,7 +6,7 @@ from typing import Any, Callable, Iterable, Literal, TypedDict, Union
 import numpy as np
 import torch
 import zarr
-from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
+from iohub.ngff import ImageArray, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.transforms import (
@@ -292,7 +292,7 @@ class HCSDataModule(LightningDataModule):
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def on_before_batch_transfer(self, batch: Any, dataloader_idx: int) -> Any:
+    def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         if self.trainer.testing or self.trainer.predicting:
             return batch
         if self.target_2d and not isinstance(batch, torch.Tensor):
