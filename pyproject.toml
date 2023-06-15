@@ -15,7 +15,7 @@ dependencies = [
     "torchvision>=0.15.1",
     "tensorboard>=2.13.0",
     "lightning>=2.0.1",
-    "monai>=1.1.0",
+    "monai>=1.2.0",
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image>=0.19.2",
     "matplotlib",
