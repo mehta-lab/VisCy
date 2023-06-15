@@ -1,9 +1,10 @@
+import os
+import unittest
+
 import cv2
 import numpy as np
-import os
 import pandas as pd
 from testfixtures import TempDirectory
-import unittest
 
 import viscy.preprocessing.resize_images as resize_images
 import viscy.utils.aux_utils as aux_utils

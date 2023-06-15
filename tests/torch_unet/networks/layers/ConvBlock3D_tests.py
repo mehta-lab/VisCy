@@ -1,11 +1,12 @@
 import collections
-import torch
-import numpy as np
 import itertools
 import unittest
 
-from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
+import numpy as np
+import torch
+
 import viscy.utils.cli_utils as io_utils
+from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 
 
 class TestConvBlock3D(unittest.TestCase):

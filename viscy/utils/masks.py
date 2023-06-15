@@ -1,13 +1,13 @@
 import numpy as np
 import scipy.ndimage as ndimage
-from skimage.filters import threshold_otsu, gaussian, laplace
 from scipy.ndimage import binary_fill_holes
+from skimage.filters import gaussian, laplace, threshold_otsu
 from skimage.morphology import (
     ball,
-    disk,
-    binary_opening,
-    remove_small_objects,
     binary_dilation,
+    binary_opening,
+    disk,
+    remove_small_objects,
 )
 
 

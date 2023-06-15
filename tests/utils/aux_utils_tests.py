@@ -1,6 +1,7 @@
 import json
-import nose.tools
 import os
+
+import nose.tools
 from testfixtures import TempDirectory
 
 from viscy.utils.aux_utils import read_config

@@ -1,15 +1,16 @@
-import nose.tools
-import numpy as np
-import numpy.testing
 import os
-import pandas as pd
-import skimage.io as sk_im_io
-from testfixtures import TempDirectory
 import unittest
 import warnings
 
-from viscy.utils import aux_utils as aux_utils
+import nose.tools
+import numpy as np
+import numpy.testing
+import pandas as pd
+import skimage.io as sk_im_io
+from testfixtures import TempDirectory
+
 from viscy.preprocessing.generate_masks import MaskProcessor
+from viscy.utils import aux_utils as aux_utils
 
 
 class TestMaskProcessor(unittest.TestCase):

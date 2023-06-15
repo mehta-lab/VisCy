@@ -1,11 +1,11 @@
-from typing import Literal, Sequence
 import logging
 import os
+from typing import Literal, Sequence
 
-from iohub.ngff import open_ome_zarr, _pad_shape
+import torch
+from iohub.ngff import _pad_shape, open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
-import torch
 
 from viscy.light.data import Sample
 

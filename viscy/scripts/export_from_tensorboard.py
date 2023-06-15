@@ -1,8 +1,8 @@
 # %% This script allows us to export visualizations from tensorboard logs
 # written by lightning training CLI.
 
-import torch
 import matplotlib.pyplot as plt
+import torch
 
 # Get the path to the tensorboard event file
 event_file_path = (

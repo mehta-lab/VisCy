@@ -1,9 +1,10 @@
+import os
+import unittest
+
 import cv2
 import nose.tools
 import numpy as np
-import os
 from testfixtures import TempDirectory
-import unittest
 
 import viscy.cli.preprocess_script as pp
 import viscy.utils.aux_utils as aux_utils

@@ -3,12 +3,13 @@
 # Evaluation metrics can be computed by comparison of prediction
 # to human proof read ground truth.
 
-import numpy as np
+import argparse
 import os
-from PIL import Image
+
 import imageio as iio
 import iohub.ngff as ngff
-import argparse
+import numpy as np
+from PIL import Image
 
 import viscy.evaluation.evaluation_metrics as metrics
 import viscy.utils.aux_utils as aux_utils

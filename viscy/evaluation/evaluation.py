@@ -1,6 +1,7 @@
 import numpy as np
-import viscy.evaluation.evaluation_metrics as inference_metrics
 from torch.utils.tensorboard import SummaryWriter
+
+import viscy.evaluation.evaluation_metrics as inference_metrics
 
 
 class TorchEvaluator(object):

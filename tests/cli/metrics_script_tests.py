@@ -1,11 +1,12 @@
-import cv2
-import numpy as np
 import os
-import pandas as pd
-from testfixtures import TempDirectory
 import unittest
 from unittest.mock import patch
+
+import cv2
+import numpy as np
+import pandas as pd
 import yaml
+from testfixtures import TempDirectory
 
 import viscy.cli.metrics_script as metrics_script
 import viscy.utils.aux_utils as aux_utils

@@ -1,9 +1,10 @@
-import os
-from PIL import Image
 import collections
-import numpy as np
+import os
 import re
+
+import numpy as np
 import torch
+from PIL import Image
 
 
 def unique_tags(directory):

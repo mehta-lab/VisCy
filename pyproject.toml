@@ -40,6 +40,9 @@ write_to = "viscy/_version.py"
 [tool.black]
 line-length = 88
 
-[tool.isort]
-profile = "black"
-line_length = 88
+[tool.ruff]
+src = ["viscy", "tests"]
+extend-select = ["I001"]
+
+[tool.ruff.isort]
+known-first-party = ["viscy"]

@@ -1,11 +1,12 @@
 """Script for preprocessing stack"""
 import argparse
-import iohub.ngff as ngff
 import time
 
-from viscy.preprocessing.generate_masks import MaskProcessor
+import iohub.ngff as ngff
+
 import viscy.utils.aux_utils as aux_utils
 import viscy.utils.meta_utils as meta_utils
+from viscy.preprocessing.generate_masks import MaskProcessor
 
 
 def parse_args():

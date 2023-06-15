@@ -1,8 +1,9 @@
-import iohub.ngff as ngff
 import os
+import sys
+
+import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
-import sys
 
 import viscy.utils.mp_utils as mp_utils
 from viscy.utils.cli_utils import show_progress_bar

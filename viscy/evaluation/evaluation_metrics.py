@@ -1,15 +1,15 @@
 """Metrics for model evaluation"""
 import functools
+
 import numpy as np
 import pandas as pd
-from skimage.metrics import structural_similarity as ssim
 import sklearn.metrics
-from skimage.morphology import disk, dilation, erosion
-from skimage.measure import label, regionprops
-from scipy.stats import pearsonr
-
 from cellpose import models
 from lapsolver import solve_dense
+from scipy.stats import pearsonr
+from skimage.measure import label, regionprops
+from skimage.metrics import structural_similarity as ssim
+from skimage.morphology import dilation, disk, erosion
 
 
 def mask_decorator(metric_function):

@@ -1,6 +1,7 @@
 """Image normalization related functions"""
-import numpy as np
 import sys
+
+import numpy as np
 from skimage.exposure import equalize_adapthist
 
 

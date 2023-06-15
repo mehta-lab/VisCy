@@ -2,7 +2,6 @@ import numpy as np
 
 import viscy.evaluation.evaluation_metrics as metrics
 
-
 im_shape = (35, 45, 25)
 target_im = np.ones(im_shape)
 for i in range(4):

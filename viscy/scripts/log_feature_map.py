@@ -1,8 +1,8 @@
 # %%
-import numpy as np
 import time
-import torch
 
+import numpy as np
+import torch
 
 from viscy.utils import cli_utils
 
