@@ -38,6 +38,7 @@ viscy = "viscy.cli.cli:main"
 write_to = "viscy/_version.py"
 
 [tool.black]
+src = ["viscy"]
 line-length = 88
 
 [tool.ruff]

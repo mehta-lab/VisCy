@@ -44,7 +44,8 @@ class TestResizeImages(unittest.TestCase):
                 )
         # Write metadata
         self.frames_meta.to_csv(
-            os.path.join(self.temp_path, self.meta_name), sep=",",
+            os.path.join(self.temp_path, self.meta_name),
+            sep=",",
         )
 
     def tearDown(self):
@@ -148,7 +149,8 @@ class TestResizeImages(unittest.TestCase):
         exp_meta_df = pd.DataFrame.from_dict(exp_meta_dict)
         # Write metadata
         frames_meta.to_csv(
-            os.path.join(self.temp_path, self.meta_name), sep=",",
+            os.path.join(self.temp_path, self.meta_name),
+            sep=",",
         )
 
         scale_factor = [3.3, 0.8, 1.0]

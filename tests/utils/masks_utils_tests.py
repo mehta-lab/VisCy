@@ -30,7 +30,9 @@ def test_unimodal_thresholding():
     nose.tools.assert_true(mask.dtype, bool)
     # Check that mask is somewhat close to simple thresholding
     thresh_im = input_image > 3.04
-    nose.tools.assert_true(np.abs(np.mean(mask) - np.mean(thresh_im)) < 0.1,)
+    nose.tools.assert_true(
+        np.abs(np.mean(mask) - np.mean(thresh_im)) < 0.1,
+    )
 
 
 def test_get_unet_border_weight_map():

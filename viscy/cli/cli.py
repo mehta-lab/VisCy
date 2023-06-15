@@ -34,7 +34,9 @@ class VSLightningCLI(LightningCLI):
                     log_graph=True,
                 ),
                 "trainer.callbacks": [
-                    {"class_path": "viscy.light.predict_writer.HCSPredictionWriter",}
+                    {
+                        "class_path": "viscy.light.predict_writer.HCSPredictionWriter",
+                    }
                 ],
             }
         )

@@ -330,7 +330,11 @@ class HCSDataModule(LightningDataModule):
         return [
             CenterSpatialCropd(
                 keys=["source", "target"],
-                roi_size=(-1, self.yx_patch_size[0], self.yx_patch_size[1],),
+                roi_size=(
+                    -1,
+                    self.yx_patch_size[0],
+                    self.yx_patch_size[1],
+                ),
             )
         ]
 

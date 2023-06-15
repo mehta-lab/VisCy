@@ -17,7 +17,9 @@ def parse_args():
     """
     parser = argparse.ArgumentParser()
     parser.add_argument(
-        "--config", type=str, help="path to yaml configuration file",
+        "--config",
+        type=str,
+        help="path to yaml configuration file",
     )
     args = parser.parse_args()
     return args
@@ -34,7 +36,7 @@ def pre_process(torch_config):
     This script will preprocess your dataset, save auxilary data and
     associated metadata for on-the-fly processing during training. Masks
     will be saved both as an additional channel and as an array tracked in
-    custom metadata. 
+    custom metadata.
 
     :param dict torch_config: 'master' torch config with subfields for all steps
                             of data analysis

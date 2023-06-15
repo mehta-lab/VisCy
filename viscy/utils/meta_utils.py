@@ -46,7 +46,10 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
 
 
 def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32,
+    zarr_dir,
+    num_workers=4,
+    channel_ids=-1,
+    grid_spacing=32,
 ):
     """
     Generate pixel intensity metadata to be later used in on-the-fly normalization
@@ -88,7 +91,9 @@ def generate_normalization_metadata(
     # sample values and use them to get normalization statistics
     for i, channel in enumerate(channel_ids):
         show_progress_bar(
-            dataloader=channel_ids, current=i, process="sampling channel values",
+            dataloader=channel_ids,
+            current=i,
+            process="sampling channel values",
         )
 
         channel_name = plate.channel_names[channel]
@@ -189,7 +194,10 @@ def compute_zscore_params(
         [col not in ["zscore_median", "zscore_iqr"] for col in frames_meta.columns]
     ]
     frames_meta = pd.merge(
-        frames_meta[cols_to_merge], ints_agg, how="left", on=agg_cols,
+        frames_meta[cols_to_merge],
+        ints_agg,
+        how="left",
+        on=agg_cols,
     )
     if frames_meta["zscore_median"].isnull().values.any():
         raise ValueError(
@@ -202,7 +210,12 @@ def compute_zscore_params(
     cols_to_merge = ints_meta.columns[
         [col not in ["zscore_median", "zscore_iqr"] for col in ints_meta.columns]
     ]
-    ints_meta = pd.merge(ints_meta[cols_to_merge], ints_agg, how="left", on=agg_cols,)
+    ints_meta = pd.merge(
+        ints_meta[cols_to_merge],
+        ints_agg,
+        how="left",
+        on=agg_cols,
+    )
     ints_meta["intensity_norm"] = (
         ints_meta["intensity"] - ints_meta["zscore_median"]
     ) / (ints_meta["zscore_iqr"] + sys.float_info.epsilon)

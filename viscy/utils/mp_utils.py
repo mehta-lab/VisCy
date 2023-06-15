@@ -36,7 +36,10 @@ def mp_create_and_write_mask(fn_args, workers):
 
 
 def add_channel(
-    position: ngff.Position, new_channel_array, new_channel_name, overwrite_ok=False,
+    position: ngff.Position,
+    new_channel_array,
+    new_channel_name,
+    overwrite_ok=False,
 ):
     """
     Adds a channels to the data array at position "position". Note that there is
@@ -192,7 +195,11 @@ def create_and_write_mask(
 
 
 def get_mask_slice(
-    position_zarr, time_index, channel_index, mask_type, structure_elem_radius,
+    position_zarr,
+    time_index,
+    channel_index,
+    mask_type,
+    structure_elem_radius,
 ):
     """
     Given a set of indices, mask type, and structuring element,
@@ -220,7 +227,8 @@ def get_mask_slice(
         )
     elif mask_type == "mem_detection":
         mask = mask_utils.create_membrane_mask(
-            im.astype("float32"), structure_elem_radius,
+            im.astype("float32"),
+            structure_elem_radius,
         )
     elif mask_type == "borders_weight_loss_map":
         mask = mask_utils.get_unet_border_weight_map(im)
@@ -277,7 +285,9 @@ def mp_sample_im_pixels(fn_args, workers):
 
 
 def sample_im_pixels(
-    position: ngff.Position, grid_spacing, channel,
+    position: ngff.Position,
+    grid_spacing,
+    channel,
 ):
     # TODO move out of mp utils into normalization utils
     """

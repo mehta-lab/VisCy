@@ -27,7 +27,11 @@ def _assert_unique_subset(subset, superset, name):
 
 
 def validate_metadata_indices(
-    zarr_dir, time_ids=[], channel_ids=[], slice_ids=[], pos_ids=[],
+    zarr_dir,
+    time_ids=[],
+    channel_ids=[],
+    slice_ids=[],
+    pos_ids=[],
 ):
     """
     Check the availability of indices provided timepoints, channels, positions

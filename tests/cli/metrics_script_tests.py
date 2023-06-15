@@ -50,21 +50,25 @@ class TestMetricsScript(unittest.TestCase):
                 if c == 2:
                     norm_im = normalize.zscore(self.im + im_add).astype(np.float32)
                     cv2.imwrite(
-                        os.path.join(self.pred_dir, im_name), norm_im,
+                        os.path.join(self.pred_dir, im_name),
+                        norm_im,
                     )
                 self.frames_meta = self.frames_meta.append(
                     aux_utils.parse_idx_from_name(
-                        im_name=im_name, dir_name=self.image_dir,
+                        im_name=im_name,
+                        dir_name=self.image_dir,
                     ),
                     ignore_index=True,
                 )
         # Write metadata
         self.frames_meta.to_csv(
-            os.path.join(self.image_dir, self.meta_name), sep=",",
+            os.path.join(self.image_dir, self.meta_name),
+            sep=",",
         )
         # Write as test metadata in model dir too
         self.frames_meta.to_csv(
-            os.path.join(self.model_dir, "test_metadata.csv"), sep=",",
+            os.path.join(self.model_dir, "test_metadata.csv"),
+            sep=",",
         )
         # Write split samples
         split_idx_fname = os.path.join(self.model_dir, "split_samples.json")
@@ -144,7 +148,9 @@ class TestMetricsScript(unittest.TestCase):
             # self.assertEqual(row.mse, 1.0)
             # self.assertEqual(row.mae, 1.0)
         # Same for xyz
-        metrics_xyz = pd.read_csv(os.path.join(self.pred_dir, "metrics_xyz.csv"),)
+        metrics_xyz = pd.read_csv(
+            os.path.join(self.pred_dir, "metrics_xyz.csv"),
+        )
         self.assertTupleEqual(metrics_xyz.shape, (1, 3))
         # self.assertEqual(metrics_xyz.loc[0, 'mse'], 1.0)
         # self.assertEqual(metrics_xyz.loc[0, 'mae'], 1.0)

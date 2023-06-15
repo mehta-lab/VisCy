@@ -29,7 +29,9 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        "--config", type=str, help="path to yaml configuration file",
+        "--config",
+        type=str,
+        help="path to yaml configuration file",
     )
     args = parser.parse_args()
     return args

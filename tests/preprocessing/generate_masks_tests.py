@@ -27,7 +27,7 @@ class TestMaskProcessor(unittest.TestCase):
         y = x.copy()
         z = np.linspace(-3, 3, 8)
         xx, yy, zz = np.meshgrid(x, y, z)
-        sph = xx ** 2 + yy ** 2 + zz ** 2
+        sph = xx**2 + yy**2 + zz**2
         fg = (sph <= 8) * (8 - sph)
         fg[fg > 1e-8] = (fg[fg > 1e-8] / np.max(fg)) * 127 + 128
         fg = np.around(fg).astype("uint8")
@@ -74,7 +74,8 @@ class TestMaskProcessor(unittest.TestCase):
             with warnings.catch_warnings():
                 warnings.simplefilter("ignore")
                 sk_im_io.imsave(
-                    os.path.join(self.temp_path, im_name), rec[:, :, z].astype("uint8"),
+                    os.path.join(self.temp_path, im_name),
+                    rec[:, :, z].astype("uint8"),
                 )
             frames_meta = frames_meta.append(
                 aux_utils.parse_idx_from_name(im_name=im_name, dir_name=self.temp_path),
@@ -190,7 +191,8 @@ class TestMaskProcessor(unittest.TestCase):
         mask_gen_inst.generate_masks(str_elem_radius=1)
 
         frames_meta = pd.read_csv(
-            os.path.join(mask_gen_inst.get_mask_dir(), "frames_meta.csv"), index_col=0,
+            os.path.join(mask_gen_inst.get_mask_dir(), "frames_meta.csv"),
+            index_col=0,
         )
         # pos1: 8 slices, pos2: 3 slices
         exp_len = 8 + 3

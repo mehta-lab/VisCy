@@ -23,11 +23,19 @@ def model_init(network_config, device=torch.device("cuda"), debug_mode=False):
     if network_config["architecture"] == "2.5D":
         default_model = ModelDefaults25D()
         model_class = Unet25D.Unet25d
-        model = define_model(model_class, default_model, network_config,)
+        model = define_model(
+            model_class,
+            default_model,
+            network_config,
+        )
     elif network_config["architecture"] == "2D":
         default_model = ModelDefaults2D()
         model_class = Unet2D.Unet2d
-        model = define_model(model_class, default_model, network_config,)
+        model = define_model(
+            model_class,
+            default_model,
+            network_config,
+        )
     else:
         raise NotImplementedError("Only 2.5D and 2D architectures available.")
 

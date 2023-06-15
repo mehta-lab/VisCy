@@ -112,7 +112,9 @@ class TorchEvaluator(object):
 
         if "xy" in metrics_orientations:
             metrics_estimator.estimate_xy_metrics(
-                target=target, prediction=prediction, pred_name=pred_name,
+                target=target,
+                prediction=prediction,
+                pred_name=pred_name,
             )
             metrics_xy = self._collapse_metrics_dict(
                 metrics_estimator.get_metrics_xy().to_dict()
@@ -121,7 +123,9 @@ class TorchEvaluator(object):
 
         if "xyz" in metrics_orientations:
             metrics_estimator.estimate_xyz_metrics(
-                target=target, prediction=prediction, pred_name=pred_name,
+                target=target,
+                prediction=prediction,
+                pred_name=pred_name,
             )
             metrics_xyz = self._collapse_metrics_dict(
                 metrics_estimator.get_metrics_xyz().to_dict()
@@ -130,7 +134,9 @@ class TorchEvaluator(object):
 
         if "xz" in metrics_orientations:
             metrics_estimator.estimate_xz_metrics(
-                target=target, prediction=prediction, pred_name=pred_name,
+                target=target,
+                prediction=prediction,
+                pred_name=pred_name,
             )
             metrics_xz = self._collapse_metrics_dict(
                 metrics_estimator.get_metrics_xz().to_dict()
@@ -139,7 +145,9 @@ class TorchEvaluator(object):
 
         if "yz" in metrics_orientations:
             metrics_estimator.estimate_yz_metrics(
-                target=target, prediction=prediction, pred_name=pred_name,
+                target=target,
+                prediction=prediction,
+                pred_name=pred_name,
             )
             metrics_yz = self._collapse_metrics_dict(
                 metrics_estimator.get_metrics_yz().to_dict()
@@ -180,7 +188,8 @@ class TorchEvaluator(object):
                 # Need to plot a line if metrics calculated along an axis
                 if scalar_dict[list(scalar_dict.keys())[0]].shape[0] == 1:
                     self.writer.add_scalars(
-                        main_tag=main_tag, tag_scalar_dict=scalar_dict,
+                        main_tag=main_tag,
+                        tag_scalar_dict=scalar_dict,
                     )
                 else:
                     axis_length = scalar_dict[list(scalar_dict.keys())[0]].shape[0]

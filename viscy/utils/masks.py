@@ -200,7 +200,7 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
     distance_maps = np.sort(distance_maps, 2)
     d1 = distance_maps[:, :, 0]
     d2 = distance_maps[:, :, 1]
-    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma ** 2)))
+    border_loss_map = w0 * np.exp((-1 * (d1 + d2) ** 2) / (2 * (sigma**2)))
 
     zero_label = np.zeros((annotation.shape[0], annotation.shape[1]), dtype=np.float64)
     zero_label[labeled_array == 0] = 1

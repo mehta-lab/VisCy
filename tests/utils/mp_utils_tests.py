@@ -20,7 +20,7 @@ class TestMpUtilsBaseClass(unittest.TestCase):
         y = x.copy()
         z = np.linspace(-3, 3, shape[2])
         xx, yy, zz = np.meshgrid(x, y, z)
-        sph = xx ** 2 + yy ** 2 + zz ** 2
+        sph = xx**2 + yy**2 + zz**2
         fg = (sph <= shape[2]) * (shape[2] - sph)
         fg[fg > 1e-8] = (fg[fg > 1e-8] / np.max(fg)) * 127 + 128
         fg = np.around(fg).astype("uint8")
@@ -147,5 +147,6 @@ class TestMpUtilsOtsu(TestMpUtilsBaseClass):
             )
             mask_exp = np.any(mask_stack, axis=0)
             numpy.testing.assert_array_equal(
-                mask_image, mask_exp,
+                mask_image,
+                mask_exp,
             )

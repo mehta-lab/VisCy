@@ -34,7 +34,9 @@ class TestPreprocessScript(unittest.TestCase):
         self.im = 1500 * np.ones((30, 20), dtype=np.uint16)
         self.im[10:20, 5:15] = 3000
         # Create the same data in zarr format
-        zarr_writer = io_utils.ZarrWriter(save_dir=self.zarr_dir,)
+        zarr_writer = io_utils.ZarrWriter(
+            save_dir=self.zarr_dir,
+        )
         for p in self.pos_ids:
             zarr_writer.create_zarr_root("test_name_pos{}".format(p))
             zarr_writer.init_array(
@@ -47,7 +49,10 @@ class TestPreprocessScript(unittest.TestCase):
             for c in self.channel_ids:
                 for z in self.slice_ids:
                     im_name = aux_utils.get_im_name(
-                        channel_idx=c, slice_idx=z, time_idx=self.time_idx, pos_idx=p,
+                        channel_idx=c,
+                        slice_idx=z,
+                        time_idx=self.time_idx,
+                        pos_idx=p,
                     )
                     im = self.im + c * 100
                     cv2.imwrite(os.path.join(self.temp_path, im_name), im)
@@ -55,16 +60,19 @@ class TestPreprocessScript(unittest.TestCase):
                     zarr_writer.write(im, p=p, t=0, c=c, z=z)
                     # Create metadata
                     meta_row = aux_utils.parse_idx_from_name(
-                        im_name=im_name, dir_name=self.image_dir,
+                        im_name=im_name,
+                        dir_name=self.image_dir,
                     )
                     meta_row["mean"] = np.nanmean(im)
                     meta_row["std"] = np.nanstd(im)
                     self.frames_meta = self.frames_meta.append(
-                        meta_row, ignore_index=True,
+                        meta_row,
+                        ignore_index=True,
                     )
         # Write metadata
         self.frames_meta.to_csv(
-            os.path.join(self.image_dir, self.meta_name), sep=",",
+            os.path.join(self.image_dir, self.meta_name),
+            sep=",",
         )
         # Make input masks
         self.input_mask_channel = 111
@@ -84,16 +92,19 @@ class TestPreprocessScript(unittest.TestCase):
                     pos_idx=p,
                 )
                 cv2.imwrite(
-                    os.path.join(self.input_mask_dir, im_name), mask,
+                    os.path.join(self.input_mask_dir, im_name),
+                    mask,
                 )
                 mask_meta = mask_meta.append(
                     aux_utils.parse_idx_from_name(
-                        im_name=im_name, dir_name=self.input_mask_dir,
+                        im_name=im_name,
+                        dir_name=self.input_mask_dir,
                     ),
                     ignore_index=True,
                 )
         mask_meta.to_csv(
-            os.path.join(self.input_mask_dir, self.meta_name), sep=",",
+            os.path.join(self.input_mask_dir, self.meta_name),
+            sep=",",
         )
         # Create preprocessing config
         self.pp_config = {
@@ -102,7 +113,10 @@ class TestPreprocessScript(unittest.TestCase):
             "file_format": "tiff",
             "channel_ids": [0, 1, 3],
             "num_workers": 4,
-            "masks": {"channels": [3], "str_elem_radius": 3,},
+            "masks": {
+                "channels": [3],
+                "str_elem_radius": 3,
+            },
             "tile": {
                 "tile_size": [10, 10],
                 "step_size": [10, 10],
@@ -111,7 +125,9 @@ class TestPreprocessScript(unittest.TestCase):
                 "image_format": "zyx",
                 "normalize_channels": [True, True, True],
             },
-            "normalize": {"normalize_im": "stack",},
+            "normalize": {
+                "normalize_im": "stack",
+            },
         }
         # Create base config, generated party from pp_config in script
         self.base_config = {
@@ -139,10 +155,12 @@ class TestPreprocessScript(unittest.TestCase):
         out_config, runtime = pp.pre_process(self.pp_config)
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
-            self.base_config["input_dir"], self.image_dir,
+            self.base_config["input_dir"],
+            self.image_dir,
         )
         self.assertEqual(
-            self.base_config["channel_ids"], self.pp_config["channel_ids"],
+            self.base_config["channel_ids"],
+            self.pp_config["channel_ids"],
         )
         self.assertEqual(
             out_config["masks"]["mask_dir"],
@@ -162,7 +180,8 @@ class TestPreprocessScript(unittest.TestCase):
         mask_names.pop(mask_names.index("frames_meta.csv"))
         # Validate that all masks are there
         self.assertEqual(
-            len(mask_names), len(self.slice_ids) * len(self.pos_ids),
+            len(mask_names),
+            len(self.slice_ids) * len(self.pos_ids),
         )
         for p in self.pos_ids:
             for z in self.slice_ids:
@@ -172,7 +191,10 @@ class TestPreprocessScript(unittest.TestCase):
                     time_idx=self.time_idx,
                     pos_idx=p,
                 )
-                im = cv2.imread(os.path.join(mask_dir, im_name), cv2.IMREAD_ANYDEPTH,)
+                im = cv2.imread(
+                    os.path.join(mask_dir, im_name),
+                    cv2.IMREAD_ANYDEPTH,
+                )
                 self.assertTupleEqual(im.shape, (30, 20))
                 self.assertTrue(im.dtype == "uint8")
                 self.assertTrue(im_name in mask_names)
@@ -185,16 +207,20 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(tile_meta.shape[0], expected_rows)
         # Check indices
         self.assertListEqual(
-            tile_meta.channel_idx.unique().tolist(), [0, 1, 3, 4],
+            tile_meta.channel_idx.unique().tolist(),
+            [0, 1, 3, 4],
         )
         self.assertListEqual(
-            tile_meta.pos_idx.unique().tolist(), self.pos_ids,
+            tile_meta.pos_idx.unique().tolist(),
+            self.pos_ids,
         )
         self.assertListEqual(
-            tile_meta.slice_idx.unique().tolist(), self.slice_ids,
+            tile_meta.slice_idx.unique().tolist(),
+            self.slice_ids,
         )
         self.assertListEqual(
-            tile_meta.time_idx.unique().tolist(), [self.time_idx],
+            tile_meta.time_idx.unique().tolist(),
+            [self.time_idx],
         )
         self.assertListEqual(
             list(tile_meta),
@@ -210,16 +236,21 @@ class TestPreprocessScript(unittest.TestCase):
             ],
         )
         self.assertListEqual(
-            tile_meta.row_start.unique().tolist(), [0, 10, 20],
+            tile_meta.row_start.unique().tolist(),
+            [0, 10, 20],
         )
         self.assertListEqual(
-            tile_meta.col_start.unique().tolist(), [0, 10],
+            tile_meta.col_start.unique().tolist(),
+            [0, 10],
         )
         # Read one tile and check format
         # r = row start/end idx, c = column start/end, sl = slice start/end
         # sl0-1 signifies depth of 1
         im = np.load(
-            os.path.join(tile_dir, "im_c001_z000_t000_p007_r10-20_c10-20_sl0-1.npy",)
+            os.path.join(
+                tile_dir,
+                "im_c001_z000_t000_p007_r10-20_c10-20_sl0-1.npy",
+            )
         )
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == np.float64)
@@ -230,7 +261,8 @@ class TestPreprocessScript(unittest.TestCase):
         out_config, runtime = pp.pre_process(self.pp_config)
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
-            self.base_config["channel_ids"], self.pp_config["channel_ids"],
+            self.base_config["channel_ids"],
+            self.pp_config["channel_ids"],
         )
         self.assertEqual(
             out_config["masks"]["mask_dir"],
@@ -250,7 +282,8 @@ class TestPreprocessScript(unittest.TestCase):
         mask_names.pop(mask_names.index("frames_meta.csv"))
         # Validate that all masks are there
         self.assertEqual(
-            len(mask_names), len(self.slice_ids) * len(self.pos_ids),
+            len(mask_names),
+            len(self.slice_ids) * len(self.pos_ids),
         )
         for p in self.pos_ids:
             for z in self.slice_ids:
@@ -260,7 +293,10 @@ class TestPreprocessScript(unittest.TestCase):
                     time_idx=self.time_idx,
                     pos_idx=p,
                 )
-                im = cv2.imread(os.path.join(mask_dir, im_name), cv2.IMREAD_ANYDEPTH,)
+                im = cv2.imread(
+                    os.path.join(mask_dir, im_name),
+                    cv2.IMREAD_ANYDEPTH,
+                )
                 self.assertTupleEqual(im.shape, (30, 20))
                 self.assertTrue(im.dtype == "uint8")
                 self.assertTrue(im_name in mask_names)
@@ -273,16 +309,20 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(tile_meta.shape[0], expected_rows)
         # Check indices
         self.assertListEqual(
-            tile_meta.channel_idx.unique().tolist(), [0, 1, 3, 4],
+            tile_meta.channel_idx.unique().tolist(),
+            [0, 1, 3, 4],
         )
         self.assertListEqual(
-            tile_meta.pos_idx.unique().tolist(), self.pos_ids,
+            tile_meta.pos_idx.unique().tolist(),
+            self.pos_ids,
         )
         self.assertListEqual(
-            tile_meta.slice_idx.unique().tolist(), self.slice_ids,
+            tile_meta.slice_idx.unique().tolist(),
+            self.slice_ids,
         )
         self.assertListEqual(
-            tile_meta.time_idx.unique().tolist(), [self.time_idx],
+            tile_meta.time_idx.unique().tolist(),
+            [self.time_idx],
         )
         self.assertListEqual(
             list(tile_meta),
@@ -298,16 +338,21 @@ class TestPreprocessScript(unittest.TestCase):
             ],
         )
         self.assertListEqual(
-            tile_meta.row_start.unique().tolist(), [0, 10, 20],
+            tile_meta.row_start.unique().tolist(),
+            [0, 10, 20],
         )
         self.assertListEqual(
-            tile_meta.col_start.unique().tolist(), [0, 10],
+            tile_meta.col_start.unique().tolist(),
+            [0, 10],
         )
         # Read one tile and check format
         # r = row start/end idx, c = column start/end, sl = slice start/end
         # sl0-1 signifies depth of 1
         im = np.load(
-            os.path.join(tile_dir, "im_c001_z000_t000_p007_r10-20_c10-20_sl0-1.npy",)
+            os.path.join(
+                tile_dir,
+                "im_c001_z000_t000_p007_r10-20_c10-20_sl0-1.npy",
+            )
         )
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == np.float64)
@@ -318,7 +363,8 @@ class TestPreprocessScript(unittest.TestCase):
         out_config, runtime = pp.pre_process(self.pp_config)
         self.assertIsInstance(runtime, np.float)
         self.assertEqual(
-            self.base_config["input_dir"], self.image_dir,
+            self.base_config["input_dir"],
+            self.image_dir,
         )
         frames_meta = aux_utils.read_meta(self.image_dir)
         self.assertTupleEqual(frames_meta.shape, (72, 8))
@@ -373,21 +419,26 @@ class TestPreprocessScript(unittest.TestCase):
         weights_meta = aux_utils.read_meta(out_config["weights"]["weights_dir"])
         # Check indices
         self.assertListEqual(
-            weights_meta.channel_idx.unique().tolist(), [5],
+            weights_meta.channel_idx.unique().tolist(),
+            [5],
         )
         self.assertListEqual(
-            weights_meta.pos_idx.unique().tolist(), self.pos_ids,
+            weights_meta.pos_idx.unique().tolist(),
+            self.pos_ids,
         )
         self.assertListEqual(
-            weights_meta.slice_idx.unique().tolist(), self.slice_ids,
+            weights_meta.slice_idx.unique().tolist(),
+            self.slice_ids,
         )
         self.assertListEqual(
-            weights_meta.time_idx.unique().tolist(), [self.time_idx],
+            weights_meta.time_idx.unique().tolist(),
+            [self.time_idx],
         )
         # Load one weights file and check contents
         im = np.load(
             os.path.join(
-                out_config["weights"]["weights_dir"], "im_c005_z002_t000_p007.npy",
+                out_config["weights"]["weights_dir"],
+                "im_c005_z002_t000_p007.npy",
             )
         )
         self.assertTupleEqual(im.shape, (30, 20))
@@ -400,26 +451,36 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(tile_meta.shape[0], expected_rows)
         # Check indices
         self.assertListEqual(
-            tile_meta.channel_idx.unique().tolist(), [0, 1, 3, 4, 5],
+            tile_meta.channel_idx.unique().tolist(),
+            [0, 1, 3, 4, 5],
         )
         self.assertListEqual(
-            tile_meta.pos_idx.unique().tolist(), self.pos_ids,
+            tile_meta.pos_idx.unique().tolist(),
+            self.pos_ids,
         )
         self.assertListEqual(
-            tile_meta.slice_idx.unique().tolist(), self.slice_ids,
+            tile_meta.slice_idx.unique().tolist(),
+            self.slice_ids,
         )
         self.assertListEqual(
-            tile_meta.time_idx.unique().tolist(), [self.time_idx],
+            tile_meta.time_idx.unique().tolist(),
+            [self.time_idx],
         )
         # Load a weight tile
         im = np.load(
-            os.path.join(tile_dir, "im_c005_z002_t000_p008_r0-10_c10-20_sl0-1.npy",)
+            os.path.join(
+                tile_dir,
+                "im_c005_z002_t000_p008_r0-10_c10-20_sl0-1.npy",
+            )
         )
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == np.float)
         # Load one tile
         im = np.load(
-            os.path.join(tile_dir, "im_c004_z002_t000_p008_r0-10_c10-20_sl0-1.npy",)
+            os.path.join(
+                tile_dir,
+                "im_c004_z002_t000_p008_r0-10_c10-20_sl0-1.npy",
+            )
         )
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == bool)
@@ -446,7 +507,8 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(resize_meta.shape[0], expected_rows)
         # Load an image and make sure it's twice as big
         im = cv2.imread(
-            os.path.join(resize_dir, "im_c003_z002_t000_p010.png"), cv2.IMREAD_ANYDEPTH,
+            os.path.join(resize_dir, "im_c003_z002_t000_p010.png"),
+            cv2.IMREAD_ANYDEPTH,
         )
         self.assertTupleEqual(im.shape, (60, 40))
         self.assertTrue(im.dtype, np.uint8)
@@ -458,7 +520,10 @@ class TestPreprocessScript(unittest.TestCase):
         self.assertEqual(tile_meta.shape[0], expected_rows)
         # Load a tile and assert shape
         im = np.load(
-            os.path.join(tile_dir, "im_c001_z000_t000_p007_r40-50_c20-30_sl0-1.npy",)
+            os.path.join(
+                tile_dir,
+                "im_c001_z000_t000_p007_r40-50_c20-30_sl0-1.npy",
+            )
         )
         self.assertTupleEqual(im.shape, (1, 10, 10))
         self.assertTrue(im.dtype == np.float64)
