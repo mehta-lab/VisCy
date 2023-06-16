@@ -1,8 +1,9 @@
-import iohub.ngff as ngff
 import os
+import sys
+
+import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
-import sys
 
 import viscy.utils.mp_utils as mp_utils
 from viscy.utils.cli_utils import show_progress_bar
@@ -12,7 +13,8 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
     """
     Writes 'metadata' to position's plate-level or FOV level .zattrs metadata by either
     creating a new field (field_name) according to 'metadata', or updating the metadata
-    to an existing field if found, or concatenating the metadata from different channels.
+    to an existing field if found,
+    or concatenating the metadata from different channels.
 
     Assumes that the zarr store group given follows the OMG-NGFF HCS
     format as specified here:
@@ -23,7 +25,8 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
 
     :param Position zarr_dir: NGFF position node object
     :param dict metadata: metadata dictionary to write to JSON .zattrs
-    :param str subfield_name: name of subfield inside the the main field (values for different channels)
+    :param str subfield_name: name of subfield inside the the main field
+        (values for different channels)
     """
     if field_name in position.zattrs:
         if subfield_name in position.zattrs[field_name]:

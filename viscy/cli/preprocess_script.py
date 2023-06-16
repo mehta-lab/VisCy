@@ -1,11 +1,12 @@
 """Script for preprocessing stack"""
 import argparse
-import iohub.ngff as ngff
 import time
 
-from viscy.preprocessing.generate_masks import MaskProcessor
+import iohub.ngff as ngff
+
 import viscy.utils.aux_utils as aux_utils
 import viscy.utils.meta_utils as meta_utils
+from viscy.preprocessing.generate_masks import MaskProcessor
 
 
 def parse_args():
@@ -35,7 +36,7 @@ def pre_process(torch_config):
     This script will preprocess your dataset, save auxilary data and
     associated metadata for on-the-fly processing during training. Masks
     will be saved both as an additional channel and as an array tracked in
-    custom metadata. 
+    custom metadata.
 
     :param dict torch_config: 'master' torch config with subfields for all steps
                             of data analysis
@@ -43,7 +44,7 @@ def pre_process(torch_config):
      and mask_dir (the former is for generating masks from a channel)
     """
     time_start = time.time()
-    plate = ngff.open_ome_zarr(torch_config["zarr_dir"], layout='hcs', mode='r')
+    plate = ngff.open_ome_zarr(torch_config["zarr_dir"], layout="hcs", mode="r")
     preprocess_config = torch_config["preprocessing"]
 
     # ----------------- Generate normalization values -----------------

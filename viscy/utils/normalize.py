@@ -1,6 +1,7 @@
 """Image normalization related functions"""
-import numpy as np
 import sys
+
+import numpy as np
 from skimage.exposure import equalize_adapthist
 
 
@@ -17,8 +18,7 @@ def zscore(input_image, im_mean=None, im_std=None):
         im_mean = np.nanmean(input_image)
     if not im_std:
         im_std = np.nanstd(input_image)
-    norm_img = (input_image - im_mean) /\
-               (im_std + sys.float_info.epsilon)
+    norm_img = (input_image - im_mean) / (im_std + sys.float_info.epsilon)
     return norm_img
 
 
@@ -74,11 +74,12 @@ def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
         elif isinstance(kernel_size, (list, tuple)):
             assert len(kernel_size) == len(input_image.shape)
         else:
-            raise ValueError('kernel size invalid: not an int / list / tuple')
+            raise ValueError("kernel size invalid: not an int / list / tuple")
 
     if clip_limit is not None:
-        assert 0 <= clip_limit <= 1, \
-            "Clip limit {} is out of range [0, 1]".format(clip_limit)
+        assert 0 <= clip_limit <= 1, "Clip limit {} is out of range [0, 1]".format(
+            clip_limit
+        )
 
     adapt_eq_image = equalize_adapthist(
         input_image, kernel_size=kernel_size, clip_limit=clip_limit

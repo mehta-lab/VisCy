@@ -14,8 +14,8 @@ from skimage.exposure import rescale_intensity
 from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
 
-from viscy.torch_unet.networks.Unet25D import Unet25d
-from viscy.torch_unet.utils.model import ModelDefaults25D, define_model
+from viscy.unet.networks.Unet25D import Unet25d
+from viscy.unet.utils.model import ModelDefaults25D, define_model
 
 
 class VSTrainer(Trainer):
@@ -177,8 +177,7 @@ class PhaseToNuc25D(LightningModule):
     @staticmethod
     def _detach_sample(imgs: Sequence[torch.Tensor]):
         return [
-            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1)))
-            for img in imgs
+            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1))) for img in imgs
         ]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):

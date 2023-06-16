@@ -1,4 +1,5 @@
 from concurrent.futures import ProcessPoolExecutor
+
 import iohub.ngff as ngff
 import numpy as np
 import scipy.stats
@@ -63,9 +64,10 @@ def add_channel(
     assert len(new_channel_array.shape) == len(position.data.shape) - 1, (
         "New channel array must match all dimensions of the position array, "
         "except in the inferred channel dimension: "
-        f"array shape: {position.data.shape}"
-        f", expected channel shape: {(position.data.shape[0], ) + position.data.shape[2:]}"
-        f", received channel shape: {new_channel_array.shape}"
+        f"array shape: {position.data.shape}, "
+        "expected channel shape: "
+        f"{(position.data.shape[0], ) + position.data.shape[2:]}, "
+        f"received channel shape: {new_channel_array.shape}"
     )
     # determine whether to overwrite or append
     if new_channel_name in position.channel_names and overwrite_ok:
@@ -155,7 +157,6 @@ def create_and_write_mask(
 
                 # get mask for image slice or populate with zeros
                 if time_index in time_indices:
-
                     mask = get_mask_slice(
                         position_zarr=position.data,
                         time_index=time_index,

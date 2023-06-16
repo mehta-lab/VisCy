@@ -1,6 +1,7 @@
 import numpy as np
-import viscy.evaluation.evaluation_metrics as inference_metrics
 from torch.utils.tensorboard import SummaryWriter
+
+import viscy.evaluation.evaluation_metrics as inference_metrics
 
 
 class TorchEvaluator(object):
@@ -10,6 +11,7 @@ class TorchEvaluator(object):
     Params:
     :param dict torch_config: master config file
     """
+
     def __init__(self, torch_config, device=None) -> None:
         self.torch_config = torch_config
 
@@ -22,12 +24,12 @@ class TorchEvaluator(object):
 
         self.inference_metrics = {}
         self.log_writer = SummaryWriter(log_dir=self.save_folder)
-    
+
     def get_save_location(self):
         """
         Sets save location as specified in config files.
         """
-        #TODO implement
+        # TODO implement
         return
         # TODO Change the functionality of saving to put inference in the actual
         # train directory the model comes from. Not a big fan
@@ -50,7 +52,7 @@ class TorchEvaluator(object):
         # self.save_folder = os.path.join(save_dir, f"inference_results_{now}")
         # if not os.path.exists(self.save_folder):
         #     os.makedirs(self.save_folder)
-        
+
     def _collapse_metrics_dict(self, metrics_dict):
         """
         Collapses metrics dict in the form of
@@ -80,20 +82,22 @@ class TorchEvaluator(object):
         window=None,
     ):
         """
-        Gets metrics for this target_/prediction pair in all the specified orientations for all the
-        specified metrics.
+        Gets metrics for this target_/prediction pair in all the specified orientations
+        for all the specified metrics.
 
         :param np.ndarray target: 5d target array (on cpu)
         :param np.ndarray prediction: 5d prediction array (on cpu)
-        :param list metrics_list: list of strings indicating the name of a desired metric, for options
-                                    see inference.evaluation_metrics. MetricsEstimator docstring
-        :param list metrics_orientations: list of strings indicating the orientation to compute, for
-                                    options see inference.evaluation_metrics. MetricsEstimator docstring
-        :param tuple window: spatial window of this target/prediction pair in the larger arrays they
-                                    come from.
+        :param list metrics_list: list of strings
+            indicating the name of a desired metric,
+            for options see inference.evaluation_metrics. MetricsEstimator docstring
+        :param list metrics_orientations: list of strings
+            indicating the orientation to compute,
+            for options see inference.evaluation_metrics. MetricsEstimator docstring
+        :param tuple window: spatial window of this target/prediction pair
+            in the larger arrays they come from.
 
-        :return dict prediction_metrics: dict mapping orientation -> pd.dataframe of metrics for that
-                                    orientation
+        :return dict prediction_metrics: dict mapping orientation -> pd.dataframe
+            of metrics for that orientation
         """
         metrics_estimator = inference_metrics.MetricsEstimator(metrics_list)
         prediction_metrics = {}
@@ -160,12 +164,14 @@ class TorchEvaluator(object):
         """
         Handles metric recording in tensorboard.
 
-        Metrics are saved position by position. If multiple scalar metric values are stored for a
-        particular metric in a particular position, they are plotted along the axis they are calculated
-        on.
+        Metrics are saved position by position.
+        If multiple scalar metric values are stored for a
+        particular metric in a particular position,
+        they are plotted along the axis they are calculated on.
 
-        :param list sample_information: list of tuples containing information about each sample
-                                in the form (position_group, position_path, normalization_meta, window)
+        :param list sample_information: list of tuples containing information about
+            each sample in the form
+            (position_group, position_path, normalization_meta, window)
         """
         for info_tuple in sample_information:
             _, position_path, normalization_meta, window = info_tuple

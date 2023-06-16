@@ -8,7 +8,7 @@ predict:
     num_nodes: 1
     precision: 32-true
     callbacks:
-      - class_path: viscy.light.prediction_writer.HCSPredictionWriter
+      - class_path: viscy.light.predict_writer.HCSPredictionWriter
         init_args:
           output_store: null
           write_input: false

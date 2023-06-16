@@ -1,11 +1,12 @@
 import collections
-import torch
-import numpy as np
 import itertools
 import unittest
 
-from viscy.torch_unet.networks.Unet2D import Unet2d
+import numpy as np
+import torch
+
 import viscy.utils.cli_utils as io_utils
+from viscy.unet.networks.Unet2D import Unet2d
 
 
 class TestUnet2d(unittest.TestCase):

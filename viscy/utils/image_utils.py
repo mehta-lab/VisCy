@@ -1,9 +1,9 @@
 """Utility functions for processing images"""
 
 import itertools
+import sys
 
 import numpy as np
-import sys
 
 import viscy.utils.normalize as normalize
 

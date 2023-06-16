@@ -1,8 +1,8 @@
 # script to profile dataloading
 
-from viscy.light.data import HCSDataModule
-from numcodecs import blosc
 from profilehooks import profile
+
+from viscy.light.data import HCSDataModule
 
 dataset = "/path/to/dataset.zarr"
 

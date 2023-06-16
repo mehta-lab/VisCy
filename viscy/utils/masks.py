@@ -1,31 +1,28 @@
 import numpy as np
 import scipy.ndimage as ndimage
-from skimage.filters import threshold_otsu, gaussian, laplace
 from scipy.ndimage import binary_fill_holes
+from skimage.filters import gaussian, laplace, threshold_otsu
 from skimage.morphology import (
     ball,
-    disk,
-    binary_opening,
-    remove_small_objects,
     binary_dilation,
+    binary_opening,
+    disk,
+    remove_small_objects,
 )
-from viscy.utils.image_utils import im_adjust
 
 
 def create_otsu_mask(input_image, sigma=0.6):
-
     """Create a binary mask using morphological operations
     :param np.array input_image: generate masks from this 3D image
-    :param float sigma: Gaussian blur standard deviation, increase in value increases blur
+    :param float sigma: Gaussian blur standard deviation,
+        increase in value increases blur
     :return: volume mask of input_image, 3D np.array
     """
-
-    input_image_blur = gaussian(input_image, sigma=sigma)
 
     input_sz = input_image.shape
     mid_slice_id = input_sz[0] // 2
 
-    thresh = threshold_otsu(input_image[mid_slice_id,:,:])
+    thresh = threshold_otsu(input_image[mid_slice_id, :, :])
     mask = input_image >= thresh
 
     return mask
@@ -35,10 +32,12 @@ def create_membrane_mask(input_image, str_elem_size=23, sigma=0.4, k_size=3, msi
     """Create a binary mask using Laplacian of Gaussian (LOG) feature detection
 
     :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the laplacian filter used for contarst enhancement, odd number.
+    :param int str_elem_size: size of the laplacian filter
+        used for contarst enhancement, odd number.
         Increase in value increases sensitivity of contrast enhancement
     :param float sigma: Gaussian blur standard deviation
-    :param int k_size: disk/ball size for mask dilation, ball for 3D and disk for 2D data
+    :param int k_size: disk/ball size for mask dilation,
+        ball for 3D and disk for 2D data
     :param int msize: size of small objects removed to clean segmentation
     :return: mask of input_image, np.array
     """
@@ -106,7 +105,7 @@ def get_unimodal_threshold(input_image):
     return best_threshold
 
 
-def create_unimodal_mask(input_image, str_elem_size=3, sigma = 0.6):
+def create_unimodal_mask(input_image, str_elem_size=3, sigma=0.6):
     """
     Create a mask with unimodal thresholding and morphological operations.
     Unimodal thresholding seems to oversegment, erode it by a fraction
@@ -118,7 +117,7 @@ def create_unimodal_mask(input_image, str_elem_size=3, sigma = 0.6):
     """
 
     input_image = gaussian(input_image, sigma=sigma)
-    
+
     if np.min(input_image) == np.max(input_image):
         thr = np.unique(input_image)
     else:

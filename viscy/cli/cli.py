@@ -20,15 +20,11 @@ class VSLightningCLI(LightningCLI):
 
     def add_arguments_to_parser(self, parser):
         parser.link_arguments("data.batch_size", "model.batch_size")
-        parser.link_arguments(
-            "data.yx_patch_size", "model.example_input_yx_shape"
-        )
+        parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
         parser.link_arguments(
             "trainer.default_root_dir", "trainer.logger.init_args.save_dir"
         )
-        parser.link_arguments(
-            "model.model_config.architecture", "data.architecture"
-        )
+        parser.link_arguments("model.model_config.architecture", "data.architecture")
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -39,7 +35,7 @@ class VSLightningCLI(LightningCLI):
                 ),
                 "trainer.callbacks": [
                     {
-                        "class_path": "viscy.light.prediction_writer.HCSPredictionWriter",
+                        "class_path": "viscy.light.predict_writer.HCSPredictionWriter",
                     }
                 ],
             }

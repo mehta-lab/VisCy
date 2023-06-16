@@ -1,8 +1,7 @@
-import viscy.torch_unet.networks.Unet25D as Unet25D
-import viscy.torch_unet.networks.Unet2D as Unet2D
-import os
 import torch
-import matplotlib.pyplot as plt
+
+import viscy.unet.networks.Unet2D as Unet2D
+import viscy.unet.networks.Unet25D as Unet25D
 
 
 def model_init(network_config, device=torch.device("cuda"), debug_mode=False):

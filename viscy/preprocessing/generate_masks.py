@@ -1,7 +1,5 @@
 """Generate masks from sum of flurophore channels"""
 import iohub.ngff as ngff
-import os
-import pandas as pd
 
 import viscy.utils.aux_utils as aux_utils
 from viscy.utils.mp_utils import mp_create_and_write_mask
@@ -56,21 +54,21 @@ class MaskProcessor:
             "unimodal",
             "mem_detection",
             "borders_weight_loss_map",
-        ], "Masking method invalid, 'otsu', 'unimodal', 'mem_detection', 'borders_weight_loss_map'\
-             are currently supported"
+        ], (
+            "Masking method invalid, 'otsu', 'unimodal', 'mem_detection', "
+            "'borders_weight_loss_map' are supported"
+        )
         self.mask_type = mask_type
         self.ints_metadata = None
         self.channel_thr_df = None
 
-        plate = ngff.open_ome_zarr(store_path=zarr_dir, mode='r')
-        
+        plate = ngff.open_ome_zarr(store_path=zarr_dir, mode="r")
+
         # deal with output channel selection/overwriting messages
         if overwrite_ok:
             mask_name = "_".join(["mask", self.mask_type])
             if mask_name in plate.channel_names:
-                print(
-                    f"Mask found in channel {mask_name}. Overwriting with this mask."
-                )
+                print(f"Mask found in channel {mask_name}. Overwriting with this mask.")
         plate.close()
 
     def generate_masks(self, structure_elem_radius=5):
@@ -88,10 +86,10 @@ class MaskProcessor:
         :param int structure_elem_radius: Radius of structuring element for
                                 morphological operations
         """
-        
+
         # Gather function arguments for each index pair at each position
-        plate = ngff.open_ome_zarr(store_path=self.zarr_dir, mode='r+')
-        
+        plate = ngff.open_ome_zarr(store_path=self.zarr_dir, mode="r+")
+
         mp_mask_creator_args = []
 
         for i, (_, position) in enumerate(plate.positions()):
