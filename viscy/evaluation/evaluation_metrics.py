@@ -496,6 +496,13 @@ class MetricsEstimator:
                 metrics_row[metric_name] = cur_metric
         return metrics_row
 
+    @staticmethod
+    def _append_to_df(df: pd.DataFrame, row: dict):
+        """Append row to dataframe as ``pd.DataFrame.append`` is deprecated."""
+        # FIXME: dirty workaround...
+        row_df = pd.DataFrame([row])
+        return pd.concat([df, row_df], ignore_index=True)
+
     def estimate_xyz_metrics(self, target, prediction, pred_name, mask=None):
         """
         Estimate 3D metrics for the current input, target pair
@@ -515,10 +522,7 @@ class MetricsEstimator:
             mask=mask,
         )
         # Append to existing dataframe
-        self.metrics_xyz = self.metrics_xyz.append(
-            metrics_row,
-            ignore_index=True,
-        )
+        self.metrics_xyz = self._append_to_df(self.metrics_xyz, metrics_row)
 
     def estimate_xy_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -547,10 +551,7 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_xy = self.metrics_xy.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_xy = self._append_to_df(self.metrics_xy, metrics_row)
 
     def estimate_xz_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -577,10 +578,7 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_xz = self.metrics_xz.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_xz = self._append_to_df(self.metrics_xz, metrics_row)
 
     def estimate_yz_metrics(self, target, prediction, pred_name, mask=None):
         """
@@ -607,7 +605,4 @@ class MetricsEstimator:
                 mask=cur_mask,
             )
             # Append to existing dataframe
-            self.metrics_yz = self.metrics_yz.append(
-                metrics_row,
-                ignore_index=True,
-            )
+            self.metrics_yz = self._append_to_df(self.metrics_yz, metrics_row)

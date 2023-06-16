@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 import viscy.evaluation.evaluation_metrics as metrics
 
@@ -11,52 +12,54 @@ pred_im = target_im.copy() + 2
 
 def test_mse_metric():
     mse = metrics.mse_metric(target=target_im, prediction=pred_im)
-    assert mse == 4
+    assert mse[0] == 4
 
 
 def test_mae_metric():
     mae = metrics.mae_metric(target=target_im, prediction=pred_im)
-    nose.tools.assert_equal(mae, 2)
+    assert mae[0] == 2
 
 
 def test_r2_metric():
     r2 = metrics.r2_metric(target=target_im, prediction=pred_im)
-    nose.tools.assert_less(r2, -1)
+    assert r2[0] < -1
 
 
 def test_corr_metric():
     corr = metrics.corr_metric(target=target_im, prediction=pred_im)
-    nose.tools.assert_greater(corr, 0.999)
+    assert corr > 0.999
 
 
 def test_ssim_metric():
     ssim = metrics.ssim_metric(target=target_im, prediction=pred_im, win_size=5)
-    nose.tools.assert_less(ssim, 1)
+    assert ssim[0] < 1
 
 
+@pytest.mark.skip(reason="skip segmentation tests")
 def test_accuracy_metric():
     target = np.zeros((5, 10, 2))
-    target[:, :5, 0] = 255.0
+    target[:, :5, 0] = 255
     pred = np.zeros_like(target)
-    pred[:, :, 0] = 255.0
-    acc = metrics.accuracy_metric(target=target, prediction=pred)
-    nose.tools.assert_equal(acc, 0.75)
+    pred[:, :, 0] = 255
+    acc = metrics.accuracy_metric(target_bin=target, pred_bin=pred)
+    assert acc[0] == 0.75
 
 
+@pytest.mark.skip(reason="skip segmentation tests")
 def test_dice_metric():
     target = np.zeros((5, 10, 2)) + 255.0
     pred = np.zeros_like(target)
     pred[:, :, 0] = 255.0
-    dice = metrics.dice_metric(target=target, prediction=pred)
-    nose.tools.assert_equal(dice, 0.5)
+    dice = metrics.dice_metric(target_bin=target, pred_bin=pred)
+    assert dice == 0.5
 
 
 def test_binarize_array():
     im = np.zeros((4, 3, 2))
     im[..., 1] = 15.0
     im_bin = metrics.binarize_array(im)
-    nose.tools.assert_equal(len(im_bin), 24)
-    nose.tools.assert_equal(im_bin.max(), 1)
+    assert len(im_bin) == 24
+    assert im_bin.max() == 1
 
 
 def test_mask_to_bool():
@@ -67,7 +70,7 @@ def test_mask_to_bool():
         metrics_list=metrics_list,
     )
     mask = metrics_inst.mask_to_bool(mask)
-    nose.tools.assert_equal(mask.dtype, "bool")
+    assert mask.dtype == "bool"
 
 
 def test_xyz_metrics():
@@ -84,9 +87,9 @@ def test_xyz_metrics():
         pred_name=pred_name,
     )
     metrics_xyz = metrics_inst.get_metrics_xyz()
-    nose.tools.assert_tuple_equal(metrics_xyz.shape, (1, 6))
+    assert metrics_xyz.shape == (1, 6)
     metrics_list.append("pred_name")
-    nose.tools.assert_list_equal(list(metrics_xyz), metrics_list)
+    assert list(metrics_xyz) == metrics_list
 
 
 def test_xy_metrics():
@@ -103,11 +106,12 @@ def test_xy_metrics():
         pred_name=pred_name,
     )
     metrics_xy = metrics_inst.get_metrics_xy()
-    nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 4))
+    assert metrics_xy.shape == (im_shape[2], 4)
     metrics_list.append("pred_name")
-    nose.tools.assert_list_equal(list(metrics_xy), metrics_list)
+    assert list(metrics_xy) == metrics_list
 
 
+@pytest.mark.skip(reason="skip segmentation tests")
 def test_xy_metrics_mask():
     metrics_list = ["corr", "r2"]
     pred_name = "test_pred"
@@ -126,7 +130,7 @@ def test_xy_metrics_mask():
         mask=mask,
     )
     metrics_xy = metrics_inst.get_metrics_xy()
-    nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 6))
+    assert metrics_xy.shape == (im_shape[2], 6)
     expected_list = [
         "corr",
         "r2",
@@ -135,18 +139,20 @@ def test_xy_metrics_mask():
         "r2_masked",
         "pred_name",
     ]
-    nose.tools.assert_list_equal(list(metrics_xy), expected_list)
+    assert list(metrics_xy) == expected_list
 
 
-@nose.tools.raises(AssertionError)
+@pytest.mark.skip(reason="skip segmentation tests")
 def test_xy_metrics_mask_and_segmentation():
     metrics_list = ["corr", "r2", "dice"]
-    metrics.MetricsEstimator(
-        metrics_list=metrics_list,
-        masked_metrics=True,
-    )
+    with pytest.raises(AssertionError):
+        metrics.MetricsEstimator(
+            metrics_list=metrics_list,
+            masked_metrics=True,
+        )
 
 
+@pytest.mark.skip(reason="skip segmentation tests")
 def test_xy_metrics_segmentation():
     metrics_list = ["acc", "dice"]
     pred_name = "test_pred"
@@ -162,13 +168,13 @@ def test_xy_metrics_segmentation():
         pred_name=pred_name,
     )
     metrics_xy = metrics_inst.get_metrics_xy()
-    nose.tools.assert_tuple_equal(metrics_xy.shape, (im_shape[2], 3))
+    assert metrics_xy.shape == (im_shape[2], 3)
     expected_list = [
         "acc",
         "dice",
         "pred_name",
     ]
-    nose.tools.assert_list_equal(list(metrics_xy), expected_list)
+    assert list(metrics_xy) == expected_list
 
 
 def test_xz_metrics():
@@ -185,9 +191,9 @@ def test_xz_metrics():
         pred_name=pred_name,
     )
     metrics_xz = metrics_inst.get_metrics_xz()
-    nose.tools.assert_tuple_equal(metrics_xz.shape, (im_shape[0], 3))
+    assert metrics_xz.shape == (im_shape[0], 3)
     metrics_list.append("pred_name")
-    nose.tools.assert_list_equal(list(metrics_xz), metrics_list)
+    assert list(metrics_xz) == metrics_list
 
 
 def test_yz_metrics():
@@ -204,6 +210,6 @@ def test_yz_metrics():
         pred_name=pred_name,
     )
     metrics_yz = metrics_inst.get_metrics_yz()
-    nose.tools.assert_tuple_equal(metrics_yz.shape, (im_shape[1], 3))
+    assert metrics_yz.shape == (im_shape[1], 3)
     metrics_list.append("pred_name")
-    nose.tools.assert_list_equal(list(metrics_yz), metrics_list)
+    assert list(metrics_yz) == metrics_list

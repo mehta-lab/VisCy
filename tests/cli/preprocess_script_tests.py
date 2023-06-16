@@ -1,14 +1,13 @@
 import os
 import unittest
+from tempfile import TemporaryDirectory
 
 import cv2
-import nose.tools
 import numpy as np
-from testfixtures import TempDirectory
+from iohub.ngff import open_ome_zarr
 
 import viscy.cli.preprocess_script as pp
 import viscy.utils.aux_utils as aux_utils
-import viscy.utils.io_utils as io_utils
 
 
 class TestPreprocessScript(unittest.TestCase):
@@ -16,7 +15,7 @@ class TestPreprocessScript(unittest.TestCase):
         """
         Set up a directory with some images to resample
         """
-        self.tempdir = TempDirectory()
+        self.tempdir = TemporaryDirectory()
         self.temp_path = self.tempdir.path
         self.image_dir = self.temp_path
         self.output_dir = os.path.join(self.temp_path, "out_dir")
@@ -34,8 +33,11 @@ class TestPreprocessScript(unittest.TestCase):
         self.im = 1500 * np.ones((30, 20), dtype=np.uint16)
         self.im[10:20, 5:15] = 3000
         # Create the same data in zarr format
-        zarr_writer = io_utils.ZarrWriter(
-            save_dir=self.zarr_dir,
+        zarr_writer = open_ome_zarr(
+            self.zarr_dir,
+            mode="w-",
+            layout="hcs",
+            channel_names=["ch0", "ch1", "ch2", "ch3"],
         )
         for p in self.pos_ids:
             zarr_writer.create_zarr_root("test_name_pos{}".format(p))
@@ -43,7 +45,6 @@ class TestPreprocessScript(unittest.TestCase):
                 position=p,
                 data_shape=(1, 4, 6, 30, 20),
                 chunk_size=(1, 1, 1, 30, 20),
-                chan_names=["ch0", "ch1", "ch2", "ch3"],
                 dtype="uint16",
             )
             for c in self.channel_ids:
@@ -148,8 +149,7 @@ class TestPreprocessScript(unittest.TestCase):
         """
         Tear down temporary folder and file structure
         """
-        TempDirectory.cleanup_all()
-        nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
+        self.tempdir.cleanup()
 
     def test_pre_process(self):
         out_config, runtime = pp.pre_process(self.pp_config)
