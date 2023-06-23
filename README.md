@@ -3,6 +3,29 @@
 viscy is a machine learning toolkit to solve computer vision problems
 in high-throughput imaging of cells.
 
+## Installation
+
+(Optional) create a new virtual/Conda environment.
+
+Clone this repository and install viscy:
+
+```sh
+git clone https://github.com/mehta-lab/viscy.git
+pip install viscy
+```
+
+Verify installation by accessing the CLI help message:
+
+```sh
+viscy --help
+```
+
+For development installation, see [the contributing guide](CONTRIBUTING.md).
+
+Full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.0).
+Some features (e.g. mixed precision and distributed training) may not work with other setups,
+see [PyTorch documentation](https://pytorch.org) for details.
+
 ## Predicting sub-cellular structure
 
 Training a model for the segmentation of sub-cellular landmarks
