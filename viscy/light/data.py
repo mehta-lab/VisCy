@@ -1,7 +1,7 @@
 import logging
 import os
 import tempfile
-from typing import Callable, Iterable, Literal, TypedDict, Union
+from typing import Callable, Iterable, Literal, Sequence, TypedDict, Union
 
 import numpy as np
 import torch
@@ -24,9 +24,9 @@ from torch.utils.data import DataLoader, Dataset
 
 
 class ChannelMap(TypedDict, total=False):
-    source: str
+    source: Union[str, Sequence[str]]
     # optional
-    target: str
+    target: Union[str, Sequence[str]]
 
 
 class Sample(TypedDict, total=False):
@@ -34,6 +34,7 @@ class Sample(TypedDict, total=False):
     source: torch.Tensor
     # optional
     target: torch.Tensor
+    weight: torch.Tensor
 
 
 class NormalizeSampled(MapTransform, InvertibleTransform):
@@ -41,23 +42,16 @@ class NormalizeSampled(MapTransform, InvertibleTransform):
 
     :param Union[str, Iterable[str]] keys: keys to normalize
     :param Plate plate: NGFF HCS plate object
-    :param ChannelMap channels: source and target channel names
     """
 
     def __init__(
-        self,
-        keys: Union[str, Iterable[str]],
-        norm_meta: dict[str, str],
-        channels: ChannelMap,
+        self, keys: Union[str, Iterable[str]], norm_meta: dict[str, str]
     ) -> None:
-        if set(keys) > channels.keys():
-            raise KeyError(f"Keys to transform ({keys}) not in {channels.keys()}")
         super().__init__(keys, allow_missing_keys=False)
         self.norm_meta = norm_meta
-        self.channels = channels
 
     def _stat(self, key: str) -> dict:
-        return self.norm_meta[self.channels[key]]["dataset_statistics"]
+        return self.norm_meta[key]["dataset_statistics"]
 
     def __call__(self, data: Sample) -> Sample:
         d = dict(data)
@@ -154,8 +148,10 @@ class HCSDataModule(LightningDataModule):
     """Lightning data module for a preprocessed HCS NGFF Store.
 
     :param str data_path: path to the data store
-    :param str source_channel: name of the source channel, e.g. 'Phase'
-    :param str target_channel: name of the target channel, e.g. 'Nuclei'
+    :param Union[str, Sequence[str]] source_channel: name(s) of the source channel,
+        e.g. ``'Phase'``
+    :param Union[str, Sequence[str]] target_channel: name(s) of the target channel,
+        e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
         e.g. 0.8 means a 80/20 split between training/validation
@@ -174,8 +170,8 @@ class HCSDataModule(LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        source_channel: str,
-        target_channel: str,
+        source_channel: Union[str, Sequence[str]],
+        target_channel: Union[str, Sequence[str]],
         z_window_size: int,
         split_ratio: float,
         batch_size: int = 16,
@@ -188,8 +184,8 @@ class HCSDataModule(LightningDataModule):
     ):
         super().__init__()
         self.data_path = data_path
-        self.source_channel = source_channel
-        self.target_channel = target_channel
+        self.source_channel = self._ensure_channel_list(source_channel)
+        self.target_channel = self._ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.target_2d = True if architecture == "2.5D" else False
@@ -200,6 +196,17 @@ class HCSDataModule(LightningDataModule):
         self.caching = caching
         self.normalize_source = normalize_source
         self.tmp_zarr = None
+
+    def _ensure_channel_list(str_or_seq: Union[str, Sequence[str]]):
+        if isinstance(str_or_seq, str):
+            return [str_or_seq]
+        try:
+            return list(str_or_seq)
+        except TypeError:
+            raise TypeError(
+                "Channel argument must be a string or sequence of strings. "
+                f"Got {str_or_seq}."
+            )
 
     def prepare_data(self):
         if not self.caching:
@@ -343,7 +350,7 @@ class HCSDataModule(LightningDataModule):
     def _fit_transform(self):
         return [
             CenterSpatialCropd(
-                keys=["source", "target"],
+                keys=self.source_channel + self.target_channel,
                 roi_size=(
                     -1,
                     self.yx_patch_size[0],
@@ -355,8 +362,8 @@ class HCSDataModule(LightningDataModule):
     def _train_transform(self) -> list[Callable]:
         transforms = [
             RandWeightedCropd(
-                keys=["source", "target"],
-                w_key="target",
+                keys=self.source_channel + self.target_channel,
+                w_key="weight",
                 spatial_size=(-1, self.yx_patch_size[0] * 2, self.yx_patch_size[1] * 2),
                 num_samples=1,
             )
@@ -365,15 +372,17 @@ class HCSDataModule(LightningDataModule):
             transforms.extend(
                 [
                     RandAffined(
-                        keys=["source", "target"],
+                        keys=self.source_channel + self.target_channel,
                         prob=0.5,
                         rotate_range=(np.pi, 0, 0),
                         shear_range=(0, (0.05), (0.05)),
                         scale_range=(0, 0.3, 0.3),
                     ),
-                    RandAdjustContrastd(keys=["source"], prob=0.3, gamma=(0.75, 1.5)),
+                    RandAdjustContrastd(
+                        keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
+                    ),
                     RandGaussianSmoothd(
-                        keys=["source"],
+                        keys=self.source_channel,
                         prob=0.3,
                         sigma_x=(0.05, 0.25),
                         sigma_y=(0.05, 0.25),
