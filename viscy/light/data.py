@@ -241,56 +241,70 @@ class HCSDataModule(LightningDataModule):
         channels = {"source": self.source_channel}
         dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
-            dataset_settings["channels"]["target"] = self.target_channel
-            data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
-            plate = open_ome_zarr(data_path, mode="r")
-            # disable metadata tracking in MONAI for performance
-            set_track_meta(False)
-            # define training stage transforms
-            norm_keys = ["target"]
-            if self.normalize_source:
-                norm_keys.append("source")
-            normalize_transform = [
-                NormalizeSampled(norm_keys, plate.zattrs["normalization"], channels)
-            ]
-            fit_transform = self._fit_transform()
-            train_transform = Compose(
-                normalize_transform + self._train_transform() + fit_transform
-            )
-            val_transform = Compose(normalize_transform + fit_transform)
-            # shuffle positions, randomness is handled globally
-            positions = [pos for _, pos in plate.positions()]
-            shuffled_indices = torch.randperm(len(positions))
-            positions = list(positions[i] for i in shuffled_indices)
-            num_train_fovs = int(len(positions) * self.split_ratio)
-            # train/val split
-            self.train_dataset = SlidingWindowDataset(
-                positions[:num_train_fovs],
-                transform=train_transform,
-                **dataset_settings,
-            )
-            self.val_dataset = SlidingWindowDataset(
-                positions[num_train_fovs:], transform=val_transform, **dataset_settings
-            )
+            self._setup_fit(dataset_settings)
         elif stage == "predict":
-            # track metadata for inverting transform
-            set_track_meta(True)
-            if self.caching:
-                logging.warning("Ignoring caching config in 'predict' stage.")
-            plate = open_ome_zarr(self.data_path, mode="r")
-            predict_transform = (
-                NormalizeSampled(norm_keys, plate.zattrs["normalization"], channels)
-                if self.normalize_source
-                else None
-            )
-            self.predict_dataset = SlidingWindowDataset(
-                [p for _, p in plate.positions()],
-                transform=predict_transform,
-                **dataset_settings,
-            )
+            self._setup_predict(dataset_settings)
         # test stage
         else:
             raise NotImplementedError(f"{stage} stage")
+
+    def _setup_fit(self, dataset_settings: dict):
+        dataset_settings["channels"]["target"] = self.target_channel
+        data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
+        plate = open_ome_zarr(data_path, mode="r")
+        # disable metadata tracking in MONAI for performance
+        set_track_meta(False)
+        # define training stage transforms
+        norm_keys = ["target"]
+        if self.normalize_source:
+            norm_keys.append("source")
+        normalize_transform = [
+            NormalizeSampled(
+                norm_keys,
+                plate.zattrs["normalization"],
+                channels=dataset_settings["channels"],
+            )
+        ]
+        fit_transform = self._fit_transform()
+        train_transform = Compose(
+            normalize_transform + self._train_transform() + fit_transform
+        )
+        val_transform = Compose(normalize_transform + fit_transform)
+        # shuffle positions, randomness is handled globally
+        positions = [pos for _, pos in plate.positions()]
+        shuffled_indices = torch.randperm(len(positions))
+        positions = list(positions[i] for i in shuffled_indices)
+        num_train_fovs = int(len(positions) * self.split_ratio)
+        # train/val split
+        self.train_dataset = SlidingWindowDataset(
+            positions[:num_train_fovs],
+            transform=train_transform,
+            **dataset_settings,
+        )
+        self.val_dataset = SlidingWindowDataset(
+            positions[num_train_fovs:], transform=val_transform, **dataset_settings
+        )
+
+    def _setup_predict(self, dataset_settings: dict):
+        # track metadata for inverting transform
+        set_track_meta(True)
+        if self.caching:
+            logging.warning("Ignoring caching config in 'predict' stage.")
+        plate = open_ome_zarr(self.data_path, mode="r")
+        predict_transform = (
+            NormalizeSampled(
+                "source",
+                plate.zattrs["normalization"],
+                channels=dataset_settings["channels"],
+            )
+            if self.normalize_source
+            else None
+        )
+        self.predict_dataset = SlidingWindowDataset(
+            [p for _, p in plate.positions()],
+            transform=predict_transform,
+            **dataset_settings,
+        )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         if self.trainer.testing or self.trainer.predicting:
