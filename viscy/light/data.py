@@ -359,7 +359,8 @@ class HCSDataModule(LightningDataModule):
             return batch
         if self.target_2d and not isinstance(batch, torch.Tensor):
             # slice the center during training, skipping example input array
-            batch["target"] = batch["target"][:, :, self.z_window_size // 2][:, :, None]
+            z_index = self.z_window_size // 2
+            batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
         return batch
 
     def train_dataloader(self):
