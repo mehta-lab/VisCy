@@ -176,18 +176,20 @@ class PhaseToNuc25D(LightningModule):
 
     @staticmethod
     def _detach_sample(imgs: Sequence[torch.Tensor]):
-        return [
-            np.squeeze(img[0].detach().cpu().numpy().max(axis=(0, 1))) for img in imgs
-        ]
+        return [np.squeeze(img[0].detach().cpu().numpy().max(axis=(1))) for img in imgs]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         images_grid = []
         for sample_images in imgs:
             images_row = []
-            for im, cm_name in zip(sample_images, ["gray"] + ["inferno"] * 2):
-                im = rescale_intensity(im, out_range=(0, 1))
-                rendered_im = get_cmap(cm_name)(im, bytes=True)[..., :3]
-                images_row.append(rendered_im)
+            for i, image in enumerate(sample_images):
+                cm_name = "gray" if i == 0 else "inferno"
+                if image.ndim == 2:
+                    image = image[np.newaxis]
+                for channel in image:
+                    channel = rescale_intensity(channel, out_range=(0, 1))
+                    render = get_cmap(cm_name)(channel, bytes=True)[..., :3]
+                    images_row.append(render)
             images_grid.append(np.concatenate(images_row, axis=1))
         grid = np.concatenate(images_grid, axis=0)
         self.logger.experiment.add_image(
