@@ -134,7 +134,7 @@ class PhaseToNuc25D(LightningModule):
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("val_loss", loss, batch_size=self.batch_size, sync_dist=True)
+        self.log("loss/validate", loss, batch_size=self.batch_size, sync_dist=True)
         if batch_idx < self.log_num_samples:
             self.validation_step_outputs.append(
                 self._detach_sample((source, target, pred))
