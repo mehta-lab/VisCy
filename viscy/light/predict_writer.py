@@ -11,21 +11,21 @@ from viscy.light.data import Sample
 
 
 class HCSPredictionWriter(BasePredictionWriter):
+    """Callback to store virtual staining predictions as HCS OME-Zarr.
+
+    :param str output_store: Path to the zarr store to store output
+    :param bool write_input: Write the source and target channels too
+        (must be writing to a new store),
+        defaults to False
+    :param Literal['batch', 'epoch', 'batch_and_epoch'] write_interval:
+        When to write, defaults to "batch"
+    """
     def __init__(
         self,
         output_store: str,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
     ) -> None:
-        """Callback to store virtual staining predictions as HCS OME-Zarr.
-
-        :param str output_store: Path to the zarr store to store output
-        :param bool write_input: Write the source and target channels too
-            (must be writing to a new store),
-            defaults to False
-        :param Literal['batch', 'epoch', 'batch_and_epoch'] write_interval:
-            When to write, defaults to "batch"
-        """
         super().__init__(write_interval)
         source_channel = "source"
         target_channel = "target"

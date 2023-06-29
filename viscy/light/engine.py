@@ -5,7 +5,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
@@ -25,12 +25,22 @@ class VSTrainer(Trainer):
         export_path: str,
         ckpt_path: str,
         format="onnx",
-        datamodule=None,
-        dataloaders=None,
+        datamodule: LightningDataModule = None,
+        dataloaders: Sequence = None,
     ):
+        """Export the model for deployment (currently only ONNX is supported).
+
+        :param LightningModule model: module to export
+        :param str export_path: output file name
+        :param str ckpt_path: model checkpoint
+        :param str format: format (currently only ONNX is supported), defaults to "onnx"
+        :param LightningDataModule datamodule: placeholder for datamodule,
+            defaults to None
+        :param Sequence dataloaders: placeholder for dataloaders, defaults to None
+        """
         if dataloaders or datamodule:
             logging.debug("Ignoring datamodule and dataloaders during export.")
-        if not format == "onnx":
+        if not format.lower() == "onnx":
             raise NotImplementedError(f"Export format '{format}'")
         model = _maybe_unwrap_optimized(model)
         self.strategy._lightning_module = model
