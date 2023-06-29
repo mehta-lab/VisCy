@@ -37,7 +37,8 @@ class HCSPredictionWriter(BasePredictionWriter):
                 )
             else:
                 self.plate = open_ome_zarr(output_store, mode="r+")
-                self.plate.append_channel(prediction_channel, resize_arrays=True)
+                for _, pos in self.plate.positions():
+                    pos.append_channel(prediction_channel, resize_arrays=True)
         else:
             channel_names = [prediction_channel]
             if write_input:
