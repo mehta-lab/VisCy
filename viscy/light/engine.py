@@ -72,7 +72,7 @@ class VSTrainer(Trainer):
         logging.info(f"ONNX exported at {export_path}")
 
 
-class PhaseToNuc25D(LightningModule):
+class VSUNet(LightningModule):
     def __init__(
         self,
         model_config: dict = {},

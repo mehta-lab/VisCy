@@ -6,7 +6,7 @@ from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy.light.data import HCSDataModule
-from viscy.light.engine import PhaseToNuc25D, VSTrainer
+from viscy.light.engine import VSTrainer, VSUNet
 
 
 class VSLightningCLI(LightningCLI):
@@ -45,7 +45,7 @@ class VSLightningCLI(LightningCLI):
 def main():
     torch.set_float32_matmul_precision("high")
     _ = VSLightningCLI(
-        model_class=PhaseToNuc25D,
+        model_class=VSUNet,
         datamodule_class=HCSDataModule,
         trainer_class=VSTrainer,
     )
