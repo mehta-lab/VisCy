@@ -6,7 +6,7 @@ from typing import Callable, Iterable, Literal, Sequence, TypedDict, Union
 import numpy as np
 import torch
 import zarr
-from iohub.ngff import ImageArray, Position, open_ome_zarr
+from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.transforms import (
@@ -292,13 +292,14 @@ class HCSDataModule(LightningDataModule):
         dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
+        elif stage == "test":
+            self._setup_test(dataset_settings)
         elif stage == "predict":
             self._setup_predict(dataset_settings)
-        # test stage
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _setup_fit(self, dataset_settings: dict):
+    def _setup_eval(self, dataset_settings: dict) -> tuple[Plate, MapTransform]:
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
@@ -308,17 +309,19 @@ class HCSDataModule(LightningDataModule):
         norm_keys = self.target_channel
         if self.normalize_source:
             norm_keys += self.source_channel
-        normalize_transform = [
-            NormalizeSampled(
-                norm_keys,
-                plate.zattrs["normalization"],
-            )
-        ]
+        normalize_transform = NormalizeSampled(
+            norm_keys,
+            plate.zattrs["normalization"],
+        )
+        return plate, normalize_transform
+
+    def _setup_fit(self, dataset_settings: dict):
+        plate, normalize_transform = self._setup_eval(dataset_settings)
         fit_transform = self._fit_transform()
         train_transform = Compose(
-            normalize_transform + self._train_transform() + fit_transform
+            [normalize_transform] + self._train_transform() + fit_transform
         )
-        val_transform = Compose(normalize_transform + fit_transform)
+        val_transform = Compose([normalize_transform] + fit_transform)
         # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
         shuffled_indices = torch.randperm(len(positions))
@@ -332,6 +335,14 @@ class HCSDataModule(LightningDataModule):
         )
         self.val_dataset = SlidingWindowDataset(
             positions[num_train_fovs:], transform=val_transform, **dataset_settings
+        )
+
+    def _setup_test(self, dataset_settings):
+        plate, normalize_transform = self._setup_eval(dataset_settings)
+        self.test_dataset = SlidingWindowDataset(
+            [p for _, p in plate.positions()],
+            transform=normalize_transform,
+            **dataset_settings,
         )
 
     def _setup_predict(self, dataset_settings: dict):
@@ -355,10 +366,11 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        if self.trainer.testing or self.trainer.predicting:
+        if self.trainer.predicting or isinstance(batch, torch.Tensor):
+            # skipping example input array
             return batch
-        if self.target_2d and not isinstance(batch, torch.Tensor):
-            # slice the center during training, skipping example input array
+        if self.target_2d:
+            # slice the center during training or testing
             z_index = self.z_window_size // 2
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
         return batch
@@ -379,6 +391,14 @@ class HCSDataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             persistent_workers=True,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
         )
 
     def predict_dataloader(self):
