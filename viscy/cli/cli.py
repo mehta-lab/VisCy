@@ -32,12 +32,7 @@ class VSLightningCLI(LightningCLI):
                     save_dir="",
                     version=datetime.now().strftime(r"%Y%m%d-%H%M%S"),
                     log_graph=True,
-                ),
-                "trainer.callbacks": [
-                    {
-                        "class_path": "viscy.light.predict_writer.HCSPredictionWriter",
-                    }
-                ],
+                )
             }
         )
 
@@ -49,6 +44,7 @@ def main():
         datamodule_class=HCSDataModule,
         trainer_class=VSTrainer,
     )
+
 
 if __name__ == "__main__":
     main()
