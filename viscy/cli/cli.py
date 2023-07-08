@@ -49,3 +49,6 @@ def main():
         datamodule_class=HCSDataModule,
         trainer_class=VSTrainer,
     )
+
+if __name__ == "__main__":
+    main()
