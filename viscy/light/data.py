@@ -40,8 +40,11 @@ def _ensure_channel_list(str_or_seq: Union[str, Sequence[str]]):
 def _search_int_in_str(pattern: str, file_name: str) -> str:
     """Search image indices in a file name with regex patterns and strip leading zeros.
     E.g. ``'001'`` -> ``1``"""
-    first_match = re.search(pattern, file_name).group()
-    return int(first_match)
+    match = re.search(pattern, file_name)
+    if match:
+        return match.group()
+    else:
+        raise ValueError(f"Cannot find pattern {pattern} in {file_name}.")
 
 
 class ChannelMap(TypedDict, total=False):
@@ -209,7 +212,7 @@ class SlidingWindowDataset(Dataset):
         self.positions[0].zgroup.store.close()
 
 
-class TestDataset(SlidingWindowDataset):
+class MaskTestDataset(SlidingWindowDataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
     This a testing stage version of :py:class:`viscy.light.data.SlidingWindowDataset`,
@@ -241,14 +244,17 @@ class TestDataset(SlidingWindowDataset):
             t_idx = 0
             # TODO: record channel name
             # channel_name = re.search(r"^.+(?=_p\d{3})", img_name).group()
-            z_idx = _search_int_in_str(r"(?<=_z)\d{3}", img_name)
-            self.masks[(position_name, t_idx, z_idx)] = img_path
+            z_idx = _search_int_in_str(r"(?<=_z)\d+", img_name)
+            self.masks[(int(position_name), int(t_idx), int(z_idx))] = img_path
+        logging.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
         sample = super().__getitem__(index)
         img_name, t_idx, z_idx = sample["index"]
-        position_name = img_name.split("/")[-1]
-        if img_path := self.masks.get((position_name, t_idx, z_idx)):
+        position_name = int(img_name.split("/")[-1])
+        if img_path := self.masks.get(
+            (position_name, t_idx, z_idx + self.z_window_size // 2)
+        ):
             sample["mask"] = torch.from_numpy(imread(img_path))
         return sample
 
@@ -400,9 +406,10 @@ class HCSDataModule(LightningDataModule):
         if self.batch_size != 1:
             logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
         plate, normalize_transform = self._setup_eval(dataset_settings)
-        self.test_dataset = SlidingWindowDataset(
+        self.test_dataset = MaskTestDataset(
             [p for _, p in plate.positions()],
             transform=normalize_transform,
+            ground_truth_masks=self.ground_truth_masks,
             **dataset_settings,
         )
 
