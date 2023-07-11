@@ -1,10 +1,10 @@
 import logging
-from typing import Literal, Sequence
+from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from cellpose.models import CellposeModel
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from matplotlib.cm import get_cmap
@@ -13,7 +13,18 @@ from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
 from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
+from torchmetrics.functional import (
+    accuracy,
+    cosine_similarity,
+    dice,
+    jaccard_index,
+    mean_absolute_error,
+    mean_squared_error,
+    r2_score,
+    structural_similarity_index_measure,
+)
 
+from viscy.light.data import Sample
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.utils.model import ModelDefaults25D, define_model
 
@@ -73,33 +84,39 @@ class VSTrainer(Trainer):
 
 
 class VSUNet(LightningModule):
+    """Regression U-Net module for virtual staining.
+
+    :param dict model_config: model config,
+        defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
+    :param int batch_size: batch size, defaults to 16
+    :param Callable[[torch.Tensor, torch.Tensor], torch.Tensor] loss_function:
+        loss function in training/validation, defaults to L2 (mean squared error)
+    :param float lr: learning rate in training, defaults to 1e-3
+    :param Literal['WarmupCosine', 'Constant'] schedule:
+        learning rate scheduler, defaults to "Constant"
+    :param int log_num_samples:
+        number of image samples to log each training/validation epoch, defaults to 8
+    :param Sequence[int] example_input_yx_shape:
+        XY shape of the example input for network graph tracing, defaults to (256, 256)
+    :param str test_cellpose_model_path:
+        path to the CellPose model for testing segmentation, defaults to None
+    """
+
     def __init__(
         self,
         model_config: dict = {},
         batch_size: int = 16,
-        loss_function: nn.Module = None,
+        loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_num_samples: int = 8,
         example_input_yx_shape: Sequence[int] = (256, 256),
+        test_cellpose_model_path: str = None,
     ) -> None:
-        """Regression U-Net module for virtual staining.
-
-        Parameters
-        ----------
-        model : nn.Module
-            U-Net model
-        max_epochs : int, optional
-            Max epochs in fitting, by default 100
-        loss_function : nn.Module, optional
-            Loss function module, by default L2 (mean squared error)
-        lr : float, optional
-            Learning rate, by default 1e-3
-        schedule: Literal["WarmupCosine", "Constant"], optional
-            Learning rate scheduler, by default 'Constant'
-        """
         super().__init__()
         self.model = define_model(Unet25d, ModelDefaults25D(), model_config)
+        # TODO: handle num_outputs in metrics
+        # self.out_channels = self.model.terminal_block.out_filters
         self.batch_size = batch_size
         self.loss_function = loss_function if loss_function else F.mse_loss
         self.lr = lr
@@ -114,11 +131,12 @@ class VSUNet(LightningModule):
             (model_config.get("in_stack_depth") or 5),
             *example_input_yx_shape,
         )
+        self.test_cellpose_model_path = test_cellpose_model_path
 
-    def forward(self, x):
+    def forward(self, x) -> torch.Tensor:
         return self.model(x)
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch: Sample, batch_idx: int):
         source = batch["source"]
         target = batch["target"]
         pred = self.forward(source)
@@ -139,7 +157,7 @@ class VSUNet(LightningModule):
             )
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch: Sample, batch_idx: int):
         source = batch["source"]
         target = batch["target"]
         pred = self.forward(source)
@@ -150,7 +168,66 @@ class VSUNet(LightningModule):
                 self._detach_sample((source, target, pred))
             )
 
-    def predict_step(self, batch, batch_idx: int, dataloader_idx: int = 0):
+    def test_step(self, batch: Sample, batch_idx: int):
+        source = batch["source"]
+        target = batch["target"][:, 0]
+        pred = self.forward(source)[:, 0]
+        # FIXME: Only works for batch size 1 and the first channel
+        self._log_regression_metrics(pred, target)
+        if "mask" in batch:
+            self._log_segmentation_metrics(batch, pred)
+        img_names, ts, zs = batch["index"]
+        self.log_dict(
+            {
+                "position": int(img_names[0].split("/")[-2]),
+                "time": ts[0],
+                "slice": zs[0],
+            },
+            on_step=True,
+            on_epoch=False,
+        )
+
+    def _log_regression_metrics(self, pred: torch.Tensor, target: torch.Tensor):
+        # paired image translation metrics
+        self.log_dict(
+            {
+                # regression
+                "test_metrics/MAE": mean_absolute_error(pred, target),
+                "test_metrics/MSE": mean_squared_error(pred, target),
+                "test_metrics/cosine": cosine_similarity(
+                    pred, target, reduction="mean"
+                ),
+                "test_metrics/r2": r2_score(pred.flatten(), target.flatten()),
+                # image perception
+                "test_metrics/SSIM": structural_similarity_index_measure(
+                    pred, target, gaussian_kernel=False, kernel_size=21
+                ),
+            },
+            on_step=True,
+            on_epoch=True,
+        )
+
+    def _log_segmentation_metrics(self, batch: Sample, pred: torch.Tensor):
+        pred_mask = torch.from_numpy(
+            self.cellpose_model.eval(
+                pred.cpu().numpy(), channels=[0, 0], diameter=None
+            )[0].astype(np.int16)[np.newaxis]
+        ).to(self.device)
+        target_mask = batch["mask"]
+        self.log_dict(
+            {
+                # semantic segmentation
+                "test_metrics/accuracy": accuracy(pred_mask, target_mask),
+                "test_metrics/dice": dice(pred_mask, target_mask),
+                "test_metrics/jaccard": jaccard_index(
+                    pred_mask, target_mask, task="binary"
+                ),
+            },
+            on_step=True,
+            on_epoch=True,
+        )
+
+    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = self._predict_pad(batch["source"])
         return self._predict_pad.inverse(self.forward(source))
 
@@ -161,6 +238,13 @@ class VSUNet(LightningModule):
     def on_validation_epoch_end(self):
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+
+    def on_test_start(self):
+        """Load CellPose model for segmentation."""
+        if self.test_cellpose_model_path is not None:
+            self.cellpose_model = CellposeModel(
+                model_type=self.test_cellpose_model_path
+            )
 
     def on_predict_start(self):
         """Pad the input shape to be divisible by the downsampling factor.
