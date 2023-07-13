@@ -223,7 +223,7 @@ class VSUNet(LightningModule):
         pred_binary = pred_labels > 0
         target_binary = target_labels > 0
         coco_metrics = mean_average_precision(pred_labels, target_labels)
-        print(coco_metrics)
+        logging.debug(coco_metrics)
         self.log_dict(
             {
                 # semantic segmentation
