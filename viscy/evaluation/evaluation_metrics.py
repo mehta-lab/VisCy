@@ -87,6 +87,7 @@ def POD_metric(target_bin, pred_bin):
     # to make the unbalanced assignment problem balanced.
     # The zero entries (=no realobjects)
     # are set to nan to prevent them of being matched.
+    # FIXME: this will make perfect matches NaN
     cost_matrix[cost_matrix == 0.0] = np.nan
 
     # LAPsolver for minimizing cost matrix of objects
