@@ -36,8 +36,10 @@ def test_VOI_metric(labels_numpy):
         assert VOI_metric(labels, np.zeros_like(labels))[0] > 0.9
 
 
-@pytest.skip("The tested function is broken")
+@pytest.mark.skip("The tested function is broken")
 def test_POD_metric(labels_numpy):
+    """Test POD_metric()"""
+    # FIXME: remove skip after the tested function is fixed
     for labels in labels_numpy:
         (
             true_positives,
