@@ -58,7 +58,7 @@ class Sample(TypedDict, total=False):
     # optional
     source: torch.Tensor
     target: torch.Tensor
-    mask: torch.Tensor
+    labels: torch.Tensor
 
 
 class NormalizeSampled(MapTransform, InvertibleTransform):
@@ -255,7 +255,7 @@ class MaskTestDataset(SlidingWindowDataset):
         if img_path := self.masks.get(
             (position_name, t_idx, z_idx + self.z_window_size // 2)
         ):
-            sample["mask"] = torch.from_numpy(imread(img_path).astype(np.int16))
+            sample["labels"] = torch.from_numpy(imread(img_path).astype(np.int16))
         return sample
 
 

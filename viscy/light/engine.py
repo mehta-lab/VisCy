@@ -176,8 +176,8 @@ class VSUNet(LightningModule):
         pred = self.forward(source)[:, 0]
         # FIXME: Only works for batch size 1 and the first channel
         self._log_regression_metrics(pred, target)
-        if "mask" in batch:
-            self._log_segmentation_metrics(batch, pred)
+        if "labels" in batch:
+            self._log_segmentation_metrics(pred, batch["labels"][0])
         img_names, ts, zs = batch["index"]
         self.log_dict(
             {
@@ -212,25 +212,35 @@ class VSUNet(LightningModule):
             on_epoch=True,
         )
 
-    def _log_segmentation_metrics(self, batch: Sample, pred: torch.Tensor):
-        pred_mask = torch.from_numpy(
+    def _log_segmentation_metrics(
+        self, pred: torch.Tensor, target_labels: torch.ShortTensor
+    ):
+        pred_labels = torch.from_numpy(
             self.cellpose_model.eval(
                 pred.cpu().numpy(), channels=[0, 0], diameter=None
             )[0].astype(np.int16)[np.newaxis]
-        ).to(self.device)
-        target_mask = batch["mask"]
+        ).to(self.device)[0]
+        pred_binary = pred_labels > 0
+        target_binary = target_labels > 0
+        coco_metrics = mean_average_precision(pred_labels, target_labels)
+        print(coco_metrics)
         self.log_dict(
             {
                 # semantic segmentation
-                "test_metrics/accuracy": accuracy(pred_mask, target_mask),
-                "test_metrics/dice": dice(pred_mask, target_mask),
-                "test_metrics/jaccard": jaccard_index(
-                    pred_mask, target_mask, task="binary"
+                "test_metrics/accuracy": accuracy(
+                    pred_binary, target_binary, task="binary"
                 ),
-                "test_metrics/mAP": mean_average_precision(pred_mask, target_mask),
+                "test_metrics/dice": dice(pred_binary, target_binary),
+                "test_metrics/jaccard": jaccard_index(
+                    pred_binary, target_binary, task="binary"
+                ),
+                "test_metrics/mAP": coco_metrics["map"],
+                "test_metrics/mAP_50": coco_metrics["map_50"],
+                "test_metrics/mAP_75": coco_metrics["map_75"],
+                "test_metrics/mAR_100": coco_metrics["mar_100"],
             },
             on_step=True,
-            on_epoch=True,
+            on_epoch=False,
         )
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
@@ -249,7 +259,7 @@ class VSUNet(LightningModule):
         """Load CellPose model for segmentation."""
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
-                model_type=self.test_cellpose_model_path
+                model_type=self.test_cellpose_model_path, device=self.device
             )
 
     def on_predict_start(self):
