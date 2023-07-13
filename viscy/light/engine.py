@@ -20,10 +20,12 @@ from torchmetrics.functional import (
     jaccard_index,
     mean_absolute_error,
     mean_squared_error,
+    pearson_corrcoef,
     r2_score,
     structural_similarity_index_measure,
 )
 
+from viscy.evaluation.evaluation_metrics import mean_average_precision
 from viscy.light.data import Sample
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.utils.model import ModelDefaults25D, define_model
@@ -197,6 +199,9 @@ class VSUNet(LightningModule):
                 "test_metrics/cosine": cosine_similarity(
                     pred, target, reduction="mean"
                 ),
+                "test_metrics/pearson": pearson_corrcoef(
+                    pred.flatten(), target.flatten()
+                ),
                 "test_metrics/r2": r2_score(pred.flatten(), target.flatten()),
                 # image perception
                 "test_metrics/SSIM": structural_similarity_index_measure(
@@ -222,6 +227,7 @@ class VSUNet(LightningModule):
                 "test_metrics/jaccard": jaccard_index(
                     pred_mask, target_mask, task="binary"
                 ),
+                "test_metrics/mAP": mean_average_precision(pred_mask, target_mask),
             },
             on_step=True,
             on_epoch=True,
