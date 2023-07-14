@@ -251,10 +251,9 @@ class MaskTestDataset(SlidingWindowDataset):
     def __getitem__(self, index: int) -> Sample:
         sample = super().__getitem__(index)
         img_name, t_idx, z_idx = sample["index"]
-        position_name = int(img_name.split("/")[-1])
-        if img_path := self.masks.get(
-            (position_name, t_idx, z_idx + self.z_window_size // 2)
-        ):
+        position_name = int(img_name.split("/")[-2])
+        key = (position_name, int(t_idx), int(z_idx) + self.z_window_size // 2)
+        if img_path := self.masks.get(key):
             sample["labels"] = torch.from_numpy(imread(img_path).astype(np.int16))
         return sample
 
