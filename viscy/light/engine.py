@@ -181,22 +181,30 @@ class VSUNet(LightningModule):
         source = batch["source"]
         target = batch["target"][:, 0]
         pred = self.forward(source)[:, 0]
+        if pred.min() == pred.max() or target.min() == target.max():
+            raise RuntimeError(
+                str(pred.min(), pred.max(), target.min(), target.max(), batch["index"])
+            )
         # FIXME: Only works for batch size 1 and the first channel
         self._log_regression_metrics(pred, target)
         img_names, ts, zs = batch["index"]
-        position = int(img_names[0].split("/")[-2])
+        position = float(img_names[0].split("/")[-2])
         self.log_dict(
             {
                 "position": position,
-                "time": ts[0],
-                "slice": zs[0],
+                "time": float(ts[0]),
+                "slice": float(zs[0]),
             },
             on_step=True,
             on_epoch=False,
         )
         if "labels" in batch:
-            pred_labels = self._cellpose_predict(pred, f"p{position}_t{ts[0]}_z{zs[0]}")
+            pred_labels = self._cellpose_predict(
+                pred, f"p{int(position)}_t{ts[0]}_z{zs[0]}"
+            )
             self._log_segmentation_metrics(pred_labels, batch["labels"][0])
+        else:
+            self._log_segmentation_metrics(None, None)
 
     def _log_regression_metrics(self, pred: torch.Tensor, target: torch.Tensor):
         # paired image translation metrics
@@ -209,7 +217,7 @@ class VSUNet(LightningModule):
                     pred, target, reduction="mean"
                 ),
                 "test_metrics/pearson": pearson_corrcoef(
-                    pred.flatten(), target.flatten()
+                    pred.flatten() * 1e4, target.flatten() * 1e4
                 ),
                 "test_metrics/r2": r2_score(pred.flatten(), target.flatten()),
                 # image perception
@@ -225,30 +233,38 @@ class VSUNet(LightningModule):
         pred_labels_np = self.cellpose_model.eval(
             pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
         )[0].astype(np.int16)
-        imwrite(os.path.join(self.logger.save_dir, f"{name}.png"), pred_labels_np)
+        imwrite(os.path.join(self.logger.log_dir, f"{name}.png"), pred_labels_np)
         return torch.from_numpy(pred_labels_np).to(self.device)
 
     def _log_segmentation_metrics(
         self, pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor
     ):
-        pred_binary = pred_labels > 0
-        target_binary = target_labels > 0
-        coco_metrics = mean_average_precision(pred_labels, target_labels)
-        logging.debug(coco_metrics)
+        compute = pred_labels is not None
+        if compute:
+            pred_binary = pred_labels > 0
+            target_binary = target_labels > 0
+            coco_metrics = mean_average_precision(pred_labels, target_labels)
+            logging.debug(coco_metrics)
         self.log_dict(
             {
                 # semantic segmentation
                 "test_metrics/accuracy": accuracy(
                     pred_binary, target_binary, task="binary"
-                ),
-                "test_metrics/dice": dice(pred_binary, target_binary),
+                )
+                if compute
+                else -1,
+                "test_metrics/dice": dice(pred_binary, target_binary)
+                if compute
+                else -1,
                 "test_metrics/jaccard": jaccard_index(
                     pred_binary, target_binary, task="binary"
-                ),
-                "test_metrics/mAP": coco_metrics["map"],
-                "test_metrics/mAP_50": coco_metrics["map_50"],
-                "test_metrics/mAP_75": coco_metrics["map_75"],
-                "test_metrics/mAR_100": coco_metrics["mar_100"],
+                )
+                if compute
+                else -1,
+                "test_metrics/mAP": coco_metrics["map"] if compute else -1,
+                "test_metrics/mAP_50": coco_metrics["map_50"] if compute else -1,
+                "test_metrics/mAP_75": coco_metrics["map_75"] if compute else -1,
+                "test_metrics/mAR_100": coco_metrics["mar_100"] if compute else -1,
             },
             on_step=True,
             on_epoch=False,
