@@ -38,7 +38,6 @@ def test_VOI_metric(labels_numpy):
 
 def test_POD_metric(labels_numpy):
     """Test POD_metric()"""
-    # FIXME: remove skip after the tested function is fixed
     for labels in labels_numpy:
         (
             true_positives,
@@ -78,6 +77,11 @@ def test_labels_to_masks(labels_tensor: torch.ShortTensor):
         assert torch.equal(masks[0], labels == 1)
         with pytest.raises(ValueError):
             _ = labels_to_masks(torch.randint(0, 5, (3, 32, 32), dtype=torch.short))
+
+
+def test_labels_to_masks_more_dims():
+    with pytest.raises(ValueError):
+        _ = labels_to_masks(torch.randint(0, 42, (1, 4, 4), dtype=torch.short))
 
 
 def test_labels_to_detection(labels_tensor: torch.ShortTensor):
