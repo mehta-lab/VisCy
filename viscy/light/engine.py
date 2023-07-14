@@ -1,10 +1,12 @@
 import logging
+import os
 from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from cellpose.models import CellposeModel
+from imageio import imwrite
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from matplotlib.cm import get_cmap
@@ -102,6 +104,9 @@ class VSUNet(LightningModule):
         XY shape of the example input for network graph tracing, defaults to (256, 256)
     :param str test_cellpose_model_path:
         path to the CellPose model for testing segmentation, defaults to None
+    :param float test_cellpose_diameter:
+        diameter parameter of the CellPose model for testing segmentation,
+        defaults to None
     """
 
     def __init__(
@@ -114,6 +119,7 @@ class VSUNet(LightningModule):
         log_num_samples: int = 8,
         example_input_yx_shape: Sequence[int] = (256, 256),
         test_cellpose_model_path: str = None,
+        test_cellpose_diameter: float = None,
     ) -> None:
         super().__init__()
         self.model = define_model(Unet25d, ModelDefaults25D(), model_config)
@@ -134,6 +140,7 @@ class VSUNet(LightningModule):
             *example_input_yx_shape,
         )
         self.test_cellpose_model_path = test_cellpose_model_path
+        self.test_cellpose_diameter = test_cellpose_diameter
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
@@ -176,18 +183,20 @@ class VSUNet(LightningModule):
         pred = self.forward(source)[:, 0]
         # FIXME: Only works for batch size 1 and the first channel
         self._log_regression_metrics(pred, target)
-        if "labels" in batch:
-            self._log_segmentation_metrics(pred, batch["labels"][0])
         img_names, ts, zs = batch["index"]
+        position = int(img_names[0].split("/")[-2])
         self.log_dict(
             {
-                "position": int(img_names[0].split("/")[-2]),
+                "position": position,
                 "time": ts[0],
                 "slice": zs[0],
             },
             on_step=True,
             on_epoch=False,
         )
+        if "labels" in batch:
+            pred_labels = self._cellpose_predict(pred, f"p{position}_t{ts[0]}_z{zs[0]}")
+            self._log_segmentation_metrics(pred_labels, batch["labels"][0])
 
     def _log_regression_metrics(self, pred: torch.Tensor, target: torch.Tensor):
         # paired image translation metrics
@@ -212,14 +221,16 @@ class VSUNet(LightningModule):
             on_epoch=True,
         )
 
+    def _cellpose_predict(self, pred: torch.Tensor, name: str) -> torch.ShortTensor:
+        pred_labels_np = self.cellpose_model.eval(
+            pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
+        )[0].astype(np.int16)
+        imwrite(os.path.join(self.logger.save_dir, f"{name}.png"), pred_labels_np)
+        return torch.from_numpy(pred_labels_np).to(self.device)
+
     def _log_segmentation_metrics(
-        self, pred: torch.Tensor, target_labels: torch.ShortTensor
+        self, pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor
     ):
-        pred_labels = torch.from_numpy(
-            self.cellpose_model.eval(
-                pred.cpu().numpy(), channels=[0, 0], diameter=None
-            )[0].astype(np.int16)[np.newaxis]
-        ).to(self.device)[0]
         pred_binary = pred_labels > 0
         target_binary = target_labels > 0
         coco_metrics = mean_average_precision(pred_labels, target_labels)
