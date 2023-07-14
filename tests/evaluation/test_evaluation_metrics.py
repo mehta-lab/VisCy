@@ -36,7 +36,6 @@ def test_VOI_metric(labels_numpy):
         assert VOI_metric(labels, np.zeros_like(labels))[0] > 0.9
 
 
-@pytest.mark.skip("The tested function is broken")
 def test_POD_metric(labels_numpy):
     """Test POD_metric()"""
     # FIXME: remove skip after the tested function is fixed
@@ -50,10 +49,12 @@ def test_POD_metric(labels_numpy):
             f1_score,
         ) = POD_metric(labels, labels)
         assert true_positives == labels.max()
+        assert precision == recall == f1_score == 1
         assert false_negatives == 0
         assert false_positives == 0
         wrong_labels = np.copy(labels)
-        wrong_labels[0, 0] == labels.max() + 1
+        wrong_labels[wrong_labels == 1] = 0
+        wrong_labels[0, 0] == 1
         (
             true_positives,
             false_positives,
@@ -62,10 +63,10 @@ def test_POD_metric(labels_numpy):
             recall,
             f1_score,
         ) = POD_metric(labels, wrong_labels)
-        for metric in (precision, recall, f1_score):
-            assert _is_within_unit(metric)
-        assert true_positives <= labels.max()
-        assert false_negatives == 0
+        for i, metric in enumerate((precision, recall, f1_score)):
+            assert _is_within_unit(metric), i
+        assert true_positives < labels.max()
+        assert false_negatives > 0
         assert false_positives > 0
 
 
