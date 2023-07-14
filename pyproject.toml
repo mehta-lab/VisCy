@@ -31,7 +31,7 @@ metrics = [
     "scipy>=1.8.0",
     "torchmetrics[detection]",
 ]
-dev = ["pytest", "hypothesis", "profilehooks", "onnxruntime"]
+dev = ["pytest", "pytest-cov", "hypothesis", "profilehooks", "onnxruntime"]
 
 [project.scripts]
 viscy = "viscy.cli.cli:main"
