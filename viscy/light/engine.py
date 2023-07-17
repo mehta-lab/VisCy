@@ -181,10 +181,6 @@ class VSUNet(LightningModule):
         source = batch["source"]
         target = batch["target"][:, 0]
         pred = self.forward(source)[:, 0]
-        if pred.min() == pred.max() or target.min() == target.max():
-            raise RuntimeError(
-                str(pred.min(), pred.max(), target.min(), target.max(), batch["index"])
-            )
         # FIXME: Only works for batch size 1 and the first channel
         self._log_regression_metrics(pred, target)
         img_names, ts, zs = batch["index"]
