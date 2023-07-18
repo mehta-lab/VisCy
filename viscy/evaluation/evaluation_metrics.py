@@ -1,205 +1,10 @@
 """Metrics for model evaluation"""
-import functools
-
 import numpy as np
-import pandas as pd
-import sklearn.metrics
-from cellpose import models
+import torch
 from lapsolver import solve_dense
-from scipy.stats import pearsonr
 from skimage.measure import label, regionprops
-from skimage.metrics import structural_similarity as ssim
-from skimage.morphology import dilation, disk, erosion
-
-
-def mask_decorator(metric_function):
-    """Decorator for masking the metrics
-
-    :param function metric_function: a python function that takes target and
-     prediction arrays as input
-    :return function wrapper_metric_function: input function that returns
-     metrics and masked_metrics if mask was passed as param to input function
-    """
-
-    @functools.wraps(metric_function)
-    def wrapper_metric_function(**kwargs):
-        """Expected inputs cur_target, prediction, mask
-
-        :param dict kwargs: with keys target, prediction and mask all of which
-         are np.arrays
-        """
-
-        metric = metric_function(
-            target=kwargs["target"], prediction=kwargs["prediction"]
-        )
-        if "mask" in kwargs:
-            mask = kwargs["mask"]
-            cur_target = kwargs["target"]
-            cur_pred = kwargs["prediction"]
-            masked_metric = metric_function(
-                target=cur_target[mask], prediction=cur_pred[mask]
-            )
-            return [metric, masked_metric]
-        return metric
-
-    return wrapper_metric_function
-
-
-# @mask_decorator
-def mse_metric(target, prediction):
-    """MSE of target and prediction
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float mean squared error
-    """
-    mse = np.mean((target - prediction) ** 2)
-    return [mse]
-
-
-# @mask_decorator
-def mae_metric(target, prediction):
-    """MAE of target and prediction
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float mean absolute error
-    """
-    mae = np.mean(np.abs(target - prediction))
-    return [mae]
-
-
-# @mask_decorator
-def r2_metric(target, prediction):
-    """Coefficient of determination of target and prediction
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float coefficient of determination
-    """
-    ss_res = np.sum((target - prediction) ** 2)
-    ss_tot = np.sum((target - np.mean(target)) ** 2)
-    cur_r2 = 1 - (ss_res / (ss_tot + 1e-8))
-    return [cur_r2]
-
-
-# @mask_decorator
-def corr_metric(target, prediction):
-    """Pearson correlation of target and prediction
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float Pearson correlation
-    """
-    cur_corr = pearsonr(target.flatten(), prediction.flatten())[0]
-    return cur_corr
-
-
-def ssim_metric(target, prediction, win_size=21):
-    """
-    Structural similarity indiex (SSIM) of target and prediction.
-    Window size is not passed into function so make sure tiles
-    are never smaller than default win_size.
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :param np.array/None mask: Mask
-    :param int win_size: window size for computing local SSIM
-    :return float/list ssim and ssim_masked
-    """
-    assert target.shape == prediction.shape, (
-        "target and prediction have different shapes:"
-        f"expected target shape {prediction.shape}, "
-        f"but got target shape {target.shape}"
-    )
-
-    multichannel = win_size > target.shape[-1]
-    cur_ssim = ssim(
-        target,
-        prediction,
-        win_size=win_size,
-        data_range=target.max() - target.min(),
-        multichannel=multichannel,
-    )
-    return [cur_ssim]
-
-
-def accuracy_metric(target_bin, pred_bin):
-    """Accuracy of binary target and prediction.
-    Not using mask decorator for binary data evaluation.
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float Accuracy: Accuracy for binarized data
-    """
-    # target_bin = binarize_array(target)
-    # pred_bin = cpmask_array(prediction)
-    acc = sklearn.metrics.accuracy_score(target_bin, pred_bin)
-    return [acc]
-
-
-def dice_metric(target_bin, pred_bin):
-    """Dice similarity coefficient (F1 score) of binary target and prediction.
-    Reports global metric.
-    Not using mask decorator for binary data evaluation.
-
-    :param np.array target: ground truth array
-    :param np.array prediction: model prediction
-    :return float dice: Dice for binarized data
-    """
-    # target_bin = binarize_array(target)
-    # change to reading existing ground truth masks
-    # pred_bin = cpmask_array(prediction)
-    dice = sklearn.metrics.f1_score(target_bin, pred_bin, average="micro")
-    return [dice]
-
-
-def IOU_metric(target, prediction):
-    """Intersection over union metric is same as dice metric
-    Reports overlap between predicted and ground truth mask
-    : param np.array target: ground truth mask
-    : param np.array prediction: model infered FL image cellpose mask
-    : return float IOU: IOU for image masks
-    """
-    # predicted image cellpose segmentation: output labelled mask
-    pred_bin = prediction > 0
-    target_bin = target > 0
-
-    # convert label to binary mask
-    im_targ_mask = target_bin > 0
-    im_pred_mask = pred_bin > 0
-
-    # compute raw intersection, union and IoU
-    im_intersection = np.logical_and(im_pred_mask, im_targ_mask)
-    # im_union = (1-((1-im_pred_mask)*(1-im_targ_mask)))
-    im_union = np.logical_or(im_pred_mask, im_targ_mask)
-    IOU_ksize = [(np.sum(im_intersection) / np.sum(im_union))]
-
-    # compute intersection, union and IoU for different mask constriction
-    # mask can be too large/small due to variation in cellpose segmentation
-    # eg., defocused image has more dilated mask
-    # compute IoU at range of dilation/erosion of mask to find highest IoU
-    for k_size in range(20):
-        im_dilation = dilation(im_pred_mask, disk(k_size + 1))
-        # cv2.erode(im_pred_mask, k_size+1, iterations=1)
-        im_erosion = erosion(im_pred_mask, disk(k_size + 1))
-
-        # im_intersection = (im_pred_mask*im_targ_mask)
-        im_intersection_e = np.logical_and(im_erosion, im_targ_mask)
-        im_intersection_d = np.logical_and(im_dilation, im_targ_mask)
-
-        # im_union = (1-((1-im_pred_mask)*(1-im_targ_mask)))
-        im_union_e = np.logical_or(im_erosion, im_targ_mask)
-        im_union_d = np.logical_or(im_dilation, im_targ_mask)
-
-        # I[1] : Intersection over union
-        IOU_ksize.append(np.sum(im_intersection_d) / np.sum(im_union_d))
-        to_insert = np.sum(im_intersection_e) / np.sum(im_union_e)
-        IOU_ksize = [to_insert] + IOU_ksize
-
-    IOU = max(IOU_ksize)
-
-    return [IOU]
+from torchmetrics.detection import MeanAveragePrecision
+from torchvision.ops import masks_to_boxes
 
 
 def VOI_metric(target, prediction):
@@ -278,12 +83,6 @@ def POD_metric(target_bin, pred_bin):
 
     distance_threshold = np.mean(lab_targ_major_axis) / 2
 
-    # an uneven number of targ and pred yields zero entry row / column
-    # to make the unbalanced assignment problem balanced.
-    # The zero entries (=no realobjects)
-    # are set to nan to prevent them of being matched.
-    cost_matrix[cost_matrix == 0.0] = np.nan
-
     # LAPsolver for minimizing cost matrix of objects
     rids, cids = solve_dense(cost_matrix)
 
@@ -312,297 +111,61 @@ def POD_metric(target_bin, pred_bin):
     ]
 
 
-def binarize_array(im):
-    """Binarize image
+def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
+    """Convert integer labels to a stack of boolean masks.
 
-    :param np.array im: Prediction or target array
-    :return np.array im_bin: Flattened and binarized array
+    :param torch.ShortTensor labels: 2D labels where each value is an object
+        (0 is background)
+    :return torch.BoolTensor: Boolean masks of shape (objects, H, W)
     """
-    im_bin = (im.flatten() / im.max()) > 0.5
-    return im_bin.astype(np.uint8)
-
-
-def cpmask_array(im, model_name):
-    """mask preparation using cellpose
-
-    :input model: cellpose model used for segmentation
-    :input im: predicted image to be segmented
-    :return im_mask: cellpose segmented mask
-    """
-    model = models.CellposeModel(model_type=model_name)
-    channels = [0, 0]
-    masks = model.eval(im, channels=channels, diameter=None)[0]
+    if labels.ndim != 2:
+        raise ValueError(f"Labels must be 2D, got shape {labels.shape}.")
+    masks = torch.zeros(
+        (labels.max(), *labels.shape), dtype=torch.bool, device=labels.device
+    )
+    # TODO: optimize this?
+    for segment in range(labels.max()):
+        # start from label value 1, i.e. skip background label
+        masks[segment] = labels == (segment + 1)
     return masks
 
 
-class MetricsEstimator:
-    """Estimate metrics for evaluating a trained model"""
+def labels_to_detection(labels: torch.ShortTensor) -> dict[str, torch.Tensor]:
+    """Convert integer labels to a torchvision/torchmetrics detection dictionary.
 
-    def __init__(self, metrics_list, masked_metrics=False):
-        """
-        Init. After instantiating the class you can call metrics estimation
-        in xy, xz, yz and xyz orientations assuming images are of shape xyz.
-        The first three indices will iterate over planes whereas xyz will
-        generate one global 3D metric.
+    :param torch.ShortTensor labels: 2D labels where each value is an object
+        (0 is background)
+    :return dict[str, torch.Tensor]: detection boxes, scores, labels, and masks
+    """
+    masks = labels_to_masks(labels)
+    boxes = masks_to_boxes(masks)
+    return {
+        "boxes": boxes,
+        # dummy confidence scores
+        "scores": torch.ones(
+            (boxes.shape[0],), dtype=torch.float32, device=boxes.device
+        ),
+        # dummy class labels
+        "labels": torch.zeros(
+            (boxes.shape[0],), dtype=torch.uint8, device=boxes.device
+        ),
+        "masks": masks,
+    }
 
-        :param list metrics_list: list of strings with name of metrics
-            Currently available metrics:
-            'ssim' - Structual similarity index
-            'corr' - Correlation
-            'r2' -   R squared (coefficient of determination
-            'mse' -  Mean squared error
-            'mae' -  Mean absolute error
-            'acc' -  Accuracy (for binary data, no masks)
-            'dice' - Dice similarity coefficient (for binary data, no masks)
-            'IoU' - Intersection over union (for binary data)
-            'VI'  - Variation of information (for binary data)
-            'POD' - Percent object detected (for label mask data)
-        :param bool masked_metrics: get the metrics for the masked region
-        """
 
-        available_metrics = {
-            "ssim",
-            "corr",
-            "r2",
-            "mse",
-            "mae",
-            "acc",
-            "dice",
-            "IoU",
-            "VI",
-            "POD",
-        }
-        assert set(metrics_list).issubset(
-            available_metrics
-        ), "only ssim, r2, corr, mse, mae, acc, dice, IoU, VI, POD are supported"
-        self.metrics_list = metrics_list
-        self.pd_col_names = metrics_list.copy()
-        self.masked_metrics = masked_metrics
-        self.metrics_xyz = None
-        self.metrics_xy = None
-        self.metrics_xz = None
-        self.metrics_yz = None
-        # No masking for evaluating segmentations (which are masks)
-        if "acc" in metrics_list or "dice" in metrics_list:
-            assert (
-                not self.masked_metrics
-            ), "Don't use masked metrics if evaluating segmentation"
+def mean_average_precision(
+    pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor, **kwargs
+) -> dict[str, torch.Tensor]:
+    """Compute the mAP metric for instance segmentation.
 
-        if self.masked_metrics:
-            self.pd_col_names.append("vol_frac")
-            for metric in metrics_list:
-                cur_col_name = "{}_masked".format(metric)
-                self.pd_col_names.append(cur_col_name)
-
-        self.pd_col_names.append("pred_name")
-        self.fn_mapping = {
-            "mae_metric": mae_metric,
-            "mse_metric": mse_metric,
-            "r2_metric": r2_metric,
-            "corr_metric": corr_metric,
-            "ssim_metric": ssim_metric,
-            "acc_metric": accuracy_metric,
-            "dice_metric": dice_metric,
-            "IoU_metric": IOU_metric,
-            "VI_metric": VOI_metric,
-            "POD_metric": POD_metric,
-        }
-
-    def get_metrics_xyz(self):
-        """Return 3D metrics"""
-        return self.metrics_xyz
-
-    def get_metrics_xy(self):
-        """Return xy metrics"""
-        return self.metrics_xy
-
-    def get_metrics_xz(self):
-        """Return xz metrics"""
-        return self.metrics_xz
-
-    def get_metrics_yz(self):
-        """Return yz metrics"""
-        return self.metrics_yz
-
-    @staticmethod
-    def mask_to_bool(mask):
-        """
-        If mask exists and is not boolean, convert.
-        Assume mask values == 0 is background.
-
-        :param np.array mask: Mask
-        :return np.array mask: Mask with boolean dtype
-        """
-        if mask is not None:
-            if mask.dtype != "bool":
-                mask = mask > 0
-        return mask
-
-    @staticmethod
-    def assert_input(target, prediction, pred_name, mask=None):
-        assert isinstance(pred_name, str), (
-            "more than one pred_name is passed. Only one target-pred pair "
-            "is handled per function call"
-        )
-        assert (
-            target.shape == prediction.shape
-        ), "The shape of target and prediction are not same: {}, {}".format(
-            target.shape, prediction.shape
-        )
-        assert (
-            target.dtype == prediction.dtype
-        ), "The dtype of target and prediction are not same: {}, {}".format(
-            target.dtype, prediction.dtype
-        )
-        if mask is not None:
-            assert (
-                target.shape == mask.shape
-            ), "The shape of target and mask are not same: {}, {}".format(
-                target.shape, mask.shape
-            )
-            assert mask.dtype == "bool", "mask is not boolean"
-
-    def compute_metrics_row(self, target, prediction, pred_name, mask):
-        """
-        Compute one row in metrics dataframe.
-
-        :param np.array target: ground truth
-        :param np.array prediction: model prediction
-        :param str pred_name: filename used for saving model prediction
-        :param np.array mask: binary mask with foreground / background
-        :return: dict metrics_row: a row for a metrics dataframe
-        """
-        metrics_row = dict.fromkeys(self.pd_col_names)
-        metrics_row["pred_name"] = pred_name
-        for metric_name in self.metrics_list:
-            metric_fn_name = "{}_metric".format(metric_name)
-            metric_fn = self.fn_mapping[metric_fn_name]
-            if self.masked_metrics:
-                cur_metric_list = metric_fn(
-                    target=target,
-                    prediction=prediction,
-                    mask=mask,
-                )
-                vol_frac = np.mean(mask)
-                metrics_row["vol_frac"] = vol_frac
-                metrics_row[metric_name] = cur_metric_list[0]
-                metric_name = "{}_masked".format(metric_name)
-                metrics_row[metric_name] = cur_metric_list[1]
-            else:
-                cur_metric = metric_fn(
-                    target=target,
-                    prediction=prediction,
-                )
-                metrics_row[metric_name] = cur_metric
-        return metrics_row
-
-    @staticmethod
-    def _append_to_df(df: pd.DataFrame, row: dict):
-        """Append row to dataframe as ``pd.DataFrame.append`` is deprecated."""
-        # FIXME: dirty workaround...
-        row_df = pd.DataFrame([row])
-        return pd.concat([df, row_df], ignore_index=True)
-
-    def estimate_xyz_metrics(self, target, prediction, pred_name, mask=None):
-        """
-        Estimate 3D metrics for the current input, target pair
-
-        :param np.array target: ground truth
-        :param np.array prediction: model prediction
-        :param str pred_name: filename used for saving model prediction
-        :param np.array mask: binary mask with foreground / background
-        """
-        mask = self.mask_to_bool(mask)
-        self.assert_input(target, prediction, pred_name, mask)
-        self.metrics_xyz = pd.DataFrame(columns=self.pd_col_names)
-        metrics_row = self.compute_metrics_row(
-            target=target,
-            prediction=prediction,
-            pred_name=pred_name,
-            mask=mask,
-        )
-        # Append to existing dataframe
-        self.metrics_xyz = self._append_to_df(self.metrics_xyz, metrics_row)
-
-    def estimate_xy_metrics(self, target, prediction, pred_name, mask=None):
-        """
-        Estimate metrics for the current input, target pair
-        along each xy slice (in plane)
-
-        :param np.array target: ground truth
-        :param np.array prediction: model prediction
-        :param str/list pred_name: filename(s) used for saving model prediction
-        :param np.array mask: binary mask with foreground / background
-        """
-        mask = self.mask_to_bool(mask)
-        self.assert_input(target, prediction, pred_name, mask)
-        if len(target.shape) == 2:
-            target = target[..., np.newaxis]
-            prediction = prediction[..., np.newaxis]
-        self.metrics_xy = pd.DataFrame(columns=self.pd_col_names)
-        # Loop through slices
-        for slice_idx in range(target.shape[2]):
-            slice_name = "{}_xy{}".format(pred_name, slice_idx)
-            cur_mask = mask[..., slice_idx] if mask is not None else None
-            metrics_row = self.compute_metrics_row(
-                target=target[..., slice_idx],
-                prediction=prediction[..., slice_idx],
-                pred_name=slice_name,
-                mask=cur_mask,
-            )
-            # Append to existing dataframe
-            self.metrics_xy = self._append_to_df(self.metrics_xy, metrics_row)
-
-    def estimate_xz_metrics(self, target, prediction, pred_name, mask=None):
-        """
-        Estimate metrics for the current input, target pair
-        along each xz slice
-
-        :param np.array target: ground truth
-        :param np.array prediction: model prediction
-        :param str pred_name: filename used for saving model prediction
-        :param np.array mask: binary mask with foreground / background
-        """
-        mask = self.mask_to_bool(mask)
-        self.assert_input(target, prediction, pred_name, mask)
-        assert len(target.shape) == 3, "Dataset is assumed to be 3D"
-        self.metrics_xz = pd.DataFrame(columns=self.pd_col_names)
-        # Loop through slices
-        for slice_idx in range(target.shape[0]):
-            slice_name = "{}_xz{}".format(pred_name, slice_idx)
-            cur_mask = mask[slice_idx, ...] if mask is not None else None
-            metrics_row = self.compute_metrics_row(
-                target=target[slice_idx, ...],
-                prediction=prediction[slice_idx, ...],
-                pred_name=slice_name,
-                mask=cur_mask,
-            )
-            # Append to existing dataframe
-            self.metrics_xz = self._append_to_df(self.metrics_xz, metrics_row)
-
-    def estimate_yz_metrics(self, target, prediction, pred_name, mask=None):
-        """
-        Estimate metrics for the current input, target pair
-        along each yz slice
-
-        :param np.array target: ground truth
-        :param np.array prediction: model prediction
-        :param str pred_name: filename used for saving model prediction
-        :param np.array mask: binary mask with foreground / background
-        """
-        mask = self.mask_to_bool(mask)
-        self.assert_input(target, prediction, pred_name, mask)
-        assert len(target.shape) == 3, "Dataset is assumed to be 3D"
-        self.metrics_yz = pd.DataFrame(columns=self.pd_col_names)
-        # Loop through slices
-        for slice_idx in range(target.shape[1]):
-            slice_name = "{}_yz{}".format(pred_name, slice_idx)
-            cur_mask = mask[:, slice_idx, :] if mask is not None else None
-            metrics_row = self.compute_metrics_row(
-                target=target[:, slice_idx, :],
-                prediction=prediction[:, slice_idx, :],
-                pred_name=slice_name,
-                mask=cur_mask,
-            )
-            # Append to existing dataframe
-            self.metrics_yz = self._append_to_df(self.metrics_yz, metrics_row)
+    :param torch.ShortTensor pred_labels: 2D integer prediction labels
+    :param torch.ShortTensor target_labels: 2D integer prediction labels
+    :param dict **kwargs: keyword arguments passed to
+        :py:class:`torchmetrics.detection.MeanAveragePrecision`
+    :return dict[str, torch.Tensor]: COCO-style metrics
+    """
+    map_metric = MeanAveragePrecision(box_format="xyxy", iou_type="segm", **kwargs)
+    map_metric.update(
+        [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
+    )
+    return map_metric.compute()

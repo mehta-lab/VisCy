@@ -29,8 +29,9 @@ metrics = [
     "lapsolver==1.1.0",
     "scikit-learn>=1.1.3",
     "scipy>=1.8.0",
+    "torchmetrics[detection]>=1.0.0",
 ]
-dev = ["pytest", "hypothesis", "profilehooks", "onnxruntime"]
+dev = ["pytest", "pytest-cov", "hypothesis", "profilehooks", "onnxruntime"]
 
 [project.scripts]
 viscy = "viscy.cli.cli:main"

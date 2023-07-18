@@ -27,3 +27,14 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.coverage
+.coverage.*
+.cache
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/

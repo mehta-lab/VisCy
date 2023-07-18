@@ -1,12 +1,15 @@
 import logging
 import os
+import re
 import tempfile
+from glob import glob
 from typing import Callable, Iterable, Literal, Sequence, TypedDict, Union
 
 import numpy as np
 import torch
 import zarr
-from iohub.ngff import ImageArray, Position, open_ome_zarr
+from imageio import imread
+from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.transforms import (
@@ -34,6 +37,16 @@ def _ensure_channel_list(str_or_seq: Union[str, Sequence[str]]):
         )
 
 
+def _search_int_in_str(pattern: str, file_name: str) -> str:
+    """Search image indices in a file name with regex patterns and strip leading zeros.
+    E.g. ``'001'`` -> ``1``"""
+    match = re.search(pattern, file_name)
+    if match:
+        return match.group()
+    else:
+        raise ValueError(f"Cannot find pattern {pattern} in {file_name}.")
+
+
 class ChannelMap(TypedDict, total=False):
     source: Union[str, Sequence[str]]
     # optional
@@ -45,6 +58,7 @@ class Sample(TypedDict, total=False):
     # optional
     source: torch.Tensor
     target: torch.Tensor
+    labels: torch.Tensor
 
 
 class NormalizeSampled(MapTransform, InvertibleTransform):
@@ -198,6 +212,52 @@ class SlidingWindowDataset(Dataset):
         self.positions[0].zgroup.store.close()
 
 
+class MaskTestDataset(SlidingWindowDataset):
+    """Torch dataset where each element is a window of
+    (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
+    This a testing stage version of :py:class:`viscy.light.data.SlidingWindowDataset`,
+    and can only be used with batch size 1 for efficiency (no padding for collation),
+    since the mask is not available for each stack.
+
+    :param list[Position] positions: FOVs to include in dataset
+    :param ChannelMap channels: source and target channel names,
+        e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
+    :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
+    :param Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] transform:
+        a callable that transforms data, defaults to None
+    """
+
+    def __init__(
+        self,
+        positions: list[Position],
+        channels: ChannelMap,
+        z_window_size: int,
+        transform: Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] = None,
+        ground_truth_masks: str = None,
+    ) -> None:
+        super().__init__(positions, channels, z_window_size, transform)
+        self.masks = {}
+        for img_path in glob(os.path.join(ground_truth_masks, "*cp_masks.png")):
+            img_name = os.path.basename(img_path)
+            position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
+            # TODO: specify time index in the file name
+            t_idx = 0
+            # TODO: record channel name
+            # channel_name = re.search(r"^.+(?=_p\d{3})", img_name).group()
+            z_idx = _search_int_in_str(r"(?<=_z)\d+", img_name)
+            self.masks[(int(position_name), int(t_idx), int(z_idx))] = img_path
+        logging.info(str(self.masks))
+
+    def __getitem__(self, index: int) -> Sample:
+        sample = super().__getitem__(index)
+        img_name, t_idx, z_idx = sample["index"]
+        position_name = int(img_name.split("/")[-2])
+        key = (position_name, int(t_idx), int(z_idx) + self.z_window_size // 2)
+        if img_path := self.masks.get(key):
+            sample["labels"] = torch.from_numpy(imread(img_path).astype(np.int16))
+        return sample
+
+
 class HCSDataModule(LightningDataModule):
     """Lightning data module for a preprocessed HCS NGFF Store.
 
@@ -219,6 +279,8 @@ class HCSDataModule(LightningDataModule):
         defaults to True
     :param bool caching: whether to decompress all the images and cache the result,
         defaults to False
+    :param str ground_truth_masks: path to the ground truth segmentation masks,
+        defaults to None
     """
 
     def __init__(
@@ -235,6 +297,7 @@ class HCSDataModule(LightningDataModule):
         augment: bool = True,
         caching: bool = False,
         normalize_source: bool = False,
+        ground_truth_masks: str = None,
     ):
         super().__init__()
         self.data_path = data_path
@@ -249,6 +312,7 @@ class HCSDataModule(LightningDataModule):
         self.augment = augment
         self.caching = caching
         self.normalize_source = normalize_source
+        self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
 
     def prepare_data(self):
@@ -292,13 +356,14 @@ class HCSDataModule(LightningDataModule):
         dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
+        elif stage == "test":
+            self._setup_test(dataset_settings)
         elif stage == "predict":
             self._setup_predict(dataset_settings)
-        # test stage
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _setup_fit(self, dataset_settings: dict):
+    def _setup_eval(self, dataset_settings: dict) -> tuple[Plate, MapTransform]:
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
@@ -308,17 +373,19 @@ class HCSDataModule(LightningDataModule):
         norm_keys = self.target_channel
         if self.normalize_source:
             norm_keys += self.source_channel
-        normalize_transform = [
-            NormalizeSampled(
-                norm_keys,
-                plate.zattrs["normalization"],
-            )
-        ]
+        normalize_transform = NormalizeSampled(
+            norm_keys,
+            plate.zattrs["normalization"],
+        )
+        return plate, normalize_transform
+
+    def _setup_fit(self, dataset_settings: dict):
+        plate, normalize_transform = self._setup_eval(dataset_settings)
         fit_transform = self._fit_transform()
         train_transform = Compose(
-            normalize_transform + self._train_transform() + fit_transform
+            [normalize_transform] + self._train_transform() + fit_transform
         )
-        val_transform = Compose(normalize_transform + fit_transform)
+        val_transform = Compose([normalize_transform] + fit_transform)
         # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
         shuffled_indices = torch.randperm(len(positions))
@@ -332,6 +399,17 @@ class HCSDataModule(LightningDataModule):
         )
         self.val_dataset = SlidingWindowDataset(
             positions[num_train_fovs:], transform=val_transform, **dataset_settings
+        )
+
+    def _setup_test(self, dataset_settings):
+        if self.batch_size != 1:
+            logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
+        plate, normalize_transform = self._setup_eval(dataset_settings)
+        self.test_dataset = MaskTestDataset(
+            [p for _, p in plate.positions()],
+            transform=normalize_transform,
+            ground_truth_masks=self.ground_truth_masks,
+            **dataset_settings,
         )
 
     def _setup_predict(self, dataset_settings: dict):
@@ -355,10 +433,11 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        if self.trainer.testing or self.trainer.predicting:
+        if self.trainer.predicting or isinstance(batch, torch.Tensor):
+            # skipping example input array
             return batch
-        if self.target_2d and not isinstance(batch, torch.Tensor):
-            # slice the center during training, skipping example input array
+        if self.target_2d:
+            # slice the center during training or testing
             z_index = self.z_window_size // 2
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
         return batch
@@ -379,6 +458,14 @@ class HCSDataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=False,
             persistent_workers=True,
+        )
+
+    def test_dataloader(self):
+        return DataLoader(
+            self.test_dataset,
+            batch_size=1,
+            num_workers=self.num_workers,
+            shuffle=False,
         )
 
     def predict_dataloader(self):
