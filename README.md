@@ -3,7 +3,7 @@
 viscy is a machine learning toolkit to solve computer vision problems
 in high-throughput imaging of cells.
 
-![virtual_staining](figures/phase_to_nuclei_membrane.svg)
+![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
 ## Installation
 
