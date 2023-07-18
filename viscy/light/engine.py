@@ -107,6 +107,9 @@ class VSUNet(LightningModule):
     :param float test_cellpose_diameter:
         diameter parameter of the CellPose model for testing segmentation,
         defaults to None
+    :param bool test_evaluate_cellpose:
+        evaluate the performance of the CellPose model instead of the trained model
+        in test stage, defaults to False
     """
 
     def __init__(
@@ -120,6 +123,7 @@ class VSUNet(LightningModule):
         example_input_yx_shape: Sequence[int] = (256, 256),
         test_cellpose_model_path: str = None,
         test_cellpose_diameter: float = None,
+        test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
         self.model = define_model(Unet25d, ModelDefaults25D(), model_config)
@@ -141,6 +145,7 @@ class VSUNet(LightningModule):
         )
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
+        self.test_evaluate_cellpose = test_evaluate_cellpose
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
@@ -180,9 +185,12 @@ class VSUNet(LightningModule):
     def test_step(self, batch: Sample, batch_idx: int):
         source = batch["source"]
         target = batch["target"][:, 0]
-        pred = self.forward(source)[:, 0]
-        # FIXME: Only works for batch size 1 and the first channel
-        self._log_regression_metrics(pred, target)
+        if self.test_evaluate_cellpose:
+            pred = target
+        else:
+            pred = self.forward(source)[:, 0]
+            # FIXME: Only works for batch size 1 and the first channel
+            self._log_regression_metrics(pred, target)
         img_names, ts, zs = batch["index"]
         position = float(img_names[0].split("/")[-2])
         self.log_dict(
