@@ -1,7 +1,9 @@
 # viscy
 
-viscy is a machine learning toolkit to solve computer vision problems
-in high-throughput imaging of cells.
+viscy is a deep learning pipeline for training and deploying computer vision models for high-throughput imaging and image-based phenotyping with single cell resolution.
+
+The current focus of the pipeline is on the image translation models for virutal staining of multiple cellular compartments from label-free images. We are building these models for screening fields of view during imaging and for simultaneous segmentation of nuclei and membrane for single-cell phenotyping. The pipeline provides utilities to export the models to onnx format for use during runtime. We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
+
 
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
@@ -24,11 +26,13 @@ viscy --help
 
 For development installation, see [the contributing guide](CONTRIBUTING.md).
 
-Full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.0).
+The pipeline is built using the [pytorch lightning](https://www.pytorchlightning.ai/index.html) framework and [iohub](https://github.com/czbiohub-sf/iohub) library for reading and writing data in [ome-zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
+
+The full functionality is  tested only on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.0).
 Some features (e.g. mixed precision and distributed training) may not work with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
 
-## Predicting sub-cellular structure from label-free images
+## Virtual staining of cellular compartments from label-free images
 
 Predicting sub-cellular landmarks such as nuclei and membrane from label-free (e.g. phase) images
 can improve imaging throughput and ease experiment design.
@@ -39,5 +43,9 @@ and turn this instance segmentation problem into a paired image-to-image transla
 viscy features an end-to-end pipeline to design, train and evaluate I2I models in a declarative manner.
 It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets,
 as well as 3D networks with anisotropic filters.
+
+### Overview of the pipeline
+
+### Model architecture
 
 ![eLife_2020_UNets](https://iiif.elifesciences.org/lax/55502%2Felife-55502-fig3-figsupp1-v2.tif/full/1500,/0/default.jpg)
