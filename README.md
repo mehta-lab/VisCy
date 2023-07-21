@@ -32,6 +32,30 @@ The full functionality is  tested only on Linux `x86_64` with NVIDIA Ampere GPUs
 Some features (e.g. mixed precision and distributed training) may not work with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
 
+Following dependencies will allow use and development of the pipeline, while the pypi package is pending:
+
+```<yaml>
+iohub==0.1.0.dev3
+torch>=2.0.0
+torchvision>=0.15.1
+tensorboard>=2.13.0
+lightning>=2.0.1
+monai>=1.2.0
+jsonargparse[signatures]>=4.20.1
+scikit-image>=0.19.2
+matplotlib
+cellpose==2.1.0
+lapsolver==1.1.0
+scikit-learn>=1.1.3
+scipy>=1.8.0
+torchmetrics[detection]>=1.0.0
+pytest
+pytest-cov
+hypothesis
+profilehooks
+onnxruntime
+```
+
 ## Virtual staining of cellular compartments from label-free images
 
 Predicting sub-cellular landmarks such as nuclei and membrane from label-free (e.g. phase) images
