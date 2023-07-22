@@ -4,7 +4,6 @@ viscy is a deep learning pipeline for training and deploying computer vision mod
 
 The current focus of the pipeline is on the image translation models for virutal staining of multiple cellular compartments from label-free images. We are building these models for screening fields of view during imaging and for simultaneous segmentation of nuclei and membrane for single-cell phenotyping. The pipeline provides utilities to export the models to onnx format for use during runtime. We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
 
-
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
 ## Installation
@@ -69,6 +68,44 @@ It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets,
 as well as 3D networks with anisotropic filters.
 
 ### Overview of the pipeline
+
+```mermaid
+flowchart LR
+    subgraph sp[Signal Processing]
+        Registration --> Reconstruction --> Resampling
+    end
+    subgraph viscy["Computer Vision (viscy)"]
+        subgraph Preprocessing
+            Normalization -.-> fd[Feature Detection]
+        end
+        subgraph Training
+            arch[Model Architecting]
+            hyper[Hyperparameter Tuning]
+            val[Performance Validation]
+            compute[Acceleration]
+            arch <--> hyper <--> compute <--> val <--> arch
+        end
+        subgraph Testing
+            regr[Regression Metrics]
+            segm[Instance Segmentation Metrics]
+            cp[CellPose]
+            cp --> segm
+        end
+        Preprocessing --> Training --> Testing
+        Testing --> test{"Performance?"}
+        test -- good --> Deployment
+        test -- bad --> Training
+    end
+    subgraph Segmentation
+        CellPose ~~~ aicssegmentation
+    end
+    input[(Raw Images)] --> sp --> stage{"Training?"}
+    stage -.- no -.-> model{{Virtual Staining Model}}
+    stage -- yes --> viscy
+    viscy --> model
+    model --> vs[(Predicted Images)]
+    vs --> Segmentation --> output[Biological Analysis]
+```
 
 ### Model architecture
 
