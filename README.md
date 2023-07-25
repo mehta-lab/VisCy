@@ -109,4 +109,5 @@ flowchart LR
 
 ### Model architecture
 
-![eLife_2020_UNets](https://iiif.elifesciences.org/lax/55502%2Felife-55502-fig3-figsupp1-v2.tif/full/1500,/0/default.jpg)
+![2.5D U-Net light](docs/figures/2_5d_unet_light.svg#gh-light-mode-only)
+![2.5D U-Net dark](docs/figures/2_5d_unet_dark.svg#gh-dark-mode-only)
