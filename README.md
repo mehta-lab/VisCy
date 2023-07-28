@@ -1,10 +1,12 @@
 # viscy
 
-viscy is a deep learning pipeline for training and deploying computer vision models for high-throughput imaging and image-based phenotyping with single cell resolution.
+viscy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
 
-The current focus of the pipeline is on the image translation models for virutal staining of multiple cellular compartments from label-free images. We are building these models for screening fields of view during imaging and for simultaneous segmentation of nuclei and membrane for single-cell phenotyping. The pipeline provides utilities to export the models to onnx format for use during runtime. We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
+The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images. We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline. Our pipeline also provides utilities to export the models to onnx format for use at runtime. We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
 
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
+
+This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on viscy.
 
 ## Installation
 
@@ -14,7 +16,8 @@ Clone this repository and install viscy:
 
 ```sh
 git clone https://github.com/mehta-lab/viscy.git
-pip install viscy
+cd viscy
+pip install .
 ```
 
 Verify installation by accessing the CLI help message:
