@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import re
 import tempfile
@@ -281,6 +282,9 @@ class HCSDataModule(LightningDataModule):
         defaults to False
     :param str ground_truth_masks: path to the ground truth segmentation masks,
         defaults to None
+    :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
+        passed to MONAI's ``RandAffined`` transform,
+        defaults to [-0.4, 0.2]
     """
 
     def __init__(
@@ -298,6 +302,7 @@ class HCSDataModule(LightningDataModule):
         caching: bool = False,
         normalize_source: bool = False,
         ground_truth_masks: str = None,
+        train_z_scale_range: tuple[float, float] = [-0.2, 1],
     ):
         super().__init__()
         self.data_path = data_path
@@ -314,6 +319,9 @@ class HCSDataModule(LightningDataModule):
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
+        if train_z_scale_range[0] > 1 or train_z_scale_range[1] < 1:
+            raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
+        self.train_z_scale_range = train_z_scale_range
 
     def prepare_data(self):
         if not self.caching:
@@ -391,11 +399,15 @@ class HCSDataModule(LightningDataModule):
         shuffled_indices = torch.randperm(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
+        # training set needs to sample more Z range for augmentation
+        train_dataset_settings = dataset_settings.copy()
+        expanded_z = math.ceil(self.z_window_size * (1 + self.train_z_scale_range[1]))
+        train_dataset_settings["z_window_size"] = expanded_z - expanded_z // 2
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
             transform=train_transform,
-            **dataset_settings,
+            **train_dataset_settings,
         )
         self.val_dataset = SlidingWindowDataset(
             positions[num_train_fovs:], transform=val_transform, **dataset_settings
@@ -481,7 +493,7 @@ class HCSDataModule(LightningDataModule):
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
                 roi_size=(
-                    -1,
+                    self.z_window_size,
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
@@ -505,7 +517,7 @@ class HCSDataModule(LightningDataModule):
                         prob=0.5,
                         rotate_range=(np.pi, 0, 0),
                         shear_range=(0, (0.05), (0.05)),
-                        scale_range=(0, 0.3, 0.3),
+                        scale_range=(self.train_z_scale_range, 0.3, 0.3),
                     ),
                     RandAdjustContrastd(
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
