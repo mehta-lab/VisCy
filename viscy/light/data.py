@@ -281,6 +281,7 @@ class HCSDataModule(LightningDataModule):
     :param bool augment: whether to apply augmentation in training,
         defaults to True
     :param bool caching: whether to decompress all the images and cache the result,
+        will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
     :param str ground_truth_masks: path to the ground truth segmentation masks,
         defaults to None
@@ -343,7 +344,9 @@ class HCSDataModule(LightningDataModule):
         logger.addHandler(file_handler)
         # cache in temporary directory
         self.tmp_zarr = os.path.join(
-            tempfile.gettempdir(), os.path.basename(self.data_path)
+            tempfile.gettempdir(),
+            os.getenv("SLURM_JOB_ID"),
+            os.path.basename(self.data_path),
         )
         logger.info(f"Caching dataset at {self.tmp_zarr}.")
         tmp_store = zarr.NestedDirectoryStore(self.tmp_zarr)
@@ -500,13 +503,13 @@ class HCSDataModule(LightningDataModule):
                     self.yx_patch_size[1],
                 ),
             ),
-            ScaleIntensityRangePercentilesd(
-                keys=self.target_channel,
-                lower=5,
-                upper=95,
-                b_min=None,
-                b_max=None,
-            ),
+            # ScaleIntensityRangePercentilesd(
+            #     keys=self.target_channel,
+            #     lower=5,
+            #     upper=95,
+            #     b_min=None,
+            #     b_max=None,
+            # ),
         ]
 
     def _train_transform(self) -> list[Callable]:
