@@ -433,7 +433,11 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        if self.trainer.predicting or isinstance(batch, torch.Tensor):
+        predicting= False
+        if self.trainer:
+            if self.trainer.predicting:
+                predicting = True
+        if predicting or isinstance(batch, torch.Tensor):
             # skipping example input array
             return batch
         if self.target_2d:
