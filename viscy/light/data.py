@@ -312,7 +312,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = True if architecture == "2.5D" else False
+        self.target_2d = False if architecture == "3D" else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
@@ -321,7 +321,7 @@ class HCSDataModule(LightningDataModule):
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
-        if train_z_scale_range[0] > 1 or train_z_scale_range[1] < 1:
+        if train_z_scale_range[0] > 0 or train_z_scale_range[1] < 0:
             raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
         self.train_z_scale_range = train_z_scale_range
 
