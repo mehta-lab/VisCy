@@ -22,6 +22,7 @@ from monai.transforms import (
     RandAffined,
     RandGaussianSmoothd,
     RandWeightedCropd,
+    ScaleIntensityRangePercentilesd,
 )
 from torch.utils.data import DataLoader, Dataset
 
@@ -169,7 +170,7 @@ class SlidingWindowDataset(Dataset):
             slice(t, t + 1),
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
-        ]
+        ].astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
@@ -269,7 +270,8 @@ class HCSDataModule(LightningDataModule):
         e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
-        e.g. 0.8 means a 80/20 split between training/validation
+        e.g. 0.8 means a 80/20 split between training/validation,
+        by default 0.8
     :param int batch_size: batch size, defaults to 16
     :param int num_workers: number of data-loading workers, defaults to 8
     :param Literal["2.5D", "2D", "3D"] architecture: U-Net architecture,
@@ -293,7 +295,7 @@ class HCSDataModule(LightningDataModule):
         source_channel: Union[str, Sequence[str]],
         target_channel: Union[str, Sequence[str]],
         z_window_size: int,
-        split_ratio: float,
+        split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
         architecture: Literal["2.5D", "2D", "3D"] = "2.5D",
@@ -497,7 +499,14 @@ class HCSDataModule(LightningDataModule):
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
-            )
+            ),
+            ScaleIntensityRangePercentilesd(
+                keys=self.target_channel,
+                lower=5,
+                upper=95,
+                b_min=None,
+                b_max=None,
+            ),
         ]
 
     def _train_transform(self) -> list[Callable]:

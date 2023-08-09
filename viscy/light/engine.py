@@ -29,8 +29,13 @@ from torchmetrics.functional import (
 
 from viscy.evaluation.evaluation_metrics import mean_average_precision
 from viscy.light.data import Sample
+from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
-from viscy.unet.utils.model import ModelDefaults25D, define_model
+
+_UNET_ARCHITECTURE = {
+    "2.5D": Unet25d,
+    "2.1D": Unet21d,
+}
 
 
 class VSTrainer(Trainer):
@@ -126,7 +131,11 @@ class VSUNet(LightningModule):
         test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
-        self.model = define_model(Unet25d, ModelDefaults25D(), model_config)
+        arch = model_config.pop("architecture")
+        net_class = _UNET_ARCHITECTURE.get(arch)
+        if not arch:
+            raise ValueError(f"Architecture {arch} not in {_UNET_ARCHITECTURE.keys()}")
+        self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
         self.batch_size = batch_size
