@@ -1,3 +1,5 @@
+import logging
+import os
 from datetime import datetime
 
 import torch
@@ -35,6 +37,9 @@ class VSLightningCLI(LightningCLI):
 
 
 def main():
+    """Main Lightning CLI entry point."""
+    log_level = os.getenv("VISCY_LOG_LEVEL", logging.INFO)
+    logging.getLogger("lightning.pytorch").setLevel((log_level))
     torch.set_float32_matmul_precision("high")
     _ = VSLightningCLI(
         model_class=VSUNet,
