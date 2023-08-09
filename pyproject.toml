@@ -11,7 +11,7 @@ requires-python = ">=3.9,!=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 dependencies = [
-    "iohub==0.1.0.dev3",
+    "iohub==0.1.0.dev4",
     "torch>=2.0.0",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
