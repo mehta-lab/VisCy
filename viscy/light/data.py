@@ -407,7 +407,7 @@ class HCSDataModule(LightningDataModule):
         # training set needs to sample more Z range for augmentation
         train_dataset_settings = dataset_settings.copy()
         expanded_z = math.ceil(self.z_window_size * (1 + self.train_z_scale_range[1]))
-        train_dataset_settings["z_window_size"] = expanded_z - expanded_z // 2
+        train_dataset_settings["z_window_size"] = expanded_z - expanded_z % 2
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
