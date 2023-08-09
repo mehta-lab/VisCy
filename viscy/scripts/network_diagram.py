@@ -32,6 +32,3 @@ graph = model_graph.visual_graph
 graph
 # %%
 model_graph.visual_graph.render(format="svg")
-
-# %%
-import matplotlib.pyplot as plt

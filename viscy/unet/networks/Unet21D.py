@@ -2,7 +2,7 @@ from typing import Sequence, Union
 
 import timm
 import torch
-from monai.networks.blocks import Convolution, ResidualUnit, UnetrUpBlock
+from monai.networks.blocks import ResidualUnit, UnetrUpBlock
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from torch import nn
 
