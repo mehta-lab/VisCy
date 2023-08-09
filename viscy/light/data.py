@@ -452,7 +452,7 @@ class HCSDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True,
-            persistent_workers=True,
+            persistent_workers=bool(self.num_workers),
         )
 
     def val_dataloader(self):
@@ -461,7 +461,7 @@ class HCSDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
-            persistent_workers=True,
+            persistent_workers=bool(self.num_workers),
         )
 
     def test_dataloader(self):
