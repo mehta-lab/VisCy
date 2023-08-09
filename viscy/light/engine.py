@@ -310,7 +310,7 @@ class VSUNet(LightningModule):
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         if self.schedule == "WarmupCosine":
             scheduler = WarmupCosineSchedule(
                 optimizer,
