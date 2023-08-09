@@ -13,12 +13,12 @@ authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 dependencies = [
     "iohub==0.1.0.dev3",
     "torch>=2.0.0",
-    "torchvision>=0.15.1",
+    "timm>=0.9.5",
     "tensorboard>=2.13.0",
     "lightning>=2.0.1",
     "monai>=1.2.0",
     "jsonargparse[signatures]>=4.20.1",
-    "scikit-image>=0.19.2",
+    "scikit-image",
     "matplotlib",
 ]
 dynamic = ["version"]
