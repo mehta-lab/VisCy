@@ -31,7 +31,7 @@ class Conv21dStem(nn.Module):
         b, c, d, h, w = x.shape
         # project Z/depth into channels
         # return a view when possible (contiguous)
-        return x.view(b, c * d, h, w)
+        return x.reshape(b, c * d, h, w)
 
 
 class Unet2dDecoder(nn.Module):
