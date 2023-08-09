@@ -433,7 +433,7 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        predicting= False
+        predicting = False
         if self.trainer:
             if self.trainer.predicting:
                 predicting = True
