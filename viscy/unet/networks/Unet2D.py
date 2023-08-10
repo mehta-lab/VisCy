@@ -1,7 +1,7 @@
 import torch
 import torch.nn as nn
 
-from viscy.unet.networks.layers import ConvBlock2D
+from viscy.unet.networks.layers.ConvBlock2D import ConvBlock2D
 
 
 class Unet2d(nn.Module):
@@ -189,7 +189,7 @@ class Unet2d(nn.Module):
                 f"Input channels must equal network"
                 f" input channels: {self.in_channels}"
             )
-
+        x = x.squeeze(2)
         # encoder
         skip_tensors = []
         for i in range(self.num_blocks):
@@ -209,7 +209,7 @@ class Unet2d(nn.Module):
         # output channel collapsing layer
         x = self.terminal_block(x)
 
-        return x
+        return x.unsqueeze(2)
 
     def register_modules(self, module_list, name):
         """
