@@ -177,6 +177,8 @@ Increase the ``depth`` in ``draw_graph`` to zoom in.
 # %%
 model_config = {
     "architecture": "2D",
+    "in_channels": 1,
+    "out_channels": 2,
     "residual": True,
     "dropout": 0.1,
     "task": "reg",
