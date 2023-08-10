@@ -128,7 +128,7 @@ train_dataloader = data_module.train_dataloader()
 
 for i, batch in enumerate(train_dataloader):
     ...
-    # check some batches and break
+    # plot one image from each of the batch and break
     break
 
 # %% tags=["solution"]
@@ -141,6 +141,10 @@ fig, axs = plt.subplots(3, 8, figsize=(20, 6))
 
 for i, batch in enumerate(train_dataloader):
     # The batch is a dictionary consisting of three keys: 'index', 'source', 'target'.
+    # index is the tuple consisting of (image name, time, and z-slice)
+    # source is the tensor of size 1x1x256x256
+    # target is the tensor of size 2x1x256x256
+    
     if i >= 8:
         break
     FOV = batch['index'][0][0]
