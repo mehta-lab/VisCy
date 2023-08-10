@@ -305,7 +305,7 @@ class HCSDataModule(LightningDataModule):
         caching: bool = False,
         normalize_source: bool = False,
         ground_truth_masks: str = None,
-        train_z_scale_range: tuple[float, float] = [-0.2, 1],
+        train_z_scale_range: tuple[float, float] = [0, 0],
     ):
         super().__init__()
         self.data_path = data_path
@@ -407,7 +407,7 @@ class HCSDataModule(LightningDataModule):
         # training set needs to sample more Z range for augmentation
         train_dataset_settings = dataset_settings.copy()
         expanded_z = math.ceil(self.z_window_size * (1 + self.train_z_scale_range[1]))
-        train_dataset_settings["z_window_size"] = expanded_z - expanded_z % 2
+        train_dataset_settings["z_window_size"] = max(1, expanded_z - expanded_z % 2)
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
