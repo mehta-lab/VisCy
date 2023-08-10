@@ -30,6 +30,7 @@ from viscy.light.data import HCSDataModule
 from viscy.light.engine import VSTrainer, VSUNet
 
 BATCH_SIZE = 32
+GPU_ID = 0
 
 # %% [markdown]
 """
@@ -193,7 +194,7 @@ model = VSUNet(
 )
 
 # visualize graph
-model_graph = draw_graph(model, model.example_input_array, depth=2)
+model_graph = draw_graph(model, model.example_input_array, depth=2, device="cpu")
 graph = model_graph.visual_graph
 graph
 
@@ -204,7 +205,7 @@ Here we use the ``fast_dev_run`` flag to run a sanity check first.
 """
 
 # %%
-trainer = VSTrainer(accelerator="gpu", fast_dev_run=True)
+trainer = VSTrainer(accelerator="gpu", device=GPU_ID, fast_dev_run=True)
 
 trainer.fit(model, datamodule=data_module)
 
