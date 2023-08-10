@@ -20,12 +20,12 @@ dependencies = [
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image",
     "matplotlib",
-    "cellpose==2.1.0", # currently imported by viscy.light.engine
 ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
 metrics = [
+    "cellpose==2.1.0",
     "lapsolver==1.1.0",
     "scikit-learn>=1.1.3",
     "scipy>=1.8.0",
