@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "viscy"
-description = "Learning vision for cells"
+description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
 # cannot build on 3.11 due to https://github.com/cheind/py-lapsolver/pull/18
 requires-python = ">=3.9,!=3.11"
