@@ -130,16 +130,33 @@ for i, batch in enumerate(train_dataloader):
 # %% tags=["solution"]
 train_dataloader = data_module.train_dataloader()
 
+
+fig, axs = plt.subplots(3, 8, figsize=(20, 6))
+
+# Draw 8 batches, each with 32 images. Show the first image in each batch.
+
 for i, batch in enumerate(train_dataloader):
-    print(f"Batch {i}:")
-    for k, v in batch.items():
-        if isinstance(v, torch.Tensor):
-            summary = (v.shape, v.dtype)
-        else:
-            summary = v
-        print(k, summary)
-    if i > 2:
+    # The batch is a dictionary consisting of three keys: 'index', 'source', 'target'.
+    if i >= 8:
         break
+    FOV = batch['index'][0][0]
+    input_tensor = batch['source'][0, 0, :, :].squeeze()
+    target_membrane_tensor = batch['target'][0, 0, :, :].squeeze()
+    target_nuclei_tensor = batch['target'][0, 1, :, :].squeeze()
+
+    axs[0, i].imshow(input_tensor, cmap='gray')
+    axs[1, i].imshow(target_nuclei_tensor, cmap='gray')
+    axs[2, i].imshow(target_membrane_tensor, cmap='gray')
+    axs[0, i].set_title(f'input@{FOV}')
+    axs[1, i].set_title('target-nuclei')
+    axs[2, i].set_title('target-membrane')
+    axs[0, i].axis('off')
+    axs[1, i].axis('off')
+    axs[2, i].axis('off')
+
+plt.tight_layout()
+plt.show()
+
 
 # %% [markdown]
 """
