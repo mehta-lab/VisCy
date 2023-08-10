@@ -56,7 +56,7 @@ Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 # %%
 # set dataset path here
 data_path = (
-    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane.zarr"
+    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
 )
 
 dataset = open_ome_zarr(data_path)
@@ -80,7 +80,9 @@ as some cells are not expressing the fluorophore.
 row = "0"
 col = "0"
 field = "0"
-resolution = "0" # 0 is the highest resolution, 1 is 2x2 binned, 2 is 4x4 binned, etc.
+# '0' is the highest resolution
+# '1' is 2x2 down-scaled, '2' is 4x4 down-scaled, etc.
+resolution = "0"
 image = dataset[f'{row}/{col}/{field}/{resolution}'].numpy()
 print(image.shape)
 
