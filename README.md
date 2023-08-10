@@ -25,7 +25,14 @@ This pipeline evolved from the [TensorFlow version of virtual staining pipeline]
 ```sh
 git clone https://github.com/mehta-lab/viscy.git
 cd viscy
+# in project root directory (where you can see README.md with `ls`)
 pip install .
+```
+If you are using virtually stained images for segmenting structures, you should also install the metrics,
+
+```sh
+# in project root directory (where you can see README.md with `ls`)
+pip install ."[metrics]"
 ```
 
 3. Verify installation by accessing the CLI help message:
