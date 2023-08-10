@@ -55,9 +55,7 @@ Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 
 # %%
 # set dataset path here
-data_path = (
-    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
-)
+data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
 
 dataset = open_ome_zarr(data_path)
 
@@ -83,7 +81,7 @@ field = "0"
 # '0' is the highest resolution
 # '1' is 2x2 down-scaled, '2' is 4x4 down-scaled, etc.
 resolution = "0"
-image = dataset[f'{row}/{col}/{field}/{resolution}'].numpy()
+image = dataset[f"{row}/{col}/{field}/{resolution}"].numpy()
 print(image.shape)
 
 figure, axes = plt.subplots(1, 3, figsize=(9, 3))
@@ -146,23 +144,23 @@ for i, batch in enumerate(train_dataloader):
     # index is the tuple consisting of (image name, time, and z-slice)
     # source is the tensor of size 1x1x256x256
     # target is the tensor of size 2x1x256x256
-    
+
     if i >= 8:
         break
-    FOV = batch['index'][0][0]
-    input_tensor = batch['source'][0, 0, :, :].squeeze()
-    target_membrane_tensor = batch['target'][0, 0, :, :].squeeze()
-    target_nuclei_tensor = batch['target'][0, 1, :, :].squeeze()
+    FOV = batch["index"][0][0]
+    input_tensor = batch["source"][0, 0, :, :].squeeze()
+    target_membrane_tensor = batch["target"][0, 0, :, :].squeeze()
+    target_nuclei_tensor = batch["target"][0, 1, :, :].squeeze()
 
-    axs[0, i].imshow(input_tensor, cmap='gray')
-    axs[1, i].imshow(target_nuclei_tensor, cmap='gray')
-    axs[2, i].imshow(target_membrane_tensor, cmap='gray')
-    axs[0, i].set_title(f'input@{FOV}')
-    axs[1, i].set_title('target-nuclei')
-    axs[2, i].set_title('target-membrane')
-    axs[0, i].axis('off')
-    axs[1, i].axis('off')
-    axs[2, i].axis('off')
+    axs[0, i].imshow(input_tensor, cmap="gray")
+    axs[1, i].imshow(target_nuclei_tensor, cmap="gray")
+    axs[2, i].imshow(target_membrane_tensor, cmap="gray")
+    axs[0, i].set_title(f"input@{FOV}")
+    axs[1, i].set_title("target-nuclei")
+    axs[2, i].set_title("target-membrane")
+    axs[0, i].axis("off")
+    axs[1, i].axis("off")
+    axs[2, i].axis("off")
 
 plt.tight_layout()
 plt.show()
