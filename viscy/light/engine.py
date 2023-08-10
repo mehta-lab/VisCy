@@ -29,12 +29,14 @@ from torchmetrics.functional import (
 
 from viscy.evaluation.evaluation_metrics import mean_average_precision
 from viscy.light.data import Sample
+from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
 
 _UNET_ARCHITECTURE = {
-    "2.5D": Unet25d,
+    "2D": Unet2d,
     "2.1D": Unet21d,
+    "2.5D": Unet25d,
 }
 
 
@@ -146,10 +148,14 @@ class VSUNet(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
+        if arch == "2D":
+            example_depth = 1
+        else:
+            example_depth = model_config.get("in_stack_depth") or 5
         self.example_input_array = torch.rand(
             1,
             1,
-            (model_config.get("in_stack_depth") or 5),
+            example_depth,
             *example_input_yx_shape,
         )
         self.test_cellpose_model_path = test_cellpose_model_path
