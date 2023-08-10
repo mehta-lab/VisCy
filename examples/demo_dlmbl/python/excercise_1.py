@@ -43,7 +43,11 @@ Use <a href=https://czbiohub-sf.github.io/iohub/main/api/ngff.html#open-ome-zarr
 
 There should be 301 FOVs in the dataset (9.3 GB compressed).
 
-Each FOV consists of 3 channels of 2048x2048 images, saved in a [HCS layout](https://ngff.openmicroscopy.org/latest/#hcs-layout) format specified by the to the Open Microscopy Environment (OME) next generation file format (NGFF).
+Each FOV consists of 3 channels of 2048x2048 images,
+saved in the <a href="https://ngff.openmicroscopy.org/latest/#hcs-layout">
+High-Content Screening (HCS) layout</a>
+specified by the Open Microscopy Environment Next Generation File Format
+(OME-NGFF).
 
 Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 
