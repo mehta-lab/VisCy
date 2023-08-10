@@ -40,9 +40,12 @@ Task 1.1
 
 Use <a href=https://czbiohub-sf.github.io/iohub/main/api/ngff.html#open-ome-zarr>
 <code>iohub.open_ome_zarr</code></a> to read the dataset.
-Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 
 There should be 301 FOVs in the dataset (9.3 GB compressed).
+
+Each FOV consists of 3 channels of 2048x2048 images, saved in a [HCS layout](https://ngff.openmicroscopy.org/latest/#hcs-layout) format specified by the to the Open Microscopy Environment (OME) next generation file format (NGFF).
+
+Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 
 """
 
@@ -56,16 +59,25 @@ dataset = open_ome_zarr(data_path)
 
 print(len(list(dataset.positions())))
 
+
 # %% [markdown]
 """
 View images with matplotlib.
+
+The layout on the disk is: row/col/field/resolution/timepoint/channel/z/y/x.
+
 
 Note that labelling is not perfect,
 as some cells are not expressing the fluorophore.
 """
 
 # %%
-image = dataset["0/0/0/0"].numpy()
+
+row = "0"
+col = "0"
+field = "0"
+resolution = "0" # 0 is the highest resolution, 1 is 2x2 binned, 2 is 4x4 binned, etc.
+image = dataset[f'{row}/{col}/{field}/{resolution}'].numpy()
 print(image.shape)
 
 figure, axes = plt.subplots(1, 3, figsize=(9, 3))

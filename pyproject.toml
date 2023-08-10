@@ -20,6 +20,9 @@ dependencies = [
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image",
     "matplotlib",
+    "ipykernel", # used by demo_dlmbl
+    "graphviz", # used by demo_dlmbl
+    "torchview", # used by demo_dlmbl
 ]
 dynamic = ["version"]
 
