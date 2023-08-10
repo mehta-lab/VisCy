@@ -5,7 +5,6 @@ from typing import Callable, Literal, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
-from cellpose.models import CellposeModel
 from imageio import imwrite
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
@@ -32,6 +31,12 @@ from viscy.light.data import Sample
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
+
+try:
+    from cellpose.models import CellposeModel
+except ImportError:
+    CellposeModel = None
+
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -303,6 +308,12 @@ class VSUNet(LightningModule):
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
+        if CellposeModel is None:
+            raise ImportError(
+                "CellPose not installed. "
+                "Please install the metrics dependency with "
+                "`pip install viscy\".[metrics]\"`"
+            )
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
                 model_type=self.test_cellpose_model_path, device=self.device

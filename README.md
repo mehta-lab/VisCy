@@ -2,61 +2,56 @@
 
 viscy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
 
-The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images. We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline. Our pipeline also provides utilities to export the models to onnx format for use at runtime. We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
+The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images.
+We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline.
+Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
+We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
+Expect rough edges until we release a PyPI package.
 
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
 This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on viscy.
 
-## Installation
+## Installing viscy
 
-(Optional) create a new virtual/Conda environment.
+1. We highly encourage using new Conda/virtual environment.
+    ([Mamba](https://github.com/mamba-org/mamba) is a faster re-implementation Conda.)
 
-Clone this repository and install viscy:
+    ```sh
+    mamba create --name viscy python=3.10
+    # OR
+    mamba create --prefix /path/to/conda/envs/viscy python=3.10
+    ```
 
-```sh
-git clone https://github.com/mehta-lab/viscy.git
-cd viscy
-pip install .
-```
+2. Clone this repository and install with pip:
 
-Verify installation by accessing the CLI help message:
+    ```sh
+    git clone https://github.com/mehta-lab/viscy.git
+    # change to project root directory (parent folder of pyproject.toml)
+    cd viscy
+    pip install .
+    ```
 
-```sh
-viscy --help
-```
+    If evaluating virtually stained images for segmentation tasks,
+    additional dependencies need to be installed:
+
+    ```sh
+    pip install ".[metrics]"
+    ```
+
+3. Verify installation by accessing the CLI help message:
+
+    ```sh
+    viscy --help
+    ```
 
 For development installation, see [the contributing guide](CONTRIBUTING.md).
 
-The pipeline is built using the [pytorch lightning](https://www.pytorchlightning.ai/index.html) framework and [iohub](https://github.com/czbiohub-sf/iohub) library for reading and writing data in [ome-zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
+The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning.ai/index.html) framework and [iohub](https://github.com/czbiohub-sf/iohub) library for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
 The full functionality is  tested only on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.0).
 Some features (e.g. mixed precision and distributed training) may not work with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
-
-Following dependencies will allow use and development of the pipeline, while the pypi package is pending:
-
-```<yaml>
-iohub==0.1.0.dev3
-torch>=2.0.0
-torchvision>=0.15.1
-tensorboard>=2.13.0
-lightning>=2.0.1
-monai>=1.2.0
-jsonargparse[signatures]>=4.20.1
-scikit-image>=0.19.2
-matplotlib
-cellpose==2.1.0
-lapsolver==1.1.0
-scikit-learn>=1.1.3
-scipy>=1.8.0
-torchmetrics[detection]>=1.0.0
-pytest
-pytest-cov
-hypothesis
-profilehooks
-onnxruntime
-```
 
 ## Virtual staining of cellular compartments from label-free images
 
