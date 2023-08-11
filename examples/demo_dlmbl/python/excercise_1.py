@@ -25,6 +25,8 @@ import torch
 from iohub import open_ome_zarr
 from tensorboard import notebook
 from torchview import draw_graph
+import os
+
 
 from viscy.light.data import HCSDataModule
 from viscy.light.engine import VSTrainer, VSUNet
@@ -150,8 +152,9 @@ for i, batch in enumerate(train_dataloader):
         break
     FOV = batch["index"][0][0]
     input_tensor = batch["source"][0, 0, :, :].squeeze()
-    target_membrane_tensor = batch["target"][0, 0, :, :].squeeze()
-    target_nuclei_tensor = batch["target"][0, 1, :, :].squeeze()
+    target_nuclei_tensor = batch["target"][0, 0, :, :].squeeze()
+    target_membrane_tensor = batch["target"][0, 1, :, :].squeeze()
+
 
     axs[0, i].imshow(input_tensor, cmap="gray")
     axs[1, i].imshow(target_nuclei_tensor, cmap="gray")
@@ -205,7 +208,7 @@ Here we use the ``fast_dev_run`` flag to run a sanity check first.
 """
 
 # %%
-trainer = VSTrainer(accelerator="gpu", device=GPU_ID, fast_dev_run=True)
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 
 trainer.fit(model, datamodule=data_module)
 
@@ -246,8 +249,9 @@ model = model = VSUNet(
     log_num_samples=10,
 )
 
+
 trainer = VSTrainer(
-    accelerator="gpu", max_epochs=20, log_every_n_steps=10, default_root_dir=""
+    accelerator="gpu", max_epochs=20, log_every_n_steps=8, default_root_dir=os.path.expanduser("~")
 )
 
 trainer.fit(model, datamodule=data_module)
