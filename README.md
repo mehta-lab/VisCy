@@ -8,6 +8,7 @@ Our pipeline also provides utilities to export the models to ONNX format for use
 We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
 Expect rough edges until we release a PyPI package.
 
+
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
 This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on viscy.
@@ -22,6 +23,7 @@ This pipeline evolved from the [TensorFlow version of virtual staining pipeline]
     # OR
     mamba create --prefix /path/to/conda/envs/viscy python=3.10
     ```
+
 
 2. Clone this repository and install with pip:
 
