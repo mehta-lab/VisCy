@@ -1,6 +1,6 @@
 import logging
 import os
-from typing import Literal, Sequence
+from typing import Literal, Optional, Sequence
 
 import torch
 from iohub.ngff import ImageArray, _pad_shape, open_ome_zarr
@@ -10,17 +10,19 @@ from numpy.typing import DTypeLike
 
 from viscy.light.data import Sample
 
+_logger = logging.getLogger("lightning.pytorch")
+
 
 def _resize_image(image: ImageArray, t_index: int, z_index: int):
     """Resize image array if incoming T and Z index is not within bounds."""
     if image.shape[0] <= t_index or image.shape[2] <= z_index:
-        logging.debug(
+        _logger.debug(
             f"Resizing image '{image.name}' {image.shape} for T={t_index}, Z={z_index}."
         )
         image.resize(
             max(t_index + 1, image.shape[0]),
             image.channels,
-            max(z_index + 1, image.shape[1]),
+            max(z_index + 1, image.shape[2]),
             *image.shape[-2:],
         )
 
@@ -63,11 +65,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         else:
             channel_names = prediction_channel
             if self.write_input:
-                channel_names = source_channel + target_channel + channel_names
+                channel_names = source_channel + channel_names
             self.plate = open_ome_zarr(
                 self.output_store, layout="hcs", mode="a", channel_names=channel_names
             )
-        logging.info(f"Writing prediction to: '{self.plate.zgroup.store.path}'.")
+        _logger.info(f"Writing prediction to: '{self.plate.zgroup.store.path}'.")
         if self.write_input:
             self.source_index = self._get_channel_indices(source_channel)
             self.target_index = self._get_channel_indices(target_channel)
@@ -81,12 +83,12 @@ class HCSPredictionWriter(BasePredictionWriter):
         trainer: Trainer,
         pl_module: LightningModule,
         prediction: torch.Tensor,
-        batch_indices: Sequence[int] | None,
+        batch_indices: Optional[Sequence[int]],
         batch: Sample,
         batch_idx: int,
         dataloader_idx: int,
     ) -> None:
-        logging.debug(f"Writing batch {batch_idx}.")
+        _logger.debug(f"Writing batch {batch_idx}.")
         for sample_index, _ in enumerate(batch["index"][0]):
             self.write_sample(batch, prediction[sample_index], sample_index)
 
@@ -96,7 +98,7 @@ class HCSPredictionWriter(BasePredictionWriter):
     def write_sample(
         self, batch: Sample, sample_prediction: torch.Tensor, sample_index: int
     ) -> None:
-        logging.debug(f"Writing sample {sample_index}.")
+        _logger.debug(f"Writing sample {sample_index}.")
         sample_prediction = sample_prediction.cpu().numpy()
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
@@ -106,20 +108,22 @@ class HCSPredictionWriter(BasePredictionWriter):
         )
         _resize_image(image, t_index, z_index)
         if self.write_input:
-            # FIXME: should write center sclice of source
-            image[t_index, self.source_index, z_index] = batch["source"][
-                sample_index
-            ].cpu()[:, 0]
-            image[t_index, self.target_index, z_index] = batch["target"][
-                sample_index
-            ].cpu()[:, 0]
+            source_stack = batch["source"][sample_index].cpu()
+            center_slice_index = source_stack.shape[-3] // 2
+            image[t_index, self.source_index, z_index] = source_stack[
+                :, center_slice_index
+            ]
+            if "target" in batch:
+                image[t_index, self.target_index, z_index] = batch["target"][
+                    sample_index
+                ][:, center_slice_index].cpu()
         # write C1YX
         image.oindex[t_index, self.prediction_index, z_index] = sample_prediction[:, 0]
 
     def _create_image(self, img_name: str, shape: tuple[int], dtype: DTypeLike):
         if img_name in self.plate.zgroup:
             return self.plate[img_name]
-        logging.debug(f"Creating image '{img_name}'")
+        _logger.debug(f"Creating image '{img_name}'")
         _, row_name, col_name, pos_name, arr_name = img_name.split("/")
         position = self.plate.create_position(row_name, col_name, pos_name)
         shape = [1] + list(shape)

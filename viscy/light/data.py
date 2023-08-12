@@ -1,4 +1,5 @@
 import logging
+import math
 import os
 import re
 import tempfile
@@ -21,6 +22,7 @@ from monai.transforms import (
     RandAffined,
     RandGaussianSmoothd,
     RandWeightedCropd,
+    ScaleIntensityRangePercentilesd,
 )
 from torch.utils.data import DataLoader, Dataset
 
@@ -168,7 +170,7 @@ class SlidingWindowDataset(Dataset):
             slice(t, t + 1),
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
-        ]
+        ].astype(np.float32)
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
@@ -268,7 +270,8 @@ class HCSDataModule(LightningDataModule):
         e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
-        e.g. 0.8 means a 80/20 split between training/validation
+        e.g. 0.8 means a 80/20 split between training/validation,
+        by default 0.8
     :param int batch_size: batch size, defaults to 16
     :param int num_workers: number of data-loading workers, defaults to 8
     :param Literal["2.5D", "2D", "3D"] architecture: U-Net architecture,
@@ -278,9 +281,13 @@ class HCSDataModule(LightningDataModule):
     :param bool augment: whether to apply augmentation in training,
         defaults to True
     :param bool caching: whether to decompress all the images and cache the result,
+        will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
     :param str ground_truth_masks: path to the ground truth segmentation masks,
         defaults to None
+    :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
+        passed to MONAI's ``RandAffined`` transform,
+        defaults to [-0.4, 0.2]
     """
 
     def __init__(
@@ -289,7 +296,7 @@ class HCSDataModule(LightningDataModule):
         source_channel: Union[str, Sequence[str]],
         target_channel: Union[str, Sequence[str]],
         z_window_size: int,
-        split_ratio: float,
+        split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
         architecture: Literal["2.5D", "2D", "3D"] = "2.5D",
@@ -298,6 +305,7 @@ class HCSDataModule(LightningDataModule):
         caching: bool = False,
         normalize_source: bool = False,
         ground_truth_masks: str = None,
+        train_z_scale_range: tuple[float, float] = [0, 0],
     ):
         super().__init__()
         self.data_path = data_path
@@ -305,7 +313,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = True if architecture == "2.5D" else False
+        self.target_2d = False if architecture == "3D" else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
@@ -314,6 +322,9 @@ class HCSDataModule(LightningDataModule):
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
+        if train_z_scale_range[0] > 0 or train_z_scale_range[1] < 0:
+            raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
+        self.train_z_scale_range = train_z_scale_range
 
     def prepare_data(self):
         if not self.caching:
@@ -333,7 +344,9 @@ class HCSDataModule(LightningDataModule):
         logger.addHandler(file_handler)
         # cache in temporary directory
         self.tmp_zarr = os.path.join(
-            tempfile.gettempdir(), os.path.basename(self.data_path)
+            tempfile.gettempdir(),
+            os.getenv("SLURM_JOB_ID"),
+            os.path.basename(self.data_path),
         )
         logger.info(f"Caching dataset at {self.tmp_zarr}.")
         tmp_store = zarr.NestedDirectoryStore(self.tmp_zarr)
@@ -391,11 +404,15 @@ class HCSDataModule(LightningDataModule):
         shuffled_indices = torch.randperm(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
+        # training set needs to sample more Z range for augmentation
+        train_dataset_settings = dataset_settings.copy()
+        expanded_z = math.ceil(self.z_window_size * (1 + self.train_z_scale_range[1]))
+        train_dataset_settings["z_window_size"] = max(1, expanded_z - expanded_z % 2)
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
             transform=train_transform,
-            **dataset_settings,
+            **train_dataset_settings,
         )
         self.val_dataset = SlidingWindowDataset(
             positions[num_train_fovs:], transform=val_transform, **dataset_settings
@@ -481,11 +498,18 @@ class HCSDataModule(LightningDataModule):
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
                 roi_size=(
-                    -1,
+                    self.z_window_size,
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
-            )
+            ),
+            # ScaleIntensityRangePercentilesd(
+            #     keys=self.target_channel,
+            #     lower=5,
+            #     upper=95,
+            #     b_min=None,
+            #     b_max=None,
+            # ),
         ]
 
     def _train_transform(self) -> list[Callable]:
@@ -505,7 +529,7 @@ class HCSDataModule(LightningDataModule):
                         prob=0.5,
                         rotate_range=(np.pi, 0, 0),
                         shear_range=(0, (0.05), (0.05)),
-                        scale_range=(0, 0.3, 0.3),
+                        scale_range=(self.train_z_scale_range, 0.3, 0.3),
                     ),
                     RandAdjustContrastd(
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)

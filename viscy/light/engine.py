@@ -5,7 +5,6 @@ from typing import Callable, Literal, Sequence
 import numpy as np
 import torch
 import torch.nn.functional as F
-from cellpose.models import CellposeModel
 from imageio import imwrite
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
@@ -29,8 +28,21 @@ from torchmetrics.functional import (
 
 from viscy.evaluation.evaluation_metrics import mean_average_precision
 from viscy.light.data import Sample
+from viscy.unet.networks.Unet2D import Unet2d
+from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
-from viscy.unet.utils.model import ModelDefaults25D, define_model
+
+try:
+    from cellpose.models import CellposeModel
+except ImportError:
+    CellposeModel = None
+
+
+_UNET_ARCHITECTURE = {
+    "2D": Unet2d,
+    "2.1D": Unet21d,
+    "2.5D": Unet25d,
+}
 
 
 class VSTrainer(Trainer):
@@ -126,7 +138,11 @@ class VSUNet(LightningModule):
         test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
-        self.model = define_model(Unet25d, ModelDefaults25D(), model_config)
+        arch = model_config.pop("architecture")
+        net_class = _UNET_ARCHITECTURE.get(arch)
+        if not arch:
+            raise ValueError(f"Architecture {arch} not in {_UNET_ARCHITECTURE.keys()}")
+        self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
         self.batch_size = batch_size
@@ -137,10 +153,14 @@ class VSUNet(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
+        if arch == "2D":
+            example_depth = 1
+        else:
+            example_depth = model_config.get("in_stack_depth") or 5
         self.example_input_array = torch.rand(
             1,
             1,
-            (model_config.get("in_stack_depth") or 5),
+            example_depth,
             *example_input_yx_shape,
         )
         self.test_cellpose_model_path = test_cellpose_model_path
@@ -288,6 +308,12 @@ class VSUNet(LightningModule):
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
+        if CellposeModel is None:
+            raise ImportError(
+                "CellPose not installed. "
+                "Please install the metrics dependency with "
+                "`pip install viscy\".[metrics]\"`"
+            )
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
                 model_type=self.test_cellpose_model_path, device=self.device
@@ -301,7 +327,7 @@ class VSUNet(LightningModule):
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
-        optimizer = torch.optim.Adam(self.model.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         if self.schedule == "WarmupCosine":
             scheduler = WarmupCosineSchedule(
                 optimizer,
