@@ -4,14 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "viscy"
-description = "Learning vision for cells"
+description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
 # cannot build on 3.11 due to https://github.com/cheind/py-lapsolver/pull/18
 requires-python = ">=3.9,!=3.11"
 license = { file = "LICENSE" }
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 dependencies = [
-    "iohub==0.1.0.dev3",
+    "iohub==0.1.0.dev4",
     "torch>=2.0.0",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
@@ -20,6 +20,9 @@ dependencies = [
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image",
     "matplotlib",
+    "ipykernel", # used by demo_dlmbl
+    "graphviz", # used by demo_dlmbl
+    "torchview", # used by demo_dlmbl
 ]
 dynamic = ["version"]
 
