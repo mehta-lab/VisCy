@@ -20,6 +20,7 @@ from monai.transforms import (
     MapTransform,
     RandAdjustContrastd,
     RandAffined,
+    RandGaussianNoised,
     RandGaussianSmoothd,
     RandWeightedCropd,
     ScaleIntensityRangePercentilesd,
@@ -537,6 +538,9 @@ class HCSDataModule(LightningDataModule):
                     ),
                     RandAdjustContrastd(
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
+                    ),
+                    RandGaussianNoised(
+                        keys=self.source_channel, prob=0.5, mean=0, std=0.3
                     ),
                     RandGaussianSmoothd(
                         keys=self.source_channel,
