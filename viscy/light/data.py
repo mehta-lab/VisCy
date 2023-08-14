@@ -384,7 +384,7 @@ class HCSDataModule(LightningDataModule):
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # define training stage transforms
-        norm_keys = self.target_channel
+        norm_keys = self.target_channel.copy()
         if self.normalize_source:
             norm_keys += self.source_channel
         normalize_transform = NormalizeSampled(
