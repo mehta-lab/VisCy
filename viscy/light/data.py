@@ -288,7 +288,10 @@ class HCSDataModule(LightningDataModule):
         defaults to None
     :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
         passed to MONAI's ``RandAffined`` transform,
-        defaults to [-0.4, 0.2]
+        defaults to [0, 0]
+    :param float train_noise_std: Upper bound of the standard deviation
+        of the Gaussian noise added to source images during training,
+        defaults to 0.0
     """
 
     def __init__(
@@ -307,6 +310,7 @@ class HCSDataModule(LightningDataModule):
         normalize_source: bool = False,
         ground_truth_masks: str = None,
         train_z_scale_range: tuple[float, float] = [0, 0],
+        train_noise_std: float = 0.0,
     ):
         super().__init__()
         self.data_path = data_path
@@ -320,12 +324,15 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.augment = augment
         self.caching = caching
+        if train_noise_std and not normalize_source:
+            raise ValueError("Noise augmentaion must be added to normalized input.")
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
         if train_z_scale_range[0] > 0 or train_z_scale_range[1] < 0:
             raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
         self.train_z_scale_range = train_z_scale_range
+        self.train_noise_std = train_noise_std
 
     def prepare_data(self):
         if not self.caching:
@@ -540,7 +547,10 @@ class HCSDataModule(LightningDataModule):
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
                     ),
                     RandGaussianNoised(
-                        keys=self.source_channel, prob=0.5, mean=0, std=0.3
+                        keys=self.source_channel,
+                        prob=0.5,
+                        mean=0,
+                        std=self.train_noise_std,
                     ),
                     RandGaussianSmoothd(
                         keys=self.source_channel,
