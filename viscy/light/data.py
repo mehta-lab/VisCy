@@ -558,9 +558,9 @@ class HCSDataModule(LightningDataModule):
                     RandGaussianSmoothd(
                         keys=self.source_channel,
                         prob=0.3,
-                        sigma_x=(0.05, 0.25),
-                        sigma_y=(0.05, 0.25),
-                        sigma_z=((0.05, 0.25)),
+                        sigma_x=(0.25, 1.5),
+                        sigma_y=(0.25, 1.5),
+                        sigma_z=(0.25, 1.5),
                     ),
                 ]
             )
