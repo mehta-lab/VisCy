@@ -22,8 +22,8 @@ from monai.transforms import (
     RandAffined,
     RandGaussianNoised,
     RandGaussianSmoothd,
+    RandScaleIntensityd,
     RandWeightedCropd,
-    ScaleIntensityRangePercentilesd,
 )
 from torch.utils.data import DataLoader, Dataset
 
@@ -545,6 +545,9 @@ class HCSDataModule(LightningDataModule):
                     ),
                     RandAdjustContrastd(
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
+                    ),
+                    RandScaleIntensityd(
+                        keys=self.source_channel, prob=0.5, factors=0.5
                     ),
                     RandGaussianNoised(
                         keys=self.source_channel,
