@@ -514,14 +514,7 @@ class HCSDataModule(LightningDataModule):
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
-            ),
-            # ScaleIntensityRangePercentilesd(
-            #     keys=self.target_channel,
-            #     lower=5,
-            #     upper=95,
-            #     b_min=None,
-            #     b_max=None,
-            # ),
+            )
         ]
 
     def _train_transform(self) -> list[Callable]:
