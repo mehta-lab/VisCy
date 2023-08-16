@@ -8,8 +8,9 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike
 
-from viscy.light.data import Sample
+from viscy.light.data import Sample, HCSDataModule
 
+__all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
@@ -49,8 +50,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.write_input = write_input
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
-        source_channel: list[str] = trainer.datamodule.source_channel
-        target_channel: list[str] = trainer.datamodule.target_channel
+        dm: HCSDataModule = trainer.datamodule
+        self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
+        _logger.debug(f"Setting Z padding to {self.z_padding}")
+        source_channel = dm.source_channel
+        target_channel = dm.target_channel
         prediction_channel = [ch + "_prediction" for ch in target_channel]
         if os.path.exists(self.output_store):
             if self.write_input:
@@ -103,6 +107,8 @@ class HCSPredictionWriter(BasePredictionWriter):
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]
         t_index = int(t_index)
         z_index = int(z_index)
+        # account for lost slices in 2.5D
+        z_index += self.z_padding
         image = self._create_image(
             img_name, sample_prediction.shape, sample_prediction.dtype
         )
