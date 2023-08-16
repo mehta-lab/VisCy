@@ -95,6 +95,35 @@ class NormalizeSampled(MapTransform, InvertibleTransform):
             d[key] = (d[key] * self._stat(key)["iqr"]) + self._stat(key)["median"]
 
 
+class ClampQuantiled(MapTransform):
+    """Clamp input tensor at quantiles.
+
+    :param Union[str, Iterable[str]] keys: keys to clamp
+    :param float lower: Lower quantile in [0, 1]
+    :param float upper: Upper quantile in [0, 1]
+    """
+
+    def __init__(
+        self, keys: Union[str, Iterable[str]], lower: float, upper: float
+    ) -> None:
+        super().__init__(keys, allow_missing_keys=False)
+        for v in (lower, upper):
+            if v < 0 or v > 1:
+                raise ValueError("Quantiles must be in [0, 1].")
+        if lower >= upper:
+            raise ValueError("THe lower quantile must be smaller than the upper.")
+        self.lower = lower
+        self.upper = upper
+
+    def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+        d = dict(data)
+        for key in self.keys:
+            q = torch.tensor([self.lower, self.upper], device=d[key].device)
+            i_min, i_max = d[key].quantile(q)
+            d[key] = d[key].clamp(i_min, i_max)
+        return d
+
+
 class SlidingWindowDataset(Dataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
@@ -514,7 +543,8 @@ class HCSDataModule(LightningDataModule):
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
-            )
+            ),
+            ClampQuantiled(keys=self.target_channel, lower=0.0, upper=0.99),
         ]
 
     def _train_transform(self) -> list[Callable]:
