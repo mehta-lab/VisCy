@@ -8,7 +8,7 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike
 
-from viscy.light.data import Sample, HCSDataModule
+from viscy.light.data import HCSDataModule, Sample
 
 __all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
