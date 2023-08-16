@@ -20,9 +20,10 @@ from monai.transforms import (
     MapTransform,
     RandAdjustContrastd,
     RandAffined,
+    RandGaussianNoised,
     RandGaussianSmoothd,
+    RandScaleIntensityd,
     RandWeightedCropd,
-    ScaleIntensityRangePercentilesd,
 )
 from torch.utils.data import DataLoader, Dataset
 
@@ -287,7 +288,10 @@ class HCSDataModule(LightningDataModule):
         defaults to None
     :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
         passed to MONAI's ``RandAffined`` transform,
-        defaults to [-0.4, 0.2]
+        defaults to [0, 0]
+    :param float train_noise_std: Upper bound of the standard deviation
+        of the Gaussian noise added to source images during training,
+        defaults to 0.0
     """
 
     def __init__(
@@ -306,6 +310,7 @@ class HCSDataModule(LightningDataModule):
         normalize_source: bool = False,
         ground_truth_masks: str = None,
         train_z_scale_range: tuple[float, float] = [0, 0],
+        train_noise_std: float = 0.0,
     ):
         super().__init__()
         self.data_path = data_path
@@ -319,12 +324,15 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.augment = augment
         self.caching = caching
+        if train_noise_std and not normalize_source:
+            raise ValueError("Noise augmentaion must be added to normalized input.")
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
         if train_z_scale_range[0] > 0 or train_z_scale_range[1] < 0:
             raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
         self.train_z_scale_range = train_z_scale_range
+        self.train_noise_std = train_noise_std
 
     def prepare_data(self):
         if not self.caching:
@@ -383,7 +391,7 @@ class HCSDataModule(LightningDataModule):
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # define training stage transforms
-        norm_keys = self.target_channel
+        norm_keys = self.target_channel.copy()
         if self.normalize_source:
             norm_keys += self.source_channel
         normalize_transform = NormalizeSampled(
@@ -506,14 +514,7 @@ class HCSDataModule(LightningDataModule):
                     self.yx_patch_size[0],
                     self.yx_patch_size[1],
                 ),
-            ),
-            # ScaleIntensityRangePercentilesd(
-            #     keys=self.target_channel,
-            #     lower=5,
-            #     upper=95,
-            #     b_min=None,
-            #     b_max=None,
-            # ),
+            )
         ]
 
     def _train_transform(self) -> list[Callable]:
@@ -538,12 +539,21 @@ class HCSDataModule(LightningDataModule):
                     RandAdjustContrastd(
                         keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
                     ),
+                    RandScaleIntensityd(
+                        keys=self.source_channel, prob=0.5, factors=0.5
+                    ),
+                    RandGaussianNoised(
+                        keys=self.source_channel,
+                        prob=0.5,
+                        mean=0,
+                        std=self.train_noise_std,
+                    ),
                     RandGaussianSmoothd(
                         keys=self.source_channel,
-                        prob=0.3,
-                        sigma_x=(0.05, 0.25),
-                        sigma_y=(0.05, 0.25),
-                        sigma_z=((0.05, 0.25)),
+                        prob=0.5,
+                        sigma_x=(0.25, 1.5),
+                        sigma_y=(0.25, 1.5),
+                        sigma_z=(0.25, 1.5),
                     ),
                 ]
             )
