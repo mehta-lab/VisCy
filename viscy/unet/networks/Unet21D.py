@@ -134,6 +134,8 @@ class Unet21d(nn.Module):
             kernel_size=3,
             last_kernel_size=stem_kernel_size[-2:],
         )
+        # shape compatibility
+        self.num_blocks = 6
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
