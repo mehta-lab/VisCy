@@ -312,7 +312,7 @@ class VSUNet(LightningModule):
             raise ImportError(
                 "CellPose not installed. "
                 "Please install the metrics dependency with "
-                "`pip install viscy\".[metrics]\"`"
+                '`pip install viscy".[metrics]"`'
             )
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
