@@ -1,22 +1,57 @@
 # %% [markdown]
 """
-# Image translation excercise part 1
+# Image translation
+"""
+# %% [markdown]
+"""
+Written by Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.
+-----------------
 
-In this exercise, we will solve an image translation task of
-reconstructing nuclei and membrane markers from phase images of cells.
-Here, the source domain is label-free microscopy (average material density),
-and the target domain is fluorescence microscopy (fluorophore density).
+In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image. 
 
-Learning goals of part 1:
+Here, the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density). The goal is to learn a mapping from the source domain to the target domain. We will use a deep convolutional neural network (CNN), specifically, a U-Net model with residual connections to learn the mapping. The preprocessing, training, prediction, evaluation, and deployment steps are unified in a computer vision pipeline for single-cell analysis that we call [VisCy](https://github.com/mehta-lab/VisCy).
 
-- Load the and visualize the images from OME-Zarr
-- Configure the data loaders
-- Initialize a 2D U-Net model for virtual staining
+VisCy evolved from our previous work on virtual staining of cellular components from their density and anisotropy.
+![](https://iiif.elifesciences.org/lax/55502%2Felife-55502-fig1-v2.tif/full/1500,/0/default.jpg)
 
+[Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning
+. eLife](https://elifesciences.org/articles/55502).
+
+VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). Our previous pipelinem, [microDL](https://github.com/mehta-lab/microDL), is deprecated and is now a public archive.
+"""
+
+# %% [markdown]
+"""
+Today, we will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
+
+![virtual_staining](docs/figures/phase_to_nuclei_membrane.png)
+
+The exercise is organized in 3 parts. Each part should take roughly 1.5 hours to work through:
+* [Part 1](Part-1:tensorboard) - Explore the data and model using tensorboard. Launch the training before lunch.
+* Lunch break - The model will continue training during lunch.
+* [Part 2](#Part-2:evaluation) - Evaluate the training using tensorboard logs. Train a model to predict phase from nuclei and membrane.
+* [Part 3](#Part-3:exploration) - Examine the quality of predictions and metrics after adjusting the capacity of the network.
+
+"
+Before you start,
 
 <div class="alert alert-danger">
-Set your python kernel to <code>004-image-translation</code>
+Set your python kernel to <span style="color:black;">04-image-translation</span>
 </div>
+
+"""
+# %% [markdown]
+"""
+(Part-1:tensorboard)=# Part 1: Visualize data and model using tensorboard, start training a model.
+
+Learning goals:
+
+- Load the and visualize the images from OME-Zarr
+- Configure the data loader
+- Initialize a 2D U-Net model for virtual staining
+- Log the images and the model to tensorboard.
+- Start training the model to predict nuclei and membrane from phase.
+
 """
 
 # %%
@@ -26,6 +61,8 @@ from iohub import open_ome_zarr
 from tensorboard import notebook
 from torchview import draw_graph
 import os
+from pathlib import Path
+import numpy as np
 
 
 from viscy.light.data import HCSDataModule
@@ -58,7 +95,9 @@ Run <code>open_ome_zarr?</code> in a cell to see the docstring.
 
 # %%
 # set dataset path here
-data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
+data_path = Path(
+    "~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/"
+).expanduser()
 
 dataset = open_ome_zarr(data_path)
 
@@ -69,7 +108,7 @@ print(len(list(dataset.positions())))
 """
 View images with matplotlib.
 
-The layout on the disk is: row/col/field/resolution/timepoint/channel/z/y/x.
+The layout on the disk is: row/col/field/pyramid_level/timepoint/channel/z/y/x.
 
 
 Note that labelling is not perfect,
@@ -80,19 +119,31 @@ as some cells are not expressing the fluorophore.
 
 row = "0"
 col = "0"
-field = "0"
+field = "42"
+# This dataset contains images at 3 resolutions.
 # '0' is the highest resolution
-# '1' is 2x2 down-scaled, '2' is 4x4 down-scaled, etc.
-resolution = "0"
-image = dataset[f"{row}/{col}/{field}/{resolution}"].numpy()
-print(image.shape)
+# '1' is down-scaled 2x2,
+# '2' is down-scaled 4x4.
+# Such datasets are called image pyramids.
+pyaramid_level = "0"
 
-figure, axes = plt.subplots(1, 3, figsize=(9, 3))
+# `channel_names` is the metadata that is stored with data accoring to the OME-NGFF spec.
+n_channels = len(dataset.channel_names)
 
-for ax, channel in zip(axes, image[0, :, 0]):
-    ax.imshow(channel, cmap="gray")
-    ax.axis("off")
+image = dataset[f"{row}/{col}/{field}/{pyaramid_level}"].numpy()
+print(f"data shape: {image.shape}, FOV: {field}, pyramid level: {pyaramid_level}")
 
+figure, axes = plt.subplots(1, n_channels, figsize=(9, 3))
+
+for i in range(n_channels):
+    for i in range(n_channels):
+        channel_image = image[0, i, 0]
+        # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
+        p1, p99 = np.percentile(channel_image, (0.5, 99.5))
+        channel_image = np.clip(channel_image, p1, p99)
+        axes[i].imshow(channel_image, cmap="gray")
+        axes[i].axis("off")
+        axes[i].set_title(dataset.channel_names[i])
 plt.tight_layout()
 
 # %% [markdown]
@@ -138,7 +189,7 @@ for i, batch in enumerate(train_dataloader):
 train_dataloader = data_module.train_dataloader()
 
 
-fig, axs = plt.subplots(3, 8, figsize=(20, 6))
+fig, axs = plt.subplots(3, 8, figsize=(20, 8))
 
 # Draw 8 batches, each with 32 images. Show the first image in each batch.
 
@@ -154,7 +205,6 @@ for i, batch in enumerate(train_dataloader):
     input_tensor = batch["source"][0, 0, :, :].squeeze()
     target_nuclei_tensor = batch["target"][0, 0, :, :].squeeze()
     target_membrane_tensor = batch["target"][0, 1, :, :].squeeze()
-
 
     axs[0, i].imshow(input_tensor, cmap="gray")
     axs[1, i].imshow(target_nuclei_tensor, cmap="gray")
@@ -251,7 +301,10 @@ model = model = VSUNet(
 
 
 trainer = VSTrainer(
-    accelerator="gpu", max_epochs=20, log_every_n_steps=8, default_root_dir=os.path.expanduser("~")
+    accelerator="gpu",
+    max_epochs=20,
+    log_every_n_steps=8,
+    default_root_dir=os.path.expanduser("~"),
 )
 
 trainer.fit(model, datamodule=data_module)
