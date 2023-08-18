@@ -1,11 +1,10 @@
 # %% [markdown]
 """
 # Image translation
-"""
-# %% [markdown]
-"""
+---
+
 Written by Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.
------------------
+
 
 In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image. 
 
@@ -18,13 +17,13 @@ VisCy evolved from our previous work on virtual staining of cellular components 
 . eLife](https://elifesciences.org/articles/55502).
 
 VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). Our previous pipelinem, [microDL](https://github.com/mehta-lab/microDL), is deprecated and is now a public archive.
+
 """
 
 # %% [markdown]
 """
 Today, we will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
-
-![virtual_staining](docs/figures/phase_to_nuclei_membrane.png)
+![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.png)
 
 The exercise is organized in 3 parts. Each part should take roughly 1.5 hours to work through:
 * [Part 1](Part-1:tensorboard) - Explore the data and model using tensorboard. Launch the training before lunch.
@@ -32,7 +31,6 @@ The exercise is organized in 3 parts. Each part should take roughly 1.5 hours to
 * [Part 2](#Part-2:evaluation) - Evaluate the training using tensorboard logs. Train a model to predict phase from nuclei and membrane.
 * [Part 3](#Part-3:exploration) - Examine the quality of predictions and metrics after adjusting the capacity of the network.
 
-"
 Before you start,
 
 <div class="alert alert-danger">
@@ -42,7 +40,8 @@ Set your python kernel to <span style="color:black;">04-image-translation</span>
 """
 # %% [markdown]
 """
-(Part-1:tensorboard)=# Part 1: Visualize data and model using tensorboard, start training a model.
+(Part-1:tensorboard)
+# Part 1: Visualize data and model using tensorboard, start training a model.
 
 Learning goals:
 
