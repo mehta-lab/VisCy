@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 import logging
 import math
 import os
@@ -53,17 +51,6 @@ def _search_int_in_str(pattern: str, file_name: str) -> str:
         raise ValueError(f"Cannot find pattern {pattern} in {file_name}.")
 
 
-def _collate_samples(batch: Sequence[Sample]) -> Sample:
-    elemment = batch[0]
-    collated = {}
-    for key in elemment.keys():
-        data: list[list[torch.Tensor]] = [sample[key] for sample in batch]
-        collated[key] = collate_meta_tensor(
-            [im for imgs in data for im in imgs]
-        )
-    return collated
-
-
 class ChannelMap(TypedDict, total=False):
     source: Union[str, Sequence[str]]
     # optional
@@ -76,6 +63,15 @@ class Sample(TypedDict, total=False):
     source: Union[torch.Tensor, Sequence[torch.Tensor]]
     target: Union[torch.Tensor, Sequence[torch.Tensor]]
     labels: Union[torch.Tensor, Sequence[torch.Tensor]]
+
+
+def _collate_samples(batch: Sequence[Sample]) -> Sample:
+    elemment = batch[0]
+    collated = {}
+    for key in elemment.keys():
+        data: list[list[torch.Tensor]] = [sample[key] for sample in batch]
+        collated[key] = collate_meta_tensor([im for imgs in data for im in imgs])
+    return collated
 
 
 class NormalizeSampled(MapTransform, InvertibleTransform):
