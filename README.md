@@ -1,6 +1,6 @@
-# viscy
+# VisCy
 
-viscy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
+VisCy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
 
 The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images.
 We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline.
