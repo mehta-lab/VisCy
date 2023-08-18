@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 import math
 import os
@@ -13,6 +15,7 @@ from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
+from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
     CenterSpatialCropd,
     Compose,
@@ -50,6 +53,17 @@ def _search_int_in_str(pattern: str, file_name: str) -> str:
         raise ValueError(f"Cannot find pattern {pattern} in {file_name}.")
 
 
+def _collate_samples(batch: Sequence[Sample]) -> Sample:
+    elemment = batch[0]
+    collated = {}
+    for key in elemment.keys():
+        data: list[list[torch.Tensor]] = [sample[key] for sample in batch]
+        collated[key] = collate_meta_tensor(
+            [im for imgs in data for im in imgs]
+        )
+    return collated
+
+
 class ChannelMap(TypedDict, total=False):
     source: Union[str, Sequence[str]]
     # optional
@@ -59,9 +73,9 @@ class ChannelMap(TypedDict, total=False):
 class Sample(TypedDict, total=False):
     index: tuple[str, int, int]
     # optional
-    source: torch.Tensor
-    target: torch.Tensor
-    labels: torch.Tensor
+    source: Union[torch.Tensor, Sequence[torch.Tensor]]
+    target: Union[torch.Tensor, Sequence[torch.Tensor]]
+    labels: Union[torch.Tensor, Sequence[torch.Tensor]]
 
 
 class NormalizeSampled(MapTransform, InvertibleTransform):
@@ -178,9 +192,12 @@ class SlidingWindowDataset(Dataset):
         return self._max_window
 
     def _stack_channels(
-        self, sample_images: dict[str, torch.Tensor], key: str
+        self, sample_images: list[dict[str, torch.Tensor]], key: str
     ) -> torch.Tensor:
-        return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
+        return [
+            torch.stack([im[ch][0] for ch in self.channels[key]])
+            for im in sample_images
+        ]
 
     def __getitem__(self, index: int) -> Sample:
         img, tz = self._find_window(index)
@@ -198,8 +215,8 @@ class SlidingWindowDataset(Dataset):
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if self.transform:
             sample_images = self.transform(sample_images)
-        if isinstance(sample_images, list):
-            sample_images = sample_images[0]
+        # if isinstance(sample_images, list):
+        #     sample_images = sample_images[0]
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
@@ -275,7 +292,7 @@ class HCSDataModule(LightningDataModule):
         by default 0.8
     :param int batch_size: batch size, defaults to 16
     :param int num_workers: number of data-loading workers, defaults to 8
-    :param Literal["2.5D", "2D", "3D"] architecture: U-Net architecture,
+    :param Literal["2D", "2.1D", "2.5D", "3D"] architecture: U-Net architecture,
         defaults to "2.5D"
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
@@ -292,6 +309,8 @@ class HCSDataModule(LightningDataModule):
     :param float train_noise_std: Upper bound of the standard deviation
         of the Gaussian noise added to source images during training,
         defaults to 0.0
+    :param int train_patches_per_stack: number of patches to sample
+        from each stack during training, defaults to 1
     """
 
     def __init__(
@@ -303,7 +322,7 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        architecture: Literal["2.5D", "2D", "3D"] = "2.5D",
+        architecture: Literal["2D", "2.1D", "2.5D", "3D"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
         augment: bool = True,
         caching: bool = False,
@@ -311,6 +330,7 @@ class HCSDataModule(LightningDataModule):
         ground_truth_masks: str = None,
         train_z_scale_range: tuple[float, float] = [0, 0],
         train_noise_std: float = 0.0,
+        train_patches_per_stack: int = 1,
     ):
         super().__init__()
         self.data_path = data_path
@@ -333,6 +353,12 @@ class HCSDataModule(LightningDataModule):
             raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
         self.train_z_scale_range = train_z_scale_range
         self.train_noise_std = train_noise_std
+        if batch_size % train_patches_per_stack != 0:
+            raise ValueError(
+                "Batch size must be divisible by number of patches per stack. "
+                f"Got {batch_size} and {train_patches_per_stack}."
+            )
+        self.train_patches_per_stack = train_patches_per_stack
 
     def prepare_data(self):
         if not self.caching:
@@ -414,8 +440,13 @@ class HCSDataModule(LightningDataModule):
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
         train_dataset_settings = dataset_settings.copy()
-        expanded_z = math.ceil(self.z_window_size * (1 + self.train_z_scale_range[1]))
-        train_dataset_settings["z_window_size"] = max(1, expanded_z - expanded_z % 2)
+        z_scale_low, z_scale_high = self.train_z_scale_range
+        if z_scale_high <= 0.0:
+            expanded_z = self.z_window_size
+        else:
+            expanded_z = math.ceil(self.z_window_size * (1 + z_scale_high))
+            expanded_z -= expanded_z % 2
+        train_dataset_settings["z_window_size"] = expanded_z
         # train/val split
         self.train_dataset = SlidingWindowDataset(
             positions[:num_train_fovs],
@@ -474,10 +505,11 @@ class HCSDataModule(LightningDataModule):
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size,
+            batch_size=self.batch_size // self.train_patches_per_stack,
             num_workers=self.num_workers,
             shuffle=True,
             persistent_workers=bool(self.num_workers),
+            collate_fn=_collate_samples,
         )
 
     def val_dataloader(self):
@@ -523,7 +555,7 @@ class HCSDataModule(LightningDataModule):
                 keys=self.source_channel + self.target_channel,
                 w_key="weight",
                 spatial_size=(-1, self.yx_patch_size[0] * 2, self.yx_patch_size[1] * 2),
-                num_samples=1,
+                num_samples=self.train_patches_per_stack,
             )
         ]
         if self.augment:
