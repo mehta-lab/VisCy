@@ -190,6 +190,9 @@ class SlidingWindowDataset(Dataset):
     def _stack_channels(
         self, sample_images: list[dict[str, torch.Tensor]], key: str
     ) -> torch.Tensor:
+        if not isinstance(sample_images, list):
+            return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
+        # training time
         return [
             torch.stack([im[ch][0] for ch in self.channels[key]])
             for im in sample_images
