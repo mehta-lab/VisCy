@@ -16,48 +16,53 @@ VisCy evolved from our previous work on virtual staining of cellular components 
 [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning
 . eLife](https://elifesciences.org/articles/55502).
 
-VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). Our previous pipelinem, [microDL](https://github.com/mehta-lab/microDL), is deprecated and is now a public archive.
+VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). Our previous pipeline, [microDL](https://github.com/mehta-lab/microDL), is deprecated and is now a public archive.
 
 """
 
 # %% [markdown]
 """
 Today, we will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
-![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.png)
+![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
 
-The exercise is organized in 3 parts. Each part should take roughly 1.5 hours to work through:
-* [Part 1](Part-1:tensorboard) - Explore the data and model using tensorboard. Launch the training before lunch.
+The exercise is organized in 3 parts.
+
+* [Part 1](#1_phase2fluor) - Explore the data and model using tensorboard. Launch the training before lunch.
 * Lunch break - The model will continue training during lunch.
-* [Part 2](#Part-2:evaluation) - Evaluate the training using tensorboard logs. Train a model to predict phase from nuclei and membrane.
-* [Part 3](#Part-3:exploration) - Examine the quality of predictions and metrics after adjusting the capacity of the network.
+* [Part 2](#2_fluor2phase) - Evaluate the training with tensorboard. Train a model to predict phase from fluorescence.
+* [Part 3, bonus](#3_tuning) - Tune the capacity of networks and other hyperparameters to improve the performance.
+
+<div class="alert alert-info">
+Each part should take ~1.5 hours, depending on your practice with python.
+During parts 2 and 3, please summarize the models you train and their performance in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z).
+At checkpoints 2 and 3, we will discuss your results!
+</div>
 
 Before you start,
 
 <div class="alert alert-danger">
 Set your python kernel to <span style="color:black;">04-image-translation</span>
 </div>
-
 """
-# %% [markdown]
+# %% [markdown] <a id='1_phase2fluor'></a>
 """
-(Part-1:tensorboard)
-# Part 1: Visualize data and model using tensorboard, start training a model.
+# Part 1: Visualize data using tensorboard, start training a model.
 
 Learning goals:
 
 - Load the and visualize the images from OME-Zarr
-- Configure the data loader
+- Configure and understand the data loader
+- Log the data to tensorboard.
 - Initialize a 2D U-Net model for virtual staining
-- Log the images and the model to tensorboard.
 - Start training the model to predict nuclei and membrane from phase.
 
 """
 
-# %%
+# %% Imports and paths
+
 import matplotlib.pyplot as plt
 import torch
 from iohub import open_ome_zarr
-from tensorboard import notebook
 from torchview import draw_graph
 import os
 from pathlib import Path
@@ -66,21 +71,26 @@ import numpy as np
 
 from viscy.light.data import HCSDataModule
 from viscy.light.engine import VSTrainer, VSUNet
+from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
+from tensorboard import notebook  # for viewing tensorboard in notebook
 
-BATCH_SIZE = 32
-GPU_ID = 0
+# Paths to data and log directory
+data_path = Path(
+    "~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/"
+).expanduser()
+log_dir = Path("~/data/04_image_translation/logs/").expanduser()
 
 # %% [markdown]
 """
-Load Dataset.
+## Load Dataset.
 
 <div class="alert alert-info">
 Task 1.1
-
 Use <a href=https://czbiohub-sf.github.io/iohub/main/api/ngff.html#open-ome-zarr>
 <code>iohub.open_ome_zarr</code></a> to read the dataset.
+</div>
 
-There should be 301 FOVs in the dataset (9.3 GB compressed).
+There should be 301 FOVs in the dataset (12 GB compressed).
 
 Each FOV consists of 3 channels of 2048x2048 images,
 saved in the <a href="https://ngff.openmicroscopy.org/latest/#hcs-layout">
@@ -88,20 +98,15 @@ High-Content Screening (HCS) layout</a>
 specified by the Open Microscopy Environment Next Generation File Format
 (OME-NGFF).
 
-Run <code>open_ome_zarr?</code> in a cell to see the docstring.
-
 """
 
 # %%
 # set dataset path here
-data_path = Path(
-    "~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/"
-).expanduser()
+
 
 dataset = open_ome_zarr(data_path)
 
 print(len(list(dataset.positions())))
-
 
 # %% [markdown]
 """
@@ -116,6 +121,7 @@ as some cells are not expressing the fluorophore.
 
 # %%
 
+# Change the parameters below to visualize data.
 row = "0"
 col = "0"
 field = "42"
@@ -124,7 +130,7 @@ field = "42"
 # '1' is down-scaled 2x2,
 # '2' is down-scaled 4x4.
 # Such datasets are called image pyramids.
-pyaramid_level = "0"
+pyaramid_level = "2"
 
 # `channel_names` is the metadata that is stored with data accoring to the OME-NGFF spec.
 n_channels = len(dataset.channel_names)
@@ -147,10 +153,13 @@ plt.tight_layout()
 
 # %% [markdown]
 """
-Configure the data loaders for training and validation.
+## Initialize the data loaders.
 """
 
 # %%
+
+BATCH_SIZE = 32
+
 data_module = HCSDataModule(
     data_path,
     source_channel="Phase",
@@ -169,10 +178,36 @@ print(len(data_module.train_dataset), len(data_module.val_dataset))
 
 # %% [markdown]
 """
+## Initialize tensorboard.
+
+<div class="alert alert-info">
+Task 1.2
+Log the batches drawn with data loader to tensorboard.
+"""
+
+# %% [markdown]
+"""
+Launch TensorBoard :
+
+```
+%load_ext tensorboard
+%tensorboard --logdir model_log_dir
+```
+"""
+
+# %%
+notebook.list()
+
+# %%
+notebook.display(port=6006, height=800)
+
+
+# %% [markdown]
+"""
 <div class="alert alert-info">
 Task 1.2
 
-Validate that the data can be loaded in batches correctly.
+Understand the data loader.
 </div>
 """
 
@@ -180,9 +215,45 @@ Validate that the data can be loaded in batches correctly.
 train_dataloader = data_module.train_dataloader()
 
 for i, batch in enumerate(train_dataloader):
+    # The batch is a dictionary consisting of three keys: 'index', 'source', 'target'.
+    # index is the tuple consisting of (image name, time, and z-slice)
+    # source is the tensor of size 1x1x256x256
+    # target is the tensor of size 2x1x256x256
     ...
     # plot one image from each of the batch and break
     break
+
+# %% Load the data with tensorboard
+
+train_dataloader = data_module.train_dataloader()
+
+# create a SummaryWriter object to write to the tensorboard log
+writer = SummaryWriter()
+
+for i, batch in enumerate(train_dataloader):
+    # The batch is a dictionary consisting of three keys: 'index', 'source', 'target'.
+    # index is the tuple consisting of (image name, time, and z-slice)
+    # source is the tensor of size 1x1x256x256
+    # target is the tensor of size 2x1x256x256
+
+    if i >= 5:
+        break
+    FOV = batch["index"][0][0]
+    input_tensor = batch["source"][0, 0, :, :].squeeze()
+    target_nuclei_tensor = batch["target"][0, 0, :, :].squeeze()
+    target_membrane_tensor = batch["target"][0, 1, :, :].squeeze()
+
+    # add the images to the tensorboard log
+    writer.add_images(f"input/{FOV}", input_tensor.unsqueeze(0), global_step=i)
+    writer.add_images(
+        f"target_nuclei/{FOV}", target_nuclei_tensor.unsqueeze(0), global_step=i
+    )
+    writer.add_images(
+        f"target_membrane/{FOV}", target_membrane_tensor.unsqueeze(0), global_step=i
+    )
+
+# close the SummaryWriter object
+writer.close()
 
 # %% tags=["solution"]
 train_dataloader = data_module.train_dataloader()
@@ -228,6 +299,8 @@ Increase the ``depth`` in ``draw_graph`` to zoom in.
 """
 
 # %%
+
+
 model_config = {
     "architecture": "2D",
     "in_channels": 1,
@@ -257,6 +330,7 @@ Here we use the ``fast_dev_run`` flag to run a sanity check first.
 """
 
 # %%
+GPU_ID = 0
 trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 
 trainer.fit(model, datamodule=data_module)
@@ -303,26 +377,11 @@ trainer = VSTrainer(
     accelerator="gpu",
     max_epochs=20,
     log_every_n_steps=8,
-    default_root_dir=os.path.expanduser("~"),
+    default_root_dir=model_log_dir,
 )
 
 trainer.fit(model, datamodule=data_module)
 
-# %% [markdown]
-"""
-Launch TensorBoard with:
-
-```
-%load_ext tensorboard
-%tensorboard --logdir /path/to/lightning_logs
-```
-"""
-
-# %%
-notebook.list()
-
-# %%
-notebook.display(port=6006, height=800)
 
 # %% [markdown]
 """
@@ -334,4 +393,51 @@ we can come back after a while and evaluate the performance!
 </div>
 """
 
-# %%
+# %% [markdown] <a id='1_fluor2phase'></a>
+"""
+# Part 2: Visualize the previous model and training with tensorboard. Train fluorescence to phase contrast translation model.
+--------------------------------------------------
+
+Learning goals:
+- Visualize the previous model and training with tensorboard
+- Train fluorescence to phase contrast translation model
+- Compare the performance of the two models.
+
+"""
+
+# %% [markdown]
+"""
+<div class="alert alert-success">
+Checkpoint 2
+Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+
+Now that you have trained two models, let's think about the following questions:
+- What is the information content of each channel in the dataset?
+- How would you use image translation models?
+- What can you try to improve the performance of each model?
+
+
+</div>
+"""
+
+# %% [markdown] <a id='3_tuning'></a>
+"""
+# Part 3: Tune the capacity of networks and other hyperparameters to improve the performance.
+--------------------------------------------------
+
+Learning goals:
+- Visualize the previous model and training with tensorboard
+- Train fluorescence to phase contrast translation model
+- Compare the performance of the two models.
+
+"""
+
+# %% [markdown]
+"""
+<div class="alert alert-success">
+Checkpoint 3
+
+Congratulations! You have trained several image translation models now!
+Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+</div>
+"""
