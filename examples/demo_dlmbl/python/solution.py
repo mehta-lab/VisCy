@@ -78,6 +78,7 @@ from viscy.light.data import HCSDataModule
 # Trainer class and UNet.
 from viscy.light.engine import VSTrainer, VSUNet
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
+from pytorch_lightning.loggers import TensorBoardLogger #pytorch lightning wrapper for Tensorboard.
 from tensorboard import notebook  # for viewing tensorboard in notebook
 
 # Paths to data and log directory
@@ -341,6 +342,9 @@ trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs = 40,  fast_
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
+# log graph to the same experiment.
+
+trainer.logger.log_graph(phase2fluor_model,phase2fluor_data.train_dataset[0]['source'])
 # %% [markdown]
 """
 <div class="alert alert-info">
