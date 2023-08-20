@@ -23,7 +23,8 @@ dependencies = [
     "ipykernel", # used by demo_dlmbl
     "graphviz", # used by demo_dlmbl
     "torchview", # used by demo_dlmbl
-    "pathlib",
+    "tensorboard", # used by demo_dlmbl
+    "pillow", # used by demo_dlmbl
 ]
 dynamic = ["version"]
 
