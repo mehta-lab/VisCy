@@ -83,7 +83,7 @@ from tensorboard import notebook  # for viewing tensorboard in notebook
 
 # Paths to data and log directory
 data_path = Path(
-    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
+    Path("~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/")
 ).expanduser()
 
 log_dir = (
@@ -522,8 +522,8 @@ trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
-def plot_metrics(model, data_module):
-    # Compute metrics for validation dataset and show as box plot or similar.
+def plot_metrics(model: VSUNet, data_module: HCSDataModule):
+    for batch in 
     
 # %% [markdown]
 """
