@@ -299,12 +299,13 @@ We setup a fresh data module and instantiate the trainer class.
 # %% The entire training loop is contained in this block.
 
 GPU_ID = 0
-BATCH_SIZE = 32
+BATCH_SIZE = 10
 
 
 # Dictionary that specifies key parameters of the model.
-model_config = {
+phase2fluor_config = {
     "architecture": "2D",
+    "num_filters": [24, 48, 96, 192, 384],
     "in_channels": 1,
     "out_channels": 2,
     "residual": True,
@@ -312,16 +313,16 @@ model_config = {
     "task": "reg", # reg = regression task.
 }
 
-model = VSUNet(
-    model_config=model_config.copy(),
+phase2fluor_model = VSUNet(
+    model_config=phase2fluor_config.copy(),
     batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.mse_loss,
+    loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
 )
 
 # Reinitialize the data module. 
-data_module = HCSDataModule(
+phase2fluor_data = HCSDataModule(
     data_path,
     source_channel="Phase",
     target_channel=["Nuclei", "Membrane"],
@@ -330,15 +331,15 @@ data_module = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=(256, 256), 
+    yx_patch_size=(512, 512), 
     augment = True 
 )
-data_module.setup("fit")
+phase2fluor_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs = 40,  fast_dev_run=True)
 
 # trainer class takes the model and the data module as inputs.
-trainer.fit(model, datamodule=data_module)
+trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 # %% [markdown]
 """
@@ -353,28 +354,21 @@ in a specific directory.
 """
 
 # %% tags=["solution"]
-wider_config = model_config | {"num_filters": [24, 48, 96, 192, 384]}
 
-model = model = VSUNet(
-    model_config=wider_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.mse_loss, # mean square error.
-    schedule="WarmupCosine",
-    log_num_samples=10,
-)
-
-n_samples = len(data_module.train_dataset)
-steps_per_epoch = n_samples // BATCH_SIZE
+GPU_ID = 0
+n_samples = len(phase2fluor_data.train_dataset)
+steps_per_epoch = n_samples // BATCH_SIZE # log data after so many steps.
 n_epochs = 50
 
 trainer = VSTrainer(
     accelerator="gpu",
+    devices=[GPU_ID],
     max_epochs=n_epochs,
     log_every_n_steps= steps_per_epoch,
     default_root_dir=Path(log_dir,"phase2fluor"),
 )
 
-trainer.fit(model, datamodule=data_module)
+trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 
 # %% [markdown]
@@ -402,7 +396,7 @@ Learning goals:
 # %% 
 
 # visualize graph. 
-model_graph = torchview.draw_graph(model, data_module.train_dataset[0]['source'], depth=2, device="cpu")
+model_graph = torchview.draw_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]['source'], depth=2, device="cpu")
 # Increase the depth to zoom in.
 
 graph = model_graph.visual_graph
@@ -410,10 +404,12 @@ graph
 
 # %% tags = ["solution"]
 
-GPU_ID = 0
-BATCH_SIZE = 32
 
-data_module = HCSDataModule(
+GPU_ID = 0
+BATCH_SIZE = 10
+
+
+fluor2phase_data = HCSDataModule(
     data_path,
     source_channel="Nuclei",
     target_channel="Phase",
@@ -422,27 +418,25 @@ data_module = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=(256, 256), 
+    yx_patch_size=(512, 512), 
     augment = True 
 )
-data_module.setup("fit")
+fluor2phase_data.setup("fit")
 
 
 # Dictionary that specifies key parameters of the model.
-model_config = {
+fluor2phase_config = {
     "architecture": "2D",
     "in_channels": 1,
     "out_channels": 1,
     "residual": True,
     "dropout": 0.1, # dropout randomly turns off weights to avoid overfitting of the model to data.
     "task": "reg", # reg = regression task.
+    "num_filters": [24, 48, 96, 192, 384],
 }
 
-wider_config = model_config | {"num_filters": [24, 48, 96, 192, 384]}
-
-
-model = VSUNet(
-    model_config=wider_config.copy(),
+fluor2phase_model = VSUNet(
+    model_config=fluor2phase_config.copy(),
     batch_size=BATCH_SIZE,
     loss_function=torch.nn.functional.mse_loss,
     schedule="WarmupCosine",
@@ -457,12 +451,13 @@ n_epochs = 50
 
 trainer = VSTrainer(
     accelerator="gpu",
+    devices=[GPU_ID],
     max_epochs=n_epochs,
     log_every_n_steps= steps_per_epoch,
     default_root_dir=Path(log_dir,"fluor2phase"),
 )
 
-trainer.fit(model, datamodule=data_module)
+trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
 # %% [markdown]
 """
