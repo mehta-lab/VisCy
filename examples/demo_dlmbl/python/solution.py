@@ -444,7 +444,7 @@ wider_config = model_config | {"num_filters": [24, 48, 96, 192, 384]}
 model = VSUNet(
     model_config=wider_config.copy(),
     batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.mae_loss,
+    loss_function=torch.nn.functional.mse_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
 )
@@ -486,10 +486,20 @@ Now that you have trained two models, let's think about the following questions:
 
 Learning goals:
 
-- Tweak model hyperparameters, primarily depth
+- Tweak model hyperparameters, primarily depth and learning rate.
 - Adjust batch size to fully utilize the VRAM
 """
 
+# %% tags = ["solution"]
+# TODO: Tune the capacity of network
+
+# %% tags = ["solution"]
+# TODO: Tune the learning rate
+
+# %% tags = ["solution"]
+def plot_metrics(model, data_module):
+    # Compute metrics for validation dataset and show as box plot or similar.
+    
 # %% [markdown]
 """
 <div class="alert alert-success">
@@ -499,19 +509,3 @@ Congratulations! You have trained several image translation models now!
 Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
 </div>
 """
-# %% 
-
-# data_module_augmented = HCSDataModule(
-#     data_path,
-#     source_channel="Phase",
-#     target_channel=["Nuclei", "Membrane"],
-#     z_window_size=1,
-#     split_ratio=0.8,
-#     batch_size=21,
-#     num_workers=8,
-#     architecture="2D",
-#     yx_patch_size=(512, 512),
-#     augment = True # Turn on augmentations.
-# )
-
-# data_module_augmented.setup("fit")
