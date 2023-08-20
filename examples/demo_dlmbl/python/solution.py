@@ -80,6 +80,9 @@ from viscy.light.engine import VSTrainer, VSUNet
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 from pytorch_lightning.loggers import TensorBoardLogger #pytorch lightning wrapper for Tensorboard.
 from tensorboard import notebook  # for viewing tensorboard in notebook
+from lightning.pytorch import seed_everything
+
+seed_everything(42, workers=True)
 
 # Paths to data and log directory
 data_path = Path(
@@ -503,7 +506,7 @@ phase2fluor_wider_model = VSUNet(
     example_input_yx_shape=YX_PATCH_SIZE
 )
 
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True, seed)
 trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
@@ -520,10 +523,6 @@ phase2fluor_slow_model = VSUNet(
 
 trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
-
-# %% tags = ["solution"]
-def plot_metrics(model: VSUNet, data_module: HCSDataModule):
-    for batch in 
     
 # %% [markdown]
 """
