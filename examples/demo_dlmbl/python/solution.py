@@ -300,6 +300,7 @@ We setup a fresh data module and instantiate the trainer class.
 
 GPU_ID = 0
 BATCH_SIZE = 10
+YX_PATCH_SIZE = (512, 512)
 
 
 # Dictionary that specifies key parameters of the model.
@@ -319,6 +320,7 @@ phase2fluor_model = VSUNet(
     loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE
 )
 
 # Reinitialize the data module. 
@@ -331,7 +333,7 @@ phase2fluor_data = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=(512, 512), 
+    yx_patch_size=YX_PATCH_SIZE, 
     augment = True 
 )
 phase2fluor_data.setup("fit")
