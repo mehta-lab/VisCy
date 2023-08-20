@@ -126,7 +126,7 @@ Notice that labelling of nuclei channel is not complete - some cells are not exp
 
 dataset = open_ome_zarr(data_path)
 
-print(f"Number of positions:{len(list(dataset.positions()))}")
+print(f"Number of positions: {len(list(dataset.positions()))}")
 
 # Use the field and pyramid_level below to visualize data.
 row = "0"
@@ -140,7 +140,7 @@ field = "23"
 # Such datasets are called image pyramids.
 pyaramid_level = "0"
 
-# `channel_names` is the metadata that is stored with data accoring to the OME-NGFF spec.
+# `channel_names` is the metadata that is stored with data according to the OME-NGFF spec.
 n_channels = len(dataset.channel_names)
 
 image = dataset[f"{row}/{col}/{field}/{pyaramid_level}"].numpy()
