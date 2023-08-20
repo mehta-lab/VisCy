@@ -409,12 +409,6 @@ graph = model_graph.visual_graph
 graph
 
 # %% tags = ["solution"]
-
-
-GPU_ID = 0
-BATCH_SIZE = 10
-
-
 fluor2phase_data = HCSDataModule(
     data_path,
     source_channel="Nuclei",
@@ -424,11 +418,10 @@ fluor2phase_data = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=(512, 512), 
+    yx_patch_size=YX_PATCH_SIZE, 
     augment = True 
 )
 fluor2phase_data.setup("fit")
-
 
 # Dictionary that specifies key parameters of the model.
 fluor2phase_config = {
@@ -448,8 +441,6 @@ fluor2phase_model = VSUNet(
     schedule="WarmupCosine",
     log_num_samples=10,
 )
-
-
 
 n_samples = len(data_module.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE
