@@ -83,7 +83,7 @@ from tensorboard import notebook  # for viewing tensorboard in notebook
 
 # Paths to data and log directory
 data_path = Path(
-    "~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/"
+    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
 ).expanduser()
 
 log_dir = (
@@ -127,7 +127,7 @@ Notice that labelling of nuclei channel is not complete - some cells are not exp
 
 dataset = open_ome_zarr(data_path)
 
-print(f"Number of positions:{len(list(dataset.positions()))}")
+print(f"Number of positions: {len(list(dataset.positions()))}")
 
 # Use the field and pyramid_level below to visualize data.
 row = "0"
@@ -141,7 +141,7 @@ field = "23"
 # Such datasets are called image pyramids.
 pyaramid_level = "0"
 
-# `channel_names` is the metadata that is stored with data accoring to the OME-NGFF spec.
+# `channel_names` is the metadata that is stored with data according to the OME-NGFF spec.
 n_channels = len(dataset.channel_names)
 
 image = dataset[f"{row}/{col}/{field}/{pyaramid_level}"].numpy()
@@ -153,8 +153,8 @@ for i in range(n_channels):
     for i in range(n_channels):
         channel_image = image[0, i, 0]
         # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
-        p1, p99 = np.percentile(channel_image, (0.5, 99.5))
-        channel_image = np.clip(channel_image, p1, p99)
+        p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+        channel_image = np.clip(channel_image, p_low, p_high)
         axes[i].imshow(channel_image, cmap="gray")
         axes[i].axis("off")
         axes[i].set_title(dataset.channel_names[i])
