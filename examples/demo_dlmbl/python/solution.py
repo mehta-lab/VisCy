@@ -82,7 +82,7 @@ from tensorboard import notebook  # for viewing tensorboard in notebook
 
 # Paths to data and log directory
 data_path = Path(
-    "~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/"
+    "/hpc/projects/comp.micro/virtual_staining/datasets/dlmbl/HEK_nuclei_membrane_pyramid.zarr"
 ).expanduser()
 
 log_dir = (
@@ -152,8 +152,8 @@ for i in range(n_channels):
     for i in range(n_channels):
         channel_image = image[0, i, 0]
         # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
-        p1, p99 = np.percentile(channel_image, (0.5, 99.5))
-        channel_image = np.clip(channel_image, p1, p99)
+        p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+        channel_image = np.clip(channel_image, p_low, p_high)
         axes[i].imshow(channel_image, cmap="gray")
         axes[i].axis("off")
         axes[i].set_title(dataset.channel_names[i])
