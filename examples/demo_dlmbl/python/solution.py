@@ -442,7 +442,7 @@ fluor2phase_model = VSUNet(
     log_num_samples=10,
 )
 
-n_samples = len(data_module.train_dataset)
+n_samples = len(fluor2phase_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE
 n_epochs = 50
 
@@ -483,7 +483,7 @@ Learning goals:
 """
 
 # %% tags = ["solution"]
-# TODO: Tune the capacity of network
+
 
 # %% tags = ["solution"]
 # TODO: Tune the learning rate
