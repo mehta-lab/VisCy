@@ -507,7 +507,19 @@ trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
-# TODO: Tune the learning rate
+phase2fluor_slow_model = VSUNet(
+    model_config=phase2fluor_config.copy(),
+    batch_size=BATCH_SIZE,
+    loss_function=torch.nn.functional.l1_loss,
+    # lower learning rate by 5 times
+    lr=2e-4,
+    schedule="WarmupCosine",
+    log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE
+)
+
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
+trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
 def plot_metrics(model, data_module):
