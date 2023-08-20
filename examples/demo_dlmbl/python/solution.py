@@ -478,12 +478,33 @@ Now that you have trained two models, let's think about the following questions:
 
 Learning goals:
 
-- Tweak model hyperparameters, primarily depth and learning rate.
+- Tweak model hyperparameters, primarily width and learning rate.
 - Adjust batch size to fully utilize the VRAM
 """
 
 # %% tags = ["solution"]
+phase2fluor_wider_config = {
+    "architecture": "2D",
+    # double the number of filters at each stage
+    "num_filters": [48, 96, 192, 384, 768],
+    "in_channels": 1,
+    "out_channels": 2,
+    "residual": True,
+    "dropout": 0.1,
+    "task": "reg",
+}
 
+phase2fluor_wider_model = VSUNet(
+    model_config=phase2fluor_wider_config.copy(),
+    batch_size=BATCH_SIZE,
+    loss_function=torch.nn.functional.l1_loss,
+    schedule="WarmupCosine",
+    log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE
+)
+
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
+trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
 # TODO: Tune the learning rate
