@@ -104,7 +104,6 @@ class VSUNet(LightningModule):
 
     :param dict model_config: model config,
         defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
-    :param int batch_size: batch size, defaults to 16
     :param Callable[[torch.Tensor, torch.Tensor], torch.Tensor] loss_function:
         loss function in training/validation, defaults to L2 (mean squared error)
     :param float lr: learning rate in training, defaults to 1e-3
@@ -127,7 +126,6 @@ class VSUNet(LightningModule):
     def __init__(
         self,
         model_config: dict = {},
-        batch_size: int = 16,
         loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -145,7 +143,6 @@ class VSUNet(LightningModule):
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
-        self.batch_size = batch_size
         self.loss_function = loss_function if loss_function else F.mse_loss
         self.lr = lr
         self.schedule = schedule
@@ -182,7 +179,6 @@ class VSUNet(LightningModule):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            batch_size=self.batch_size,
             sync_dist=True,
         )
         if batch_idx < self.log_num_samples:
@@ -196,7 +192,7 @@ class VSUNet(LightningModule):
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("loss/validate", loss, batch_size=self.batch_size, sync_dist=True)
+        self.log("loss/validate", loss, sync_dist=True)
         if batch_idx < self.log_num_samples:
             self.validation_step_outputs.append(
                 self._detach_sample((source, target, pred))
