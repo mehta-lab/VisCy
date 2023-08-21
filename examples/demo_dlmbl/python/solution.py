@@ -179,32 +179,9 @@ The dataloader in `HCSDataModule` returns a batch of samples. A `batch` is a lis
 
 """
 
-# %%
+# %% 
+# Define a function to write a batch to tensorboard log.
 
-BATCH_SIZE = 42  # 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
-# More seriously, batch size does not have to be a power of 2.
-# See: https://sebastianraschka.com/blog/2022/batch-size-2.html
-
-data_module = HCSDataModule(
-    data_path,
-    source_channel="Phase",
-    target_channel=["Nuclei", "Membrane"],
-    z_window_size=1,
-    split_ratio=0.8,
-    batch_size=BATCH_SIZE,
-    num_workers=8,
-    architecture="2D",
-    yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
-    augment=False,  # Turn off augmentation for now.
-)
-data_module.setup("fit")
-
-print(
-    f"FOVs in training set: {len(data_module.train_dataset)}, FOVs in validation set:{len(data_module.val_dataset)}"
-)
-
-
-# %% Define a function to write a batch to tensorboard log.
 def log_batch_tensorboard(batch, batchno, writer, card_name):
     """
     Logs a batch of images to TensorBoard.
@@ -246,22 +223,57 @@ def log_batch_tensorboard(batch, batchno, writer, card_name):
     writer.add_image(card_name, grid, batchno)
 
 
-# %% Log a batch and an epoch to tensorboard.
+# %%
 
-writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
+# Initialize the data module.
+
+BATCH_SIZE = 42 
+# 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
+# More seriously, batch size does not have to be a power of 2.
+# See: https://sebastianraschka.com/blog/2022/batch-size-2.html
+
+data_module = HCSDataModule(
+    data_path,
+    source_channel="Phase",
+    target_channel=["Nuclei", "Membrane"],
+    z_window_size=1,
+    split_ratio=0.8,
+    batch_size=BATCH_SIZE,
+    num_workers=8,
+    architecture="2D",
+    yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
+    augment=False,  # Turn off augmentation for now.
+)
+data_module.setup("fit")
+
+print(
+    f"FOVs in training set: {len(data_module.train_dataset)}, FOVs in validation set:{len(data_module.val_dataset)}"
+)
 train_dataloader = data_module.train_dataloader()
 
+# Instantiate the tensorboard SummaryWriter, logs the first batch and then iterates through all the batches and logs them to tensorboard.
+
+writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
 # Draw a batch and write to tensorboard.
 batch = next(iter(train_dataloader))
 log_batch_tensorboard(batch, 0, writer, "augmentation/none")
 
+# Iterate through all the batches and log them to tensorboard.
 for i, batch in enumerate(train_dataloader):
     log_batch_tensorboard(batch, i, writer, "augmentation/none")
 writer.close()
 
-# %% Use the following if you need to bring up the tensorboard session again
-# notebook.list()
-# notebook.display(port=6006, height=800)
+# %% [markdown]
+"""
+There are multiple ways of seeing the tensorboard.
+1. Jupyter lab forwards the tensorboard port to the browser. Go to http://localhost:6006/ to see the tensorboard.
+2. You likely have an open viewer in the first cell where you loaded tensorboard jupyter extension.
+3. If you want to see tensorboard in a specific cell, use the following code.
+```
+notebook.list() # View open TensorBoard instances
+notebook.display(port=6006, height=800) # Display the TensorBoard instance specified by the port.
+```
+"""
 
 # %% [markdown]
 """
@@ -272,18 +284,20 @@ Task 1.3
 Turn on augmentation and view the batch in tensorboard.
 """
 # %%
-# data_module.augment = ...
-# data_module.batch_size = ...
-# ... # Feel free to adjust a few other parameters of data_module.
-# data_module.setup("fit")
-# train_dataloader = data_module.train_dataloader()
-# # Draw batches and write to tensorboard
-# writer = SummaryWriter(log_dir = f"{log_dir}/view_batch")
-# for i, batch in enumerate(train_dataloader):
-#     log_batch_tensorboard(...)
-# writer.close()
+##########################
+######## TODO ########
+##########################
+
+# Write code to turn on augmentations, change batch sizes and log them to tensorboard.
+# See how the training data changes as a function of these parameters.
+# Remember to call `data_module.setup("fit")` after changing the parameters.
+
 
 # %% tags=["solution"]
+##########################
+######## Solution ########
+##########################
+
 data_module.augment = True
 data_module.batch_size = 21
 data_module.split_ratio = 0.8
@@ -303,7 +317,9 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` for configuration details.
 We setup a fresh data module and instantiate the trainer class.
 """
 
-# %% The entire training loop is contained in this cell.
+# %% 
+
+# The entire training loop is contained in this cell.
 
 GPU_ID = 0
 BATCH_SIZE = 10
@@ -326,7 +342,7 @@ phase2fluor_model = VSUNet(
     batch_size=BATCH_SIZE,
     loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
-    log_num_samples=10,
+    log_num_samples=10, # Number of samples from each batch to log to tensorboard.
     example_input_yx_shape=YX_PATCH_SIZE,
 )
 
@@ -344,19 +360,13 @@ phase2fluor_data = HCSDataModule(
     augment=True,
 )
 phase2fluor_data.setup("fit")
-# fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(
-    accelerator="gpu", devices=[GPU_ID], max_epochs=40, fast_dev_run=True
-)
 
-# trainer class takes the model and the data module as inputs.
-trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 # %% [markdown]
 """
 <div class="alert alert-info">
 Task 1.4
-Setup the training for ~50 epochs
+Setup the training for ~30 epochs
 </div>
 
 Tips:
@@ -364,7 +374,19 @@ Tips:
 in a specific directory.
 """
 
-# %% tags=["solution"]
+# %% Setup trainer and check for errors.
+
+# fast_dev_run runs a single batch of data through the model to check for errors.
+trainer = VSTrainer(
+    accelerator="gpu", devices=[GPU_ID], fast_dev_run=True
+)
+
+# trainer class takes the model and the data module as inputs.
+trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
+
+
+
+# %% 
 
 GPU_ID = 0
 n_samples = len(phase2fluor_data.train_dataset)
@@ -377,8 +399,7 @@ trainer = VSTrainer(
     max_epochs=n_epochs,
     log_every_n_steps=steps_per_epoch // 2, 
     # log losses and image samples 2 times per epoch.
-    default_root_dir=Path(log_dir, "phase2fluor"),
-    
+    default_root_dir=Path(log_dir, "phase2fluor"), # lightning trainer transparently saves logs and model checkpoints in this directory.
 )
 
 # Log graph
@@ -411,17 +432,17 @@ Learning goals:
 
 # %%
 
-# visualize graph.
-model_graph = torchview.draw_graph(
+# PyTorch uses dynamic graphs under the hood. The graphs are constructed on the fly. This is in contrast to TensorFlow, where the graph is constructed before the training loop and remains static. In other words, the graph of the network can change with every forward pass. Therefore, we need to supply an input tensor to construct the graph. The input tensor can be a random tensor of the correct shape and type. We can also supply a real image from the dataset. The latter is more useful for debugging.
+
+# visualize graph. 
+model_graph_phase2fluor = torchview.draw_graph(
     phase2fluor_model,
     phase2fluor_data.train_dataset[0]["source"],
-    depth=2,
+    depth=2, # adjust depth to zoom in.
     device="cpu",
 )
 # Increase the depth to zoom in.
-
-graph = model_graph.visual_graph
-graph
+model_graph_phase2fluor.visual_graph
 
 # %% tags = ["solution"]
 fluor2phase_data = HCSDataModule(
@@ -472,78 +493,33 @@ trainer = VSTrainer(
 trainer.logger.log_graph(fluor2phase_model, fluor2phase_data.train_dataset[0]["source"])
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
+# %% 
+# Visualize the graph of fluor2phase model. 
+model_graph_fluor2phase = torchview.draw_graph(
+    phase2fluor_model,
+    phase2fluor_data.train_dataset[0]["source"],
+    depth=2, # adjust depth to zoom in.
+    device="cpu",
+)
+model_graph_fluor2phase.visual_graph
+
 # %% [markdown]
 """
-<div class="alert alert-success">
-Checkpoint 2
-Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+We now look at some metrics of performance. Loss is a differentiable metric. But, several non-differentiable metrics are useful to assess the performance of the model. We typically evaluate the model performance on a held out test data. We will use the following metrics to evaluate the accuracy of regression of the model:
+- [Coefficient of determination](https://en.wikipedia.org/wiki/Coefficient_of_determination): $R^2$ 
+- [Person Correlation](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient).
+- [Structural similarity](https://en.wikipedia.org/wiki/Structural_similarity) (SSIM):
 
-Now that you have trained two models, let's think about the following questions:
-- What is the information content of each channel in the dataset?
-- How would you use image translation models?
-- What can you try to improve the performance of each model?
-
-
-</div>
 """
+# %%
 
-# %% [markdown] <a id='3_tuning'></a>
-"""
-# Part 3: Tune the capacity of networks and other hyperparameters to improve the performance.
---------------------------------------------------
-
-Learning goals:
-
-- Tweak model hyperparameters, primarily width and learning rate.
-- Adjust batch size to fully utilize the VRAM
-"""
-
-# %% tags = ["solution"]
-phase2fluor_wider_config = {
-    "architecture": "2D",
-    # double the number of filters at each stage
-    "num_filters": [48, 96, 192, 384, 768],
-    "in_channels": 1,
-    "out_channels": 2,
-    "residual": True,
-    "dropout": 0.1,
-    "task": "reg",
-}
-
-phase2fluor_wider_model = VSUNet(
-    model_config=phase2fluor_wider_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.l1_loss,
-    schedule="WarmupCosine",
-    log_num_samples=10,
-    example_input_yx_shape=YX_PATCH_SIZE,
-)
-
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
-trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
-
-# %% tags = ["solution"]
-phase2fluor_slow_model = VSUNet(
-    model_config=phase2fluor_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.l1_loss,
-    # lower learning rate by 5 times
-    lr=2e-4,
-    schedule="WarmupCosine",
-    log_num_samples=10,
-    example_input_yx_shape=YX_PATCH_SIZE,
-)
-
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
-trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
-
-# %% tags = ["solution"]
-# name of the model variant
+# TODO: set following parameters, specifically path to checkpoint, and log the metrics.
+test_data_path = Path("~/data/04_image_translation/HEK_nuclei_membrane_test.zarr").expanduser()
 model_version = "phase2fluor"
 save_dir = Path(log_dir, "test")
-test_data_path = Path("~/data/04_image_translation/HEK_nuclei_membrane_test.zarr").expanduser()
-# FIXME: path to checkpoint
-ckpt_path = Path(r"/home/mehtas/data/04_image_translation/logs/phase2fluor/lightning_logs/version_0/checkpoints/epoch=29-step=720.ckpt")
+ckpt_path = Path(r"/home/mehtas/data/04_image_translation/logs/phase2fluor/lightning_logs/version_0/checkpoints/epoch=29-step=720.ckpt") #prefix the string with 'r' to avoid the need for escape characters.
+### END TODO
+
 test_data = HCSDataModule(
     test_data_path,
     source_channel="Phase",
@@ -566,7 +542,7 @@ trainer.test(
 )
 # read metrics and plot
 metrics = pd.read_csv(Path(save_dir, "lightning_logs", model_version, "metrics.csv"))
-axes = metrics.boxplot(
+metrics.boxplot(
     column=[
         "test_metrics/r2_step",
         "test_metrics/pearson_step",
@@ -574,6 +550,102 @@ axes = metrics.boxplot(
     ],
     rot=30,
 )
+# %% [markdown]
+"""
+<div class="alert alert-success">
+Checkpoint 2
+Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+
+Now that you have trained two models, let's think about the following questions:
+- What is the information content of each channel in the dataset?
+- How would you use image translation models?
+- What can you try to improve the performance of each model?
+
+
+</div>
+"""
+
+# %% [markdown] <a id='3_tuning'></a>
+"""
+# Part 3: Run computational experiments to tune the capacity of models.
+--------------------------------------------------
+
+Learning goals:
+
+- Tweak model hyperparameters, such as number of filters at each depth.
+- Adjust learning rate to improve performance.
+"""
+
+# %%
+# %%
+##########################
+######## TODO ########
+##########################
+
+# Choose a model you want to train (phase2fluor or fluor2phase).
+# Create a config to double the number of filters at each stage.
+# Use training loop illustrated in previous cells to train phase2fluor and fluor2phase models to prototype your own training loop.
+
+
+# %% tags = ["solution"]
+
+##########################
+######## Solution ########
+##########################
+
+phase2fluor_wider_config = {
+    "architecture": "2D",
+    # double the number of filters at each stage
+    "num_filters": [48, 96, 192, 384, 768],
+    "in_channels": 1,
+    "out_channels": 2,
+    "residual": True,
+    "dropout": 0.1,
+    "task": "reg",
+}
+
+phase2fluor_wider_model = VSUNet(
+    model_config=phase2fluor_wider_config.copy(),
+    batch_size=BATCH_SIZE,
+    loss_function=torch.nn.functional.l1_loss,
+    schedule="WarmupCosine",
+    log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE,
+)
+ 
+
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs=n_epochs, log_every_n_steps=steps_per_epoch, default_root_dir=Path(log_dir, "phase2fluor"), fast_dev_run=True) # Set fast_dev_run to False to train the model.
+trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
+
+# %%
+##########################
+######## TODO ########
+##########################
+
+# Choose a model you want to train (phase2fluor or fluor2phase).
+# Train it with lower learning rate to see how the performance changes.
+
+
+# %% tags = ["solution"]
+
+##########################
+######## Solution ########
+##########################
+
+phase2fluor_slow_model = VSUNet(
+    model_config=phase2fluor_config.copy(),
+    batch_size=BATCH_SIZE,
+    loss_function=torch.nn.functional.l1_loss,
+    # lower learning rate by 5 times
+    lr=2e-4,
+    schedule="WarmupCosine",
+    log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE,
+)
+
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs=n_epochs, log_every_n_steps=steps_per_epoch, default_root_dir=Path(log_dir, "phase2fluor"), fast_dev_run=True)
+trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
+
 
 # %% [markdown]
 """
@@ -581,6 +653,6 @@ axes = metrics.boxplot(
 Checkpoint 3
 
 Congratulations! You have trained several image translation models now!
-Please summarize hyperparameters and performance of your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+Please document hyperparameters, snapshots of predictioons on validation set, and loss curves for your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
 </div>
 """
