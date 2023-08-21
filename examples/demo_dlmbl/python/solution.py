@@ -303,7 +303,7 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` for configuration details.
 We setup a fresh data module and instantiate the trainer class.
 """
 
-# %% The entire training loop is contained in this block.
+# %% The entire training loop is contained in this cell.
 
 GPU_ID = 0
 BATCH_SIZE = 10
@@ -352,9 +352,6 @@ trainer = VSTrainer(
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
-# log graph to the same experiment.
-
-trainer.logger.log_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]["source"])
 # %% [markdown]
 """
 <div class="alert alert-info">
@@ -371,17 +368,22 @@ in a specific directory.
 
 GPU_ID = 0
 n_samples = len(phase2fluor_data.train_dataset)
-steps_per_epoch = n_samples // BATCH_SIZE  # log data after so many steps.
-n_epochs = 50
+steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
+n_epochs = 30
 
 trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch,
+    log_every_n_steps=steps_per_epoch // 2, 
+    # log losses and image samples 2 times per epoch.
     default_root_dir=Path(log_dir, "phase2fluor"),
+    
 )
 
+# Log graph
+trainer.logger.log_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]["source"])
+# Launch training.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 
@@ -453,11 +455,12 @@ fluor2phase_model = VSUNet(
     loss_function=torch.nn.functional.mse_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
+    example_input_yx_shape=YX_PATCH_SIZE,
 )
 
 n_samples = len(fluor2phase_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE
-n_epochs = 50
+n_epochs = 30
 
 trainer = VSTrainer(
     accelerator="gpu",
@@ -466,7 +469,7 @@ trainer = VSTrainer(
     log_every_n_steps=steps_per_epoch,
     default_root_dir=Path(log_dir, "fluor2phase"),
 )
-
+trainer.logger.log_graph(fluor2phase_model, fluor2phase_data.train_dataset[0]["source"])
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
 # %% [markdown]
@@ -538,9 +541,9 @@ trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
 # name of the model variant
 model_version = "phase2fluor"
 save_dir = Path(log_dir, "test")
-test_data_path = Path("~/data/04_image_translation/test.zarr").expanduser()
+test_data_path = Path("~/data/04_image_translation/HEK_nuclei_membrane_test.zarr").expanduser()
 # FIXME: path to checkpoint
-ckpt_path = save_dir / Path("lightning_logs", model_version, "checkpoints", "...ckpt")
+ckpt_path = Path(r"/home/mehtas/data/04_image_translation/logs/phase2fluor/lightning_logs/version_0/checkpoints/epoch=29-step=720.ckpt")
 test_data = HCSDataModule(
     test_data_path,
     source_channel="Phase",
@@ -562,7 +565,7 @@ trainer.test(
     ckpt_path=ckpt_path,
 )
 # read metrics and plot
-metrics = pd.read_csv(save_dir / Path("lightning_logs", model_version, "metrics.csv"))
+metrics = pd.read_csv(Path(save_dir, "lightning_logs", model_version, "metrics.csv"))
 axes = metrics.boxplot(
     column=[
         "test_metrics/r2_step",
