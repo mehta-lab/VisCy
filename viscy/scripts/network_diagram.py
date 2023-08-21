@@ -13,7 +13,6 @@ model = VSUNet(
         "backbone": "convnextv2_femto",
         "stem_kernel_size": (3, 4, 4),
     },
-    batch_size=32,
 )
 # %%
 model_graph = draw_graph(
