@@ -63,24 +63,27 @@ Learning goals:
 
 # %% Imports and paths
 
-import matplotlib.pyplot as plt
-import torch
-from iohub import open_ome_zarr
-import torchvision
-import torchview
-import os
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
+import torch
+import torchview
+import torchvision
+from iohub import open_ome_zarr
+from lightning.pytorch import seed_everything
+from lightning.pytorch.loggers import CSVLogger
 
+# pytorch lightning wrapper for Tensorboard.
+from tensorboard import notebook  # for viewing tensorboard in notebook
+from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 
-# HCSDataModule makes it easy to load data during training. 
-from viscy.light.data import HCSDataModule 
+# HCSDataModule makes it easy to load data during training.
+from viscy.light.data import HCSDataModule
+
 # Trainer class and UNet.
 from viscy.light.engine import VSTrainer, VSUNet
-from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
-from pytorch_lightning.loggers import TensorBoardLogger #pytorch lightning wrapper for Tensorboard.
-from tensorboard import notebook  # for viewing tensorboard in notebook
-from lightning.pytorch import seed_everything
 
 seed_everything(42, workers=True)
 
@@ -89,18 +92,13 @@ data_path = Path(
     Path("~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/")
 ).expanduser()
 
-log_dir = (
-    Path("~/data/04_image_translation/logs/")
-    .expanduser()
-)
+log_dir = Path("~/data/04_image_translation/logs/").expanduser()
 
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
 
 %reload_ext tensorboard
 %tensorboard --logdir {log_dir}
-
-
 
 
 # %% [markdown]
@@ -183,8 +181,8 @@ The dataloader in `HCSDataModule` returns a batch of samples. A `batch` is a lis
 
 # %%
 
-BATCH_SIZE = 42 # 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
-# More seriously, batch size does not have to be a power of 2. 
+BATCH_SIZE = 42  # 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
+# More seriously, batch size does not have to be a power of 2.
 # See: https://sebastianraschka.com/blog/2022/batch-size-2.html
 
 data_module = HCSDataModule(
@@ -196,14 +194,15 @@ data_module = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=(512, 512), # larger patch size makes it easy to see augmentations.
-    augment = False # Turn off augmentation for now.
+    yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
+    augment=False,  # Turn off augmentation for now.
 )
 data_module.setup("fit")
 
 print(
     f"FOVs in training set: {len(data_module.train_dataset)}, FOVs in validation set:{len(data_module.val_dataset)}"
 )
+
 
 # %% Define a function to write a batch to tensorboard log.
 def log_batch_tensorboard(batch, batchno, writer, card_name):
@@ -218,37 +217,41 @@ def log_batch_tensorboard(batch, batchno, writer, card_name):
     Returns:
         None
     """
-    batch_phase = batch['source'][:,:,0,:,:]  # batch_size x z_size x Y x X tensor. 
-    batch_membrane = batch['target'][:,1,0,:,:].unsqueeze(1) # batch_size x 1 x Y x X tensor.
-    batch_nuclei = batch['target'][:,0,0,:,:].unsqueeze(1) # batch_size x 1 x Y x X tensor.
+    batch_phase = batch["source"][:, :, 0, :, :]  # batch_size x z_size x Y x X tensor.
+    batch_membrane = batch["target"][:, 1, 0, :, :].unsqueeze(
+        1
+    )  # batch_size x 1 x Y x X tensor.
+    batch_nuclei = batch["target"][:, 0, 0, :, :].unsqueeze(
+        1
+    )  # batch_size x 1 x Y x X tensor.
 
     p1, p99 = np.percentile(batch_membrane, (0.1, 99.9))
     batch_membrane = np.clip((batch_membrane - p1) / (p99 - p1), 0, 1)
 
-    p1, p99 = np.percentile(batch_nuclei,  (0.1, 99.9))
+    p1, p99 = np.percentile(batch_nuclei, (0.1, 99.9))
     batch_nuclei = np.clip((batch_nuclei - p1) / (p99 - p1), 0, 1)
 
-    p1, p99 = np.percentile(batch_phase,  (0.1, 99.9))
+    p1, p99 = np.percentile(batch_phase, (0.1, 99.9))
     batch_phase = np.clip((batch_phase - p1) / (p99 - p1), 0, 1)
-    
-    [N,C,H,W] = batch_phase.shape
-    interleaved_images = torch.zeros((3*N,C,H,W),dtype = batch_phase.dtype)
-    interleaved_images[0::3,:]=batch_phase
-    interleaved_images[1::3,:]=batch_nuclei
-    interleaved_images[2::3,:]=batch_membrane
 
-    grid=torchvision.utils.make_grid(interleaved_images, nrow=3)
+    [N, C, H, W] = batch_phase.shape
+    interleaved_images = torch.zeros((3 * N, C, H, W), dtype=batch_phase.dtype)
+    interleaved_images[0::3, :] = batch_phase
+    interleaved_images[1::3, :] = batch_nuclei
+    interleaved_images[2::3, :] = batch_membrane
+
+    grid = torchvision.utils.make_grid(interleaved_images, nrow=3)
 
     # add the grid to tensorboard
     writer.add_image(card_name, grid, batchno)
-    
+
 
 # %% Log a batch and an epoch to tensorboard.
 
-writer = SummaryWriter(log_dir = f"{log_dir}/view_batch")
+writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
 train_dataloader = data_module.train_dataloader()
 
-# Draw a batch and write to tensorboard. 
+# Draw a batch and write to tensorboard.
 batch = next(iter(train_dataloader))
 log_batch_tensorboard(batch, 0, writer, "augmentation/none")
 
@@ -268,7 +271,7 @@ writer.close()
 Task 1.3
 Turn on augmentation and view the batch in tensorboard.
 """
-# %% 
+# %%
 # data_module.augment = ...
 # data_module.batch_size = ...
 # ... # Feel free to adjust a few other parameters of data_module.
@@ -288,7 +291,7 @@ data_module.setup("fit")
 
 train_dataloader = data_module.train_dataloader()
 # Draw batches and write to tensorboard
-writer = SummaryWriter(log_dir = f"{log_dir}/view_batch")
+writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
 for i, batch in enumerate(train_dataloader):
     log_batch_tensorboard(batch, i, writer, "augmentation/some")
 writer.close()
@@ -314,8 +317,8 @@ phase2fluor_config = {
     "in_channels": 1,
     "out_channels": 2,
     "residual": True,
-    "dropout": 0.1, # dropout randomly turns off weights to avoid overfitting of the model to data.
-    "task": "reg", # reg = regression task.
+    "dropout": 0.1,  # dropout randomly turns off weights to avoid overfitting of the model to data.
+    "task": "reg",  # reg = regression task.
 }
 
 phase2fluor_model = VSUNet(
@@ -324,10 +327,10 @@ phase2fluor_model = VSUNet(
     loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
-    example_input_yx_shape=YX_PATCH_SIZE
+    example_input_yx_shape=YX_PATCH_SIZE,
 )
 
-# Reinitialize the data module. 
+# Reinitialize the data module.
 phase2fluor_data = HCSDataModule(
     data_path,
     source_channel="Phase",
@@ -337,19 +340,21 @@ phase2fluor_data = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=YX_PATCH_SIZE, 
-    augment = True 
+    yx_patch_size=YX_PATCH_SIZE,
+    augment=True,
 )
 phase2fluor_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs = 40,  fast_dev_run=True)
+trainer = VSTrainer(
+    accelerator="gpu", devices=[GPU_ID], max_epochs=40, fast_dev_run=True
+)
 
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 # log graph to the same experiment.
 
-trainer.logger.log_graph(phase2fluor_model,phase2fluor_data.train_dataset[0]['source'])
+trainer.logger.log_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]["source"])
 # %% [markdown]
 """
 <div class="alert alert-info">
@@ -366,15 +371,15 @@ in a specific directory.
 
 GPU_ID = 0
 n_samples = len(phase2fluor_data.train_dataset)
-steps_per_epoch = n_samples // BATCH_SIZE # log data after so many steps.
+steps_per_epoch = n_samples // BATCH_SIZE  # log data after so many steps.
 n_epochs = 50
 
 trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,
-    log_every_n_steps= steps_per_epoch,
-    default_root_dir=Path(log_dir,"phase2fluor"),
+    log_every_n_steps=steps_per_epoch,
+    default_root_dir=Path(log_dir, "phase2fluor"),
 )
 
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
@@ -402,10 +407,15 @@ Learning goals:
 
 """
 
-# %% 
+# %%
 
-# visualize graph. 
-model_graph = torchview.draw_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]['source'], depth=2, device="cpu")
+# visualize graph.
+model_graph = torchview.draw_graph(
+    phase2fluor_model,
+    phase2fluor_data.train_dataset[0]["source"],
+    depth=2,
+    device="cpu",
+)
 # Increase the depth to zoom in.
 
 graph = model_graph.visual_graph
@@ -421,8 +431,8 @@ fluor2phase_data = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=8,
     architecture="2D",
-    yx_patch_size=YX_PATCH_SIZE, 
-    augment = True 
+    yx_patch_size=YX_PATCH_SIZE,
+    augment=True,
 )
 fluor2phase_data.setup("fit")
 
@@ -432,8 +442,8 @@ fluor2phase_config = {
     "in_channels": 1,
     "out_channels": 1,
     "residual": True,
-    "dropout": 0.1, # dropout randomly turns off weights to avoid overfitting of the model to data.
-    "task": "reg", # reg = regression task.
+    "dropout": 0.1,  # dropout randomly turns off weights to avoid overfitting of the model to data.
+    "task": "reg",  # reg = regression task.
     "num_filters": [24, 48, 96, 192, 384],
 }
 
@@ -453,8 +463,8 @@ trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,
-    log_every_n_steps= steps_per_epoch,
-    default_root_dir=Path(log_dir,"fluor2phase"),
+    log_every_n_steps=steps_per_epoch,
+    default_root_dir=Path(log_dir, "fluor2phase"),
 )
 
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
@@ -503,10 +513,10 @@ phase2fluor_wider_model = VSUNet(
     loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
     log_num_samples=10,
-    example_input_yx_shape=YX_PATCH_SIZE
+    example_input_yx_shape=YX_PATCH_SIZE,
 )
 
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True, seed)
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
 
 # %% tags = ["solution"]
@@ -518,12 +528,50 @@ phase2fluor_slow_model = VSUNet(
     lr=2e-4,
     schedule="WarmupCosine",
     log_num_samples=10,
-    example_input_yx_shape=YX_PATCH_SIZE
+    example_input_yx_shape=YX_PATCH_SIZE,
 )
 
 trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
-    
+
+# %% tags = ["solution"]
+# name of the model variant
+model_version = "phase2fluor"
+save_dir = Path(log_dir, "test")
+test_data_path = Path("~/data/04_image_translation/test.zarr").expanduser()
+# FIXME: path to checkpoint
+ckpt_path = save_dir / Path("lightning_logs", model_version, "checkpoints", "...ckpt")
+test_data = HCSDataModule(
+    test_data_path,
+    source_channel="Phase",
+    target_channel=["Nuclei", "Membrane"],
+    z_window_size=1,
+    batch_size=1,
+    num_workers=8,
+    architecture="2D",
+)
+test_data.setup("test")
+trainer = VSTrainer(
+    accelerator="gpu",
+    devices=[GPU_ID],
+    logger=CSVLogger(save_dir=save_dir, version=model_version),
+)
+trainer.test(
+    phase2fluor_model,
+    datamodule=test_data,
+    ckpt_path=ckpt_path,
+)
+# read metrics and plot
+metrics = pd.read_csv(save_dir / Path("lightning_logs", model_version, "metrics.csv"))
+axes = metrics.boxplot(
+    column=[
+        "test_metrics/r2_step",
+        "test_metrics/pearson_step",
+        "test_metrics/SSIM_step",
+    ],
+    rot=30,
+)
+
 # %% [markdown]
 """
 <div class="alert alert-success">
