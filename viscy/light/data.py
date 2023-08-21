@@ -430,12 +430,19 @@ class HCSDataModule(LightningDataModule):
         if self.batch_size != 1:
             logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
         plate, normalize_transform = self._setup_eval(dataset_settings)
-        self.test_dataset = MaskTestDataset(
-            [p for _, p in plate.positions()],
-            transform=normalize_transform,
-            ground_truth_masks=self.ground_truth_masks,
-            **dataset_settings,
-        )
+        if self.ground_truth_masks:
+            self.test_dataset = MaskTestDataset(
+                [p for _, p in plate.positions()],
+                transform=normalize_transform,
+                ground_truth_masks=self.ground_truth_masks,
+                **dataset_settings,
+            )
+        else:
+            self.test_dataset = SlidingWindowDataset(
+                [p for _, p in plate.positions()],
+                transform=normalize_transform,
+                **dataset_settings,
+            )
 
     def _setup_predict(self, dataset_settings: dict):
         # track metadata for inverting transform
