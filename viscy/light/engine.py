@@ -310,11 +310,17 @@ class VSUNet(LightningModule):
     def on_test_start(self):
         """Load CellPose model for segmentation."""
         if CellposeModel is None:
-            raise ImportError(
+            # raise ImportError(
+            #     "CellPose not installed. "
+            #     "Please install the metrics dependency with "
+            #     '`pip install viscy".[metrics]"`'
+            # )
+            logging.warning(
                 "CellPose not installed. "
                 "Please install the metrics dependency with "
-                '`pip install viscy".[metrics]"`'
+                '`pip install viscy"[metrics]"`'
             )
+
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
                 model_type=self.test_cellpose_model_path, device=self.device
