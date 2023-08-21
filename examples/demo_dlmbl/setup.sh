@@ -4,10 +4,11 @@
 mamba create --name 04_image_translation python=3.10
 
 # Install ipykernel in the environment.
-mamba install -y ipykernel --name 04_image_translation
+mamba install -y ipykernel nbformat nbconvert black jupytext --name 04_image_translation
 # Specifying the environment explicitly.
 # mamba activate sometimes doesn't work from within shell scripts.
 
+mamba install -y nbformat --name 04_image_translation 
 
 # Find path to the environment - mamba activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep 04_image_translation | awk '{print $2}')

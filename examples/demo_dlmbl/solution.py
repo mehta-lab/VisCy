@@ -4,7 +4,7 @@
 ---
 
 Written by Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.
-
+---
 
 In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image. 
 
@@ -25,20 +25,22 @@ VisCy exploits recent advances in the data and metadata formats ([OME-zarr](http
 Today, we will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
 ![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
 
+<div class="alert alert-info">
 The exercise is organized in 3 parts.
 
-* [Part 1](#1_phase2fluor) - Explore the data and model using tensorboard. Launch the training before lunch.
+* **Part 1** - Explore the data using tensorboard. Launch the training before lunch.
 * Lunch break - The model will continue training during lunch.
-* [Part 2](#2_fluor2phase) - Evaluate the training with tensorboard. Train a model to predict phase from fluorescence.
-* [Part 3, bonus](#3_tuning) - Tune the capacity of networks and other hyperparameters to improve the performance.
-
+* **Part 2** - Evaluate the training with tensorboard. Train another model.
+* **Part 3** - Tune the models to improve performance.
+</div>
 
 📖 As you work through parts 2 and 3, please share the layouts of the models you train and their performance with everyone via [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z) 📖.
 
-<div class="alert alert-info">
+
 Our guesstimate is that each of the three parts will take ~1.5 hours, but don't rush parts 1 and 2 if you need more time with them.
-We will discuss your observations on google doc after checkpoints 2 and 3.
-</div>
+We will discuss your observations on google doc after checkpoints 2 and 3. The exercise is focused on understanding information contained in data, process of training and evaluating image translation models, and parameter exploration.
+There are a few coding tasks sprinkled in.
+
 
 Before you start,
 
@@ -48,7 +50,7 @@ Set your python kernel to <span style="color:black;">04-image-translation</span>
 """
 # %% [markdown] <a id='1_phase2fluor'></a>
 """
-# Part 1: Visualize training data using tensorboard, start training a model.
+# Part 1: Log training data to tensorboard, start training a model.
 ---------
 
 Learning goals:
@@ -97,8 +99,10 @@ log_dir = Path("~/data/04_image_translation/logs/").expanduser()
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
 
+# fmt: off
 %reload_ext tensorboard
 %tensorboard --logdir {log_dir}
+# fmt: on
 
 
 # %% [markdown]
@@ -179,8 +183,9 @@ The dataloader in `HCSDataModule` returns a batch of samples. A `batch` is a lis
 
 """
 
-# %% 
+# %%
 # Define a function to write a batch to tensorboard log.
+
 
 def log_batch_tensorboard(batch, batchno, writer, card_name):
     """
@@ -227,7 +232,7 @@ def log_batch_tensorboard(batch, batchno, writer, card_name):
 
 # Initialize the data module.
 
-BATCH_SIZE = 42 
+BATCH_SIZE = 42
 # 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
 # More seriously, batch size does not have to be a power of 2.
 # See: https://sebastianraschka.com/blog/2022/batch-size-2.html
@@ -317,7 +322,7 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` for configuration details.
 We setup a fresh data module and instantiate the trainer class.
 """
 
-# %% 
+# %%
 
 # The entire training loop is contained in this cell.
 
@@ -342,7 +347,7 @@ phase2fluor_model = VSUNet(
     batch_size=BATCH_SIZE,
     loss_function=torch.nn.functional.l1_loss,
     schedule="WarmupCosine",
-    log_num_samples=10, # Number of samples from each batch to log to tensorboard.
+    log_num_samples=10,  # Number of samples from each batch to log to tensorboard.
     example_input_yx_shape=YX_PATCH_SIZE,
 )
 
@@ -377,16 +382,13 @@ in a specific directory.
 # %% Setup trainer and check for errors.
 
 # fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(
-    accelerator="gpu", devices=[GPU_ID], fast_dev_run=True
-)
+trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 
-
-# %% 
+# %%
 
 GPU_ID = 0
 n_samples = len(phase2fluor_data.train_dataset)
@@ -397,9 +399,11 @@ trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch // 2, 
+    log_every_n_steps=steps_per_epoch // 2,
     # log losses and image samples 2 times per epoch.
-    default_root_dir=Path(log_dir, "phase2fluor"), # lightning trainer transparently saves logs and model checkpoints in this directory.
+    default_root_dir=Path(
+        log_dir, "phase2fluor"
+    ),  # lightning trainer transparently saves logs and model checkpoints in this directory.
 )
 
 # Log graph
@@ -420,7 +424,7 @@ we can come back after a while and evaluate the performance!
 
 # %% [markdown] <a id='1_fluor2phase'></a>
 """
-# Part 2: Visualize the previous model and training with tensorboard. Train fluorescence to phase contrast translation model.
+# Part 2: Assess previous model, train fluorescence to phase contrast translation model.
 --------------------------------------------------
 
 Learning goals:
@@ -434,11 +438,11 @@ Learning goals:
 
 # PyTorch uses dynamic graphs under the hood. The graphs are constructed on the fly. This is in contrast to TensorFlow, where the graph is constructed before the training loop and remains static. In other words, the graph of the network can change with every forward pass. Therefore, we need to supply an input tensor to construct the graph. The input tensor can be a random tensor of the correct shape and type. We can also supply a real image from the dataset. The latter is more useful for debugging.
 
-# visualize graph. 
+# visualize graph.
 model_graph_phase2fluor = torchview.draw_graph(
     phase2fluor_model,
     phase2fluor_data.train_dataset[0]["source"],
-    depth=2, # adjust depth to zoom in.
+    depth=2,  # adjust depth to zoom in.
     device="cpu",
 )
 # Increase the depth to zoom in.
@@ -493,12 +497,12 @@ trainer = VSTrainer(
 trainer.logger.log_graph(fluor2phase_model, fluor2phase_data.train_dataset[0]["source"])
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
-# %% 
-# Visualize the graph of fluor2phase model. 
+# %%
+# Visualize the graph of fluor2phase model.
 model_graph_fluor2phase = torchview.draw_graph(
     phase2fluor_model,
     phase2fluor_data.train_dataset[0]["source"],
-    depth=2, # adjust depth to zoom in.
+    depth=2,  # adjust depth to zoom in.
     device="cpu",
 )
 model_graph_fluor2phase.visual_graph
@@ -514,10 +518,14 @@ We now look at some metrics of performance. Loss is a differentiable metric. But
 # %%
 
 # TODO: set following parameters, specifically path to checkpoint, and log the metrics.
-test_data_path = Path("~/data/04_image_translation/HEK_nuclei_membrane_test.zarr").expanduser()
+test_data_path = Path(
+    "~/data/04_image_translation/HEK_nuclei_membrane_test.zarr"
+).expanduser()
 model_version = "phase2fluor"
 save_dir = Path(log_dir, "test")
-ckpt_path = Path(r"/home/mehtas/data/04_image_translation/logs/phase2fluor/lightning_logs/version_0/checkpoints/epoch=29-step=720.ckpt") #prefix the string with 'r' to avoid the need for escape characters.
+ckpt_path = Path(
+    r"/home/mehtas/data/04_image_translation/logs/phase2fluor/lightning_logs/version_0/checkpoints/epoch=29-step=720.ckpt"
+)  # prefix the string with 'r' to avoid the need for escape characters.
 ### END TODO
 
 test_data = HCSDataModule(
@@ -567,7 +575,7 @@ Now that you have trained two models, let's think about the following questions:
 
 # %% [markdown] <a id='3_tuning'></a>
 """
-# Part 3: Run computational experiments to tune the capacity of models.
+# Part 3: Tune the models.
 --------------------------------------------------
 
 Learning goals:
@@ -612,9 +620,16 @@ phase2fluor_wider_model = VSUNet(
     log_num_samples=10,
     example_input_yx_shape=YX_PATCH_SIZE,
 )
- 
 
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs=n_epochs, log_every_n_steps=steps_per_epoch, default_root_dir=Path(log_dir, "phase2fluor"), fast_dev_run=True) # Set fast_dev_run to False to train the model.
+
+trainer = VSTrainer(
+    accelerator="gpu",
+    devices=[GPU_ID],
+    max_epochs=n_epochs,
+    log_every_n_steps=steps_per_epoch,
+    default_root_dir=Path(log_dir, "phase2fluor"),
+    fast_dev_run=True,
+)  # Set fast_dev_run to False to train the model.
 trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
 
 # %%
@@ -643,7 +658,14 @@ phase2fluor_slow_model = VSUNet(
     example_input_yx_shape=YX_PATCH_SIZE,
 )
 
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], max_epochs=n_epochs, log_every_n_steps=steps_per_epoch, default_root_dir=Path(log_dir, "phase2fluor"), fast_dev_run=True)
+trainer = VSTrainer(
+    accelerator="gpu",
+    devices=[GPU_ID],
+    max_epochs=n_epochs,
+    log_every_n_steps=steps_per_epoch,
+    default_root_dir=Path(log_dir, "phase2fluor"),
+    fast_dev_run=True,
+)
 trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
 
 

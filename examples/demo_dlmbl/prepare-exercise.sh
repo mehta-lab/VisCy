@@ -1,5 +1,5 @@
 # Run black on .py files
-black solution.py
+# black solution.py
 
 # Convert .py to ipynb
 # "cell_metadata_filter": "all" preserve cell tags including our solution tags
