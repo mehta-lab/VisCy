@@ -75,7 +75,7 @@ import torchview
 import torchvision
 from iohub import open_ome_zarr
 from lightning.pytorch import seed_everything
-from lightning.pytorch.loggers import CSVLogger
+from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 
 # pytorch lightning wrapper for Tensorboard.
 from tensorboard import notebook  # for viewing tensorboard in notebook
@@ -399,15 +399,16 @@ trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch // 2,
     # log losses and image samples 2 times per epoch.
-    default_root_dir=Path(
-        log_dir, "phase2fluor"
-    ),  # lightning trainer transparently saves logs and model checkpoints in this directory.
+    log_every_n_steps=steps_per_epoch // 2,
+    # lightning trainer transparently saves logs and model checkpoints in this directory
+    logger=TensorBoardLogger(
+        save_dir=log_dir,
+        name="phase2fluor",
+        log_graph=True,
+    ),
 )
 
-# Log graph
-trainer.logger.log_graph(phase2fluor_model, phase2fluor_data.train_dataset[0]["source"])
 # Launch training.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
@@ -492,9 +493,12 @@ trainer = VSTrainer(
     devices=[GPU_ID],
     max_epochs=n_epochs,
     log_every_n_steps=steps_per_epoch,
-    default_root_dir=Path(log_dir, "fluor2phase"),
+    logger=TensorBoardLogger(
+        save_dir=log_dir,
+        name="fluor2phase",
+        log_graph=True,
+    ),
 )
-trainer.logger.log_graph(fluor2phase_model, fluor2phase_data.train_dataset[0]["source"])
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
 # %%
@@ -627,7 +631,12 @@ trainer = VSTrainer(
     devices=[GPU_ID],
     max_epochs=n_epochs,
     log_every_n_steps=steps_per_epoch,
-    default_root_dir=Path(log_dir, "phase2fluor"),
+    logger=TensorBoardLogger(
+        save_dir=log_dir,
+        name="phase2fluor",
+        version="wider",
+        log_graph=True,
+    ),
     fast_dev_run=True,
 )  # Set fast_dev_run to False to train the model.
 trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
@@ -663,7 +672,12 @@ trainer = VSTrainer(
     devices=[GPU_ID],
     max_epochs=n_epochs,
     log_every_n_steps=steps_per_epoch,
-    default_root_dir=Path(log_dir, "phase2fluor"),
+    logger=TensorBoardLogger(
+        save_dir=log_dir,
+        name="phase2fluor",
+        version="low_lr",
+        log_graph=True,
+    ),
     fast_dev_run=True,
 )
 trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
