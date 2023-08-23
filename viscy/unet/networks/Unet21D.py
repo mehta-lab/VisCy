@@ -7,6 +7,19 @@ from monai.networks.blocks.dynunet_block import get_conv_layer
 from torch import nn
 
 
+def _get_convnext_stage(in_channels: int, out_channels: int, depth: int):
+    return timm.models.convnext.ConvNeXtStage(
+        in_chs=in_channels,
+        out_chs=out_channels,
+        stride=1,
+        depth=depth,
+        ls_init_value=None,
+        use_grn=True,
+        norm_layer=timm.layers.LayerNorm2d,
+        norm_layer_cl=timm.layers.LayerNorm,
+    )
+
+
 class Conv21dStem(nn.Module):
     """Stem for 2.1D networks."""
 
@@ -77,15 +90,8 @@ class Unet2dUpStage(nn.Module):
                 pre_conv="default",
                 apply_pad_pool=True,
             )
-            self.conv = timm.models.convnext.ConvNeXtStage(
-                in_chs=out_channels + out_channels,
-                out_chs=out_channels,
-                stride=1,
-                depth=conv_blocks,
-                ls_init_value=None,
-                use_grn=True,
-                norm_layer=timm.layers.LayerNorm2d,
-                norm_layer_cl=timm.layers.LayerNorm,
+            self.conv = _get_convnext_stage(
+                out_channels + out_channels, out_channels, conv_blocks
             )
             self.conv.apply(timm.models.convnext._init_weights)
 
@@ -98,6 +104,46 @@ class Unet2dUpStage(nn.Module):
         inp = self.upsample(inp)
         inp = torch.cat([inp, skip], dim=1)
         return self.conv(inp)
+
+
+class PixelToVoxelHead(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        out_stack_depth: int,
+        conv_blocks: int,
+    ) -> None:
+        super().__init__()
+        self.norm = timm.layers.LayerNorm2d(num_channels=in_channels)
+        self.gelu = nn.GELU()
+        self.conv = nn.Conv3d(
+            in_channels // out_stack_depth,
+            out_channels,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+        )
+        self.out_stack_depth = out_stack_depth
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.norm(x)
+        x = self.gelu(x)
+        b, c, h, w = x.shape
+        x = x.reshape((b, c // self.out_stack_depth, self.out_stack_depth, h, w))
+        x = self.conv(x)
+        return x
+
+
+class UnsqueezeHead(nn.Module):
+    """Unsqueeze 2D (B, C, H, W) feature map to 3D (B, C, 1, H, W) output"""
+
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = x.unsqueeze(2)
+        return x
 
 
 class Unet2dDecoder(nn.Module):
@@ -149,10 +195,11 @@ class Unet21d(nn.Module):
         self,
         in_channels: int = 1,
         out_channels: int = 1,
-        in_stack_depth: int = 9,
+        in_stack_depth: int = 5,
+        out_stack_depth: int = 1,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
-        stem_kernel_size: tuple[int, int, int] = (3, 4, 4),
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
@@ -162,6 +209,12 @@ class Unet21d(nn.Module):
             raise ValueError(
                 f"Input stack depth {in_stack_depth} is not divisible "
                 f"by stem kernel depth {stem_kernel_size[0]}."
+            )
+        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
+            raise ValueError(
+                "`out_stack_depth` must be either 1 or "
+                f"the same as `input_stack_depth` ({in_stack_depth}), "
+                f"but got {out_stack_depth}."
             )
         multi_scale_encoder = timm.create_model(
             backbone, pretrained=pretrained, features_only=True
@@ -175,21 +228,37 @@ class Unet21d(nn.Module):
         )
         decoder_channels = num_channels
         decoder_channels.reverse()
+        if out_stack_depth == 1:
+            decoder_out_channels = out_channels
+            self.head = UnsqueezeHead()
+        else:
+            decoder_out_channels = (
+                out_stack_depth * decoder_channels[-1] // stem_kernel_size[-1] ** 2
+            )
+            self.head = PixelToVoxelHead(
+                decoder_out_channels,
+                out_channels,
+                out_stack_depth,
+                conv_blocks=decoder_conv_blocks,
+            )
         self.decoder = Unet2dDecoder(
             decoder_channels,
-            out_channels,
+            decoder_out_channels,
             norm_name=decoder_norm_layer,
             mode=decoder_mode,
             conv_blocks=decoder_conv_blocks,
             strides=[2] * len(num_channels) + [stem_kernel_size[-1]],
         )
-        # shape compatibility
-        self.num_blocks = 6
+        self.out_stack_depth = out_stack_depth
+
+    @property
+    def num_blocks(self) -> int:
+        """2-times downscaling factor of the smallest feature map"""
+        return 6
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
         x: list = self.encoder_stages(x)
         x.reverse()
         x = self.decoder(x)
-        # add Z/depth back
-        return x.unsqueeze(2)
+        return self.head(x)
