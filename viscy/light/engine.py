@@ -41,6 +41,8 @@ except ImportError:
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "2.1D": Unet21d,
+    # same class with out_stack_depth > 1
+    "2.2D": Unet21d,
     "2.5D": Unet25d,
 }
 
@@ -104,7 +106,6 @@ class VSUNet(LightningModule):
 
     :param dict model_config: model config,
         defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
-    :param int batch_size: batch size, defaults to 16
     :param Callable[[torch.Tensor, torch.Tensor], torch.Tensor] loss_function:
         loss function in training/validation, defaults to L2 (mean squared error)
     :param float lr: learning rate in training, defaults to 1e-3
@@ -127,8 +128,8 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
         model_config: dict = {},
-        batch_size: int = 16,
         loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -139,14 +140,16 @@ class VSUNet(LightningModule):
         test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
-        arch = model_config.pop("architecture")
-        net_class = _UNET_ARCHITECTURE.get(arch)
-        if not arch:
-            raise ValueError(f"Architecture {arch} not in {_UNET_ARCHITECTURE.keys()}")
+        net_class = _UNET_ARCHITECTURE.get(architecture)
+        if not net_class:
+            raise ValueError(
+                f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}"
+            )
+        if architecture == "2.2D":
+            model_config["out_stack_depth"] = model_config["in_stack_depth"]
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
-        self.batch_size = batch_size
         self.loss_function = loss_function if loss_function else F.mse_loss
         self.lr = lr
         self.schedule = schedule
@@ -154,7 +157,7 @@ class VSUNet(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
-        if arch == "2D":
+        if architecture == "2D":
             example_depth = 1
         else:
             example_depth = model_config.get("in_stack_depth") or 5
@@ -183,7 +186,6 @@ class VSUNet(LightningModule):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            batch_size=self.batch_size,
             sync_dist=True,
         )
         if batch_idx == 0:
@@ -197,7 +199,7 @@ class VSUNet(LightningModule):
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("loss/validate", loss, batch_size=self.batch_size, sync_dist=True)
+        self.log("loss/validate", loss, sync_dist=True)
         if batch_idx == 0:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
