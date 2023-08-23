@@ -112,7 +112,8 @@ class VSUNet(LightningModule):
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
     :param int log_num_samples:
-        number of image samples to log each training/validation epoch, defaults to 8
+        number of image samples to log each training/validation epoch,
+        has to be smaller than batch size, defaults to 8
     :param Sequence[int] example_input_yx_shape:
         XY shape of the example input for network graph tracing, defaults to (256, 256)
     :param str test_cellpose_model_path:
@@ -187,8 +188,8 @@ class VSUNet(LightningModule):
             logger=True,
             sync_dist=True,
         )
-        if batch_idx < self.log_num_samples:
-            self.training_step_outputs.append(
+        if batch_idx == 0:
+            self.training_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
         return loss
@@ -199,8 +200,8 @@ class VSUNet(LightningModule):
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
         self.log("loss/validate", loss, sync_dist=True)
-        if batch_idx < self.log_num_samples:
-            self.validation_step_outputs.append(
+        if batch_idx == 0:
+            self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
 
@@ -311,11 +312,17 @@ class VSUNet(LightningModule):
     def on_test_start(self):
         """Load CellPose model for segmentation."""
         if CellposeModel is None:
-            raise ImportError(
+            # raise ImportError(
+            #     "CellPose not installed. "
+            #     "Please install the metrics dependency with "
+            #     '`pip install viscy".[metrics]"`'
+            # )
+            logging.warning(
                 "CellPose not installed. "
                 "Please install the metrics dependency with "
-                '`pip install viscy".[metrics]"`'
+                '`pip install viscy"[metrics]"`'
             )
+
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
                 model_type=self.test_cellpose_model_path, device=self.device
@@ -343,9 +350,12 @@ class VSUNet(LightningModule):
             )
         return [optimizer], [scheduler]
 
-    @staticmethod
-    def _detach_sample(imgs: Sequence[torch.Tensor]):
-        return [np.squeeze(img[0].detach().cpu().numpy().max(axis=(1))) for img in imgs]
+    def _detach_sample(self, imgs: Sequence[torch.Tensor]):
+        num_samples = min(imgs[0].shape[0], self.log_num_samples)
+        return [
+            [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
+            for i in range(num_samples)
+        ]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         images_grid = []

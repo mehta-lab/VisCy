@@ -12,7 +12,7 @@ model = VSUNet(
         "out_channels": 2,
         "in_stack_depth": 9,
         "backbone": "convnextv2_tiny",
-        "stem_kernel_size": (9, 4, 4)
+        "stem_kernel_size": (9, 4, 4),
     },
 )
 
