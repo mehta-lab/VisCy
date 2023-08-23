@@ -41,6 +41,8 @@ except ImportError:
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "2.1D": Unet21d,
+    # same class with out_stack_depth > 1
+    "2.2D": Unet21d,
     "2.5D": Unet25d,
 }
 
@@ -125,6 +127,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
         model_config: dict = {},
         loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
         lr: float = 1e-3,
@@ -136,10 +139,13 @@ class VSUNet(LightningModule):
         test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
-        arch = model_config.pop("architecture")
-        net_class = _UNET_ARCHITECTURE.get(arch)
-        if not arch:
-            raise ValueError(f"Architecture {arch} not in {_UNET_ARCHITECTURE.keys()}")
+        net_class = _UNET_ARCHITECTURE.get(architecture)
+        if not net_class:
+            raise ValueError(
+                f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}"
+            )
+        if architecture == "2.2D":
+            model_config["out_stack_depth"] = model_config["in_stack_depth"]
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
@@ -150,7 +156,7 @@ class VSUNet(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
-        if arch == "2D":
+        if architecture == "2D":
             example_depth = 1
         else:
             example_depth = model_config.get("in_stack_depth") or 5
