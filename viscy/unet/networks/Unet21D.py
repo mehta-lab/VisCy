@@ -112,7 +112,6 @@ class PixelToVoxelHead(nn.Module):
         in_channels: int,
         out_channels: int,
         out_stack_depth: int,
-        conv_blocks: int,
     ) -> None:
         super().__init__()
         self.norm = timm.layers.LayerNorm2d(num_channels=in_channels)
@@ -203,6 +202,7 @@ class Unet21d(nn.Module):
         decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
+        drop_path_rate: float = 0.0,
     ) -> None:
         super().__init__()
         if in_stack_depth % stem_kernel_size[0] != 0:
@@ -217,7 +217,10 @@ class Unet21d(nn.Module):
                 f"but got {out_stack_depth}."
             )
         multi_scale_encoder = timm.create_model(
-            backbone, pretrained=pretrained, features_only=True
+            backbone,
+            pretrained=pretrained,
+            features_only=True,
+            drop_path_rate=drop_path_rate,
         )
         num_channels = multi_scale_encoder.feature_info.channels()
         # replace first convolution layer with a projection tokenizer
@@ -236,10 +239,7 @@ class Unet21d(nn.Module):
                 out_stack_depth * decoder_channels[-1] // stem_kernel_size[-1] ** 2
             )
             self.head = PixelToVoxelHead(
-                decoder_out_channels,
-                out_channels,
-                out_stack_depth,
-                conv_blocks=decoder_conv_blocks,
+                decoder_out_channels, out_channels, out_stack_depth
             )
         self.decoder = Unet2dDecoder(
             decoder_channels,
