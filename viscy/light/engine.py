@@ -163,7 +163,7 @@ class VSUNet(LightningModule):
             example_depth = model_config.get("in_stack_depth") or 5
         self.example_input_array = torch.rand(
             1,
-            1,
+            model_config.get("in_channels") or 1,
             example_depth,
             *example_input_yx_shape,
         )
