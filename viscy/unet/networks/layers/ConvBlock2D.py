@@ -18,6 +18,7 @@ class ConvBlock2D(nn.Module):
         num_repeats=3,
         filter_steps="first",
         layer_order="can",
+        num_input_channels=1,
     ):
         """
         Convolutional block for lateral layers in Unet
@@ -58,7 +59,8 @@ class ConvBlock2D(nn.Module):
         self.num_repeats = num_repeats
         self.filter_steps = filter_steps
         self.layer_order = layer_order
-
+        self.num_input_channels = num_input_channels
+        
         # ---- Handle Kernel ----#
         ks = kernel_size
         if isinstance(ks, int):
@@ -143,6 +145,7 @@ class ConvBlock2D(nn.Module):
                             depth_pair[1],
                             kernel_size=kernel_size,
                             padding="same",
+                            group = self.num_input_channels
                         )
                     )
 
@@ -159,6 +162,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
                     else:
@@ -168,6 +172,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
             else:
@@ -179,6 +184,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
                     else:
@@ -188,6 +194,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
 
@@ -204,6 +211,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
                     else:
@@ -213,6 +221,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
             else:
@@ -224,6 +233,7 @@ class ConvBlock2D(nn.Module):
                                 out_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
                     else:
@@ -233,6 +243,7 @@ class ConvBlock2D(nn.Module):
                                 in_filters,
                                 kernel_size=kernel_size,
                                 padding="same",
+                                group = self.num_input_channels
                             )
                         )
         self.register_modules(self.conv_list, "Conv2d")
