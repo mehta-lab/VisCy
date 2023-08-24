@@ -22,7 +22,7 @@ class VSLightningCLI(LightningCLI):
 
     def add_arguments_to_parser(self, parser):
         parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
-        parser.link_arguments("model.model_config.architecture", "data.architecture")
+        parser.link_arguments("model.architecture", "data.architecture")
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
