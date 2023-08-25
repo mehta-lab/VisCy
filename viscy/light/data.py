@@ -523,7 +523,7 @@ class HCSDataModule(LightningDataModule):
             self.val_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False,
+            shuffle=True,
             persistent_workers=bool(self.num_workers),
         )
 
