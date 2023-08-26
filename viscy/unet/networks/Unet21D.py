@@ -1,23 +1,34 @@
-from typing import Literal, Sequence
+from typing import Callable, Literal, Optional, Sequence, Union
 
 import timm
 import torch
-from monai.networks.blocks import ResidualUnit, UpSample
+from monai.networks.blocks import Convolution, ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
+from monai.networks.utils import icnr_init, normal_init
 from torch import nn
 
 
-def _get_convnext_stage(in_channels: int, out_channels: int, depth: int):
-    return timm.models.convnext.ConvNeXtStage(
+def _get_convnext_stage(
+    in_channels: int,
+    out_channels: int,
+    depth: int,
+    upsample_factor: Optional[int] = None,
+) -> nn.Module:
+    stage = timm.models.convnext.ConvNeXtStage(
         in_chs=in_channels,
         out_chs=out_channels,
         stride=1,
         depth=depth,
         ls_init_value=None,
+        conv_mlp=True,
         use_grn=True,
         norm_layer=timm.layers.LayerNorm2d,
         norm_layer_cl=timm.layers.LayerNorm,
     )
+    stage.apply(timm.models.convnext._init_weights)
+    if upsample_factor:
+        icnr_init(stage.blocks[-1].mlp.fc2, upsample_factor)
+    return stage
 
 
 class Conv21dStem(nn.Module):
@@ -51,11 +62,13 @@ class Unet2dUpStage(nn.Module):
     def __init__(
         self,
         in_channels: int,
+        skip_channels: int,
         out_channels: int,
         scale_factor: int,
         mode: Literal["deconv", "pixelshuffle"],
         conv_blocks: int,
         norm_name: str,
+        upsample_pre_conv: Optional[Union[Literal["default"], Callable]],
     ) -> None:
         super().__init__()
         spatial_dims = 2
@@ -81,19 +94,23 @@ class Unet2dUpStage(nn.Module):
                 nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1)),
             )
         elif mode == "pixelshuffle":
+            mid_channels = in_channels // scale_factor**2
             self.upsample = UpSample(
                 spatial_dims=spatial_dims,
                 in_channels=in_channels,
-                out_channels=out_channels,
+                out_channels=mid_channels,
                 scale_factor=scale_factor,
                 mode=mode,
-                pre_conv="default",
-                apply_pad_pool=True,
+                pre_conv=upsample_pre_conv,
+                apply_pad_pool=False,
             )
+            conv_weight_init_factor = None if upsample_pre_conv else scale_factor
             self.conv = _get_convnext_stage(
-                out_channels + out_channels, out_channels, conv_blocks
+                mid_channels + skip_channels,
+                out_channels,
+                conv_blocks,
+                upsample_factor=conv_weight_init_factor,
             )
-            self.conv.apply(timm.models.convnext._init_weights)
 
     def forward(self, inp: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         """
@@ -112,24 +129,30 @@ class PixelToVoxelHead(nn.Module):
         in_channels: int,
         out_channels: int,
         out_stack_depth: int,
+        expansion_ratio: int,
     ) -> None:
         super().__init__()
         self.norm = timm.layers.LayerNorm2d(num_channels=in_channels)
         self.gelu = nn.GELU()
-        self.conv = nn.Conv3d(
-            in_channels // out_stack_depth,
-            out_channels,
-            kernel_size=3,
-            stride=1,
-            padding=1,
+        self.conv = nn.Sequential(
+            Convolution(
+                spatial_dims=3,
+                in_channels=in_channels // out_stack_depth,
+                out_channels=out_channels * expansion_ratio,
+                kernel_size=3,
+                padding=(0, 1, 1),
+            ),
+            nn.Conv3d(out_channels * expansion_ratio, out_channels, 1),
         )
+        normal_init(self.conv, normal_func=nn.init.trunc_normal_)
         self.out_stack_depth = out_stack_depth
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        d = self.out_stack_depth + 2
         x = self.norm(x)
         x = self.gelu(x)
         b, c, h, w = x.shape
-        x = x.reshape((b, c // self.out_stack_depth, self.out_stack_depth, h, w))
+        x = x.reshape((b, c // d, d, h, w))
         x = self.conv(x)
         return x
 
@@ -154,37 +177,46 @@ class Unet2dDecoder(nn.Module):
         mode: Literal["deconv", "pixelshuffle"],
         conv_blocks: int,
         strides: list[int],
+        upsample_pre_conv: Optional[Union[Literal["default"], Callable]],
+        head_pool: bool,
     ) -> None:
         super().__init__()
         self.decoder_stages = nn.ModuleList([])
-        stages = len(num_channels)
-        num_channels.append(num_channels[-1])
+        num_out_channels = num_channels[1:]
+        stages = len(num_channels) - 1
         for i in range(stages):
-            stride = strides[i]
             stage = Unet2dUpStage(
                 in_channels=num_channels[i],
-                out_channels=num_channels[i + 1],
-                scale_factor=stride,
+                skip_channels=num_channels[i + 1],
+                out_channels=num_out_channels[i],
+                scale_factor=strides[i],
                 mode=mode,
                 conv_blocks=conv_blocks,
                 norm_name=norm_name,
+                upsample_pre_conv=upsample_pre_conv,
             )
             self.decoder_stages.append(stage)
+        if mode == "pixelshuffle" and upsample_pre_conv is None:
+            head_in_channels = out_channels * strides[-1] ** 2
+            upsample_pre_conv = nn.Conv2d(num_channels[-1], head_in_channels, 1)
+            icnr_init(upsample_pre_conv, upsample_factor=strides[-1])
+        else:
+            head_in_channels = num_channels[-1]
         self.head = UpSample(
             spatial_dims=2,
             in_channels=num_channels[-1],
             out_channels=out_channels,
             scale_factor=strides[-1],
             mode=mode,
-            pre_conv="default",
-            apply_pad_pool=False,
+            pre_conv=upsample_pre_conv,
+            apply_pad_pool=head_pool,
         )
 
     def forward(self, features: Sequence[torch.Tensor]) -> torch.Tensor:
         feat = features[0]
         # padding
         features.append(None)
-        for skip, stage in zip(features[1:], self.decoder_stages[:-1]):
+        for skip, stage in zip(features[1:], self.decoder_stages):
             feat = stage(feat, skip)
         return self.head(feat)
 
@@ -202,6 +234,9 @@ class Unet21d(nn.Module):
         decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
+        decoder_upsample_pre_conv: bool = False,
+        decoder_head_pool: bool = False,
+        decoder_head_expansion_ratio: int = 4,
         drop_path_rate: float = 0.0,
     ) -> None:
         super().__init__()
@@ -231,24 +266,26 @@ class Unet21d(nn.Module):
         )
         decoder_channels = num_channels
         decoder_channels.reverse()
-        if out_stack_depth == 1:
-            decoder_out_channels = out_channels
-            self.head = UnsqueezeHead()
-        else:
-            decoder_out_channels = (
-                out_stack_depth * decoder_channels[-1] // stem_kernel_size[-1] ** 2
-            )
-            self.head = PixelToVoxelHead(
-                decoder_out_channels, out_channels, out_stack_depth
-            )
+        decoder_out_channels = (out_stack_depth + 2) * out_channels
         self.decoder = Unet2dDecoder(
             decoder_channels,
             decoder_out_channels,
             norm_name=decoder_norm_layer,
             mode=decoder_mode,
             conv_blocks=decoder_conv_blocks,
-            strides=[2] * len(num_channels) + [stem_kernel_size[-1]],
+            strides=[2] * (len(num_channels) - 1) + [stem_kernel_size[-1]],
+            upsample_pre_conv="default" if decoder_upsample_pre_conv else None,
+            head_pool=decoder_head_pool,
         )
+        if out_stack_depth == 1:
+            self.head = UnsqueezeHead()
+        else:
+            self.head = PixelToVoxelHead(
+                decoder_out_channels,
+                out_channels,
+                out_stack_depth,
+                decoder_head_expansion_ratio,
+            )
         self.out_stack_depth = out_stack_depth
 
     @property
