@@ -154,6 +154,7 @@ class PixelToVoxelHead(nn.Module):
             ),
             nn.Conv3d(mid_channels, out_channels * 2**2, 1),
         )
+        normal_init(self.conv[0])
         icnr_init(self.conv[-1], 2)
         self.out = nn.PixelShuffle(2)
         self.out_stack_depth = out_stack_depth
