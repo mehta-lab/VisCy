@@ -137,33 +137,36 @@ class PixelToVoxelHead(nn.Module):
         self.upsample = UpSample(
             spatial_dims=2,
             in_channels=in_channels,
-            out_channels=out_channels // first_scale**2,
+            out_channels=in_channels // first_scale**2,
             scale_factor=first_scale,
             mode="pixelshuffle",
             pre_conv=None,
             apply_pad_pool=pool,
         )
+        mid_channels = out_channels * expansion_ratio * 2**2
         self.conv = nn.Sequential(
             Convolution(
                 spatial_dims=3,
-                in_channels=in_channels // out_stack_depth,
-                out_channels=out_channels * expansion_ratio,
+                in_channels=in_channels // first_scale**2 // (out_stack_depth + 2),
+                out_channels=mid_channels,
                 kernel_size=3,
                 padding=(0, 1, 1),
             ),
-            nn.Conv3d(out_channels * expansion_ratio, out_channels, 1),
+            nn.Conv3d(mid_channels, out_channels * 2**2, 1),
         )
-        normal_init(self.conv)
+        icnr_init(self.conv[-1], 2)
+        self.out = nn.PixelShuffle(2)
         self.out_stack_depth = out_stack_depth
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        x = self.upsample(x)
         d = self.out_stack_depth + 2
-        x = self.norm(x)
-        x = self.gelu(x)
         b, c, h, w = x.shape
         x = x.reshape((b, c // d, d, h, w))
         x = self.conv(x)
-        return x
+        x = x.transpose(1, 2)
+        x = self.out(x)
+        return x.transpose(1, 2)
 
 
 class UnsqueezeHead(nn.Module):
@@ -193,7 +196,7 @@ class Unet2dDecoder(nn.Module):
         for i in range(stages):
             stage = Unet2dUpStage(
                 in_channels=num_channels[i],
-                skip_channels=num_channels[i + 1],
+                skip_channels=num_channels[i] // 2,
                 out_channels=num_channels[i + 1],
                 scale_factor=strides[i],
                 mode=mode,
@@ -227,7 +230,7 @@ class Unet21d(nn.Module):
         decoder_norm_layer: str = "instance",
         decoder_upsample_pre_conv: bool = False,
         head_pool: bool = False,
-        head_expansion_ratio: int = 2,
+        head_expansion_ratio: int = 4,
         drop_path_rate: float = 0.0,
     ) -> None:
         super().__init__()
@@ -258,10 +261,7 @@ class Unet21d(nn.Module):
         decoder_channels = num_channels
         decoder_channels.reverse()
         decoder_channels[-1] = (
-            (out_stack_depth + 2)
-            * out_channels
-            * out_stack_depth
-            * head_expansion_ratio
+            (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
         )
         self.decoder = Unet2dDecoder(
             decoder_channels,
