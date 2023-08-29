@@ -10,6 +10,7 @@ from viscy.evaluation.evaluation_metrics import (
     labels_to_detection,
     labels_to_masks,
     mean_average_precision,
+    ms_ssim_25d,
     ssim_25d,
 )
 
@@ -120,3 +121,20 @@ def test_ssim_25d():
     img_inv = 1 - img
     loss_inv = ssim_25d(img_inv, img)
     assert _is_within_unit(-loss_inv)
+
+
+def test_ms_ssim_25d():
+    img = torch.from_numpy(img_as_float(data.camera()[np.newaxis, np.newaxis]))
+    img = torch.stack([img] * 5, dim=2)
+    # comparing to self should be almost 1
+    loss_self = ms_ssim_25d(img, img)
+    assert torch.allclose(loss_self, torch.tensor(1.0))
+    # add $\mathcal{U}(0, 1)$ additive noise to mimic prediction
+    # should still be positive correlation
+    noise = torch.rand(img.shape)
+    img_pred = img + noise - 0.5
+    loss_pred = ms_ssim_25d(img_pred, img)
+    assert _is_within_unit(loss_pred)
+    # normalized should be positive
+    loss_norm = ms_ssim_25d(torch.ones(img.shape), img, normalize=True)
+    assert _is_within_unit(loss_norm)
