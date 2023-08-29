@@ -221,7 +221,7 @@ def ms_ssim_25d(
     preds: torch.Tensor,
     target: torch.Tensor,
     in_plane_window_size: tuple[int, int] = (11, 11),
-    normalize: bool = False,
+    clamp: bool = False,
     betas: Sequence[float] = (0.0448, 0.2856, 0.3001, 0.2363, 0.1333),
 ) -> torch.Tensor:
     """Multi-scale SSIM for 2.5D volumes (3D with small depth).
@@ -229,27 +229,33 @@ def ms_ssim_25d(
     Depth dimension is not downsampled.
 
     Adapted from torchmetrics@99d6d9d6ac4eb1b3398241df558604e70521e6b0
-    Original license: Copyright The Lightning team, http://www.apache.org/licenses/LICENSE-2.0
+    Original license:
+        Copyright The Lightning team, http://www.apache.org/licenses/LICENSE-2.0
 
     :param torch.Tensor preds: predicted images
     :param torch.Tensor target: target images
     :param tuple[int, int] in_plane_window_size: kernel width and height,
         defaults to (11, 11)
-    :param bool normalize: normalize with ReLU for training stability, defaults to False
+    :param bool clamp: clamp to [1e-6, 1] for training stability when used in loss,
+        defaults to False
     :param Sequence[float] betas: exponents of each resolution,
         defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
     :return torch.Tensor: multi-scale SSIM
     """
+    base_min = 1e-6
     mcs_list = []
     for _ in range(len(betas)):
         ssim, contrast_sensitivity = ssim_25d(
             preds, target, in_plane_window_size, return_contrast_sensitivity=True
         )
+        if clamp:
+            contrast_sensitivity = contrast_sensitivity.clamp(min=base_min)
         mcs_list.append(contrast_sensitivity)
+        # do not downsample along depth
         preds = F.avg_pool3d(preds, (1, 2, 2))
         target = F.avg_pool3d(target, (1, 2, 2))
-    if normalize:
-        ssim = torch.relu(ssim)
+    if clamp:
+        ssim = ssim.clamp(min=base_min)
     mcs_list[-1] = ssim
     mcs_stack = torch.stack(mcs_list)
     betas = torch.tensor(betas, device=mcs_stack.device).view(-1, 1)

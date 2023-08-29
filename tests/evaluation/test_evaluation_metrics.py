@@ -110,31 +110,31 @@ def test_ssim_25d():
     img = torch.from_numpy(img_as_float(data.camera()[np.newaxis, np.newaxis]))
     img = torch.stack([img] * 5, dim=2)
     # comparing to self should be almost 1
-    loss_self = ssim_25d(img, img)
-    assert torch.allclose(loss_self, torch.tensor(1.0))
+    ssim_self = ssim_25d(img, img)
+    assert torch.allclose(ssim_self, torch.tensor(1.0))
     # add $\mathcal{U}(0, 1)$ additive noise to mimic prediction
     # should still be positive correlation
     img_pred = img + torch.rand(img.shape) - 0.5
-    loss_pred = ssim_25d(img_pred, img)
-    assert _is_within_unit(loss_pred)
+    ssim_pred = ssim_25d(img_pred, img)
+    assert _is_within_unit(ssim_pred)
     # inverted should be negative
     img_inv = 1 - img
-    loss_inv = ssim_25d(img_inv, img)
-    assert _is_within_unit(-loss_inv)
+    ssim_inv = ssim_25d(img_inv, img)
+    assert _is_within_unit(-ssim_inv)
 
 
 def test_ms_ssim_25d():
     img = torch.from_numpy(img_as_float(data.camera()[np.newaxis, np.newaxis]))
     img = torch.stack([img] * 5, dim=2)
     # comparing to self should be almost 1
-    loss_self = ms_ssim_25d(img, img)
-    assert torch.allclose(loss_self, torch.tensor(1.0))
+    ssim_self = ms_ssim_25d(img, img)
+    assert torch.allclose(ssim_self, torch.tensor(1.0))
     # add $\mathcal{U}(0, 1)$ additive noise to mimic prediction
     # should still be positive correlation
     noise = torch.rand(img.shape)
     img_pred = img + noise - 0.5
-    loss_pred = ms_ssim_25d(img_pred, img)
-    assert _is_within_unit(loss_pred)
-    # normalized should be positive
-    loss_norm = ms_ssim_25d(torch.ones(img.shape), img, normalize=True)
-    assert _is_within_unit(loss_norm)
+    ssim_pred = ms_ssim_25d(img_pred, img)
+    assert _is_within_unit(ssim_pred)
+    # clamped should be positive but very small
+    ssim_inv = ms_ssim_25d(1 - img, img, clamp=True)
+    assert 0 < ssim_inv < 1e-3
