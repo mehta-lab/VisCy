@@ -76,7 +76,7 @@ class MixedLoss(nn.Module):
             loss += F.l1_loss(preds, target) * self.l1_alpha
         if self.l2_alpha:
             loss += F.mse_loss(preds, target) * self.l2_alpha
-        if self.dssim_alpha:
+        if self.ms_dssim_alpha:
             ms_ssim = ms_ssim_25d(preds, target, normalize=True)
             # the 1/2 factor in the original DSSIM is not used
             # since the MS-SSIM here is stabilized with ReLU
