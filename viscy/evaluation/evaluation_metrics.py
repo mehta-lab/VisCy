@@ -242,7 +242,7 @@ def ms_ssim_25d(
         defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
     :return torch.Tensor: multi-scale SSIM
     """
-    base_min = 1e-6
+    base_min = 1e-4
     mcs_list = []
     for _ in range(len(betas)):
         ssim, contrast_sensitivity = ssim_25d(
