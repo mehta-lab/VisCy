@@ -1,7 +1,7 @@
 # %%
 from torchview import draw_graph
 
-from viscy.light.engine import VSUNet
+from viscy.light.engine import VSUNet, MixedLoss
 
 # %%
 model = VSUNet(
@@ -13,6 +13,7 @@ model = VSUNet(
         "backbone": "convnextv2_tiny",
         "stem_kernel_size": (5, 4, 4),
         "decoder_mode": "pixelshuffle",
+        "loss_function": MixedLoss()
     },
 )
 # %%
