@@ -1,10 +1,9 @@
 import logging
 import os
-from typing import Callable, Literal, Sequence
+from typing import Literal, Sequence, Union
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
@@ -12,6 +11,8 @@ from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
+from torch import nn
+from torch.nn import functional as F
 from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
@@ -26,7 +27,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.evaluation.evaluation_metrics import mean_average_precision
+from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.light.data import Sample
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
@@ -45,6 +46,41 @@ _UNET_ARCHITECTURE = {
     "2.2D": Unet21d,
     "2.5D": Unet25d,
 }
+
+
+class MixedLoss(nn.Module):
+    """Mixed reconstruction loss.
+    Adapted from Zhao et al, https://arxiv.org/pdf/1511.08861.pdf
+    Reduces to simple distances if only one weight is non-zero.
+
+    :param float l1_alpha: L1 loss weight, defaults to 0.5
+    :param float l2_alpha: L2 loss weight, defaults to 0.0
+    :param float dssim_alpha: MS-DSSIM weight, defaults to 0.5
+    """
+
+    def __init__(
+        self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, dssim_alpha: float = 0.5
+    ):
+        if not any(l1_alpha, l2_alpha, dssim_alpha):
+            raise ValueError("Loss term weights cannot be all zero!")
+        self.l1_alpha = l1_alpha
+        self.l2_alpha = l2_alpha
+        self.dssim_alpha = dssim_alpha
+
+    def forward(self, preds, target):
+        loss = 0
+        if self.l1_alpha:
+            # the gaussian in the reference is not used
+            # because the SSIM here uses a uniform window
+            loss += F.l1_loss(preds, target) * self.l1_alpha
+        if self.l2_alpha:
+            loss += F.mse_loss(preds, target) * self.l2_alpha
+        if self.dssim_alpha:
+            ms_ssim = ms_ssim_25d(preds, target, normalize=True)
+            # the 1/2 factor in the original DSSIM is not used
+            # since the MS-SSIM here is stabilized with ReLU
+            loss += (1 - ms_ssim) * self.dssim_alpha
+        return loss
 
 
 class VSTrainer(Trainer):
@@ -106,8 +142,11 @@ class VSUNet(LightningModule):
 
     :param dict model_config: model config,
         defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
-    :param Callable[[torch.Tensor, torch.Tensor], torch.Tensor] loss_function:
-        loss function in training/validation, defaults to L2 (mean squared error)
+    :param Union[nn.Module, MixedLoss] loss_function:
+        loss function in training/validation,
+        if a dictionary, should specify weights of each term
+        ('l1_alpha', 'l2_alpha', 'ssim_alpha')
+        defaults to L2 (mean squared error)
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
@@ -130,7 +169,7 @@ class VSUNet(LightningModule):
         self,
         architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
         model_config: dict = {},
-        loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_num_samples: int = 8,
@@ -150,7 +189,7 @@ class VSUNet(LightningModule):
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
-        self.loss_function = loss_function if loss_function else F.mse_loss
+        self.loss_function = loss_function if loss_function else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
         self.log_num_samples = log_num_samples
