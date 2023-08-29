@@ -61,6 +61,7 @@ class MixedLoss(nn.Module):
     def __init__(
         self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, ms_dssim_alpha: float = 0.5
     ):
+        super().__init__()
         if not any([l1_alpha, l2_alpha, ms_dssim_alpha]):
             raise ValueError("Loss term weights cannot be all zero!")
         self.l1_alpha = l1_alpha
