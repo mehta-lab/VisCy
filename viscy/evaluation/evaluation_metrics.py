@@ -1,7 +1,10 @@
 """Metrics for model evaluation"""
+from warnings import warn
+
 import numpy as np
 import torch
 from lapsolver import solve_dense
+from monai.metrics.regression import compute_ssim_and_cs
 from skimage.measure import label, regionprops
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
@@ -169,3 +172,37 @@ def mean_average_precision(
         [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
     )
     return map_metric.compute()
+
+
+def ssim_25d(
+    preds: torch.Tensor,
+    target: torch.Tensor,
+    in_plane_window_size: tuple[int, int] = (11, 11),
+) -> torch.Tensor:
+    """Multi-scale SSIM loss function for 2.5D volumes (3D with small depth).
+    Uses uniform kernel (windows), depth-dimension window size equals to depth size.
+
+    :param torch.Tensor preds: predicted batch (B, C, D, W, H)
+    :param torch.Tensor target: target batch
+    :param tuple[int, int] in_plane_window_size: kernel width and height,
+        by default (11, 11)
+    :return torch.Tensor: SSIM for the batch
+    """
+    if preds.ndim != 5:
+        raise ValueError(
+            f"Input shape must be (B, C, D, W, H), got input shape {preds.shape}"
+        )
+    depth = preds.shape[2]
+    if depth > 15:
+        warn(f"Input depth {depth} is potentially too large for 2.5D SSIM.")
+    ssim_img, _ = compute_ssim_and_cs(
+        preds,
+        target,
+        3,
+        kernel_sigma=None,
+        kernel_size=(depth, *in_plane_window_size),
+        data_range=target.max(),
+        kernel_type="uniform",
+    )
+    # aggregate to one scalar per batch
+    return ssim_img.view(ssim_img.shape[0], -1).mean(1, keepdim=True)

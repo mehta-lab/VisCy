@@ -2,6 +2,7 @@ import numpy as np
 import pytest
 import torch
 from skimage import data, measure
+from skimage.util import img_as_float
 
 from viscy.evaluation.evaluation_metrics import (
     POD_metric,
@@ -9,6 +10,7 @@ from viscy.evaluation.evaluation_metrics import (
     labels_to_detection,
     labels_to_masks,
     mean_average_precision,
+    ssim_25d,
 )
 
 
@@ -101,3 +103,20 @@ def test_mean_average_precision(labels_tensor: torch.ShortTensor):
         assert coco_metrics["map"] == 1
         assert _is_within_unit(coco_metrics["mar_1"])
         assert coco_metrics["mar_10"] == 1
+
+
+def test_ssim_25d():
+    img = torch.from_numpy(img_as_float(data.camera()[np.newaxis, np.newaxis]))
+    img = torch.stack([img] * 5, dim=2)
+    # comparing to self should be almost 1
+    loss_self = ssim_25d(img, img)
+    assert torch.allclose(loss_self, torch.tensor(1.0))
+    # add $\mathcal{U}(0, 1)$ additive noise to mimic prediction
+    # should still be positive correlation
+    img_pred = img + torch.rand(img.shape) - 0.5
+    loss_pred = ssim_25d(img_pred, img)
+    assert _is_within_unit(loss_pred)
+    # inverted should be negative
+    img_inv = 1 - img
+    loss_inv = ssim_25d(img_inv, img)
+    assert _is_within_unit(-loss_inv)
