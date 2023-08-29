@@ -55,17 +55,17 @@ class MixedLoss(nn.Module):
 
     :param float l1_alpha: L1 loss weight, defaults to 0.5
     :param float l2_alpha: L2 loss weight, defaults to 0.0
-    :param float dssim_alpha: MS-DSSIM weight, defaults to 0.5
+    :param float ms_dssim_alpha: MS-DSSIM weight, defaults to 0.5
     """
 
     def __init__(
-        self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, dssim_alpha: float = 0.5
+        self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, ms_dssim_alpha: float = 0.5
     ):
-        if not any(l1_alpha, l2_alpha, dssim_alpha):
+        if not any([l1_alpha, l2_alpha, ms_dssim_alpha]):
             raise ValueError("Loss term weights cannot be all zero!")
         self.l1_alpha = l1_alpha
         self.l2_alpha = l2_alpha
-        self.dssim_alpha = dssim_alpha
+        self.ms_dssim_alpha = ms_dssim_alpha
 
     def forward(self, preds, target):
         loss = 0
@@ -79,7 +79,7 @@ class MixedLoss(nn.Module):
             ms_ssim = ms_ssim_25d(preds, target, normalize=True)
             # the 1/2 factor in the original DSSIM is not used
             # since the MS-SSIM here is stabilized with ReLU
-            loss += (1 - ms_ssim) * self.dssim_alpha
+            loss += (1 - ms_ssim) * self.ms_dssim_alpha
         return loss
 
 
