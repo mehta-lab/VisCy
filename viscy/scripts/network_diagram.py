@@ -5,13 +5,14 @@ from viscy.light.engine import VSUNet
 
 # %%
 model = VSUNet(
+    architecture="2.2D",
     model_config={
-        "architecture": "2.1D",
         "in_channels": 1,
         "out_channels": 2,
-        "in_stack_depth": 9,
-        "backbone": "convnextv2_femto",
-        "stem_kernel_size": (3, 4, 4),
+        "in_stack_depth": 5,
+        "backbone": "convnextv2_tiny",
+        "stem_kernel_size": (5, 4, 4),
+        "decoder_mode": "pixelshuffle",
     },
 )
 # %%
