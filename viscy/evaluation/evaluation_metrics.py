@@ -254,4 +254,4 @@ def ms_ssim_25d(
     mcs_stack = torch.stack(mcs_list)
     betas = torch.tensor(betas, device=mcs_stack.device).view(-1, 1)
     mcs_weighted = mcs_stack**betas
-    return torch.prod(mcs_weighted, axis=0)
+    return torch.prod(mcs_weighted, axis=0).squeeze()
