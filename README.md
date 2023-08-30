@@ -30,7 +30,7 @@ This pipeline evolved from the [TensorFlow version of virtual staining pipeline]
     ```sh
     git clone https://github.com/mehta-lab/viscy.git
     # change to project root directory (parent folder of pyproject.toml)
-    cd viscy
+    cd VisCy
     pip install .
     ```
 
