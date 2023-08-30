@@ -23,7 +23,7 @@ dependencies = [
     "ipykernel", # used by demo_dlmbl
     "graphviz", # used by demo_dlmbl
     "torchview", # used by demo_dlmbl
-]
+    ]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -33,6 +33,7 @@ metrics = [
     "scikit-learn>=1.1.3",
     "scipy>=1.8.0",
     "torchmetrics[detection]>=1.0.0",
+    "ptflops>=0.7",
 ]
 dev = ["pytest", "pytest-cov", "hypothesis", "profilehooks", "onnxruntime"]
 

@@ -1,7 +1,12 @@
 """Metrics for model evaluation"""
+from typing import Sequence, Union
+from warnings import warn
+
 import numpy as np
 import torch
+import torch.nn.functional as F
 from lapsolver import solve_dense
+from monai.metrics.regression import compute_ssim_and_cs
 from skimage.measure import label, regionprops
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
@@ -169,3 +174,89 @@ def mean_average_precision(
         [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
     )
     return map_metric.compute()
+
+
+def ssim_25d(
+    preds: torch.Tensor,
+    target: torch.Tensor,
+    in_plane_window_size: tuple[int, int] = (11, 11),
+    return_contrast_sensitivity: bool = False,
+) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    """Multi-scale SSIM loss function for 2.5D volumes (3D with small depth).
+    Uses uniform kernel (windows), depth-dimension window size equals to depth size.
+
+    :param torch.Tensor preds: predicted batch (B, C, D, W, H)
+    :param torch.Tensor target: target batch
+    :param tuple[int, int] in_plane_window_size: kernel width and height,
+        by default (11, 11)
+    :param bool return_contrast_sensitivity: whether to return contrast sensitivity
+    :return torch.Tensor: SSIM for the batch
+    :return Optional[torch.Tensor]: contrast sensitivity
+    """
+    if preds.ndim != 5:
+        raise ValueError(
+            f"Input shape must be (B, C, D, W, H), got input shape {preds.shape}"
+        )
+    depth = preds.shape[2]
+    if depth > 15:
+        warn(f"Input depth {depth} is potentially too large for 2.5D SSIM.")
+    ssim_img, cs_img = compute_ssim_and_cs(
+        preds,
+        target,
+        3,
+        kernel_sigma=None,
+        kernel_size=(depth, *in_plane_window_size),
+        data_range=target.max(),
+        kernel_type="uniform",
+    )
+    # aggregate to one scalar per batch
+    ssim = ssim_img.view(ssim_img.shape[0], -1).mean(1)
+    if return_contrast_sensitivity:
+        return ssim, cs_img.view(cs_img.shape[0], -1).mean(1)
+    else:
+        return ssim
+
+
+def ms_ssim_25d(
+    preds: torch.Tensor,
+    target: torch.Tensor,
+    in_plane_window_size: tuple[int, int] = (11, 11),
+    clamp: bool = False,
+    betas: Sequence[float] = (0.0448, 0.2856, 0.3001, 0.2363, 0.1333),
+) -> torch.Tensor:
+    """Multi-scale SSIM for 2.5D volumes (3D with small depth).
+    Uses uniform kernel (windows), depth-dimension window size equals to depth size.
+    Depth dimension is not downsampled.
+
+    Adapted from torchmetrics@99d6d9d6ac4eb1b3398241df558604e70521e6b0
+    Original license:
+        Copyright The Lightning team, http://www.apache.org/licenses/LICENSE-2.0
+
+    :param torch.Tensor preds: predicted images
+    :param torch.Tensor target: target images
+    :param tuple[int, int] in_plane_window_size: kernel width and height,
+        defaults to (11, 11)
+    :param bool clamp: clamp with ReLU for training stability when used in loss,
+        defaults to False
+    :param Sequence[float] betas: exponents of each resolution,
+        defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
+    :return torch.Tensor: multi-scale SSIM
+    """
+    mcs_list = []
+    for _ in range(len(betas)):
+        ssim, contrast_sensitivity = ssim_25d(
+            preds, target, in_plane_window_size, return_contrast_sensitivity=True
+        )
+        if clamp:
+            contrast_sensitivity = torch.relu(contrast_sensitivity)
+        mcs_list.append(contrast_sensitivity)
+        # do not downsample along depth
+        preds = F.avg_pool3d(preds, (1, 2, 2))
+        target = F.avg_pool3d(target, (1, 2, 2))
+    if clamp:
+        ssim = torch.relu(ssim)
+    mcs_list[-1] = ssim
+    mcs_stack = torch.stack(mcs_list)
+    betas = torch.tensor(betas, device=mcs_stack.device).view(-1, 1)
+    mcs_weighted = mcs_stack**betas
+    return torch.prod(mcs_weighted, axis=0).mean()

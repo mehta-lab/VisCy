@@ -1,10 +1,9 @@
 import logging
 import os
-from typing import Callable, Literal, Sequence
+from typing import Literal, Sequence, Union
 
 import numpy as np
 import torch
-import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
@@ -12,6 +11,8 @@ from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
+from torch import nn
+from torch.nn import functional as F
 from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
@@ -26,7 +27,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.evaluation.evaluation_metrics import mean_average_precision
+from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.light.data import Sample
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
@@ -41,8 +42,47 @@ except ImportError:
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "2.1D": Unet21d,
+    # same class with out_stack_depth > 1
+    "2.2D": Unet21d,
     "2.5D": Unet25d,
 }
+
+
+class MixedLoss(nn.Module):
+    """Mixed reconstruction loss.
+    Adapted from Zhao et al, https://arxiv.org/pdf/1511.08861.pdf
+    Reduces to simple distances if only one weight is non-zero.
+
+    :param float l1_alpha: L1 loss weight, defaults to 0.5
+    :param float l2_alpha: L2 loss weight, defaults to 0.0
+    :param float ms_dssim_alpha: MS-DSSIM weight, defaults to 0.5
+    """
+
+    def __init__(
+        self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, ms_dssim_alpha: float = 0.5
+    ):
+        super().__init__()
+        if not any([l1_alpha, l2_alpha, ms_dssim_alpha]):
+            raise ValueError("Loss term weights cannot be all zero!")
+        self.l1_alpha = l1_alpha
+        self.l2_alpha = l2_alpha
+        self.ms_dssim_alpha = ms_dssim_alpha
+
+    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+    def forward(self, preds, target):
+        loss = 0
+        if self.l1_alpha:
+            # the gaussian in the reference is not used
+            # because the SSIM here uses a uniform window
+            loss += F.l1_loss(preds, target) * self.l1_alpha
+        if self.l2_alpha:
+            loss += F.mse_loss(preds, target) * self.l2_alpha
+        if self.ms_dssim_alpha:
+            ms_ssim = ms_ssim_25d(preds, target, clamp=True)
+            # the 1/2 factor in the original DSSIM is not used
+            # since the MS-SSIM here is stabilized with ReLU
+            loss += (1 - ms_ssim) * self.ms_dssim_alpha
+        return loss
 
 
 class VSTrainer(Trainer):
@@ -104,14 +144,17 @@ class VSUNet(LightningModule):
 
     :param dict model_config: model config,
         defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
-    :param int batch_size: batch size, defaults to 16
-    :param Callable[[torch.Tensor, torch.Tensor], torch.Tensor] loss_function:
-        loss function in training/validation, defaults to L2 (mean squared error)
+    :param Union[nn.Module, MixedLoss] loss_function:
+        loss function in training/validation,
+        if a dictionary, should specify weights of each term
+        ('l1_alpha', 'l2_alpha', 'ssim_alpha')
+        defaults to L2 (mean squared error)
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
     :param int log_num_samples:
-        number of image samples to log each training/validation epoch, defaults to 8
+        number of image samples to log each training/validation epoch,
+        has to be smaller than batch size, defaults to 8
     :param Sequence[int] example_input_yx_shape:
         XY shape of the example input for network graph tracing, defaults to (256, 256)
     :param str test_cellpose_model_path:
@@ -126,9 +169,9 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
         model_config: dict = {},
-        batch_size: int = 16,
-        loss_function: Callable[[torch.Tensor, torch.Tensor], torch.Tensor] = None,
+        loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_num_samples: int = 8,
@@ -138,28 +181,30 @@ class VSUNet(LightningModule):
         test_evaluate_cellpose: bool = False,
     ) -> None:
         super().__init__()
-        arch = model_config.pop("architecture")
-        net_class = _UNET_ARCHITECTURE.get(arch)
-        if not arch:
-            raise ValueError(f"Architecture {arch} not in {_UNET_ARCHITECTURE.keys()}")
+        net_class = _UNET_ARCHITECTURE.get(architecture)
+        if not net_class:
+            raise ValueError(
+                f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}"
+            )
+        if architecture == "2.2D":
+            model_config["out_stack_depth"] = model_config["in_stack_depth"]
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
-        self.batch_size = batch_size
-        self.loss_function = loss_function if loss_function else F.mse_loss
+        self.loss_function = loss_function if loss_function else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
         self.log_num_samples = log_num_samples
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
-        if arch == "2D":
+        if architecture == "2D":
             example_depth = 1
         else:
             example_depth = model_config.get("in_stack_depth") or 5
         self.example_input_array = torch.rand(
             1,
-            1,
+            model_config.get("in_channels") or 1,
             example_depth,
             *example_input_yx_shape,
         )
@@ -182,11 +227,10 @@ class VSUNet(LightningModule):
             on_epoch=True,
             prog_bar=True,
             logger=True,
-            batch_size=self.batch_size,
             sync_dist=True,
         )
-        if batch_idx < self.log_num_samples:
-            self.training_step_outputs.append(
+        if batch_idx == 0:
+            self.training_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
         return loss
@@ -196,9 +240,9 @@ class VSUNet(LightningModule):
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("loss/validate", loss, batch_size=self.batch_size, sync_dist=True)
-        if batch_idx < self.log_num_samples:
-            self.validation_step_outputs.append(
+        self.log("loss/validate", loss, sync_dist=True)
+        if batch_idx == 0:
+            self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
 
@@ -309,11 +353,17 @@ class VSUNet(LightningModule):
     def on_test_start(self):
         """Load CellPose model for segmentation."""
         if CellposeModel is None:
-            raise ImportError(
+            # raise ImportError(
+            #     "CellPose not installed. "
+            #     "Please install the metrics dependency with "
+            #     '`pip install viscy".[metrics]"`'
+            # )
+            logging.warning(
                 "CellPose not installed. "
                 "Please install the metrics dependency with "
-                '`pip install viscy".[metrics]"`'
+                '`pip install viscy"[metrics]"`'
             )
+
         if self.test_cellpose_model_path is not None:
             self.cellpose_model = CellposeModel(
                 model_type=self.test_cellpose_model_path, device=self.device
@@ -341,9 +391,12 @@ class VSUNet(LightningModule):
             )
         return [optimizer], [scheduler]
 
-    @staticmethod
-    def _detach_sample(imgs: Sequence[torch.Tensor]):
-        return [np.squeeze(img[0].detach().cpu().numpy().max(axis=(1))) for img in imgs]
+    def _detach_sample(self, imgs: Sequence[torch.Tensor]):
+        num_samples = min(imgs[0].shape[0], self.log_num_samples)
+        return [
+            [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
+            for i in range(num_samples)
+        ]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         images_grid = []

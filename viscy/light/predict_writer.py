@@ -2,11 +2,12 @@ import logging
 import os
 from typing import Literal, Optional, Sequence
 
+import numpy as np
 import torch
 from iohub.ngff import ImageArray, _pad_shape, open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
-from numpy.typing import DTypeLike
+from numpy.typing import DTypeLike, NDArray
 
 from viscy.light.data import HCSDataModule, Sample
 
@@ -14,18 +15,33 @@ __all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def _resize_image(image: ImageArray, t_index: int, z_index: int):
-    """Resize image array if incoming T and Z index is not within bounds."""
-    if image.shape[0] <= t_index or image.shape[2] <= z_index:
+def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
+    """Resize image array if incoming (1, C, Z, Y, X) stack is not within bounds."""
+    if image.shape[0] <= t_index or image.shape[2] < z_slice.stop:
         _logger.debug(
-            f"Resizing image '{image.name}' {image.shape} for T={t_index}, Z={z_index}."
+            f"Resizing image '{image.name}' {image.shape} for "
+            f"T={t_index}, Z-sclice={z_slice}."
         )
         image.resize(
             max(t_index + 1, image.shape[0]),
             image.channels,
-            max(z_index + 1, image.shape[2]),
+            max(z_slice.stop, image.shape[2]),
             *image.shape[-2:],
         )
+
+
+def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> None:
+    if z_slice.start == 0:
+        return new_stack
+    depth = z_slice.stop - z_slice.start
+    # relevant predictions to integrate
+    samples = min(z_slice.start + 1, depth)
+    factors = []
+    for i in reversed(list(range(depth))):
+        factors.append(min(i + 1, samples))
+    _logger.debug(f"Blending with factors {factors}.")
+    factors = np.array(factors)[np.newaxis :, np.newaxis, np.newaxis]
+    return old_stack * (factors - 1) / factors + new_stack / factors
 
 
 class HCSPredictionWriter(BasePredictionWriter):
@@ -109,10 +125,11 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_index = int(z_index)
         # account for lost slices in 2.5D
         z_index += self.z_padding
+        z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         image = self._create_image(
             img_name, sample_prediction.shape, sample_prediction.dtype
         )
-        _resize_image(image, t_index, z_index)
+        _resize_image(image, t_index, z_slice)
         if self.write_input:
             source_stack = batch["source"][sample_index].cpu()
             center_slice_index = source_stack.shape[-3] // 2
@@ -123,8 +140,11 @@ class HCSPredictionWriter(BasePredictionWriter):
                 image[t_index, self.target_index, z_index] = batch["target"][
                     sample_index
                 ][:, center_slice_index].cpu()
-        # write C1YX
-        image.oindex[t_index, self.prediction_index, z_index] = sample_prediction[:, 0]
+        # write CZYX
+        if self.z_padding == 0 and sample_prediction.shape[-3] > 1:
+            old_stack = image.oindex[t_index, self.prediction_index, z_slice]
+            sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
+        image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
 
     def _create_image(self, img_name: str, shape: tuple[int], dtype: DTypeLike):
         if img_name in self.plate.zgroup:
