@@ -102,7 +102,7 @@ class Unet2dUpStage(nn.Module):
                 scale_factor=scale_factor,
                 mode=mode,
                 pre_conv=upsample_pre_conv,
-                apply_pad_pool=False,
+                apply_pad_pool=True,
             )
             conv_weight_init_factor = None if upsample_pre_conv else scale_factor
             self.conv = _get_convnext_stage(
