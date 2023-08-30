@@ -13,6 +13,7 @@ model = VSUNet(
         "backbone": "convnextv2_tiny",
         "stem_kernel_size": (5, 4, 4),
         "decoder_mode": "pixelshuffle",
+        "head_expansion_ratio": 2
     },
 )
 # %%
