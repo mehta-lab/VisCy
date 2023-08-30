@@ -135,6 +135,6 @@ def test_ms_ssim_25d():
     img_pred = img + noise - 0.5
     ssim_pred = ms_ssim_25d(img_pred, img)
     assert _is_within_unit(ssim_pred)
-    # clamped should be positive but very small
+    # Negative correlation should be zero when clamped
     ssim_inv = ms_ssim_25d(1 - img, img, clamp=True)
-    assert 0 < ssim_inv < 1e-3
+    assert torch.allclose(ssim_inv, torch.tensor(0.0))
