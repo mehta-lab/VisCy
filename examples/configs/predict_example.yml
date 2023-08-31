@@ -65,5 +65,5 @@ predict:
     augment: true
     caching: false
     normalize_source: false
-  return_predictions: null
+  return_predictions: false
   ckpt_path: null
