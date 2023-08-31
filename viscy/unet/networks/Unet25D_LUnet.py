@@ -6,10 +6,16 @@ from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from torch import nn
 
-#TODO: modify the 2.
+# TODO: modify the encoder with vanilla Conv2D as mode: 'deconv' is broken
+# TODO: Modify the multiscale encoder and replace the ConvNext backbone
+# TODO: check the decoder is the same as in 25D Unet
+
+# Questions
+# TODO: what does self.head in torch do?
+
 
 class Conv25d_LUnetStem(nn.Module):
-    """Stem for 2.1D networks."""
+    """Stem for 2.5D_LUnet networks."""
 
     def __init__(
         self,
@@ -41,7 +47,7 @@ class Unet2dUpStage(nn.Module):
         in_channels: int,
         out_channels: int,
         scale_factor: int,
-        mode: Literal["deconv", "pixelshuffle"],
+        mode: Literal["deconv"],
         conv_blocks: int,
         norm_name: str,
     ) -> None:
@@ -68,6 +74,9 @@ class Unet2dUpStage(nn.Module):
                 ),
                 nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1)),
             )
+        else:
+            raise NotImplementedError("only deconv method is implemented")
+
     def forward(self, inp: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
         """
         :param torch.Tensor inp: Low resolution features
@@ -124,7 +133,7 @@ class Unet2dDecoder(nn.Module):
         num_channels: list[int],
         out_channels: int,
         norm_name: str,
-        mode: Literal["deconv", "pixelshuffle"],
+        mode: Literal["deconv"],
         conv_blocks: int,
         strides: list[int],
     ) -> None:
@@ -172,7 +181,7 @@ class Unet25d_LUnetd(nn.Module):
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
-        decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
+        decoder_mode: Literal["deconv"] = "deconv",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
         drop_path_rate: float = 0.0,
@@ -189,8 +198,8 @@ class Unet25d_LUnetd(nn.Module):
                 f"the same as `input_stack_depth` ({in_stack_depth}), "
                 f"but got {out_stack_depth}."
             )
-        
-        #TODO: Modify the encoder here
+
+        # TODO: Modify the encoder here
         multi_scale_encoder = timm.create_model(
             backbone,
             pretrained=pretrained,
@@ -202,6 +211,7 @@ class Unet25d_LUnetd(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
+
         self.stem = Conv25d_LUnetStem(
             in_channels, num_channels[0], stem_kernel_size, in_stack_depth
         )
