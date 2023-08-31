@@ -6,7 +6,7 @@ from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 
 class Unet25d(nn.Module):
     def __name__(self):
-        return "Unet25d"
+        return "Unet21D_AR_adhoc"
 
     def __init__(
         self,
