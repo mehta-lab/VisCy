@@ -1,8 +1,7 @@
 # Exercise 4: Image translation
 
-This exercise was developed for the DL@MBL 2023 course by Ziwen Liu and Shalin Mehta, with may inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).
+This demo script was developed for the DL@MBL 2023 course by Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).
 
-This now serves as a demo of image translation/virtual staining/in-silico labeling (phase -> nuclei & membrane) as well as some components of VisCy.
 
 
 
@@ -33,7 +32,7 @@ Install vscode, install jupyter extension inside vscode, and setup [cell mode](h
 
 ## Use Jupyter Notebook
 
-The matching exercise and solution notebooks can be found [here](https://github.com/dlmbl/image_translation/tree/28e0e515b4a8ad3f392a69c8341e105f730d204f) DL@MBL 2023 github repo. 
+The matching exercise and solution notebooks can be found [here](https://github.com/dlmbl/image_translation/tree/28e0e515b4a8ad3f392a69c8341e105f730d204f) on the course repository.
 
 Launch a jupyter environment
 
