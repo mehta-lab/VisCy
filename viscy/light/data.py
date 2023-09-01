@@ -96,13 +96,13 @@ class NormalizeSampled(MapTransform, InvertibleTransform):
     def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         d = dict(data)
         for key in self.keys:
-            d[key] = (d[key] - self._stat(key)["median"]) / self._stat(key)["iqr"]
+            d[key] = (d[key] - self._stat(key)["median"]) / self._stat(key)["std"]
         return d
 
     def inverse(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
         d = dict(data)
         for key in self.keys:
-            d[key] = (d[key] * self._stat(key)["iqr"]) + self._stat(key)["median"]
+            d[key] = (d[key] * self._stat(key)["std"]) + self._stat(key)["median"]
 
 
 class SlidingWindowDataset(Dataset):
