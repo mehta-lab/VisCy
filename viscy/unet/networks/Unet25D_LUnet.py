@@ -30,7 +30,8 @@ class Conv25d_LUnetStem(nn.Module):
             in_channels=in_channels,
             out_channels=out_channels // ratio,
             kernel_size=kernel_size,
-            stride=kernel_size,
+            # stride=kernel_size,
+            padding=(0, kernel_size[1] // 2, kernel_size[2] // 2),
         )
 
     def forward(self, x: torch.Tensor):
@@ -39,6 +40,51 @@ class Conv25d_LUnetStem(nn.Module):
         # project Z/depth into channels
         # return a view when possible (contiguous)
         return x.reshape(b, c * d, h, w)
+
+
+class Unet2dDownStage(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        scale_factor: int,
+        mode: Literal["vanilla"],
+        conv_blocks: int,
+        norm_name: str,
+        down_mode: Literal["maxpool", "avgpool", None] = "avgpool",
+    ) -> None:
+        super().__init__()
+        spatial_dims = 2
+        if mode == "vanilla":
+            if down_mode == "maxpool":
+                self.down_mode = nn.MaxPool2d(kernel_size=2)
+            elif down_mode == "avgpool":
+                self.down_mode = nn.AvgPool2d(kernel_size=2)
+            else:
+                self.down_mode = None
+
+            self.conv = nn.Sequential(
+                ResidualUnit(
+                    spatial_dims=spatial_dims,
+                    in_channels=in_channels,
+                    out_channels=in_channels,
+                    norm=norm_name,
+                    kernel_size=(3, 3),
+                    padding=(1, 1),
+                ),
+                nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1)),
+                # self.down_mode,
+            )
+
+        else:
+            NotImplementedError("only vanilla encoder is implemented")
+
+    def forward(self, inp: torch.Tensor) -> torch.Tensor:
+        skip = self.conv(inp)
+        if self.down_mode is not None:
+            out = self.down_mode(skip)
+            return out, skip
+        return skip, None
 
 
 class Unet2dUpStage(nn.Module):
@@ -54,17 +100,16 @@ class Unet2dUpStage(nn.Module):
         super().__init__()
         spatial_dims = 2
         if mode == "deconv":
-            self.upsample = (
-                get_conv_layer(
-                    spatial_dims=spatial_dims,
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    stride=scale_factor,
-                    kernel_size=scale_factor,
-                    norm=norm_name,
-                    is_transposed=True,
-                ),
+            self.upsample = get_conv_layer(
+                spatial_dims=spatial_dims,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=scale_factor,
+                kernel_size=scale_factor,
+                norm=norm_name,
+                is_transposed=True,
             )
+
             self.conv = nn.Sequential(
                 ResidualUnit(
                     spatial_dims=spatial_dims,
@@ -127,6 +172,40 @@ class UnsqueezeHead(nn.Module):
         return x
 
 
+class Unet2dEncoder(nn.Module):
+    def __init__(
+        self,
+        num_filters: list[int],
+        norm_name: str,
+        mode: Literal["vanilla"],
+        conv_blocks: int,
+        strides: list[int],
+    ) -> None:
+        super().__init__()
+        self.encoder_stages = nn.ModuleList([])
+        stages = len(num_filters)
+        for i in range(stages - 1):
+            stride = strides[i]
+            stage = Unet2dDownStage(
+                in_channels=num_filters[i],
+                out_channels=num_filters[i + 1],
+                scale_factor=stride,
+                mode=mode,
+                conv_blocks=conv_blocks,
+                norm_name=norm_name,
+                down_mode="avgpool" if i != (stages - 2) else None,
+            )
+            self.encoder_stages.append(stage)
+
+    def forward(self, inp: torch.Tensor) -> torch.Tensor:
+        # padding
+        features = []
+        for stage in self.encoder_stages:
+            inp, skip = stage(inp)
+            features.append(skip)
+        return inp, features
+
+
 class Unet2dDecoder(nn.Module):
     def __init__(
         self,
@@ -162,31 +241,37 @@ class Unet2dDecoder(nn.Module):
             apply_pad_pool=False,
         )
 
-    def forward(self, features: Sequence[torch.Tensor]) -> torch.Tensor:
-        feat = features[0]
+    def forward(
+        self, feature, skip_connections: Sequence[torch.Tensor]
+    ) -> torch.Tensor:
+        feat = feature
         # padding
-        features.append(None)
-        for skip, stage in zip(features[1:], self.decoder_stages[:-1]):
+        # skip_connections.append(None)
+        for skip, stage in zip(skip_connections[1:], self.decoder_stages[:-1]):
             feat = stage(feat, skip)
+            # print(feat.shape)
         return self.head(feat)
 
 
-class Unet25d_LUnetd(nn.Module):
+class Unet25d_LUnet(nn.Module):
+    def __name__():
+        return "Unet25d_LUnet"
+
     def __init__(
         self,
         in_channels: int = 1,
-        out_channels: int = 1,
+        out_channels: int = 2,
         in_stack_depth: int = 5,
         out_stack_depth: int = 1,
-        backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         decoder_mode: Literal["deconv"] = "deconv",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
         drop_path_rate: float = 0.0,
+        num_filters: list[int] = [],
     ) -> None:
-        super().__init__()
+        super(Unet25d_LUnet, self).__init__()
         if in_stack_depth % stem_kernel_size[0] != 0:
             raise ValueError(
                 f"Input stack depth {in_stack_depth} is not divisible "
@@ -199,23 +284,22 @@ class Unet25d_LUnetd(nn.Module):
                 f"but got {out_stack_depth}."
             )
 
-        # TODO: Modify the encoder here
-        multi_scale_encoder = timm.create_model(
-            backbone,
-            pretrained=pretrained,
-            features_only=True,
-            drop_path_rate=drop_path_rate,
-        )
-
-        num_channels = multi_scale_encoder.feature_info.channels()
-        # replace first convolution layer with a projection tokenizer
-        multi_scale_encoder.stem_0 = nn.Identity()
-        self.encoder_stages = multi_scale_encoder
-
+        # 3D Conv block to tokenized
         self.stem = Conv25d_LUnetStem(
-            in_channels, num_channels[0], stem_kernel_size, in_stack_depth
+            in_channels, num_filters[0], stem_kernel_size, in_stack_depth
         )
-        decoder_channels = num_channels
+        # self.stem_out = nn.Conv2d(
+        #     num_filters[0] * in_stack_depth, num_filters[1], kernel_size=(1, 1)
+        # )
+        self.encoder_stages = Unet2dEncoder(
+            num_filters=[num_filters[0]] + num_filters,
+            norm_name=decoder_norm_layer,
+            mode="vanilla",
+            conv_blocks=decoder_conv_blocks - 1,
+            strides=[2] * (len(num_filters)),
+        )
+
+        decoder_channels = num_filters
         decoder_channels.reverse()
         if out_stack_depth == 1:
             decoder_out_channels = out_channels
@@ -227,13 +311,14 @@ class Unet25d_LUnetd(nn.Module):
             self.head = PixelToVoxelHead(
                 decoder_out_channels, out_channels, out_stack_depth
             )
+
         self.decoder = Unet2dDecoder(
-            decoder_channels,
+            decoder_channels[:-1],
             decoder_out_channels,
             norm_name=decoder_norm_layer,
             mode=decoder_mode,
             conv_blocks=decoder_conv_blocks,
-            strides=[2] * len(num_channels) + [stem_kernel_size[-1]],
+            strides=[2] * (len(num_filters) - 1),
         )
         self.out_stack_depth = out_stack_depth
 
@@ -244,7 +329,29 @@ class Unet25d_LUnetd(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         x = self.stem(x)
-        x: list = self.encoder_stages(x)
-        x.reverse()
-        x = self.decoder(x)
+        skip_first = x
+        x, skip_connections = self.encoder_stages(x)
+        skip_connections.reverse()
+        x = self.decoder(x, skip_connections)
         return self.head(x)
+
+
+# if __name__ == "__main__":
+#     import torch
+
+#     x = torch.rand((4, 1, 5, 256, 256))
+#     model = Unet25d_LUnet(
+#         in_channels=x.shape[1],
+#         out_channels=2,
+#         in_stack_depth=x.shape[2],
+#         out_stack_depth=1,
+#         pretrained=False,
+#         stem_kernel_size=(5, 3, 3),
+#         decoder_mode="deconv",
+#         decoder_conv_blocks=2,
+#         decoder_norm_layer="instance",
+#         drop_path_rate=0.1,
+#         num_filters=[24, 48, 96, 192, 384],
+#     )
+#     a = model(x)
+#     print(a.shape)

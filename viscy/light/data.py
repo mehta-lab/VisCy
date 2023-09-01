@@ -321,7 +321,7 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"] = "2.5D",
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "25D_LUnet"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
         augment: bool = True,
         caching: bool = False,
