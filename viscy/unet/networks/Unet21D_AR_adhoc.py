@@ -67,7 +67,8 @@ class Unet25d(nn.Module):
         # ----- set static parameters ----- #
         self.block_padding = "same"
         down_mode = "avgpool"  # TODO set static avgpool
-        up_mode = "trilinear"  # TODO set static trilinear
+        # up_mode = "trilinear"  # TODO set static trilinear
+        up_mode = "bilinear"  # TODO set static trilinear
         activation = "relu"  # TODO set static relu
         self.bottom_block_spatial = False  # TODO set static
         # TODO set conv_block layer order variable
@@ -109,7 +110,7 @@ class Unet25d(nn.Module):
         self.up_list = []
         for i in range(num_blocks):
             self.up_list.append(
-                nn.Upsample(scale_factor=(1, 2, 2), mode=up_mode, align_corners=False)
+                nn.Upsample(scale_factor=(2, 2), mode=up_mode, align_corners=False)
             )
 
         # ----- Convolutional blocks ----- #
@@ -180,13 +181,13 @@ class Unet25d(nn.Module):
         self.up_conv_blocks = []
         for i in range(num_blocks):
             self.up_conv_blocks.append(
-                ConvBlock3D(
+                ConvBlock2D(
                     upsampling_filters[i],
                     downsampling_filters[-(i + 2)],
                     dropout=self.dropout,
                     residual=self.residual,
                     activation=activation,
-                    kernel_size=(1, self.kernel_size[0], self.kernel_size[1]),
+                    kernel_size=(self.kernel_size[0], self.kernel_size[1]),
                     num_repeats=num_block_layers,
                 )
             )
@@ -195,35 +196,44 @@ class Unet25d(nn.Module):
         # ----- Skip Interruption Conv Blocks ----- #
         self.skip_conv_layers = []
         for i in range(num_blocks):
-            self.skip_conv_layers.append(
-                nn.Conv2d(
-                    downsampling_filters[i + 1],
-                    downsampling_filters[i + 1],
-                    kernel_size=(1, 1),
+            if i == 0:
+                self.skip_conv_layers.append(
+                    nn.Conv2d(
+                        downsampling_filters[i + 1] * in_stack_depth,
+                        downsampling_filters[i + 1],
+                        kernel_size=(1, 1),
+                    )
                 )
-            )
+            else:
+                self.skip_conv_layers.append(
+                    nn.Conv2d(
+                        downsampling_filters[i + 1],
+                        downsampling_filters[i + 1],
+                        kernel_size=(1, 1),
+                    )
+                )
         self.register_modules(self.skip_conv_layers, "skip_conv_layer")
 
         # ----- Terminal Block and Activation Layer ----- #
         if self.task == "reg":
-            self.terminal_block = ConvBlock3D(
+            self.terminal_block = ConvBlock2D(
                 downsampling_filters[1],
                 out_channels,
                 dropout=False,
                 residual=False,
                 activation="linear",
-                kernel_size=(1, 3, 3),
+                kernel_size=(3, 3),
                 norm="none",
                 num_repeats=1,
             )
         else:
-            self.terminal_block = ConvBlock3D(
+            self.terminal_block = ConvBlock2D(
                 downsampling_filters[1],
                 out_channels,
                 dropout=self.dropout,
                 residual=False,
                 activation=activation,
-                kernel_size=(1, 3, 3),
+                kernel_size=(3, 3),
                 num_repeats=1,
             )
 
@@ -265,22 +275,26 @@ class Unet25d(nn.Module):
 
         # transition block
         x = self.bottom_transition_block(x)
-        print(f"Exited Transition")
+        print(f"Exited Transition, {x.shape}")
 
         # skip interruptions
         for i in range(self.num_blocks):
             skip_tensors[i] = self.skip_conv_layers[i](skip_tensors[i])
-            print(f"Added Skips {i}")
+            print(f"Added Skips {i}, {skip_tensors[i].shape}")
 
         # decoder
         for i in range(self.num_blocks):
+            print("Entered Decoder")
             x = self.up_list[i](x)
+            print(f"Entered Decoder: Upscale, {x.shape}")
             x = torch.cat([x, skip_tensors[-1 * (i + 1)]], 1)
+            print(f"Entered Decoder: Concatenated Skip, {x.shape}")
             x = self.up_conv_blocks[i](x)
-            print(f"Exited Decoder {i}")
+            print(f"Exited Decoder {i}, {x.shape}")
 
         # output channel collapsing layer
         x = self.terminal_block(x)
+        print(f"Exited Decoder: Terminal Block, {x.shape}")
         return x
 
     def register_modules(self, module_list, name):
