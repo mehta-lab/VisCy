@@ -32,6 +32,7 @@ from viscy.light.data import Sample
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
+from viscy.unet.networks.Unet25D_LUnet import Unet25d_LUnet
 
 try:
     from cellpose.models import CellposeModel
@@ -45,6 +46,7 @@ _UNET_ARCHITECTURE = {
     # same class with out_stack_depth > 1
     "2.2D": Unet21d,
     "2.5D": Unet25d,
+    "25D_LUnet": Unet25d_LUnet,
 }
 
 
@@ -169,7 +171,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "25D_LUnet"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
