@@ -196,7 +196,7 @@ class Unet25d(nn.Module):
         self.skip_conv_layers = []
         for i in range(num_blocks):
             self.skip_conv_layers.append(
-                nn.Conv3d(
+                nn.Conv2d(
                     downsampling_filters[i + 1],
                     downsampling_filters[i + 1],
                     kernel_size=(1, 1),
