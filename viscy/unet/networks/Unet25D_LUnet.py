@@ -249,7 +249,7 @@ class Unet2dDecoder(nn.Module):
         # skip_connections.append(None)
         for skip, stage in zip(skip_connections[1:], self.decoder_stages[:-1]):
             feat = stage(feat, skip)
-            print(feat.shape)
+            # print(feat.shape)
         return self.head(feat)
 
 
@@ -336,22 +336,22 @@ class Unet25d_LUnet(nn.Module):
         return self.head(x)
 
 
-if __name__ == "__main__":
-    import torch
+# if __name__ == "__main__":
+#     import torch
 
-    x = torch.rand((4, 1, 5, 256, 256))
-    model = Unet25d_LUnet(
-        in_channels=x.shape[1],
-        out_channels=2,
-        in_stack_depth=x.shape[2],
-        out_stack_depth=1,
-        pretrained=False,
-        stem_kernel_size=(5, 3, 3),
-        decoder_mode="deconv",
-        decoder_conv_blocks=2,
-        decoder_norm_layer="instance",
-        drop_path_rate=0.1,
-        num_filters=[24, 48, 96, 192, 384],
-    )
-    a = model(x)
-    print(a.shape)
+#     x = torch.rand((4, 1, 5, 256, 256))
+#     model = Unet25d_LUnet(
+#         in_channels=x.shape[1],
+#         out_channels=2,
+#         in_stack_depth=x.shape[2],
+#         out_stack_depth=1,
+#         pretrained=False,
+#         stem_kernel_size=(5, 3, 3),
+#         decoder_mode="deconv",
+#         decoder_conv_blocks=2,
+#         decoder_norm_layer="instance",
+#         drop_path_rate=0.1,
+#         num_filters=[24, 48, 96, 192, 384],
+#     )
+#     a = model(x)
+#     print(a.shape)
