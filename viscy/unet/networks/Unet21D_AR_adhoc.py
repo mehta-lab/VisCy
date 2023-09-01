@@ -5,7 +5,7 @@ from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 from viscy.unet.networks.layers.ConvBlock2D import ConvBlock2D
 
 
-class Unet25d(nn.Module):
+class Unet21d_AR_adhoc(nn.Module):
     def __name__(self):
         return "Unet21D_AR_adhoc"
 
@@ -52,7 +52,7 @@ class Unet25d(nn.Module):
         :param str debug_mode: if true logs features at each step of architecture,
             must be manually set
         """
-        super(Unet25d, self).__init__()
+        super(Unet21d_AR_adhoc, self).__init__()
         self.in_channels = in_channels
         self.num_blocks = num_blocks
         self.kernel_size = xy_kernel_size
@@ -312,7 +312,7 @@ class Unet25d(nn.Module):
             self.add_module(f"{name}_{str(i)}", module)
 
 if __name__ == "__main__":
-    model = Unet25d(
+    model = Unet21d_AR_adhoc(
         in_channels=1,
         out_channels=2,
         in_stack_depth=5,
