@@ -119,6 +119,18 @@ class Unet2dUpStage(nn.Module):
                 ),
                 nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1)),
             )
+        elif mode == "pixelshuffle":
+            self.upsample = UpSample(
+                spatial_dims=spatial_dims,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                scale_factor=scale_factor,
+                mode=mode,
+                pre_conv="default",
+                apply_pad_pool=True,
+            )
+            self.conv = nn.Conv2d(in_channels, out_channels, kernel_size=(1, 1))
+
         else:
             raise NotImplementedError("only deconv method is implemented")
 
@@ -265,7 +277,7 @@ class Unet25d_LUnet(nn.Module):
         out_stack_depth: int = 1,
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
-        decoder_mode: Literal["deconv"] = "deconv",
+        decoder_mode: Literal["deconv", "pixelshuffle"] = "deconv",
         decoder_conv_blocks: int = 2,
         decoder_norm_layer: str = "instance",
         drop_path_rate: float = 0.0,
@@ -347,7 +359,7 @@ class Unet25d_LUnet(nn.Module):
 #         out_stack_depth=1,
 #         pretrained=False,
 #         stem_kernel_size=(5, 3, 3),
-#         decoder_mode="deconv",
+#         decoder_mode="pixelshuffle",
 #         decoder_conv_blocks=2,
 #         decoder_norm_layer="instance",
 #         drop_path_rate=0.1,
