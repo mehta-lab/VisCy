@@ -507,8 +507,8 @@ class HCSDataModule(LightningDataModule):
         # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
         shuffled_indices = torch.randperm(len(positions))
-        # Ankit was here: reduced the train positions by half
-        positions = list(positions[i] for i in shuffled_indices)[::2]
+        # NOTE: Ankit was here: reduced the train positions by half - ED removed
+        positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
         train_dataset_settings = dataset_settings.copy()
