@@ -138,6 +138,7 @@ class SlidingWindowDataset(Dataset):
         self.z_window_size = z_window_size
         self.transform = transform
         self._get_windows()
+        # print("In SlidingWindowDataset\n\n")
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z,
@@ -153,12 +154,18 @@ class SlidingWindowDataset(Dataset):
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
         self._max_window = w
+        # print(f"Window Key: {self.window_keys}")
+        # print(f"Z stack size: {len(self.window_arrays)}")
+        # print(f"Max window: {w}")
 
     def _find_window(self, index: int) -> tuple[int, int]:
         """Look up window given index."""
         window_idx = sorted(self.window_keys + [index + 1]).index(index + 1)
+        # print(f"Window index: {window_idx}")
         w = self.window_keys[window_idx]
         tz = index - self.window_keys[window_idx - 1] if window_idx > 0 else index
+        # print(f"\nSomething... {self.window_arrays[self.window_keys.index(w)]}")
+        # print(f"tz: {tz}")
         return self.window_arrays[self.window_keys.index(w)], tz
 
     def _read_img_window(
@@ -177,11 +184,15 @@ class SlidingWindowDataset(Dataset):
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
         z = tz - t * zs
+        # print(f"\n")
+        # print(f"t: {t}")
+        # print(f"z: {z}")
         data = img.oindex[
             slice(t, t + 1),
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
         ].astype(np.float32)
+        # print(f"\n\nProbably sliced: {data.shape}")
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
@@ -199,6 +210,7 @@ class SlidingWindowDataset(Dataset):
         ]
 
     def __getitem__(self, index: int) -> Sample:
+        # print("In __getitem__")
         img, tz = self._find_window(index)
         ch_names = self.channels["source"].copy()
         ch_idx = self.source_ch_idx.copy()
@@ -397,6 +409,13 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
+    # # A funky way to create patches for the prediction stage
+    # def funky_patches(self):
+    #     for index in range(len(self.predict_dataset)):
+    #         print(f"{index}\t{self.predict_dataset[index]['index']}")
+    #         print(f"{index}\t{self.predict_dataset[index]['source'].shape}")
+
+
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         channels = {"source": self.source_channel}
         dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
@@ -405,6 +424,7 @@ class HCSDataModule(LightningDataModule):
         elif stage == "test":
             self._setup_test(dataset_settings)
         elif stage == "predict":
+            # print("In predict stage")   # ANKIT was here
             self._setup_predict(dataset_settings)
         else:
             raise NotImplementedError(f"{stage} stage")
@@ -477,6 +497,7 @@ class HCSDataModule(LightningDataModule):
 
     def _setup_predict(self, dataset_settings: dict):
         # track metadata for inverting transform
+        # print("In _setup_predict")  # ANKIT was here
         set_track_meta(True)
         if self.caching:
             logging.warning("Ignoring caching config in 'predict' stage.")
@@ -494,6 +515,7 @@ class HCSDataModule(LightningDataModule):
             transform=predict_transform,
             **dataset_settings,
         )
+        self.funky_patches()
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         predicting = False
@@ -597,3 +619,22 @@ class HCSDataModule(LightningDataModule):
                 ]
             )
         return transforms
+
+
+if __name__ == '__main__':
+    # Reinitialize the data module.
+    phase2fluor_data = HCSDataModule(
+        "/home/ankitr/MBL-Project/Data/cropped_dataset_v3.zarr",
+        source_channel="Phase3D",
+        target_channel=["GFP EX488 EM525-45", "mCherry EX561 EM600-37"],
+        z_window_size=5,
+        split_ratio=0.8,
+        batch_size=4,
+        num_workers=8,
+        architecture="2.5D",
+        yx_patch_size=(512,512),
+        augment=True,
+        normalize_source=True
+    )
+    phase2fluor_data.setup("predict")
+    # print(f"Predict dataset size: {len(phase2fluor_data.predict_dataset[100])}")

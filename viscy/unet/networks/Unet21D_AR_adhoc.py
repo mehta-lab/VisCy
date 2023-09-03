@@ -5,7 +5,7 @@ from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 from viscy.unet.networks.layers.ConvBlock2D import ConvBlock2D
 
 
-class Unet21d_AR_adhoc(nn.Module):
+class Unet21D_AR_adhoc(nn.Module):
     def __name__(self):
         return "Unet21D_AR_adhoc"
 
@@ -311,21 +311,23 @@ class Unet21d_AR_adhoc(nn.Module):
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)
 
-if __name__ == "__main__":
-    model = Unet21d_AR_adhoc(
-        in_channels=1,
-        out_channels=2,
-        in_stack_depth=5,
-        out_stack_depth=1,
-        xy_kernel_size=(3, 3),
-        residual=True,
-        dropout=0.1,
-        num_blocks=4,
-        num_block_layers=2,
-        num_filters=[24, 48, 96, 192, 384],
-        task="reg",
-    )
 
-    print("Hello")
-    x = torch.rand((4, 1, 5, 64, 64))
-    model(x)
+# This block is only used for testing puposes
+# if __name__ == "__main__":
+#     model = Unet21d_AR_adhoc(
+#         in_channels=1,
+#         out_channels=2,
+#         in_stack_depth=5,
+#         out_stack_depth=1,
+#         xy_kernel_size=(3, 3),
+#         residual=True,
+#         dropout=0.1,
+#         num_blocks=4,
+#         num_block_layers=2,
+#         num_filters=[24, 48, 96, 192, 384],
+#         task="reg",
+#     )
+
+#     print("Hello")
+#     x = torch.rand((4, 1, 5, 64, 64))
+#     model(x)
