@@ -33,6 +33,7 @@ from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.Unet25D_LUnet import Unet25d_LUnet
+from viscy.unet.networks.Unet21D_AR_adhoc import Unet21D_AR_adhoc
 
 try:
     from cellpose.models import CellposeModel
@@ -47,6 +48,7 @@ _UNET_ARCHITECTURE = {
     "2.2D": Unet21d,
     "2.5D": Unet25d,
     "25D_LUnet": Unet25d_LUnet,
+    "21D_AR": Unet21D_AR_adhoc,
 }
 
 
