@@ -342,6 +342,7 @@ class HCSDataModule(LightningDataModule):
         train_z_scale_range: tuple[float, float] = [0, 0],
         train_noise_std: float = 0.0,
         train_patches_per_stack: int = 1,
+        tiled_prediction: bool = False,
     ):
         super().__init__()
         self.data_path = data_path
@@ -370,6 +371,7 @@ class HCSDataModule(LightningDataModule):
                 f"Got {batch_size} and {train_patches_per_stack}."
             )
         self.train_patches_per_stack = train_patches_per_stack
+        self.tiled_prediction = tiled_prediction
 
     def prepare_data(self):
         if not self.caching:
@@ -409,11 +411,61 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
-    # # A funky way to create patches for the prediction stage
-    # def funky_patches(self):
-    #     for index in range(len(self.predict_dataset)):
-    #         print(f"{index}\t{self.predict_dataset[index]['index']}")
-    #         print(f"{index}\t{self.predict_dataset[index]['source'].shape}")
+    # Apply padding
+    def i_pad(self, img, x_start, x_end, y_start, y_end):
+        extra_patch = self.yx_patch_size[0] // 2
+
+        x_start = x_start - extra_patch
+        x_end = x_end + extra_patch
+        y_start = y_start - extra_patch
+        y_end = y_end + extra_patch
+
+        pad_x_start = 0 if x_start >= 0 else - x_start
+        pad_x_end = 0 if x_end <= img.shape[-1] else (x_end - img.shape[-1])
+        pad_y_start = 0 if y_start >= 0 else - y_start
+        pad_y_end = 0 if y_end <= img.shape[-2] else (y_end - img.shape[-2])
+
+        x_start = 0 if x_start < 0 else x_start
+        x_end = x_end if x_end <= img.shape[-1] else img.shape[-1]
+        y_start = 0 if y_start < 0 else y_start
+        y_end = y_end if y_end <= img.shape[-2] else img.shape[-2]
+
+        crop_img = img[:, :, y_start:y_end, x_start:x_end]
+
+        mirror = torch.nn.ReflectionPad2d((pad_x_start, pad_x_end, pad_y_start, pad_y_end))
+
+        padded_img = mirror(crop_img)
+        print(padded_img.shape)
+
+        return padded_img
+
+    # A funky way to create patches for the prediction stage
+    def funky_patches(self):
+
+        x_dim = self.predict_dataset[0]['source'].shape[-1] // self.yx_patch_size[0]
+        y_dim = self.predict_dataset[0]['source'].shape[-2] // self.yx_patch_size[1]
+
+        for index in range(len(self.predict_dataset)):
+            print(f"{index}\t{self.predict_dataset[index]['index']}")
+            print(f"{index}\t{self.predict_dataset[index]['source'].shape}")
+
+            img = self.predict_dataset[index]['source']
+            patches = []
+            patch_idx = []
+
+            for x_cut in range(1, x_dim+1):
+                for y_cut in range(1, y_dim+1):
+                    patch_idx.append((x_cut, y_cut))
+                    x_start = (x_cut-1) * self.yx_patch_size[0]
+                    x_end = (x_cut) * self.yx_patch_size[0]
+                    y_start = (y_cut-1) * self.yx_patch_size[1]
+                    y_end = (y_cut) * self.yx_patch_size[1]
+
+                    print(x_cut, y_cut)
+                    print(x_start, x_end, y_start, y_end)
+                    patches.append(self.i_pad(img, x_start, x_end, y_start, y_end))
+
+        return patches
 
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
@@ -515,7 +567,8 @@ class HCSDataModule(LightningDataModule):
             transform=predict_transform,
             **dataset_settings,
         )
-        self.funky_patches()
+        if self.tiled_prediction:
+            self.funky_patches()
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         predicting = False
@@ -634,7 +687,8 @@ if __name__ == '__main__':
         architecture="2.5D",
         yx_patch_size=(512,512),
         augment=True,
-        normalize_source=True
+        normalize_source=True,
+        tiled_prediction=True,
     )
     phase2fluor_data.setup("predict")
     # print(f"Predict dataset size: {len(phase2fluor_data.predict_dataset[100])}")
