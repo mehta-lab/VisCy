@@ -152,9 +152,12 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
-    :param int log_num_samples:
-        number of image samples to log each training/validation epoch,
-        has to be smaller than batch size, defaults to 8
+    :param int log_batches_per_epoch:
+        number of batches to log each training/validation epoch,
+        has to be smaller than steps per epoch, defaults to 8
+    :param int log_samples_per_batch:
+        number of samples to log each training/validation batch,
+        has to be smaller than batch size, defaults to 1
     :param Sequence[int] example_input_yx_shape:
         XY shape of the example input for network graph tracing, defaults to (256, 256)
     :param str test_cellpose_model_path:
@@ -174,7 +177,8 @@ class VSUNet(LightningModule):
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
-        log_num_samples: int = 8,
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         test_cellpose_model_path: str = None,
         test_cellpose_diameter: float = None,
@@ -194,7 +198,8 @@ class VSUNet(LightningModule):
         self.loss_function = loss_function if loss_function else nn.MSELoss()
         self.lr = lr
         self.schedule = schedule
-        self.log_num_samples = log_num_samples
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
@@ -229,7 +234,7 @@ class VSUNet(LightningModule):
             logger=True,
             sync_dist=True,
         )
-        if batch_idx == 0:
+        if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
@@ -241,7 +246,7 @@ class VSUNet(LightningModule):
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
         self.log("loss/validate", loss, sync_dist=True)
-        if batch_idx == 0:
+        if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
             )
@@ -392,7 +397,7 @@ class VSUNet(LightningModule):
         return [optimizer], [scheduler]
 
     def _detach_sample(self, imgs: Sequence[torch.Tensor]):
-        num_samples = min(imgs[0].shape[0], self.log_num_samples)
+        num_samples = min(imgs[0].shape[0], self.log_samples_per_batch)
         return [
             [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
             for i in range(num_samples)
