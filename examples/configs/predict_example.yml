@@ -50,7 +50,6 @@ predict:
     loss_function: null
     lr: 0.001
     schedule: Constant
-    log_num_samples: 8
   data:
     data_path: null
     source_channel: null
