@@ -248,11 +248,14 @@ class VSUNet(LightningModule):
 
     def test_step(self, batch: Sample, batch_idx: int):
         source = batch["source"]
-        target = batch["target"][:, 0]
+        target = batch["target"]
+        center_index = target.shape[-3] // 2
+        center_slice = slice(center_index, center_index + 1)
+        target = target[:, 0, center_slice]
         if self.test_evaluate_cellpose:
             pred = target
         else:
-            pred = self.forward(source)[:, 0]
+            pred = self.forward(source)[:, 0, center_slice]
             # FIXME: Only works for batch size 1 and the first channel
             self._log_regression_metrics(pred, target)
         img_names, ts, zs = batch["index"]
