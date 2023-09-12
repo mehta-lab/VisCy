@@ -52,7 +52,7 @@ class Unet21D_AR_adhoc(nn.Module):
         :param str debug_mode: if true logs features at each step of architecture,
             must be manually set
         """
-        super(Unet21d_AR_adhoc, self).__init__()
+        super(Unet21D_AR_adhoc, self).__init__()
         self.in_channels = in_channels
         self.num_blocks = num_blocks
         self.kernel_size = xy_kernel_size

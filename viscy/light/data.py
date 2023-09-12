@@ -372,6 +372,8 @@ class HCSDataModule(LightningDataModule):
             )
         self.train_patches_per_stack = train_patches_per_stack
         self.tiled_prediction = tiled_prediction
+        self.funky_patch_id = []
+        self.funky_patch_data = []
 
     def prepare_data(self):
         if not self.caching:
@@ -411,7 +413,7 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
-    # Apply padding
+    # Apply reflection padding
     def i_pad(self, img, x_start, x_end, y_start, y_end):
         extra_patch = self.yx_patch_size[0] // 2
 
@@ -435,7 +437,7 @@ class HCSDataModule(LightningDataModule):
         mirror = torch.nn.ReflectionPad2d((pad_x_start, pad_x_end, pad_y_start, pad_y_end))
 
         padded_img = mirror(crop_img)
-        print(padded_img.shape)
+        # print(padded_img.shape)
 
         return padded_img
 
@@ -445,27 +447,41 @@ class HCSDataModule(LightningDataModule):
         x_dim = self.predict_dataset[0]['source'].shape[-1] // self.yx_patch_size[0]
         y_dim = self.predict_dataset[0]['source'].shape[-2] // self.yx_patch_size[1]
 
+        patches = []
+        patch_idx = []
+
         for index in range(len(self.predict_dataset)):
             print(f"{index}\t{self.predict_dataset[index]['index']}")
             print(f"{index}\t{self.predict_dataset[index]['source'].shape}")
 
             img = self.predict_dataset[index]['source']
-            patches = []
-            patch_idx = []
 
             for x_cut in range(1, x_dim+1):
                 for y_cut in range(1, y_dim+1):
-                    patch_idx.append((x_cut, y_cut))
+                    patch_idx.append(self.predict_dataset[index]['index'] + (x_cut, y_cut))
+                    # print(patch_idx)
                     x_start = (x_cut-1) * self.yx_patch_size[0]
                     x_end = (x_cut) * self.yx_patch_size[0]
                     y_start = (y_cut-1) * self.yx_patch_size[1]
                     y_end = (y_cut) * self.yx_patch_size[1]
 
-                    print(x_cut, y_cut)
-                    print(x_start, x_end, y_start, y_end)
+                    # print(x_cut, y_cut)
+                    # print(x_start, x_end, y_start, y_end)
                     patches.append(self.i_pad(img, x_start, x_end, y_start, y_end))
 
-        return patches
+        print("Funky patches have been generated")
+
+        return patches, patch_idx
+    
+    # Reloads data into the dataloader with tiled patches instead of full images
+    def hijack_dataloader(self, patches, patch_idx):
+        
+        for i, idx in enumerate(patch_idx):
+            self.predict_dataset[i] = (idx, patches[i])
+
+        print("Dataloader successfully hijacked!")
+
+
 
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
@@ -562,13 +578,18 @@ class HCSDataModule(LightningDataModule):
             if self.normalize_source
             else None
         )
+        positions = [p for _, p in plate.positions()]
+        positions = positions[::36]
         self.predict_dataset = SlidingWindowDataset(
-            [p for _, p in plate.positions()],
+            positions,
             transform=predict_transform,
             **dataset_settings,
         )
-        if self.tiled_prediction:
-            self.funky_patches()
+        # if self.tiled_prediction:
+        #     patches, patch_idx = self.funky_patches()
+        #     self.funky_patch_id = patch_idx
+        #     self.funky_patch_data = patches
+            
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         predicting = False

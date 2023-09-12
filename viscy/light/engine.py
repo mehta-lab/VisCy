@@ -173,7 +173,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "25D_LUnet"],
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "25D_LUnet", "21D_AR"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
