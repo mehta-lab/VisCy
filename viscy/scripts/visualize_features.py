@@ -21,15 +21,13 @@ from viscy.light.engine import VSUNet
 
 # %%
 # prepare sample images
-dataset = open_ome_zarr(
-    "/hpc/projects/comp.micro/virtual_staining/datasets/test/2022_04_19_HEK_ImagingVariations_torch/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
-)
+dataset = open_ome_zarr("data.hcs.ome.zarr")
 center_index = 48
 depth = 5
 crop = 1024
 # normalize phase
 norm_meta = dataset.zattrs["normalization"]["Phase3D"]["dataset_statistics"]
-img = dataset["plate/0/3/0"][
+img = dataset["row/col/0/0"][
     :, :, center_index - depth // 2 : center_index + depth // 2 + 1, :crop, :crop
 ]
 phase = img[:, 0:1]
@@ -39,7 +37,7 @@ plt.imshow(phase[0, 0, 2], cmap="gray")
 # %%
 # load model
 model = VSUNet.load_from_checkpoint(
-    "/hpc/projects/comp.micro/virtual_staining/models/unet-2.2d/lightning_logs/20230829-182136/checkpoints/best_epoch=48-step=18130.ckpt",
+    "model.ckpt",
     architecture="2.2D",
     model_config={
         "in_channels": 1,
