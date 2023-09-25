@@ -1,0 +1,21 @@
+# lightning.pytorch==2.0.4
+seed_everything: true
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+model:
+  architecture: null
+  model_config: {}
+  loss_function: null
+  lr: 0.001
+  schedule: Constant
+  log_num_samples: 8
+  test_cellpose_model_path: null
+  test_cellpose_diameter: null
+  test_evaluate_cellpose: false
+export_path: null
+ckpt_path: null
+format: onnx
