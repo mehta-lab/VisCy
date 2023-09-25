@@ -4,8 +4,41 @@ import timm
 import torch
 from monai.networks.blocks import Convolution, ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
-from monai.networks.utils import icnr_init, normal_init
+from monai.networks.utils import normal_init
 from torch import nn
+
+
+def icnr_init(
+    conv: nn.Module,
+    upsample_factor: int,
+    upsample_dims: int,
+    init=nn.init.kaiming_normal_,
+):
+    """
+    ICNR initialization for 2D/3D kernels adapted from Aitken et al.,2017 ,
+    "Checkerboard artifact free sub-pixel convolution".
+
+    Adapted from MONAI v1.2.0, added support for upsampling dimensions
+    that are not the same as the kernel dimension.
+
+    :param conv: convolution layer
+    :param upsample_factor: upsample factor
+    :param upsample_dims: upsample dimensions, 2 or 3
+    :param init: initialization function
+    """
+    out_channels, in_channels, *dims = conv.weight.shape
+    scale_factor = upsample_factor ** upsample_dims
+
+    oc2 = int(out_channels / scale_factor)
+
+    kernel = torch.zeros([oc2, in_channels] + dims)
+    kernel = init(kernel)
+    kernel = kernel.transpose(0, 1)
+    kernel = kernel.reshape(oc2, in_channels, -1)
+    kernel = kernel.repeat(1, 1, scale_factor)
+    kernel = kernel.reshape([in_channels, out_channels] + dims)
+    kernel = kernel.transpose(0, 1)
+    conv.weight.data.copy_(kernel)
 
 
 def _get_convnext_stage(
@@ -27,7 +60,7 @@ def _get_convnext_stage(
     )
     stage.apply(timm.models.convnext._init_weights)
     if upsample_factor:
-        icnr_init(stage.blocks[-1].mlp.fc2, upsample_factor)
+        icnr_init(stage.blocks[-1].mlp.fc2, upsample_factor, upsample_dims=2)
     return stage
 
 
@@ -155,7 +188,7 @@ class PixelToVoxelHead(nn.Module):
             nn.Conv3d(mid_channels, out_channels * 2**2, 1),
         )
         normal_init(self.conv[0])
-        icnr_init(self.conv[-1], 2)
+        icnr_init(self.conv[-1], 2, upsample_dims=2)
         self.out = nn.PixelShuffle(2)
         self.out_stack_depth = out_stack_depth
 
