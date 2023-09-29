@@ -78,10 +78,11 @@ class HCSPredictionWriter(BasePredictionWriter):
                     "Cannot write input to an existing store. Aborting."
                 )
             else:
+                with open_ome_zarr(self.output_store, mode="r+") as plate:
+                    for _, pos in plate.positions():
+                        for ch in prediction_channel:
+                            pos.append_channel(ch, resize_arrays=True)
                 self.plate = open_ome_zarr(self.output_store, mode="r+")
-                for _, pos in self.plate.positions():
-                    for ch in prediction_channel:
-                        pos.append_channel(ch, resize_arrays=True)
         else:
             channel_names = prediction_channel
             if self.write_input:
