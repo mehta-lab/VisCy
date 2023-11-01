@@ -236,25 +236,26 @@ def ms_ssim_25d(
     :param torch.Tensor target: target images
     :param tuple[int, int] in_plane_window_size: kernel width and height,
         defaults to (11, 11)
-    :param bool clamp: clamp with ReLU for training stability when used in loss,
+    :param bool clamp: clamp to [1e-6, 1] for training stability when used in loss,
         defaults to False
     :param Sequence[float] betas: exponents of each resolution,
         defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
     :return torch.Tensor: multi-scale SSIM
     """
+    base_min = 1e-4
     mcs_list = []
     for _ in range(len(betas)):
         ssim, contrast_sensitivity = ssim_25d(
             preds, target, in_plane_window_size, return_contrast_sensitivity=True
         )
         if clamp:
-            contrast_sensitivity = torch.relu(contrast_sensitivity)
+            contrast_sensitivity = contrast_sensitivity.clamp(min=base_min)
         mcs_list.append(contrast_sensitivity)
         # do not downsample along depth
         preds = F.avg_pool3d(preds, (1, 2, 2))
         target = F.avg_pool3d(target, (1, 2, 2))
     if clamp:
-        ssim = torch.relu(ssim)
+        ssim = ssim.clamp(min=base_min)
     mcs_list[-1] = ssim
     mcs_stack = torch.stack(mcs_list)
     betas = torch.tensor(betas, device=mcs_stack.device).view(-1, 1)

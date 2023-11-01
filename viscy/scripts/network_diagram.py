@@ -6,18 +6,15 @@ from viscy.light.engine import VSUNet
 # %% 2D UNet
 model = VSUNet(
     architecture="2D",
-    model_config={
-        "in_channels": 2,
-        "out_channels": 1,
-    },
+    model_config={"in_channels": 1, "out_channels": 2},
 )
-
+# %%
 model_graph = draw_graph(
     model,
     model.example_input_array,
     graph_name="2D UNet",
     roll=True,
-    depth=2,
+    depth=4,
     # graph_dir="LR",
     # save_graph=True,
 )
@@ -75,12 +72,12 @@ graph21d
 model = VSUNet(
     architecture="2.2D",
     model_config={
-        "in_channels": 2,
-        "out_channels": 1,
+        "in_channels": 1,
+        "out_channels": 2,
         "in_stack_depth": 9,
         "backbone": "convnextv2_tiny",
-        "stem_kernel_size": (3, 2, 2),
-        "decoder_mode": "deconv",
+        "decoder_mode": "pixelshuffle",
+        "stem_kernel_size": (3, 4, 4),
     },
 )
 
