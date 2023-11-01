@@ -77,7 +77,7 @@ model = VSUNet(
         "in_stack_depth": 9,
         "backbone": "convnextv2_tiny",
         "decoder_mode": "pixelshuffle",
-        "stem_kernel_size": (3, 4, 4)
+        "stem_kernel_size": (3, 4, 4),
     },
 )
 
