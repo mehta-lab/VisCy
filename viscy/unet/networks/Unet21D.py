@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Optional, Literal, Sequence
+from typing import Callable, Literal, Optional, Sequence, Union
 
 import timm
 import torch
@@ -27,7 +27,7 @@ def icnr_init(
     :param init: initialization function
     """
     out_channels, in_channels, *dims = conv.weight.shape
-    scale_factor = upsample_factor ** upsample_dims
+    scale_factor = upsample_factor**upsample_dims
 
     oc2 = int(out_channels / scale_factor)
 
@@ -256,13 +256,8 @@ class Unet21d(nn.Module):
         out_channels: int = 1,
         in_stack_depth: int = 5,
         out_stack_depth: int = 1,
-        in_stack_depth: int = 5,
-        out_stack_depth: int = 1,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
-        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
-        decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
-        decoder_conv_blocks: int = 2,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         decoder_conv_blocks: int = 2,
