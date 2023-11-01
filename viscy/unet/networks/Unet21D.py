@@ -1,4 +1,4 @@
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Optional, Literal, Sequence
 
 import timm
 import torch
@@ -256,8 +256,13 @@ class Unet21d(nn.Module):
         out_channels: int = 1,
         in_stack_depth: int = 5,
         out_stack_depth: int = 1,
+        in_stack_depth: int = 5,
+        out_stack_depth: int = 1,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
+        decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
+        decoder_conv_blocks: int = 2,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         decoder_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         decoder_conv_blocks: int = 2,
@@ -272,6 +277,12 @@ class Unet21d(nn.Module):
             raise ValueError(
                 f"Input stack depth {in_stack_depth} is not divisible "
                 f"by stem kernel depth {stem_kernel_size[0]}."
+            )
+        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
+            raise ValueError(
+                "`out_stack_depth` must be either 1 or "
+                f"the same as `input_stack_depth` ({in_stack_depth}), "
+                f"but got {out_stack_depth}."
             )
         if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
             raise ValueError(
