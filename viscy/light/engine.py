@@ -5,15 +5,13 @@ from typing import Literal, Sequence, Union
 import numpy as np
 import torch
 from imageio import imwrite
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
+from lightning.pytorch import LightningModule
 from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
 from torch import nn
 from torch.nn import functional as F
-from torch.onnx import OperatorExportTypes
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
@@ -83,60 +81,6 @@ class MixedLoss(nn.Module):
             # since the MS-SSIM here is stabilized with ReLU
             loss += (1 - ms_ssim) * self.ms_dssim_alpha
         return loss
-
-
-class VSTrainer(Trainer):
-    def export(
-        self,
-        model: LightningModule,
-        export_path: str,
-        ckpt_path: str,
-        format="onnx",
-        datamodule: LightningDataModule = None,
-        dataloaders: Sequence = None,
-    ):
-        """Export the model for deployment (currently only ONNX is supported).
-
-        :param LightningModule model: module to export
-        :param str export_path: output file name
-        :param str ckpt_path: model checkpoint
-        :param str format: format (currently only ONNX is supported), defaults to "onnx"
-        :param LightningDataModule datamodule: placeholder for datamodule,
-            defaults to None
-        :param Sequence dataloaders: placeholder for dataloaders, defaults to None
-        """
-        if dataloaders or datamodule:
-            logging.debug("Ignoring datamodule and dataloaders during export.")
-        if not format.lower() == "onnx":
-            raise NotImplementedError(f"Export format '{format}'")
-        model = _maybe_unwrap_optimized(model)
-        self.strategy._lightning_module = model
-        model.load_state_dict(torch.load(ckpt_path)["state_dict"])
-        model.eval()
-        model.to_onnx(
-            export_path,
-            input_sample=model.example_input_array,
-            export_params=True,
-            opset_version=18,
-            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK,
-            input_names=["input"],
-            output_names=["output"],
-            dynamic_axes={
-                "input": {
-                    0: "batch_size",
-                    1: "channels",
-                    3: "num_rows",
-                    4: "num_cols",
-                },
-                "output": {
-                    0: "batch_size",
-                    1: "channels",
-                    3: "num_rows",
-                    4: "num_cols",
-                },
-            },
-        )
-        logging.info(f"ONNX exported at {export_path}")
 
 
 class VSUNet(LightningModule):
