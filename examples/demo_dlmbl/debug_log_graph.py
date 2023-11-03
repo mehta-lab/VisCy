@@ -22,7 +22,8 @@ from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 from viscy.light.data import HCSDataModule
 
 # Trainer class and UNet.
-from viscy.light.engine import VSTrainer, VSUNet
+from viscy.light.engine import VSUNet
+from viscy.light.trainer import VSTrainer
 
 seed_everything(42, workers=True)
 
