@@ -14,11 +14,7 @@ class PlaceholderPredictTrainer(VSTrainer):
 # %%
 stage = "predict"
 
-args = [
-    stage,
-    "--config",
-    "/hpc/projects/comp.micro/mantis/2023_08_18_A549_CellMask/3-registration/prediction/predict.yml",
-]
+args = [stage, "--config", "predict.yml"]
 
 
 # %%
