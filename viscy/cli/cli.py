@@ -1,5 +1,6 @@
 import logging
 import os
+import sys
 from datetime import datetime
 
 import torch
@@ -18,13 +19,14 @@ class VSLightningCLI(LightningCLI):
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
         subcommands = LightningCLI.subcommands()
-        subcommands["preprocess"] = {"trainer", "model", "dataloaders", "datamodule"}
+        subcommands["preprocess"] = {"dataloaders", "datamodule"}
         subcommands["export"] = {"model", "dataloaders", "datamodule"}
         return subcommands
 
     def add_arguments_to_parser(self, parser):
-        parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
-        parser.link_arguments("model.architecture", "data.architecture")
+        if "preprocess" not in sys.argv:
+            parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
+            parser.link_arguments("model.architecture", "data.architecture")
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -42,9 +44,14 @@ def main():
     log_level = os.getenv("VISCY_LOG_LEVEL", logging.INFO)
     logging.getLogger("lightning.pytorch").setLevel((log_level))
     torch.set_float32_matmul_precision("high")
+    model_class = VSUNet
+    datamodule_class = HCSDataModule
+    if "preprocess" in sys.argv:
+        model_class = None
+        datamodule_class = None
     _ = VSLightningCLI(
-        model_class=VSUNet,
-        datamodule_class=HCSDataModule,
+        model_class=model_class,
+        datamodule_class=datamodule_class,
         trainer_class=VSTrainer,
     )
 
