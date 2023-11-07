@@ -18,6 +18,7 @@ class VSTrainer(Trainer):
         channel_names: Union[list[str], Literal[-1]] = -1,
         num_workers: int = 1,
         block_size: int = 32,
+        model: LightningModule = None,
         datamodule: LightningDataModule = None,
         dataloaders: Sequence = None,
     ):
@@ -28,11 +29,12 @@ class VSTrainer(Trainer):
             defaults to -1 (all channels)
         :param int num_workers: number of workers, defaults to 1
         :param int block_size: sampling block size, defaults to 32
+        :param LightningModule model: place holder for model, ignored
         :param LightningDataModule datamodule: place holder for datamodule, ignored
         :param Sequence dataloaders: place holder for dataloaders, ignored
         """
-        if dataloaders or datamodule:
-            logging.debug("Ignoring datamodule and dataloaders during preprocessing.")
+        if model or dataloaders or datamodule:
+            logging.debug("Ignoring model and data configs during preprocessing.")
         with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
             channel_indices = (
                 [dataset.channel_names.index(c) for c in channel_names]

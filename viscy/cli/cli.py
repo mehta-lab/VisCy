@@ -5,6 +5,7 @@ from datetime import datetime
 
 import torch
 from jsonargparse import lazy_instance
+from lightning.pytorch import LightningModule
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
@@ -19,7 +20,7 @@ class VSLightningCLI(LightningCLI):
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
         subcommands = LightningCLI.subcommands()
-        subcommands["preprocess"] = {"dataloaders", "datamodule"}
+        subcommands["preprocess"] = {}
         subcommands["export"] = {"model", "dataloaders", "datamodule"}
         return subcommands
 
@@ -42,17 +43,19 @@ class VSLightningCLI(LightningCLI):
 def main():
     """Main Lightning CLI entry point."""
     log_level = os.getenv("VISCY_LOG_LEVEL", logging.INFO)
-    logging.getLogger("lightning.pytorch").setLevel((log_level))
+    logging.getLogger("lightning.pytorch").setLevel(log_level)
     torch.set_float32_matmul_precision("high")
     model_class = VSUNet
     datamodule_class = HCSDataModule
     if "preprocess" in sys.argv:
-        model_class = None
+        seed = False
+        model_class = LightningModule
         datamodule_class = None
     _ = VSLightningCLI(
         model_class=model_class,
         datamodule_class=datamodule_class,
         trainer_class=VSTrainer,
+        seed_everything_default=seed,
     )
 
 
