@@ -3,12 +3,15 @@
 # %%
 from typing import Optional
 
+import torch
+from matplotlib import pyplot as plt
+
 from viscy.cli.cli import HCSDataModule, VSLightningCLI, VSTrainer, VSUNet
 
 
 class PlaceholderPredictTrainer(VSTrainer):
     def predict(self, ckpt_path: Optional[str] = None, *args, **kwargs):
-        pass
+        self.ckpt_path = ckpt_path
 
 
 # %%
@@ -29,11 +32,19 @@ cli = VSLightningCLI(
 # %%
 dm = cli.datamodule
 dm.setup(stage)
+dataloader = dm.predict_dataloader()
 
-dl = dm.predict_dataloader()
+model = cli.model
+model.load_state_dict(torch.load(cli.trainer.ckpt_path)["state_dict"])
+model.on_predict_start()
 
 # %%
-for batch in dl:
-    print(batch)
+for batch in dataloader:
     break
+
+with torch.inference_mode():
+    prediction = model.predict_step(batch, 0)  # %%
+
+plt.imshow(prediction[0, 0, 2].cpu().numpy())
+
 # %%
