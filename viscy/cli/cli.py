@@ -47,6 +47,7 @@ def main():
     torch.set_float32_matmul_precision("high")
     model_class = VSUNet
     datamodule_class = HCSDataModule
+    seed = True
     if "preprocess" in sys.argv:
         seed = False
         model_class = LightningModule
