@@ -20,7 +20,7 @@ class VSLightningCLI(LightningCLI):
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
         subcommands = LightningCLI.subcommands()
-        subcommands["preprocess"] = {}
+        subcommands["preprocess"] = {"model", "dataloaders", "datamodule"}
         subcommands["export"] = {"model", "dataloaders", "datamodule"}
         return subcommands
 
