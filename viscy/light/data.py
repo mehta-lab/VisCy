@@ -358,7 +358,7 @@ class HCSDataModule(LightningDataModule):
         predict_scale_source: Optional[float] = None,
     ):
         super().__init__()
-        self.data_path = data_path
+        self.data_path = Path(data_path)
         self.source_channel = _ensure_channel_list(source_channel)
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
@@ -519,8 +519,20 @@ class HCSDataModule(LightningDataModule):
         set_track_meta(True)
         if self.caching:
             logging.warning("Ignoring caching config in 'predict' stage.")
-        plate = open_ome_zarr(self.data_path, mode="r")
-        norm_meta = plate.zattrs["normalization"].copy()
+        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
+        if isinstance(dataset, Position):
+            try:
+                plate_path = self.data_path.parent.parent.parent
+                fov_name = self.data_path.relative_to(plate_path).as_posix()
+                plate = open_ome_zarr(plate_path)
+            except Exception:
+                raise FileNotFoundError(
+                    "Parent HCS store not found for single FOV input."
+                )
+            positions = [plate[fov_name]]
+        elif isinstance(dataset, Plate):
+            positions = [p for _, p in dataset.positions()]
+        norm_meta = dataset.zattrs["normalization"].copy()
         if self.predict_scale_source is not None:
             for ch in self.source_channel:
                 # FIXME: hard-coded key
@@ -531,7 +543,7 @@ class HCSDataModule(LightningDataModule):
             else None
         )
         self.predict_dataset = SlidingWindowDataset(
-            [p for _, p in plate.positions()],
+            positions=positions,
             transform=predict_transform,
             **dataset_settings,
         )
