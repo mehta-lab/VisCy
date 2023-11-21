@@ -20,12 +20,8 @@ from monai.transforms import (
     Compose,
     InvertibleTransform,
     MapTransform,
-    RandAdjustContrastd,
+    MultiSampleTrait,
     RandAffined,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-    RandWeightedCropd,
 )
 from torch.utils.data import DataLoader, Dataset
 
@@ -315,8 +311,8 @@ class HCSDataModule(LightningDataModule):
         defaults to "2.5D"
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
-    :param bool augment: whether to apply augmentation in training,
-        defaults to True
+    :param Optional[list[MapTransform]] augmentations: MONAI dictionary transforms
+        applied to the training set, defaults to None (no augmentation)
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
@@ -325,14 +321,6 @@ class HCSDataModule(LightningDataModule):
     :param Optional[Path] ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
-    :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
-        passed to MONAI's ``RandAffined`` transform,
-        defaults to [0, 0]
-    :param float train_noise_std: Upper bound of the standard deviation
-        of the Gaussian noise added to source images during training,
-        defaults to 0.0
-    :param int train_patches_per_stack: number of patches to sample
-        from each stack during training, defaults to 1
     :param Optional[float] predict_scale_source: scale the source channel intensity,
         defaults to None (no scaling)
     """
@@ -348,13 +336,10 @@ class HCSDataModule(LightningDataModule):
         num_workers: int = 8,
         architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
-        augment: bool = True,
+        augmentations: Optional[list[MapTransform]] = None,
         caching: bool = False,
         normalize_source: bool = False,
         ground_truth_masks: Optional[Path] = None,
-        train_z_scale_range: tuple[float, float] = [0, 0],
-        train_noise_std: float = 0.0,
-        train_patches_per_stack: int = 1,
         predict_scale_source: Optional[float] = None,
     ):
         super().__init__()
@@ -367,23 +352,11 @@ class HCSDataModule(LightningDataModule):
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
-        self.augment = augment
+        self.augmentations = augmentations
         self.caching = caching
-        if train_noise_std and not normalize_source:
-            raise ValueError("Noise augmentaion must be added to normalized input.")
         self.normalize_source = normalize_source
         self.ground_truth_masks = ground_truth_masks
         self.tmp_zarr = None
-        if train_z_scale_range[0] > 0 or train_z_scale_range[1] < 0:
-            raise ValueError(f"Invalid scaling range: {train_z_scale_range}")
-        self.train_z_scale_range = train_z_scale_range
-        self.train_noise_std = train_noise_std
-        if batch_size % train_patches_per_stack != 0:
-            raise ValueError(
-                "Batch size must be divisible by number of patches per stack. "
-                f"Got {batch_size} and {train_patches_per_stack}."
-            )
-        self.train_patches_per_stack = train_patches_per_stack
         if predict_scale_source is not None:
             if not normalize_source:
                 raise ValueError(
@@ -599,7 +572,7 @@ class HCSDataModule(LightningDataModule):
         )
 
     def _fit_transform(self):
-        """Deterministic center crop as the last step."""
+        """Deterministic center crop as the last step of training and validation."""
         return [
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
@@ -612,44 +585,40 @@ class HCSDataModule(LightningDataModule):
         ]
 
     def _train_transform(self) -> list[Callable]:
-        """Random crop sampling and augmentation for training."""
-        transforms = [
-            RandWeightedCropd(
-                keys=self.source_channel + self.target_channel,
-                w_key="weight",
-                spatial_size=(-1, self.yx_patch_size[0] * 2, self.yx_patch_size[1] * 2),
-                num_samples=self.train_patches_per_stack,
-            )
-        ]
-        if self.augment:
-            transforms.extend(
-                [
-                    RandAffined(
-                        keys=self.source_channel + self.target_channel,
-                        prob=0.5,
-                        rotate_range=(np.pi, 0, 0),
-                        shear_range=(0, (0.05), (0.05)),
-                        scale_range=(self.train_z_scale_range, 0.3, 0.3),
-                    ),
-                    RandAdjustContrastd(
-                        keys=self.source_channel, prob=0.3, gamma=(0.75, 1.5)
-                    ),
-                    RandScaleIntensityd(
-                        keys=self.source_channel, prob=0.5, factors=0.5
-                    ),
-                    RandGaussianNoised(
-                        keys=self.source_channel,
-                        prob=0.5,
-                        mean=0,
-                        std=self.train_noise_std,
-                    ),
-                    RandGaussianSmoothd(
-                        keys=self.source_channel,
-                        prob=0.5,
-                        sigma_x=(0.25, 1.5),
-                        sigma_y=(0.25, 1.5),
-                        sigma_z=(0.25, 1.5),
-                    ),
-                ]
-            )
-        return transforms
+        """Setup training augmentations: check input values,
+        and parse the number of Z slices and patches to sample per stack."""
+        self.train_patches_per_stack = 1
+        z_scale_range = None
+        if self.augmentations:
+            for aug in self.augmentations:
+                if isinstance(aug, RandAffined):
+                    if z_scale_range is not None:
+                        raise ValueError(
+                            "Only one RandAffined augmentation is allowed."
+                        )
+                    z_scale_range = aug.rand_affine.rand_affine_grid.scale_range[0]
+                if isinstance(aug, MultiSampleTrait):
+                    # e.g. RandWeightedCropd.cropper.num_samples
+                    # this trait does not have any concrete interface
+                    # so this attribute may not be the same for other transforms
+                    num_samples = aug.cropper.num_samples
+                    if self.batch_size % num_samples != 0:
+                        raise ValueError(
+                            "Batch size must be divisible by `num_samples` per stack. "
+                            f"Got batch size {self.batch_size} and "
+                            f"number of samples {num_samples} for "
+                            f"transform type {type(aug)}."
+                        )
+                    self.train_patches_per_stack = num_samples
+        else:
+            self.augmentations = []
+        if z_scale_range is not None:
+            if isinstance(z_scale_range, float):
+                z_scale_range = (-z_scale_range, z_scale_range)
+            if z_scale_range[0] > 0 or z_scale_range[1] < 0:
+                raise ValueError(f"Invalid scaling range: {z_scale_range}")
+            self.train_z_scale_range = z_scale_range
+        else:
+            self.train_z_scale_range = (0.0, 0.0)
+        logging.debug(f"Training augmentations: {self.augmentations}")
+        return list(self.augmentations)
