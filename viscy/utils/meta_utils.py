@@ -126,7 +126,7 @@ def generate_normalization_metadata(
                 current=j,
                 process=f"calculating channel statistics {channel}/{list(channel_ids)}",
             )
-            position_statistics = {
+            position_statistics = dataset_statistics | {
                 "fov_statistics": fov_level_statistics[j],
             }
 

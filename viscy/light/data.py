@@ -4,7 +4,8 @@ import os
 import re
 import tempfile
 from glob import glob
-from typing import Callable, Iterable, Literal, Sequence, TypedDict, Union
+from pathlib import Path
+from typing import Callable, Iterable, Literal, Optional, Sequence, TypedDict, Union
 
 import numpy as np
 import torch
@@ -108,6 +109,7 @@ class NormalizeSampled(MapTransform, InvertibleTransform):
         self.norm_meta = norm_meta
 
     def _stat(self, key: str) -> dict:
+        # FIXME: hard-coded key
         return self.norm_meta[key]["dataset_statistics"]
 
     def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
@@ -318,7 +320,10 @@ class HCSDataModule(LightningDataModule):
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
-    :param str ground_truth_masks: path to the ground truth segmentation masks,
+    :param bool normalize_source: whether to normalize the source channel,
+        defaults to False
+    :param Optional[Path] ground_truth_masks: path to the ground truth masks,
+        used in the test stage to compute segmentation metrics,
         defaults to None
     :param tuple[float, float] train_z_scale_range: Z scaling augmentation range,
         passed to MONAI's ``RandAffined`` transform,
@@ -328,6 +333,8 @@ class HCSDataModule(LightningDataModule):
         defaults to 0.0
     :param int train_patches_per_stack: number of patches to sample
         from each stack during training, defaults to 1
+    :param Optional[float] predict_scale_source: scale the source channel intensity,
+        defaults to None (no scaling)
     """
 
     def __init__(
@@ -344,13 +351,14 @@ class HCSDataModule(LightningDataModule):
         augment: bool = True,
         caching: bool = False,
         normalize_source: bool = False,
-        ground_truth_masks: str = None,
+        ground_truth_masks: Optional[Path] = None,
         train_z_scale_range: tuple[float, float] = [0, 0],
         train_noise_std: float = 0.0,
         train_patches_per_stack: int = 1,
+        predict_scale_source: Optional[float] = None,
     ):
         super().__init__()
-        self.data_path = data_path
+        self.data_path = Path(data_path)
         self.source_channel = _ensure_channel_list(source_channel)
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
@@ -376,6 +384,16 @@ class HCSDataModule(LightningDataModule):
                 f"Got {batch_size} and {train_patches_per_stack}."
             )
         self.train_patches_per_stack = train_patches_per_stack
+        if predict_scale_source is not None:
+            if not normalize_source:
+                raise ValueError(
+                    "Intensity scaling must be applied to normalized source channels."
+                )
+            if predict_scale_source <= 0:
+                raise ValueError(
+                    f"Intensity scaling {predict_scale_source} should be positive."
+                )
+        self.predict_scale_source = predict_scale_source
 
     def prepare_data(self):
         if not self.caching:
@@ -501,17 +519,31 @@ class HCSDataModule(LightningDataModule):
         set_track_meta(True)
         if self.caching:
             logging.warning("Ignoring caching config in 'predict' stage.")
-        plate = open_ome_zarr(self.data_path, mode="r")
+        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
+        if isinstance(dataset, Position):
+            try:
+                plate_path = self.data_path.parent.parent.parent
+                fov_name = self.data_path.relative_to(plate_path).as_posix()
+                plate = open_ome_zarr(plate_path)
+            except Exception:
+                raise FileNotFoundError(
+                    "Parent HCS store not found for single FOV input."
+                )
+            positions = [plate[fov_name]]
+        elif isinstance(dataset, Plate):
+            positions = [p for _, p in dataset.positions()]
+        norm_meta = dataset.zattrs["normalization"].copy()
+        if self.predict_scale_source is not None:
+            for ch in self.source_channel:
+                # FIXME: hard-coded key
+                norm_meta[ch]["dataset_statistics"]["iqr"] /= self.predict_scale_source
         predict_transform = (
-            NormalizeSampled(
-                self.source_channel,
-                plate.zattrs["normalization"],
-            )
+            NormalizeSampled(self.source_channel, norm_meta)
             if self.normalize_source
             else None
         )
         self.predict_dataset = SlidingWindowDataset(
-            [p for _, p in plate.positions()],
+            positions=positions,
             transform=predict_transform,
             **dataset_settings,
         )
