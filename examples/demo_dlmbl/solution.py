@@ -123,8 +123,8 @@ You can also launch tensorboard in an independent tab (instead of in the noteboo
 """
 
 # %% Imports and paths tags=[]
-# %reload_ext tensorboard
-# %tensorboard --logdir {log_dir}
+%reload_ext tensorboard
+%tensorboard --logdir {log_dir}
 
 # %% [markdown]
 """
@@ -321,7 +321,7 @@ data_module = HCSDataModule(
     num_workers=8,
     architecture="2D",
     yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
-    augment=None,  # Turn off augmentation for now.
+    augmentations=None,  # Turn off augmentation for now.
 )
 data_module.setup("fit")
 
@@ -343,7 +343,7 @@ writer.close()
 # Visualize directly on Jupyter ☄️, if your tensorboard is causing issues.
 
 # %%
-# %matplotlib inline
+%matplotlib inline
 log_batch_jupyter(batch)
 
 # %% [markdown]

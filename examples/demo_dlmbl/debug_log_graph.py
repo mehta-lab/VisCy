@@ -80,7 +80,7 @@ phase2fluor_data = HCSDataModule(
     num_workers=8,
     architecture="2D",
     yx_patch_size=YX_PATCH_SIZE,
-    augment=True,
+    augmentations=None,
 )
 phase2fluor_data.setup("fit")
 
