@@ -65,7 +65,7 @@ data:
         keys: source
         prob: 0.5
         mean: 0.0
-        std: 0.01
+        std: 1.0
     - class_path: monai.transforms.RandGaussianSmoothd
       init_args:
         keys: source
