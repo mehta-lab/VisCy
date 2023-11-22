@@ -85,6 +85,16 @@ from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 # HCSDataModule makes it easy to load data during training.
 from viscy.light.data import HCSDataModule
 
+# training augmentations
+from viscy.transforms import (
+    RandAdjustContrastd,
+    RandAffined,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandScaleIntensityd,
+    RandWeightedCropd,
+)
+
 # Trainer class and UNet.
 from viscy.light.engine import VSUNet
 from viscy.light.trainer import VSTrainer
@@ -102,7 +112,7 @@ log_dir = Path("~/data/04_image_translation/logs/").expanduser()
 log_dir.mkdir(parents=True, exist_ok=True)
 
 # %% [markdown] tags=[]
-'''
+"""
 The next cell starts tensorboard within the notebook.
 
 <div class="alert alert-danger">
@@ -110,11 +120,11 @@ If you launched jupyter lab from ssh terminal, add <code>--host &lt;your-server-
 
 You can also launch tensorboard in an independent tab (instead of in the notebook) by changing the `%` to `!`
 </div>
-'''
+"""
 
 # %% Imports and paths tags=[]
-%reload_ext tensorboard
-%tensorboard --logdir {log_dir} 
+# %reload_ext tensorboard
+# %tensorboard --logdir {log_dir}
 
 # %% [markdown]
 """
@@ -172,7 +182,7 @@ plt.tight_layout()
 # <div class="alert alert-info">
 #
 # ### Task 1.1
-#     
+#
 # Look at a couple different fields of view by changing the value in the cell above. See if you notice any missing or inconsistent staining.
 # </div>
 
@@ -202,6 +212,7 @@ The dataloader in `HCSDataModule` returns a batch of samples. A `batch` is a lis
 
 # %%
 # Define a function to write a batch to tensorboard log.
+
 
 def log_batch_tensorboard(batch, batchno, writer, card_name):
     """
@@ -245,7 +256,8 @@ def log_batch_tensorboard(batch, batchno, writer, card_name):
 
 
 # %%
-# Define a function to visualize a batch on jupyter, in case tensorboard is finicky 
+# Define a function to visualize a batch on jupyter, in case tensorboard is finicky
+
 
 def log_batch_jupyter(batch):
     """
@@ -279,9 +291,9 @@ def log_batch_jupyter(batch):
     fig, axes = plt.subplots(batch_size, n_channels, figsize=(10, 10))
     [N, C, H, W] = batch_phase.shape
     for sample_id in range(batch_size):
-        axes[sample_id, 0].imshow(batch_phase[sample_id,0])
-        axes[sample_id, 1].imshow(batch_nuclei[sample_id,0])
-        axes[sample_id, 2].imshow(batch_membrane[sample_id,0])
+        axes[sample_id, 0].imshow(batch_phase[sample_id, 0])
+        axes[sample_id, 1].imshow(batch_nuclei[sample_id, 0])
+        axes[sample_id, 2].imshow(batch_membrane[sample_id, 0])
 
         for i in range(n_channels):
             axes[sample_id, i].axis("off")
@@ -309,7 +321,7 @@ data_module = HCSDataModule(
     num_workers=8,
     architecture="2D",
     yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
-    augment=False,  # Turn off augmentation for now.
+    augment=None,  # Turn off augmentation for now.
 )
 data_module.setup("fit")
 
@@ -331,7 +343,7 @@ writer.close()
 # Visualize directly on Jupyter ☄️, if your tensorboard is causing issues.
 
 # %%
-%matplotlib inline
+# %matplotlib inline
 log_batch_jupyter(batch)
 
 # %% [markdown]
@@ -340,7 +352,26 @@ log_batch_jupyter(batch)
 """
 # %%
 # Here we turn on data augmentation and rerun setup
-data_module.augment = True
+augmentations = [
+    RandWeightedCropd(
+        keys=["Phase", "Membrane", "Nuclei"], w_key="Nuclei", spatial_size=[512, 512]
+    ),
+    RandAffined(
+        keys=["Phase", "Membrane", "Nuclei"],
+        prob=0.5,
+        rotate_range=[3.14, 0.0, 0.0],
+        shear_range=[0.0, 0.05, 0.05],
+        scale_range=[0.0, 0.3, 0.3],
+    ),
+    RandAdjustContrastd(keys=["Phase"], prob=0.3, gamma=[0.5, 1.5]),
+    RandScaleIntensityd(keys=["Phase"], prob=0.5, factors=0.5),
+    RandGaussianNoised(keys=["Phase"], prob=0.5, std=1),
+    RandGaussianSmoothd(
+        keys=["Phase"], prob=0.5, sigma_x=[0.25, 1.5], sigma_y=[0.25, 1.5]
+    ),
+]
+
+data_module.augmentations = augmentations
 data_module.setup("fit")
 
 # get the new data loader with augmentation turned on
@@ -418,7 +449,7 @@ phase2fluor_data = HCSDataModule(
     num_workers=8,
     architecture="2D",
     yx_patch_size=YX_PATCH_SIZE,
-    augment=True,
+    augmentations=augmentations,
 )
 phase2fluor_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
@@ -466,7 +497,7 @@ Start training by running the following cell. Check the new logs on the tensorbo
 GPU_ID = 0
 n_samples = len(phase2fluor_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
-n_epochs = 50 # Set this to 50 or the number of epochs you want to train for.
+n_epochs = 50  # Set this to 50 or the number of epochs you want to train for.
 
 trainer = VSTrainer(
     accelerator="gpu",
@@ -479,8 +510,8 @@ trainer = VSTrainer(
         # lightning trainer transparently saves logs and model checkpoints in this directory.
         name="phase2fluor",
         log_graph=True,
-        ),
-    )  
+    ),
+)
 # Launch training and check that loss and images are being logged on tensorboard.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
@@ -530,7 +561,7 @@ For each of the above metrics, write a brief definition of what they are and wha
 #
 # - Pearson Correlation:
 #
-# - Structural similarity: 
+# - Structural similarity:
 
 # %% Compute metrics directly and plot here.
 test_data_path = Path(
@@ -654,7 +685,7 @@ fluor2phase_data = HCSDataModule(
     num_workers=8,
     architecture="2D",
     yx_patch_size=YX_PATCH_SIZE,
-    augment=True,
+    augmentations=augmentations,
 )
 fluor2phase_data.setup("fit")
 
@@ -722,7 +753,7 @@ test_data_path = Path(
 
 test_data = HCSDataModule(
     test_data_path,
-    source_channel="Nuclei", # or Membrane, depending on your choice of source
+    source_channel="Nuclei",  # or Membrane, depending on your choice of source
     target_channel="Phase",
     z_window_size=1,
     batch_size=1,
@@ -731,9 +762,7 @@ test_data = HCSDataModule(
 )
 test_data.setup("test")
 
-test_metrics = pd.DataFrame(
-    columns=["pearson_phase", "SSIM_phase"]
-)
+test_metrics = pd.DataFrame(columns=["pearson_phase", "SSIM_phase"])
 
 
 def min_max_scale(input):
@@ -756,7 +785,9 @@ for i, sample in enumerate(test_data.test_dataloader()):
     predicted_phase = min_max_scale(predicted_image[0, :, :, :].squeeze(0))
 
     # Compute SSIM and pearson correlation.
-    ssim_phase = metrics.structural_similarity(target_phase, predicted_phase, data_range=1)
+    ssim_phase = metrics.structural_similarity(
+        target_phase, predicted_phase, data_range=1
+    )
     pearson_phase = np.corrcoef(target_phase.flatten(), predicted_phase.flatten())[0, 1]
 
     test_metrics.loc[i] = {
