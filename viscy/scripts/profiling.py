@@ -15,7 +15,7 @@ dm = HCSDataModule(
     0.8,
     batch_size=32,
     num_workers=32,
-    augment=True,
+    augment=None,
     caching=False,
 )
 

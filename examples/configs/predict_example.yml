@@ -61,7 +61,6 @@ predict:
     yx_patch_size:
       - 256
       - 256
-    augment: true
     caching: false
     normalize_source: false
     predict_scale_source: null

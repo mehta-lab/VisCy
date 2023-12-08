@@ -60,14 +60,8 @@ data:
   yx_patch_size:
   - 256
   - 256
-  augment: true
   caching: false
   normalize_source: false
   ground_truth_masks: null
-  train_z_scale_range:
-  - 0.0
-  - 0.0
-  train_noise_std: 0.0
-  train_patches_per_stack: 1
 ckpt_path: null
 verbose: true
