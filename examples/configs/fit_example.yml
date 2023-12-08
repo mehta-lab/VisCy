@@ -37,36 +37,36 @@ data:
   num_workers: 16
   yx_patch_size: [256, 256]
   augmentations:
-    - class_path: monai.transforms.RandWeightedCropd
+    - class_path: viscy.transforms.RandWeightedCropd
       init_args:
         keys: [source, target_1, target_2]
         w_key: target_1
         spatial_size: [-1, 512, 512]
         num_samples: 1
-    - class_path: monai.transforms.RandAffined
+    - class_path: viscy.transforms.RandAffined
       init_args:
         keys: [source, target_1, target_2]
         prob: 0.5
         rotate_range: [3.14, 0.0, 0.0]
         shear_range: [0.0, 0.05, 0.05]
         scale_range: [0.2, 0.3, 0.3]
-    - class_path: monai.transforms.RandAdjustContrastd
+    - class_path: viscy.transforms.RandAdjustContrastd
       init_args:
         keys: source
         prob: 0.3
         gamma: [0.75, 1.5]
-    - class_path: monai.transforms.RandScaleIntensityd
+    - class_path: viscy.transforms.RandScaleIntensityd
       init_args:
         keys: source
         prob: 0.5
         factors: 0.5
-    - class_path: monai.transforms.RandGaussianNoised
+    - class_path: viscy.transforms.RandGaussianNoised
       init_args:
         keys: source
         prob: 0.5
         mean: 0.0
         std: 1.0
-    - class_path: monai.transforms.RandGaussianSmoothd
+    - class_path: viscy.transforms.RandGaussianSmoothd
       init_args:
         keys: source
         prob: 0.5
