@@ -5,8 +5,8 @@ from warnings import warn
 import numpy as np
 import torch
 import torch.nn.functional as F
-from lapsolver import solve_dense
 from monai.metrics.regression import compute_ssim_and_cs
+from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
 from torchmetrics.detection import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
@@ -88,8 +88,8 @@ def POD_metric(target_bin, pred_bin):
 
     distance_threshold = np.mean(lab_targ_major_axis) / 2
 
-    # LAPsolver for minimizing cost matrix of objects
-    rids, cids = solve_dense(cost_matrix)
+    # minimize cost matrix of objects
+    rids, cids = linear_sum_assignment(cost_matrix)
 
     # filter out rid and cid pairs that exceed distance threshold
     matching_targ = []
