@@ -8,7 +8,6 @@ Our pipeline also provides utilities to export the models to ONNX format for use
 We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
 Expect rough edges until we release a PyPI package.
 
-
 ![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
 
 This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on viscy.
@@ -23,7 +22,6 @@ This pipeline evolved from the [TensorFlow version of virtual staining pipeline]
     # OR
     mamba create --prefix /path/to/conda/envs/viscy python=3.10
     ```
-
 
 2. Clone this repository and install with pip:
 
@@ -111,3 +109,17 @@ flowchart LR
 
 ![2.5D U-Net light](docs/figures/2_5d_unet_light.svg#gh-light-mode-only)
 ![2.5D U-Net dark](docs/figures/2_5d_unet_dark.svg#gh-dark-mode-only)
+
+### Reference
+
+We report the use of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+
+```bibtex
+@misc{ivanov_mantis_2023,
+ title = {Mantis: high-throughput {4D} imaging and analysis of the molecular and physical architecture of cells},
+ url = {https://www.biorxiv.org/content/10.1101/2023.12.19.572435v1},
+ doi = {10.1101/2023.12.19.572435},
+ publisher = {bioRxiv},
+ author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
+}
+```
