@@ -3,11 +3,11 @@
 ## Development installation
 
 Clone or fork the repository,
-then make an editable installation with optional dependencies:
+then make an editable installation with all the optional dependencies:
 
 ```sh
-# in project root directory (where you can see README.md with `ls`)
-pip install -e ".[dev,metrics]"
+# in project root directory (parent folder of pyproject.toml)
+pip install -e ".[dev,visual,metrics]"
 ```
 
 ## Testing
@@ -15,5 +15,5 @@ pip install -e ".[dev,metrics]"
 Run tests with `pytest`:
 
 ```sh
-pytest
+pytest -v
 ```
