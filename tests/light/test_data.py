@@ -4,7 +4,7 @@ import torch
 from iohub import open_ome_zarr
 from pytest import mark
 
-from viscy.light.data import HCSDataModule
+from viscy.data.hcs import HCSDataModule
 from viscy.light.trainer import VSTrainer
 
 
