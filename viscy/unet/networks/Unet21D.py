@@ -12,7 +12,7 @@ def icnr_init(
     conv: nn.Module,
     upsample_factor: int,
     upsample_dims: int,
-    init=nn.init.kaiming_normal_,
+    init: Callable = nn.init.kaiming_normal_,
 ):
     """
     ICNR initialization for 2D/3D kernels adapted from Aitken et al.,2017 ,
