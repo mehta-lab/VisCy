@@ -11,20 +11,19 @@ from typing import Callable, Literal, Sequence
 import torch
 from timm.layers import DropPath, LayerNorm2d, create_conv2d, trunc_normal_
 from timm.models.convnext import Downsample
-from torch import BoolTensor, Tensor, nn
+from torch import BoolTensor, Size, Tensor, nn
 
 
-def _upsample_mask(mask: BoolTensor, features: Tensor) -> BoolTensor:
-    mask = mask[..., :, :][None, None]
-    if features.shape[-2:] != mask.shape[-2:]:
-        if not all(i % j == 0 for i, j in zip(features.shape[-2:], mask.shape[-2:])):
+def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
+    if target[-2:] != mask.shape[-2:]:
+        if not all(i % j == 0 for i, j in zip(target, mask.shape)):
             raise ValueError(
-                f"feature map shape {features.shape} must be divisible by "
+                f"feature map shape {target} must be divisible by "
                 f"mask shape {mask.shape}."
             )
         mask = mask.repeat_interleave(
-            features.shape[-2] // mask.shape[-2], dim=-2
-        ).repeat_interleave(features.shape[-1] // mask.shape[-1], dim=-1)
+            target[-2] // mask.shape[-2], dim=-2
+        ).repeat_interleave(target[-1] // mask.shape[-1], dim=-1)
     return mask
 
 
@@ -193,10 +192,62 @@ class MaskedConvNeXtV2Stage(nn.Module):
         """
         x = self.downsample(x)
         if mask is not None:
-            mask = _upsample_mask(mask, x)
+            mask = upsample_mask(mask, x.shape)
         for block in self.blocks:
             x = block(x, mask)
         return x
+
+
+class AdaptiveProjection(nn.Module):
+    """
+    Patchifying layer for projecting 2D or 3D input into 2D feature maps.
+    Masking is not needed because the mask will cover entire patches.
+
+    :param int in_channels: input channels
+    :param int out_channels: output channels
+    :param Sequence[int, int] | int kernel_size_2d: kernel width and height
+    :param int kernel_depth: kernel depth for 3D input
+    :param int in_stack_depth: input stack depth for 3D input
+    """
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size_2d: tuple[int, int] | int = 4,
+        kernel_depth: int = 5,
+        in_stack_depth: int = 5,
+    ) -> None:
+        super().__init__()
+        ratio = in_stack_depth // kernel_depth
+        if isinstance(kernel_size_2d, int):
+            kernel_size_2d = [kernel_size_2d] * 2
+        kernel_size_3d = [kernel_depth, *kernel_size_2d]
+        self.conv3d = nn.Conv3d(
+            in_channels=in_channels,
+            out_channels=out_channels // ratio,
+            kernel_size=kernel_size_3d,
+            stride=kernel_size_3d,
+        )
+        self.conv2d = nn.Conv2d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            kernel_size=kernel_size_2d,
+            stride=kernel_size_2d,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """
+        :param Tensor x: input tensor (BCDHW)
+        :return Tensor: output tensor (BCHW)
+        """
+        if x.shape[2] > 1:
+            x = self.conv3d(x)
+            b, c, d, h, w = x.shape
+            # project Z/depth into channels
+            # return a view when possible (contiguous)
+            return x.reshape(b, c * d, h, w)
+        return self.conv2d(x.squeeze(2))
 
 
 class MaskedMultiscaleEncoder(nn.Module):
@@ -208,28 +259,52 @@ class MaskedMultiscaleEncoder(nn.Module):
         drop_path_rate: float = 0.0,
     ) -> None:
         super().__init__()
+        stem_kernel_size_2d = 4
+        self.stem = nn.Sequential(
+            AdaptiveProjection(
+                in_channels, dims[0], kernel_size_2d=stem_kernel_size_2d, kernel_depth=5
+            ),
+            LayerNorm2d(dims[0]),
+        )
         self.stages = nn.ModuleList()
-        chs = [in_channels, *dims]
+        chs = [dims[0], *dims]
         for i, num_blocks in enumerate(stage_blocks):
+            stride = 1 if i == 0 else 2
             self.stages.append(
                 MaskedConvNeXtV2Stage(
                     chs[i],
                     chs[i + 1],
                     kernel_size=7,
-                    stride=2,
+                    stride=stride,
                     num_blocks=num_blocks,
                     drop_path_rates=[drop_path_rate] * num_blocks,
                 )
             )
+        self.total_stride = stem_kernel_size_2d * 2 ** (len(self.stages) - 1)
 
-    def forward(self, x: Tensor, mask: BoolTensor | None = None) -> Tensor:
+    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
         """
         :param Tensor x: input tensor (BCHW)
-        :param BoolTensor | None mask: boolean mask, defaults to None
+        :param float mask_ratio: ratio of the feature maps to mask,
+            defaults to 0.0 (no masking)
         :return Tensor: output tensor (BCHW)
         """
+        if mask_ratio > 0.0:
+            noise = torch.rand(
+                x.shape[0],
+                1,
+                x.shape[-2] // self.total_stride,
+                x.shape[-1] // self.total_stride,
+                device=x.device,
+            )
+            mask = noise > mask_ratio
+        else:
+            mask = None
+        x = self.stem(x)
         features = []
         for stage in self.stages:
             x = stage(x, mask)
             features.append(x)
+        if mask is not None:
+            return features, mask
         return features

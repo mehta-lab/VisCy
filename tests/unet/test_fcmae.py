@@ -1,9 +1,12 @@
 import torch
 
 from viscy.unet.networks.fcmae import (
+    AdaptiveProjection,
     MaskedConvNeXtV2Block,
     MaskedConvNeXtV2Stage,
     MaskedGlobalResponseNorm,
+    MaskedMultiscaleEncoder,
+    upsample_mask,
 )
 
 
@@ -41,3 +44,37 @@ def test_masked_convnextv2_stage() -> None:
     assert out.shape == (2, 3, 8, 8)
     masked_out = stage(x, mask)
     assert not torch.allclose(masked_out, out)
+
+
+def test_adaptive_projection() -> None:
+    proj = AdaptiveProjection(3, 12, kernel_size_2d=4, kernel_depth=5, in_stack_depth=5)
+    assert proj(torch.rand(2, 3, 5, 8, 8)).shape == (2, 12, 2, 2)
+    assert proj(torch.rand(2, 3, 1, 12, 16)).shape == (2, 12, 3, 4)
+    proj = AdaptiveProjection(
+        3, 12, kernel_size_2d=(2, 4), kernel_depth=5, in_stack_depth=15
+    )
+    assert proj(torch.rand(2, 3, 15, 6, 8)).shape == (2, 12, 3, 2)
+
+
+def test_masked_multiscale_encoder() -> None:
+    xy_size = 64
+    dims = [12, 24, 48, 96]
+    x = torch.rand(2, 3, 5, xy_size, xy_size)
+    encoder = MaskedMultiscaleEncoder(3, dims=dims)
+    # auto_masked_features, mask = encoder(x, mask_ratio=0.5)
+    auto_masked_features = encoder(x)
+    target_shape = list(x.shape)
+    target_shape.pop(1)
+    pre_masked_features = encoder(x) #encoder(x * ~upsample_mask(mask, target_shape).unsqueeze(1))
+    assert len(auto_masked_features) == len(pre_masked_features) == 4
+    for i, (dim, afeat, pfeat) in enumerate(
+        zip(dims, auto_masked_features, pre_masked_features)
+    ):
+        assert afeat.shape[0] == x.shape[0]
+        assert afeat.shape[1] == dim
+        stride = 2 * 2 ** (i + 1)
+        assert afeat.shape[2] == afeat.shape[3] == xy_size // stride
+        assert torch.allclose(afeat, pfeat, rtol=1e-1, atol=5e-2), (
+            i,
+            (afeat - pfeat).abs().max(),
+        )
