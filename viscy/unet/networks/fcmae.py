@@ -9,7 +9,14 @@ also referring to timm's dense implementation of the encoder in ``timm.models.co
 from typing import Callable, Literal, Sequence
 
 import torch
-from timm.layers import DropPath, LayerNorm2d, create_conv2d, trunc_normal_
+from timm.layers import (
+    DropPath,
+    GlobalResponseNormMlp,
+    LayerNorm2d,
+    LayerNorm,
+    create_conv2d,
+    trunc_normal_,
+)
 from timm.models.convnext import Downsample
 from torch import BoolTensor, Size, Tensor, nn
 
@@ -198,10 +205,9 @@ class MaskedConvNeXtV2Stage(nn.Module):
         return x
 
 
-class AdaptiveProjection(nn.Module):
+class MaskedAdaptiveProjection(nn.Module):
     """
-    Patchifying layer for projecting 2D or 3D input into 2D feature maps.
-    Masking is not needed because the mask will cover entire patches.
+    Masked patchifying layer for projecting 2D or 3D input into 2D feature maps.
 
     :param int in_channels: input channels
     :param int out_channels: output channels
@@ -235,19 +241,35 @@ class AdaptiveProjection(nn.Module):
             kernel_size=kernel_size_2d,
             stride=kernel_size_2d,
         )
+        self.norm = nn.LayerNorm(out_channels)
 
-    def forward(self, x: Tensor) -> Tensor:
+    def forward(self, x: Tensor, mask: BoolTensor = None) -> Tensor:
         """
         :param Tensor x: input tensor (BCDHW)
+        :param BoolTensor mask: boolean mask (B1HW), defaults to None
         :return Tensor: output tensor (BCHW)
         """
+        # no need to mask before convolutions since patches do not spill over
         if x.shape[2] > 1:
             x = self.conv3d(x)
             b, c, d, h, w = x.shape
             # project Z/depth into channels
             # return a view when possible (contiguous)
-            return x.reshape(b, c * d, h, w)
-        return self.conv2d(x.squeeze(2))
+            x = x.reshape(b, c * d, h, w)
+        else:
+            x = self.conv2d(x.squeeze(2))
+        out_shape = x.shape
+        if mask is not None:
+            mask = upsample_mask(mask, x.shape)
+            x = x[mask]
+        else:
+            x = x.flatten(2)
+        x = x.permute(0, 2, 1)
+        x = self.norm(x)
+        x = x.permute(0, 2, 1)
+        if mask is not None:
+            out = torch.zeros(out_shape, device=x.device)
+            out[mask] = x
 
 
 class MaskedMultiscaleEncoder(nn.Module):
@@ -261,7 +283,7 @@ class MaskedMultiscaleEncoder(nn.Module):
         super().__init__()
         stem_kernel_size_2d = 4
         self.stem = nn.Sequential(
-            AdaptiveProjection(
+            MaskedAdaptiveProjection(
                 in_channels, dims[0], kernel_size_2d=stem_kernel_size_2d, kernel_depth=5
             ),
             LayerNorm2d(dims[0]),
