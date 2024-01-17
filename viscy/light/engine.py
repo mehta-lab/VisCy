@@ -373,7 +373,7 @@ class VSUNet(LightningModule):
 
 class FcmaeUNet(VSUNet):
     def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
-        super().__init__(**kwargs)
+        super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
 
     def forward(self, x, mask_ratio: float = 0.0):
