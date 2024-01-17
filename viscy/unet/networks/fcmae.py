@@ -9,19 +9,36 @@ and timm's dense implementation of the encoder in ``timm.models.convnext``
 from typing import Callable, Literal, Sequence
 
 import torch
-import torch.nn.functional as F
-from timm.layers import (
+from timm.models.convnext import (
+    Downsample,
     DropPath,
     GlobalResponseNormMlp,
     LayerNorm2d,
     create_conv2d,
     trunc_normal_,
 )
-from timm.models.convnext import Downsample
 from torch import BoolTensor, Size, Tensor, nn
 
+from viscy.unet.networks.Unet21D import PixelToVoxelHead, Unet2dDecoder, UnsqueezeHead
 
-def generate_mask(target: Size, stride: int, mask_ratio: float) -> BoolTensor:
+
+def _init_weights(module: nn.Module) -> None:
+    """Initialize weights of the given module."""
+    if isinstance(module, nn.Conv2d):
+        trunc_normal_(module.weight, std=0.02)
+        if module.bias is not None:
+            nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.Linear):
+        trunc_normal_(module.weight, std=0.02)
+        nn.init.zeros_(module.bias)
+    elif isinstance(module, nn.LayerNorm):
+        nn.init.ones_(module.weight)
+        nn.init.zeros_(module.bias)
+
+
+def generate_mask(
+    target: Size, stride: int, mask_ratio: float, device: str
+) -> BoolTensor:
     """
     :param Size target: target shape
     :param int stride: total stride
@@ -32,7 +49,7 @@ def generate_mask(target: Size, stride: int, mask_ratio: float) -> BoolTensor:
     m_width = target[-1] // stride
     mask_numel = m_height * m_width
     masked_elements = int(mask_numel * mask_ratio)
-    mask = torch.rand(target[0], mask_numel).argsort(1) < masked_elements
+    mask = torch.rand(target[0], mask_numel, device=device).argsort(1) < masked_elements
     return mask.reshape(target[0], 1, m_height, m_width)
 
 
@@ -293,14 +310,16 @@ class MaskedMultiscaleEncoder(nn.Module):
         stage_blocks: Sequence[int] = (3, 3, 9, 3),
         dims: Sequence[int] = (96, 192, 384, 768),
         drop_path_rate: float = 0.0,
+        stem_kernel_size: Sequence[int] = (5, 4, 4),
+        in_stack_depth: int = 5,
     ) -> None:
         super().__init__()
-        stem_kernel_size_2d = 4
-        self.stem = nn.Sequential(
-            MaskedAdaptiveProjection(
-                in_channels, dims[0], kernel_size_2d=stem_kernel_size_2d, kernel_depth=5
-            ),
-            LayerNorm2d(dims[0]),
+        self.stem = MaskedAdaptiveProjection(
+            in_channels,
+            dims[0],
+            kernel_size_2d=stem_kernel_size[1:],
+            kernel_depth=stem_kernel_size[0],
+            in_stack_depth=in_stack_depth,
         )
         self.stages = nn.ModuleList()
         chs = [dims[0], *dims]
@@ -316,24 +335,82 @@ class MaskedMultiscaleEncoder(nn.Module):
                     drop_path_rates=[drop_path_rate] * num_blocks,
                 )
             )
-        self.total_stride = stem_kernel_size_2d * 2 ** (len(self.stages) - 1)
+        self.total_stride = stem_kernel_size[1] * 2 ** (len(self.stages) - 1)
+        self.apply(_init_weights)
 
-    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
+    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> list[Tensor]:
         """
-        :param Tensor x: input tensor (BCHW)
+        :param Tensor x: input tensor (BCDHW)
         :param float mask_ratio: ratio of the feature maps to mask,
             defaults to 0.0 (no masking)
-        :return Tensor: output tensor (BCHW)
+        :return list[Tensor]: output tensors (list of BCHW)
+        :return BoolTensor | None: boolean foreground mask, None if no masking
         """
         if mask_ratio > 0.0:
-            unmasked = ~generate_mask(x.shape, self.total_stride, mask_ratio)
+            mask = generate_mask(
+                x.shape, self.total_stride, mask_ratio, device=x.device
+            )
+            b, c, d, h, w = x.shape
+            unmasked = ~mask
+            mask = upsample_mask(mask, (b, d, h, w))
         else:
-            unmasked = None
+            mask = unmasked = None
         x = self.stem(x)
         features = []
         for stage in self.stages:
             x = stage(x, unmasked=unmasked)
             features.append(x)
-        if unmasked is not None:
-            return features, unmasked
-        return features
+        return features, mask
+
+
+class FullyConvolutionalMAE(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        encoder_blocks: Sequence[int] = [3, 3, 9, 3],
+        dims: Sequence[int] = [96, 192, 384, 768],
+        encoder_drop_path_rate: float = 0.0,
+        head_expansion_ratio: int = 4,
+        stem_kernel_size: Sequence[int] = (5, 4, 4),
+        in_stack_depth: int = 5,
+    ) -> None:
+        super().__init__()
+        self.encoder = MaskedMultiscaleEncoder(
+            in_channels=in_channels,
+            stage_blocks=encoder_blocks,
+            dims=dims,
+            drop_path_rate=encoder_drop_path_rate,
+            stem_kernel_size=stem_kernel_size,
+            in_stack_depth=in_stack_depth,
+        )
+        decoder_channels = list(dims)
+        decoder_channels.reverse()
+        decoder_channels[-1] = (
+            (in_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
+        )
+        self.decoder = Unet2dDecoder(
+            decoder_channels,
+            norm_name="instance",
+            mode="pixelshuffle",
+            conv_blocks=1,
+            strides=[2] * (len(dims) - 1) + [stem_kernel_size[-1]],
+            upsample_pre_conv=None,
+        )
+        if in_stack_depth == 1:
+            self.head = UnsqueezeHead()
+        else:
+            self.head = PixelToVoxelHead(
+                in_channels=decoder_channels[-1],
+                out_channels=in_channels,
+                out_stack_depth=in_stack_depth,
+                expansion_ratio=head_expansion_ratio,
+                pool=True,
+            )
+        self.out_stack_depth = in_stack_depth
+        self.num_blocks = 6
+
+    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
+        x, mask = self.encoder(x, mask_ratio=mask_ratio)
+        x.reverse()
+        x = self.decoder(x)
+        return self.head(x), mask

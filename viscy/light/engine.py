@@ -27,6 +27,7 @@ from torchmetrics.functional import (
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
+from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
@@ -43,6 +44,7 @@ _UNET_ARCHITECTURE = {
     # same class with out_stack_depth > 1
     "2.2D": Unet21d,
     "2.5D": Unet25d,
+    "fcmae": FullyConvolutionalMAE,
 }
 
 
@@ -367,3 +369,45 @@ class VSUNet(LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
+
+
+class FcmaeUNet(VSUNet):
+    def __init__(self, train_mask_ratio: float = 0.0, **kwargs):
+        super().__init__(**kwargs)
+        self.train_mask_ratio = train_mask_ratio
+
+    def forward(self, x, mask_ratio: float = 0.0):
+        return self.model(x, mask_ratio)
+
+    def training_step(self, batch: Sample, batch_idx: int):
+        source = batch["source"]
+        target = batch["target"]
+        pred, mask = self.forward(source, mask_ratio=self.train_mask_ratio)
+        loss = F.mse_loss(pred, target, reduction="none")
+        loss = (loss * mask).sum() / mask.sum()
+        self.log(
+            "loss/train",
+            loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(
+                self._detach_sample((source, target, pred))
+            )
+        return loss
+
+    def validation_step(self, batch: Sample, batch_idx: int):
+        source = batch["source"]
+        target = batch["target"]
+        pred, mask = self.forward(source, mask_ratio=self.train_mask_ratio)
+        loss = F.mse_loss(pred, target, reduction="none")
+        loss = (loss.mean(2) * mask).sum() / mask.sum()
+        self.log("loss/validate", loss, sync_dist=True)
+        if batch_idx < self.log_batches_per_epoch:
+            self.validation_step_outputs.extend(
+                self._detach_sample((source, target, pred))
+            )
