@@ -4,13 +4,52 @@ from viscy.unet.networks.fcmae import (
     MaskedAdaptiveProjection,
     MaskedConvNeXtV2Block,
     MaskedConvNeXtV2Stage,
-    MaskedGlobalResponseNorm,
+    # MaskedGlobalResponseNorm,
     MaskedMultiscaleEncoder,
+    generate_mask,
+    masked_patchify,
+    masked_unpatchify,
     upsample_mask,
 )
 
 
-def test_masked_grn() -> None:
+def test_generate_mask():
+    w = 64
+    s = 16
+    m = 0.75
+    mask = generate_mask((2, 3, w, w), stride=s, mask_ratio=m)
+    assert mask.shape == (2, 1, w // s, w // s)
+    assert mask.dtype == torch.bool
+    ratio = mask.sum((2, 3)) / mask.numel() * mask.shape[0]
+    assert torch.allclose(ratio, torch.ones_like(ratio) * m)
+
+
+def test_masked_patchify():
+    b, c, h, w = 2, 3, 4, 8
+    x = torch.rand(b, c, h, w)
+    mask_ratio = 0.75
+    mask = generate_mask(x.shape, stride=2, mask_ratio=mask_ratio)
+    mask = upsample_mask(mask, x.shape)
+    feat = masked_patchify(x, mask)
+    assert feat.shape == (b, int(h * w * (1 - mask_ratio)), c)
+
+
+def test_unmasked_patchify_roundtrip():
+    x = torch.rand(2, 3, 4, 8)
+    y = masked_unpatchify(masked_patchify(x), out_shape=x.shape)
+    assert torch.allclose(x, y)
+
+
+def test_masked_patchify_roundtrip():
+    x = torch.rand(2, 3, 4, 8)
+    mask = generate_mask(x.shape, stride=2, mask_ratio=0.5)
+    mask = upsample_mask(mask, x.shape)
+    y = masked_unpatchify(masked_patchify(x, mask), out_shape=x.shape, mask=mask)
+    assert torch.all((y == 0) ^ (x == y))
+    assert torch.all((y == 0)[:, 0:1] == mask)
+
+
+def test_masked_grn():
     x = torch.rand(2, 3, 4, 5)
     grn = MaskedGlobalResponseNorm(3, channels_last=False)
     grn.gamma.data = torch.ones_like(grn.gamma.data)
@@ -36,7 +75,7 @@ def test_masked_convnextv2_block() -> None:
     assert len(masked_out[:, :, mask].unique()) == x.shape[1]
 
 
-def test_masked_convnextv2_stage() -> None:
+def test_masked_convnextv2_stage():
     x = torch.rand(2, 3, 16, 16)
     mask = torch.rand(4, 4) > 0.5
     stage = MaskedConvNeXtV2Stage(3, 3, kernel_size=7, stride=2, num_blocks=2)
@@ -46,19 +85,21 @@ def test_masked_convnextv2_stage() -> None:
     assert not torch.allclose(masked_out, out)
 
 
-def test_adaptive_projection() -> None:
+def test_adaptive_projection():
     proj = MaskedAdaptiveProjection(
         3, 12, kernel_size_2d=4, kernel_depth=5, in_stack_depth=5
     )
     assert proj(torch.rand(2, 3, 5, 8, 8)).shape == (2, 12, 2, 2)
     assert proj(torch.rand(2, 3, 1, 12, 16)).shape == (2, 12, 3, 4)
+    mask = torch.rand(2, 1, 2, 2) > 0.5
+    masked_out = proj(torch.rand(2, 3, 5, 16, 16), mask)
     proj = MaskedAdaptiveProjection(
         3, 12, kernel_size_2d=(2, 4), kernel_depth=5, in_stack_depth=15
     )
     assert proj(torch.rand(2, 3, 15, 6, 8)).shape == (2, 12, 3, 2)
 
 
-def test_masked_multiscale_encoder() -> None:
+def test_masked_multiscale_encoder():
     xy_size = 64
     dims = [12, 24, 48, 96]
     x = torch.rand(2, 3, 5, xy_size, xy_size)

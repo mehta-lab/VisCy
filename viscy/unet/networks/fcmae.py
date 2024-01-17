@@ -2,18 +2,18 @@
 Fully Convolutional Masked Autoencoder as described in ConvNeXt V2
 based on the official JAX example in
 https://github.com/facebookresearch/ConvNeXt-V2/blob/main/TRAINING.md#implementing-fcmae-with-masked-convolution-in-jax
-also referring to timm's dense implementation of the encoder in ``timm.models.convnext``
+and timm's dense implementation of the encoder in ``timm.models.convnext``
 """
 
 
 from typing import Callable, Literal, Sequence
 
 import torch
+import torch.nn.functional as F
 from timm.layers import (
     DropPath,
     GlobalResponseNormMlp,
     LayerNorm2d,
-    LayerNorm,
     create_conv2d,
     trunc_normal_,
 )
@@ -21,7 +21,27 @@ from timm.models.convnext import Downsample
 from torch import BoolTensor, Size, Tensor, nn
 
 
+def generate_mask(target: Size, stride: int, mask_ratio: float) -> BoolTensor:
+    """
+    :param Size target: target shape
+    :param int stride: total stride
+    :param float mask_ratio: ratio of the pixels to mask
+    :return BoolTensor: boolean mask (N, H*W)
+    """
+    m_height = target[-2] // stride
+    m_width = target[-1] // stride
+    mask_numel = m_height * m_width
+    masked_elements = int(mask_numel * mask_ratio)
+    mask = torch.rand(target[0], mask_numel).argsort(1) < masked_elements
+    return mask.reshape(target[0], 1, m_height, m_width)
+
+
 def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
+    """
+    :param BoolTensor mask: low-resolution boolean mask (B1HW)
+    :param Size target: target size (BCHW)
+    :return BoolTensor: upsampled boolean mask (B1HW)
+    """
     if target[-2:] != mask.shape[-2:]:
         if not all(i % j == 0 for i, j in zip(target, mask.shape)):
             raise ValueError(
@@ -34,43 +54,48 @@ def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
     return mask
 
 
-class MaskedGlobalResponseNorm(nn.Module):
+def masked_patchify(features: Tensor, mask: BoolTensor | None = None) -> Tensor:
     """
-    Masked Global Response Normalization.
-
-    :param int dim: number of input channels
-    :param float eps: small value added for numerical stability,
-        defaults to 1e-6
-    :param bool channels_last: BHWC (True) or BCHW (False) dimension ordering,
-        defaults to False
+    :param Tensor features: input image features (BCHW)
+    :param BoolTensor mask: boolean mask (B1HW)
+    :return Tensor: masked channel-last features (BLC, L = H * W * mask_ratio)
     """
+    if mask is None:
+        return features.flatten(2).permute(0, 2, 1)
+    b, c = features.shape[:2]
+    # (B, C, H, W) -> (B, H, W, C)
+    features = features.permute(0, 2, 3, 1)
+    # (B, H, W, C) -> (B * L, C) -> (B, L, C)
+    features = features[~mask[:, 0]].reshape(b, -1, c)
 
-    def __init__(
-        self, dim: int, eps: float = 1e-6, channels_last: bool = False
-    ) -> None:
-        super().__init__()
-        if channels_last:
-            self.spatial_dim = (1, 2)
-            self.channel_dim = -1
-            weights_shape = (1, 1, 1, dim)
-        else:
-            self.spatial_dim = (2, 3)
-            self.channel_dim = 1
-            weights_shape = (1, dim, 1, 1)
-        self.gamma = nn.Parameter(torch.zeros(weights_shape))
-        self.beta = nn.Parameter(torch.zeros(weights_shape))
-        self.eps = eps
+    # kernel_size = tuple(features.shape[-i] // mask.shape[-i] for i in (2, 1))
+    # # (B, C, H, W) -> (B, C * H_patch * Wp, H_grid * Wg)
+    # features = F.unfold(features, kernel_size=kernel_size, stride=kernel_size)
+    # patch_size = kernel_size[0] * kernel_size[1]
+    # # (B, C * Hp * Wp, Hg * Wg) -> (B, C, Hp * Wp, Hg * Wg) -> (B, Hg * Wg, C, Hp * Wp)
+    # features = features.view(b, c, patch_size, -1).permute(0, 3, 1, 2)
+    # # (B, 1, Hg, Wg) -> (B, Hg*Wg)
+    # idx = ~mask.flatten(1)
+    # # (B, Hg * Wg, C, Hp * Wp) -> (B * L, C, Hp * Wp) -> (B, L, C, Hp * Wp)
+    # features = features[idx].view(b, -1, c, patch_size)
+    # # (B, L, C, Hp * Wp) -> (B, L, Hp * Wp, C) -> (B, L * Hp * Wp, C)
+    # features = features.permute(0, 1, 3, 2).reshape(b, -1, c)
+    return features
 
-    def forward(self, x: Tensor, mask: BoolTensor | None = None) -> Tensor:
-        """
-        :param Tensor x: input tensor, BHWC or BCHW
-        :param BoolTensor | None mask: boolean mask, defaults to None
-        :return Tensor: normalized tensor
-        """
-        samples = x if mask is None else x * ~mask
-        g_x = samples.norm(p=2, dim=self.spatial_dim, keepdim=True)
-        n_x = g_x / (g_x.mean(dim=self.channel_dim, keepdim=True) + self.eps)
-        return x + torch.addcmul(self.beta, self.gamma, x * n_x)
+
+def masked_unpatchify(
+    features: Tensor, out_shape: Size, mask: BoolTensor | None = None
+) -> Tensor:
+    if mask is None:
+        # (B, L, C) -> (B, C, L) -> (B, C, H, W)
+        return features.permute(0, 2, 1).reshape(out_shape)
+    b, c, w, h = out_shape
+    out = torch.zeros((b, w, h, c), device=features.device, dtype=features.dtype)
+    # (B, L, C) -> (B * L, C)
+    features = features.reshape(-1, c)
+    out[~mask[:, 0]] = features
+    # (B, H, W, C) -> (B, C, H, W)
+    return out.permute(0, 3, 1, 2)
 
 
 class MaskedConvNeXtV2Block(nn.Module):
@@ -102,11 +127,13 @@ class MaskedConvNeXtV2Block(nn.Module):
             stride=stride,
             depthwise=True,
         )
-        self.layernorm = LayerNorm2d(out_channels)
-        self.pwconv1 = nn.Conv2d(out_channels, mlp_ratio * out_channels, kernel_size=1)
-        self.act = nn.GELU()
-        self.grn = MaskedGlobalResponseNorm(mlp_ratio * out_channels)
-        self.pwconv2 = nn.Conv2d(mlp_ratio * out_channels, out_channels, kernel_size=1)
+        self.layernorm = nn.LayerNorm(out_channels)
+        mid_channels = mlp_ratio * out_channels
+        self.mlp = GlobalResponseNormMlp(
+            in_features=out_channels,
+            hidden_features=mid_channels,
+            out_features=out_channels,
+        )
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
         if in_channels != out_channels or stride > 1:
             self.shortcut = Downsample(in_channels, out_channels, stride=stride)
@@ -125,6 +152,8 @@ class MaskedConvNeXtV2Block(nn.Module):
         x = self.dwconv(x)
         if mask is not None:
             x *= ~mask
+        out_shape = x.shape
+        x = masked_project(x, mask)
         x = self.layernorm(x)
         x = self.pwconv1(x)
         x = self.act(x)
@@ -268,8 +297,10 @@ class MaskedAdaptiveProjection(nn.Module):
         x = self.norm(x)
         x = x.permute(0, 2, 1)
         if mask is not None:
-            out = torch.zeros(out_shape, device=x.device)
+            out = torch.zeros(out_shape, device=x.device, dtype=x.dtype)
             out[mask] = x
+            return out
+        return x.reshape(out_shape)
 
 
 class MaskedMultiscaleEncoder(nn.Module):
@@ -312,14 +343,7 @@ class MaskedMultiscaleEncoder(nn.Module):
         :return Tensor: output tensor (BCHW)
         """
         if mask_ratio > 0.0:
-            noise = torch.rand(
-                x.shape[0],
-                1,
-                x.shape[-2] // self.total_stride,
-                x.shape[-1] // self.total_stride,
-                device=x.device,
-            )
-            mask = noise > mask_ratio
+            mask = generate_mask(x.shape, self.total_stride, mask_ratio)
         else:
             mask = None
         x = self.stem(x)
