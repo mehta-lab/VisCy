@@ -372,19 +372,23 @@ class VSUNet(LightningModule):
 
 
 class FcmaeUNet(VSUNet):
-    def __init__(self, train_mask_ratio: float = 0.0, **kwargs):
+    def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
         super().__init__(**kwargs)
-        self.train_mask_ratio = train_mask_ratio
+        self.fit_mask_ratio = fit_mask_ratio
 
     def forward(self, x, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def training_step(self, batch: Sample, batch_idx: int):
+    def forward_fit(self, batch: Sample):
         source = batch["source"]
         target = batch["target"]
-        pred, mask = self.forward(source, mask_ratio=self.train_mask_ratio)
+        pred, mask = self.forward(source, mask_ratio=self.fit_mask_ratio)
         loss = F.mse_loss(pred, target, reduction="none")
-        loss = (loss * mask).sum() / mask.sum()
+        loss = (loss.mean(2) * mask).sum() / mask.sum()
+        return source, target, pred, mask, loss
+
+    def training_step(self, batch: Sample, batch_idx: int):
+        source, target, pred, mask, loss = self.forward_fit(batch)
         self.log(
             "loss/train",
             loss,
@@ -396,18 +400,14 @@ class FcmaeUNet(VSUNet):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
-                self._detach_sample((source, target, pred))
+                self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
         return loss
 
     def validation_step(self, batch: Sample, batch_idx: int):
-        source = batch["source"]
-        target = batch["target"]
-        pred, mask = self.forward(source, mask_ratio=self.train_mask_ratio)
-        loss = F.mse_loss(pred, target, reduction="none")
-        loss = (loss.mean(2) * mask).sum() / mask.sum()
+        source, target, pred, mask, loss = self.forward_fit(batch)
         self.log("loss/validate", loss, sync_dist=True)
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                self._detach_sample((source, target, pred))
+                self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )

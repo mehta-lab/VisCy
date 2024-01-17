@@ -107,5 +107,9 @@ def test_masked_multiscale_encoder():
 def test_fcmae():
     x = torch.rand(2, 3, 5, 128, 128)
     model = FullyConvolutionalMAE(3)
-    assert model(x).shape == x.shape
-    assert model(x, mask_ratio=0.6).shape == x.shape
+    y, m = model(x)
+    assert y.shape == x.shape
+    assert m is None
+    y, m = model(x, mask_ratio=0.6)
+    assert y.shape == x.shape
+    assert m.shape == (2, 1, 128, 128)

@@ -6,7 +6,7 @@ and timm's dense implementation of the encoder in ``timm.models.convnext``
 """
 
 
-from typing import Callable, Literal, Sequence
+from typing import Sequence
 
 import torch
 from timm.models.convnext import (
@@ -43,7 +43,7 @@ def generate_mask(
     :param Size target: target shape
     :param int stride: total stride
     :param float mask_ratio: ratio of the pixels to mask
-    :return BoolTensor: boolean mask (N, H*W)
+    :return BoolTensor: boolean mask (B1HW)
     """
     m_height = target[-2] // stride
     m_width = target[-1] // stride
@@ -352,7 +352,7 @@ class MaskedMultiscaleEncoder(nn.Module):
             )
             b, c, d, h, w = x.shape
             unmasked = ~mask
-            mask = upsample_mask(mask, (b, d, h, w))
+            mask = upsample_mask(mask, (b, 1, h, w))
         else:
             mask = unmasked = None
         x = self.stem(x)

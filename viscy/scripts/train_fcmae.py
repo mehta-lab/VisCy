@@ -1,4 +1,5 @@
 # %%
+from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch import set_float32_matmul_precision
 
@@ -17,8 +18,11 @@ from viscy.transforms import (
 # %%
 model = FcmaeUNet(
     architecture="fcmae",
-    model_config=dict(in_channels=1),
-    train_mask_ratio=0.6,
+    model_config=dict(
+        in_channels=1, encoder_blocks=[3, 3, 27, 3], dims=[128, 256, 512, 1024]
+    ),
+    fit_mask_ratio=0.6,
+    schedule="WarmupCosine",
 )
 
 # %%
@@ -32,8 +36,10 @@ data = HCSDataModule(
     batch_size=64,
     num_workers=12,
     architecture="3D",
+    yx_patch_size=[384, 384],
+    normalize_source=True,
     augmentations=[
-        RandWeightedCropd(ch, ch, spatial_size=[-1, 512, 512], num_samples=2),
+        RandWeightedCropd(ch, ch, spatial_size=[-1, 768, 768], num_samples=2),
         RandAffined(
             ch,
             prob=0.5,
@@ -55,11 +61,16 @@ data = HCSDataModule(
 set_float32_matmul_precision("high")
 
 trainer = VSTrainer(
-    fast_dev_run=False,
-    max_epochs=50,
+    fast_dev_run=True,
+    precision="16-mixed",
+    max_epochs=100,
     logger=TensorBoardLogger(
-        save_dir="/hpc/mydata/ziwen.liu/fcmae", version="test_0", log_graph=False
+        save_dir="/hpc/mydata/ziwen.liu/fcmae", version="test_1", log_graph=False
     ),
+    callbacks=[
+        LearningRateMonitor(logging_interval="step"),
+        ModelCheckpoint(monitor="loss/validate", save_top_k=5, every_n_epochs=1),
+    ],
 )
 trainer.fit(model, data)
 
