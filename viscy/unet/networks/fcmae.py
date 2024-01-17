@@ -54,46 +54,38 @@ def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
     return mask
 
 
-def masked_patchify(features: Tensor, mask: BoolTensor | None = None) -> Tensor:
+def masked_patchify(features: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
     """
     :param Tensor features: input image features (BCHW)
-    :param BoolTensor mask: boolean mask (B1HW)
+    :param BoolTensor unmasked: boolean foreground mask (B1HW)
     :return Tensor: masked channel-last features (BLC, L = H * W * mask_ratio)
     """
-    if mask is None:
+    if unmasked is None:
         return features.flatten(2).permute(0, 2, 1)
     b, c = features.shape[:2]
     # (B, C, H, W) -> (B, H, W, C)
     features = features.permute(0, 2, 3, 1)
     # (B, H, W, C) -> (B * L, C) -> (B, L, C)
-    features = features[~mask[:, 0]].reshape(b, -1, c)
-
-    # kernel_size = tuple(features.shape[-i] // mask.shape[-i] for i in (2, 1))
-    # # (B, C, H, W) -> (B, C * H_patch * Wp, H_grid * Wg)
-    # features = F.unfold(features, kernel_size=kernel_size, stride=kernel_size)
-    # patch_size = kernel_size[0] * kernel_size[1]
-    # # (B, C * Hp * Wp, Hg * Wg) -> (B, C, Hp * Wp, Hg * Wg) -> (B, Hg * Wg, C, Hp * Wp)
-    # features = features.view(b, c, patch_size, -1).permute(0, 3, 1, 2)
-    # # (B, 1, Hg, Wg) -> (B, Hg*Wg)
-    # idx = ~mask.flatten(1)
-    # # (B, Hg * Wg, C, Hp * Wp) -> (B * L, C, Hp * Wp) -> (B, L, C, Hp * Wp)
-    # features = features[idx].view(b, -1, c, patch_size)
-    # # (B, L, C, Hp * Wp) -> (B, L, Hp * Wp, C) -> (B, L * Hp * Wp, C)
-    # features = features.permute(0, 1, 3, 2).reshape(b, -1, c)
+    features = features[unmasked[:, 0]].reshape(b, -1, c)
     return features
 
 
 def masked_unpatchify(
-    features: Tensor, out_shape: Size, mask: BoolTensor | None = None
+    features: Tensor, out_shape: Size, unmasked: BoolTensor | None = None
 ) -> Tensor:
-    if mask is None:
-        # (B, L, C) -> (B, C, L) -> (B, C, H, W)
+    """
+    :param Tensor features: dense channel-last features (BLC)
+    :param Size out_shape: output shape (BCHW)
+    :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
+    :return Tensor: masked features (BCHW)
+    """
+    if unmasked is None:
         return features.permute(0, 2, 1).reshape(out_shape)
     b, c, w, h = out_shape
     out = torch.zeros((b, w, h, c), device=features.device, dtype=features.dtype)
     # (B, L, C) -> (B * L, C)
     features = features.reshape(-1, c)
-    out[~mask[:, 0]] = features
+    out[unmasked[:, 0]] = features
     # (B, H, W, C) -> (B, C, H, W)
     return out.permute(0, 3, 1, 2)
 
@@ -140,25 +132,23 @@ class MaskedConvNeXtV2Block(nn.Module):
         else:
             self.shortcut = nn.Identity()
 
-    def forward(self, x: Tensor, mask: BoolTensor | None = None) -> Tensor:
+    def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
         """
         :param Tensor x: input tensor (BCHW)
-        :param BoolTensor | None mask: boolean mask, defaults to None
+        :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
         :return Tensor: output tensor (BCHW)
         """
         shortcut = self.shortcut(x)
-        if mask is not None:
-            x *= ~mask
+        if unmasked is not None:
+            x *= unmasked
         x = self.dwconv(x)
-        if mask is not None:
-            x *= ~mask
+        if unmasked is not None:
+            x *= unmasked
         out_shape = x.shape
-        x = masked_project(x, mask)
+        x = masked_patchify(x, unmasked=unmasked)
         x = self.layernorm(x)
-        x = self.pwconv1(x)
-        x = self.act(x)
-        x = self.grn(x, mask)
-        x = self.pwconv2(x)
+        x = self.mlp(x.unsqueeze(1)).squeeze(1)
+        x = masked_unpatchify(x, out_shape=out_shape, unmasked=unmasked)
         x = self.drop_path(x) + shortcut
         return x
 
@@ -220,17 +210,17 @@ class MaskedConvNeXtV2Stage(nn.Module):
             )
             in_channels = out_channels
 
-    def forward(self, x: Tensor, mask: BoolTensor | None = None) -> Tensor:
+    def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
         """
         :param Tensor x: input tensor (BCHW)
-        :param BoolTensor | None mask: boolean mask, defaults to None
+        :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
         :return Tensor: output tensor (BCHW)
         """
         x = self.downsample(x)
-        if mask is not None:
-            mask = upsample_mask(mask, x.shape)
+        if unmasked is not None:
+            unmasked = upsample_mask(unmasked, x.shape)
         for block in self.blocks:
-            x = block(x, mask)
+            x = block(x, unmasked)
         return x
 
 
@@ -272,10 +262,10 @@ class MaskedAdaptiveProjection(nn.Module):
         )
         self.norm = nn.LayerNorm(out_channels)
 
-    def forward(self, x: Tensor, mask: BoolTensor = None) -> Tensor:
+    def forward(self, x: Tensor, unmasked: BoolTensor = None) -> Tensor:
         """
         :param Tensor x: input tensor (BCDHW)
-        :param BoolTensor mask: boolean mask (B1HW), defaults to None
+        :param BoolTensor unmasked: boolean foreground mask (B1HW), defaults to None
         :return Tensor: output tensor (BCHW)
         """
         # no need to mask before convolutions since patches do not spill over
@@ -288,19 +278,12 @@ class MaskedAdaptiveProjection(nn.Module):
         else:
             x = self.conv2d(x.squeeze(2))
         out_shape = x.shape
-        if mask is not None:
-            mask = upsample_mask(mask, x.shape)
-            x = x[mask]
-        else:
-            x = x.flatten(2)
-        x = x.permute(0, 2, 1)
+        if unmasked is not None:
+            unmasked = upsample_mask(unmasked, x.shape)
+        x = masked_patchify(x, unmasked=unmasked)
         x = self.norm(x)
-        x = x.permute(0, 2, 1)
-        if mask is not None:
-            out = torch.zeros(out_shape, device=x.device, dtype=x.dtype)
-            out[mask] = x
-            return out
-        return x.reshape(out_shape)
+        x = masked_unpatchify(x, out_shape=out_shape, unmasked=unmasked)
+        return x
 
 
 class MaskedMultiscaleEncoder(nn.Module):
@@ -343,14 +326,14 @@ class MaskedMultiscaleEncoder(nn.Module):
         :return Tensor: output tensor (BCHW)
         """
         if mask_ratio > 0.0:
-            mask = generate_mask(x.shape, self.total_stride, mask_ratio)
+            unmasked = ~generate_mask(x.shape, self.total_stride, mask_ratio)
         else:
-            mask = None
+            unmasked = None
         x = self.stem(x)
         features = []
         for stage in self.stages:
-            x = stage(x, mask)
+            x = stage(x, unmasked=unmasked)
             features.append(x)
-        if mask is not None:
-            return features, mask
+        if unmasked is not None:
+            return features, unmasked
         return features
