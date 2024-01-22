@@ -367,12 +367,15 @@ class FullyConvolutionalMAE(nn.Module):
     def __init__(
         self,
         in_channels: int,
+        out_channels: int,
         encoder_blocks: Sequence[int] = [3, 3, 9, 3],
         dims: Sequence[int] = [96, 192, 384, 768],
         encoder_drop_path_rate: float = 0.0,
         head_expansion_ratio: int = 4,
         stem_kernel_size: Sequence[int] = (5, 4, 4),
         in_stack_depth: int = 5,
+        decoder_conv_blocks: int = 1,
+        pretraining: bool = True,
     ) -> None:
         super().__init__()
         self.encoder = MaskedMultiscaleEncoder(
@@ -392,7 +395,7 @@ class FullyConvolutionalMAE(nn.Module):
             decoder_channels,
             norm_name="instance",
             mode="pixelshuffle",
-            conv_blocks=1,
+            conv_blocks=decoder_conv_blocks,
             strides=[2] * (len(dims) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv=None,
         )
@@ -401,16 +404,20 @@ class FullyConvolutionalMAE(nn.Module):
         else:
             self.head = PixelToVoxelHead(
                 in_channels=decoder_channels[-1],
-                out_channels=in_channels,
+                out_channels=out_channels,
                 out_stack_depth=in_stack_depth,
                 expansion_ratio=head_expansion_ratio,
                 pool=True,
             )
         self.out_stack_depth = in_stack_depth
         self.num_blocks = 6
+        self.pretraining = pretraining
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
         x, mask = self.encoder(x, mask_ratio=mask_ratio)
         x.reverse()
         x = self.decoder(x)
-        return self.head(x), mask
+        x = self.head(x)
+        if self.pretraining:
+            return x, mask
+        return x
