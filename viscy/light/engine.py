@@ -118,11 +118,12 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D"],
+        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        freeze_encoder: bool = False,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
@@ -162,6 +163,7 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        self.freeze_encoder = freeze_encoder
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
@@ -331,6 +333,9 @@ class VSUNet(LightningModule):
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
+        if self.freeze_encoder:
+            self.model: FullyConvolutionalMAE
+            self.model.encoder.requires_grad_(False)
         optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.lr)
         if self.schedule == "WarmupCosine":
             scheduler = WarmupCosineSchedule(
