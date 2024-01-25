@@ -96,6 +96,7 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
+    :param str chkpt_path: path to the checkpoint to load weights, defaults to None
     :param int log_batches_per_epoch:
         number of batches to log each training/validation epoch,
         has to be smaller than steps per epoch, defaults to 8
@@ -146,7 +147,9 @@ class VSUNet(LightningModule):
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         if chkpt_path is not None:
-            self.model.load_state_dict(torch.load(chkpt_path)["state_dict"])
+            self.model.load_state_dict(
+                torch.load(chkpt_path)["state_dict"], strict=False
+            )  # loading only weights
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
