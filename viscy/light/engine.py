@@ -96,6 +96,7 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
+    :param str chkpt_path: path to the checkpoint to load weights, defaults to None
     :param int log_batches_per_epoch:
         number of batches to log each training/validation epoch,
         has to be smaller than steps per epoch, defaults to 8
@@ -121,6 +122,7 @@ class VSUNet(LightningModule):
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        ckpt_path: str = None,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
@@ -160,6 +162,11 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+
+        if ckpt_path is not None:
+            self.load_state_dict(
+                torch.load(ckpt_path)["state_dict"]
+            )  # loading only weights
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
