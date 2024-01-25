@@ -146,10 +146,7 @@ class VSUNet(LightningModule):
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
-        if chkpt_path is not None:
-            self.model.load_state_dict(
-                torch.load(chkpt_path)["state_dict"], strict=False
-            )  # loading only weights
+
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
@@ -166,6 +163,10 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        if chkpt_path is not None:
+            self.load_state_dict(
+                torch.load(chkpt_path)["state_dict"]
+            )  # loading only weights
 
     def forward(self, x) -> torch.Tensor:
         return self.model(x)
