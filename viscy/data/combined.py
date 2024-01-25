@@ -1,7 +1,7 @@
 from typing import Literal, Sequence
 
 from lightning.pytorch import LightningDataModule
-from lightning.pytorch.utilities import combined_loader
+from lightning.pytorch.utilities.combined_loader import CombinedLoader
 
 _MODES = Literal["min_size", "max_size_cycle", "max_size", "sequential"]
 
@@ -41,22 +41,22 @@ class CombinedDataModule(LightningDataModule):
             dm.setup(stage)
 
     def train_dataloader(self):
-        return combined_loader(
+        return CombinedLoader(
             [dm.train_dataloader() for dm in self.data_modules], mode=self.train_mode
         )
 
     def val_dataloader(self):
-        return combined_loader(
+        return CombinedLoader(
             [dm.val_dataloader() for dm in self.data_modules], mode=self.val_mode
         )
 
     def test_dataloader(self):
-        return combined_loader(
+        return CombinedLoader(
             [dm.test_dataloader() for dm in self.data_modules], mode=self.test_mode
         )
 
     def predict_dataloader(self):
-        return combined_loader(
+        return CombinedLoader(
             [dm.predict_dataloader() for dm in self.data_modules],
             mode=self.predict_mode,
         )
