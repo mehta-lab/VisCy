@@ -146,7 +146,6 @@ class VSUNet(LightningModule):
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
-
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
