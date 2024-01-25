@@ -121,6 +121,7 @@ class VSUNet(LightningModule):
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        chkpt_path: str = None,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
@@ -144,6 +145,8 @@ class VSUNet(LightningModule):
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
+        if chkpt_path is not None:
+            self.model.load_state_dict(torch.load(chkpt_path)["state_dict"])
         self.training_step_outputs = []
         self.validation_step_outputs = []
         # required to log the graph
