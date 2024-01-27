@@ -10,7 +10,7 @@ from matplotlib.cm import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
-from torch import nn
+from torch import Tensor, nn
 from torch.nn import functional as F
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
@@ -165,7 +165,7 @@ class VSUNet(LightningModule):
         self.test_evaluate_cellpose = test_evaluate_cellpose
         self.freeze_encoder = freeze_encoder
 
-    def forward(self, x) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
     def training_step(self, batch: Sample, batch_idx: int):
@@ -230,7 +230,7 @@ class VSUNet(LightningModule):
         else:
             self._log_segmentation_metrics(None, None)
 
-    def _log_regression_metrics(self, pred: torch.Tensor, target: torch.Tensor):
+    def _log_regression_metrics(self, pred: Tensor, target: Tensor):
         # paired image translation metrics
         self.log_dict(
             {
@@ -253,7 +253,7 @@ class VSUNet(LightningModule):
             on_epoch=True,
         )
 
-    def _cellpose_predict(self, pred: torch.Tensor, name: str) -> torch.ShortTensor:
+    def _cellpose_predict(self, pred: Tensor, name: str) -> torch.ShortTensor:
         pred_labels_np = self.cellpose_model.eval(
             pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
         )[0].astype(np.int16)
@@ -350,7 +350,7 @@ class VSUNet(LightningModule):
             )
         return [optimizer], [scheduler]
 
-    def _detach_sample(self, imgs: Sequence[torch.Tensor]):
+    def _detach_sample(self, imgs: Sequence[Tensor]):
         num_samples = min(imgs[0].shape[0], self.log_samples_per_batch)
         return [
             [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
@@ -380,11 +380,12 @@ class FcmaeUNet(VSUNet):
     def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
+        self.validation_losses = []
 
-    def forward(self, x, mask_ratio: float = 0.0):
+    def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def forward_fit(self, batch: Sample):
+    def forward_fit(self, batch: Sample) -> tuple[Tensor]:
         source = batch["source"]
         target = batch["target"]
         pred, mask = self.forward(source, mask_ratio=self.fit_mask_ratio)
@@ -392,27 +393,40 @@ class FcmaeUNet(VSUNet):
         loss = (loss.mean(2) * mask).sum() / mask.sum()
         return source, target, pred, mask, loss
 
-    def training_step(self, batch: Sample, batch_idx: int):
-        source, target, pred, mask, loss = self.forward_fit(batch)
+    def training_step(self, batch: Sequence[Sample], batch_idx: int):
+        losses = []
+        batch_size = 0
+        for b in batch:
+            source, target, pred, mask, loss = self.forward_fit(b)
+            losses.append(loss)
+            batch_size += source.shape[0]
+            if batch_idx < self.log_batches_per_epoch:
+                self.training_step_outputs.extend(
+                    self._detach_sample((source, target * mask.unsqueeze(2), pred))
+                )
+        loss_step = torch.stack(losses).mean()
         self.log(
             "loss/train",
-            loss,
+            loss_step,
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
+            batch_size=batch_size,
         )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                self._detach_sample((source, target * mask.unsqueeze(2), pred))
-            )
-        return loss
+        return loss_step
 
-    def validation_step(self, batch: Sample, batch_idx: int):
+    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source, target, pred, mask, loss = self.forward_fit(batch)
-        self.log("loss/validate", loss, sync_dist=True)
+        self.validation_losses.append(loss.detach())
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
+
+    def on_validation_epoch_end(self):
+        super().on_validation_epoch_end()
+        self.log(
+            "loss/validate", torch.stack(self.validation_losses).mean(), sync_dist=True
+        )
