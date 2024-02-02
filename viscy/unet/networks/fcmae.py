@@ -5,7 +5,6 @@ https://github.com/facebookresearch/ConvNeXt-V2/blob/main/TRAINING.md#implementi
 and timm's dense implementation of the encoder in ``timm.models.convnext``
 """
 
-
 from typing import Sequence
 
 import torch

@@ -272,19 +272,19 @@ class VSUNet(LightningModule):
         self.log_dict(
             {
                 # semantic segmentation
-                "test_metrics/accuracy": accuracy(
-                    pred_binary, target_binary, task="binary"
-                )
-                if compute
-                else -1,
-                "test_metrics/dice": dice(pred_binary, target_binary)
-                if compute
-                else -1,
-                "test_metrics/jaccard": jaccard_index(
-                    pred_binary, target_binary, task="binary"
-                )
-                if compute
-                else -1,
+                "test_metrics/accuracy": (
+                    accuracy(pred_binary, target_binary, task="binary")
+                    if compute
+                    else -1
+                ),
+                "test_metrics/dice": (
+                    dice(pred_binary, target_binary) if compute else -1
+                ),
+                "test_metrics/jaccard": (
+                    jaccard_index(pred_binary, target_binary, task="binary")
+                    if compute
+                    else -1
+                ),
                 "test_metrics/mAP": coco_metrics["map"] if compute else -1,
                 "test_metrics/mAP_50": coco_metrics["map_50"] if compute else -1,
                 "test_metrics/mAP_75": coco_metrics["map_75"] if compute else -1,

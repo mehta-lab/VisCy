@@ -1,4 +1,5 @@
 """Generate masks from sum of flurophore channels"""
+
 import iohub.ngff as ngff
 
 import viscy.utils.aux_utils as aux_utils

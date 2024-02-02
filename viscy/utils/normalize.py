@@ -1,4 +1,5 @@
 """Image normalization related functions"""
+
 import sys
 
 import numpy as np
