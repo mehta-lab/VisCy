@@ -23,10 +23,11 @@ from monai.transforms import (
     MultiSampleTrait,
     RandAffined,
 )
+from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 
-def _ensure_channel_list(str_or_seq: Union[str, Sequence[str]]):
+def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
     Ensure channel argument is a list of strings.
 
@@ -67,9 +68,9 @@ class Sample(TypedDict, total=False):
 
     index: tuple[str, int, int]
     # optional
-    source: Union[torch.Tensor, Sequence[torch.Tensor]]
-    target: Union[torch.Tensor, Sequence[torch.Tensor]]
-    labels: Union[torch.Tensor, Sequence[torch.Tensor]]
+    source: Union[Tensor, Sequence[Tensor]]
+    target: Union[Tensor, Sequence[Tensor]]
+    labels: Union[Tensor, Sequence[Tensor]]
 
 
 def _collate_samples(batch: Sequence[Sample]) -> Sample:
@@ -83,7 +84,7 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
     elemment = batch[0]
     collated = {}
     for key in elemment.keys():
-        data: list[list[torch.Tensor]] = [sample[key] for sample in batch]
+        data: list[list[Tensor]] = [sample[key] for sample in batch]
         collated[key] = collate_meta_tensor([im for imgs in data for im in imgs])
     return collated
 
@@ -108,13 +109,13 @@ class NormalizeSampled(MapTransform, InvertibleTransform):
         # FIXME: hard-coded key
         return self.norm_meta[key]["dataset_statistics"]
 
-    def __call__(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def __call__(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
         d = dict(data)
         for key in self.keys:
             d[key] = (d[key] - self._stat(key)["median"]) / self._stat(key)["iqr"]
         return d
 
-    def inverse(self, data: dict[str, torch.Tensor]) -> dict[str, torch.Tensor]:
+    def inverse(self, data: dict[str, Tensor]) -> dict[str, Tensor]:
         d = dict(data)
         for key in self.keys:
             d[key] = (d[key] * self._stat(key)["iqr"]) + self._stat(key)["median"]
@@ -128,7 +129,7 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] transform:
+    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
         a callable that transforms data, defaults to None
     """
 
@@ -137,7 +138,7 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -178,14 +179,14 @@ class SlidingWindowDataset(Dataset):
 
     def _read_img_window(
         self, img: ImageArray, ch_idx: list[str], tz: int
-    ) -> tuple[tuple[torch.Tensor], tuple[str, int, int]]:
+    ) -> tuple[tuple[Tensor], tuple[str, int, int]]:
         """Read image window as tensor.
 
         :param ImageArray img: NGFF image array
         :param list[int] channels: list of channel indices to read,
             output channel ordering will reflect the sequence
         :param int tz: window index within the FOV, counted Z-first
-        :return tuple[torch.Tensor], tuple[str, int, int]:
+        :return tuple[Tensor], tuple[str, int, int]:
             tuple of (C=1, Z, Y, X) image tensors,
             tuple of image name, time index, and Z index
         """
@@ -203,8 +204,8 @@ class SlidingWindowDataset(Dataset):
         return self._max_window
 
     def _stack_channels(
-        self, sample_images: list[dict[str, torch.Tensor]], key: str
-    ) -> torch.Tensor:
+        self, sample_images: list[dict[str, Tensor]], key: str
+    ) -> Tensor:
         """Stack single-channel images into a multi-channel tensor."""
         if not isinstance(sample_images, list):
             return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
@@ -258,7 +259,7 @@ class MaskTestDataset(SlidingWindowDataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] transform:
+    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
         a callable that transforms data, defaults to None
     """
 
@@ -267,7 +268,7 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, torch.Tensor]], dict[str, torch.Tensor]] = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] = None,
         ground_truth_masks: str = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
@@ -527,7 +528,7 @@ class HCSDataModule(LightningDataModule):
         if self.trainer:
             if self.trainer.predicting:
                 predicting = True
-        if predicting or isinstance(batch, torch.Tensor):
+        if predicting or isinstance(batch, Tensor):
             # skipping example input array
             return batch
         if self.target_2d:
