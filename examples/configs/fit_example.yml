@@ -37,18 +37,18 @@ data:
   num_workers: 16
   yx_patch_size: [256, 256]
   normalizations:
-  - class_path: viscy.transforms.NormalizeSampled
-      init_args:
-        keys: [source]
-        level: 'fov_statistics',
-        subtrahend: 'mean'
-        divisor: 'std'
-  - class_path: viscy.transforms.NormalizeSampled
-      init_args:
-        keys: [target_1]
-        level: 'fov_statistics',
-        subtrahend: 'median'
-        divisor: 'iqr'
+    - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [source]
+          level: 'fov_statistics',
+          subtrahend: 'mean'
+          divisor: 'std'
+    - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [target_1]
+          level: 'fov_statistics',
+          subtrahend: 'median'
+          divisor: 'iqr'
   augmentations:
     - class_path: viscy.transforms.RandWeightedCropd
       init_args:
