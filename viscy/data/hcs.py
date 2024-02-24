@@ -377,7 +377,6 @@ class HCSDataModule(LightningDataModule):
         )
         val_transform = Compose(self.normalizations + fit_transform)
 
-        # TODO: this might be it's own function as previously _setup_eval()
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
         plate = open_ome_zarr(data_path, mode="r")

@@ -47,8 +47,8 @@ data:
       init_args:
         keys: [target_1]
         level: 'fov_statistics',
-        subtrahend: 'mean'
-        divisor: 'std'
+        subtrahend: 'median'
+        divisor: 'iqr'
   augmentations:
     - class_path: viscy.transforms.RandWeightedCropd
       init_args:

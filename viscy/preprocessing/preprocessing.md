@@ -87,11 +87,17 @@ The statistics are added as dictionaries into the .zattrs file. An example of pl
     }
 ```
 
-FOV level statistics added to every position:
+FOV level statistics added to every position as well as the dataset_statistics to read dataset statistics:
 
 ```json
     "normalization": {
         "Deconvolved-Nuc": {
+            "dataset_statistics": {
+                "iqr": 149.7620086669922,
+                "mean": 262.2070617675781,
+                "median": 65.5246353149414,
+                "std": 890.0471801757812
+            },
             "fov_statistics": {
                 "iqr": 450.4745788574219,
                 "mean": 486.3854064941406,
@@ -99,7 +105,13 @@ FOV level statistics added to every position:
                 "std": 976.02392578125
             }
         },
-        "Phase3D": {
+        "Phase3D": {           
+            "dataset_statistics": {
+                "iqr": 0.0011349652777425945,
+                "mean": -1.9603044165705796e-06,
+                "median": 3.388232289580628e-05,
+                "std": 0.005480962339788675
+            },
             "fov_statistics": {
                 "iqr": 0.006403466919437051,
                 "mean": 0.0010083537781611085,
