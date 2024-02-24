@@ -25,8 +25,8 @@ class CTMCv1DataModule(LightningDataModule):
         channel_name: str = "DIC",
     ) -> None:
         super().__init__()
-        self.train_data_path = Path(train_data_path)
-        self.val_data_path = Path(val_data_path)
+        self.train_data_path = train_data_path
+        self.val_data_path = val_data_path
         self.train_transforms = train_transforms
         self.val_transforms = val_transforms
         self.channel_map = ChannelMap(source=channel_name, target=channel_name)
