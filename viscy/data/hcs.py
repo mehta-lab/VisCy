@@ -5,7 +5,7 @@ import re
 import tempfile
 from glob import glob
 from pathlib import Path
-from typing import Callable, Iterable, Literal, Optional, Sequence, TypedDict, Union
+from typing import Callable, Literal, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -18,7 +18,6 @@ from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
     CenterSpatialCropd,
     Compose,
-    InvertibleTransform,
     MapTransform,
     MultiSampleTrait,
     RandAffined,
@@ -27,7 +26,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, Sample
-from viscy.transforms import NormalizeSampled
 
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:

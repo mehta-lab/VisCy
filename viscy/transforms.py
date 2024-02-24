@@ -3,16 +3,16 @@
 from typing import Sequence, Union
 
 from monai.transforms import (
+    MapTransform,
     RandAdjustContrastd,
     RandAffined,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
     RandWeightedCropd,
-    NormalizeIntensity,
-    MapTransform,
 )
-from typing_extensions import Literal, Iterable
+from typing_extensions import Iterable, Literal
+
 from viscy.data.typing import Sample
 
 
