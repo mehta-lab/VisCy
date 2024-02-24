@@ -17,7 +17,7 @@ def test_generate_mask():
     w = 64
     s = 16
     m = 0.75
-    mask = generate_mask((2, 3, w, w), stride=s, mask_ratio=m)
+    mask = generate_mask((2, 3, w, w), stride=s, mask_ratio=m, device="cpu")
     assert mask.shape == (2, 1, w // s, w // s)
     assert mask.dtype == torch.bool
     ratio = mask.sum((2, 3)) / mask.numel() * mask.shape[0]
@@ -28,7 +28,7 @@ def test_masked_patchify():
     b, c, h, w = 2, 3, 4, 8
     x = torch.rand(b, c, h, w)
     mask_ratio = 0.75
-    mask = generate_mask(x.shape, stride=2, mask_ratio=mask_ratio)
+    mask = generate_mask(x.shape, stride=2, mask_ratio=mask_ratio, device=x.device)
     mask = upsample_mask(mask, x.shape)
     feat = masked_patchify(x, ~mask)
     assert feat.shape == (b, int(h * w * (1 - mask_ratio)), c)
@@ -42,7 +42,7 @@ def test_unmasked_patchify_roundtrip():
 
 def test_masked_patchify_roundtrip():
     x = torch.rand(2, 3, 4, 8)
-    mask = generate_mask(x.shape, stride=2, mask_ratio=0.5)
+    mask = generate_mask(x.shape, stride=2, mask_ratio=0.5, device=x.device)
     mask = upsample_mask(mask, x.shape)
     y = masked_unpatchify(masked_patchify(x, ~mask), out_shape=x.shape, unmasked=~mask)
     assert torch.all((y == 0) ^ (x == y))
@@ -51,7 +51,7 @@ def test_masked_patchify_roundtrip():
 
 def test_masked_convnextv2_block() -> None:
     x = torch.rand(2, 3, 4, 5)
-    mask = generate_mask(x.shape, stride=1, mask_ratio=0.5)
+    mask = generate_mask(x.shape, stride=1, mask_ratio=0.5, device=x.device)
     block = MaskedConvNeXtV2Block(3, 3 * 2)
     unmasked_out = block(x)
     assert len(unmasked_out.unique()) == x.numel() * 2
@@ -65,7 +65,7 @@ def test_masked_convnextv2_block() -> None:
 
 def test_masked_convnextv2_stage():
     x = torch.rand(2, 3, 16, 16)
-    mask = generate_mask(x.shape, stride=4, mask_ratio=0.5)
+    mask = generate_mask(x.shape, stride=4, mask_ratio=0.5, device=x.device)
     stage = MaskedConvNeXtV2Stage(3, 3, kernel_size=7, stride=2, num_blocks=2)
     out = stage(x)
     assert out.shape == (2, 3, 8, 8)
@@ -79,7 +79,7 @@ def test_adaptive_projection():
     )
     assert proj(torch.rand(2, 3, 5, 8, 8)).shape == (2, 12, 2, 2)
     assert proj(torch.rand(2, 3, 1, 12, 16)).shape == (2, 12, 3, 4)
-    mask = generate_mask((1, 3, 5, 8, 8), stride=4, mask_ratio=0.6)
+    mask = generate_mask((1, 3, 5, 8, 8), stride=4, mask_ratio=0.6, device="cpu")
     masked_out = proj(torch.rand(1, 3, 5, 16, 16), mask)
     assert masked_out.shape == (1, 12, 4, 4)
     proj = MaskedAdaptiveProjection(
@@ -106,7 +106,7 @@ def test_masked_multiscale_encoder():
 
 def test_fcmae():
     x = torch.rand(2, 3, 5, 128, 128)
-    model = FullyConvolutionalMAE(3)
+    model = FullyConvolutionalMAE(3, 3)
     y, m = model(x)
     assert y.shape == x.shape
     assert m is None

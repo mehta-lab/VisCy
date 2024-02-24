@@ -23,6 +23,7 @@ model:
   loss_function: null
   lr: 0.001
   schedule: Constant
+  ckpt_path: null
   log_batches_per_epoch: 8
   log_samples_per_batch: 1
 data:
