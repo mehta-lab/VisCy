@@ -1,11 +1,8 @@
-import logging
 from pathlib import Path
 
-import numpy as np
-from iohub.ngff import ImageArray, Plate, Position, TransformationMeta, open_ome_zarr
+from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.transforms import Compose, MapTransform
-from torch import Tensor
 from torch.utils.data import DataLoader
 
 from viscy.data.hcs import ChannelMap, SlidingWindowDataset
@@ -39,8 +36,11 @@ class CTMCv1DataModule(LightningDataModule):
     def setup(self, stage: str) -> None:
         if stage != "fit":
             raise NotImplementedError("Only fit stage is supported")
-        train_plate = open_ome_zarr(self.train_data_path, mode="r")
-        val_plate = open_ome_zarr(self.val_data_path, mode="r")
+        self._setup_fit()
+
+    def _setup_fit(self) -> None:
+        train_plate = open_ome_zarr(self.train_data_path)
+        val_plate = open_ome_zarr(self.val_data_path)
         train_positions = [p for _, p in train_plate.positions()]
         val_positions = [p for _, p in val_plate.positions()]
         self.train_dataset = SlidingWindowDataset(
@@ -58,10 +58,18 @@ class CTMCv1DataModule(LightningDataModule):
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(
-            self.train_dataset, batch_size=self.batch_size, num_workers=self.num_workers
+            self.train_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=bool(self.num_workers),
+            shuffle=True,
         )
 
     def val_dataloader(self) -> DataLoader:
         return DataLoader(
-            self.val_dataset, batch_size=self.batch_size, num_workers=self.num_workers
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=bool(self.num_workers),
+            shuffle=False,
         )
