@@ -55,26 +55,3 @@ def test_datamodule_setup_predict(preprocessed_hcs_dataset):
         img.height,
         img.width,
     )
-
-
-def test_datamodule_predict_scales(preprocessed_hcs_dataset):
-    data_path = preprocessed_hcs_dataset
-    with open_ome_zarr(data_path) as dataset:
-        channel_names = dataset.channel_names
-
-    def get_normalized_stack(predict_scale_source):
-        factor = 1 if predict_scale_source is None else predict_scale_source
-        dm = HCSDataModule(
-            data_path=data_path,
-            source_channel=channel_names[:2],
-            target_channel=channel_names[2:],
-            z_window_size=5,
-            batch_size=2,
-            num_workers=0,
-            predict_scale_source=predict_scale_source,
-            normalize_source=True,
-        )
-        dm.setup(stage="predict")
-        return dm.predict_dataset[0]["source"] / factor
-
-    assert torch.allclose(get_normalized_stack(None), get_normalized_stack(2))

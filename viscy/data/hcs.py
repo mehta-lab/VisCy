@@ -278,8 +278,6 @@ class HCSDataModule(LightningDataModule):
     :param Optional[Path] ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
-    :param Optional[float] predict_scale_source: scale the source channel intensity,
-        defaults to None (no scaling)
     """
 
     def __init__(
@@ -297,7 +295,6 @@ class HCSDataModule(LightningDataModule):
         augmentations: Optional[list[MapTransform]] = None,
         caching: bool = False,
         ground_truth_masks: Optional[Path] = None,
-        predict_scale_source: Optional[float] = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
