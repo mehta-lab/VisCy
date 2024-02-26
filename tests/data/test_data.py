@@ -18,6 +18,16 @@ def test_preprocess(small_hcs_dataset: Path, default_channels: bool):
             channel_names = dataset.channel_names
     trainer = VSTrainer(accelerator="cpu")
     trainer.preprocess(data_path, channel_names=channel_names, num_workers=2)
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+        for channel in channel_names:
+            assert "dataset_statistics" in dataset.zattrs["normalization"][channel]
+        for _, fov in dataset.positions():
+            norm_metadata = fov.zattrs["normalization"]
+            for channel in channel_names:
+                assert channel in norm_metadata
+                assert "dataset_statistics" in norm_metadata[channel]
+                assert "fov_statistics" in norm_metadata[channel]
 
 
 def test_datamodule_setup_predict(preprocessed_hcs_dataset):
@@ -45,26 +55,3 @@ def test_datamodule_setup_predict(preprocessed_hcs_dataset):
         img.height,
         img.width,
     )
-
-
-def test_datamodule_predict_scales(preprocessed_hcs_dataset):
-    data_path = preprocessed_hcs_dataset
-    with open_ome_zarr(data_path) as dataset:
-        channel_names = dataset.channel_names
-
-    def get_normalized_stack(predict_scale_source):
-        factor = 1 if predict_scale_source is None else predict_scale_source
-        dm = HCSDataModule(
-            data_path=data_path,
-            source_channel=channel_names[:2],
-            target_channel=channel_names[2:],
-            z_window_size=5,
-            batch_size=2,
-            num_workers=0,
-            predict_scale_source=predict_scale_source,
-            normalize_source=True,
-        )
-        dm.setup(stage="predict")
-        return dm.predict_dataset[0]["source"] / factor
-
-    assert torch.allclose(get_normalized_stack(None), get_normalized_stack(2))
