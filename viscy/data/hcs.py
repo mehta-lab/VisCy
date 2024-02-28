@@ -269,9 +269,9 @@ class HCSDataModule(LightningDataModule):
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
     :param Optional[list[MapTransform]] normalizations: MONAI dictionary transforms
-        applied to selected channels, defaults to None (no normalization)
+        applied to selected channels, defaults to [] (no normalization)
     :param Optional[list[MapTransform]] augmentations: MONAI dictionary transforms
-        applied to the training set, defaults to None (no augmentation)
+        applied to the training set, defaults to [] (no augmentation)
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
@@ -291,8 +291,8 @@ class HCSDataModule(LightningDataModule):
         num_workers: int = 8,
         architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
-        normalizations: Optional[list[MapTransform]] = None,
-        augmentations: Optional[list[MapTransform]] = None,
+        normalizations: Optional[list[MapTransform]] = [],
+        augmentations: Optional[list[MapTransform]] = [],
         caching: bool = False,
         ground_truth_masks: Optional[Path] = None,
     ):
