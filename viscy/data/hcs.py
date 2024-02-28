@@ -120,7 +120,7 @@ class SlidingWindowDataset(Dataset):
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
-            self.window_norm_meta.append(fov.zattrs["normalization"])
+            self.window_norm_meta.append(fov.zattrs.get("normalization", 0))
         self._max_window = w
 
     def _find_window(self, index: int) -> tuple[int, int]:

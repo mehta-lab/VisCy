@@ -29,7 +29,7 @@ class CTMCv1DataModule(LightningDataModule):
         self.val_data_path = val_data_path
         self.train_transforms = train_transforms
         self.val_transforms = val_transforms
-        self.channel_map = ChannelMap(source=channel_name, target=channel_name)
+        self.channel_map = ChannelMap(source=[channel_name], target=[channel_name])
         self.batch_size = batch_size
         self.num_workers = num_workers
 
@@ -47,13 +47,13 @@ class CTMCv1DataModule(LightningDataModule):
             train_positions,
             channels=self.channel_map,
             z_window_size=1,
-            transform=Compose(self.train_transform),
+            transform=Compose(self.train_transforms),
         )
         self.val_dataset = SlidingWindowDataset(
             val_positions,
             channels=self.channel_map,
             z_window_size=1,
-            transform=Compose(self.val_transform),
+            transform=Compose(self.val_transforms),
         )
 
     def train_dataloader(self) -> DataLoader:
