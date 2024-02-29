@@ -6,12 +6,33 @@ from monai.transforms import Compose, MapTransform
 from torch.utils.data import DataLoader
 
 from viscy.data.hcs import ChannelMap, SlidingWindowDataset
+from viscy.data.typing import Sample
+
+
+class CTMCv1ValidationDataset(SlidingWindowDataset):
+    subsample_rate: int = 30
+
+    def __len__(self) -> int:
+        # sample every 30th frame in the videos
+        return super().__len__() // self.subsample_rate
+
+    def __getitem__(self, index: int) -> Sample:
+        index = index * self.subsample_rate
+        return super().__getitem__(index)
 
 
 class CTMCv1DataModule(LightningDataModule):
     """
     Autoregression data module for the CTMCv1 dataset.
     Training and validation datasets are stored in separate HCS OME-Zarr stores.
+
+    :param str | Path train_data_path: Path to the training dataset
+    :param str | Path val_data_path: Path to the validation dataset
+    :param list[MapTransform] train_transforms: List of transforms for training
+    :param list[MapTransform] val_transforms: List of transforms for validation
+    :param int batch_size: Batch size, defaults to 16
+    :param int num_workers: Number of workers, defaults to 8
+    :param str channel_name: Name of the DIC channel, defaults to "DIC"
     """
 
     def __init__(
@@ -49,7 +70,7 @@ class CTMCv1DataModule(LightningDataModule):
             z_window_size=1,
             transform=Compose(self.train_transforms),
         )
-        self.val_dataset = SlidingWindowDataset(
+        self.val_dataset = CTMCv1ValidationDataset(
             val_positions,
             channels=self.channel_map,
             z_window_size=1,
