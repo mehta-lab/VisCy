@@ -6,8 +6,8 @@ from torch import Tensor
 class Sample(TypedDict, total=False):
     """Image sample type for mini-batches."""
 
+    # all optional
     index: tuple[str, int, int]
-    # optional
     source: Union[Tensor, Sequence[Tensor]]
     target: Union[Tensor, Sequence[Tensor]]
     labels: Union[Tensor, Sequence[Tensor]]
