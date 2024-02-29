@@ -3,7 +3,6 @@ from typing import Literal, Sequence
 
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
-from torch import Tensor
 from torch.utils.data import ConcatDataset, DataLoader
 
 from viscy.data.hcs import _collate_samples
