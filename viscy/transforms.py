@@ -8,9 +8,12 @@ from monai.transforms import (
     RandAffined,
     RandGaussianNoised,
     RandGaussianSmoothd,
+    RandomizableTransform,
     RandScaleIntensityd,
     RandWeightedCropd,
 )
+from monai.transforms.transform import Randomizable
+from numpy.random.mtrand import RandomState as RandomState
 from typing_extensions import Iterable, Literal
 
 from viscy.data.typing import Sample
@@ -148,12 +151,34 @@ class NormalizeSampled(MapTransform):
     # TODO: need to implement the case where the preprocessing already exists
     def __call__(self, sample: Sample) -> Sample:
         for key in self.keys:
-            if key in self.keys:
-                level_meta = sample["norm_meta"][key][self.level]
-                subtrahend_val = level_meta[self.subtrahend]
-                divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
-                sample[key] = (sample[key] - subtrahend_val) / divisor_val
+            level_meta = sample["norm_meta"][key][self.level]
+            subtrahend_val = level_meta[self.subtrahend]
+            divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
+            sample[key] = (sample[key] - subtrahend_val) / divisor_val
         return sample
 
     def _normalize():
         NotImplementedError("_normalization() not implemented")
+
+
+class RandInvertIntensityd(MapTransform, RandomizableTransform):
+    """
+    Randomly invert the intensity of the image.
+    """
+
+    def __init__(self, keys: Union[str, Iterable[str]], prob: float = 0.1) -> None:
+        MapTransform.__init__(self, keys)
+        RandomizableTransform.__init__(self, prob)
+
+    def __call__(self, sample: Sample) -> Sample:
+        self.randomize(None)
+        for key in self.keys:
+            if key in sample:
+                sample[key] = -sample[key]
+        return sample
+
+    def set_random_state(
+        self, seed: int | None = None, state: RandomState | None = None
+    ) -> Randomizable:
+        super().set_random_state(seed, state)
+        return self
