@@ -194,12 +194,12 @@ class VSUNet(LightningModule):
             )
         return loss
 
-    def validation_step(self, batch: Sample, batch_idx: int):
+    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = batch["source"]
         target = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("loss/validate", loss, sync_dist=True)
+        self.log("loss/validate", loss, sync_dist=True, add_dataloader_idx=False)
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
@@ -425,7 +425,15 @@ class FcmaeUNet(VSUNet):
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source, target, pred, mask, loss = self.forward_fit(batch)
-        self.validation_losses.append(loss.detach())
+        if dataloader_idx + 1 > len(self.validation_losses):
+            self.validation_losses.append([])
+        self.validation_losses[dataloader_idx].append(loss.detach())
+        self.log(
+            f"loss/val/{dataloader_idx}",
+            loss,
+            sync_dist=True,
+            batch_size=source.shape[0],
+        )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
@@ -433,6 +441,6 @@ class FcmaeUNet(VSUNet):
 
     def on_validation_epoch_end(self):
         super().on_validation_epoch_end()
-        self.log(
-            "loss/validate", torch.stack(self.validation_losses).mean(), sync_dist=True
-        )
+        # average within each dataloader
+        loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
+        self.log("loss/validate", torch.tensor(loss_means).mean(), sync_dist=True)
