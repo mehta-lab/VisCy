@@ -5,6 +5,7 @@ https://github.com/facebookresearch/ConvNeXt-V2/blob/main/TRAINING.md#implementi
 and timm's dense implementation of the encoder in ``timm.models.convnext``
 """
 
+import math
 from typing import Sequence
 
 import torch
@@ -416,7 +417,7 @@ class FullyConvolutionalMAE(nn.Module):
         )
         decoder_channels = list(dims)
         decoder_channels.reverse()
-        decoder_channels[-1] = (in_stack_depth + 2) * in_channels * 2**2
+        decoder_channels[-1] = out_channels * in_stack_depth * stem_kernel_size[-1] ** 2
         self.decoder = Unet2dDecoder(
             decoder_channels,
             norm_name="instance",
@@ -433,7 +434,8 @@ class FullyConvolutionalMAE(nn.Module):
             pool=True,
         )
         self.out_stack_depth = in_stack_depth
-        self.num_blocks = 6
+        # TODO: replace num_blocks with explicit strides for all models
+        self.num_blocks = len(dims) * int(math.log2(stem_kernel_size[-1]))
         self.pretraining = pretraining
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
