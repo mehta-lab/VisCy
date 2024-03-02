@@ -8,6 +8,7 @@ and timm's dense implementation of the encoder in ``timm.models.convnext``
 from typing import Sequence
 
 import torch
+from monai.networks.blocks import UpSample
 from timm.models.convnext import (
     Downsample,
     DropPath,
@@ -18,7 +19,7 @@ from timm.models.convnext import (
 )
 from torch import BoolTensor, Size, Tensor, nn
 
-from viscy.unet.networks.Unet21D import PixelToVoxelHead, Unet2dDecoder, UnsqueezeHead
+from viscy.unet.networks.Unet21D import Unet2dDecoder
 
 
 def _init_weights(module: nn.Module) -> None:
@@ -362,6 +363,35 @@ class MaskedMultiscaleEncoder(nn.Module):
         return features, mask
 
 
+class PixelToVoxelShuffleHead(nn.Module):
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        out_stack_depth: int = 5,
+        xy_scaling: int = 4,
+        pool: bool = False,
+    ) -> None:
+        super().__init__()
+        self.out_channels = out_channels
+        self.out_stack_depth = out_stack_depth
+        self.upsample = UpSample(
+            spatial_dims=2,
+            in_channels=in_channels,
+            out_channels=out_stack_depth * out_channels,
+            scale_factor=xy_scaling,
+            mode="pixelshuffle",
+            pre_conv=None,
+            apply_pad_pool=pool,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.upsample(x)
+        b, _, h, w = x.shape
+        x = x.reshape(b, self.out_channels, self.out_stack_depth, h, w)
+        return x
+
+
 class FullyConvolutionalMAE(nn.Module):
     def __init__(
         self,
@@ -370,7 +400,6 @@ class FullyConvolutionalMAE(nn.Module):
         encoder_blocks: Sequence[int] = [3, 3, 9, 3],
         dims: Sequence[int] = [96, 192, 384, 768],
         encoder_drop_path_rate: float = 0.0,
-        head_expansion_ratio: int = 4,
         stem_kernel_size: Sequence[int] = (5, 4, 4),
         in_stack_depth: int = 5,
         decoder_conv_blocks: int = 1,
@@ -387,9 +416,7 @@ class FullyConvolutionalMAE(nn.Module):
         )
         decoder_channels = list(dims)
         decoder_channels.reverse()
-        decoder_channels[-1] = (
-            (in_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
-        )
+        decoder_channels[-1] = (in_stack_depth + 2) * in_channels * 2**2
         self.decoder = Unet2dDecoder(
             decoder_channels,
             norm_name="instance",
@@ -398,16 +425,13 @@ class FullyConvolutionalMAE(nn.Module):
             strides=[2] * (len(dims) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv=None,
         )
-        if in_stack_depth == 1:
-            self.head = UnsqueezeHead()
-        else:
-            self.head = PixelToVoxelHead(
-                in_channels=decoder_channels[-1],
-                out_channels=out_channels,
-                out_stack_depth=in_stack_depth,
-                expansion_ratio=head_expansion_ratio,
-                pool=True,
-            )
+        self.head = PixelToVoxelShuffleHead(
+            in_channels=decoder_channels[-1],
+            out_channels=out_channels,
+            out_stack_depth=in_stack_depth,
+            xy_scaling=stem_kernel_size[-1],
+            pool=True,
+        )
         self.out_stack_depth = in_stack_depth
         self.num_blocks = 6
         self.pretraining = pretraining
