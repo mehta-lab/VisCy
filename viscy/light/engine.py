@@ -413,7 +413,7 @@ class FcmaeUNet(VSUNet):
         loss_step = torch.stack(losses).mean()
         self.log(
             "loss/train",
-            loss_step,
+            loss_step.to(self.device),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
@@ -430,7 +430,7 @@ class FcmaeUNet(VSUNet):
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
             f"loss/val/{dataloader_idx}",
-            loss,
+            loss.to(self.device),
             sync_dist=True,
             batch_size=source.shape[0],
         )
@@ -443,4 +443,8 @@ class FcmaeUNet(VSUNet):
         super().on_validation_epoch_end()
         # average within each dataloader
         loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
-        self.log("loss/validate", torch.tensor(loss_means).mean(), sync_dist=True)
+        self.log(
+            "loss/validate",
+            torch.tensor(loss_means).mean().to(self.device),
+            sync_dist=True,
+        )
