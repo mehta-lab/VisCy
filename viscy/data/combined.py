@@ -36,10 +36,10 @@ class CombinedDataModule(LightningDataModule):
     ):
         super().__init__()
         self.data_modules = data_modules
-        self.train_mode = train_mode
-        self.val_mode = val_mode
-        self.test_mode = test_mode
-        self.predict_mode = predict_mode
+        self.train_mode = CombineMode(train_mode).value
+        self.val_mode = CombineMode(val_mode).value
+        self.test_mode = CombineMode(test_mode).value
+        self.predict_mode = CombineMode(predict_mode).value
 
     def prepare_data(self):
         for dm in self.data_modules:
