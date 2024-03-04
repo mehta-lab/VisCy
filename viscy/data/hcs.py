@@ -203,10 +203,6 @@ class SlidingWindowDataset(Dataset):
             sample["target"] = self._stack_channels(sample_images, "target")
         return sample
 
-    def __del__(self):
-        """Close the Zarr store when the dataset instance gets GC'ed."""
-        self.positions[0].zgroup.store.close()
-
 
 class MaskTestDataset(SlidingWindowDataset):
     """Torch dataset where each element is a window of
@@ -314,7 +310,13 @@ class HCSDataModule(LightningDataModule):
         self.augmentations = augmentations
         self.caching = caching
         self.ground_truth_masks = ground_truth_masks
-        self.tmp_zarr = None
+        self.prepare_data_per_node = True
+
+    @property
+    def cache_path(self):
+        return Path(
+            tempfile.gettempdir(), os.getenv("SLURM_JOB_ID"), self.data_path.name
+        )
 
     def prepare_data(self):
         if not self.caching:
@@ -326,20 +328,14 @@ class HCSDataModule(LightningDataModule):
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
-        os.mkdir(self.trainer.logger.log_dir)
+        os.makedirs(self.trainer.logger.log_dir, exist_ok=True)
         file_handler = logging.FileHandler(
             os.path.join(self.trainer.logger.log_dir, "data.log")
         )
         file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
-        # cache in temporary directory
-        self.tmp_zarr = os.path.join(
-            tempfile.gettempdir(),
-            os.getenv("SLURM_JOB_ID"),
-            os.path.basename(self.data_path),
-        )
-        logger.info(f"Caching dataset at {self.tmp_zarr}.")
-        tmp_store = zarr.NestedDirectoryStore(self.tmp_zarr)
+        logger.info(f"Caching dataset at {self.cache_path}.")
+        tmp_store = zarr.NestedDirectoryStore(self.cache_path)
         with open_ome_zarr(self.data_path, mode="r") as lazy_plate:
             _, skipped, _ = zarr.copy(
                 lazy_plate.zgroup,
@@ -377,7 +373,7 @@ class HCSDataModule(LightningDataModule):
         val_transform = Compose(self.normalizations + fit_transform)
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
+        data_path = self.cache_path if self.caching else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
 
         # disable metadata tracking in MONAI for performance
@@ -414,7 +410,7 @@ class HCSDataModule(LightningDataModule):
             logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
+        data_path = self.cache_path if self.cache_path else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
@@ -481,6 +477,7 @@ class HCSDataModule(LightningDataModule):
             persistent_workers=bool(self.num_workers),
             prefetch_factor=4 if self.num_workers else None,
             collate_fn=_collate_samples,
+            drop_last=True,
         )
 
     def val_dataloader(self):
