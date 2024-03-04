@@ -412,17 +412,18 @@ class HCSDataModule(LightningDataModule):
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.tmp_zarr if self.tmp_zarr else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
+        test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
             self.test_dataset = MaskTestDataset(
                 [p for _, p in plate.positions()],
-                transform=self.normalizations,
+                transform=test_transform,
                 ground_truth_masks=self.ground_truth_masks,
                 norm_meta=plate.zattrs["normalization"] ** dataset_settings,
             )
         else:
             self.test_dataset = SlidingWindowDataset(
                 [p for _, p in plate.positions()],
-                transform=self.normalizations,
+                transform=test_transform,
                 norm_meta=plate.zattrs["normalization"] ** dataset_settings,
             )
 
@@ -445,9 +446,7 @@ class HCSDataModule(LightningDataModule):
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):
             positions = [p for _, p in dataset.positions()]
-
-        predict_transform = self.normalizations
-
+        predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
             positions=positions,
             transform=predict_transform,
