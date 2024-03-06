@@ -10,7 +10,6 @@ import torch.nn.functional as F
 
 import napari
 from pytorch_lightning.loggers import TensorBoardLogger
-from monai.transforms import Zoom
 from monai.transforms import Compose, RandRotate, Resize, Zoom, Flip, RandFlip, RandZoom, RandRotate90, RandRotate, RandAffine, Rand2DElastic, Rand3DElastic, RandGaussianNoise, RandGaussianNoised
 
 # %% Create a dataloader and visualize the batches.
@@ -91,7 +90,11 @@ def dice_loss(pred, target):
 # ])
 
 transforms = Compose([
+    RandRotate(range_x=15, prob=0.5),
     Flip(spatial_axis=[0,1]),
+    RandFlip(spatial_axis=[0,1], prob=0.5),
+    RandRotate90(spatial_axes=(0,1), prob=0.2, max_k=3),
+    RandGaussianNoise(prob=0.5),
 ])
 
 # create a small unet for image translation which accepts two input images (a label image and a microscopy image) and outputs one label image
@@ -121,7 +124,12 @@ class UNet(nn.Module):
             nn.ReLU(inplace=True),
             nn.Conv2d(128, 64, kernel_size=3, padding=1),
             nn.ReLU(inplace=True),
-            nn.Conv2d(64, out_channels, kernel_size=1)
+            nn.Conv2d(128, out_channels, kernel_size=1),
+            nn.Softmax(dim=1),
+            nn.Conv2d(out_channels, out_channels, kernel_size=1),
+            nn.Softmax(dim=1),
+            nn.Conv2d(out_channels, out_channels, kernel_size=1),
+            nn.Softmax(dim=1)
         )
 
     def forward(self, x):
@@ -145,9 +153,10 @@ for batch in dataloader:
 
     # Apply the augmentations to your data
     augmented_input = transforms(input_data)
+    viewer.add_image(augmented_input.cpu().numpy().astype(np.float32))
 
     # Forward pass through the model
-    output = unet_model(augmented_input,target)
+    output = unet_model(augmented_input)
 
     # Apply softmax activation to the output
     output = F.softmax(output, dim=1)
@@ -161,8 +170,8 @@ for batch in dataloader:
     optimizer.zero_grad()
 
 # Visualize sample of the augmented data using napari
-for i in range(augmented_data.shape[0]):
-    viewer.add_image(augmented_data[i].cpu().numpy().astype(np.float32))
+# for i in range(augmented_input.shape[0]):
+#     viewer.add_image(augmented_input[i].cpu().numpy().astype(np.float32))
 
 
 #%% use the batch for training the unet model using the lightning module
