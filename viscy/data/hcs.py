@@ -25,7 +25,7 @@ from monai.transforms import (
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy.data.typing import ChannelMap, Sample
+from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
 
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
@@ -64,11 +64,11 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
         as is the case with ``train_patches_per_stack > 1``.
     :return Sample: Batch sample (dictionary of tensors)
     """
-    collated = {}
+    collated: Sample = {}
     for key in batch[0].keys():
         data = []
         for sample in batch:
-            if isinstance(sample[key], list):
+            if isinstance(sample[key], Sequence):
                 data.extend(sample[key])
             else:
                 data.append(sample[key])
@@ -84,7 +84,7 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
+    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] | None transform:
         a callable that transforms data, defaults to None
     """
 
@@ -93,7 +93,7 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -116,18 +116,18 @@ class SlidingWindowDataset(Dataset):
         w = 0
         self.window_keys = []
         self.window_arrays = []
-        self.window_norm_meta = []
+        self.window_norm_meta: list[NormMeta | None] = []
         for fov in self.positions:
-            img_arr = fov["0"]
+            img_arr: ImageArray = fov["0"]
             ts = img_arr.frames
             zs = img_arr.slices - self.z_window_size + 1
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
-            self.window_norm_meta.append(fov.zattrs.get("normalization", 0))
+            self.window_norm_meta.append(fov.zattrs.get("normalization", None))
         self._max_window = w
 
-    def _find_window(self, index: int) -> tuple[int, int]:
+    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None]:
         """Look up window given index."""
         window_idx = sorted(self.window_keys + [index + 1]).index(index + 1)
         w = self.window_keys[window_idx]
@@ -136,16 +136,16 @@ class SlidingWindowDataset(Dataset):
         return (self.window_arrays[self.window_keys.index(w)], tz, norm_meta)
 
     def _read_img_window(
-        self, img: ImageArray, ch_idx: list[str], tz: int
-    ) -> tuple[tuple[Tensor], tuple[str, int, int]]:
+        self, img: ImageArray, ch_idx: list[int], tz: int
+    ) -> tuple[list[Tensor], HCSStackIndex]:
         """Read image window as tensor.
 
         :param ImageArray img: NGFF image array
-        :param list[int] channels: list of channel indices to read,
+        :param list[int] ch_idx: list of channel indices to read,
             output channel ordering will reflect the sequence
         :param int tz: window index within the FOV, counted Z-first
-        :return tuple[Tensor], tuple[str, int, int]:
-            tuple of (C=1, Z, Y, X) image tensors,
+        :return list[Tensor], HCSStackIndex:
+            list of (C=1, Z, Y, X) image tensors,
             tuple of image name, time index, and Z index
         """
         zs = img.shape[-3] - self.z_window_size + 1
@@ -162,8 +162,8 @@ class SlidingWindowDataset(Dataset):
         return self._max_window
 
     def _stack_channels(
-        self, sample_images: list[dict[str, Tensor]], key: str
-    ) -> Tensor:
+        self, sample_images: list[dict[str, Tensor]] | dict[str, Tensor], key: str
+    ) -> Tensor | list[Tensor]:
         """Stack single-channel images into a multi-channel tensor."""
         if not isinstance(sample_images, list):
             return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
@@ -187,7 +187,8 @@ class SlidingWindowDataset(Dataset):
             # since adding a reference to a tensor does not copy
             # maybe write a weight map in preprocessing to use more information?
             sample_images["weight"] = sample_images[self.channels["target"][0]]
-        sample_images["norm_meta"] = norm_meta
+        if norm_meta is not None:
+            sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
         # if isinstance(sample_images, list):
@@ -224,7 +225,7 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
         ground_truth_masks: str = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
@@ -268,9 +269,9 @@ class HCSDataModule(LightningDataModule):
         defaults to "2.5D"
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
-    :param Optional[list[MapTransform]] normalizations: MONAI dictionary transforms
+    :param list[MapTransform] normalizations: MONAI dictionary transforms
         applied to selected channels, defaults to [] (no normalization)
-    :param Optional[list[MapTransform]] augmentations: MONAI dictionary transforms
+    :param list[MapTransform] augmentations: MONAI dictionary transforms
         applied to the training set, defaults to [] (no augmentation)
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
@@ -291,8 +292,8 @@ class HCSDataModule(LightningDataModule):
         num_workers: int = 8,
         architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
-        normalizations: Optional[list[MapTransform]] = [],
-        augmentations: Optional[list[MapTransform]] = [],
+        normalizations: list[MapTransform] = [],
+        augmentations: list[MapTransform] = [],
         caching: bool = False,
         ground_truth_masks: Optional[Path] = None,
     ):
@@ -315,8 +316,19 @@ class HCSDataModule(LightningDataModule):
     @property
     def cache_path(self):
         return Path(
-            tempfile.gettempdir(), os.getenv("SLURM_JOB_ID"), self.data_path.name
+            tempfile.gettempdir(),
+            os.getenv("SLURM_JOB_ID", "viscy_cache"),
+            self.data_path.name,
         )
+
+    def _data_log_path(self) -> Path:
+        log_dir = Path.cwd()
+        if self.trainer:
+            if self.trainer.logger:
+                if self.trainer.logger.log_dir:
+                    log_dir = Path(self.trainer.logger.log_dir)
+        log_dir.mkdir(parents=True, exist_ok=True)
+        return log_dir / "data.log"
 
     def prepare_data(self):
         if not self.caching:
@@ -328,10 +340,7 @@ class HCSDataModule(LightningDataModule):
         console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         logger.addHandler(console_handler)
-        os.makedirs(self.trainer.logger.log_dir, exist_ok=True)
-        file_handler = logging.FileHandler(
-            os.path.join(self.trainer.logger.log_dir, "data.log")
-        )
+        file_handler = logging.FileHandler(self._data_log_path())
         file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
         logger.info(f"Caching dataset at {self.cache_path}.")
