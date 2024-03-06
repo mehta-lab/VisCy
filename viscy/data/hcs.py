@@ -427,13 +427,13 @@ class HCSDataModule(LightningDataModule):
                 [p for _, p in plate.positions()],
                 transform=test_transform,
                 ground_truth_masks=self.ground_truth_masks,
-                norm_meta=plate.zattrs["normalization"] ** dataset_settings,
+                **dataset_settings,
             )
         else:
             self.test_dataset = SlidingWindowDataset(
                 [p for _, p in plate.positions()],
                 transform=test_transform,
-                norm_meta=plate.zattrs["normalization"] ** dataset_settings,
+                **dataset_settings,
             )
 
     def _setup_predict(self, dataset_settings: dict):
