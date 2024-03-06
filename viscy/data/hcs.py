@@ -64,11 +64,15 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
         as is the case with ``train_patches_per_stack > 1``.
     :return Sample: Batch sample (dictionary of tensors)
     """
-    elemment = batch[0]
     collated = {}
-    for key in elemment.keys():
-        data: list[list[Tensor]] = [sample[key] for sample in batch]
-        collated[key] = collate_meta_tensor([im for imgs in data for im in imgs])
+    for key in batch[0].keys():
+        data = []
+        for sample in batch:
+            if isinstance(sample[key], list):
+                data.extend(sample[key])
+            else:
+                data.append(sample[key])
+        collated[key] = collate_meta_tensor(data)
     return collated
 
 
@@ -471,7 +475,7 @@ class HCSDataModule(LightningDataModule):
             num_workers=self.num_workers,
             shuffle=True,
             persistent_workers=bool(self.num_workers),
-            prefetch_factor=4,
+            prefetch_factor=4 if self.num_workers else None,
             collate_fn=_collate_samples,
             drop_last=True,
         )
@@ -482,7 +486,7 @@ class HCSDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
-            prefetch_factor=4,
+            prefetch_factor=4 if self.num_workers else None,
             persistent_workers=bool(self.num_workers),
         )
 
