@@ -38,7 +38,9 @@ data_module.prepare_data()
 data_module.setup(stage = "fit")
 
 # Create a dataloader
-dataloader = data_module.train_dataloader()
+train_dm = data_module.train_dataloader()
+
+val_dm = data_module.val_dataloader()
 
 # Visualize the dataset and the batch using napari
 # Set the display
@@ -135,7 +137,7 @@ unet_model = UNet(in_channels=2, out_channels=1)
 optimizer = torch.optim.Adam(unet_model.parameters(), lr=1e-3)
 
 #%% Iterate over the batches
-for batch in dataloader:
+for batch in train_dm:
     # Extract the input and target from the batch
     input_data, target = batch['source'], batch['target']
     # viewer.add_image(input_data.cpu().numpy().astype(np.float32))
@@ -150,6 +152,17 @@ for batch in dataloader:
     loss.backward()
     optimizer.step()
     optimizer.zero_grad()
+
+for batch in val_dm:
+    # Extract the input and target from the batch
+    input_data, target = batch['source'], batch['target']
+
+    # Forward pass through the model
+    output = unet_model(input_data)
+
+    # Calculate the loss
+    loss = DiceLoss()(output, target)
+
 
 # Visualize sample of the augmented data using napari
 # for i in range(augmented_input.shape[0]):
@@ -175,6 +188,12 @@ class LightningUNet(pl.LightningModule):
         self.log('train_loss', loss)
         return loss
 
+    def validation_step(self, batch, batch_idx):
+        input_data, target = batch['source'], batch['target']
+        output = self(input_data)
+        loss = DiceLoss()(output, target)
+        self.log('val_loss', loss)
+
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
@@ -186,7 +205,7 @@ unet_model = LightningUNet(in_channels=2, out_channels=1)
 logger = TensorBoardLogger("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs", name="infection_classification_model")
 
 # Pass the logger to the Trainer
-trainer = pl.Trainer(logger=logger, max_epochs=10, default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs", log_every_n_steps=1)
+trainer = pl.Trainer(logger=logger, max_epochs=30, default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs", log_every_n_steps=1)
 
 # Define the checkpoint callback
 checkpoint_callback = ModelCheckpoint(
@@ -205,8 +224,14 @@ trainer.callbacks.append(checkpoint_callback)
 trainer.fit(unet_model, data_module)
 
 # %% test the model on the test set
-# Load the test dataset
-test_dataloader = data_module.test_dataloader()
+test_datapath = '/hpc/projects/intracellular_dashboard/viral-sensor/2023_12_08-BJ5a-calibration/5_classify/2023_12_08_BJ5a_pAL040_72HPI_Calibration_1.zarr'
+
+test_dm = HCSDataModule(
+    test_datapath, 
+    source_channel=['Sensor','Nuclei_mask'],
+)
+# Load the predict dataset
+test_dataloader = test_dm.test_dataloader()
 
 # Set the model to evaluation mode
 unet_model.eval()
