@@ -61,7 +61,6 @@ data:
   - 256
   - 256
   caching: false
-  normalize_source: false
   ground_truth_masks: null
 ckpt_path: null
 verbose: true
