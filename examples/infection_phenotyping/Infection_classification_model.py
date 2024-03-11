@@ -12,6 +12,8 @@ import napari
 from pytorch_lightning.loggers import TensorBoardLogger
 from monai.transforms import RandRotate, Resize, Zoom, Flip, RandFlip, RandZoom, RandRotate90, RandRotate, RandAffine, Rand2DElastic, Rand3DElastic, RandGaussianNoise, RandGaussianNoised
 from pytorch_lightning.callbacks import ModelCheckpoint
+from monai.losses import DiceLoss
+from viscy.light.engine import VSUNet
 
 # %% Create a dataloader and visualize the batches.
 # Set the path to the dataset
@@ -61,77 +63,13 @@ val_dm = data_module.val_dataloader()
 
 # %% use 2D Unet from viscy with a softmax layer at end for 4 label classification
 # use for image translation from instance segmentation to annotated image
-
-# use diceloss function from here: https://www.kaggle.com/code/bigironsphere/loss-function-library-keras-pytorch
-class DiceLoss(nn.Module):
-    def __init__(self, weight=None, size_average=True):
-        super(DiceLoss, self).__init__()
-
-    def forward(self, inputs, targets, smooth=1):
-        
-        #comment out if your model contains a sigmoid or equivalent activation layer
-        inputs = F.sigmoid(inputs)       
-        
-        #flatten label and prediction tensors
-        inputs = inputs.view(-1)
-        targets = targets.view(-1)
-        
-        intersection = (inputs * targets).sum()                            
-        dice = (2.*intersection + smooth)/(inputs.sum() + targets.sum() + smooth)  
-        
-        return 1 - dice
     
 # load 2D UNet from viscy
-# unet_model = VSUNet(
-#     architecture='2D', 
-#     model_config={"in_channels": 2, "out_channels": 1},
-#     loss_function=dice_loss, 
-#     lr=1e-3, 
-#     example_input_xy_shape=(128,128),
-#     )
-
-# create a small unet for image translation which accepts two input images (a label image and a microscopy image) and outputs one label image
-class UNet(nn.Module):
-    def __init__(self, in_channels, out_channels):
-        super(UNet, self).__init__()
-
-        self.encoder = nn.Sequential(
-            nn.Conv3d(in_channels, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=1, stride=1),
-            nn.Conv3d(64, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=1, stride=1),
-            nn.Conv3d(128, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=1, stride=1),
-            nn.Conv3d(256, 512, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True)
-        )
-
-        self.decoder = nn.Sequential(
-            nn.Conv3d(512, 256, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(256, 128, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(128, 64, kernel_size=3, padding=1),
-            nn.ReLU(inplace=True),
-            nn.Conv3d(64, out_channels, kernel_size=1),
-            nn.Softmax(dim=1),
-            nn.Conv3d(out_channels, out_channels, kernel_size=1),
-            nn.Softmax(dim=1),
-            nn.Conv3d(out_channels, out_channels, kernel_size=1),
-            nn.Softmax(dim=1)
-        )
-
-    def forward(self, x):
-        x = self.encoder(x)
-
-        x = self.decoder(x)
-
-        return x
-
-unet_model = UNet(in_channels=2, out_channels=1)
+unet_model = VSUNet(
+    architecture='2D', 
+    model_config={"in_channels": 2, "out_channels": 4, "task": "reg"}, 
+    lr=1e-3,
+)
 
 # Define the optimizer
 optimizer = torch.optim.Adam(unet_model.parameters(), lr=1e-3)
