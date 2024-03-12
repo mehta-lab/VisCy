@@ -1,4 +1,3 @@
-
 # %%
 import torch
 from viscy.data.hcs import HCSDataModule
@@ -7,13 +6,31 @@ import numpy as np
 import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
+import torchview
+from typing import Literal, Union
 
-import napari
+# import napari
 from pytorch_lightning.loggers import TensorBoardLogger
-from monai.transforms import RandRotate, Resize, Zoom, Flip, RandFlip, RandZoom, RandRotate90, RandRotate, RandAffine, Rand2DElastic, Rand3DElastic, RandGaussianNoise, RandGaussianNoised
+from monai.transforms import (
+    RandRotate,
+    Resize,
+    Zoom,
+    Flip,
+    RandFlip,
+    RandZoom,
+    RandRotate90,
+    RandRotate,
+    RandAffine,
+    Rand2DElastic,
+    Rand3DElastic,
+    RandGaussianNoise,
+    RandGaussianNoised,
+)
 from pytorch_lightning.callbacks import ModelCheckpoint
 from monai.losses import DiceLoss
 from viscy.light.engine import VSUNet
+from viscy.unet.networks.Unet2D import Unet2d
+from viscy.data.hcs import Sample
 
 # %% Create a dataloader and visualize the batches.
 # Set the path to the dataset
@@ -21,13 +38,13 @@ dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_cla
 
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
-    dataset_path, 
-    source_channel=['Sensor','Nucl_mask'], 
-    target_channel=['Inf_mask'],
-    yx_patch_size=[128,128], 
-    split_ratio=0.8, 
-    z_window_size=1, 
-    architecture = '2D',
+    dataset_path,
+    source_channel=["Sensor"],
+    target_channel=["Inf_mask"],
+    yx_patch_size=[128, 128],
+    split_ratio=0.8,
+    z_window_size=1,
+    architecture="2D",
     num_workers=1,
     batch_size=12,
     augmentations=[],
@@ -37,7 +54,7 @@ data_module = HCSDataModule(
 data_module.prepare_data()
 
 # Setup the data
-data_module.setup(stage = "fit")
+data_module.setup(stage="fit")
 
 # Create a dataloader
 train_dm = data_module.train_dataloader()
@@ -61,112 +78,132 @@ val_dm = data_module.val_dataloader()
 # # Start the napari event loop
 # napari.run()
 
-# %% use 2D Unet from viscy with a softmax layer at end for 4 label classification
-# use for image translation from instance segmentation to annotated image
-    
-# load 2D UNet from viscy
-unet_model = VSUNet(
-    architecture='2D', 
-    model_config={"in_channels": 2, "out_channels": 4, "task": "reg"}, 
-    lr=1e-3,
-)
-
-# Define the optimizer
-optimizer = torch.optim.Adam(unet_model.parameters(), lr=1e-3)
-
-#%% Iterate over the batches
-for batch in train_dm:
-    # Extract the input and target from the batch
-    input_data, target = batch['source'], batch['target']
-    # viewer.add_image(input_data.cpu().numpy().astype(np.float32))
-
-    # Forward pass through the model
-    output = unet_model(input_data)
-
-    # Calculate the loss
-    loss = DiceLoss()(output, target)
-
-    # Perform backpropagation and update the model's parameters
-    loss.backward()
-    optimizer.step()
-    optimizer.zero_grad()
-
-for batch in val_dm:
-    # Extract the input and target from the batch
-    input_data, target = batch['source'], batch['target']
-
-    # Forward pass through the model
-    output = unet_model(input_data)
-
-    # Calculate the loss
-    loss = DiceLoss()(output, target)
+# %% use 2D Unet and Lightning module
 
 
-# Visualize sample of the augmented data using napari
-# for i in range(augmented_input.shape[0]):
-#     viewer.add_image(augmented_input[i].cpu().numpy().astype(np.float32))
-
-
-#%% use the batch for training the unet model using the lightning module
-    
 # Train the model
 # Create a TensorBoard logger
 class LightningUNet(pl.LightningModule):
-    def __init__(self, in_channels, out_channels):
+    def __init__(
+        self,
+        in_channels,
+        out_channels,
+        lr: float = 1e-3,
+        loss_function: nn.CrossEntropyLoss = None,
+        schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        log_batches_per_epoch: int = 2,
+        log_samples_per_batch: int = 1,
+    ):
         super(LightningUNet, self).__init__()
-        self.unet_model = UNet(in_channels, out_channels)
+        self.unet_model = Unet2d(in_channels=in_channels, out_channels=out_channels)
+        self.lr = lr
+        self.loss_function = loss_function if loss_function else nn.CrossEntropyLoss()
+        self.schedule = schedule
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
 
     def forward(self, x):
         return self.unet_model(x)
-
-    def training_step(self, batch, batch_idx):
-        input_data, target = batch['source'], batch['target']
-        output = self(input_data)
-        loss = DiceLoss()(output, target)
-        self.log('train_loss', loss)
-        return loss
-
-    def validation_step(self, batch, batch_idx):
-        input_data, target = batch['source'], batch['target']
-        output = self(input_data)
-        loss = DiceLoss()(output, target)
-        self.log('val_loss', loss)
 
     def configure_optimizers(self):
         optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
         return optimizer
 
-# Create an instance of the LightningUNet class
-unet_model = LightningUNet(in_channels=2, out_channels=1)
+    def training_step(self, batch: Sample, batch_idx: int):
 
-# Define the logger
-logger = TensorBoardLogger("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs", name="infection_classification_model")
+        # Extract the input and target from the batch
+        source = batch["source"]
+        target = batch["target"]
+        pred = self.forward(source)
+
+        # Convert the target image to one-hot encoding
+        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=4).permute(
+            0, 4, 1, 2, 3
+        )
+        target_one_hot = target_one_hot.float()  # Convert target to float type
+        # Calculate the loss
+        train_loss = self.loss_function(pred, target_one_hot)
+        # if batch_idx < self.log_batches_per_epoch:
+        #     self.training_step_outputs.extend(
+        #         self._detach_sample((source, target_one_hot, pred))
+        #     )
+        self.log(
+            "loss/train",
+            train_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+        return train_loss
+
+    def validation_step(self, batch: Sample, batch_idx: int):
+
+        # Extract the input and target from the batch
+        source = batch["source"]
+        target = batch["target"]
+        pred = self.forward(source)
+
+        # Convert the target image to one-hot encoding
+        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=4).permute(
+            0, 4, 1, 2, 3
+        )
+        target_one_hot = target_one_hot.float()  # Convert target to float type
+        # Calculate the loss
+        loss = self.loss_function(pred, target_one_hot)
+        self.log("loss/validate", loss, sync_dist=True, add_dataloader_idx=False)
+        # if batch_idx < self.log_batches_per_epoch:
+        #     self.validation_step_outputs.extend(
+        #         self._detach_sample((source, target, pred))
+        #     )
+        return loss
+
+
+# %% Define the logger
+logger = TensorBoardLogger(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs",
+    name="infection_classification_model",
+)
 
 # Pass the logger to the Trainer
-trainer = pl.Trainer(logger=logger, max_epochs=30, default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs", log_every_n_steps=1)
+trainer = pl.Trainer(
+    logger=logger,
+    max_epochs=30,
+    default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs",
+    log_every_n_steps=1,
+)
 
 # Define the checkpoint callback
 checkpoint_callback = ModelCheckpoint(
-    dirpath='/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/checkpoints',
-    filename='checkpoint_{epoch:02d}',
+    dirpath="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/checkpoints",
+    filename="checkpoint_{epoch:02d}",
     save_top_k=-1,
     verbose=True,
-    monitor='val_loss',
-    mode='min'
+    monitor="loss/validate",
+    mode="min",
 )
 
 # Add the checkpoint callback to the trainer
 trainer.callbacks.append(checkpoint_callback)
 
 # Fit the model
-trainer.fit(unet_model, data_module)
+model = LightningUNet(
+    in_channels=1,
+    out_channels=4,
+    loss_function=nn.CrossEntropyLoss(),
+)
+trainer.fit(model, data_module)
+
 
 # %% test the model on the test set
-test_datapath = '/hpc/projects/intracellular_dashboard/viral-sensor/2023_12_08-BJ5a-calibration/5_classify/2023_12_08_BJ5a_pAL040_72HPI_Calibration_1.zarr'
+test_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/2023_12_08-BJ5a-calibration/5_classify/2023_12_08_BJ5a_pAL040_72HPI_Calibration_1.zarr"
 
 test_dm = HCSDataModule(
-    test_datapath, 
-    source_channel=['Sensor','Nuclei_mask'],
+    test_datapath,
+    source_channel=["Sensor", "Nuclei_mask"],
 )
 # Load the predict dataset
 test_dataloader = test_dm.test_dataloader()
@@ -180,7 +217,7 @@ predictions = []
 # Iterate over the test batches
 for batch in test_dataloader:
     # Extract the input from the batch
-    input_data = batch['source']
+    input_data = batch["source"]
 
     # Forward pass through the model
     output = unet_model(input_data)
@@ -193,4 +230,4 @@ predictions = np.stack(predictions)
 
 # Save the predictions as added channel in zarr format
 # use iohub or viscy to save the predictions!!!
-zarr.save('predictions.zarr', predictions)
+zarr.save("predictions.zarr", predictions)
