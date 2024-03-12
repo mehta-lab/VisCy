@@ -7,10 +7,13 @@ import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
 import torchview
-from typing import Literal, Union
+from typing import Literal, Sequence
+from skimage.exposure import rescale_intensity
+from matplotlib.cm import get_cmap
 
 # import napari
 from pytorch_lightning.loggers import TensorBoardLogger
+from torch import Tensor
 from monai.transforms import (
     RandRotate,
     Resize,
@@ -125,10 +128,10 @@ class LightningUNet(pl.LightningModule):
         target_one_hot = target_one_hot.float()  # Convert target to float type
         # Calculate the loss
         train_loss = self.loss_function(pred, target_one_hot)
-        # if batch_idx < self.log_batches_per_epoch:
-        #     self.training_step_outputs.extend(
-        #         self._detach_sample((source, target_one_hot, pred))
-        #     )
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(
+                self._detach_sample((source, target_one_hot, pred))
+            )
         self.log(
             "loss/train",
             train_loss,
@@ -154,12 +157,54 @@ class LightningUNet(pl.LightningModule):
         target_one_hot = target_one_hot.float()  # Convert target to float type
         # Calculate the loss
         loss = self.loss_function(pred, target_one_hot)
-        self.log("loss/validate", loss, sync_dist=True, add_dataloader_idx=False)
-        # if batch_idx < self.log_batches_per_epoch:
-        #     self.validation_step_outputs.extend(
-        #         self._detach_sample((source, target, pred))
-        #     )
+        if batch_idx < self.log_batches_per_epoch:
+            self.validation_step_outputs.extend(
+                self._detach_sample((source, target, pred))
+            )
+        self.log(
+            "loss/validate",
+            loss,
+            sync_dist=True,
+            add_dataloader_idx=False,
+        )
         return loss
+
+    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
+        source = self._predict_pad(batch["source"])
+        return self._predict_pad.inverse(self.forward(source))
+
+    def on_train_epoch_end(self):
+        self._log_samples("train_samples", self.training_step_outputs)
+        self.training_step_outputs = []
+
+    def on_validation_epoch_end(self):
+        self._log_samples("val_samples", self.validation_step_outputs)
+        self.validation_step_outputs = []
+
+    def _detach_sample(self, imgs: Sequence[Tensor]):
+        num_samples = 2  # min(imgs[0].shape[0], self.log_samples_per_batch)
+        return [
+            [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
+            for i in range(num_samples)
+        ]
+
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+        images_grid = []
+        for sample_images in imgs:
+            images_row = []
+            for i, image in enumerate(sample_images):
+                cm_name = "gray" if i == 0 else "inferno"
+                if image.ndim == 2:
+                    image = image[np.newaxis]
+                for channel in image:
+                    channel = rescale_intensity(channel, out_range=(0, 1))
+                    render = get_cmap(cm_name)(channel, bytes=True)[..., :3]
+                    images_row.append(render)
+            images_grid.append(np.concatenate(images_row, axis=1))
+        grid = np.concatenate(images_grid, axis=0)
+        self.logger.experiment.add_image(
+            key, grid, self.current_epoch, dataformats="HWC"
+        )
 
 
 # %% Define the logger
@@ -171,7 +216,7 @@ logger = TensorBoardLogger(
 # Pass the logger to the Trainer
 trainer = pl.Trainer(
     logger=logger,
-    max_epochs=30,
+    max_epochs=50,
     default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs",
     log_every_n_steps=1,
 )
@@ -193,7 +238,7 @@ trainer.callbacks.append(checkpoint_callback)
 model = LightningUNet(
     in_channels=1,
     out_channels=4,
-    loss_function=nn.CrossEntropyLoss(),
+    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.1, 0.4, 0.4, 0.1])),
 )
 trainer.fit(model, data_module)
 
