@@ -84,6 +84,7 @@ class ConcatDataModule(LightningDataModule):
                 raise ValueError("Inconsistent number of workers")
             if dm.batch_size != self.batch_size:
                 raise ValueError("Inconsistent batch size")
+        self.prepare_data_per_node = True
 
     def prepare_data(self):
         for dm in self.data_modules:
