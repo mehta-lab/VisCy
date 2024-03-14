@@ -88,6 +88,7 @@ class ConcatDataModule(LightningDataModule):
 
     def prepare_data(self):
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.prepare_data()
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
