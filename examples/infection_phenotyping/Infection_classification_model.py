@@ -6,7 +6,8 @@ import numpy as np
 import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
-import torchview
+
+# import torchview
 from typing import Literal, Sequence
 from skimage.exposure import rescale_intensity
 from matplotlib.cm import get_cmap
@@ -14,43 +15,47 @@ from matplotlib.cm import get_cmap
 # import napari
 from pytorch_lightning.loggers import TensorBoardLogger
 from torch import Tensor
-from monai.transforms import (
-    RandRotate,
-    Resize,
-    Zoom,
-    Flip,
-    RandFlip,
-    RandZoom,
-    RandRotate90,
-    RandRotate,
-    RandAffine,
-    Rand2DElastic,
-    Rand3DElastic,
-    RandGaussianNoise,
-    RandGaussianNoised,
-)
 from pytorch_lightning.callbacks import ModelCheckpoint
-from monai.losses import DiceLoss
-from viscy.light.engine import VSUNet
+
+# from monai.losses import DiceLoss
+# from viscy.light.engine import VSUNet
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.data.hcs import Sample
+from viscy.transforms import RandWeightedCropd, RandGaussianNoised
+from viscy.transforms import NormalizeSampled
 
 # %% Create a dataloader and visualize the batches.
 # Set the path to the dataset
-dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_09_28_DENV_A2_infMarked.zarr"
+dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_09_27_DENV_A2_infMarked_refined.zarr"
 
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
     dataset_path,
-    source_channel=["Sensor"],
+    source_channel=["Sensor", "Phase"],
     target_channel=["Inf_mask"],
     yx_patch_size=[128, 128],
     split_ratio=0.8,
     z_window_size=1,
     architecture="2D",
     num_workers=1,
-    batch_size=12,
-    augmentations=[],
+    batch_size=64,
+    normalizations=[
+        NormalizeSampled(
+            keys=["Sensor", "Phase"],
+            level="fov_statistics",
+            subtrahend="median",
+            divisor="iqr",
+        )
+    ],
+    augmentations=[
+        RandWeightedCropd(
+            num_samples=8,
+            spatial_size=[-1, 128, 128],
+            keys=["Sensor", "Phase", "Inf_mask"],
+            w_key="Inf_mask",
+        ),
+        RandGaussianNoised(keys=["Sensor", "Phase"], mean=0.0, std=1.0, prob=0.5),
+    ],
 )
 
 # Prepare the data
@@ -159,13 +164,14 @@ class LightningUNet(pl.LightningModule):
         loss = self.loss_function(pred, target_one_hot)
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                self._detach_sample((source, target, pred))
+                self._detach_sample((source, target_one_hot, pred))
             )
         self.log(
             "loss/validate",
             loss,
             sync_dist=True,
             add_dataloader_idx=False,
+            logger=True,
         )
         return loss
 
@@ -209,21 +215,21 @@ class LightningUNet(pl.LightningModule):
 
 # %% Define the logger
 logger = TensorBoardLogger(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs",
-    name="infection_classification_model",
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/",
+    name="logs_wPhase",
 )
 
 # Pass the logger to the Trainer
 trainer = pl.Trainer(
     logger=logger,
-    max_epochs=50,
-    default_root_dir="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/logs",
+    max_epochs=100,
+    default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase",
     log_every_n_steps=1,
 )
 
 # Define the checkpoint callback
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/Infection_phenotyping_data/checkpoints",
+    dirpath="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/",
     filename="checkpoint_{epoch:02d}",
     save_top_k=-1,
     verbose=True,
@@ -236,43 +242,10 @@ trainer.callbacks.append(checkpoint_callback)
 
 # Fit the model
 model = LightningUNet(
-    in_channels=1,
+    in_channels=2,
     out_channels=4,
-    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.1, 0.4, 0.4, 0.1])),
+    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.1, 0.3, 0.3, 0.3])),
 )
 trainer.fit(model, data_module)
 
-
-# %% test the model on the test set
-test_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/2023_12_08-BJ5a-calibration/5_classify/2023_12_08_BJ5a_pAL040_72HPI_Calibration_1.zarr"
-
-test_dm = HCSDataModule(
-    test_datapath,
-    source_channel=["Sensor", "Nuclei_mask"],
-)
-# Load the predict dataset
-test_dataloader = test_dm.test_dataloader()
-
-# Set the model to evaluation mode
-unet_model.eval()
-
-# Create a list to store the predictions
-predictions = []
-
-# Iterate over the test batches
-for batch in test_dataloader:
-    # Extract the input from the batch
-    input_data = batch["source"]
-
-    # Forward pass through the model
-    output = unet_model(input_data)
-
-    # Append the predictions to the list
-    predictions.append(output.detach().cpu().numpy())
-
-# Convert the predictions to a numpy array
-predictions = np.stack(predictions)
-
-# Save the predictions as added channel in zarr format
-# use iohub or viscy to save the predictions!!!
-zarr.save("predictions.zarr", predictions)
+# %%
