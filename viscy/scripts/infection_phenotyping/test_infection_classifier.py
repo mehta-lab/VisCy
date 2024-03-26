@@ -8,7 +8,9 @@ import lightning.pytorch as pl
 import torch
 import torchmetrics
 from viscy.light.predict_writer import HCSPredictionWriter
-from monai.transforms import DivisiblePad
+from viscy.scripts.infection_phenotyping.Infection_classification_model import (
+    SemanticSegUNet2D,
+)
 
 # %% test the model on the test set
 test_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2024_02_13_DENV_3infMarked_test.zarr"
@@ -37,52 +39,17 @@ data_module.prepare_data()
 
 data_module.setup(stage="predict")
 
-# %%
-class LightningUNet(pl.LightningModule):
-    def __init__(
-        self,
-        in_channels,
-        out_channels,
-        ckpt_path,
-    ):
-        super(LightningUNet, self).__init__()
-        self.unet_model = Unet2d(in_channels=in_channels, out_channels=out_channels)
-        # self.pred_cm = torchmetrics.classification.ConfusionMatrix(  
-        #     task="multiclass", num_classes=self.n_classes  
-        # ) 
-        if ckpt_path is not None:
-            state_dict = torch.load(ckpt_path, map_location=torch.device("cpu"))[
-                "state_dict"
-            ]
-            state_dict.pop("loss_function.weight", None)  # Remove the unexpected key
-            self.load_state_dict(state_dict)  # loading only weights
-
-    def forward(self, x):
-        return self.unet_model(x)
-
-    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source = self._predict_pad(batch["source"])
-        pred_class = self.forward(source)
-        pred_int = torch.argmax(pred_class, dim=1, keepdim=True)
-        return pred_int
-
-    def on_predict_start(self):
-        """Pad the input shape to be divisible by the downsampling factor.
-        The inverse of this transform crops the prediction to original shape.
-        """
-        down_factor = 2**self.unet_model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
-
-
 # %% create trainer and input
 
-output_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/pred/Exp_2024_02_13_DENV_3infMarked_pred.zarr"
+output_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/pred/Exp_2024_02_13_DENV_3infMarked_pred_SM.zarr"
 
 trainer = pl.Trainer(
     default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase",
     callbacks=[HCSPredictionWriter(output_path, write_input=False)],
+    devices=1,  # Set the number of GPUs to use. This avoids run-time exception from distributed training when the node has multiple GPUs
 )
-model = LightningUNet(
+
+model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
     ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/version_34/checkpoints/epoch=99-step=300.ckpt",
