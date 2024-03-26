@@ -25,8 +25,9 @@ from viscy.unet.networks.Unet2D import Unet2d
 from viscy.data.hcs import Sample
 from viscy.transforms import RandWeightedCropd, RandGaussianNoised
 from viscy.transforms import NormalizeSampled
-]
+
 # %% Create a dataloader and visualize the batches.
+
 # Set the path to the dataset
 dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2024_02_13_DENV_3infMarked_trainVal.zarr"
 
@@ -87,24 +88,24 @@ val_dm = data_module.val_dataloader()
 # # Start the napari event loop
 # napari.run()
 
-# %% use 2D Unet and Lightning module
+# %% 
+
+# Define a 2D UNet model for semantic segmentation as a lightning module.
 
 
-# Train the model
-# Create a TensorBoard logger
-class LightningUNet(pl.LightningModule):
-    # Initialize the class
+class SemanticSegUNet2D(pl.LightningModule):
+    # Model for semantic segmentation.
     def __init__(
         self,
         in_channels: int,  # Number of input channels
         out_channels: int,  # Number of output channels
         lr: float = 1e-3,  # Learning rate
-        loss_function: nn.CrossEntropyLoss = None,  # Loss function
+        loss_function: nn.Module = nn.CrossEntropyLoss(),  # Loss function
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",  # Learning rate schedule
         log_batches_per_epoch: int = 2,  # Number of batches to log per epoch
         log_samples_per_batch: int = 2,  # Number of samples to log per batch
     ):
-        super(LightningUNet, self).__init__()  # Call the superclass initializer
+        super(SemanticSegUNet2D, self).__init__()  # Call the superclass initializer
         # Initialize the UNet model
         self.unet_model = Unet2d(in_channels=in_channels, out_channels=out_channels)
         self.lr = lr  # Set the learning rate
@@ -115,8 +116,7 @@ class LightningUNet(pl.LightningModule):
         self.log_samples_per_batch = log_samples_per_batch  # Set the number of samples to log per batch
         self.training_step_outputs = []  # Initialize the list of training step outputs
         self.validation_step_outputs = []  # Initialize the list of validation step outputs
-        # Initialize the confusion matrix for validation
-        self.val_cm = torchmetrics.classification.ConfusionMatrix(task="multiclass", num_classes=out_channels)
+        
 
     # Define the forward pass
     def forward(self, x):
@@ -151,7 +151,6 @@ class LightningUNet(pl.LightningModule):
         target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=3).permute(0, 4, 1, 2, 3)
         target_one_hot = target_one_hot.float()  # Convert the target to float type
         loss = self.loss_function(pred, target_one_hot)  # Calculate the loss
-        self.val_cm(target_one_hot, pred)  # Update the confusion matrix
         # Log the validation step outputs if the batch index is less than the number of batches to log per epoch
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(self._detach_sample((source, target_one_hot, pred)))
@@ -173,11 +172,7 @@ class LightningUNet(pl.LightningModule):
     def on_validation_epoch_end(self):
         self._log_samples("val_samples", self.validation_step_outputs)  # Log the validation samples
         self.validation_step_outputs = []  # Reset the list of validation step outputs
-        # Compute the confusion matrix
-        confusion_matrix = self.val_cm.compute().cpu().numpy()
-        # Log the confusion matrix
-        self.logger.experiment.add_figure("Validation Confusion Matrix", ConfusionMatrixDisplay(confusion_matrix, self.index_to_label), self.current_epoch)
-        self.val_cm.reset()  # Reset the confusion matrix
+        # TODO: Log the confusion matrix
 
     # Define a method to detach a sample
     def _detach_sample(self, imgs: Sequence[Tensor]):
@@ -230,11 +225,15 @@ checkpoint_callback = ModelCheckpoint(
 trainer.callbacks.append(checkpoint_callback)
 
 # Fit the model
-model = LightningUNet(
+model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
     loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.05, 0.25, 0.7])),
 )
-trainer.fit(model, data_module)
+
+print(model)
+# %% 
+# Run training.
+# trainer.fit(model, data_module)
 
 # %%
