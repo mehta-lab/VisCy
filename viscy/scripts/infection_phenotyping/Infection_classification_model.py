@@ -21,6 +21,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 
 # from monai.losses import DiceLoss
 from monai.transforms import DivisiblePad
+from skimage.measure import regionprops
 
 # from viscy.light.engine import VSUNet
 from viscy.unet.networks.Unet2D import Unet2d
@@ -128,6 +129,9 @@ class SemanticSegUNet2D(pl.LightningModule):
             []
         )  # Initialize the list of validation step outputs
 
+        self.pred_cm = None  # Initialize the confusion matrix
+        self.index_to_label_dict = ["Background", "Infected", "Uninfected"]
+
         if checkpoint_path is not None:
             state_dict = torch.load(checkpoint_path, map_location=torch.device("cpu"))[
                 "state_dict"
@@ -205,11 +209,29 @@ class SemanticSegUNet2D(pl.LightningModule):
     # Define the prediction step
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = self._predict_pad(batch["source"])  # Pad the source
+        target = batch["target"]  # Extract the target from the batch
         logits = self._predict_pad.inverse(
             self.forward(source)
         )  # Predict and remove padding.
-        prob_map = F.softmax(logits, dim=1)  # Calculate the probabilities
-        return prob_map  # return the probabilities for computing metrics.
+        prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
+        # Go from probabilities/one-hot encoded data to class labels.
+        labels_pred = torch.argmax(prob_pred, dim=1)  # Calculate the predicted labels
+        labels_target = torch.argmax(target, dim=1)  # Calculate the target labels
+        # FIXME: Check if compliant with lightning API
+        self.pred_cm = confusion_matrix_per_cell(
+            labels_target, labels_pred, num_classes=3
+        )
+
+        return prob_pred  # log the probabilities instead of logits.
+
+    # Accumulate the confusion matrix at the end of prediction epoch and log.
+    def on_predict_epoch_end(self):
+        confusion_matrix = self.pred_cm.compute().cpu().numpy()
+        self.logger.experiment.add_figure(
+            "Confusion Matrix per Cell",
+            plot_confusion_matrix(confusion_matrix, self.index_to_label_dict),
+            self.current_epoch,
+        )
 
     # Define what happens at the end of a training epoch
     def on_train_epoch_end(self):
@@ -307,4 +329,104 @@ print(model)
 
 trainer.fit(model, data_module)
 
-# %%
+# %% Methods to compute confusion matrix per cell using torchmetrics
+
+
+# The confusion matrix at the single-cell resolution.
+def confusion_matrix_per_cell(
+    y_true: torch.Tensor, y_pred: torch.Tensor, num_classes: int
+):
+    """Compute confusion matrix per cell.
+
+    Args:
+        y_true (torch.Tensor): Ground truth label image (BXHXW).
+        y_pred (torch.Tensor): Predicted label image (BXHXW).
+        num_classes (int): Number of classes.
+
+    Returns:
+        torch.Tensor: Confusion matrix per cell (BXCXC).
+    """
+    # Convert the image class to the nuclei class
+    nuclei_true, nuclei_pred = image_class_to_nuclei_class(y_true, y_pred, num_classes)
+    # Compute the confusion matrix per cell
+    confusion_matrix_per_cell = torchmetrics.functional.confusion_matrix(
+        nuclei_true(nuclei_true > 0),  # indexing just non-background pixels.
+        nuclei_pred(nuclei_true > 0),
+        num_classes=num_classes,
+        task="multi_class",
+    )
+    return confusion_matrix_per_cell
+
+
+# These images can be logged with prediction.
+def image_class_to_nuclei_class(
+    y_true: torch.Tonser, y_pred: torch.Tensor, num_classes: int
+):
+    """Convert the class of the image to the class of the nuclei.
+
+    Args:
+        label_image (torch.Tensor): Label image (BXHXW). Values of tensor are integers that represent semantic segmentation.
+        num_classes (int): Number of classes.
+
+    Returns:
+        torch.Tensor: Label images with a consensus class at the centroid of nuclei.
+    """
+    nuclei_true = torch.zeros_like(y_true)
+    nuclie_pred = torch.zeros_like(y_pred)
+    batch_size = y_true.size(0)
+    # find centroids of nuclei from y_true
+    for i in range(batch_size):
+        regions = regionprops(y_true[i].cpu().numpy())
+        # Find centroids, pixel coordinates from the ground truth.
+        for region in regions:
+            centroid = region.centroid
+            pixel_ids = region.coords
+            # Find the class of the nuclei in the ground truth and prediction.
+            pix_labels_true = y_true[i, pixel_ids[:, 0], pixel_ids[:, 1]]
+            consensus_class_true = np.mode(pix_labels_true[:])
+
+            pix_labels_pred = y_pred[i, pixel_ids[:, 0], pixel_ids[:, 1]]
+            consensus_class_pred = np.mode(pix_labels_pred[:])
+            nuclei_true[i, centroid[0], centroid[1]] = consensus_class_true
+            nuclei_pred[i, centroid[0], centroid[1]] = consensus_class_pred
+
+        # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
+    # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
+
+    return nuclei_true, nuclei_pred
+
+
+def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
+    # Create a figure and axis to plot the confusion matrix
+    fig, ax = plt.subplots()
+
+    # Create a color heatmap for the confusion matrix
+    cax = ax.matshow(confusion_matrix, cmap="viridis")
+
+    # Create a colorbar and set the label
+    fig.colorbar(cax, label="Frequency")
+
+    # Set labels for the classes
+
+    ax.set_xticks(np.arange(len(index_to_label_dict)))
+    ax.set_yticks(np.arange(len(index_to_label_dict)))
+    ax.set_xticklabels(index_to_label_dict.values(), rotation=45)
+    ax.set_yticklabels(index_to_label_dict.values())
+
+    # Set labels for the axes
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+
+    # Add text annotations to the confusion matrix
+    for i in range(len(index_to_label_dict)):
+        for j in range(len(index_to_label_dict)):
+            ax.text(
+                j,
+                i,
+                str(int(confusion_matrix[i, j])),
+                ha="center",
+                va="center",
+                color="white",
+            )
+
+    return fig

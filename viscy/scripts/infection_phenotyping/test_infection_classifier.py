@@ -60,5 +60,3 @@ trainer.predict(
     datamodule=data_module,
     return_predictions=True,
 )
-
-# %% test the model on the test set and write to zarr store
