@@ -6,10 +6,12 @@ import numpy as np
 import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
+import torchmetrics
 
 # import torchview
 from typing import Literal, Sequence
 from skimage.exposure import rescale_intensity
+from sklearn.metrics import ConfusionMatrixDisplay
 from matplotlib.cm import get_cmap
 
 # import napari
@@ -26,7 +28,7 @@ from viscy.transforms import NormalizeSampled
 
 # %% Create a dataloader and visualize the batches.
 # Set the path to the dataset
-dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_09_27_DENV_A2_infMarked_refined.zarr"
+dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2024_02_13_DENV_3infMarked_trainVal.zarr"
 
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
@@ -38,7 +40,7 @@ data_module = HCSDataModule(
     z_window_size=1,
     architecture="2D",
     num_workers=1,
-    batch_size=64,
+    batch_size=128,
     normalizations=[
         NormalizeSampled(
             keys=["Sensor", "Phase"],
@@ -53,8 +55,7 @@ data_module = HCSDataModule(
             spatial_size=[-1, 128, 128],
             keys=["Sensor", "Phase", "Inf_mask"],
             w_key="Inf_mask",
-        ),
-        RandGaussianNoised(keys=["Sensor", "Phase"], mean=0.0, std=1.0, prob=0.5),
+        )
     ],
 )
 
@@ -111,6 +112,9 @@ class LightningUNet(pl.LightningModule):
         self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs = []
         self.validation_step_outputs = []
+        self.val_cm = torchmetrics.classification.ConfusionMatrix(  
+            task="multiclass", num_classes=self.n_classes  
+        ) 
 
     def forward(self, x):
         return self.unet_model(x)
@@ -127,7 +131,7 @@ class LightningUNet(pl.LightningModule):
         pred = self.forward(source)
 
         # Convert the target image to one-hot encoding
-        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=4).permute(
+        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=3).permute(
             0, 4, 1, 2, 3
         )
         target_one_hot = target_one_hot.float()  # Convert target to float type
@@ -156,12 +160,13 @@ class LightningUNet(pl.LightningModule):
         pred = self.forward(source)
 
         # Convert the target image to one-hot encoding
-        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=4).permute(
+        target_one_hot = F.one_hot(target.squeeze(1).long(), num_classes=3).permute(
             0, 4, 1, 2, 3
         )
         target_one_hot = target_one_hot.float()  # Convert target to float type
         # Calculate the loss
         loss = self.loss_function(pred, target_one_hot)
+        self.val_cm(target_one_hot, pred)
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target_one_hot, pred))
@@ -186,6 +191,16 @@ class LightningUNet(pl.LightningModule):
     def on_validation_epoch_end(self):
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+
+        # Log the confusion matrix at the end of the epoch  
+        confusion_matrix = self.val_cm.compute().cpu().numpy()  
+
+        self.logger.experiment.add_figure(  
+            "Validation Confusion Matrix",  
+            ConfusionMatrixDisplay(confusion_matrix, self.index_to_label),  
+            self.current_epoch,  
+        )  
+        self.val_cm.reset()
 
     def _detach_sample(self, imgs: Sequence[Tensor]):
         num_samples = 2  # min(imgs[0].shape[0], self.log_samples_per_batch)
@@ -243,8 +258,8 @@ trainer.callbacks.append(checkpoint_callback)
 # Fit the model
 model = LightningUNet(
     in_channels=2,
-    out_channels=4,
-    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.1, 0.3, 0.3, 0.3])),
+    out_channels=3,
+    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.05, 0.25, 0.7])),
 )
 trainer.fit(model, data_module)
 
