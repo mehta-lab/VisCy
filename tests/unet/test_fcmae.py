@@ -2,6 +2,7 @@ import torch
 
 from viscy.unet.networks.fcmae import (
     FullyConvolutionalMAE,
+    PixelToVoxelShuffleHead,
     MaskedAdaptiveProjection,
     MaskedConvNeXtV2Block,
     MaskedConvNeXtV2Stage,
@@ -102,6 +103,13 @@ def test_masked_multiscale_encoder():
         assert afeat.shape[1] == dim
         stride = 2 * 2 ** (i + 1)
         assert afeat.shape[2] == afeat.shape[3] == xy_size // stride
+
+
+def test_pixel_to_voxel_shuffle_head():
+    head = PixelToVoxelShuffleHead(240, 3, out_stack_depth=5, xy_scaling=4)
+    x = torch.rand(2, 240, 16, 16)
+    y = head(x)
+    assert y.shape == (2, 3, 5, 64, 64)
 
 
 def test_fcmae():

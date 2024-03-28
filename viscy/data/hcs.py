@@ -191,14 +191,11 @@ class SlidingWindowDataset(Dataset):
             sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
-        # if isinstance(sample_images, list):
-        #     sample_images = sample_images[0]
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
             "index": sample_index,
             "source": self._stack_channels(sample_images, "source"),
-            "norm_meta": norm_meta,
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
@@ -427,13 +424,13 @@ class HCSDataModule(LightningDataModule):
                 [p for _, p in plate.positions()],
                 transform=test_transform,
                 ground_truth_masks=self.ground_truth_masks,
-                norm_meta=plate.zattrs["normalization"] ** dataset_settings,
+                **dataset_settings,
             )
         else:
             self.test_dataset = SlidingWindowDataset(
                 [p for _, p in plate.positions()],
                 transform=test_transform,
-                norm_meta=plate.zattrs["normalization"] ** dataset_settings,
+                **dataset_settings,
             )
 
     def _setup_predict(self, dataset_settings: dict):

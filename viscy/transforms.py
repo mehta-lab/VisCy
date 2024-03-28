@@ -166,8 +166,13 @@ class RandInvertIntensityd(MapTransform, RandomizableTransform):
     Randomly invert the intensity of the image.
     """
 
-    def __init__(self, keys: Union[str, Iterable[str]], prob: float = 0.1) -> None:
-        MapTransform.__init__(self, keys)
+    def __init__(
+        self,
+        keys: Union[str, Iterable[str]],
+        prob: float = 0.1,
+        allow_missing_keys: bool = False,
+    ) -> None:
+        MapTransform.__init__(self, keys, allow_missing_keys=allow_missing_keys)
         RandomizableTransform.__init__(self, prob)
 
     def __call__(self, sample: Sample) -> Sample:
