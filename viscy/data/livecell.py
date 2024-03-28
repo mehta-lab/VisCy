@@ -7,6 +7,7 @@ from monai.transforms import Compose, MapTransform
 from pycocotools.coco import COCO
 from tifffile import imread
 from torch.utils.data import DataLoader, Dataset
+from torchvision.ops import box_convert
 
 from viscy.data.typing import Sample
 
@@ -61,19 +62,27 @@ class LiveCellTestDataset(Dataset):
 
     def __getitem__(self, idx: int) -> Sample:
         image_id = self.image_ids[idx]
-        image_path = self.image_dir / self.coco.imgs[image_id]["file_name"]
+        file_name = self.coco.imgs[image_id]["file_name"]
+        image_path = self.image_dir / file_name
         image = imread(image_path)[None, None]
         image = torch.from_numpy(image).to(torch.float32)
         sample = Sample(source=image)
         if self.load_target:
             sample["target"] = image
         if self.load_labels:
-            labels = torch.zeros_like(image)
             anns = self.coco.loadAnns(self.coco.getAnnIds(image_id)) or []
-            for i, ann in enumerate(anns):
-                mask = torch.from_numpy(self.coco.annToMask(ann))
-                labels[0, 0] += mask * (i + 1)
-            sample["labels"] = labels
+            boxes = [torch.tensor(ann["bbox"]).to(torch.float32) for ann in anns]
+            masks = [
+                torch.from_numpy(self.coco.annToMask(ann)).to(torch.bool)
+                for ann in anns
+            ]
+            dets = {
+                "boxes": box_convert(torch.stack(boxes), in_fmt="xywh", out_fmt="xyxy"),
+                "labels": torch.zeros(len(anns)).to(torch.uint8),
+                "masks": torch.stack(masks),
+            }
+            sample["detections"] = dets
+            sample["file_name"] = file_name
         self.transform(sample)
         return sample
 
