@@ -62,7 +62,6 @@ predict:
       - 256
       - 256
     caching: false
-    normalize_source: false
     predict_scale_source: null
   return_predictions: false
   ckpt_path: null

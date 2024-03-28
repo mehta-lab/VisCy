@@ -10,8 +10,8 @@ requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 dependencies = [
-    "iohub==0.1.0rc0",
-    "torch>=2.0.0",
+    "iohub==0.1.0",
+    "torch>=2.1.2",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
     "lightning>=2.0.1",
@@ -30,7 +30,15 @@ metrics = [
     "ptflops>=0.7",
 ]
 visual = ["ipykernel", "graphviz", "torchview"]
-dev = ["pytest", "pytest-cov", "hypothesis", "profilehooks", "onnxruntime"]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "hypothesis",
+    "ruff",
+    "black",
+    "profilehooks",
+    "onnxruntime",
+]
 
 [project.scripts]
 viscy = "viscy.cli.cli:main"
@@ -39,12 +47,9 @@ viscy = "viscy.cli.cli:main"
 write_to = "viscy/_version.py"
 
 [tool.black]
-src = ["viscy"]
 line-length = 88
 
 [tool.ruff]
 src = ["viscy", "tests"]
-extend-select = ["I001"]
-
-[tool.ruff.isort]
-known-first-party = ["viscy"]
+lint.extend-select = ["I001"]
+lint.isort.known-first-party = ["viscy"]

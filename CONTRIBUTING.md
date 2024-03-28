@@ -10,7 +10,19 @@ then make an editable installation with all the optional dependencies:
 pip install -e ".[dev,visual,metrics]"
 ```
 
-## Testing
+## CI requirements
+
+Lint with Ruff:
+
+```sh
+ruff check viscy
+```
+
+Format the code with Black:
+
+```sh
+black viscy
+```
 
 Run tests with `pytest`:
 

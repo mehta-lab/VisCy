@@ -83,7 +83,7 @@ from skimage import metrics  # for metrics.
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 
 # HCSDataModule makes it easy to load data during training.
-from viscy.light.data import HCSDataModule
+from viscy.data.hcs import HCSDataModule
 
 # training augmentations
 from viscy.transforms import (

@@ -36,6 +36,8 @@ def preprocessed_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     norm_meta = {channel: {"dataset_statistics": expected} for channel in channel_names}
     with open_ome_zarr(dataset_path, mode="r+") as dataset:
         dataset.zattrs["normalization"] = norm_meta
+        for _, fov in dataset.positions():
+            fov.zattrs["normalization"] = norm_meta
     return dataset_path
 
 

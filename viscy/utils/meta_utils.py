@@ -104,8 +104,9 @@ def generate_normalization_metadata(
         positions, fov_sample_values = mp_utils.mp_sample_im_pixels(
             this_channels_args, num_workers
         )
-        dataset_sample_values = np.stack(fov_sample_values, 0)
-
+        dataset_sample_values = np.concatenate(
+            [arr.flatten() for arr in fov_sample_values]
+        )
         fov_level_statistics = mp_utils.mp_get_val_stats(fov_sample_values, num_workers)
         dataset_level_statistics = mp_utils.get_val_stats(dataset_sample_values)
 
