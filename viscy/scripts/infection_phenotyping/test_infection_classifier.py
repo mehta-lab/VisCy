@@ -4,6 +4,7 @@ import lightning.pytorch as pl
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.scripts.infection_phenotyping.classify_infection import SemanticSegUNet2D
 from pytorch_lightning.loggers import TensorBoardLogger
+from viscy.transforms import NormalizeSampled
 
 # %% test the model on the test set
 test_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2024_02_13_DENV_3infMarked_test.zarr"
@@ -17,6 +18,14 @@ data_module = HCSDataModule(
     architecture="2D",
     num_workers=0,
     batch_size=1,
+    normalizations=[
+        NormalizeSampled(
+            keys=["Sensor", "Phase"],
+            level="fov_statistics",
+            subtrahend="median",
+            divisor="iqr",
+        )
+    ],
 )
 
 data_module.setup(stage="test")
@@ -38,7 +47,7 @@ trainer = pl.Trainer(
 model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
-    ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/version_34/checkpoints/epoch=99-step=300.ckpt",
+    ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/version_74/checkpoints/epoch=99-step=300.ckpt",
 )
 
 trainer.test(model=model, datamodule=data_module)

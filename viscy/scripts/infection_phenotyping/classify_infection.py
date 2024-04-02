@@ -6,6 +6,7 @@ import torch.nn.functional as F
 from torch import Tensor
 import torchmetrics
 from statistics import mode
+# import napari
 
 # import torchview
 from typing import Literal, Sequence
@@ -43,7 +44,7 @@ def confusion_matrix_per_cell(
         nuclei_true[nuclei_true > 0],  # indexing just non-background pixels.
         nuclei_pred[nuclei_true > 0],
         num_classes=num_classes,
-        task="multiclass",  # Fix: Change "multi_class" to "multiclass"
+        task="multiclass",  
     )
     return confusion_matrix_per_cell
 
@@ -62,7 +63,8 @@ def image_class_to_nuclei_class(
         torch.Tensor: Label images with a consensus class at the centroid of nuclei.
     """
     nuclei_true = torch.zeros_like(y_true[:, 0, 0, :, :])
-    nuclei_pred = torch.zeros_like(y_pred[:, 0, : , :])
+    nuclei_pred = torch.zeros_like(y_pred[:, 0, 0, :, :])
+
     batch_size = y_true.size(0)
     # find centroids of nuclei from y_true
     for i in range(batch_size):
@@ -78,16 +80,51 @@ def image_class_to_nuclei_class(
             pix_labels_true = y_true[i, 0, 0, pixel_ids[:, 0], pixel_ids[:, 1]]
             consensus_class_true = mode(pix_labels_true[:])
 
-            pix_labels_pred = y_pred[i, 0, pixel_ids[:, 0], pixel_ids[:, 1]]
+            pix_labels_pred = y_pred[i, 0, 0, pixel_ids[:, 0], pixel_ids[:, 1]]
             consensus_class_pred = mode(pix_labels_pred[:])
-            nuclei_true[i, pixel_ids[0], pixel_ids[1]] = torch.FloatTensor([consensus_class_true]).to(y_true.dtype)
-            nuclei_pred[i, pixel_ids[0], pixel_ids[1]] = torch.FloatTensor([consensus_class_pred]).to(y_pred.dtype)
+            nuclei_true[i, int(centroid[0]), int(centroid[1])] = torch.FloatTensor([consensus_class_true]).to(y_true.dtype)
+            nuclei_pred[i, int(centroid[0]), int(centroid[1])] = torch.FloatTensor([consensus_class_pred]).to(y_pred.dtype)
 
         # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
     # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
 
     return nuclei_true, nuclei_pred
 
+def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
+    # Create a figure and axis to plot the confusion matrix
+    fig, ax = plt.subplots()
+
+    # Create a color heatmap for the confusion matrix
+    cax = ax.matshow(confusion_matrix, cmap="viridis")
+
+    # Create a colorbar and set the label
+    index_to_label_dict = dict(enumerate(index_to_label_dict))  # Convert list to dictionary
+    fig.colorbar(cax, label="Frequency")
+
+    # Set labels for the classes
+    ax.set_xticks(np.arange(len(index_to_label_dict)))
+    ax.set_yticks(np.arange(len(index_to_label_dict)))
+    ax.set_xticklabels(index_to_label_dict.values(), rotation=45)
+    ax.set_yticklabels(index_to_label_dict.values())
+
+    # Set labels for the axes
+    ax.set_xlabel("Predicted")
+    ax.set_ylabel("True")
+
+    # Add text annotations to the confusion matrix
+    for i in range(len(index_to_label_dict)):
+        for j in range(len(index_to_label_dict)):
+            ax.text(
+                j,
+                i,
+                str(int(confusion_matrix[i, j])),
+                ha="center",
+                va="center",
+                color="white",
+            )
+
+    # plt.show(fig)  # Show the figure
+    return fig
 # Define a 2d unet model for infection classification as a lightning module.
 
 class SemanticSegUNet2D(pl.LightningModule):
@@ -108,6 +145,12 @@ class SemanticSegUNet2D(pl.LightningModule):
         super(SemanticSegUNet2D, self).__init__()  # Call the superclass initializer
         # Initialize the UNet model
         self.unet_model = Unet2d(in_channels=in_channels, out_channels=out_channels)
+        if ckpt_path is not None:
+            state_dict = torch.load(ckpt_path, map_location=torch.device("cpu"))[
+                "state_dict"
+            ]
+            state_dict.pop("loss_function.weight", None)  # Remove the unexpected key
+            self.load_state_dict(state_dict)  # loading only weights
         self.lr = lr  # Set the learning rate
         # Set the loss function to CrossEntropyLoss if none is provided
         self.loss_function = loss_function if loss_function else nn.CrossEntropyLoss()
@@ -126,12 +169,7 @@ class SemanticSegUNet2D(pl.LightningModule):
         self.pred_cm = None  # Initialize the confusion matrix
         self.index_to_label_dict = ["Background", "Infected", "Uninfected"]
 
-        if ckpt_path is not None:
-            state_dict = torch.load(ckpt_path, map_location=torch.device("cpu"))[
-                "state_dict"
-            ]
-            state_dict.pop("loss_function.weight", None)  # Remove the unexpected key
-            self.load_state_dict(state_dict)  # loading only weights
+        
 
     # Define the forward pass
     def forward(self, x):
@@ -193,23 +231,6 @@ class SemanticSegUNet2D(pl.LightningModule):
         )
         return loss  # Return the validation loss
 
-    def test_step(self, batch: Sample, batch_idx: int):
-        source = batch["source"]  # Extract the source from the batch
-        target = batch["target"]  # Extract the target from the batch
-        down_factor = 2**self.unet_model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
-        source = self._predict_pad(batch["source"])  # Pad the source
-        logits = self._predict_pad.inverse(
-            self.forward(source)
-        )  # Predict and remove padding.
-        prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
-        labels_pred = torch.argmax(prob_pred, dim=1)  # Calculate the predicted labels
-        self.pred_cm = confusion_matrix_per_cell(
-            target, labels_pred, num_classes=3
-        )
-        
-        return self.pred_cm
-
     def on_predict_start(self):
         """Pad the input shape to be divisible by the downsampling factor.
         The inverse of this transform crops the prediction to original shape.
@@ -230,16 +251,55 @@ class SemanticSegUNet2D(pl.LightningModule):
         labels_pred = torch.argmax(prob_pred, dim=1)  # Calculate the predicted labels
 
         return labels_pred  # log the class predicted image
+    
+    def on_test_start(self):
+        self.pred_cm = torch.zeros((3, 3))
+        down_factor = 2**self.unet_model.num_blocks
+        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+    
+    def test_step(self, batch: Sample):
+        source = self._predict_pad(batch["source"])  # Pad the source
+        logits = self.forward(source)
+        # prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
+        labels_pred = torch.argmax(logits, dim=1, keepdim=True)  # Calculate the predicted labels
+        
+        # pred_img = logits.detach().cpu().numpy()
+        # v = napari.Viewer()
+        # v.add_image(pred_img)
+        # napari.run()
 
-    # Accumulate the confusion matrix at the end of prediction epoch and log.
-    def on_test_epoch_end(self):
-        confusion_matrix = self.pred_cm.compute().cpu().numpy()
+        target = self._predict_pad(batch["target"])  # Extract the target from the batch
+        pred_cm = confusion_matrix_per_cell(
+            target, labels_pred, num_classes=3
+        )  # Calculate the confusion matrix per cell
+        
+        self.pred_cm += pred_cm  # Append the confusion matrix to pred_cm
         
         self.logger.experiment.add_figure(
             "Confusion Matrix per Cell",
-            plot_confusion_matrix(confusion_matrix, self.index_to_label_dict),
+            plot_confusion_matrix(pred_cm, self.index_to_label_dict),
             self.current_epoch,
         )
+
+    # Accumulate the confusion matrix at the end of test epoch and log. 
+    def on_test_end(self):
+        confusion_matrix_sum = self.pred_cm
+        self.logger.experiment.add_figure(
+            "Confusion Matrix",
+            plot_confusion_matrix(confusion_matrix_sum, self.index_to_label_dict),
+            self.current_epoch,
+        )
+    # def on_test_batch_end(self):
+    #     # confusion_matrix_sum = torch.zeros((3, 3))  # Initialize the sum of confusion matrices
+    #     # for pred_cm in self.pred_cm:  # For each confusion matrix
+    #     #     confusion_matrix_sum += pred_cm  # Accumulate the sum
+    #     # confusion_matrix_sum = confusion_matrix_sum.cpu().numpy()  # Convert to numpy array
+    #     confusion_matrix_sum = torch.sum(torch.stack([tensor.cpu() for tensor in self.pred_cm], dim=0), dim=0)
+    #     self.logger.experiment.add_figure(
+    #         "Confusion Matrix batch-wise",
+    #         plot_confusion_matrix(confusion_matrix_sum, self.index_to_label_dict),
+    #         self.current_epoch,
+    #     )
 
     # Define what happens at the end of a training epoch
     def on_train_epoch_end(self):
@@ -254,7 +314,6 @@ class SemanticSegUNet2D(pl.LightningModule):
             "val_samples", self.validation_step_outputs
         )  # Log the validation samples
         self.validation_step_outputs = []  # Reset the list of validation step outputs
-        # TODO: Log the confusion matrix
 
     # Define a method to detach a sample
     def _detach_sample(self, imgs: Sequence[Tensor]):
@@ -294,39 +353,3 @@ class SemanticSegUNet2D(pl.LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
-
-    def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
-        # Create a figure and axis to plot the confusion matrix
-        fig, ax = plt.subplots()
-
-        # Create a color heatmap for the confusion matrix
-        cax = ax.matshow(confusion_matrix, cmap="viridis")
-
-        # Create a colorbar and set the label
-        fig.colorbar(cax, label="Frequency")
-
-        # Set labels for the classes
-
-        ax.set_xticks(np.arange(len(index_to_label_dict)))
-        ax.set_yticks(np.arange(len(index_to_label_dict)))
-        ax.set_xticklabels(index_to_label_dict.values(), rotation=45)
-        ax.set_yticklabels(index_to_label_dict.values())
-
-        # Set labels for the axes
-        ax.set_xlabel("Predicted")
-        ax.set_ylabel("True")
-
-        # Add text annotations to the confusion matrix
-        for i in range(len(index_to_label_dict)):
-            for j in range(len(index_to_label_dict)):
-                ax.text(
-                    j,
-                    i,
-                    str(int(confusion_matrix[i, j])),
-                    ha="center",
-                    va="center",
-                    color="white",
-                )
-
-        plt.show(fig)  # Show the figure
-        return fig

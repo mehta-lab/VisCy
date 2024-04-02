@@ -114,3 +114,5 @@ print(model)
 # Run training.
 
 trainer.fit(model, data_module)
+
+# %%
