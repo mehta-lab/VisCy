@@ -4,9 +4,10 @@ import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
 from torch import Tensor
-import torchmetrics
+# from torchmetrics.functional import confusion_matrix
 from statistics import mode
 # import napari
+from sklearn.metrics import ConfusionMatrixDisplay
 
 # import torchview
 from typing import Literal, Sequence
@@ -39,13 +40,17 @@ def confusion_matrix_per_cell(
     """
     # Convert the image class to the nuclei class
     nuclei_true, nuclei_pred = image_class_to_nuclei_class(y_true, y_pred, num_classes)
+    
+    nuclei_true_np = nuclei_true.cpu().numpy()
+    nuclei_pred_np = nuclei_pred.cpu().numpy()
+
     # Compute the confusion matrix per cell
-    confusion_matrix_per_cell = torchmetrics.functional.confusion_matrix(
-        nuclei_true[nuclei_true > 0],  # indexing just non-background pixels.
-        nuclei_pred[nuclei_true > 0],
-        num_classes=num_classes,
-        task="multiclass",  
+    confusion_matrix_per_cell = ConfusionMatrixDisplay.from_predictions(
+        nuclei_true_np[nuclei_true_np > 0],  # indexing just non-background pixels.
+        nuclei_pred_np[nuclei_true_np > 0],
+        labels=range(num_classes),
     )
+    confusion_matrix_per_cell = torch.tensor(confusion_matrix_per_cell)
     return confusion_matrix_per_cell
 
 
@@ -70,7 +75,6 @@ def image_class_to_nuclei_class(
     for i in range(batch_size):
         y_true_cpu = y_true[i].cpu().numpy()
         y_true_reshaped = y_true_cpu.reshape(y_true_cpu.shape[-2:])
-        print(y_true_reshaped.shape)
         regions = regionprops(y_true_reshaped.astype(int))
         # Find centroids, pixel coordinates from the ground truth.
         for region in regions:
@@ -263,16 +267,10 @@ class SemanticSegUNet2D(pl.LightningModule):
         # prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
         labels_pred = torch.argmax(logits, dim=1, keepdim=True)  # Calculate the predicted labels
         
-        # pred_img = logits.detach().cpu().numpy()
-        # v = napari.Viewer()
-        # v.add_image(pred_img)
-        # napari.run()
-
         target = self._predict_pad(batch["target"])  # Extract the target from the batch
         pred_cm = confusion_matrix_per_cell(
             target, labels_pred, num_classes=3
         )  # Calculate the confusion matrix per cell
-        
         self.pred_cm += pred_cm  # Append the confusion matrix to pred_cm
         
         self.logger.experiment.add_figure(
@@ -289,17 +287,6 @@ class SemanticSegUNet2D(pl.LightningModule):
             plot_confusion_matrix(confusion_matrix_sum, self.index_to_label_dict),
             self.current_epoch,
         )
-    # def on_test_batch_end(self):
-    #     # confusion_matrix_sum = torch.zeros((3, 3))  # Initialize the sum of confusion matrices
-    #     # for pred_cm in self.pred_cm:  # For each confusion matrix
-    #     #     confusion_matrix_sum += pred_cm  # Accumulate the sum
-    #     # confusion_matrix_sum = confusion_matrix_sum.cpu().numpy()  # Convert to numpy array
-    #     confusion_matrix_sum = torch.sum(torch.stack([tensor.cpu() for tensor in self.pred_cm], dim=0), dim=0)
-    #     self.logger.experiment.add_figure(
-    #         "Confusion Matrix batch-wise",
-    #         plot_confusion_matrix(confusion_matrix_sum, self.index_to_label_dict),
-    #         self.current_epoch,
-    #     )
 
     # Define what happens at the end of a training epoch
     def on_train_epoch_end(self):
