@@ -82,6 +82,7 @@ class ConcatDataModule(LightningDataModule):
 
     :param Sequence[LightningDataModule] data_modules: data modules to concatenate
     """
+
     def __init__(self, data_modules: Sequence[LightningDataModule]):
         super().__init__()
         self.data_modules = data_modules
