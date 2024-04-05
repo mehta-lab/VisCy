@@ -1,4 +1,4 @@
-
+# %%
 
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.data.hcs import HCSDataModule
@@ -17,24 +17,24 @@ data_module = HCSDataModule(
     split_ratio=0.8,
     z_window_size=1,
     architecture="2D",
-    num_workers=0,
+    num_workers=1,
     batch_size=1,
     normalizations=[
         NormalizeSampled(
-            keys=["Sensor", "Phase"],
+            keys=["Phase", "Sensor"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
         )
     ],
 )
-
+data_module.prepare_data()
 data_module.setup(stage="predict")
 
 model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
-    ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/version_74/checkpoints/epoch=99-step=300.ckpt",
+    ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/version_34/checkpoints/epoch=99-step=300.ckpt",
 )
 
 # %% perform prediction
@@ -52,3 +52,5 @@ trainer.predict(
     datamodule=data_module,
     return_predictions=True,
 )
+
+# %%

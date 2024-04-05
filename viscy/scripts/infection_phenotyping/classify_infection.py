@@ -4,16 +4,13 @@ import torch.nn as nn
 import lightning.pytorch as pl
 import torch.nn.functional as F
 from torch import Tensor
-# from torchmetrics.functional import confusion_matrix
-from statistics import mode
-# import napari
-from sklearn.metrics import ConfusionMatrixDisplay
+import cv2
 
 # import torchview
 from typing import Literal, Sequence
 from skimage.exposure import rescale_intensity
 from matplotlib.cm import get_cmap
-from skimage.measure import regionprops
+from skimage.measure import regionprops, label
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -21,7 +18,7 @@ from monai.transforms import DivisiblePad
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.data.hcs import Sample
 
-
+# 
 # %% Methods to compute confusion matrix per cell using torchmetrics
 
 # The confusion matrix at the single-cell resolution.
@@ -39,23 +36,13 @@ def confusion_matrix_per_cell(
         torch.Tensor: Confusion matrix per cell (BXCXC).
     """
     # Convert the image class to the nuclei class
-    nuclei_true, nuclei_pred = image_class_to_nuclei_class(y_true, y_pred, num_classes)
-    
-    nuclei_true_np = nuclei_true.cpu().numpy()
-    nuclei_pred_np = nuclei_pred.cpu().numpy()
-
-    # Compute the confusion matrix per cell
-    confusion_matrix_per_cell = ConfusionMatrixDisplay.from_predictions(
-        nuclei_true_np[nuclei_true_np > 0],  # indexing just non-background pixels.
-        nuclei_pred_np[nuclei_true_np > 0],
-        labels=range(num_classes),
-    )
+    confusion_matrix_per_cell = compute_confusion_matrix(y_true, y_pred, num_classes)
     confusion_matrix_per_cell = torch.tensor(confusion_matrix_per_cell)
     return confusion_matrix_per_cell
 
 
 # These images can be logged with prediction.
-def image_class_to_nuclei_class(
+def compute_confusion_matrix(
     y_true: torch.Tensor, y_pred: torch.Tensor, num_classes: int
 ):
     """Convert the class of the image to the class of the nuclei.
@@ -67,32 +54,40 @@ def image_class_to_nuclei_class(
     Returns:
         torch.Tensor: Label images with a consensus class at the centroid of nuclei.
     """
-    nuclei_true = torch.zeros_like(y_true[:, 0, 0, :, :])
-    nuclei_pred = torch.zeros_like(y_pred[:, 0, 0, :, :])
 
     batch_size = y_true.size(0)
     # find centroids of nuclei from y_true
+    conf_mat = np.zeros((num_classes, num_classes))
     for i in range(batch_size):
         y_true_cpu = y_true[i].cpu().numpy()
+        y_pred_cpu = y_pred[i].cpu().numpy()
         y_true_reshaped = y_true_cpu.reshape(y_true_cpu.shape[-2:])
-        regions = regionprops(y_true_reshaped.astype(int))
+        y_pred_reshaped = y_pred_cpu.reshape(y_pred_cpu.shape[-2:])
+        y_pred_resized = cv2.resize(y_pred_reshaped, dsize=y_true_reshaped.shape[::-1], interpolation=cv2.INTER_NEAREST)
+        y_pred_resized = np.where(y_true_reshaped > 0, y_pred_resized, 0)
+
+        # find objects in every image
+        label_img = label(y_true_reshaped)
+        regions = regionprops(label_img)
+
         # Find centroids, pixel coordinates from the ground truth.
         for region in regions:
-            centroid = region.centroid
-            pixel_ids = region.coords
-            # Find the class of the nuclei in the ground truth and prediction.
-            pix_labels_true = y_true[i, 0, 0, pixel_ids[:, 0], pixel_ids[:, 1]]
-            consensus_class_true = mode(pix_labels_true[:])
+            if region.area > 0:
+                row, col = region.centroid
+                pred_id = y_pred_resized[int(row), int(col)]
+                test_id = y_true_reshaped[int(row), int(col)]
 
-            pix_labels_pred = y_pred[i, 0, 0, pixel_ids[:, 0], pixel_ids[:, 1]]
-            consensus_class_pred = mode(pix_labels_pred[:])
-            nuclei_true[i, int(centroid[0]), int(centroid[1])] = torch.FloatTensor([consensus_class_true]).to(y_true.dtype)
-            nuclei_pred[i, int(centroid[0]), int(centroid[1])] = torch.FloatTensor([consensus_class_pred]).to(y_pred.dtype)
-
+                if pred_id == 1 and test_id == 1:
+                    conf_mat[1,1] += 1
+                if pred_id == 1 and test_id == 2:
+                    conf_mat[0,1] += 1
+                if pred_id == 2 and test_id == 1:
+                    conf_mat[1,0] += 1
+                if pred_id == 2 and test_id == 2:
+                    conf_mat[0,0] += 1
         # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
     # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
-
-    return nuclei_true, nuclei_pred
+    return conf_mat
 
 def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
     # Create a figure and axis to plot the confusion matrix
@@ -171,7 +166,7 @@ class SemanticSegUNet2D(pl.LightningModule):
         )  # Initialize the list of validation step outputs
 
         self.pred_cm = None  # Initialize the confusion matrix
-        self.index_to_label_dict = ["Background", "Infected", "Uninfected"]
+        self.index_to_label_dict = ["Infected", "Uninfected"]
 
         
 
@@ -244,32 +239,28 @@ class SemanticSegUNet2D(pl.LightningModule):
 
     # Define the prediction step
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        down_factor = 2**self.unet_model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
         source = self._predict_pad(batch["source"])  # Pad the source
-        logits = self._predict_pad.inverse(
-            self.forward(source)
-        )  # Predict and remove padding.
+        logits = self._predict_pad.inverse(self.forward(source))  # Predict and remove padding.
         prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
         # Go from probabilities/one-hot encoded data to class labels.
-        labels_pred = torch.argmax(prob_pred, dim=1)  # Calculate the predicted labels
-
+        labels_pred = torch.argmax(prob_pred, dim=1, keepdim=True)  # Calculate the predicted labels
+        
         return labels_pred  # log the class predicted image
     
     def on_test_start(self):
-        self.pred_cm = torch.zeros((3, 3))
+        self.pred_cm = torch.zeros((2,2))
         down_factor = 2**self.unet_model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
     
     def test_step(self, batch: Sample):
         source = self._predict_pad(batch["source"])  # Pad the source
-        logits = self.forward(source)
-        # prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
-        labels_pred = torch.argmax(logits, dim=1, keepdim=True)  # Calculate the predicted labels
+        logits = self._predict_pad.inverse(self.forward(source))
+        prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
+        labels_pred = torch.argmax(prob_pred, dim=1, keepdim=True)  # Calculate the predicted labels
         
         target = self._predict_pad(batch["target"])  # Extract the target from the batch
         pred_cm = confusion_matrix_per_cell(
-            target, labels_pred, num_classes=3
+            target, labels_pred, num_classes=2
         )  # Calculate the confusion matrix per cell
         self.pred_cm += pred_cm  # Append the confusion matrix to pred_cm
         
@@ -340,3 +331,4 @@ class SemanticSegUNet2D(pl.LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
+# %%
