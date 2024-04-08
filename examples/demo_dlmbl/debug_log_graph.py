@@ -19,7 +19,7 @@ from tensorboard import notebook  # for viewing tensorboard in notebook
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 
 # HCSDataModule makes it easy to load data during training.
-from viscy.light.data import HCSDataModule
+from viscy.data.hcs import HCSDataModule
 
 # Trainer class and UNet.
 from viscy.light.engine import VSUNet

@@ -2,7 +2,7 @@
 
 from profilehooks import profile
 
-from viscy.light.data import HCSDataModule
+from viscy.data.hcs import HCSDataModule
 
 dataset = "/path/to/dataset.zarr"
 
