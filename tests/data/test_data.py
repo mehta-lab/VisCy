@@ -1,7 +1,7 @@
 from pathlib import Path
 
-import torch
 from iohub import open_ome_zarr
+from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
 
 from viscy.data.hcs import HCSDataModule
@@ -28,6 +28,54 @@ def test_preprocess(small_hcs_dataset: Path, default_channels: bool):
                 assert channel in norm_metadata
                 assert "dataset_statistics" in norm_metadata[channel]
                 assert "fov_statistics" in norm_metadata[channel]
+
+
+@mark.parametrize("multi_sample_augmentation", [True, False])
+def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentation):
+    data_path = preprocessed_hcs_dataset
+    z_window_size = 5
+    channel_split = 2
+    split_ratio = 0.8
+    yx_patch_size = [128, 96]
+    batch_size = 4
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    if multi_sample_augmentation:
+        transforms = [
+            RandSpatialCropSamplesd(
+                keys=channel_names,
+                roi_size=[z_window_size, *yx_patch_size],
+                num_samples=2,
+            )
+        ]
+    else:
+        transforms = []
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:channel_split],
+        target_channel=channel_names[channel_split:],
+        z_window_size=z_window_size,
+        batch_size=batch_size,
+        num_workers=0,
+        augmentations=transforms,
+        architecture="3D",
+        split_ratio=split_ratio,
+        yx_patch_size=yx_patch_size,
+    )
+    dm.setup(stage="fit")
+    for batch in dm.train_dataloader():
+        assert batch["source"].shape == (
+            batch_size,
+            channel_split,
+            z_window_size,
+            *yx_patch_size,
+        )
+        assert batch["target"].shape == (
+            batch_size,
+            len(channel_names) - channel_split,
+            z_window_size,
+            *yx_patch_size,
+        )
 
 
 def test_datamodule_setup_predict(preprocessed_hcs_dataset):

@@ -40,9 +40,11 @@ class CombinedDataModule(LightningDataModule):
         self.val_mode = CombineMode(val_mode).value
         self.test_mode = CombineMode(test_mode).value
         self.predict_mode = CombineMode(predict_mode).value
+        self.prepare_data_per_node = True
 
     def prepare_data(self):
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.prepare_data()
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
@@ -72,6 +74,15 @@ class CombinedDataModule(LightningDataModule):
 
 
 class ConcatDataModule(LightningDataModule):
+    """
+    Concatenate multiple data modules.
+    The concatenated data module will have the same
+    batch size and number of workers as the first data module.
+    Each element will be sampled uniformly regardless of their original data module.
+
+    :param Sequence[LightningDataModule] data_modules: data modules to concatenate
+    """
+
     def __init__(self, data_modules: Sequence[LightningDataModule]):
         super().__init__()
         self.data_modules = data_modules

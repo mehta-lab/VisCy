@@ -35,7 +35,7 @@ data = CTMCv1DataModule(
             prob=0.8,
             padding_mode="zeros",
         ),
-        RandFlipd(keys=[channel], prob=0.5, spatial_axis=(1,2)),
+        RandFlipd(keys=[channel], prob=0.5, spatial_axis=(1, 2)),
         RandAdjustContrastd(keys=[channel], prob=0.5, gamma=(0.8, 1.2)),
         RandScaleIntensityd(keys=[channel], factors=0.3, prob=0.5),
         RandGaussianNoised(keys=[channel], prob=0.5, mean=0.0, std=0.2),

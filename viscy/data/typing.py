@@ -1,22 +1,63 @@
-from typing import Sequence, TypedDict, Union
+from __future__ import annotations
 
-from torch import Tensor
+from typing import TYPE_CHECKING, NamedTuple, Sequence, TypedDict, TypeVar
+
+if TYPE_CHECKING:
+    from torch import Tensor
+
+T = TypeVar("T")
+OneOrSeq = T | Sequence[T]
+
+
+class LevelNormStats(TypedDict):
+    mean: float
+    std: float
+    median: float
+    iqr: float
+
+
+class ChannelNormStats(TypedDict):
+    dataset_statistics: LevelNormStats
+    fov_statistics: LevelNormStats
+
+
+NormMeta = dict[str, ChannelNormStats]
+
+
+class HCSStackIndex(NamedTuple):
+    """HCS stack index."""
+
+    # name of the image array, e.g. "A/1/0/0"
+    image: str
+    time: int
+    z: int
 
 
 class Sample(TypedDict, total=False):
-    """Image sample type for mini-batches."""
+    """
+    Image sample type for mini-batches.
+    All fields are optional.
+    """
 
-    # all optional
-    index: tuple[str, int, int]
-    source: Union[Tensor, Sequence[Tensor]]
-    target: Union[Tensor, Sequence[Tensor]]
-    labels: Union[Tensor, Sequence[Tensor]]
-    norm_meta: dict[str, dict]
+    index: HCSStackIndex
+    # Image data
+    source: OneOrSeq[Tensor]
+    target: OneOrSeq[Tensor]
+    weight: OneOrSeq[Tensor]
+    # Instance segmentation masks
+    labels: OneOrSeq[Tensor]
+    # None: not available
+    norm_meta: NormMeta
 
 
-class ChannelMap(TypedDict, total=False):
+class _ChannelMap(TypedDict):
+    """Source channel names."""
+
+    source: OneOrSeq[str]
+
+
+class ChannelMap(_ChannelMap, total=False):
     """Source and target channel names."""
 
-    source: Union[str, Sequence[str]]
-    # optional
-    target: Union[str, Sequence[str]]
+    # TODO: use typing.NotRequired when upgrading to Python 3.11
+    target: OneOrSeq[str]
