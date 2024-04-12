@@ -196,6 +196,7 @@ class SlidingWindowDataset(Dataset):
         sample = {
             "index": sample_index,
             "source": self._stack_channels(sample_images, "source"),
+            "norm_meta": norm_meta,
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
