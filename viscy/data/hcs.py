@@ -417,7 +417,7 @@ class HCSDataModule(LightningDataModule):
             logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.cache_path if self.cache_path else self.data_path
+        data_path = self.cache_path if self.caching else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
