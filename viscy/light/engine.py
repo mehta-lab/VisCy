@@ -175,9 +175,11 @@ class VSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    def training_step(self, batch: Sample, batch_idx: int):
+    def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
         losses = []
         batch_size = 0
+        if not isinstance(batch, Sequence):
+            batch = [batch]
         for b in batch:
             source = b["source"]
             target = b["target"]
