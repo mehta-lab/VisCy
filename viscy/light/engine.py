@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from matplotlib.cm import get_cmap
+from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
