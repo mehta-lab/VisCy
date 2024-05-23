@@ -9,7 +9,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from viscy.transforms import RandWeightedCropd
 from viscy.transforms import NormalizeSampled
 from viscy.data.hcs import HCSDataModule
-from viscy.scripts.infection_phenotyping.classify_infection import SemanticSegUNet2D
+from viscy.scripts.infection_phenotyping.classify_infection_2D import SemanticSegUNet2D
 
 # %% Create a dataloader and visualize the batches.
 

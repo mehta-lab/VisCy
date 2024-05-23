@@ -16,6 +16,7 @@ import matplotlib.pyplot as plt
 
 from monai.transforms import DivisiblePad
 from viscy.unet.networks.Unet2D import Unet2d
+# from viscy.unet.networks.Unet25D import Unet25d
 from viscy.data.hcs import Sample
 
 # 
@@ -244,8 +245,10 @@ class SemanticSegUNet2D(pl.LightningModule):
         prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
         # Go from probabilities/one-hot encoded data to class labels.
         labels_pred = torch.argmax(prob_pred, dim=1, keepdim=True)  # Calculate the predicted labels
-        
+        # prob_chan = prob_pred[:, 2, :, :]
+        # prob_chan = prob_chan.unsqueeze(1)
         return labels_pred  # log the class predicted image
+        # return prob_chan  # log the probability predicted image
     
     def on_test_start(self):
         self.pred_cm = torch.zeros((2,2))
