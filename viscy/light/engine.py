@@ -29,7 +29,7 @@ from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
-from viscy.unet.networks.Unet21D import Unet21d
+from viscy.unet.networks.Unet21D import Unet22d
 from viscy.unet.networks.Unet25D import Unet25d
 
 try:
@@ -40,9 +40,7 @@ except ImportError:
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
-    "2.1D": Unet21d,
-    # same class with out_stack_depth > 1
-    "2.2D": Unet21d,
+    "2.2D": Unet22d,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
 }
@@ -139,8 +137,6 @@ class VSUNet(LightningModule):
             raise ValueError(
                 f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}"
             )
-        if architecture == "2.2D":
-            model_config["out_stack_depth"] = model_config["in_stack_depth"]
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters

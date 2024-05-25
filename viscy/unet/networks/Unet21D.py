@@ -280,13 +280,13 @@ class Unet2dDecoder(nn.Module):
         return feat
 
 
-class Unet21d(nn.Module):
+class Unet22d(nn.Module):
     def __init__(
         self,
         in_channels: int = 1,
         out_channels: int = 1,
         in_stack_depth: int = 5,
-        out_stack_depth: int = 1,
+        out_stack_depth: int = None,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
@@ -304,18 +304,8 @@ class Unet21d(nn.Module):
                 f"Input stack depth {in_stack_depth} is not divisible "
                 f"by stem kernel depth {stem_kernel_size[0]}."
             )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
+        if out_stack_depth is None:
+            out_stack_depth = in_stack_depth
         multi_scale_encoder = timm.create_model(
             backbone,
             pretrained=pretrained,
@@ -331,12 +321,9 @@ class Unet21d(nn.Module):
         )
         decoder_channels = num_channels
         decoder_channels.reverse()
-        if out_stack_depth == 1:
-            decoder_channels[-1] = out_channels * 2**2
-        else:
-            decoder_channels[-1] = (
-                (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
-            )
+        decoder_channels[-1] = (
+            (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
+        )
         self.decoder = Unet2dDecoder(
             decoder_channels,
             norm_name=decoder_norm_layer,
@@ -345,22 +332,13 @@ class Unet21d(nn.Module):
             strides=[2] * (len(num_channels) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv="default" if decoder_upsample_pre_conv else None,
         )
-        if out_stack_depth == 1:
-            self.head = ShufflelHead(
-                in_channels=decoder_channels[-1],
-                out_channels=out_channels,
-                out_stack_depth=out_stack_depth,
-                xy_scaling=stem_kernel_size[-1],
-                pool=head_pool,
-            )
-        else:
-            self.head = PixelToVoxelHead(
-                decoder_channels[-1],
-                out_channels,
-                out_stack_depth,
-                head_expansion_ratio,
-                pool=head_pool,
-            )
+        self.head = PixelToVoxelHead(
+            decoder_channels[-1],
+            out_channels,
+            out_stack_depth,
+            head_expansion_ratio,
+            pool=head_pool,
+        )
         self.out_stack_depth = out_stack_depth
 
     @property
