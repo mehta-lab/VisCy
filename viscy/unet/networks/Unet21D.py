@@ -346,7 +346,13 @@ class Unet21d(nn.Module):
             upsample_pre_conv="default" if decoder_upsample_pre_conv else None,
         )
         if out_stack_depth == 1:
-            self.head = UnsqueezeHead()
+            self.head = ShufflelHead(
+                in_channels=decoder_channels[-1],
+                out_channels=out_channels,
+                out_stack_depth=out_stack_depth,
+                xy_scaling=stem_kernel_size[-1],
+                pool=head_pool,
+            )
         else:
             self.head = PixelToVoxelHead(
                 decoder_channels[-1],
