@@ -64,7 +64,7 @@ def _get_convnext_stage(
     return stage
 
 
-class Conv21dStem(nn.Module):
+class Conv22dStem(nn.Module):
     """Stem for 2.1D networks."""
 
     def __init__(
