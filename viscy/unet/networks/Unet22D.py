@@ -214,37 +214,6 @@ class UnsqueezeHead(nn.Module):
         return x
 
 
-class ShufflelHead(nn.Module):
-    """Shuffle (B, C * D * S**2, H, W) feature map to (B, C, D, H*S, W*S) output."""
-
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        out_stack_depth: int = 5,
-        xy_scaling: int = 4,
-        pool: bool = False,
-    ) -> None:
-        super().__init__()
-        self.out_channels = out_channels
-        self.out_stack_depth = out_stack_depth
-        self.upsample = UpSample(
-            spatial_dims=2,
-            in_channels=in_channels,
-            out_channels=out_stack_depth * out_channels,
-            scale_factor=xy_scaling,
-            mode="pixelshuffle",
-            pre_conv=None,
-            apply_pad_pool=pool,
-        )
-
-    def forward(self, x: Tensor) -> Tensor:
-        x = self.upsample(x)
-        b, _, h, w = x.shape
-        x = x.reshape(b, self.out_channels, self.out_stack_depth, h, w)
-        return x
-
-
 class Unet2dDecoder(nn.Module):
     def __init__(
         self,
