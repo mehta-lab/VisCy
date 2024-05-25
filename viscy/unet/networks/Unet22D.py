@@ -316,7 +316,7 @@ class Unet22d(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
-        self.stem = Conv21dStem(
+        self.stem = Conv22dStem(
             in_channels, num_channels[0], stem_kernel_size, in_stack_depth
         )
         decoder_channels = num_channels
