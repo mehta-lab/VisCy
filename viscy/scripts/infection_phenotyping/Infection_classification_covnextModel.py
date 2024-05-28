@@ -1,4 +1,6 @@
 # %%
+# import sys
+# sys.path.append("/hpc/mydata/soorya.pradeep/viscy_infection_phenotyping/Viscy/")
 import torch
 import lightning.pytorch as pl
 import torch.nn as nn
@@ -134,7 +136,7 @@ checkpoint_callback = ModelCheckpoint(
     mode="min",
 )
 
-# Add the checkpoint callback to the trainer
+# Add the checkpoint callback to the trainer``
 trainer.callbacks.append(checkpoint_callback)
 
 # Fit the model

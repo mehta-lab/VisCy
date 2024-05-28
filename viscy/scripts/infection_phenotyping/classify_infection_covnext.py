@@ -147,8 +147,8 @@ class SemanticSegUNet25D(pl.LightningModule):
         self.unet_model = VSUNet(
             architecture="2.2D",
             model_config={
-                "in_channels": 1,
-                "out_channels": 3,
+                "in_channels": in_channels,
+                "out_channels": out_channels,
                 "in_stack_depth": 5,
                 "backbone": "convnextv2_tiny",
                 "stem_kernel_size": (5, 4, 4),
