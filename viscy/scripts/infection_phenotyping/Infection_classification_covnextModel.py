@@ -18,7 +18,7 @@ from iohub.ngff import open_ome_zarr
 # %% Create a dataloader and visualize the batches.
 
 # Set the path to the dataset
-dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_11_08_Opencell_infection/OC43_infection_timelapse_trainVal.zarr"
+dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_11_08_Opencell_infection/OC43_infection_timelapse_all_curated_train.zarr"
 
 # find ratio of background, uninfected and infected pixels
 zarr_input = open_ome_zarr(
@@ -56,7 +56,7 @@ pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
     dataset_path,
-    source_channel=["Phase", "HSP90"],
+    source_channel=["Phase", "HSP90", "phase_nucl_iqr","hsp90_skew"],
     target_channel=["Inf_mask"],
     yx_patch_size=[256, 256],
     split_ratio=0.8,
@@ -66,7 +66,7 @@ data_module = HCSDataModule(
     batch_size=16,
     normalizations=[
         NormalizeSampled(
-            keys=["Phase","HSP90"],
+            keys=["Phase","HSP90", "phase_nucl_iqr","hsp90_skew"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
@@ -76,7 +76,7 @@ data_module = HCSDataModule(
         RandWeightedCropd(
             num_samples=4,
             spatial_size=[-1, 256, 256],
-            keys=["Phase","HSP90"],
+            keys=["Phase","HSP90", "phase_nucl_iqr","hsp90_skew"],
             w_key="Inf_mask",
         )
     ],
@@ -141,7 +141,7 @@ trainer.callbacks.append(checkpoint_callback)
 
 # Fit the model
 model = SemanticSegUNet25D(
-    in_channels=2,
+    in_channels=4,
     out_channels=3,
     loss_function=nn.CrossEntropyLoss(weight=torch.tensor(pixel_ratio)),
 )
