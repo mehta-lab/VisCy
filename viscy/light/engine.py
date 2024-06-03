@@ -298,7 +298,25 @@ class VSUNet(LightningModule):
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = self._predict_pad(batch["source"])
-        return self._predict_pad.inverse(self.forward(source))
+
+        # Test time augmentations
+        if (
+            batch.test_time_augmentations is not None
+            or len(batch.test_time_augmentations) > 0
+        ):
+            predictions = []
+            for augmentation in batch.test_time_augmentations:
+                # Apply the augmentation and predict
+                augmented_prediction = self.forward(augmentation(source))
+                # Invert the augmentation
+                augmented_prediction = Invertd(augmented_prediction)
+                predictions.append(augmented_prediction)
+            # Average the predictions
+            prediction = torch.stack(predictions).mean(dim=0)
+        else:
+            prediction = self.forward(source)
+
+        return self._predict_pad.inverse(prediction)
 
     def on_train_epoch_end(self):
         self._log_samples("train_samples", self.training_step_outputs)
