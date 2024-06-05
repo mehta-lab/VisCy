@@ -18,7 +18,7 @@ from timm.models.convnext import (
 )
 from torch import BoolTensor, Size, Tensor, nn
 
-from viscy.unet.networks.unext2 import PixelToVoxelHead, Unet2dDecoder, UnsqueezeHead
+from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder, UnsqueezeHead
 
 
 def _init_weights(module: nn.Module) -> None:
@@ -390,7 +390,7 @@ class FullyConvolutionalMAE(nn.Module):
         decoder_channels[-1] = (
             (in_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
         )
-        self.decoder = Unet2dDecoder(
+        self.decoder = UNeXt2Decoder(
             decoder_channels,
             norm_name="instance",
             mode="pixelshuffle",

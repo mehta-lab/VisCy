@@ -46,7 +46,7 @@ graph25d
 # %%
 # 3D->2D
 model = VSUNet(
-    architecture="2.2D",
+    architecture="UNext2",
     model_config={
         "in_channels": 2,
         "out_channels": 3,
@@ -61,7 +61,7 @@ model = VSUNet(
 model_graph = draw_graph(
     model,
     model.example_input_array,
-    graph_name="2.2D UNet",
+    graph_name="UNext2",
     roll=True,
     depth=3,
 )
@@ -69,9 +69,9 @@ model_graph = draw_graph(
 model_graph.visual_graph
 
 # %%
-# 2.1D UNet with upsampling in Z.
+# 3D->3D
 model = VSUNet(
-    architecture="2.2D",
+    architecture="UNext2",
     model_config={
         "in_channels": 1,
         "out_channels": 2,
@@ -85,12 +85,11 @@ model = VSUNet(
 model_graph = draw_graph(
     model,
     model.example_input_array,
-    graph_name="2.2D UNet",
+    graph_name="UNext2",
     roll=True,
     depth=3,
 )
 
-graph22d = model_graph.visual_graph
-graph22d
+model_graph.visual_graph
 # %% If you want to save the graphs as SVG files:
 # model_graph.visual_graph.render(format="svg")

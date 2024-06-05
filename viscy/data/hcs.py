@@ -265,7 +265,7 @@ class HCSDataModule(LightningDataModule):
         by default 0.8
     :param int batch_size: batch size, defaults to 16
     :param int num_workers: number of data-loading workers, defaults to 8
-    :param Literal["2D", "2.1D", "2.2D", "2.5D", "3D"] architecture: U-Net architecture,
+    :param Literal["2D", "UNeXt2", "2.5D", "3D"] architecture: U-Net architecture,
         defaults to "2.5D"
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
@@ -290,7 +290,7 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"] = "2.5D",
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
@@ -303,7 +303,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = False if architecture in ["2.2D", "3D", "fcmae"] else True
+        self.target_2d = False if architecture in ["UNeXt2", "3D", "fcmae"] else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size

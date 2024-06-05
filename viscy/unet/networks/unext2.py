@@ -64,8 +64,8 @@ def _get_convnext_stage(
     return stage
 
 
-class Conv22dStem(nn.Module):
-    """Stem for 2.1D networks."""
+class UNeXt2Stem(nn.Module):
+    """Stem for UNeXt2 networks."""
 
     def __init__(
         self,
@@ -91,7 +91,7 @@ class Conv22dStem(nn.Module):
         return x.reshape(b, c * d, h, w)
 
 
-class Unet2dUpStage(nn.Module):
+class UNeXt2UpStage(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -214,7 +214,7 @@ class UnsqueezeHead(nn.Module):
         return x
 
 
-class Unet2dDecoder(nn.Module):
+class UNeXt2Decoder(nn.Module):
     def __init__(
         self,
         num_channels: list[int],
@@ -228,7 +228,7 @@ class Unet2dDecoder(nn.Module):
         self.decoder_stages = nn.ModuleList([])
         stages = len(num_channels) - 1
         for i in range(stages):
-            stage = Unet2dUpStage(
+            stage = UNeXt2UpStage(
                 in_channels=num_channels[i],
                 skip_channels=num_channels[i] // 2,
                 out_channels=num_channels[i + 1],
@@ -249,7 +249,7 @@ class Unet2dDecoder(nn.Module):
         return feat
 
 
-class Unet22d(nn.Module):
+class UNeXt2(nn.Module):
     def __init__(
         self,
         in_channels: int = 1,
@@ -285,7 +285,7 @@ class Unet22d(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
-        self.stem = Conv22dStem(
+        self.stem = UNeXt2Stem(
             in_channels, num_channels[0], stem_kernel_size, in_stack_depth
         )
         decoder_channels = num_channels
@@ -293,7 +293,7 @@ class Unet22d(nn.Module):
         decoder_channels[-1] = (
             (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
         )
-        self.decoder = Unet2dDecoder(
+        self.decoder = UNeXt2Decoder(
             decoder_channels,
             norm_name=decoder_norm_layer,
             mode=decoder_mode,
