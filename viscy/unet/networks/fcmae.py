@@ -20,7 +20,7 @@ from timm.models.convnext import (
 )
 from torch import BoolTensor, Size, Tensor, nn
 
-from viscy.unet.networks.Unet22D import Unet2dDecoder
+from viscy.unet.networks.Unet22D import PixelToVoxelHead, Unet2dDecoder
 
 
 def _init_weights(module: nn.Module) -> None:
@@ -407,6 +407,9 @@ class FullyConvolutionalMAE(nn.Module):
         in_stack_depth: int = 5,
         decoder_conv_blocks: int = 1,
         pretraining: bool = True,
+        head_conv: bool = False,
+        head_conv_expansion_ratio: int = 4,
+        head_conv_pool: bool = True,
     ) -> None:
         super().__init__()
         self.encoder = MaskedMultiscaleEncoder(
@@ -419,7 +422,14 @@ class FullyConvolutionalMAE(nn.Module):
         )
         decoder_channels = list(dims)
         decoder_channels.reverse()
-        decoder_channels[-1] = out_channels * in_stack_depth * stem_kernel_size[-1] ** 2
+        if head_conv:
+            decoder_channels[-1] = (
+                (in_stack_depth + 2) * in_channels * 2**2 * head_conv_expansion_ratio
+            )
+        else:
+            decoder_channels[-1] = (
+                out_channels * in_stack_depth * stem_kernel_size[-1] ** 2
+            )
         self.decoder = Unet2dDecoder(
             decoder_channels,
             norm_name="instance",
@@ -428,13 +438,22 @@ class FullyConvolutionalMAE(nn.Module):
             strides=[2] * (len(dims) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv=None,
         )
-        self.head = PixelToVoxelShuffleHead(
-            in_channels=decoder_channels[-1],
-            out_channels=out_channels,
-            out_stack_depth=in_stack_depth,
-            xy_scaling=stem_kernel_size[-1],
-            pool=True,
-        )
+        if head_conv:
+            self.head = PixelToVoxelHead(
+                in_channels=decoder_channels[-1],
+                out_channels=out_channels,
+                out_stack_depth=in_stack_depth,
+                expansion_ratio=head_conv_expansion_ratio,
+                pool=head_conv_pool,
+            )
+        else:
+            self.head = PixelToVoxelShuffleHead(
+                in_channels=decoder_channels[-1],
+                out_channels=out_channels,
+                out_stack_depth=in_stack_depth,
+                xy_scaling=stem_kernel_size[-1],
+                pool=True,
+            )
         self.out_stack_depth = in_stack_depth
         # TODO: replace num_blocks with explicit strides for all models
         self.num_blocks = len(dims) * int(math.log2(stem_kernel_size[-1]))

@@ -2,11 +2,11 @@ import torch
 
 from viscy.unet.networks.fcmae import (
     FullyConvolutionalMAE,
-    PixelToVoxelShuffleHead,
     MaskedAdaptiveProjection,
     MaskedConvNeXtV2Block,
     MaskedConvNeXtV2Stage,
     MaskedMultiscaleEncoder,
+    PixelToVoxelShuffleHead,
     generate_mask,
     masked_patchify,
     masked_unpatchify,
@@ -115,6 +115,19 @@ def test_pixel_to_voxel_shuffle_head():
 def test_fcmae():
     x = torch.rand(2, 3, 5, 128, 128)
     model = FullyConvolutionalMAE(3, 3)
+    y, m = model(x)
+    assert y.shape == x.shape
+    assert m is None
+    y, m = model(x, mask_ratio=0.6)
+    assert y.shape == x.shape
+    assert m.shape == (2, 1, 128, 128)
+
+
+def test_fcmae_head_conv():
+    x = torch.rand(2, 3, 5, 128, 128)
+    model = FullyConvolutionalMAE(
+        3, 3, head_conv=True, head_conv_expansion_ratio=4, head_conv_pool=True
+    )
     y, m = model(x)
     assert y.shape == x.shape
     assert m is None
