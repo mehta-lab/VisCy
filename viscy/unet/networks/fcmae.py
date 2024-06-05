@@ -339,7 +339,9 @@ class MaskedMultiscaleEncoder(nn.Module):
         self.total_stride = stem_kernel_size[1] * 2 ** (len(self.stages) - 1)
         self.apply(_init_weights)
 
-    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> tuple[list[Tensor], BoolTensor | None]:
+    def forward(
+        self, x: Tensor, mask_ratio: float = 0.0
+    ) -> tuple[list[Tensor], BoolTensor | None]:
         """
         :param Tensor x: input tensor (BCDHW)
         :param float mask_ratio: ratio of the feature maps to mask,
