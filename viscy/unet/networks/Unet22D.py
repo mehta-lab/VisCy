@@ -64,7 +64,7 @@ def _get_convnext_stage(
     return stage
 
 
-class Conv21dStem(nn.Module):
+class Conv22dStem(nn.Module):
     """Stem for 2.1D networks."""
 
     def __init__(
@@ -249,13 +249,13 @@ class Unet2dDecoder(nn.Module):
         return feat
 
 
-class Unet21d(nn.Module):
+class Unet22d(nn.Module):
     def __init__(
         self,
         in_channels: int = 1,
         out_channels: int = 1,
         in_stack_depth: int = 5,
-        out_stack_depth: int = 1,
+        out_stack_depth: int = None,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
@@ -273,18 +273,8 @@ class Unet21d(nn.Module):
                 f"Input stack depth {in_stack_depth} is not divisible "
                 f"by stem kernel depth {stem_kernel_size[0]}."
             )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
+        if out_stack_depth is None:
+            out_stack_depth = in_stack_depth
         multi_scale_encoder = timm.create_model(
             backbone,
             pretrained=pretrained,
@@ -295,7 +285,7 @@ class Unet21d(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
-        self.stem = Conv21dStem(
+        self.stem = Conv22dStem(
             in_channels, num_channels[0], stem_kernel_size, in_stack_depth
         )
         decoder_channels = num_channels
@@ -311,16 +301,13 @@ class Unet21d(nn.Module):
             strides=[2] * (len(num_channels) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv="default" if decoder_upsample_pre_conv else None,
         )
-        if out_stack_depth == 1:
-            self.head = UnsqueezeHead()
-        else:
-            self.head = PixelToVoxelHead(
-                decoder_channels[-1],
-                out_channels,
-                out_stack_depth,
-                head_expansion_ratio,
-                pool=head_pool,
-            )
+        self.head = PixelToVoxelHead(
+            decoder_channels[-1],
+            out_channels,
+            out_stack_depth,
+            head_expansion_ratio,
+            pool=head_pool,
+        )
         self.out_stack_depth = out_stack_depth
 
     @property

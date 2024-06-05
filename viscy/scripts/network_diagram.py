@@ -44,29 +44,30 @@ graph25d = model_graph.visual_graph
 graph25d
 
 # %%
-# 2.1D UNet without upsampling in Z.
+# 3D->2D
 model = VSUNet(
-    architecture="2.1D",
+    architecture="2.2D",
     model_config={
         "in_channels": 2,
-        "out_channels": 1,
-        "in_stack_depth": 9,
+        "out_channels": 3,
+        "in_stack_depth": 5,
+        "out_stack_depth": 1,
         "backbone": "convnextv2_tiny",
-        "stem_kernel_size": (3, 1, 1),
         "decoder_mode": "pixelshuffle",
+        "stem_kernel_size": (5, 4, 4),
     },
 )
 
 model_graph = draw_graph(
     model,
     model.example_input_array,
-    graph_name="2.1D UNet",
+    graph_name="2.2D UNet",
     roll=True,
     depth=3,
 )
 
-graph21d = model_graph.visual_graph
-graph21d
+model_graph.visual_graph
+
 # %%
 # 2.1D UNet with upsampling in Z.
 model = VSUNet(
