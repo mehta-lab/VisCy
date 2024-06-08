@@ -33,6 +33,30 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
 
 
 def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray:
+    """
+    Blend a new stack of images into an old stack over a specified range of slices.
+
+    This function blends the `new_stack` of images into the `old_stack` over the range
+    specified by `z_slice`. The blending is done using a weighted average where the
+    weights are determined by the position within the range of slices. If the start
+    of `z_slice` is 0, the function returns the `new_stack` unchanged.
+
+    Parameters:
+    ----------
+    old_stack : NDArray
+        The original stack of images to be blended.
+    new_stack : NDArray
+        The new stack of images to blend into the original stack.
+    z_slice : slice
+        A slice object indicating the range of slices over which to perform the blending.
+        The start and stop attributes of the slice determine the range.
+
+    Returns:
+    -------
+    NDArray
+        The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
+    """
+
     if z_slice.start == 0:
         return new_stack
     depth = z_slice.stop - z_slice.start
