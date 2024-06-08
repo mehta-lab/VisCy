@@ -8,7 +8,7 @@ from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad
+from monai.transforms import DivisiblePad, Rotate90d, Compose, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -31,6 +31,7 @@ from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet22D import Unet22d
 from viscy.unet.networks.Unet25D import Unet25d
+
 
 try:
     from cellpose.models import CellposeModel
@@ -130,6 +131,8 @@ class VSUNet(LightningModule):
         test_cellpose_model_path: str = None,
         test_cellpose_diameter: float = None,
         test_evaluate_cellpose: bool = False,
+        test_time_augmentations: bool = True,
+        tta_type: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -161,6 +164,8 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        self.test_time_augmentations = test_time_augmentations
+        self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
         if ckpt_path is not None:
             self.load_state_dict(
@@ -297,26 +302,48 @@ class VSUNet(LightningModule):
         )
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source = self._predict_pad(batch["source"])
+        # source = self._predict_pad(batch["source"])
+        source = batch["source"]
+        down_factor = 2**self.model.num_blocks
+        # self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
-        # Test time augmentations
-        if (
-            batch.test_time_augmentations is not None
-            or len(batch.test_time_augmentations) > 0
-        ):
+        if self.test_time_augmentations:
+            # FIXME hardcoded rotations
+
+            test_time_augmentations_list = []
+            for i in range(4):
+                test_time_augmentations_list.append(
+                    Compose(
+                        DivisiblePad((0, 0, down_factor, down_factor)),
+                        Rotate90(k=i, spatial_axes=(2, 3)),
+                    )
+                )
+            test_time_augmentations_list_inv = test_time_augmentations_list[::-1]
+
+            # Test time augmentations
             predictions = []
-            for augmentation in batch.test_time_augmentations:
+            for aug, de_aug in zip(
+                test_time_augmentations_list, test_time_augmentations_list_inv
+            ):
+                # Augment
+                augmented = aug(source)
                 # Apply the augmentation and predict
-                augmented_prediction = self.forward(augmentation(source))
+                augmented_prediction = self.forward(augmented)
                 # Invert the augmentation
-                augmented_prediction = Invertd(augmented_prediction)
-                predictions.append(augmented_prediction)
+                de_augmented_prediction = aug.inverse(augmented_prediction)
+                predictions.append(de_augmented_prediction)
             # Average the predictions
-            prediction = torch.stack(predictions).mean(dim=0)
-        else:
-            prediction = self.forward(source)
+            if self.tta_type == "mean":
+                prediction = torch.stack(predictions).mean(dim=0)
+            elif self.tta_type == "median":
+                prediction = torch.stack(predictions).median(dim=0)
 
-        return self._predict_pad.inverse(prediction)
+        else:
+            source = self._predict_pad(source)
+            prediction = self.forward(source)
+            prediction = self._predict_pad.inverse(prediction)
+
+        return prediction
 
     def on_train_epoch_end(self):
         self._log_samples("train_samples", self.training_step_outputs)
