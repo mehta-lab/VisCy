@@ -301,42 +301,58 @@ class VSUNet(LightningModule):
             on_epoch=False,
         )
 
+    # def rotate_volume(self, tensor, k, spatial_axes):
+    #     rotate = Rotate90(k=k, spatial_axes=spatial_axes)
+    #     rotated_tensor = torch.empty_like(tensor)
+    #     for b in range(tensor.shape[0]):  # iterate over batch
+    #         for c in range(tensor.shape[1]):  # iterate over channels
+    #             rotated_tensor[b, c] = rotate(tensor[b, c])
+    #     return rotated_tensor
+
+    def rotate_volume(self, tensor, k, spatial_axes):
+        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
+        rotated_tensor = torch.empty_like(tensor)
+        for b in range(tensor.shape[0]):  # iterate over batch
+            rotated_tensor[b] = rotate(tensor[b])
+        return rotated_tensor
+
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        # source = self._predict_pad(batch["source"])
         source = batch["source"]
-        down_factor = 2**self.model.num_blocks
-        # self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        # source = self._predict_pad(source)  # Apply padding
 
         if self.test_time_augmentations:
-            # FIXME hardcoded rotations
-
             test_time_augmentations_list = []
             for i in range(4):
                 test_time_augmentations_list.append(
                     Compose(
-                        DivisiblePad((0, 0, down_factor, down_factor)),
-                        Rotate90(k=i, spatial_axes=(2, 3)),
+                        [lambda x, i=i: self.rotate_volume(x, k=i, spatial_axes=(1, 2))]
                     )
                 )
-            test_time_augmentations_list_inv = test_time_augmentations_list[::-1]
 
-            # Test time augmentations
+            test_time_augmentations_list_inv = [
+                Compose(
+                    [lambda x, i=i: self.rotate_volume(x, k=4 - i, spatial_axes=(1, 2))]
+                )
+                for i in range(4)
+            ]
             predictions = []
             for aug, de_aug in zip(
                 test_time_augmentations_list, test_time_augmentations_list_inv
             ):
-                # Augment
                 augmented = aug(source)
-                # Apply the augmentation and predict
+                augmented = self._predict_pad(augmented)
                 augmented_prediction = self.forward(augmented)
-                # Invert the augmentation
-                de_augmented_prediction = aug.inverse(augmented_prediction)
+                # Undo rotation and padding
+                de_augmented_prediction = self._predict_pad.inverse(
+                    augmented_prediction
+                )
+                de_augmented_prediction = de_aug(de_augmented_prediction)
                 predictions.append(de_augmented_prediction)
-            # Average the predictions
+
             if self.tta_type == "mean":
                 prediction = torch.stack(predictions).mean(dim=0)
             elif self.tta_type == "median":
-                prediction = torch.stack(predictions).median(dim=0)
+                prediction = torch.stack(predictions).median(dim=0).values
 
         else:
             source = self._predict_pad(source)
