@@ -309,28 +309,9 @@ class VSUNet(LightningModule):
         source = batch["source"]
 
         if self.test_time_augmentations:
-            # test_time_augmentations_list = []
-            # for i in range(4):
-            #     test_time_augmentations_list.append(
-            #         Compose(
-            #             [
-            #                 lambda x, i=i: self._rotate_volume(
-            #                     x, k=i, spatial_axes=(1, 2)
-            #                 )
-            #             ]
-            #         )
-            #     )
+            # Save the yx coords to crop post rotations
+            self._get_original_shape_yx(source)
 
-            # test_time_augmentations_list_inv = [
-            #     Compose(
-            #         [
-            #             lambda x, i=i: self._rotate_volume(
-            #                 x, k=4 - i, spatial_axes=(1, 2)
-            #             )
-            #         ]
-            #     )
-            #     for i in range(4)
-            # ]
             predictions = []
             # for aug, de_aug in zip(
             #     test_time_augmentations_list, test_time_augmentations_list_inv
@@ -360,9 +341,9 @@ class VSUNet(LightningModule):
                 torch.cuda.empty_cache()  #
 
             if self.tta_type == "mean":
-                prediction = torch.stack(predictions).mean(dim=0)
+                prediction = torch.stack(predictions).cpu().mean(dim=0)
             elif self.tta_type == "median":
-                prediction = torch.stack(predictions).median(dim=0).values
+                prediction = torch.stack(predictions).cpu().median(dim=0).values
             # Put back to GPU
             prediction = prediction.to(source.device)
 
@@ -405,7 +386,7 @@ class VSUNet(LightningModule):
         The inverse of this transform crops the prediction to original shape.
         """
         down_factor = 2**self.model.num_blocks
-        self._original_shape = None
+        self._original_shape_yx = None
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
@@ -456,9 +437,6 @@ class VSUNet(LightningModule):
         max_dim = max(tensor.shape[-2], tensor.shape[-1])
         pad_transform = DivisiblePad((0, 0, max_dim, max_dim))
         padded_tensor = pad_transform(tensor)
-        original_shape = tensor.shape[-2:]
-
-        self._original_shape = original_shape  # Store H, W of the input tensor
 
         # Rotation
         rotated_tensor = []
@@ -472,16 +450,20 @@ class VSUNet(LightningModule):
         # # Cropping to original shape
         return rotated_tensor
 
+    def _get_original_shape_yx(self, tensor: Tensor) -> tuple[int]:
+        self._original_shape_yx = tensor.shape[-2:]
+        return self._original_shape_yx
+
     def _crop_to_original(self, tensor: Tensor) -> Tensor:
-        if self._original_shape is None:
+        if self._original_shape_yx is None:
             raise RuntimeError(
                 "Original shape not recorded. Ensure _pad_input is called before _crop_to_original."
             )
-        original_h, original_w = self._original_shape
-        pad_h = (tensor.shape[-2] - original_h) // 2
-        pad_w = (tensor.shape[-1] - original_w) // 2
+        original_y, original_x = self._original_shape_yx
+        pad_y = (tensor.shape[-2] - original_y) // 2
+        pad_x = (tensor.shape[-1] - original_x) // 2
         cropped_tensor = tensor[
-            ..., pad_h : pad_h + original_h, pad_w : pad_w + original_w
+            ..., pad_y : pad_y + original_y, pad_x : pad_x + original_x
         ]
         return cropped_tensor
 
