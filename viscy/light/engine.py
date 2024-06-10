@@ -8,7 +8,7 @@ from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad, Rotate90d, Compose, Rotate90
+from monai.transforms import DivisiblePad, Compose, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -114,6 +114,10 @@ class VSUNet(LightningModule):
     :param bool test_evaluate_cellpose:
         evaluate the performance of the CellPose model instead of the trained model
         in test stage, defaults to False
+    :param bool test_time_augmentations:
+        apply test time augmentations in test stage, defaults to False
+    :param Literal['mean', 'median'] tta_type:
+        type of test time augmentations aggregation, defaults to "mean"
     """
 
     def __init__(
@@ -131,7 +135,7 @@ class VSUNet(LightningModule):
         test_cellpose_model_path: str = None,
         test_cellpose_diameter: float = None,
         test_evaluate_cellpose: bool = False,
-        test_time_augmentations: bool = True,
+        test_time_augmentations: bool = False,
         tta_type: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
@@ -301,58 +305,66 @@ class VSUNet(LightningModule):
             on_epoch=False,
         )
 
-    # def rotate_volume(self, tensor, k, spatial_axes):
-    #     rotate = Rotate90(k=k, spatial_axes=spatial_axes)
-    #     rotated_tensor = torch.empty_like(tensor)
-    #     for b in range(tensor.shape[0]):  # iterate over batch
-    #         for c in range(tensor.shape[1]):  # iterate over channels
-    #             rotated_tensor[b, c] = rotate(tensor[b, c])
-    #     return rotated_tensor
-
-    def rotate_volume(self, tensor, k, spatial_axes):
-        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
-        rotated_tensor = torch.empty_like(tensor)
-        for b in range(tensor.shape[0]):  # iterate over batch
-            rotated_tensor[b] = rotate(tensor[b])
-        return rotated_tensor
-
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = batch["source"]
-        # source = self._predict_pad(source)  # Apply padding
 
         if self.test_time_augmentations:
-            test_time_augmentations_list = []
-            for i in range(4):
-                test_time_augmentations_list.append(
-                    Compose(
-                        [lambda x, i=i: self.rotate_volume(x, k=i, spatial_axes=(1, 2))]
-                    )
-                )
+            # test_time_augmentations_list = []
+            # for i in range(4):
+            #     test_time_augmentations_list.append(
+            #         Compose(
+            #             [
+            #                 lambda x, i=i: self._rotate_volume(
+            #                     x, k=i, spatial_axes=(1, 2)
+            #                 )
+            #             ]
+            #         )
+            #     )
 
-            test_time_augmentations_list_inv = [
-                Compose(
-                    [lambda x, i=i: self.rotate_volume(x, k=4 - i, spatial_axes=(1, 2))]
-                )
-                for i in range(4)
-            ]
+            # test_time_augmentations_list_inv = [
+            #     Compose(
+            #         [
+            #             lambda x, i=i: self._rotate_volume(
+            #                 x, k=4 - i, spatial_axes=(1, 2)
+            #             )
+            #         ]
+            #     )
+            #     for i in range(4)
+            # ]
             predictions = []
-            for aug, de_aug in zip(
-                test_time_augmentations_list, test_time_augmentations_list_inv
-            ):
-                augmented = aug(source)
+            # for aug, de_aug in zip(
+            #     test_time_augmentations_list, test_time_augmentations_list_inv
+            # ):
+            for i in range(4):
+                augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
                 augmented = self._predict_pad(augmented)
+                # predict and move to CPU
                 augmented_prediction = self.forward(augmented)
-                # Undo rotation and padding
                 de_augmented_prediction = self._predict_pad.inverse(
                     augmented_prediction
                 )
-                de_augmented_prediction = de_aug(de_augmented_prediction)
-                predictions.append(de_augmented_prediction)
+                de_augmented_prediction = self._rotate_volume(
+                    de_augmented_prediction, k=4 - i, spatial_axes=(1, 2)
+                )
+                de_augmented_prediction = self._crop_to_original(
+                    de_augmented_prediction
+                )
+
+                # Undo rotation and padding
+                predictions.append(de_augmented_prediction.cpu())
+                del (
+                    augmented,
+                    augmented_prediction,
+                    de_augmented_prediction,
+                )
+                torch.cuda.empty_cache()  #
 
             if self.tta_type == "mean":
                 prediction = torch.stack(predictions).mean(dim=0)
             elif self.tta_type == "median":
                 prediction = torch.stack(predictions).median(dim=0).values
+            # Put back to GPU
+            prediction = prediction.to(source.device)
 
         else:
             source = self._predict_pad(source)
@@ -393,6 +405,7 @@ class VSUNet(LightningModule):
         The inverse of this transform crops the prediction to original shape.
         """
         down_factor = 2**self.model.num_blocks
+        self._original_shape = None
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
@@ -437,6 +450,40 @@ class VSUNet(LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
+
+    def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
+        # Padding to ensure square shape
+        max_dim = max(tensor.shape[-2], tensor.shape[-1])
+        pad_transform = DivisiblePad((0, 0, max_dim, max_dim))
+        padded_tensor = pad_transform(tensor)
+        original_shape = tensor.shape[-2:]
+
+        self._original_shape = original_shape  # Store H, W of the input tensor
+
+        # Rotation
+        rotated_tensor = []
+        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
+        for b in range(padded_tensor.shape[0]):  # iterate over batch
+            rotated_tensor.append(rotate(padded_tensor[b]))
+
+        # Stack the list of tensors back into a single tensor
+        rotated_tensor = torch.stack(rotated_tensor)
+        del padded_tensor
+        # # Cropping to original shape
+        return rotated_tensor
+
+    def _crop_to_original(self, tensor: Tensor) -> Tensor:
+        if self._original_shape is None:
+            raise RuntimeError(
+                "Original shape not recorded. Ensure _pad_input is called before _crop_to_original."
+            )
+        original_h, original_w = self._original_shape
+        pad_h = (tensor.shape[-2] - original_h) // 2
+        pad_w = (tensor.shape[-1] - original_w) // 2
+        cropped_tensor = tensor[
+            ..., pad_h : pad_h + original_h, pad_w : pad_w + original_w
+        ]
+        return cropped_tensor
 
 
 class FcmaeUNet(VSUNet):
