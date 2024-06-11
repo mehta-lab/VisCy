@@ -79,7 +79,6 @@ class ConcatDataModule(LightningDataModule):
     The concatenated data module will have the same
     batch size and number of workers as the first data module.
     Each element will be sampled uniformly regardless of their original data module.
-
     :param Sequence[LightningDataModule] data_modules: data modules to concatenate
     """
 
@@ -93,9 +92,11 @@ class ConcatDataModule(LightningDataModule):
                 raise ValueError("Inconsistent number of workers")
             if dm.batch_size != self.batch_size:
                 raise ValueError("Inconsistent batch size")
+        self.prepare_data_per_node = True
 
     def prepare_data(self):
         for dm in self.data_modules:
+            dm.trainer = self.trainer
             dm.prepare_data()
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):

@@ -6,6 +6,7 @@ from viscy.unet.networks.fcmae import (
     MaskedConvNeXtV2Block,
     MaskedConvNeXtV2Stage,
     MaskedMultiscaleEncoder,
+    PixelToVoxelShuffleHead,
     generate_mask,
     masked_patchify,
     masked_unpatchify,
@@ -104,9 +105,29 @@ def test_masked_multiscale_encoder():
         assert afeat.shape[2] == afeat.shape[3] == xy_size // stride
 
 
+def test_pixel_to_voxel_shuffle_head():
+    head = PixelToVoxelShuffleHead(240, 3, out_stack_depth=5, xy_scaling=4)
+    x = torch.rand(2, 240, 16, 16)
+    y = head(x)
+    assert y.shape == (2, 3, 5, 64, 64)
+
+
 def test_fcmae():
     x = torch.rand(2, 3, 5, 128, 128)
     model = FullyConvolutionalMAE(3, 3)
+    y, m = model(x)
+    assert y.shape == x.shape
+    assert m is None
+    y, m = model(x, mask_ratio=0.6)
+    assert y.shape == x.shape
+    assert m.shape == (2, 1, 128, 128)
+
+
+def test_fcmae_head_conv():
+    x = torch.rand(2, 3, 5, 128, 128)
+    model = FullyConvolutionalMAE(
+        3, 3, head_conv=True, head_conv_expansion_ratio=4, head_conv_pool=True
+    )
     y, m = model(x)
     assert y.shape == x.shape
     assert m is None

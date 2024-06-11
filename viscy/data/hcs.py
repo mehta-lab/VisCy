@@ -191,8 +191,6 @@ class SlidingWindowDataset(Dataset):
             sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
-        # if isinstance(sample_images, list):
-        #     sample_images = sample_images[0]
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
