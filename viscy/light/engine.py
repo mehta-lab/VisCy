@@ -29,8 +29,8 @@ from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
-from viscy.unet.networks.Unet22D import Unet22d
 from viscy.unet.networks.Unet25D import Unet25d
+from viscy.unet.networks.unext2 import UNeXt2
 
 
 try:
@@ -41,7 +41,7 @@ except ImportError:
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
-    "2.2D": Unet22d,
+    "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
 }
@@ -122,7 +122,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
