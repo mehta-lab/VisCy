@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from monai.metrics.regression import compute_ssim_and_cs
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
-from torchmetrics.detection import MeanAveragePrecision
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
 
 
@@ -172,7 +172,12 @@ def mean_average_precision(
         :py:class:`torchmetrics.detection.MeanAveragePrecision`
     :return dict[str, torch.Tensor]: COCO-style metrics
     """
-    map_metric = MeanAveragePrecision(box_format="xyxy", iou_type="segm", **kwargs)
+    defaults = dict(
+        iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000]
+    )
+    if not kwargs:
+        kwargs = {}
+    map_metric = MeanAveragePrecision(**(defaults | kwargs))
     map_metric.update(
         [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
     )
