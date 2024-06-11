@@ -1,0 +1,27 @@
+{
+    "plate": {
+        "acquisitions": [
+            {
+                "id": 0
+            }
+        ],
+        "columns": [
+            {
+                "name": "FOV0"
+            }
+        ],
+        "rows": [
+            {
+                "name": "0"
+            }
+        ],
+        "version": "0.4",
+        "wells": [
+            {
+                "columnIndex": 0,
+                "path": "0/FOV0",
+                "rowIndex": 0
+            }
+        ]
+    }
+}

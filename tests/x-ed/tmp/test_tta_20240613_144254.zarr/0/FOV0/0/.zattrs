@@ -1,0 +1,97 @@
+{
+    "multiscales": [
+        {
+            "axes": [
+                {
+                    "name": "T",
+                    "type": "time",
+                    "unit": "second"
+                },
+                {
+                    "name": "C",
+                    "type": "channel"
+                },
+                {
+                    "name": "Z",
+                    "type": "space",
+                    "unit": "micrometer"
+                },
+                {
+                    "name": "Y",
+                    "type": "space",
+                    "unit": "micrometer"
+                },
+                {
+                    "name": "X",
+                    "type": "space",
+                    "unit": "micrometer"
+                }
+            ],
+            "coordinateTransformations": [
+                {
+                    "type": "identity"
+                }
+            ],
+            "datasets": [
+                {
+                    "coordinateTransformations": [
+                        {
+                            "scale": [
+                                1.0,
+                                1.0,
+                                0.33,
+                                0.1494,
+                                0.1494
+                            ],
+                            "type": "scale"
+                        }
+                    ],
+                    "path": "0"
+                }
+            ],
+            "name": "0",
+            "version": "0.4"
+        }
+    ],
+    "omero": {
+        "channels": [
+            {
+                "active": true,
+                "coefficient": 1.0,
+                "color": "FFFFFF",
+                "family": "linear",
+                "inverted": false,
+                "label": "DummyChan_prediction",
+                "window": {
+                    "end": 65535.0,
+                    "max": 65535.0,
+                    "min": 0.0,
+                    "start": 0.0
+                }
+            },
+            {
+                "active": true,
+                "coefficient": 1.0,
+                "color": "FFFFFF",
+                "family": "linear",
+                "inverted": false,
+                "label": "DummyChan2_prediction",
+                "window": {
+                    "end": 65535.0,
+                    "max": 65535.0,
+                    "min": 0.0,
+                    "start": 0.0
+                }
+            }
+        ],
+        "id": 0,
+        "name": "0",
+        "rdefs": {
+            "defaultT": 0,
+            "defaultZ": 0,
+            "model": "color",
+            "projection": "normal"
+        },
+        "version": "0.4"
+    }
+}

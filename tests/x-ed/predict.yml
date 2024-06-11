@@ -1,0 +1,48 @@
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy.light.predict_writer.HCSPredictionWriter
+      init_args:
+        output_store: /home/eduardo.hirata/repos/viscy/tests/x-ed/test_nuc_mem_pred.zarr
+        write_input: false
+        write_interval: batch
+  fast_dev_run: false
+  enable_progress_bar: true
+  inference_mode: true
+model:
+  architecture: 2.2D
+  model_config:
+    in_channels: 1
+    out_channels: 2
+    in_stack_depth: 5
+    backbone: convnextv2_tiny
+    pretrained: false
+    stem_kernel_size:
+    - 5
+    - 4
+    - 4
+    decoder_mode: pixelshuffle
+    decoder_conv_blocks: 2
+    head_pool: true
+    head_expansion_ratio: 4
+    drop_path_rate: 0.0
+data:
+  # unregistered phase
+  data_path: /hpc/projects/comp.micro/mantis/2023_08_09_HEK_PCNA_H2B/8-ants-registration/pcna_rac1_virtual_staining_b1_redo_1/cropped_phase_3D_NA0p52_registered.zarr
+  source_channel: Phase3D
+  target_channel:
+    - H2B_green
+    - CAAX_magenta
+  z_window_size: 5
+  batch_size: 8
+  num_workers: 8
+  # need to normalize input phase by median and iqr
+  normalize_source: True
+# return_predictions: false  
+ckpt_path: /hpc/projects/comp.micro/virtual_staining/models/unet-2.2d/lightning_logs/20230829-182136/checkpoints/best_epoch=48-step=18130.ckpt
+
