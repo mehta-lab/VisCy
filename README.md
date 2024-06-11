@@ -58,7 +58,7 @@ The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
-The full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.3).
+The full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not work with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
 
@@ -104,7 +104,7 @@ flowchart LR
         test -- bad --> Training
     end
     subgraph Segmentation
-        CellPose ~~~ aicssegmentation
+        Cellpose ~~~ aicssegmentation
     end
     input[(Raw Images)] --> sp --> stage{"Training?"}
     stage -.- no -.-> model{{Virtual Staining Model}}
@@ -121,14 +121,34 @@ flowchart LR
 
 ### Reference
 
-We report the use of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+The virtual staining method is described in [this preprint](https://doi.org/10.1101/2024.05.31.596901):
 
 ```bibtex
-@misc{ivanov_mantis_2023,
- title = {Mantis: high-throughput {4D} imaging and analysis of the molecular and physical architecture of cells},
- url = {https://www.biorxiv.org/content/10.1101/2023.12.19.572435v1},
- doi = {10.1101/2023.12.19.572435},
- publisher = {bioRxiv},
- author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
+@article {Liu2024.05.31.596901,
+    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+    title = {Robust virtual staining of landmark organelles},
+    elocation-id = {2024.05.31.596901},
+    year = {2024},
+    doi = {10.1101/2024.05.31.596901},
+    publisher = {Cold Spring Harbor Laboratory},
+    URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
+    eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
+    journal = {bioRxiv}
+}
+```
+
+We also report the application of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+
+```bibtex
+@article {Ivanov2023.12.19.572435,
+    author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
+    title = {Mantis: high-throughput 4D imaging and analysis of the molecular and physical architecture of cells},
+    elocation-id = {2023.12.19.572435},
+    year = {2023},
+    doi = {10.1101/2023.12.19.572435},
+    publisher = {Cold Spring Harbor Laboratory},
+    URL = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435},
+    eprint = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435.full.pdf},
+    journal = {bioRxiv}
 }
 ```
