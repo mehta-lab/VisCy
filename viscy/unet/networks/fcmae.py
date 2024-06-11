@@ -20,7 +20,7 @@ from timm.models.convnext import (
 )
 from torch import BoolTensor, Size, Tensor, nn
 
-from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder, UnsqueezeHead
+from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder
 
 
 def _init_weights(module: nn.Module) -> None:
