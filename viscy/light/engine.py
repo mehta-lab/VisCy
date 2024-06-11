@@ -136,7 +136,7 @@ class VSUNet(LightningModule):
         test_cellpose_diameter: float = None,
         test_evaluate_cellpose: bool = False,
         test_time_augmentations: bool = False,
-        tta_type: Literal["mean", "median","product"] = "mean",
+        tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -364,7 +364,9 @@ class VSUNet(LightningModule):
                 prediction = torch.stack(predictions).cpu().median(dim=0).values
             elif self.tta_type == "product":
                 # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
-                log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions]) 
+                log_predictions = torch.stack(
+                    [torch.log(p + 1e-9) for p in predictions]
+                )
                 log_prediction_sum = log_predictions.sum(dim=0)
                 prediction = torch.exp(log_prediction_sum)
             # Put back to GPU
