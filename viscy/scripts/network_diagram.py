@@ -46,7 +46,7 @@ graph25d
 # %%
 # 3D->2D
 model = VSUNet(
-    architecture="UNext2",
+    architecture="UNeXt2",
     model_config={
         "in_channels": 2,
         "out_channels": 3,
@@ -61,7 +61,7 @@ model = VSUNet(
 model_graph = draw_graph(
     model,
     model.example_input_array,
-    graph_name="UNext2",
+    graph_name="UNeXt2",
     roll=True,
     depth=3,
 )
@@ -71,7 +71,7 @@ model_graph.visual_graph
 # %%
 # 3D->3D
 model = VSUNet(
-    architecture="UNext2",
+    architecture="UNeXt2",
     model_config={
         "in_channels": 1,
         "out_channels": 2,
@@ -85,7 +85,7 @@ model = VSUNet(
 model_graph = draw_graph(
     model,
     model.example_input_array,
-    graph_name="UNext2",
+    graph_name="UNeXt2",
     roll=True,
     depth=3,
 )
