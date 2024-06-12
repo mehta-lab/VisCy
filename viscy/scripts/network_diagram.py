@@ -125,11 +125,3 @@ model_graph = draw_graph(
 
 fcmae = model_graph.visual_graph
 fcmae
-
-# %%
-
-model_graph.visual_graph.render(
-    format="svg",
-)
-
-# %%
