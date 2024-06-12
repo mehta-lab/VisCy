@@ -38,7 +38,7 @@ plt.imshow(phase[0, 0, 2], cmap="gray")
 # load model
 model = VSUNet.load_from_checkpoint(
     "model.ckpt",
-    architecture="2.2D",
+    architecture="UNeXt2",
     model_config={
         "in_channels": 1,
         "out_channels": 2,

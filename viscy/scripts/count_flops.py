@@ -6,7 +6,7 @@ from viscy.light.engine import VSUNet
 
 # %%
 model = VSUNet(
-    architecture="2.2D",
+    architecture="UNeXt2",
     model_config={
         "in_channels": 1,
         "out_channels": 2,

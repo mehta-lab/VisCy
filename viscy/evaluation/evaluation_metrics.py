@@ -9,7 +9,7 @@ import torch.nn.functional as F
 from monai.metrics.regression import compute_ssim_and_cs
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
-from torchmetrics.detection import MeanAveragePrecision
+from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
 
 
@@ -126,13 +126,15 @@ def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
     """
     if labels.ndim != 2:
         raise ValueError(f"Labels must be 2D, got shape {labels.shape}.")
+    segments = torch.unique(labels)
+    n_instances = segments.numel() - 1
     masks = torch.zeros(
-        (labels.max(), *labels.shape), dtype=torch.bool, device=labels.device
+        (n_instances, *labels.shape), dtype=torch.bool, device=labels.device
     )
     # TODO: optimize this?
-    for segment in range(labels.max()):
+    for s, segment in enumerate(segments):
         # start from label value 1, i.e. skip background label
-        masks[segment] = labels == (segment + 1)
+        masks[s - 1] = labels == segment
     return masks
 
 
@@ -170,7 +172,12 @@ def mean_average_precision(
         :py:class:`torchmetrics.detection.MeanAveragePrecision`
     :return dict[str, torch.Tensor]: COCO-style metrics
     """
-    map_metric = MeanAveragePrecision(box_format="xyxy", iou_type="segm", **kwargs)
+    defaults = dict(
+        iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000]
+    )
+    if not kwargs:
+        kwargs = {}
+    map_metric = MeanAveragePrecision(**(defaults | kwargs))
     map_metric.update(
         [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
     )
