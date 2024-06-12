@@ -1,0 +1,37 @@
+# This CITATION.cff file was generated with cffinit.
+# Visit https://bit.ly/cffinit to generate yours today!
+
+cff-version: 1.2.0
+title: VisCy
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Ziwen
+    family-names: Liu
+    email: ziwen.liu@czbiohub.org
+    affiliation: Chan Zuckerberg Biohub San Francisco
+    orcid: 'https://orcid.org/0000-0001-7482-1299'
+  - given-names: Eduardo
+    family-names: Hirata-Miyasaki
+    affiliation: Chan Zuckerberg Biohub San Francisco
+    orcid: 'https://orcid.org/0000-0002-1016-2447'
+  - given-names: Christian
+    family-names: Foley
+  - given-names: Soorya
+    family-names: Pradeep
+    affiliation: Chan Zuckerberg Biohub San Francisco
+    orcid: 'https://orcid.org/0000-0002-0926-1480'
+  - given-names: Shalin
+    family-names: Mehta
+    affiliation: Chan Zuckerberg Biohub San Francisco
+    orcid: 'https://orcid.org/0000-0002-2542-3582'
+repository-code: 'https://github.com/mehta-lab/VisCy'
+url: 'https://github.com/mehta-lab/VisCy'
+abstract: computer vision models for single-cell phenotyping
+keywords:
+  - machine-learning
+  - computer-vision
+  - bioimage-analysis
+license: BSD-3-Clause

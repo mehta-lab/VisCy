@@ -1,18 +1,18 @@
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Sequence
 
 import timm
 import torch
 from monai.networks.blocks import Convolution, ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from monai.networks.utils import normal_init
-from torch import nn
+from torch import Tensor, nn
 
 
 def icnr_init(
     conv: nn.Module,
     upsample_factor: int,
     upsample_dims: int,
-    init=nn.init.kaiming_normal_,
+    init: Callable = nn.init.kaiming_normal_,
 ):
     """
     ICNR initialization for 2D/3D kernels adapted from Aitken et al.,2017 ,
@@ -45,7 +45,7 @@ def _get_convnext_stage(
     in_channels: int,
     out_channels: int,
     depth: int,
-    upsample_factor: Optional[int] = None,
+    upsample_factor: int | None = None,
 ) -> nn.Module:
     stage = timm.models.convnext.ConvNeXtStage(
         in_chs=in_channels,
@@ -64,8 +64,8 @@ def _get_convnext_stage(
     return stage
 
 
-class Conv21dStem(nn.Module):
-    """Stem for 2.1D networks."""
+class UNeXt2Stem(nn.Module):
+    """Stem for UNeXt2 networks."""
 
     def __init__(
         self,
@@ -83,7 +83,7 @@ class Conv21dStem(nn.Module):
             stride=kernel_size,
         )
 
-    def forward(self, x: torch.Tensor):
+    def forward(self, x: Tensor):
         x = self.conv(x)
         b, c, d, h, w = x.shape
         # project Z/depth into channels
@@ -91,7 +91,7 @@ class Conv21dStem(nn.Module):
         return x.reshape(b, c * d, h, w)
 
 
-class Unet2dUpStage(nn.Module):
+class UNeXt2UpStage(nn.Module):
     def __init__(
         self,
         in_channels: int,
@@ -101,7 +101,7 @@ class Unet2dUpStage(nn.Module):
         mode: Literal["deconv", "pixelshuffle"],
         conv_blocks: int,
         norm_name: str,
-        upsample_pre_conv: Optional[Union[Literal["default"], Callable]],
+        upsample_pre_conv: Literal["default"] | Callable | None,
     ) -> None:
         super().__init__()
         spatial_dims = 2
@@ -145,11 +145,11 @@ class Unet2dUpStage(nn.Module):
                 upsample_factor=conv_weight_init_factor,
             )
 
-    def forward(self, inp: torch.Tensor, skip: torch.Tensor) -> torch.Tensor:
+    def forward(self, inp: Tensor, skip: Tensor) -> Tensor:
         """
-        :param torch.Tensor inp: Low resolution features
-        :param torch.Tensor skip: High resolution skip connection features
-        :return torch.Tensor: High resolution features
+        :param Tensor inp: Low resolution features
+        :param Tensor skip: High resolution skip connection features
+        :return Tensor: High resolution features
         """
         inp = self.upsample(inp)
         inp = torch.cat([inp, skip], dim=1)
@@ -192,7 +192,7 @@ class PixelToVoxelHead(nn.Module):
         self.out = nn.PixelShuffle(2)
         self.out_stack_depth = out_stack_depth
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.upsample(x)
         d = self.out_stack_depth + 2
         b, c, h, w = x.shape
@@ -209,12 +209,12 @@ class UnsqueezeHead(nn.Module):
     def __init__(self) -> None:
         super().__init__()
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = x.unsqueeze(2)
         return x
 
 
-class Unet2dDecoder(nn.Module):
+class UNeXt2Decoder(nn.Module):
     def __init__(
         self,
         num_channels: list[int],
@@ -222,13 +222,13 @@ class Unet2dDecoder(nn.Module):
         mode: Literal["deconv", "pixelshuffle"],
         conv_blocks: int,
         strides: list[int],
-        upsample_pre_conv: Optional[Union[Literal["default"], Callable]],
+        upsample_pre_conv: Literal["default"] | Callable | None,
     ) -> None:
         super().__init__()
         self.decoder_stages = nn.ModuleList([])
         stages = len(num_channels) - 1
         for i in range(stages):
-            stage = Unet2dUpStage(
+            stage = UNeXt2UpStage(
                 in_channels=num_channels[i],
                 skip_channels=num_channels[i] // 2,
                 out_channels=num_channels[i + 1],
@@ -240,7 +240,7 @@ class Unet2dDecoder(nn.Module):
             )
             self.decoder_stages.append(stage)
 
-    def forward(self, features: Sequence[torch.Tensor]) -> torch.Tensor:
+    def forward(self, features: Sequence[Tensor]) -> Tensor:
         feat = features[0]
         # padding
         features.append(None)
@@ -249,13 +249,13 @@ class Unet2dDecoder(nn.Module):
         return feat
 
 
-class Unet21d(nn.Module):
+class UNeXt2(nn.Module):
     def __init__(
         self,
         in_channels: int = 1,
         out_channels: int = 1,
         in_stack_depth: int = 5,
-        out_stack_depth: int = 1,
+        out_stack_depth: int = None,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
@@ -273,18 +273,8 @@ class Unet21d(nn.Module):
                 f"Input stack depth {in_stack_depth} is not divisible "
                 f"by stem kernel depth {stem_kernel_size[0]}."
             )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
-        if not (in_stack_depth == out_stack_depth or out_stack_depth == 1):
-            raise ValueError(
-                "`out_stack_depth` must be either 1 or "
-                f"the same as `input_stack_depth` ({in_stack_depth}), "
-                f"but got {out_stack_depth}."
-            )
+        if out_stack_depth is None:
+            out_stack_depth = in_stack_depth
         multi_scale_encoder = timm.create_model(
             backbone,
             pretrained=pretrained,
@@ -295,7 +285,7 @@ class Unet21d(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
-        self.stem = Conv21dStem(
+        self.stem = UNeXt2Stem(
             in_channels, num_channels[0], stem_kernel_size, in_stack_depth
         )
         decoder_channels = num_channels
@@ -303,7 +293,7 @@ class Unet21d(nn.Module):
         decoder_channels[-1] = (
             (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
         )
-        self.decoder = Unet2dDecoder(
+        self.decoder = UNeXt2Decoder(
             decoder_channels,
             norm_name=decoder_norm_layer,
             mode=decoder_mode,
@@ -311,16 +301,13 @@ class Unet21d(nn.Module):
             strides=[2] * (len(num_channels) - 1) + [stem_kernel_size[-1]],
             upsample_pre_conv="default" if decoder_upsample_pre_conv else None,
         )
-        if out_stack_depth == 1:
-            self.head = UnsqueezeHead()
-        else:
-            self.head = PixelToVoxelHead(
-                decoder_channels[-1],
-                out_channels,
-                out_stack_depth,
-                head_expansion_ratio,
-                pool=head_pool,
-            )
+        self.head = PixelToVoxelHead(
+            decoder_channels[-1],
+            out_channels,
+            out_stack_depth,
+            head_expansion_ratio,
+            pool=head_pool,
+        )
         self.out_stack_depth = out_stack_depth
 
     @property
@@ -328,7 +315,7 @@ class Unet21d(nn.Module):
         """2-times downscaling factor of the smallest feature map"""
         return 6
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: Tensor) -> Tensor:
         x = self.stem(x)
         x: list = self.encoder_stages(x)
         x.reverse()
