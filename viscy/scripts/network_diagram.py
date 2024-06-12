@@ -64,6 +64,7 @@ model_graph = draw_graph(
     graph_name="UNeXt2",
     roll=True,
     depth=3,
+    expand_nested=True,
 )
 
 model_graph.visual_graph
@@ -88,6 +89,7 @@ model_graph = draw_graph(
     graph_name="UNeXt2",
     roll=True,
     depth=3,
+    expand_nested=True,
 )
 
 model_graph.visual_graph
@@ -118,6 +120,7 @@ model_graph = draw_graph(
     graph_name="VSCyto2D",
     roll=True,
     depth=3,
+    expand_nested=True,
 )
 
 fcmae = model_graph.visual_graph
