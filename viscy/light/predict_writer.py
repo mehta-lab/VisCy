@@ -73,10 +73,16 @@ class HCSPredictionWriter(BasePredictionWriter):
 
     def _get_scale_metadata(self, metadata_store: str) -> None:
         # Update the scale metadata
-        with open_ome_zarr(metadata_store, mode="r") as meta_plate:
-            for _, pos in meta_plate.positions():
-                self._dataset_scale = pos.scale
-                break
+        try:
+            with open_ome_zarr(metadata_store, mode="r") as meta_plate:
+                for _, pos in meta_plate.positions():
+                    self._dataset_scale = pos.scale
+                    break
+        except IOError:
+            _logger.warning(
+                f"Could not read scale metadata from '{metadata_store}'. "
+                "Using default scale (1, 1, 1, 1, 1)."
+            )
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
