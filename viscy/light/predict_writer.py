@@ -5,6 +5,7 @@ from typing import Literal, Optional, Sequence
 import numpy as np
 import torch
 from iohub.ngff import ImageArray, _pad_shape, open_ome_zarr
+from iohub.ngff_meta import TransformationMeta
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
@@ -47,6 +48,7 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> None:
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
+    :param str metadata_store: Path to the zarr store input
     :param str output_store: Path to the zarr store to store output
     :param bool write_input: Write the source and target channels too
         (must be writing to a new store),
@@ -57,6 +59,7 @@ class HCSPredictionWriter(BasePredictionWriter):
 
     def __init__(
         self,
+        metadata_store: str,
         output_store: str,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
@@ -64,6 +67,16 @@ class HCSPredictionWriter(BasePredictionWriter):
         super().__init__(write_interval)
         self.output_store = output_store
         self.write_input = write_input
+        self.metadata_store = metadata_store
+        self._dataset_scale = (1, 1, 1, 1, 1)
+        self._get_scale_metadata(metadata_store)
+
+    def _get_scale_metadata(self, metadata_store: str) -> None:
+        # Update the scale metadata
+        with open_ome_zarr(metadata_store, mode="r") as meta_plate:
+            for _, pos in meta_plate.positions():
+                self._dataset_scale = pos.scale
+                break
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
@@ -128,7 +141,9 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         image = self._create_image(
-            img_name, sample_prediction.shape, sample_prediction.dtype
+            img_name,
+            sample_prediction.shape,
+            sample_prediction.dtype,
         )
         _resize_image(image, t_index, z_slice)
         if self.write_input:
@@ -160,4 +175,5 @@ class HCSPredictionWriter(BasePredictionWriter):
             shape=shape,
             dtype=dtype,
             chunks=_pad_shape(tuple(shape[-2:]), 5),
+            transform=[TransformationMeta(type="scale", scale=self._dataset_scale)],
         )
