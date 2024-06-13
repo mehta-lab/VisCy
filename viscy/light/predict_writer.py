@@ -68,7 +68,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         self.output_store = output_store
         self.write_input = write_input
         self.metadata_store = metadata_store
-        self._dataset_scale = (1, 1, 1, 1, 1)
+        self._dataset_scale = None
         self._get_scale_metadata(metadata_store)
 
     def _get_scale_metadata(self, metadata_store: str) -> None:
@@ -76,7 +76,10 @@ class HCSPredictionWriter(BasePredictionWriter):
         try:
             with open_ome_zarr(metadata_store, mode="r") as meta_plate:
                 for _, pos in meta_plate.positions():
-                    self._dataset_scale = pos.scale
+                    self._dataset_scale = [
+                        TransformationMeta(type="scale", scale=pos.scale)
+                    ]
+                    _logger.debug(f"Dataset scale {pos.scale}.")
                     break
         except IOError:
             _logger.warning(
@@ -181,5 +184,5 @@ class HCSPredictionWriter(BasePredictionWriter):
             shape=shape,
             dtype=dtype,
             chunks=_pad_shape(tuple(shape[-2:]), 5),
-            transform=[TransformationMeta(type="scale", scale=self._dataset_scale)],
+            transform=self._dataset_scale,
         )
