@@ -48,8 +48,8 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> None:
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
-    :param str metadata_store: Path to the zarr store input
     :param str output_store: Path to the zarr store to store output
+    :param str metadata_store: Path to the OME-Zarr dataset to copy scale metadata from
     :param bool write_input: Write the source and target channels too
         (must be writing to a new store),
         defaults to False
