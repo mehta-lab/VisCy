@@ -1,10 +1,12 @@
 import logging
 import os
+from pathlib import Path
 from typing import Literal, Optional, Sequence
 
 import numpy as np
 import torch
 from iohub.ngff import ImageArray, _pad_shape, open_ome_zarr
+from iohub.ngff_meta import TransformationMeta
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
@@ -88,9 +90,22 @@ class HCSPredictionWriter(BasePredictionWriter):
         super().__init__(write_interval)
         self.output_store = output_store
         self.write_input = write_input
+        self._dataset_scale = None
+
+    def _get_scale_metadata(self, metadata_store: Path) -> None:
+        # Update the scale metadata
+        if metadata_store is not None:
+            with open_ome_zarr(metadata_store, mode="r", layout="hcs") as meta_plate:
+                for _, pos in meta_plate.positions():
+                    self._dataset_scale = [
+                        TransformationMeta(type="scale", scale=pos.scale)
+                    ]
+                    _logger.debug(f"Dataset scale {pos.scale}.")
+                    break
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
+        self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
         _logger.debug(f"Setting Z padding to {self.z_padding}")
         source_channel = dm.source_channel
@@ -184,4 +199,5 @@ class HCSPredictionWriter(BasePredictionWriter):
             shape=shape,
             dtype=dtype,
             chunks=_pad_shape(tuple(shape[-2:]), 5),
+            transform=self._dataset_scale,
         )
