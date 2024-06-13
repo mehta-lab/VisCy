@@ -59,8 +59,8 @@ class HCSPredictionWriter(BasePredictionWriter):
 
     def __init__(
         self,
-        metadata_store: str,
         output_store: str,
+        metadata_store: str | None = None,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
     ) -> None:
@@ -73,7 +73,7 @@ class HCSPredictionWriter(BasePredictionWriter):
 
     def _get_scale_metadata(self, metadata_store: str) -> None:
         # Update the scale metadata
-        try:
+        if metadata_store is not None:
             with open_ome_zarr(metadata_store, mode="r") as meta_plate:
                 for _, pos in meta_plate.positions():
                     self._dataset_scale = [
@@ -81,11 +81,6 @@ class HCSPredictionWriter(BasePredictionWriter):
                     ]
                     _logger.debug(f"Dataset scale {pos.scale}.")
                     break
-        except IOError:
-            _logger.warning(
-                f"Could not read scale metadata from '{metadata_store}'. "
-                "Using default scale (1, 1, 1, 1, 1)."
-            )
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
@@ -150,9 +145,7 @@ class HCSPredictionWriter(BasePredictionWriter):
         z_index += self.z_padding
         z_slice = slice(z_index, z_index + sample_prediction.shape[-3])
         image = self._create_image(
-            img_name,
-            sample_prediction.shape,
-            sample_prediction.dtype,
+            img_name, sample_prediction.shape, sample_prediction.dtype
         )
         _resize_image(image, t_index, z_slice)
         if self.write_input:
