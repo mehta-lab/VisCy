@@ -58,7 +58,7 @@ The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
-The full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.3).
+The full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not work with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
 
@@ -104,7 +104,7 @@ flowchart LR
         test -- bad --> Training
     end
     subgraph Segmentation
-        CellPose ~~~ aicssegmentation
+        Cellpose ~~~ aicssegmentation
     end
     input[(Raw Images)] --> sp --> stage{"Training?"}
     stage -.- no -.-> model{{Virtual Staining Model}}
@@ -121,14 +121,36 @@ flowchart LR
 
 ### Reference
 
-We report the use of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+The virtual staining method is described in [this preprint](https://doi.org/10.1101/2024.05.31.596901):
 
 ```bibtex
-@misc{ivanov_mantis_2023,
- title = {Mantis: high-throughput {4D} imaging and analysis of the molecular and physical architecture of cells},
- url = {https://www.biorxiv.org/content/10.1101/2023.12.19.572435v1},
- doi = {10.1101/2023.12.19.572435},
- publisher = {bioRxiv},
- author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
+@article {Liu2024.05.31.596901,
+    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+    title = {Robust virtual staining of landmark organelles},
+    elocation-id = {2024.05.31.596901},
+    year = {2024},
+    doi = {10.1101/2024.05.31.596901},
+    publisher = {Cold Spring Harbor Laboratory},
+    abstract = {Dynamic imaging of landmark organelles, such as nuclei, cell membrane, nuclear envelope, and lipid droplets enables image-based phenotyping of functional states of cells. Multispectral fluorescent imaging of landmark organelles requires labor-intensive labeling, limits throughput, and compromises cell health. Virtual staining of label-free images with deep neural networks is an emerging solution for this problem. Multiplexed imaging of cellular landmarks from scattered light and subsequent demultiplexing with virtual staining saves the light spectrum for imaging additional molecular reporters, photomanipulation, or other tasks. Published approaches for virtual staining of landmark organelles are fragile in the presence of nuisance variations in imaging, culture conditions, and cell types. This paper reports model training protocols for virtual staining of nuclei and membranes robust to cell types, cell states, and imaging parameters. We developed a flexible and scalable convolutional architecture, named UNeXt2, for supervised training and self-supervised pre-training. The strategies we report here enable robust virtual staining of nuclei and cell membranes in multiple cell types, including neuromasts of zebrafish, across a range of imaging conditions. We assess the models by comparing the intensity, segmentations, and application-specific measurements obtained from virtually stained and experimentally stained nuclei and membranes. The models rescue the missing label, non-uniform expression of labels, and photobleaching. We share three pre-trained models, named VSCyto3D, VSCyto2D, and VSNeuromast, as well as VisCy, a PyTorch-based pipeline for training, inference, and deployment that leverages the modern OME-Zarr format.Competing Interest StatementThe authors have declared no competing interest.},
+    URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
+    eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
+    journal = {bioRxiv}
+}
+```
+
+We also report the application of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+
+```bibtex
+@article {Ivanov2023.12.19.572435,
+    author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
+    title = {Mantis: high-throughput 4D imaging and analysis of the molecular and physical architecture of cells},
+    elocation-id = {2023.12.19.572435},
+    year = {2023},
+    doi = {10.1101/2023.12.19.572435},
+    publisher = {Cold Spring Harbor Laboratory},
+    abstract = {High-throughput dynamic imaging of cells and organelles is important for parsing complex cellular responses. We report a high-throughput 4D microscope, named Mantis, that combines two complementary, gentle, live-imaging technologies: remote-refocus label-free microscopy and oblique light-sheet fluorescence microscopy. We also report open-source software for automated acquisition, registration, and reconstruction, and virtual staining software for single-cell segmentation and phenotyping. Mantis enabled high-content correlative imaging of molecular components and the physical architecture of 20 cell lines every 15 minutes over 7.5 hours, and also detailed measurements of the impacts of viral infection on the architecture of host cells and host proteins. The Mantis platform can enable high-throughput profiling of intracellular dynamics, long-term imaging and analysis of cellular responses to stress, and live cell optical screens to dissect gene regulatory networks.Competing Interest StatementThe authors have declared no competing interest.},
+    URL = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435},
+    eprint = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435.full.pdf},
+    journal = {bioRxiv}
 }
 ```
