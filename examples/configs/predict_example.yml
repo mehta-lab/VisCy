@@ -10,6 +10,7 @@ predict:
     callbacks:
       - class_path: viscy.light.predict_writer.HCSPredictionWriter
         init_args:
+          metadata_store: null
           output_store: null
           write_input: false
           write_interval: batch
