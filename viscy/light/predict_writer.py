@@ -1,5 +1,6 @@
 import logging
 import os
+from pathlib import Path
 from typing import Literal, Optional, Sequence
 
 import numpy as np
@@ -49,7 +50,6 @@ class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
     :param str output_store: Path to the zarr store to store output
-    :param str metadata_store: Path to the OME-Zarr dataset to copy scale metadata from
     :param bool write_input: Write the source and target channels too
         (must be writing to a new store),
         defaults to False
@@ -60,21 +60,18 @@ class HCSPredictionWriter(BasePredictionWriter):
     def __init__(
         self,
         output_store: str,
-        metadata_store: str | None = None,
         write_input: bool = False,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "batch",
     ) -> None:
         super().__init__(write_interval)
         self.output_store = output_store
         self.write_input = write_input
-        self.metadata_store = metadata_store
         self._dataset_scale = None
-        self._get_scale_metadata(metadata_store)
 
-    def _get_scale_metadata(self, metadata_store: str) -> None:
+    def _get_scale_metadata(self, metadata_store: Path) -> None:
         # Update the scale metadata
         if metadata_store is not None:
-            with open_ome_zarr(metadata_store, mode="r") as meta_plate:
+            with open_ome_zarr(metadata_store, mode="r", layout="hcs") as meta_plate:
                 for _, pos in meta_plate.positions():
                     self._dataset_scale = [
                         TransformationMeta(type="scale", scale=pos.scale)
@@ -84,6 +81,7 @@ class HCSPredictionWriter(BasePredictionWriter):
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
+        self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
         _logger.debug(f"Setting Z padding to {self.z_padding}")
         source_channel = dm.source_channel
