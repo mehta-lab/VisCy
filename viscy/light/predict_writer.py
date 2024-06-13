@@ -31,7 +31,7 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
         )
 
 
-def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> None:
+def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray:
     if z_slice.start == 0:
         return new_stack
     depth = z_slice.stop - z_slice.start
