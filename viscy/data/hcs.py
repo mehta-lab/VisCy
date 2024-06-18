@@ -311,7 +311,6 @@ class HCSDataModule(LightningDataModule):
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
-        test_time_augmentations: list[MapTransform] = [],
         caching: bool = False,
         ground_truth_masks: Optional[Path] = None,
     ):
@@ -327,7 +326,6 @@ class HCSDataModule(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.normalizations = normalizations
         self.augmentations = augmentations
-        self.test_time_augmentations = test_time_augmentations
         self.caching = caching
         self.ground_truth_masks = ground_truth_masks
         self.prepare_data_per_node = True
@@ -477,7 +475,7 @@ class HCSDataModule(LightningDataModule):
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):
             positions = [p for _, p in dataset.positions()]
-        predict_transform = Compose(self.normalizations, self.test_time_augmentations)
+        predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
             positions=positions,
             transform=predict_transform,

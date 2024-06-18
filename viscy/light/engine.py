@@ -8,7 +8,7 @@ from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad, Compose, Rotate90
+from monai.transforms import DivisiblePad, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -24,14 +24,12 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
-
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
-
 
 try:
     from cellpose.models import CellposeModel
@@ -136,7 +134,7 @@ class VSUNet(LightningModule):
         test_cellpose_diameter: float = None,
         test_evaluate_cellpose: bool = False,
         test_time_augmentations: bool = False,
-        tta_type: Literal["mean", "median","product"] = "mean",
+        tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -172,6 +170,7 @@ class VSUNet(LightningModule):
         self.test_time_augmentations = test_time_augmentations
         self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
+        self._original_shape_yx = None
         if ckpt_path is not None:
             self.load_state_dict(
                 torch.load(ckpt_path)["state_dict"]
@@ -328,7 +327,7 @@ class VSUNet(LightningModule):
 
         if self.test_time_augmentations:
             # Save the yx coords to crop post rotations
-            self._get_original_shape_yx(source)
+            self._original_shape_yx = source.shape[-2:]
 
             predictions = []
             # for aug, de_aug in zip(
@@ -364,7 +363,9 @@ class VSUNet(LightningModule):
                 prediction = torch.stack(predictions).cpu().median(dim=0).values
             elif self.tta_type == "product":
                 # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
-                log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions]) 
+                log_predictions = torch.stack(
+                    [torch.log(p + 1e-9) for p in predictions]
+                )
                 log_prediction_sum = log_predictions.sum(dim=0)
                 prediction = torch.exp(log_prediction_sum)
             # Put back to GPU
@@ -417,7 +418,6 @@ class VSUNet(LightningModule):
         The inverse of this transform crops the prediction to original shape.
         """
         down_factor = 2**self.model.num_blocks
-        self._original_shape_yx = None
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
@@ -481,15 +481,7 @@ class VSUNet(LightningModule):
         # # Cropping to original shape
         return rotated_tensor
 
-    def _get_original_shape_yx(self, tensor: Tensor) -> tuple[int]:
-        self._original_shape_yx = tensor.shape[-2:]
-        return self._original_shape_yx
-
     def _crop_to_original(self, tensor: Tensor) -> Tensor:
-        if self._original_shape_yx is None:
-            raise RuntimeError(
-                "Original shape not recorded. Ensure _pad_input is called before _crop_to_original."
-            )
         original_y, original_x = self._original_shape_yx
         pad_y = (tensor.shape[-2] - original_y) // 2
         pad_x = (tensor.shape[-1] - original_x) // 2

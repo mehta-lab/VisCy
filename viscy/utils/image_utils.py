@@ -21,7 +21,9 @@ def im_bit_convert(im, bit=16, norm=False, limit=[]):
             / (limit[1] - limit[0] + sys.float_info.epsilon)
             * (2**bit - 1)
         )
-    im = np.clip(im, 0, 2**bit - 1)  # clip the values to avoid wrap-around by np.astype
+    im = np.clip(
+        im, 0, 2**bit - 1
+    )  # clip the values to avoid wrap-around by np.astype
     if bit == 8:
         im = im.astype(np.uint8, copy=False)  # convert to 8 bit
     else:
