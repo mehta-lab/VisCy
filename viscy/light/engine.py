@@ -24,6 +24,7 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
+
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE

@@ -10,6 +10,7 @@ from iohub.ngff_meta import TransformationMeta
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
+
 from viscy.data.hcs import HCSDataModule, Sample
 
 __all__ = ["HCSPredictionWriter"]
