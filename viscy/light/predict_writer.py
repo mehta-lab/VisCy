@@ -5,7 +5,7 @@ from typing import Literal, Optional, Sequence
 
 import numpy as np
 import torch
-from iohub.ngff import ImageArray, _pad_shape, open_ome_zarr
+from iohub.ngff import ImageArray, Plate, Position, _pad_shape, open_ome_zarr
 from iohub.ngff_meta import TransformationMeta
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
@@ -71,13 +71,18 @@ class HCSPredictionWriter(BasePredictionWriter):
     def _get_scale_metadata(self, metadata_store: Path) -> None:
         # Update the scale metadata
         if metadata_store is not None:
-            with open_ome_zarr(metadata_store, mode="r", layout="hcs") as meta_plate:
-                for _, pos in meta_plate.positions():
+            with open_ome_zarr(metadata_store, mode="r") as metadata_store:
+                if isinstance(metadata_store, Position):
                     self._dataset_scale = [
-                        TransformationMeta(type="scale", scale=pos.scale)
+                        TransformationMeta(type="scale", scale=metadata_store.scale)
                     ]
-                    _logger.debug(f"Dataset scale {pos.scale}.")
-                    break
+                elif isinstance(metadata_store, Plate):
+                    for _, pos in metadata_store.positions():
+                        self._dataset_scale = [
+                            TransformationMeta(type="scale", scale=pos.scale)
+                        ]
+                        break
+                _logger.debug(f"Dataset scale {self._dataset_scale}.")
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         dm: HCSDataModule = trainer.datamodule
