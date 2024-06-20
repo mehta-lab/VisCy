@@ -3,26 +3,37 @@
 # Image translation
 ---
 
-Written by Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.
+### Overview
+In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image.  
 
-In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image. 
+### Goal
+- Here, the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density). 
+- The goal is to learn a mapping from the source domain to the target domain. We will use a _purely convolutional architecture_ that draws on the design principles of transformer models. 
+- Here we will use a UNeXt2, an efficient image translation architecture inspired by ConvNeXt v2, SparK. UNeXt2.  
+- We will perform the preprocessing, training, prediction, evaluation, and deployment steps that are unified in a computer vision pipeline for single-cell analysis in our pipeline called [VisCy](https://github.com/mehta-lab/VisCy).  
 
-Here, the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density). The goal is to learn a mapping from the source domain to the target domain. We will use a deep convolutional neural network (CNN), specifically, a U-Net model with residual connections to learn the mapping. The preprocessing, training, prediction, evaluation, and deployment steps are unified in a computer vision pipeline for single-cell analysis that we call [VisCy](https://github.com/mehta-lab/VisCy).
 
+We will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
+![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
+
+# Extra information
+---
+Written by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.  
+  
 VisCy evolved from our previous work on virtual staining of cellular components from their density and anisotropy.
 ![](https://iiif.elifesciences.org/lax/55502%2Felife-55502-fig1-v2.tif/full/1500,/0/default.jpg)
 
+## References
+---
+[Liu,Z. and Hirata-Miyasaki,E. et al.(2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v1.full.pdf)  
+
 [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning
-. eLife](https://elifesciences.org/articles/55502).
+. eLife](https://elifesciences.org/articles/55502).  
 
 VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). 
+
 """
 
-# %% [markdown]
-"""
-Today, we will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
-![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
-"""
 # %% [markdown]
 """
 <div class="alert alert-warning">
