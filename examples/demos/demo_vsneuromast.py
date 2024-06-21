@@ -28,7 +28,7 @@ from skimage.exposure import rescale_intensity
 # %%
 # TODO: change paths to respective locations
 input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/training/neuromast/20230801_20230803_datasets/20230803_fish2_60x_1_cropped_zyx_resampled_clipped.zarr"
-model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/models/viscy-0.1.0/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
+model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/models/viscy-0.1.0/VisCy-0.1.0-VS-models/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
 output_path = "./test_neuromast_demo.zarr"
 fov = "0/3/0"  # NOTE: FOV of interest
 
