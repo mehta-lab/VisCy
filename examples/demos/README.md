@@ -1,4 +1,4 @@
-# Viscy usage examples
+# VisCy usage examples
 Examples showcasing the usage of VisCy.
 
 ## Virtual staining
