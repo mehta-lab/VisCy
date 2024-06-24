@@ -12,32 +12,40 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from iohub import open_ome_zarr
+from skimage.exposure import rescale_intensity
 
 from viscy.data.hcs import HCSDataModule
 
-# %% Imports and paths
 # Viscy classes for the trainer and model
 from viscy.light.engine import VSUNet
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.light.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
-from skimage.exposure import rescale_intensity
 
 # %% [markdown]
+"""
+## Data and Model Paths
+
+The dataset and model checkpoint files need to be downloaded before running this example.
+"""
 
 # %%
-# TODO: change paths to respective locations
-input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/test/2022_04_19_HEK_ImagingVariations_torch/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
-model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/models/viscy-0.1.0/VSCyto3D/epoch=48-step=18130.ckpt"
-output_path = "./test_hek3d_demo.zarr"
-fov = "plate/0/0"  # NOTE: FOV of interest
+# Download from
+# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto3D/hek_h2b_caax_63x.zarr
+input_data_path = "datasets/testing/VSCyto3D/hek_h2b_caax_63x.zarr"
+# Download from GitHub release page of v0.1.0
+model_ckpt_path = "viscy-0.1.0/VSCyto3D/epoch=48-step=18130.ckpt"
+# Zarr store to save the predictions
+output_path = "./hek_prediction_3d.zarr"
+# FOV of interest
+fov = "plate/0/0"
 
 input_data_path = Path(input_data_path) / fov
+
 # %%
-# Create a the VSCyto3D
+# Create the VSCyto3D model
 
 # NOTE: Change the following parameters as needed.
-GPU_ID = 0
 BATCH_SIZE = 2
 YX_PATCH_SIZE = (384, 384)
 NUM_WORKERS = 8
@@ -47,7 +55,9 @@ phase_channel_name = "Phase3D"
 """
 For this example we will use the following parameters:
 ### For more information on the VSCyto3D model:
-See ``viscy.unet.networks.fcmae`` ([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252)) for configuration details.
+See ``viscy.unet.networks.fcmae``
+([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252))
+for configuration details.
 """
 # %%
 # Setup the data module.
