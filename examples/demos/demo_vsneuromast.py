@@ -12,32 +12,39 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from iohub import open_ome_zarr
+from skimage.exposure import rescale_intensity
 
 from viscy.data.hcs import HCSDataModule
 
-# %% Imports and paths
 # Viscy classes for the trainer and model
 from viscy.light.engine import VSUNet
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.light.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
-from skimage.exposure import rescale_intensity
 
 # %% [markdown]
+"""
+## Data and Model Paths
+
+The dataset and model checkpoint files need to be downloaded before running this example.
+"""
 
 # %%
-# TODO: change paths to respective locations
-input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/training/neuromast/20230801_20230803_datasets/20230803_fish2_60x_1_cropped_zyx_resampled_clipped.zarr"
-model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/models/viscy-0.1.0/VisCy-0.1.0-VS-models/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
+# Download from
+# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSNeuromast/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr/
+input_data_path = "datasets/testing/VSNeuromast/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
+# Download from GitHub release page of v0.1.0
+model_ckpt_path = "VisCy-0.1.0-VS-models/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
+# Zarr store to save the predictions
 output_path = "./test_neuromast_demo.zarr"
-fov = "0/3/0"  # NOTE: FOV of interest
+# FOV of interest
+fov = "0/3/0"
 
 input_data_path = Path(input_data_path) / fov
 # %%
-# Create a the VSNeuromast
+# Create the VSNeuromast model
 
 # NOTE: Change the following parameters as needed.
-GPU_ID = 0
 BATCH_SIZE = 2
 YX_PATCH_SIZE = (384, 384)
 NUM_WORKERS = 8
