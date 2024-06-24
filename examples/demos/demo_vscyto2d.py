@@ -33,7 +33,7 @@ The dataset and model checkpoint files need to be downloaded before running this
 # https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr
 input_data_path = "datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr"
 # Download from GitHub release page of v0.1.0
-model_ckpt_path = "viscy-0.1.0/VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+model_ckpt_path = "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
 # Zarr store to save the predictions
 output_path = "./a549_prediction.zarr"
 # FOV of interest
