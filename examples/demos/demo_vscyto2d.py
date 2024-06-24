@@ -2,7 +2,7 @@
 """
 # 2D Virtual Staining of A549 Cells
 ---
-## Prediction using the VSCyto2D to predict nuclei and membrane from phase.
+## Prediction using the VSCyto2D to predict nuclei and plasma membrane from phase.
 This example shows how to virtually stain A549 cells using the _VSCyto2D_ model.
 The model is trained to predict the membrane and nuclei channels from the phase channel.
 """
@@ -12,32 +12,39 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from iohub import open_ome_zarr
+from skimage.exposure import rescale_intensity
 
-from viscy.data.hcs import HCSDataModule
-
-# %% Imports and paths
 # Viscy classes for the trainer and model
+from viscy.data.hcs import HCSDataModule
 from viscy.light.engine import FcmaeUNet
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.light.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
-from skimage.exposure import rescale_intensity
 
 # %% [markdown]
+"""
+## Data and Model Paths
+
+The dataset and model checkpoint files need to be downloaded before running this example.
+"""
 
 # %%
-# TODO: change paths to respective locations
-input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/test/cell_types_20x/a549_sliced/a549_hoechst_cellmask_test.zarr"
-model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/models/hek-a549-bj5a-20x/lightning_logs/tiny-2x2-finetune-e2e-amp-hek-a549-bj5a-nucleus-membrane-400ep/checkpoints/last.ckpt"
-output_path = "./test_a549_demo.zarr"
-fov = "0/0/0"  # NOTE: FOV of interest
+# Download from
+# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr
+input_data_path = "datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr"
+# Download from GitHub release page of v0.1.0
+model_ckpt_path = "viscy-0.1.0/VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+# Zarr store to save the predictions
+output_path = "./a549_prediction.zarr"
+# FOV of interest
+fov = "0/0/0"
 
 input_data_path = Path(input_data_path) / fov
+
 # %%
-# Create a the VSCyto2D
+# Create the VSCyto2D network
 
 # NOTE: Change the following parameters as needed.
-GPU_ID = 0
 BATCH_SIZE = 10
 YX_PATCH_SIZE = (384, 384)
 NUM_WORKERS = 8
@@ -46,8 +53,10 @@ phase_channel_name = "Phase3D"
 # %%[markdown]
 """
 For this example we will use the following parameters:
-### For more information on the VSCyto2D model:
-See ``viscy.unet.networks.fcmae`` ([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/fcmae.py#L398)) for configuration details.
+For more information on the VSCyto2D model,
+see ``viscy.unet.networks.fcmae``
+([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/fcmae.py#L398))
+for configuration details.
 """
 # %%
 # Setup the data module.
