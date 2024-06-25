@@ -10,10 +10,10 @@ OneOrSeq = T | Sequence[T]
 
 
 class LevelNormStats(TypedDict):
-    mean: float
-    std: float
-    median: float
-    iqr: float
+    mean: Tensor
+    std: Tensor
+    median: Tensor
+    iqr: Tensor
 
 
 class ChannelNormStats(TypedDict):
