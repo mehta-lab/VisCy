@@ -43,10 +43,13 @@ input_data_path = Path(input_data_path) / fov
 # %%
 # Create the VSCyto3D model
 
-# NOTE: Change the following parameters as needed.
+# Reduce the batch size if encountering out-of-memory errors
 BATCH_SIZE = 2
-YX_PATCH_SIZE = (384, 384)
-NUM_WORKERS = 8
+# NOTE: Set the number of workers to 0 for Windows and macOS
+# since multiprocessing only works with a
+# `if __name__ == '__main__':` guard.
+# On Linux, set it to the number of CPU cores to maximize performance.
+NUM_WORKERS = 0
 phase_channel_name = "Phase3D"
 
 # %%[markdown]
@@ -68,7 +71,6 @@ data_module = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
     architecture="UNeXt2",
-    yx_patch_size=YX_PATCH_SIZE,
     normalizations=[
         NormalizeSampled(
             [phase_channel_name],
