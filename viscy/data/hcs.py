@@ -110,15 +110,11 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: (
-            Callable[[dict[str, Tensor]], dict[str, Tensor]] | None
-        ) = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
-        self.channels = {
-            k: _ensure_channel_list(v) for k, v in channels.items()
-        }
+        self.channels = {k: _ensure_channel_list(v) for k, v in channels.items()}
         self.source_ch_idx = [
             positions[0].get_channel_index(c) for c in channels["source"]
         ]
@@ -148,17 +144,11 @@ class SlidingWindowDataset(Dataset):
             self.window_norm_meta.append(_read_norm_meta(fov))
         self._max_window = w
 
-    def _find_window(
-        self, index: int
-    ) -> tuple[ImageArray, int, NormMeta | None]:
+    def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None]:
         """Look up window given index."""
         window_idx = sorted(self.window_keys + [index + 1]).index(index + 1)
         w = self.window_keys[window_idx]
-        tz = (
-            index - self.window_keys[window_idx - 1]
-            if window_idx > 0
-            else index
-        )
+        tz = index - self.window_keys[window_idx - 1] if window_idx > 0 else index
         norm_meta = self.window_norm_meta[self.window_keys.index(w)]
         return (self.window_arrays[self.window_keys.index(w)], tz, norm_meta)
 
@@ -195,9 +185,7 @@ class SlidingWindowDataset(Dataset):
     ) -> Tensor | list[Tensor]:
         """Stack single-channel images into a multi-channel tensor."""
         if not isinstance(sample_images, list):
-            return torch.stack(
-                [sample_images[ch][0] for ch in self.channels[key]]
-            )
+            return torch.stack([sample_images[ch][0] for ch in self.channels[key]])
         # training time
         return [
             torch.stack([im[ch][0] for ch in self.channels[key]])
@@ -254,16 +242,12 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: (
-            Callable[[dict[str, Tensor]], dict[str, Tensor]] | None
-        ) = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
         ground_truth_masks: str = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}
-        for img_path in glob(
-            os.path.join(ground_truth_masks, "*cp_masks.png")
-        ):
+        for img_path in glob(os.path.join(ground_truth_masks, "*cp_masks.png")):
             img_name = os.path.basename(img_path)
             position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
             # TODO: specify time index in the file name
@@ -280,9 +264,7 @@ class MaskTestDataset(SlidingWindowDataset):
         position_name = int(img_name.split("/")[-2])
         key = (position_name, int(t_idx), int(z_idx) + self.z_window_size // 2)
         if img_path := self.masks.get(key):
-            sample["labels"] = torch.from_numpy(
-                imread(img_path).astype(np.int16)
-            )
+            sample["labels"] = torch.from_numpy(imread(img_path).astype(np.int16))
         return sample
 
 
@@ -338,9 +320,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = (
-            False if architecture in ["UNeXt2", "3D", "fcmae"] else True
-        )
+        self.target_2d = False if architecture in ["UNeXt2", "3D", "fcmae"] else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
@@ -398,9 +378,7 @@ class HCSDataModule(LightningDataModule):
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         channels = {"source": self.source_channel}
-        dataset_settings = dict(
-            channels=channels, z_window_size=self.z_window_size
-        )
+        dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
         elif stage == "test":
@@ -455,9 +433,7 @@ class HCSDataModule(LightningDataModule):
     def _setup_test(self, dataset_settings: dict):
         """Set up the test stage."""
         if self.batch_size != 1:
-            logging.warning(
-                f"Ignoring batch size {self.batch_size} in test stage."
-            )
+            logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.cache_path if self.caching else self.data_path
@@ -483,9 +459,7 @@ class HCSDataModule(LightningDataModule):
         set_track_meta(True)
         if self.caching:
             logging.warning("Ignoring caching config in 'predict' stage.")
-        dataset: Union[Plate, Position] = open_ome_zarr(
-            self.data_path, mode="r"
-        )
+        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
                 plate_path = self.data_path.parent.parent.parent
@@ -505,9 +479,7 @@ class HCSDataModule(LightningDataModule):
             **dataset_settings,
         )
 
-    def on_before_batch_transfer(
-        self, batch: Sample, dataloader_idx: int
-    ) -> Sample:
+    def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
         """Removes redundant Z slices if the target is 2D to save VRAM."""
         predicting = False
         if self.trainer:
@@ -519,9 +491,7 @@ class HCSDataModule(LightningDataModule):
         if self.target_2d:
             # slice the center during training or testing
             z_index = self.z_window_size // 2
-            batch["target"] = batch["target"][
-                :, :, slice(z_index, z_index + 1)
-            ]
+            batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
         return batch
 
     def train_dataloader(self):
@@ -587,9 +557,7 @@ class HCSDataModule(LightningDataModule):
                         raise ValueError(
                             "Only one RandAffined augmentation is allowed."
                         )
-                    z_scale_range = (
-                        aug.rand_affine.rand_affine_grid.scale_range[0]
-                    )
+                    z_scale_range = aug.rand_affine.rand_affine_grid.scale_range[0]
                 if isinstance(aug, MultiSampleTrait):
                     # e.g. RandWeightedCropd.cropper.num_samples
                     # this trait does not have any concrete interface
