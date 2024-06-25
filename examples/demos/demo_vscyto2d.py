@@ -50,7 +50,6 @@ input_data_path = input_data_path / fov
 
 # Reduce the batch size if encountering out-of-memory errors
 BATCH_SIZE = 8
-YX_PATCH_SIZE = (384, 384)
 # NOTE: Set the number of workers to 0 for Windows and macOS
 # since multiprocessing only works with a
 # `if __name__ == '__main__':` guard.
@@ -77,7 +76,6 @@ data_module = HCSDataModule(
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
     architecture="fcmae",
-    yx_patch_size=YX_PATCH_SIZE,
     normalizations=[
         NormalizeSampled(
             [phase_channel_name],
