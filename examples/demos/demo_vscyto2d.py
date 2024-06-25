@@ -27,25 +27,35 @@ The dataset and model checkpoint files need to be downloaded before running this
 """
 
 # %%
+# Set download paths
+root_dir = Path("")
 # Download from
 # https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr
-input_data_path = "datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr"
+input_data_path = (
+    root_dir / "datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr"
+)
 # Download from GitHub release page of v0.1.0
-model_ckpt_path = "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+model_ckpt_path = (
+    root_dir / "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+)
 # Zarr store to save the predictions
-output_path = "./a549_prediction.zarr"
+output_path = root_dir / "./a549_prediction.zarr"
 # FOV of interest
 fov = "0/0/0"
 
-input_data_path = Path(input_data_path) / fov
+input_data_path = input_data_path / fov
 
 # %%
 # Create the VSCyto2D network
 
-# NOTE: Change the following parameters as needed.
-BATCH_SIZE = 10
+# Reduce the batch size if encountering out-of-memory errors
+BATCH_SIZE = 8
 YX_PATCH_SIZE = (384, 384)
-NUM_WORKERS = 8
+# NOTE: Set the number of workers to 0 for Windows and macOS
+# since multiprocessing only works with a
+# `if __name__ == '__main__':` guard.
+# On Linux, set it to the number of CPU cores to maximize performance.
+NUM_WORKERS = 0
 phase_channel_name = "Phase3D"
 
 # %%[markdown]
@@ -66,7 +76,7 @@ data_module = HCSDataModule(
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
-    architecture="2D",
+    architecture="fcmae",
     yx_patch_size=YX_PATCH_SIZE,
     normalizations=[
         NormalizeSampled(
