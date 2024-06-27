@@ -5,10 +5,54 @@ VisCy is a deep learning pipeline for training and deploying computer vision mod
 The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images.
 We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline. 
 
-This pipeline reports the models and training protocols reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
+## VSCyto2D
 
-This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy. Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
+## VSCyto3D
 
+## VSNeuromast
+
+## Reference
+
+This pipeline reports the models and training protocols reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
+
+```bibtex
+@article {Liu2024.05.31.596901,
+    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+    title = {Robust virtual staining of landmark organelles},
+    elocation-id = {2024.05.31.596901},
+    year = {2024},
+    doi = {10.1101/2024.05.31.596901},
+    publisher = {Cold Spring Harbor Laboratory},
+    URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
+    eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
+    journal = {bioRxiv}
+}
+```
+
+This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502):
+
+```bibtex
+@article {10.7554/eLife.55502,
+article_type = {journal},
+title = {Revealing architectural order with quantitative label-free imaging and deep learning},
+author = {Guo, Syuan-Ming and Yeh, Li-Hao and Folkesson, Jenny and Ivanov, Ivan E and Krishnan, Anitha P and Keefe, Matthew G and Hashemi, Ezzat and Shin, David and Chhun, Bryant B and Cho, Nathan H and Leonetti, Manuel D and Han, May H and Nowakowski, Tomasz J and Mehta, Shalin B},
+editor = {Forstmann, Birte and Malhotra, Vivek and Van Valen, David},
+volume = 9,
+year = 2020,
+month = {jul},
+pub_date = {2020-07-27},
+pages = {e55502},
+citation = {eLife 2020;9:e55502},
+doi = {10.7554/eLife.55502},
+url = {https://doi.org/10.7554/eLife.55502},
+keywords = {label-free imaging, inverse algorithms, deep learning, human tissue, polarization, phase},
+journal = {eLife},
+issn = {2050-084X},
+publisher = {eLife Sciences Publications, Ltd},
+}
+```
+
+ The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy. Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
 
 
 The following methods are currently in development:
@@ -118,50 +162,10 @@ flowchart LR
     vs --> Segmentation --> output[Biological Analysis]
 ```
 
-### Model architecture
+### Model architectures
 
+Reported in the [2024 preprint](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
+
+Reported in the [2020 paper](https://elifesciences.org/articles/55502v1):
 ![2.5D U-Net light](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-light-mode-only)
 ![2.5D U-Net dark](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-dark-mode-only)
-
-### Reference
-
-The virtual staining method is described in [this preprint](https://doi.org/10.1101/2024.05.31.596901):
-
-```bibtex
-@article {Liu2024.05.31.596901,
-    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
-    title = {Robust virtual staining of landmark organelles},
-    elocation-id = {2024.05.31.596901},
-    year = {2024},
-    doi = {10.1101/2024.05.31.596901},
-    publisher = {Cold Spring Harbor Laboratory},
-    abstract = {Dynamic imaging of landmark organelles, such as nuclei, cell membrane, nuclear envelope, and lipid droplets enables image-based phenotyping of functional states of cells. Multispectral fluorescent imaging of landmark organelles requires labor-intensive labeling, limits throughput, and compromises cell health. Virtual staining of label-free images with deep neural networks is an emerging solution for this problem. Multiplexed imaging of cellular landmarks from scattered light and subsequent demultiplexing with virtual staining saves the light spectrum for imaging additional molecular reporters, photomanipulation, or other tasks. Published approaches for virtual staining of landmark organelles are fragile in the presence of nuisance variations in imaging, culture conditions, and cell types. This paper reports model training protocols for virtual staining of nuclei and membranes robust to cell types, cell states, and imaging parameters. We developed a flexible and scalable convolutional architecture, named UNeXt2, for supervised training and self-supervised pre-training. The strategies we report here enable robust virtual staining of nuclei and cell membranes in multiple cell types, including neuromasts of zebrafish, across a range of imaging conditions. We assess the models by comparing the intensity, segmentations, and application-specific measurements obtained from virtually stained and experimentally stained nuclei and membranes. The models rescue the missing label, non-uniform expression of labels, and photobleaching. We share three pre-trained models, named VSCyto3D, VSCyto2D, and VSNeuromast, as well as VisCy, a PyTorch-based pipeline for training, inference, and deployment that leverages the modern OME-Zarr format.Competing Interest StatementThe authors have declared no competing interest.},
-    URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
-    eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
-    journal = {bioRxiv}
-}
-```
-
-The previous version of virtual staining was reported in [this paper](https://elifesciences.org/articles/55502):
-
-```bibtex
-@article {10.7554/eLife.55502,
-article_type = {journal},
-title = {Revealing architectural order with quantitative label-free imaging and deep learning},
-author = {Guo, Syuan-Ming and Yeh, Li-Hao and Folkesson, Jenny and Ivanov, Ivan E and Krishnan, Anitha P and Keefe, Matthew G and Hashemi, Ezzat and Shin, David and Chhun, Bryant B and Cho, Nathan H and Leonetti, Manuel D and Han, May H and Nowakowski, Tomasz J and Mehta, Shalin B},
-editor = {Forstmann, Birte and Malhotra, Vivek and Van Valen, David},
-volume = 9,
-year = 2020,
-month = {jul},
-pub_date = {2020-07-27},
-pages = {e55502},
-citation = {eLife 2020;9:e55502},
-doi = {10.7554/eLife.55502},
-url = {https://doi.org/10.7554/eLife.55502},
-abstract = {We report quantitative label-free imaging with phase and polarization (QLIPP) for simultaneous measurement of density, anisotropy, and orientation of structures in unlabeled live cells and tissue slices. We combine QLIPP with deep neural networks to predict fluorescence images of diverse cell and tissue structures. QLIPP images reveal anatomical regions and axon tract orientation in prenatal human brain tissue sections that are not visible using brightfield imaging. We report a variant of U-Net architecture, multi-channel 2.5D U-Net, for computationally efficient prediction of fluorescence images in three dimensions and over large fields of view. Further, we develop data normalization methods for accurate prediction of myelin distribution over large brain regions. We show that experimental defects in labeling the human tissue can be rescued with quantitative label-free imaging and neural network model. We anticipate that the proposed method will enable new studies of architectural order at spatial scales ranging from organelles to tissue.},
-keywords = {label-free imaging, inverse algorithms, deep learning, human tissue, polarization, phase},
-journal = {eLife},
-issn = {2050-084X},
-publisher = {eLife Sciences Publications, Ltd},
-}
-```
