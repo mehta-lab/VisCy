@@ -138,19 +138,26 @@ The virtual staining method is described in [this preprint](https://doi.org/10.1
 }
 ```
 
-We also report the application of the virtual staining pipeline in [this preprint](https://doi.org/10.1101/2023.12.19.572435):
+The previous version of virtual staining was reported in [this paper](https://elifesciences.org/articles/55502):
 
 ```bibtex
-@article {Ivanov2023.12.19.572435,
-    author = {Ivanov, Ivan E. and Hirata-Miyasaki, Eduardo and Chandler, Talon and Kovilakam, Rasmi Cheloor and Liu, Ziwen and Liu, Chad and Leonetti, Manuel D. and Huang, Bo and Mehta, Shalin B.},
-    title = {Mantis: high-throughput 4D imaging and analysis of the molecular and physical architecture of cells},
-    elocation-id = {2023.12.19.572435},
-    year = {2023},
-    doi = {10.1101/2023.12.19.572435},
-    publisher = {Cold Spring Harbor Laboratory},
-    abstract = {High-throughput dynamic imaging of cells and organelles is important for parsing complex cellular responses. We report a high-throughput 4D microscope, named Mantis, that combines two complementary, gentle, live-imaging technologies: remote-refocus label-free microscopy and oblique light-sheet fluorescence microscopy. We also report open-source software for automated acquisition, registration, and reconstruction, and virtual staining software for single-cell segmentation and phenotyping. Mantis enabled high-content correlative imaging of molecular components and the physical architecture of 20 cell lines every 15 minutes over 7.5 hours, and also detailed measurements of the impacts of viral infection on the architecture of host cells and host proteins. The Mantis platform can enable high-throughput profiling of intracellular dynamics, long-term imaging and analysis of cellular responses to stress, and live cell optical screens to dissect gene regulatory networks.Competing Interest StatementThe authors have declared no competing interest.},
-    URL = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435},
-    eprint = {https://www.biorxiv.org/content/early/2023/12/19/2023.12.19.572435.full.pdf},
-    journal = {bioRxiv}
+@article {10.7554/eLife.55502,
+article_type = {journal},
+title = {Revealing architectural order with quantitative label-free imaging and deep learning},
+author = {Guo, Syuan-Ming and Yeh, Li-Hao and Folkesson, Jenny and Ivanov, Ivan E and Krishnan, Anitha P and Keefe, Matthew G and Hashemi, Ezzat and Shin, David and Chhun, Bryant B and Cho, Nathan H and Leonetti, Manuel D and Han, May H and Nowakowski, Tomasz J and Mehta, Shalin B},
+editor = {Forstmann, Birte and Malhotra, Vivek and Van Valen, David},
+volume = 9,
+year = 2020,
+month = {jul},
+pub_date = {2020-07-27},
+pages = {e55502},
+citation = {eLife 2020;9:e55502},
+doi = {10.7554/eLife.55502},
+url = {https://doi.org/10.7554/eLife.55502},
+abstract = {We report quantitative label-free imaging with phase and polarization (QLIPP) for simultaneous measurement of density, anisotropy, and orientation of structures in unlabeled live cells and tissue slices. We combine QLIPP with deep neural networks to predict fluorescence images of diverse cell and tissue structures. QLIPP images reveal anatomical regions and axon tract orientation in prenatal human brain tissue sections that are not visible using brightfield imaging. We report a variant of U-Net architecture, multi-channel 2.5D U-Net, for computationally efficient prediction of fluorescence images in three dimensions and over large fields of view. Further, we develop data normalization methods for accurate prediction of myelin distribution over large brain regions. We show that experimental defects in labeling the human tissue can be rescued with quantitative label-free imaging and neural network model. We anticipate that the proposed method will enable new studies of architectural order at spatial scales ranging from organelles to tissue.},
+keywords = {label-free imaging, inverse algorithms, deep learning, human tissue, polarization, phase},
+journal = {eLife},
+issn = {2050-084X},
+publisher = {eLife Sciences Publications, Ltd},
 }
 ```
