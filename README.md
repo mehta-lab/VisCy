@@ -1,19 +1,32 @@
 # VisCy
 
-VisCy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
+VisCy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
-The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images.
-We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline. 
+The following methods are being developed:
 
-## VSCyto2D
+- Image translation
+  - Robust virtual staining of landmark organelles
+- Image classification
+  - Supervised learning of of cell state (e.g. state of infection)
+- Image representation learning
+  - Self-supervised learning of the cell state and organelle phenotypes
 
-## VSCyto3D
+VisCy is currently considered alpha software and is under active development.
+Frequent breaking changes are expected.
 
-## VSNeuromast
+## Virtual staining
 
-## Reference
+A full illustration of the virtual staining pipeline can be found [here](docs/virtual_staining.md).
 
-This pipeline reports the models and training protocols reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
+### VSCyto2D
+
+### VSCyto3D
+
+### VSNeuromast
+
+### Reference
+
+The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
 
 ```bibtex
 @article {Liu2024.05.31.596901,
@@ -29,7 +42,7 @@ This pipeline reports the models and training protocols reported in our recent [
 }
 ```
 
-This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502):
+This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502):
 
 ```bibtex
 @article {10.7554/eLife.55502,
@@ -52,19 +65,9 @@ publisher = {eLife Sciences Publications, Ltd},
 }
 ```
 
- The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy. Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
+## Installation
 
-
-The following methods are currently in development:
-- Virtual staining and supervised learning of of cell state, such as state of infection.
-- Self-supervised learning of the cell and organelle states.
-
-Expect rough edges when using above models.
-
-
-## Installing viscy
-
-1. We highly encourage using a new Conda/virtual environment.
+1. We recommend using a new Conda/virtual environment.
 
     ```sh
     conda create --name viscy python=3.10
@@ -106,66 +109,7 @@ The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
-The full functionality is only tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
-Some features (e.g. mixed precision and distributed training) may not work with other setups,
+The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
+Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
 
-## Virtual staining of cellular compartments from label-free images
-
-Predicting sub-cellular landmarks such as nuclei and membrane from label-free (e.g. phase) images
-can improve imaging throughput and ease experiment design.
-However, training a model directly for segmentation requires laborious manual annotation.
-We use fluorescent markers as a proxy of supervision with human-annotated labels,
-and turn this instance segmentation problem into a paired image-to-image translation (I2I) problem.
-
-viscy features an end-to-end pipeline to design, train and evaluate I2I models in a declarative manner.
-It supports 2D, 2.5D (3D encoder, 2D decoder) and 3D U-Nets,
-as well as 3D networks with anisotropic filters.
-
-### Overview of the pipeline
-
-```mermaid
-flowchart LR
-    subgraph sp[Signal Processing]
-        Registration --> Reconstruction --> Resampling
-    end
-    subgraph viscy["Computer Vision (viscy)"]
-        subgraph Preprocessing
-            Normalization -.-> fd[Feature Detection]
-        end
-        subgraph Training
-            arch[Model Architecting]
-            hyper[Hyperparameter Tuning]
-            val[Performance Validation]
-            compute[Acceleration]
-            arch <--> hyper <--> compute <--> val <--> arch
-        end
-        subgraph Testing
-            regr[Regression Metrics]
-            segm[Instance Segmentation Metrics]
-            cp[CellPose]
-            cp --> segm
-        end
-        Preprocessing --> Training --> Testing
-        Testing --> test{"Performance?"}
-        test -- good --> Deployment
-        test -- bad --> Training
-    end
-    subgraph Segmentation
-        Cellpose ~~~ aicssegmentation
-    end
-    input[(Raw Images)] --> sp --> stage{"Training?"}
-    stage -.- no -.-> model{{Virtual Staining Model}}
-    stage -- yes --> viscy
-    viscy --> model
-    model --> vs[(Predicted Images)]
-    vs --> Segmentation --> output[Biological Analysis]
-```
-
-### Model architectures
-
-Reported in the [2024 preprint](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
-
-Reported in the [2020 paper](https://elifesciences.org/articles/55502v1):
-![2.5D U-Net light](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-light-mode-only)
-![2.5D U-Net dark](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-dark-mode-only)
