@@ -17,12 +17,12 @@ Frequent breaking changes are expected.
 ## Virtual staining
 
 A full illustration of the virtual staining pipeline can be found [here](docs/virtual_staining.md).
+Below are some examples of virtually stained images (click to play videos).
+See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
-### VSCyto2D
-
-### VSCyto3D
-
-### VSNeuromast
+| VSCyto3D | VSNeuromast | VSCyto2D |
+|:---:|:---:|:---:|
+| [![HEK293T](docs/figures/svideo_1.png)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755) | [![Neuromast](docs/figures/svideo_3.png)](https://github.com/mehta-lab/VisCy/assets/67518483/4cef8333-895c-486c-b260-167debb7fd64) | [![A549](docs/figures/svideo_5.png)](https://github.com/mehta-lab/VisCy/assets/67518483/287737dd-6b74-4ce3-8ee5-25fbf8be0018) |
 
 ### Reference
 
@@ -112,4 +112,3 @@ for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s4159
 The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
-
