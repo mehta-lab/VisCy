@@ -8,20 +8,18 @@ Our pipeline also provides utilities to export the models to ONNX format for use
 We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
 Expect rough edges until we release a PyPI package.
 
-![virtual_staining](docs/figures/phase_to_nuclei_membrane.svg)
+![virtual_staining](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
 
 This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy.
 
 ## Installing viscy
 
 1. We highly encourage using a new Conda/virtual environment.
-    The example below uses [Mamba](https://github.com/mamba-org/mamba),
-    a faster re-implementation of Conda.
 
     ```sh
-    mamba create --name viscy python=3.10
-    # OR specify a custom path since the dependencies are large
-    mamba create --prefix /path/to/conda/envs/viscy python=3.10
+    conda create --name viscy python=3.10
+    # OR specify a custom path since the dependencies are large:
+    # conda create --prefix /path/to/conda/envs/viscy python=3.10
     ```
 
 2. Clone this repository and install with pip:
@@ -116,8 +114,8 @@ flowchart LR
 
 ### Model architecture
 
-![2.5D U-Net light](docs/figures/2_5d_unet_light.svg#gh-light-mode-only)
-![2.5D U-Net dark](docs/figures/2_5d_unet_dark.svg#gh-dark-mode-only)
+![2.5D U-Net light](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-light-mode-only)
+![2.5D U-Net dark](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/2_5d_unet_dark.svg?raw=true#gh-dark-mode-only)
 
 ### Reference
 
