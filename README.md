@@ -3,14 +3,20 @@
 VisCy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single cell resolution.
 
 The current focus of the pipeline is on the image translation models for virtual staining of multiple cellular compartments from label-free images.
-We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline.
-Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
-We will grow the collection of the models suitable for high-throughput imaging and phenotyping.
-Expect rough edges until we release a PyPI package.
+We are building these models for simultaneous segmentation of nuclei and membrane, which are the first steps in a single-cell phenotyping pipeline. 
 
-![virtual_staining](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
+This pipeline reports the models and training protocols reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
 
-This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy.
+This pipeline evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502). The previous pipeline is now a public archive, and we will be focusing our efforts on VisCy. Our pipeline also provides utilities to export the models to ONNX format for use at runtime.
+
+
+
+The following methods are currently in development:
+- Virtual staining and supervised learning of of cell state, such as state of infection.
+- Self-supervised learning of the cell and organelle states.
+
+Expect rough edges when using above models.
+
 
 ## Installing viscy
 
