@@ -10,7 +10,6 @@ from viscy.data.typing import Sample
 
 
 class CTMCv1ValidationDataset(SlidingWindowDataset):
-
     def __len__(self, subsample_rate: int = 30) -> int:
         # sample every 30th frame in the videos
         return super().__len__() // self.subsample_rate
