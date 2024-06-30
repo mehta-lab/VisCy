@@ -32,7 +32,6 @@ from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
 
-
 try:
     from cellpose.models import CellposeModel
 except ImportError:
