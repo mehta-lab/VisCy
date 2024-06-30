@@ -325,9 +325,8 @@ class VSUNet(LightningModule):
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = batch["source"]
-
         if self.test_time_augmentations:
-            self.perform_test_time_augmentations(source)
+            prediction = self.perform_test_time_augmentations(source)
         else:
             source = self._predict_pad(source)
             prediction = self.forward(source)
