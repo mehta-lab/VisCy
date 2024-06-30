@@ -115,7 +115,7 @@ class VSUNet(LightningModule):
         in test stage, defaults to False
     :param bool test_time_augmentations:
         apply test time augmentations in test stage, defaults to False
-    :param Literal['mean', 'median'] tta_type:
+    :param Literal['mean', 'median', 'product'] tta_type:
         type of test time augmentations aggregation, defaults to "mean"
     """
 
@@ -327,56 +327,47 @@ class VSUNet(LightningModule):
         source = batch["source"]
 
         if self.test_time_augmentations:
-            # Save the yx coords to crop post rotations
-            self._original_shape_yx = source.shape[-2:]
-
-            predictions = []
-            # for aug, de_aug in zip(
-            #     test_time_augmentations_list, test_time_augmentations_list_inv
-            # ):
-            for i in range(4):
-                augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
-                augmented = self._predict_pad(augmented)
-                # predict and move to CPU
-                augmented_prediction = self.forward(augmented)
-                de_augmented_prediction = self._predict_pad.inverse(
-                    augmented_prediction
-                )
-                de_augmented_prediction = self._rotate_volume(
-                    de_augmented_prediction, k=4 - i, spatial_axes=(1, 2)
-                )
-                de_augmented_prediction = self._crop_to_original(
-                    de_augmented_prediction
-                )
-
-                # Undo rotation and padding
-                predictions.append(de_augmented_prediction.cpu())
-                del (
-                    augmented,
-                    augmented_prediction,
-                    de_augmented_prediction,
-                )
-                torch.cuda.empty_cache()  #
-
-            if self.tta_type == "mean":
-                prediction = torch.stack(predictions).cpu().mean(dim=0)
-            elif self.tta_type == "median":
-                prediction = torch.stack(predictions).cpu().median(dim=0).values
-            elif self.tta_type == "product":
-                # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
-                log_predictions = torch.stack(
-                    [torch.log(p + 1e-9) for p in predictions]
-                )
-                log_prediction_sum = log_predictions.sum(dim=0)
-                prediction = torch.exp(log_prediction_sum)
-            # Put back to GPU
-            prediction = prediction.to(source.device)
-
+            self.perform_test_time_augmentations(source)
         else:
             source = self._predict_pad(source)
             prediction = self.forward(source)
             prediction = self._predict_pad.inverse(prediction)
 
+        return prediction
+
+    def perform_test_time_augmentations(self, source: Tensor) -> Tensor:
+        """Perform test time augmentations on the input source
+        and aggregate the predictions using the specified method.
+
+        :param source: input tensor
+        :return: aggregated prediction
+        """
+
+        # Save the yx coords to crop post rotations
+        self._original_shape_yx = source.shape[-2:]
+        predictions = []
+        for i in range(4):
+            augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
+            augmented = self._predict_pad(augmented)
+            augmented_prediction = self.forward(augmented)
+            de_augmented_prediction = self._predict_pad.inverse(augmented_prediction)
+            de_augmented_prediction = self._rotate_volume(
+                de_augmented_prediction, k=4 - i, spatial_axes=(1, 2)
+            )
+            de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
+
+            # Undo rotation and padding
+            predictions.append(de_augmented_prediction)
+
+        if self.tta_type == "mean":
+            prediction = torch.stack(predictions).mean(dim=0)
+        elif self.tta_type == "median":
+            prediction = torch.stack(predictions).median(dim=0).values
+        elif self.tta_type == "product":
+            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
+            log_prediction_sum = log_predictions.sum(dim=0)
+            prediction = torch.exp(log_prediction_sum)
         return prediction
 
     def on_train_epoch_end(self):
