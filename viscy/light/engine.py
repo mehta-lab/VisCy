@@ -4,7 +4,6 @@ from typing import Literal, Sequence, Union
 
 import numpy as np
 import torch
-import timm
 
 from imageio import imwrite
 from lightning.pytorch import LightningModule
@@ -34,6 +33,7 @@ from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
+from viscy.unet.networks.embedding import ContrastiveConvNext
 
 try:
     from cellpose.models import CellposeModel
@@ -492,37 +492,10 @@ class ContrastiveLearningModel(LightningModule):
         in_channels: int = 2,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 5,  # number of slices in the input stack
-        stem_kernel_size: tuple[int, int, int] = (5, 5, 5),
-        embedding_len: int = 128,
+        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
+        embedding_len: int = 1000,
     ) -> None:
         super().__init__()
-
-        """ Start of model construction.
-        Main blocks:
-        - stem: transforms C_in*Z*Y*X input into C_out*Y*X feature maps.
-        - encoder: maps C_out*Y*X feature maps into embedding of size E.
-        - projection_head: maps E to E' for contrastive learning.
-        
-        NOTE: If the model variety grows, refactor model constructions into viscy/embeddings.py or similar module.
-        See viscy/unet.py for comparison.
-        """
-        if in_stack_depth % stem_kernel_size[0] != 0:
-            raise ValueError(
-                f"Input stack depth {in_stack_depth} is not divisible "
-                f"by stem kernel depth {stem_kernel_size[0]}."
-            )
-
-        # encoder
-        self.encoder = timm.create_model(
-            backbone,
-            pretrained=True,
-            features_only=False,
-            drop_path_rate=0.2,  # dropout rate.
-        )
-
-        # stem
-
-        """ End of model construction """
 
         self.loss_function = loss_function
         self.margin = margin
@@ -534,15 +507,19 @@ class ContrastiveLearningModel(LightningModule):
         self.validation_losses = []
         self.validation_step_outputs = []
 
-        # required to log the graph
-        if architecture == "2D":
-            example_depth = 1
-        else:
-            example_depth = model_config.get("in_stack_depth") or 5
+        self.model = ContrastiveConvNext(
+            backbone=backbone,
+            in_channels=in_channels,
+            in_stack_depth=in_stack_depth,
+            stem_kernel_size=stem_kernel_size,
+            embedding_len=embedding_len,
+        )
+
+        # required to log the graph.
         self.example_input_array = torch.rand(
             1,  # batch size
-            model_config.get("in_channels") or 1,
-            example_depth,
+            in_channels,
+            in_stack_depth,
             *example_input_yx_shape,
         )
 
