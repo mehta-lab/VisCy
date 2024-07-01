@@ -4,6 +4,8 @@ from typing import Literal, Sequence, Union
 
 import numpy as np
 import torch
+import timm
+
 from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
@@ -24,6 +26,7 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
+from torchvision.models import resnet18
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
@@ -459,3 +462,134 @@ class FcmaeUNet(VSUNet):
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
+
+
+class ContrastiveLearningModel(LightningModule):
+    """Contrastive Learning Model for self-supervised learning.
+
+    :param string backbone: Neural network backbone, defaults to convnext_tiny
+    :param nn.Module loss_function: Loss function for training, defaults to TripletMarginLoss
+    :param float margin: Margin for triplet loss, defaults to 0.5
+    :param float lr: Learning rate for optimizer, defaults to 1e-3
+    :param Literal['WarmupCosine', 'Constant'] schedule: Learning rate scheduler, defaults to "Constant"
+    :param int log_batches_per_epoch: Number of batches to log each training epoch, defaults to 8
+    :param int log_samples_per_batch: Number of samples to log each training batch, defaults to 1
+    :param Sequence[int] example_input_yx_shape: XY shape of the example input for network graph tracing, defaults to (256, 256)
+    :param int z_slices: Number of slices in the input stack, defaults to 5
+    """
+
+    def __init__(
+        self,
+        backbone: str = "convnext_tiny",  # convnexts are newer "ResNets" informed by vision transformers.
+        loss_function: Union[
+            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
+        ] = nn.TripletMarginLoss(),
+        margin: float = 0.5,
+        lr: float = 1e-3,
+        schedule: Literal["WarmupCosine", "Constant"] = "Constant",
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
+        in_channels: int = 2,
+        example_input_yx_shape: Sequence[int] = (256, 256),
+        in_stack_depth: int = 5,  # number of slices in the input stack
+        stem_kernel_size: tuple[int, int, int] = (5, 5, 5),
+        embedding_len: int = 128,
+    ) -> None:
+        super().__init__()
+
+        """ Start of model construction.
+        Main blocks:
+        - stem: transforms C_in*Z*Y*X input into C_out*Y*X feature maps.
+        - encoder: maps C_out*Y*X feature maps into embedding of size E.
+        - projection_head: maps E to E' for contrastive learning.
+        
+        NOTE: If the model variety grows, refactor model constructions into viscy/embeddings.py or similar module.
+        See viscy/unet.py for comparison.
+        """
+        if in_stack_depth % stem_kernel_size[0] != 0:
+            raise ValueError(
+                f"Input stack depth {in_stack_depth} is not divisible "
+                f"by stem kernel depth {stem_kernel_size[0]}."
+            )
+
+        # encoder
+        self.encoder = timm.create_model(
+            backbone,
+            pretrained=True,
+            features_only=False,
+            drop_path_rate=0.2,  # dropout rate.
+        )
+
+        # stem
+
+        """ End of model construction """
+
+        self.loss_function = loss_function
+        self.margin = margin
+        self.lr = lr
+        self.schedule = schedule
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+        self.training_step_outputs = []
+        self.validation_losses = []
+        self.validation_step_outputs = []
+
+        # required to log the graph
+        if architecture == "2D":
+            example_depth = 1
+        else:
+            example_depth = model_config.get("in_stack_depth") or 5
+        self.example_input_array = torch.rand(
+            1,  # batch size
+            model_config.get("in_channels") or 1,
+            example_depth,
+            *example_input_yx_shape,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass of the model.
+
+        :param Tensor x: Input tensor (batch size, channels, depth, height, width)
+        :return: Projected features
+        :rtype: Tensor
+        """
+        features = self.backbone(x)
+        projections = self.projection_head(features)
+        return projections
+
+    def training_step(
+        self,
+        batch: tuple[Tensor],
+        batch_idx: int,
+    ) -> Tensor:
+        """Training step of the model.
+
+        :param tuple[Tensor] batch: Input batch of images and positive images
+        :param int batch_idx: Batch index
+        :return: Loss value
+        :rtype: Tensor
+        """
+
+        if self.loss_function.__name__ == "TripletMarginLoss":
+            anchor, pos_img, neg_img = batch
+            emb_anchor = self(anchor)
+            emb_pos = self(pos_img)
+            emb_neg = self(neg_img)
+            loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        else:
+            anchor, pos_img = batch
+            emb_anchor = self(anchor)
+            emb_pos = self(pos_img)
+            loss = self.loss_function(emb_anchor, emb_pos)
+
+        self.log("train_loss", loss)
+        return loss
+
+    def configure_optimizers(self) -> torch.optim.Optimizer:
+        """Configure the optimizer for training.
+
+        :return: Optimizer
+        :rtype: torch.optim.Optimizer
+        """
+        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+        return optimizer
