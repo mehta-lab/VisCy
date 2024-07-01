@@ -6,7 +6,7 @@ import numpy as np
 import torch
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from matplotlib.cm import get_cmap
+from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
 from skimage.exposure import rescale_intensity
@@ -29,8 +29,8 @@ from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
-from viscy.unet.networks.Unet21D import Unet21d
 from viscy.unet.networks.Unet25D import Unet25d
+from viscy.unet.networks.unext2 import UNeXt2
 
 try:
     from cellpose.models import CellposeModel
@@ -40,9 +40,7 @@ except ImportError:
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
-    "2.1D": Unet21d,
-    # same class with out_stack_depth > 1
-    "2.2D": Unet21d,
+    "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
 }
@@ -119,7 +117,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
@@ -139,8 +137,6 @@ class VSUNet(LightningModule):
             raise ValueError(
                 f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}"
             )
-        if architecture == "2.2D":
-            model_config["out_stack_depth"] = model_config["in_stack_depth"]
         self.model = net_class(**model_config)
         # TODO: handle num_outputs in metrics
         # self.out_channels = self.model.terminal_block.out_filters
@@ -150,6 +146,7 @@ class VSUNet(LightningModule):
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs = []
+        self.validation_losses = []
         self.validation_step_outputs = []
         # required to log the graph
         if architecture == "2D":
@@ -174,32 +171,49 @@ class VSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    def training_step(self, batch: Sample, batch_idx: int):
-        source = batch["source"]
-        target = batch["target"]
-        pred = self.forward(source)
-        loss = self.loss_function(pred, target)
+    def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
+        losses = []
+        batch_size = 0
+        if not isinstance(batch, Sequence):
+            batch = [batch]
+        for b in batch:
+            source = b["source"]
+            target = b["target"]
+            pred = self.forward(source)
+            loss = self.loss_function(pred, target)
+            losses.append(loss)
+            batch_size += source.shape[0]
+            if batch_idx < self.log_batches_per_epoch:
+                self.training_step_outputs.extend(
+                    self._detach_sample((source, target, pred))
+                )
+        loss_step = torch.stack(losses).mean()
         self.log(
             "loss/train",
-            loss,
+            loss_step.to(self.device),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
+            batch_size=batch_size,
         )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                self._detach_sample((source, target, pred))
-            )
-        return loss
+        return loss_step
 
     def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source = batch["source"]
-        target = batch["target"]
+        source: Tensor = batch["source"]
+        target: Tensor = batch["target"]
         pred = self.forward(source)
         loss = self.loss_function(pred, target)
-        self.log("loss/validate", loss, sync_dist=True, add_dataloader_idx=False)
+        if dataloader_idx + 1 > len(self.validation_losses):
+            self.validation_losses.append([])
+        self.validation_losses[dataloader_idx].append(loss.detach())
+        self.log(
+            f"loss/val/{dataloader_idx}",
+            loss.to(self.device),
+            sync_dist=True,
+            batch_size=source.shape[0],
+        )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target, pred))
@@ -309,8 +323,16 @@ class VSUNet(LightningModule):
         self.training_step_outputs = []
 
     def on_validation_epoch_end(self):
+        super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+        # average within each dataloader
+        loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
+        self.log(
+            "loss/validate",
+            torch.tensor(loss_means).mean().to(self.device),
+            sync_dist=True,
+        )
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
@@ -386,7 +408,6 @@ class FcmaeUNet(VSUNet):
     def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
-        self.validation_losses = []
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
@@ -438,13 +459,3 @@ class FcmaeUNet(VSUNet):
             self.validation_step_outputs.extend(
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
-
-    def on_validation_epoch_end(self):
-        super().on_validation_epoch_end()
-        # average within each dataloader
-        loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
-        self.log(
-            "loss/validate",
-            torch.tensor(loss_means).mean().to(self.device),
-            sync_dist=True,
-        )

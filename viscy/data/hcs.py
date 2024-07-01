@@ -76,6 +76,23 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
     return collated
 
 
+def _read_norm_meta(fov: Position) -> NormMeta | None:
+    """
+    Read normalization metadata from the FOV.
+    Convert to float32 tensors to avoid automatic casting to float64.
+    """
+    norm_meta = fov.zattrs.get("normalization", None)
+    if norm_meta is None:
+        return None
+    for channel, channel_values in norm_meta.items():
+        for level, level_values in channel_values.items():
+            for stat, value in level_values.items():
+                norm_meta[channel][level][stat] = torch.tensor(
+                    value, dtype=torch.float32
+                )
+    return norm_meta
+
+
 class SlidingWindowDataset(Dataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
@@ -124,7 +141,7 @@ class SlidingWindowDataset(Dataset):
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
-            self.window_norm_meta.append(fov.zattrs.get("normalization", None))
+            self.window_norm_meta.append(_read_norm_meta(fov))
         self._max_window = w
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None]:
@@ -162,7 +179,9 @@ class SlidingWindowDataset(Dataset):
         return self._max_window
 
     def _stack_channels(
-        self, sample_images: list[dict[str, Tensor]] | dict[str, Tensor], key: str
+        self,
+        sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
+        key: str,
     ) -> Tensor | list[Tensor]:
         """Stack single-channel images into a multi-channel tensor."""
         if not isinstance(sample_images, list):
@@ -191,8 +210,6 @@ class SlidingWindowDataset(Dataset):
             sample_images["norm_meta"] = norm_meta
         if self.transform:
             sample_images = self.transform(sample_images)
-        # if isinstance(sample_images, list):
-        #     sample_images = sample_images[0]
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
@@ -265,7 +282,7 @@ class HCSDataModule(LightningDataModule):
         by default 0.8
     :param int batch_size: batch size, defaults to 16
     :param int num_workers: number of data-loading workers, defaults to 8
-    :param Literal["2D", "2.1D", "2.2D", "2.5D", "3D"] architecture: U-Net architecture,
+    :param Literal["2D", "UNeXt2", "2.5D", "3D"] architecture: U-Net architecture,
         defaults to "2.5D"
     :param tuple[int, int] yx_patch_size: patch size in (Y, X),
         defaults to (256, 256)
@@ -290,7 +307,7 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        architecture: Literal["2D", "2.1D", "2.2D", "2.5D", "3D", "fcmae"] = "2.5D",
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
@@ -303,7 +320,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = False if architecture in ["2.2D", "3D", "fcmae"] else True
+        self.target_2d = False if architecture in ["UNeXt2", "3D", "fcmae"] else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
