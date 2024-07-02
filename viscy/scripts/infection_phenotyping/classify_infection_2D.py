@@ -133,7 +133,7 @@ class SemanticSegUNet2D(pl.LightningModule):
         self,
         in_channels: int,  # Number of input channels
         out_channels: int,  # Number of output channels
-        lr: float = 1e-3,  # Learning rate
+        lr: float = 1e-5,  # Learning rate
         loss_function: nn.Module = nn.CrossEntropyLoss(),  # Loss function
         schedule: Literal[
             "WarmupCosine", "Constant"

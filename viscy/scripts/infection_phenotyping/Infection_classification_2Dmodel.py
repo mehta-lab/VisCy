@@ -6,30 +6,63 @@ import torch.nn as nn
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from viscy.transforms import RandWeightedCropd
-from viscy.transforms import NormalizeSampled
+from viscy.transforms import RandWeightedCropd, NormalizeSampled, RandScaleIntensityd, RandGaussianSmoothd
 from viscy.data.hcs import HCSDataModule
 from viscy.scripts.infection_phenotyping.classify_infection_2D import SemanticSegUNet2D
+
+from iohub.ngff import open_ome_zarr
 
 # %% Create a dataloader and visualize the batches.
 
 # Set the path to the dataset
-dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2024_02_13_DENV_3infMarked_trainVal.zarr"
+dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/0_training_test_data/2024_05_03_DENV_eFT226_Timecourse_trainVal_2D.zarr"
 
+# find ratio of background, uninfected and infected pixels
+zarr_input = open_ome_zarr(
+    dataset_path,
+    layout="hcs",
+    mode="r+",
+)
+in_chan_names = zarr_input.channel_names
+
+num_pixels_bkg = 0
+num_pixels_uninf = 0
+num_pixels_inf = 0
+num_pixels = 0
+for well_id, well_data in zarr_input.wells():
+    well_name, well_no = well_id.split("/")
+
+    for pos_name, pos_data in well_data.positions():
+        data = pos_data.data
+        T,C,Z,Y,X = data.shape
+        out_data = data.numpy()
+        for time in range(T):
+            Inf_mask = out_data[time,in_chan_names.index("Inf_mask"),...]
+            # Calculate the number of pixels valued 0, 1, and 2 in 'Inf_mask'
+            num_pixels_bkg = num_pixels_bkg + (Inf_mask == 0).sum()
+            num_pixels_uninf = num_pixels_uninf + (Inf_mask == 1).sum()
+            num_pixels_inf = num_pixels_inf + (Inf_mask == 2).sum()
+            num_pixels = num_pixels + Z*X*Y
+
+pixel_ratio_1 = [num_pixels/num_pixels_bkg, num_pixels/num_pixels_uninf, num_pixels/num_pixels_inf]
+pixel_ratio_sum = sum(pixel_ratio_1)
+pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
+
+# %%
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
     dataset_path,
-    source_channel=["Sensor", "Phase"],
+    source_channel=["mCherry", "Phase3D"],
     target_channel=["Inf_mask"],
     yx_patch_size=[128, 128],
-    split_ratio=0.8,
+    split_ratio=0.5,
     z_window_size=1,
     architecture="2D",
     num_workers=1,
     batch_size=128,
     normalizations=[
         NormalizeSampled(
-            keys=["Sensor", "Phase"],
+            keys=["Phase3D", "mCherry"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
@@ -39,9 +72,21 @@ data_module = HCSDataModule(
         RandWeightedCropd(
             num_samples=8,
             spatial_size=[-1, 128, 128],
-            keys=["Sensor", "Phase", "Inf_mask"],
+            keys=["mCherry", "Phase3D", "Inf_mask"],
             w_key="Inf_mask",
-        )
+        ),
+        RandScaleIntensityd(
+            keys=["mCherry", "Phase3D"],
+            factors=[0.1, 0.5],
+            prob=0.5,
+        ),
+        RandGaussianSmoothd(
+            keys=["mCherry", "Phase3D"],
+            prob=0.5,
+            sigma_x=[0.5, 1.0],
+            sigma_y=[0.5, 1.0],
+            sigma_z=[0.5, 1.0],
+        ),
     ],
 )
 
@@ -76,22 +121,22 @@ val_dm = data_module.val_dataloader()
 
 # %% Define the logger
 logger = TensorBoardLogger(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/",
-    name="logs_wPhase",
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/",
+    name="logs",
 )
 
 # Pass the logger to the Trainer
 trainer = pl.Trainer(
     logger=logger,
-    max_epochs=100,
-    default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase",
+    max_epochs=500,
+    default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/logs/",
     log_every_n_steps=1,
     devices=1,  # Set the number of GPUs to use. This avoids run-time exception from distributed training when the node has multiple GPUs
 )
 
 # Define the checkpoint callback
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/sensorInf_phenotyping/logs_wPhase/",
+    dirpath="/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/logs/",
     filename="checkpoint_{epoch:02d}",
     save_top_k=-1,
     verbose=True,
@@ -106,7 +151,7 @@ trainer.callbacks.append(checkpoint_callback)
 model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
-    loss_function=nn.CrossEntropyLoss(weight=torch.tensor([0.05, 0.25, 0.7])),
+    loss_function=nn.CrossEntropyLoss(weight=torch.tensor(pixel_ratio)),
 )
 
 print(model)
