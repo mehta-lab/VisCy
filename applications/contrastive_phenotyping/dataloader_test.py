@@ -7,6 +7,8 @@ from viscy.transforms import RandAdjustContrastd, RandAffined, RandGaussianNoise
 from monai.transforms import Compose
 from iohub import open_ome_zarr
 import pandas as pd
+import warnings
+warnings.filterwarnings("ignore")
 
 class OMEZarrDataset(Dataset):
     def __init__(self, base_path, channels, x, y, z, timesteps_csv_path, transform=None, z_range=None):
@@ -69,11 +71,15 @@ class OMEZarrDataset(Dataset):
 
         fov = int(fov_cell.split('fov')[1].split('cell')[0])
         cell_id = int(fov_cell.split('cell')[1])
+
         extracted_combined = f"{row}/{column}/fov{fov}cell{cell_id}"
 
-        self.timesteps_df['Combined'] = self.timesteps_df.apply(lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}", axis=1)
-        matched_rows = self.timesteps_df[self.timesteps_df['Combined'] == extracted_combined]
-
+        matched_rows = self.timesteps_df[
+            self.timesteps_df.apply(
+                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}", axis=1
+            ) == extracted_combined
+        ]
+        
         if matched_rows.empty:
             raise ValueError(f"No matching entry found for position path: {position_path}")
 
@@ -81,10 +87,10 @@ class OMEZarrDataset(Dataset):
         end_time = matched_rows['End Time'].values[0]
 
         random_timestep = np.random.randint(start_time, end_time)
-        
+
         reshaped_data = data[random_timestep]
         return reshaped_data
-
+    
 def get_transforms():
     transforms = Compose([
         RandAdjustContrastd(keys=['image'], prob=0.5, gamma=(0.5, 2.0)),
