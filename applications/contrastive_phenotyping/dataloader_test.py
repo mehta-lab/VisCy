@@ -6,9 +6,10 @@ from torch.utils.data import Dataset, DataLoader
 from viscy.transforms import RandAdjustContrastd, RandAffined, RandGaussianNoised, RandGaussianSmoothd, RandScaleIntensityd
 from monai.transforms import Compose
 from iohub import open_ome_zarr
+import pandas as pd
 
 class OMEZarrDataset(Dataset):
-    def __init__(self, base_path, channels, x, y, z, transform=None, z_range=None):
+    def __init__(self, base_path, channels, x, y, z, timesteps_csv_path, transform=None, z_range=None):
         self.base_path = base_path
         self.channels = channels
         self.x = x
@@ -18,6 +19,7 @@ class OMEZarrDataset(Dataset):
         self.transform = transform
         self.ds = self.open_zarr_store(self.base_path)
         self.positions = list(self.ds.positions())
+        self.timesteps_df = pd.read_csv(timesteps_csv_path)
         print(f"Initialized dataset with {len(self.positions)} positions.")
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
@@ -52,17 +54,35 @@ class OMEZarrDataset(Dataset):
         print(f"Loading data from position: {position_path}")
         zarr_array = position['0'][:]
         print('Shape before:', zarr_array.shape)
-        data = self.restructure_data(zarr_array)
+        data = self.restructure_data(zarr_array, position_path)
         if self.z_range:
             data = data[:, self.z_range[0]:self.z_range[1], :, :]
         print("Shape after:", data.shape)
         return data
 
-    def restructure_data(self, data):
-        # randomly sample a timestep and index into that
-        timesteps = data.shape[0]
-        random_timestep = np.random.randint(timesteps)
-        reshaped_data = data[random_timestep]  
+    def restructure_data(self, data, position_path):
+        # Extract row, column, fov, and cell_id from position_path
+        parts = position_path.split('/')
+        row = parts[0]
+        column = parts[1]
+        fov_cell = parts[2]
+
+        fov = int(fov_cell.split('fov')[1].split('cell')[0])
+        cell_id = int(fov_cell.split('cell')[1])
+        extracted_combined = f"{row}/{column}/fov{fov}cell{cell_id}"
+
+        self.timesteps_df['Combined'] = self.timesteps_df.apply(lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}", axis=1)
+        matched_rows = self.timesteps_df[self.timesteps_df['Combined'] == extracted_combined]
+
+        if matched_rows.empty:
+            raise ValueError(f"No matching entry found for position path: {position_path}")
+
+        start_time = matched_rows['Start Time'].values[0]
+        end_time = matched_rows['End Time'].values[0]
+
+        random_timestep = np.random.randint(start_time, end_time)
+        
+        reshaped_data = data[random_timestep]
         return reshaped_data
 
 def get_transforms():
@@ -83,7 +103,9 @@ z = 15
 z_range = (0, 10)  
 batch_size = 4
 
-dataset = OMEZarrDataset(base_path, channels, x, y, z, transform=get_transforms(), z_range=z_range)
+timesteps_csv_path = '/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv'
+
+dataset = OMEZarrDataset(base_path, channels, x, y, z, timesteps_csv_path, transform=get_transforms(), z_range=z_range)
 dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 
 # print the shape of batches from the DataLoader
