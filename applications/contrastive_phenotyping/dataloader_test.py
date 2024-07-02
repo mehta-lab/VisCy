@@ -39,15 +39,19 @@ class OMEZarrDataset(Dataset):
         anchor_data = self.load_data(anchor_position_path)
 
         positive_data = self.transform({'image': anchor_data})['image'] if self.transform else anchor_data
-
+        if self.transform:
+            print("Positive transformation applied")
+        
         negative_idx = idx
         while negative_idx == idx:
             negative_idx = random.randint(0, self.__len__() - 1)
         negative_position_path = self.positions[negative_idx][0]
         negative_data = self.load_data(negative_position_path)
 
-        negative_data = self.transform({'image': anchor_data})['image'] if self.transform else negative_data
-
+        negative_data = self.transform({'image': negative_data})['image'] if self.transform else negative_data
+        if self.transform:
+            print("Negative transformation applied")
+        
         print("shapes of tensors")
         print(torch.tensor(anchor_data).shape)
         print(torch.tensor(positive_data).shape)
