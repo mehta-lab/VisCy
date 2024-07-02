@@ -8,15 +8,18 @@ from monai.transforms import Compose
 from iohub import open_ome_zarr
 import pandas as pd
 import warnings
+import pytorch_lightning as pl
+#from viscy.data.typing import Optional
+from pathlib import Path
+
 warnings.filterwarnings("ignore")
 
 class OMEZarrDataset(Dataset):
-    def __init__(self, base_path, channels, x, y, z, timesteps_csv_path, transform=None, z_range=None):
+    def __init__(self, base_path, channels, x, y, timesteps_csv_path, transform=None, z_range=None):
         self.base_path = base_path
         self.channels = channels
         self.x = x
         self.y = y
-        self.z = z
         self.z_range = z_range
         self.transform = transform
         self.ds = self.open_zarr_store(self.base_path)
@@ -101,24 +104,154 @@ def get_transforms():
     ])
     return transforms
 
+class OMEZarrDataModule(pl.LightningDataModule):
+    def __init__(
+        self,
+        base_path: str,
+        channels: int,
+        x: int,
+        y: int,
+        timesteps_csv_path: str,
+        predict_base_path: str = None,
+        train_split_ratio: float = 0.64,
+        val_split_ratio: float = 0.16,
+        batch_size: int = 4,
+        num_workers: int = 8,
+        z_range: tuple[int, int] = None,
+        transform=None
+    ):
+        super().__init__()
+        self.base_path = Path(base_path)
+        self.channels = channels
+        self.x = x
+        self.y = y
+        self.timesteps_csv_path = timesteps_csv_path
+        self.predict_base_path = Path(predict_base_path) if predict_base_path else None
+        self.train_split_ratio = train_split_ratio
+        self.val_split_ratio = val_split_ratio
+        self.batch_size = batch_size
+        self.num_workers = num_workers
+        self.z_range = z_range
+        self.transform = transform or get_transforms()
+        self.train_dataset = None
+        self.val_dataset = None
+        self.test_dataset = None
+        self.predict_dataset = None
+
+    def setup(self, stage: str = None):
+        dataset = OMEZarrDataset(
+            self.base_path,
+            self.channels,
+            self.x,
+            self.y,
+            self.timesteps_csv_path,
+            transform=self.transform,
+            z_range=self.z_range
+        )
+
+        train_size = int(len(dataset) * self.train_split_ratio)
+        val_size = int(len(dataset) * self.val_split_ratio)
+        test_size = len(dataset) - train_size - val_size
+
+        self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
+            dataset, [train_size, val_size, test_size]
+        )
+
+        # setup prediction dataset (if needed)
+        if stage == 'predict' and self.predict_base_path:
+            self.predict_dataset = OMEZarrDataset(
+                self.predict_base_path,
+                self.channels,
+                self.x,
+                self.y,
+                self.timesteps_csv_path,
+                transform=self.transform,
+                z_range=self.z_range
+            )
+
+    def train_dataloader(self):
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    def test_dataloader(self):
+        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+    def predict_dataloader(self):
+        if self.predict_dataset is None:
+            raise ValueError("Predict dataset not set up. Call setup(stage='predict') first.")
+        return DataLoader(self.predict_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+
+# Testing the DataModule
+
 base_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/small_patch.zarr"
+#predict_base_path = " "
 channels = 2  
 x = 200       
-y = 200       
-z = 15        
+y = 200
+z = 10       
 z_range = (0, 10)  
 batch_size = 4
-
 timesteps_csv_path = '/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv'
 
-dataset = OMEZarrDataset(base_path, channels, x, y, z, timesteps_csv_path, transform=get_transforms(), z_range=z_range)
-dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+data_module = OMEZarrDataModule(
+    base_path=base_path,
+    channels=channels,
+    x=x,
+    y=y,
+    timesteps_csv_path=timesteps_csv_path,
+    batch_size=batch_size,
+    z_range=z_range,
+)
 
-# print the shape of batches from the DataLoader
-for batch in dataloader:
+# for train and val
+data_module.setup()
+
+print(f"Total dataset size: {len(data_module.train_dataset) + len(data_module.val_dataset) + len(data_module.test_dataset)}")
+print(f"Training dataset size: {len(data_module.train_dataset)}")
+print(f"Validation dataset size: {len(data_module.val_dataset)}")
+print(f"Test dataset size: {len(data_module.test_dataset)}")
+
+train_loader = data_module.train_dataloader()
+
+print("Training DataLoader:")
+for batch in train_loader:
     anchor_batch, positive_batch, negative_batch = batch
-    print("Batch shapes:")
     print("Anchor batch shape:", anchor_batch.shape)
     print("Positive batch shape:", positive_batch.shape)
     print("Negative batch shape:", negative_batch.shape)
     break
+
+val_loader = data_module.val_dataloader()
+
+print("Validation DataLoader:")
+for batch in val_loader:
+    anchor_batch, positive_batch, negative_batch = batch
+    print("Anchor batch shape:", anchor_batch.shape)
+    print("Positive batch shape:", positive_batch.shape)
+    print("Negative batch shape:", negative_batch.shape)
+    break
+
+test_loader = data_module.test_dataloader()
+
+print("Test DataLoader:")
+for batch in test_loader:
+    anchor_batch, positive_batch, negative_batch = batch
+    print("Anchor batch shape:", anchor_batch.shape)
+    print("Positive batch shape:", positive_batch.shape)
+    print("Negative batch shape:", negative_batch.shape)
+    break
+
+# Setup the DataModule for prediction
+# data_module.setup(stage='predict')
+
+# Get the predict DataLoader and print batch shapes
+# predict_loader = data_module.predict_dataloader()
+# print("Predict DataLoader:")
+# for batch in predict_loader:
+#     anchor_batch, positive_batch, negative_batch = batch
+#     print("Anchor batch shape:", anchor_batch.shape)
+#     print("Positive batch shape:", positive_batch.shape)
+#     print("Negative batch shape:", negative_batch.shape)
+#     break
