@@ -1,7 +1,7 @@
 # %% Imports and paths.
 import os
 import torch
-from viscy.light.engine import ContrastiveLearningModel
+from viscy.light.engine import ContrastiveModule
 from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.representation.contrastive import ContrastiveEncoder
 from pathlib import Path
@@ -14,12 +14,13 @@ model_dir = top_dir / "infection_classification/models/infection_score"
 %load_ext autoreload
 %autoreload 2
 # %% Initialize the model and log the graph.
-contra_model = ContrastiveEncoder()
+contra_model = ContrastiveEncoder(backbone = "convnext_tiny")
 print(contra_model)
 
+# %% 
 model_graph = torchview.draw_graph(
     contra_model,
-    torch.randn(1, 2, 15, 200, 200),
+    torch.randn(1, 2, 15, 224, 224),
     depth=3,  # adjust depth to zoom in.
     device="cpu",
 )
@@ -27,16 +28,19 @@ model_graph = torchview.draw_graph(
 model_graph.visual_graph
 
 # %% Initiatlize the lightning module and view the model.
-contrastive_module = ContrastiveLearningModel(backbone = "resnet50")
-print(contrastive_module.model)
+contrastive_module = ContrastiveModule()
+print(contrastive_module.encoder)
+
+# %%
 model_graph = torchview.draw_graph(
-    contrastive_module.model,
+    contrastive_module.encoder,
     torch.randn(1, 2, 15, 200, 200),
     depth=3,  # adjust depth to zoom in.
     device="cpu",
 )
 # Print the image of the model.
 model_graph.visual_graph
+
 # %% Initialize the data module and view the data.
 
 # %% Train the model.

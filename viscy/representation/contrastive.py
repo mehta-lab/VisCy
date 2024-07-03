@@ -42,48 +42,52 @@ class ContrastiveEncoder(nn.Module):
             num_classes=4 * embedding_len,
         )
 
-        # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
-        in_channels_encoder = self.model.stem[0].out_channels
-        stem = UNeXt2Stem(
-            in_channels=in_channels,
-            out_channels=in_channels_encoder,
-            kernel_size=stem_kernel_size,
-            in_stack_depth=in_stack_depth,
-        )
-        self.model.stem = stem
+        if "convnext" in backbone:
+            # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
+            in_channels_encoder = self.model.stem[0].out_channels
+            stem = UNeXt2Stem(
+                in_channels=in_channels,
+                out_channels=in_channels_encoder,
+                kernel_size=stem_kernel_size,
+                in_stack_depth=in_stack_depth,
+            )
+            self.model.stem = stem
 
-        # replace the fully connected layer with projection head (Linear->ReLU->Linear).
-        self.model.head.fc = nn.Sequential(
-            self.model.head.fc,
-            nn.ReLU(inplace=True),
-            nn.Linear(4 * embedding_len, embedding_len),
-        )
-        """ 
-        head of convnext
-        -------------------
-        (head): NormMlpClassifierHead(
-        (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
-        (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
-        (flatten): Flatten(start_dim=1, end_dim=-1)
-        (pre_logits): Identity()
-        (drop): Dropout(p=0.0, inplace=False)
-        (fc): Linear(in_features=768, out_features=1024, bias=True)
+            # replace the fully connected layer with projection head (Linear->ReLU->Linear).
+            self.model.head.fc = nn.Sequential(
+                self.model.head.fc,
+                nn.ReLU(inplace=True),
+                nn.Linear(4 * embedding_len, embedding_len),
+            )
+            """ 
+            head of convnext
+            -------------------
+            (head): NormMlpClassifierHead(
+            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
+            (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
+            (flatten): Flatten(start_dim=1, end_dim=-1)
+            (pre_logits): Identity()
+            (drop): Dropout(p=0.0, inplace=False)
+            (fc): Linear(in_features=768, out_features=1024, bias=True)
 
 
-        head of convnext for contrastive learning
-        ----------------------------
-        (head): NormMlpClassifierHead(
-        (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
-        (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
-        (flatten): Flatten(start_dim=1, end_dim=-1)
-        (pre_logits): Identity()
-        (drop): Dropout(p=0.0, inplace=False)
-        (fc): Sequential(
-        (0): Linear(in_features=768, out_features=1024, bias=True)
-        (1): ReLU(inplace=True)
-        (2): Linear(in_features=1024, out_features=256, bias=True)
-        )
-        """
+            head of convnext for contrastive learning
+            ----------------------------
+            (head): NormMlpClassifierHead(
+            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
+            (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
+            (flatten): Flatten(start_dim=1, end_dim=-1)
+            (pre_logits): Identity()
+            (drop): Dropout(p=0.0, inplace=False)
+            (fc): Sequential(
+            (0): Linear(in_features=768, out_features=1024, bias=True)
+            (1): ReLU(inplace=True)
+            (2): Linear(in_features=1024, out_features=256, bias=True)
+            )
+            """
+        elif "resnet" in backbone:
+            # Adapt stem and projection head of resnet here.
+            pass
 
     def forward(self, x):
         return self.model(x)
