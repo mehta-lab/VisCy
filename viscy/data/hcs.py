@@ -76,6 +76,23 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
     return collated
 
 
+def _read_norm_meta(fov: Position) -> NormMeta | None:
+    """
+    Read normalization metadata from the FOV.
+    Convert to float32 tensors to avoid automatic casting to float64.
+    """
+    norm_meta = fov.zattrs.get("normalization", None)
+    if norm_meta is None:
+        return None
+    for channel, channel_values in norm_meta.items():
+        for level, level_values in channel_values.items():
+            for stat, value in level_values.items():
+                norm_meta[channel][level][stat] = torch.tensor(
+                    value, dtype=torch.float32
+                )
+    return norm_meta
+
+
 class SlidingWindowDataset(Dataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
@@ -124,7 +141,7 @@ class SlidingWindowDataset(Dataset):
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
-            self.window_norm_meta.append(fov.zattrs.get("normalization", None))
+            self.window_norm_meta.append(_read_norm_meta(fov))
         self._max_window = w
 
     def _find_window(self, index: int) -> tuple[ImageArray, int, NormMeta | None]:
@@ -162,7 +179,9 @@ class SlidingWindowDataset(Dataset):
         return self._max_window
 
     def _stack_channels(
-        self, sample_images: list[dict[str, Tensor]] | dict[str, Tensor], key: str
+        self,
+        sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
+        key: str,
     ) -> Tensor | list[Tensor]:
         """Stack single-channel images into a multi-channel tensor."""
         if not isinstance(sample_images, list):
