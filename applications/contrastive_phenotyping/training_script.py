@@ -3,7 +3,7 @@ import os
 import torch
 from viscy.light.engine import ContrastiveLearningModel
 from viscy.unet.networks.unext2 import UNeXt2Stem
-from viscy.unet.networks.embedding import ContrastiveConvNext
+from viscy.representation.contrastive import ContrastiveEncoder
 from pathlib import Path
 import torchview
 
@@ -14,7 +14,7 @@ model_dir = top_dir / "infection_classification/models/infection_score"
 %load_ext autoreload
 %autoreload 2
 # %% Initialize the model and log the graph.
-contra_model = ContrastiveConvNext()
+contra_model = ContrastiveEncoder()
 print(contra_model)
 
 model_graph = torchview.draw_graph(
@@ -27,7 +27,7 @@ model_graph = torchview.draw_graph(
 model_graph.visual_graph
 
 # %% Initiatlize the lightning module and view the model.
-contrastive_module = ContrastiveLearningModel()
+contrastive_module = ContrastiveLearningModel(backbone = "resnet50")
 print(contrastive_module.model)
 model_graph = torchview.draw_graph(
     contrastive_module.model,

@@ -586,7 +586,7 @@ class HCSDataModule(LightningDataModule):
 
 
 # dataloader for organelle phenotyping 
-class OMEZarrDataset(Dataset):
+class ContrastiveDataset(Dataset):
     def __init__(self, base_path, channels, x, y, timesteps_csv_path, transform=None, z_range=None):
         self.base_path = base_path
         self.channels = channels
@@ -680,7 +680,7 @@ def get_transforms():
     ])
     return transforms
 
-class OMEZarrDataModule(pl.LightningDataModule):
+class ContrastiveDataModule(pl.LightningDataModule):
     def __init__(
         self,
         base_path: str,
@@ -715,7 +715,7 @@ class OMEZarrDataModule(pl.LightningDataModule):
         self.predict_dataset = None
 
     def setup(self, stage: str = None):
-        dataset = OMEZarrDataset(
+        dataset = ContrastiveDataset(
             self.base_path,
             self.channels,
             self.x,
@@ -735,7 +735,7 @@ class OMEZarrDataModule(pl.LightningDataModule):
 
         # setup prediction dataset (if needed)
         if stage == 'predict' and self.predict_base_path:
-            self.predict_dataset = OMEZarrDataset(
+            self.predict_dataset = ContrastiveDataset(
                 self.predict_base_path,
                 self.channels,
                 self.x,
