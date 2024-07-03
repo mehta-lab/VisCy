@@ -26,6 +26,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 from torchvision.models import resnet18
+from pytorch_metric_learning.losses import NTXentLoss
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
@@ -463,7 +464,6 @@ class FcmaeUNet(VSUNet):
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
 
-
 class ContrastiveLearningModel(LightningModule):
     """Contrastive Learning Model for self-supervised learning.
 
@@ -482,8 +482,8 @@ class ContrastiveLearningModel(LightningModule):
         self,
         backbone: str = "convnext_tiny",  # convnexts are newer "ResNets" informed by vision transformers.
         loss_function: Union[
-            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
-        ] = nn.TripletMarginLoss(),
+            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss, NTXentLoss
+        ] = nn.TripletMarginLoss(margin=0.5),
         margin: float = 0.5,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
