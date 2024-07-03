@@ -25,7 +25,6 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
-from torchvision.models import resnet18
 from pytorch_metric_learning.losses import NTXentLoss
 
 from viscy.data.hcs import Sample
@@ -34,7 +33,7 @@ from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
-from viscy.unet.networks.embedding import ContrastiveConvNext
+from viscy.representation.contrastive import ContrastiveEncoder
 
 try:
     from cellpose.models import CellposeModel
@@ -464,6 +463,7 @@ class FcmaeUNet(VSUNet):
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
 
+
 class ContrastiveLearningModel(LightningModule):
     """Contrastive Learning Model for self-supervised learning.
 
@@ -491,9 +491,9 @@ class ContrastiveLearningModel(LightningModule):
         log_samples_per_batch: int = 1,
         in_channels: int = 2,
         example_input_yx_shape: Sequence[int] = (256, 256),
-        in_stack_depth: int = 5,  # number of slices in the input stack
+        in_stack_depth: int = 15,  # number of slices in the input stack
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
-        embedding_len: int = 1000,
+        embedding_len: int = 256,
     ) -> None:
         super().__init__()
 
@@ -507,7 +507,7 @@ class ContrastiveLearningModel(LightningModule):
         self.validation_losses = []
         self.validation_step_outputs = []
 
-        self.model = ContrastiveConvNext(
+        self.encoder = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
@@ -530,8 +530,7 @@ class ContrastiveLearningModel(LightningModule):
         :return: Projected features
         :rtype: Tensor
         """
-        features = self.backbone(x)
-        projections = self.projection_head(features)
+        projections = self.encoder(x)
         return projections
 
     def training_step(
@@ -549,14 +548,14 @@ class ContrastiveLearningModel(LightningModule):
 
         if self.loss_function.__name__ == "TripletMarginLoss":
             anchor, pos_img, neg_img = batch
-            emb_anchor = self(anchor)
-            emb_pos = self(pos_img)
-            emb_neg = self(neg_img)
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
+            emb_neg = self.encoder(neg_img)
             loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
         else:
             anchor, pos_img = batch
-            emb_anchor = self(anchor)
-            emb_pos = self(pos_img)
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
             loss = self.loss_function(emb_anchor, emb_pos)
 
         self.log("train_loss", loss)

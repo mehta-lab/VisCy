@@ -6,6 +6,7 @@ import tempfile
 from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
+import pytorch_lightning as pl
 
 import numpy as np
 import torch
@@ -604,9 +605,18 @@ class HCSDataModule(LightningDataModule):
         return list(self.augmentations)
 
 
-# dataloader for organelle phenotyping 
+# dataloader for organelle phenotyping
 class ContrastiveDataset(Dataset):
-    def __init__(self, base_path, channels, x, y, timesteps_csv_path, transform=None, z_range=None):
+    def __init__(
+        self,
+        base_path,
+        channels,
+        x,
+        y,
+        timesteps_csv_path,
+        transform=None,
+        z_range=None,
+    ):
         self.base_path = base_path
         self.channels = channels
         self.x = x
@@ -629,75 +639,107 @@ class ContrastiveDataset(Dataset):
         anchor_position_path = self.positions[idx][0]
         anchor_data = self.load_data(anchor_position_path)
 
-        positive_data = self.transform({'image': anchor_data})['image'] if self.transform else anchor_data
+        positive_data = (
+            self.transform({"image": anchor_data})["image"]
+            if self.transform
+            else anchor_data
+        )
         if self.transform:
             print("Positive transformation applied")
-        
+
         negative_idx = idx
         while negative_idx == idx:
             negative_idx = random.randint(0, self.__len__() - 1)
         negative_position_path = self.positions[negative_idx][0]
         negative_data = self.load_data(negative_position_path)
 
-        negative_data = self.transform({'image': negative_data})['image'] if self.transform else negative_data
+        negative_data = (
+            self.transform({"image": negative_data})["image"]
+            if self.transform
+            else negative_data
+        )
         if self.transform:
             print("Negative transformation applied")
-        
+
         print("shapes of tensors")
         print(torch.tensor(anchor_data).shape)
         print(torch.tensor(positive_data).shape)
         print(torch.tensor(negative_data).shape)
-        return torch.tensor(anchor_data), torch.tensor(positive_data), torch.tensor(negative_data)
+        return (
+            torch.tensor(anchor_data),
+            torch.tensor(positive_data),
+            torch.tensor(negative_data),
+        )
 
     def load_data(self, position_path):
         position = self.ds[position_path]
         print(f"Loading data from position: {position_path}")
-        zarr_array = position['0'][:]
-        print('Shape before:', zarr_array.shape)
+        zarr_array = position["0"][:]
+        print("Shape before:", zarr_array.shape)
         data = self.restructure_data(zarr_array, position_path)
         if self.z_range:
-            data = data[:, self.z_range[0]:self.z_range[1], :, :]
+            data = data[:, self.z_range[0] : self.z_range[1], :, :]
         print("Shape after:", data.shape)
         return data
 
     def restructure_data(self, data, position_path):
         # Extract row, column, fov, and cell_id from position_path
-        parts = position_path.split('/')
+        parts = position_path.split("/")
         row = parts[0]
         column = parts[1]
         fov_cell = parts[2]
 
-        fov = int(fov_cell.split('fov')[1].split('cell')[0])
-        cell_id = int(fov_cell.split('cell')[1])
+        fov = int(fov_cell.split("fov")[1].split("cell")[0])
+        cell_id = int(fov_cell.split("cell")[1])
 
         extracted_combined = f"{row}/{column}/fov{fov}cell{cell_id}"
 
         matched_rows = self.timesteps_df[
             self.timesteps_df.apply(
-                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}", axis=1
-            ) == extracted_combined
+                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
+                axis=1,
+            )
+            == extracted_combined
         ]
-        
-        if matched_rows.empty:
-            raise ValueError(f"No matching entry found for position path: {position_path}")
 
-        start_time = matched_rows['Start Time'].values[0]
-        end_time = matched_rows['End Time'].values[0]
+        if matched_rows.empty:
+            raise ValueError(
+                f"No matching entry found for position path: {position_path}"
+            )
+
+        start_time = matched_rows["Start Time"].values[0]
+        end_time = matched_rows["End Time"].values[0]
 
         random_timestep = np.random.randint(start_time, end_time)
 
         reshaped_data = data[random_timestep]
         return reshaped_data
-    
+
+
 def get_transforms():
-    transforms = Compose([
-        RandAdjustContrastd(keys=['image'], prob=0.5, gamma=(0.5, 2.0)),
-        RandAffined(keys=['image'], prob=0.5, rotate_range=(0.2, 0.2), shear_range=(0.2, 0.2), scale_range=(0.2, 0.2)),
-        RandGaussianNoised(keys=['image'], prob=0.5, mean=0.0, std=0.1),
-        RandGaussianSmoothd(keys=['image'], prob=0.5, sigma_x=(0.5, 1.0), sigma_y=(0.5, 1.0), sigma_z=(0.5, 1.0)),
-        RandScaleIntensityd(keys=['image'], factors=(0.5, 2.0), prob=0.5),
-    ])
+    transforms = Compose(
+        [
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.5, 2.0)),
+            RandAffined(
+                keys=["image"],
+                prob=0.5,
+                rotate_range=(0.2, 0.2),
+                shear_range=(0.2, 0.2),
+                scale_range=(0.2, 0.2),
+            ),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.1),
+            RandGaussianSmoothd(
+                keys=["image"],
+                prob=0.5,
+                sigma_x=(0.5, 1.0),
+                sigma_y=(0.5, 1.0),
+                sigma_z=(0.5, 1.0),
+            ),
+            RandScaleIntensityd(keys=["image"], factors=(0.5, 2.0), prob=0.5),
+        ]
+    )
     return transforms
+
 
 class ContrastiveDataModule(pl.LightningDataModule):
     def __init__(
@@ -713,7 +755,7 @@ class ContrastiveDataModule(pl.LightningDataModule):
         batch_size: int = 4,
         num_workers: int = 8,
         z_range: tuple[int, int] = None,
-        transform=None
+        transform=None,
     ):
         super().__init__()
         self.base_path = Path(base_path)
@@ -741,19 +783,19 @@ class ContrastiveDataModule(pl.LightningDataModule):
             self.y,
             self.timesteps_csv_path,
             transform=self.transform,
-            z_range=self.z_range
+            z_range=self.z_range,
         )
 
         train_size = int(len(dataset) * self.train_split_ratio)
         val_size = int(len(dataset) * self.val_split_ratio)
         test_size = len(dataset) - train_size - val_size
 
-        self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
-            dataset, [train_size, val_size, test_size]
+        self.train_dataset, self.val_dataset, self.test_dataset = (
+            torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
         )
 
         # setup prediction dataset (if needed)
-        if stage == 'predict' and self.predict_base_path:
+        if stage == "predict" and self.predict_base_path:
             self.predict_dataset = ContrastiveDataset(
                 self.predict_base_path,
                 self.channels,
@@ -761,20 +803,41 @@ class ContrastiveDataModule(pl.LightningDataModule):
                 self.y,
                 self.timesteps_csv_path,
                 transform=self.transform,
-                z_range=self.z_range
+                z_range=self.z_range,
             )
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True, num_workers=self.num_workers)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=True,
+            num_workers=self.num_workers,
+        )
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def test_dataloader(self):
-        return DataLoader(self.test_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
+        return DataLoader(
+            self.test_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
 
     def predict_dataloader(self):
         if self.predict_dataset is None:
-            raise ValueError("Predict dataset not set up. Call setup(stage='predict') first.")
-        return DataLoader(self.predict_dataset, batch_size=self.batch_size, shuffle=False, num_workers=self.num_workers)
-
+            raise ValueError(
+                "Predict dataset not set up. Call setup(stage='predict') first."
+            )
+        return DataLoader(
+            self.predict_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            num_workers=self.num_workers,
+        )
