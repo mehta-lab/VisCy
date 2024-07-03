@@ -25,7 +25,6 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
-from torchvision.models import resnet18
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
@@ -33,7 +32,7 @@ from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
-from viscy.unet.networks.embedding import ContrastiveConvNext
+from viscy.representation.contrastive import ContrastiveEncoder
 
 try:
     from cellpose.models import CellposeModel
@@ -507,7 +506,7 @@ class ContrastiveLearningModel(LightningModule):
         self.validation_losses = []
         self.validation_step_outputs = []
 
-        self.model = ContrastiveConvNext(
+        self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
