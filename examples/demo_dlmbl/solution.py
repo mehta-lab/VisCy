@@ -1,64 +1,59 @@
 # %% [markdown]
 """
-# Image translation
+# Image translation (Virtual Staining)
 ---
 
 ### Overview
 In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will _virtually stain_ the nuclei and membrane visible in the phase image.  
+Additionally, we will apply the inverse process of predicting a phase image from a fluorescence membrane label.
 
-### Goal
+### Goals
 - Here, the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density). 
 - The goal is to learn a mapping from the source domain to the target domain. We will use a _purely convolutional architecture_ that draws on the design principles of transformer models. 
-- Here we will use a UNeXt2, an efficient image translation architecture inspired by ConvNeXt v2, SparK. UNeXt2.  
+- Here we will use a UNeXt2, an efficient image translation architecture inspired by ConvNeXt v2, SparK.  
 - We will perform the preprocessing, training, prediction, evaluation, and deployment steps that are unified in a computer vision pipeline for single-cell analysis in our pipeline called [VisCy](https://github.com/mehta-lab/VisCy).  
+- We will train a 2D image translation model using a 2D-Unet with residual connections. We will use a dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549), each FOV has 3 channels (phase, nuclei, and cell membrane). The nuclei were stained with DAPI and the cell membrane with Cellmask.![](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/svideo_1.png)
+- The last exercise is trying out the inverse going from fluorescence to label-free.
+![](https://github.com/mehta-lab/VisCy/blob/main/docs/figures/svideo_1.png)
 
 
-We will train a 2D image translation model using a 2D U-Net with residual connections. We will use a dataset of 301 fields of view (FOVs) of Human Embryonic Kidney (HEK) cells, each FOV has 3 channels (phase, membrane, and nuclei). The cells were labeled with CRISPR editing. Intrestingly, not all cells during this experiment were labeled due to the stochastic nature of CRISPR editing. In such situations, virtual staining rescues missing labels.
-![HEK](https://github.com/mehta-lab/VisCy/blob/dlmbl2023/docs/figures/phase_to_nuclei_membrane.svg?raw=true)
+📖 As you work through parts 2 and 3, please share the layouts of your models (output of torchview) and their performance with everyone via [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing) 📖.
 
-# Extra information
----
-Written by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.  
-  
-VisCy evolved from our previous work on virtual staining of cellular components from their density and anisotropy.
-![](https://iiif.elifesciences.org/lax/55502%2Felife-55502-fig1-v2.tif/full/1500,/0/default.jpg)
+Our guesstimate is that each of the three parts will take ~1.5 hours. A reasonable 2D UNet can be trained in ~30 min on a typical AWS node. 
+
+The focus of the exercise is on understanding information content of the data, how to train and evaluate 2D image translation model, and explore some hyperparameters of the model. If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
+
+
+Checkout VisCy!! Our deep learning pipeline for training and deploying computer vision models for image-based phenotyping in including the robust virtual staining of landmark organelles.
+VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). 
 
 ## References
 ---
-[Liu,Z. and Hirata-Miyasaki,E. et al.(2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v1.full.pdf)  
+- [Liu,Z. and Hirata-Miyasaki,E. et al.(2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v2.full.pdf)  
 
-[Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning
-. eLife](https://elifesciences.org/articles/55502).  
+- [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning
+. eLife](https://elifesciences.org/articles/55502).    
 
-VisCy exploits recent advances in the data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/). 
+
+Written by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, CZ Biohub San Francisco.  
 
 """
-
 # %% [markdown]
 """
 <div class="alert alert-warning">
-The exercise is organized in 3 parts.
+The exercise is organized in 3 parts + Extra part.
 
-* **Part 1** - Explore the data using tensorboard. Launch the training before lunch.
-* Lunch break - The model will continue training during lunch.
-* **Part 2** - Evaluate the training with tensorboard. Train another model.
-* **Part 3** - Tune the models to improve performance.
+* **Part 1** - Explore the data using tensorboard.Explore augmentations. Train a phase to fluroesence model.
+* **Part 2** - Evaluate the training with tensorboard. Evaluate the trained model.
+* **Part 3** - Train the fluorescence to phase model. 
+* **Extra task** - Tune the models to improve performance.
+
 </div>
 """
 # %% [markdown]
 """
-📖 As you work through parts 2 and 3, please share the layouts of your models (output of torchview) and their performance with everyone via [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z) 📖.
-
-
-Our guesstimate is that each of the three parts will take ~1.5 hours. A reasonable 2D UNet can be trained in ~20 min on a typical AWS node. 
-We will discuss your observations on google doc after checkpoints 2 and 3.
-
-The focus of the exercise is on understanding information content of the data, how to train and evaluate 2D image translation model, and explore some hyperparameters of the model. If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
-"""
-# %% [markdown]
-"""
 <div class="alert alert-danger">
-Set your python kernel to <span style="color:black;">04_image_translation</span>
+Set your python kernel to <span style="color:black;">06_image_translation</span>
 </div>
 """
 # %% <a [markdown] id='1_phase2fluor'></a>
@@ -103,21 +98,23 @@ from viscy.transforms import (
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
-    RandWeightedCropd,
+    RandWeightedCropd, 
+    NormalizeSampled
 )
 
 # Trainer class and UNet.
-from viscy.light.engine import VSUNet
+from viscy.light.engine import VSUNet,MixedLoss
 from viscy.light.trainer import VSTrainer
 
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-data_path = Path(
-    Path("~/data/04_image_translation/HEK_nuclei_membrane_pyramid.zarr/")
-).expanduser()
+# data_path = Path(
+#     Path("~/data/06_image_translation/HEK_nuclei_membrane_pyramid.zarr/")
+# ).expanduser()
 
-log_dir = Path("~/data/04_image_translation/logs/").expanduser()
+data_path = Path("/hpc/projects/comp.micro/virtual_staining/datasets/training/a549-hoechst-cellmask-20x/a549_hoechst_cellmask_train_val.zarr")
+log_dir = Path("~/mydata/tmp/06_image_translation/logs/").expanduser()
 
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -150,7 +147,6 @@ specified by the Open Microscopy Environment Next Generation File Format
 (OME-NGFF).
 
 The layout on the disk is: row/col/field/pyramid_level/timepoint/channel/z/y/x.
-Notice that labelling of nuclei channel is not complete - some cells are not expressing the fluorescent protein.
 """
 
 # %%
@@ -194,7 +190,7 @@ plt.tight_layout()
 #
 # ### Task 1.1
 #
-# Look at a couple different fields of view by changing the value in the cell above. See if you notice any missing or inconsistent staining.
+# Look at a couple different fields of view by changing the value in the cell above. Check the cell density, the cell morphologies, and fluorescence signal.
 # </div>
 
 # %% [markdown]
@@ -314,25 +310,26 @@ def log_batch_jupyter(batch):
 
 
 # %%
-
 # Initialize the data module.
 
-BATCH_SIZE = 4
-# 42 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
+BATCH_SIZE = 6
+
+# 6 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
 # More seriously, batch size does not have to be a power of 2.
 # See: https://sebastianraschka.com/blog/2022/batch-size-2.html
 
 data_module = HCSDataModule(
     data_path,
-    source_channel="Phase",
-    target_channel=["Membrane", "Nuclei"],
     z_window_size=1,
+    architecture='fcmae',
+    source_channel=["Phase3D"],
+    target_channel=['Nucl','Mem'],
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=8,
-    architecture="2D",
-    yx_patch_size=(512, 512),  # larger patch size makes it easy to see augmentations.
-    augmentations=None,  # Turn off augmentation for now.
+    yx_patch_size=(256, 256),  # larger patch size makes it easy to see augmentations.
+    augmentations=[],  # Turn off augmentation for now.
+    normalizations=[],  #Turn off normalization for now.
 )
 data_module.setup("fit")
 
@@ -363,23 +360,43 @@ log_batch_jupyter(batch)
 """
 # %%
 # Here we turn on data augmentation and rerun setup
+source_channel= ['Phase3D']
+target_channel=['Nucl','Mem']
+
 augmentations = [
     RandWeightedCropd(
-        keys=["Phase", "Membrane", "Nuclei"], w_key="Nuclei", spatial_size=[512, 512]
+        keys=source_channel + target_channel,
+        spatial_size=(1, 384, 384),
+        num_samples=2,
+        w_key=target_channel[0],
     ),
     RandAffined(
-        keys=["Phase", "Membrane", "Nuclei"],
-        prob=0.5,
+        keys=source_channel + target_channel,
         rotate_range=[3.14, 0.0, 0.0],
-        shear_range=[0.0, 0.05, 0.05],
         scale_range=[0.0, 0.3, 0.3],
+        prob=0.8,
+        padding_mode="zeros",
+        shear_range=[0.0, 0.01, 0.01],
     ),
-    RandAdjustContrastd(keys=["Phase"], prob=0.3, gamma=[0.5, 1.5]),
-    RandScaleIntensityd(keys=["Phase"], prob=0.5, factors=0.5),
-    RandGaussianNoised(keys=["Phase"], prob=0.5, std=1),
+    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
+    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
+    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
     RandGaussianSmoothd(
-        keys=["Phase"], prob=0.5, sigma_x=[0.25, 1.5], sigma_y=[0.25, 1.5]
+        keys=source_channel,
+        sigma_x=(0.25, 0.75),
+        sigma_y=(0.25, 0.75),
+        sigma_z=(0.0, 0.0),
+        prob=0.5,
     ),
+]
+
+normalizations=[
+    NormalizeSampled(
+        keys=source_channel+target_channel,
+        level="fov_statistics",
+        subtrahend="median",
+        divisor="std",
+    )
 ]
 
 data_module.augmentations = augmentations
@@ -405,7 +422,8 @@ log_batch_jupyter(augmented_batch)
 #
 # ### Task 1.3
 # Can you tell what augmentation were applied from looking at the augmented images in Tensorboard?
-#
+# Why are these augmentations important? How do can they make the model more robust?
+
 # Check your answer using the source code [here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
 # </div>
 
@@ -420,27 +438,51 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` ([source code](https://github.com/meht
 # Create a 2D UNet.
 GPU_ID = 0
 BATCH_SIZE = 10
-YX_PATCH_SIZE = (512, 512)
+YX_PATCH_SIZE = (256, 256)
 
 
 # Dictionary that specifies key parameters of the model.
-phase2fluor_config = {
-    "architecture": "2D",
-    "num_filters": [24, 48, 96, 192, 384],
-    "in_channels": 1,
-    "out_channels": 2,
-    "residual": True,
-    "dropout": 0.1,  # dropout randomly turns off weights to avoid overfitting of the model to data.
-    "task": "reg",  # reg = regression task.
-}
+# phase2fluor_config=dict(
+#     in_channels=1,
+#     out_channels=2,
+#     encoder_blocks=[3, 3, 9, 3],
+#     dims=[96, 192, 384, 768],
+#     decoder_conv_blocks=2,
+#     stem_kernel_size=(1, 2, 2),
+#     in_stack_depth=1,
+#     pretraining=False,
+# )
+
+# phase2fluor_model = VSUNet(
+#     architecture='fcmae',
+#     model_config=phase2fluor_config.copy(),
+#     loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
+#     schedule="WarmupCosine",
+#     lr=2e-4,
+#     log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
+#     freeze_encoder=False,
+# )
+phase2fluor_config=dict(
+            in_channels=1,
+            out_channels=2,
+            in_stack_depth=1,
+            backbone="convnextv2_tiny",
+            pretrained=False,
+            stem_kernel_size=[1, 4, 4],
+            decoder_mode="pixelshuffle",
+            decoder_conv_blocks=2,
+            head_pool=True,
+            head_expansion_ratio=4,
+            drop_path_rate=0.0,
+        )
 
 phase2fluor_model = VSUNet(
+    architecture='UNeXt2',
     model_config=phase2fluor_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.l1_loss,
+    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     schedule="WarmupCosine",
-    log_num_samples=5,  # Number of samples from each batch to log to tensorboard.
-    example_input_yx_shape=YX_PATCH_SIZE,
+    lr=2e-4,
+    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
 )
 
 
@@ -452,15 +494,16 @@ phase2fluor_model = VSUNet(
 # Setup the data module.
 phase2fluor_data = HCSDataModule(
     data_path,
-    source_channel="Phase",
-    target_channel=["Membrane", "Nuclei"],
+    architecture="UNeXt2",
+    source_channel=["Phase3D"],
+    target_channel=["Nucl", "Mem"],
     z_window_size=1,
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=8,
-    architecture="2D",
     yx_patch_size=YX_PATCH_SIZE,
     augmentations=augmentations,
+    normalizations=normalizations
 )
 phase2fluor_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
@@ -486,9 +529,11 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 # visualize graph of phase2fluor model as image.
 model_graph_phase2fluor = torchview.draw_graph(
     phase2fluor_model,
-    phase2fluor_data.train_dataset[0]["source"],
-    depth=2,  # adjust depth to zoom in.
+    phase2fluor_data.train_dataset[0]["source"][0].unsqueeze(dim=0),
+    roll=True,
+    depth=3,  # adjust depth to zoom in.
     device="cpu",
+    expand_nested=True,
 )
 # Print the image of the model.
 model_graph_phase2fluor.visual_graph
@@ -575,18 +620,20 @@ For each of the above metrics, write a brief definition of what they are and wha
 # - Structural similarity:
 
 # %% Compute metrics directly and plot here.
-test_data_path = Path(
-    "~/data/04_image_translation/HEK_nuclei_membrane_test.zarr"
-).expanduser()
+# test_data_path = Path(
+#     "~/data/06_image_translation/HEK_nuclei_membrane_test.zarr"
+# ).expanduser()
 
+#TODO: replace this path with relative_test_dataset uncommenting above.
+test_data_path = Path("/hpc/projects/comp.micro/virtual_staining/datasets/test/cell_types_20x/a549_sliced/a549_hoechst_cellmask_test.zarr")
 test_data = HCSDataModule(
     test_data_path,
-    source_channel="Phase",
-    target_channel=["Membrane", "Nuclei"],
+    source_channel=source_channel,
+    target_channel=target_channel,
     z_window_size=1,
     batch_size=1,
     num_workers=8,
-    architecture="2D",
+    architecture="UNeXt2",
 )
 test_data.setup("test")
 
@@ -633,7 +680,37 @@ test_metrics.boxplot(
     column=["pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"],
     rot=30,
 )
+#%%
+#Plot the predicted image
+channel_titles=['Phase','VS Nuclei','VS Membrane']
+fig,axes = plt.subplots(1,3,figsize=(12,4))
 
+channel_image=phase_image[0,0]
+p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+channel_image = np.clip(channel_image, p_low, p_high)
+axes[0].imshow(channel_image)
+axes[0].axis("off")
+axes[0].set_title(channel_titles[0])
+
+for i in range(predicted_image.shape[-4]):
+    # Adjust contrast to 0.5th and 99.5th percentile of pixel values.
+    channel_image = predicted_image[i,0]
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, 0, p_high)
+    axes[i+1].imshow(channel_image, cmap="gray")
+    axes[i+1].axis("off")
+    axes[i+1].set_title(channel_titles[i+1])
+plt.tight_layout()
+#%%
+#Plot the target images
+fig,axes = plt.subplots(1,2,figsize=(10,10))
+for i in range(target_image.shape[-4]):
+    channel_image=target_image[i,0]
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[i].imshow(channel_image, cmap="gray")
+    axes[i].axis("off")
+    axes[i].set_title(dataset.channel_names[i])
 
 # %% [markdown] tags=[]
 """
@@ -685,41 +762,85 @@ model_graph_fluor2phase.visual_graph
 ##########################
 
 # The entire training loop is contained in this cell.
+source_channel=['Mem']  # or 'Nuc' depending on choice
+target_channel = ["Phase3D"]
 
+#Setup the new augmentations
+augmentations = [
+    RandWeightedCropd(
+        keys=source_channel + target_channel,
+        spatial_size=(1, 384, 384),
+        num_samples=2,
+        w_key=target_channel[0],
+    ),
+    RandAffined(
+        keys=source_channel + target_channel,
+        rotate_range=[3.14, 0.0, 0.0],
+        scale_range=[0.0, 0.3, 0.3],
+        prob=0.8,
+        padding_mode="zeros",
+        shear_range=[0.0, 0.01, 0.01],
+    ),
+    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
+    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
+    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
+    RandGaussianSmoothd(
+        keys=source_channel,
+        sigma_x=(0.25, 0.75),
+        sigma_y=(0.25, 0.75),
+        sigma_z=(0.0, 0.0),
+        prob=0.5,
+    ),
+]
+
+normalizations=[
+    NormalizeSampled(
+        keys=source_channel+target_channel,
+        level="fov_statistics",
+        subtrahend="median",
+        divisor="std",
+    )
+]
+
+#Setup the dataloader
 fluor2phase_data = HCSDataModule(
     data_path,
-    source_channel="Membrane",
-    target_channel="Phase",
+    architecture="UNeXt2",
+    source_channel=source_channel,
+    target_channel=target_channel,
     z_window_size=1,
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=8,
-    architecture="2D",
     yx_patch_size=YX_PATCH_SIZE,
     augmentations=augmentations,
+    normalizations=normalizations
 )
 fluor2phase_data.setup("fit")
 
 # Dictionary that specifies key parameters of the model.
-fluor2phase_config = {
-    "architecture": "2D",
-    "in_channels": 1,
-    "out_channels": 1,
-    "residual": True,
-    "dropout": 0.1,  # dropout randomly turns off weights to avoid overfitting of the model to data.
-    "task": "reg",  # reg = regression task.
-    "num_filters": [24, 48, 96, 192, 384],
-}
+fluor2phase_config = dict(
+            in_channels=1,
+            out_channels=2,
+            in_stack_depth=1,
+            backbone="convnextv2_tiny",
+            pretrained=False,
+            stem_kernel_size=[1, 4, 4],
+            decoder_mode="pixelshuffle",
+            decoder_conv_blocks=2,
+            head_pool=True,
+            head_expansion_ratio=4,
+            drop_path_rate=0.0,
+        )
 
 fluor2phase_model = VSUNet(
+    architecture='UNeXt2',
     model_config=fluor2phase_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.mse_loss,
+    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     schedule="WarmupCosine",
-    log_num_samples=5,
-    example_input_yx_shape=YX_PATCH_SIZE,
+    lr=2e-4,
+    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
 )
-
 
 trainer = VSTrainer(
     accelerator="gpu",
@@ -735,7 +856,7 @@ trainer = VSTrainer(
 )
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
-
+#%%
 # Visualize the graph of fluor2phase model as image.
 model_graph_fluor2phase = torchview.draw_graph(
     fluor2phase_model,
@@ -759,17 +880,17 @@ While your model is training, let's think about the following questions:
 """
 # %%
 test_data_path = Path(
-    "~/data/04_image_translation/HEK_nuclei_membrane_test.zarr"
+    "~/data/06_image_translation/HEK_nuclei_membrane_test.zarr"
 ).expanduser()
 
 test_data = HCSDataModule(
     test_data_path,
-    source_channel="Nuclei",  # or Membrane, depending on your choice of source
+    source_channel="Mem",  # or Nuc, depending on your choice of source
     target_channel="Phase",
     z_window_size=1,
     batch_size=1,
     num_workers=8,
-    architecture="2D",
+    architecture="UNeXt2",
 )
 test_data.setup("test")
 
@@ -816,7 +937,7 @@ test_metrics.boxplot(
 <div class="alert alert-success">
 
 ## Checkpoint 2
-When your model finishes training, please summarize hyperparameters and performance of your models in the [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+When your model finishes training, please summarize hyperparameters and performance of your models in the [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing)
 
 </div>
 """
@@ -842,7 +963,7 @@ Learning goals: Understand how data, model capacity, and training parameters con
 - Use training loop illustrated in previous cells to train phase2fluor and fluor2phase models to prototype your own training loop.
 - Add code to evaluate the model using Pearson Correlation and SSIM
 
-As your model is training, please document hyperparameters, snapshots of predictions on validation set, and loss curves for your models in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z)
+As your model is training, please document hyperparameters, snapshots of predictions on validation set, and loss curves for your models in [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing)
 
 </div>
 """
@@ -886,25 +1007,27 @@ model_graph_tune.visual_graph
 ##########################
 ######## Solution ########
 ##########################
+phase2fluor_config=dict(
+            in_channels=1,
+            out_channels=2,
+            in_stack_depth=1,
+            backbone="convnextv2_base",
+            pretrained=False,
+            stem_kernel_size=[1, 4, 4],
+            decoder_mode="pixelshuffle",
+            decoder_conv_blocks=2,
+            head_pool=True,
+            head_expansion_ratio=4,
+            drop_path_rate=0.0,
+        )
 
-phase2fluor_wider_config = {
-    "architecture": "2D",
-    # double the number of filters at each stage
-    "num_filters": [48, 96, 192, 384, 768],
-    "in_channels": 1,
-    "out_channels": 2,
-    "residual": True,
-    "dropout": 0.1,
-    "task": "reg",
-}
-
-phase2fluor_wider_model = VSUNet(
-    model_config=phase2fluor_wider_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.l1_loss,
+phase2fluor_model = VSUNet(
+    architecture='UNeXt2',
+    model_config=phase2fluor_config.copy(),
+    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     schedule="WarmupCosine",
-    log_num_samples=5,
-    example_input_yx_shape=YX_PATCH_SIZE,
+    lr=2e-4,
+    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
 )
 
 
@@ -916,28 +1039,26 @@ trainer = VSTrainer(
     logger=TensorBoardLogger(
         save_dir=log_dir,
         name="phase2fluor",
-        version="wider",
+        version="base_model",
         log_graph=True,
     ),
     fast_dev_run=True,
 )  # Set fast_dev_run to False to train the model.
-trainer.fit(phase2fluor_wider_model, datamodule=phase2fluor_data)
+trainer.fit(phase2fluor_model, datamodule=phase2fluor_data)
 
 # %% tags=["solution"]
 
 ##########################
 ######## Solution ########
 ##########################
-
 phase2fluor_slow_model = VSUNet(
+    architecture='UNeXt2',
     model_config=phase2fluor_config.copy(),
-    batch_size=BATCH_SIZE,
-    loss_function=torch.nn.functional.l1_loss,
-    # lower learning rate by 5 times
-    lr=2e-4,
+    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
+    # lower learning rate by 10 times
+    lr=2e-5,
     schedule="WarmupCosine",
-    log_num_samples=5,
-    example_input_yx_shape=YX_PATCH_SIZE,
+    log_batches_per_epoch=5,
 )
 
 trainer = VSTrainer(
@@ -963,6 +1084,8 @@ trainer.fit(phase2fluor_slow_model, datamodule=phase2fluor_data)
 ## Checkpoint 3
 
 Congratulations! You have trained several image translation models now!
-Please document hyperparameters, snapshots of predictions on validation set, and loss curves for your models and add the final perforance in [this google doc](https://docs.google.com/document/d/1hZWSVRvt9KJEdYu7ib-vFBqAVQRYL8cWaP_vFznu7D8/edit#heading=h.n5u485pmzv2z). We'll discuss our combined results as a group.
+Please document hyperparameters, snapshots of predictions on validation set, and loss curves for your models and add the final perforance in [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing). We'll discuss our combined results as a group.
 </div>
 """
+
+# %%
