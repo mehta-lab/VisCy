@@ -29,8 +29,8 @@ The dataset and model checkpoint files need to be downloaded before running this
 
 # %%
 # Download from
-# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSNeuromast/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr/
-input_data_path = "datasets/testing/VSNeuromast/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
+# https://public.czbiohub.org/comp.micro/viscy/VSNeuromast/test/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr/
+input_data_path = "VSNeuromast/test/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
 # Download from GitHub release page of v0.1.0
 model_ckpt_path = "VisCy-0.1.0-VS-models/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
 # Zarr store to save the predictions
