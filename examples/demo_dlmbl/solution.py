@@ -101,6 +101,7 @@ import torch
 import torchview
 import torchvision
 from iohub import open_ome_zarr
+from iohub.reader import print_info
 from lightning.pytorch import seed_everything
 from lightning.pytorch.loggers import CSVLogger, TensorBoardLogger
 from skimage import metrics  # for metrics.
@@ -130,12 +131,11 @@ from viscy.light.trainer import VSTrainer
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-# data_path = Path(
-#     Path("~/data/06_image_translation/HEK_nuclei_membrane_pyramid.zarr/")
-# ).expanduser()
+data_path = Path(
+    Path("~/data/06_image_translation/training/a549_hoechst_cellmask_train_val.zarr")
+).expanduser()
 
-data_path = Path("/hpc/projects/comp.micro/virtual_staining/datasets/training/a549-hoechst-cellmask-20x/a549_hoechst_cellmask_train_val.zarr")
-log_dir = Path("~/mydata/tmp/06_image_translation/logs/").expanduser()
+log_dir = Path("~/data/06_image_translation/logs/").expanduser()
 
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -170,15 +170,26 @@ specified by the Open Microscopy Environment Next Generation File Format
 The layout on the disk is: row/col/field/pyramid_level/timepoint/channel/z/y/x.
 """
 
-# %%
+# %%[markdown]
+"""
+You can inspect the tree structure by using your terminal:
+`iohub info -v <path-to-zarr>`  
+
+More info on the CLI:
+`iohub info -h` to see the help menu.
+"""
+#%%
+# This is the python function called by `iohub info` CLI command
+print_info(data_path,verbose=True)
+
+# Open and inspect the dataset. 
 dataset = open_ome_zarr(data_path)
 
-print(f"Number of positions: {len(list(dataset.positions()))}")
-
+#%%
 # Use the field and pyramid_level below to visualize data.
 row = 0
 col = 0
-field = 10  # TODO: Change this to explore data.
+field = 9  # TODO: Change this to explore data.
 
 # This dataset contains images at 3 resolutions.
 # '0' is the highest resolution
@@ -464,8 +475,8 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` ([source code](https://github.com/meht
 """
 # %%
 # Create a 2D UNet.
-GPU_ID = 0
-BATCH_SIZE = 2
+GPU_ID = 1
+BATCH_SIZE = 12
 YX_PATCH_SIZE = (256, 256)
 
 
@@ -554,7 +565,7 @@ Start training by running the following cell. Check the new logs on the tensorbo
 """
 
 # %%
-GPU_ID = 0
+GPU_ID = 1
 n_samples = len(phase2fluor_2D_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 n_epochs = 50  # Set this to 50 or the number of epochs you want to train for.
@@ -625,12 +636,10 @@ For each of the above metrics, write a brief definition of what they are and wha
 # - Structural similarity:
 
 # %% Compute metrics directly and plot here.
-# test_data_path = Path(
-#     "~/data/06_image_translation/HEK_nuclei_membrane_test.zarr"
-# ).expanduser()
+test_data_path = Path(
+    "~/data/06_image_translation/test/a549_hoechst_cellmask_test.zarr"
+).expanduser()
 
-#TODO: replace this path with relative_test_dataset uncommenting above.
-test_data_path = Path("/hpc/projects/comp.micro/virtual_staining/datasets/test/cell_types_20x/a549_sliced/a549_hoechst_cellmask_test.zarr")
 test_data = HCSDataModule(
     test_data_path,
     source_channel=source_channel,
@@ -888,7 +897,7 @@ While your model is training, let's think about the following questions:
 """
 # %%
 test_data_path = Path(
-    "~/data/06_image_translation/HEK_nuclei_membrane_test.zarr"
+    "~/data/06_image_translation/test/a549_hoechst_cellmask_test.zarr"
 ).expanduser()
 
 test_data = HCSDataModule(
@@ -1057,6 +1066,19 @@ trainer.fit(phase2fluor_model_low_lr, datamodule=phase2fluor_2D_data)
 ##########################
 ######## Solution ########
 ##########################
+"""
+You can download the file and place it in the data folder.
+https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/train/raw-and-reconstructed.zarr/
+
+You can run the following shell script:
+```
+cd ~/data/hek3d/training
+# Download the Zarr dataset recursively (if the server supports it)
+wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/train/raw-and-reconstructed.zarr/"
+```
+
+"""
+
 data_path = Path() #TODO: Point to a 3D dataset (HEK, Neuromast)
 BATCH_SIZE = 4
 YX_PATCH_SIZE = (384, 384)
