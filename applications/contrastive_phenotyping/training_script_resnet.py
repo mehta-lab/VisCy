@@ -1,7 +1,6 @@
 # %% Imports and paths.
 import os
 import torch
-# add path
 from viscy.light.engine import ContrastiveModule
 from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.representation.contrastive import ContrastiveEncoder
