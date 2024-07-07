@@ -4,7 +4,6 @@ from viscy.unet.networks.unext2 import UNeXt2Stem
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
@@ -42,7 +41,7 @@ class ContrastiveEncoder(nn.Module):
             num_classes=4 * embedding_len,
         )
 
-        if "convnext" in backbone:
+        if "convnext_tiny" in backbone:
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
             in_channels_encoder = self.model.stem[0].out_channels
             stem = UNeXt2Stem(
