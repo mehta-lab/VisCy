@@ -4,9 +4,14 @@ from typing import Literal, Sequence, Union
 
 import numpy as np
 import torch
-
+import wandb
 from imageio import imwrite
-from lightning.pytorch import LightningModule
+#from lightning.pytorch import LightningModule
+#from lightning import LightningModule
+from torch.optim import Adam
+
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer
+
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad
@@ -83,7 +88,6 @@ class MixedLoss(nn.Module):
             # since the MS-SSIM here is stabilized with ReLU
             loss += (1 - ms_ssim) * self.ms_dssim_alpha
         return loss
-
 
 class VSUNet(LightningModule):
     """Regression U-Net module for virtual staining.
@@ -462,24 +466,12 @@ class FcmaeUNet(VSUNet):
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
 
-
 class ContrastiveModule(LightningModule):
-    """Contrastive Learning Model for self-supervised learning.
-
-    :param string backbone: Neural network backbone, defaults to convnext_tiny
-    :param nn.Module loss_function: Loss function for training, defaults to TripletMarginLoss
-    :param float margin: Margin for triplet loss, defaults to 0.5
-    :param float lr: Learning rate for optimizer, defaults to 1e-3
-    :param Literal['WarmupCosine', 'Constant'] schedule: Learning rate scheduler, defaults to "Constant"
-    :param int log_batches_per_epoch: Number of batches to log each training epoch, defaults to 8
-    :param int log_samples_per_batch: Number of samples to log each training batch, defaults to 1
-    :param Sequence[int] example_input_yx_shape: XY shape of the example input for network graph tracing, defaults to (256, 256)
-    :param int z_slices: Number of slices in the input stack, defaults to 5
-    """
+    """Contrastive Learning Model for self-supervised learning."""
 
     def __init__(
         self,
-        backbone: str = "convnext_tiny",  # convnexts are newer "ResNets" informed by vision transformers.
+        backbone: str = "convnext_tiny",
         loss_function: Union[
             nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
         ] = nn.TripletMarginLoss(),
@@ -490,7 +482,7 @@ class ContrastiveModule(LightningModule):
         log_samples_per_batch: int = 1,
         in_channels: int = 2,
         example_input_yx_shape: Sequence[int] = (256, 256),
-        in_stack_depth: int = 15,  # number of slices in the input stack
+        in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
     ) -> None:
@@ -503,8 +495,8 @@ class ContrastiveModule(LightningModule):
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
         self.training_step_outputs = []
-        self.validation_losses = []
         self.validation_step_outputs = []
+        self.test_step_outputs = []
 
         self.encoder = ContrastiveEncoder(
             backbone=backbone,
@@ -523,29 +515,41 @@ class ContrastiveModule(LightningModule):
         )
 
     def forward(self, x: Tensor) -> Tensor:
-        """Forward pass of the model.
-
-        :param Tensor x: Input tensor (batch size, channels, depth, height, width)
-        :return: Projected features
-        :rtype: Tensor
-        """
+        """Forward pass of the model."""
         projections = self.encoder(x)
         return projections
+
+    def log_images(self, anchor, positive, negative, step_name, step_idx, epoch):
+        #  middle z-slice
+        z_idx = 7
+        
+        # 7th z-slice from both channels for the first sample
+        anchor_img_channel1 = anchor[0, 0, z_idx, :, :].cpu().numpy()
+        anchor_img_channel2 = anchor[0, 1, z_idx, :, :].cpu().numpy()
+        positive_img_channel1 = positive[0, 0, z_idx, :, :].cpu().numpy()
+        positive_img_channel2 = positive[0, 1, z_idx, :, :].cpu().numpy()
+        negative_img_channel1 = negative[0, 0, z_idx, :, :].cpu().numpy()
+        negative_img_channel2 = negative[0, 1, z_idx, :, :].cpu().numpy()
+
+        images = {
+            f"{step_name}/anchor_channel1_epoch{epoch}_{step_idx}": wandb.Image(anchor_img_channel1),
+            f"{step_name}/anchor_channel2_epoch{epoch}_{step_idx}": wandb.Image(anchor_img_channel2),
+            f"{step_name}/positive_channel1_epoch{epoch}_{step_idx}": wandb.Image(positive_img_channel1),
+            f"{step_name}/positive_channel2_epoch{epoch}_{step_idx}": wandb.Image(positive_img_channel2),
+            f"{step_name}/negative_channel1_epoch{epoch}_{step_idx}": wandb.Image(negative_img_channel1),
+            f"{step_name}/negative_channel2_epoch{epoch}_{step_idx}": wandb.Image(negative_img_channel2),
+        }
+
+        self.logger.experiment.log(images)
 
     def training_step(
         self,
         batch: tuple[Tensor],
         batch_idx: int,
     ) -> Tensor:
-        """Training step of the model.
+        """Training step of the model."""
 
-        :param tuple[Tensor] batch: Input batch of images and positive images
-        :param int batch_idx: Batch index
-        :return: Loss value
-        :rtype: Tensor
-        """
-
-        if self.loss_function.__name__ == "TripletMarginLoss":
+        if isinstance(self.loss_function, nn.TripletMarginLoss):
             anchor, pos_img, neg_img = batch
             emb_anchor = self.encoder(anchor)
             emb_pos = self.encoder(pos_img)
@@ -557,14 +561,84 @@ class ContrastiveModule(LightningModule):
             emb_pos = self.encoder(pos_img)
             loss = self.loss_function(emb_anchor, emb_pos)
 
-        self.log("train_loss", loss)
-        return loss
+        self.log("train/loss", loss, on_step=True, prog_bar=True, logger=True)
+        
+        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+            self.log_images(anchor, pos_img, neg_img, "train", batch_idx, self.current_epoch)
 
-    def configure_optimizers(self) -> torch.optim.Optimizer:
-        """Configure the optimizer for training.
+        self.training_step_outputs.append(loss)
+        return {'loss': loss}
 
-        :return: Optimizer
-        :rtype: torch.optim.Optimizer
-        """
-        optimizer = torch.optim.Adam(self.parameters(), lr=1e-3)
+    def on_train_epoch_end(self) -> None:
+        epoch_loss = torch.stack(self.training_step_outputs).mean()
+        self.log("train/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.training_step_outputs.clear()  
+
+    def validation_step(
+        self,
+        batch: tuple[Tensor],
+        batch_idx: int,
+    ) -> Tensor:
+        """Validation step of the model."""
+
+        if isinstance(self.loss_function, nn.TripletMarginLoss):
+            anchor, pos_img, neg_img = batch
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
+            emb_neg = self.encoder(neg_img)
+            loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        else:
+            anchor, pos_img = batch
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
+            loss = self.loss_function(emb_anchor, emb_pos)
+
+        self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
+
+        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+            self.log_images(anchor, pos_img, neg_img, "validation", batch_idx, self.current_epoch)
+
+        self.validation_step_outputs.append(loss)
+        return {'loss': loss}
+    
+    def on_validation_epoch_end(self) -> None:
+        epoch_loss = torch.stack(self.validation_step_outputs).mean()
+        self.log("val/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.validation_step_outputs.clear()  
+
+    def test_step(
+        self,
+        batch: tuple[Tensor],
+        batch_idx: int,
+    ) -> Tensor:
+        """Test step of the model."""
+
+        if isinstance(self.loss_function, nn.TripletMarginLoss):
+            anchor, pos_img, neg_img = batch
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
+            emb_neg = self.encoder(neg_img)
+            loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        else:
+            anchor, pos_img = batch
+            emb_anchor = self.encoder(anchor)
+            emb_pos = self.encoder(pos_img)
+            loss = self.loss_function(emb_anchor, emb_pos)
+        
+        self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
+
+        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+            self.log_images(anchor, pos_img, neg_img, "test", batch_idx, self.current_epoch)
+
+        self.test_step_outputs.append(loss)
+        return {'loss': loss}
+
+    def on_test_epoch_end(self) -> None:
+        epoch_loss = torch.stack(self.test_step_outputs).mean()
+        self.log("test/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
+        self.test_step_outputs.clear()  
+
+    def configure_optimizers(self):
+        optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
+
