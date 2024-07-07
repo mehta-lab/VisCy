@@ -6,14 +6,14 @@ import tempfile
 from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
-import pytorch_lightning as pl
+#import pytorch_lightning as pl
 
 import numpy as np
 import torch
 import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-from lightning.pytorch import LightningDataModule
+#from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
@@ -23,11 +23,32 @@ from monai.transforms import (
     MultiSampleTrait,
     RandAffined,
 )
+
+
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
 
+import random
+from viscy.transforms import (
+    RandAdjustContrastd,
+    RandAffined,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandScaleIntensityd,
+)
+from monai.transforms import Compose
+from iohub import open_ome_zarr
+import pandas as pd
+import warnings
+from lightning.pytorch import LightningDataModule, LightningModule, Trainer
+
+
+# from viscy.data.typing import Optional
+from pathlib import Path
+
+warnings.filterwarnings("ignore")
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
@@ -610,7 +631,7 @@ class ContrastiveDataset(Dataset):
         print(f"Initialized dataset with {len(self.positions)} positions.")
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
-        print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
+        #print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
 
     def __len__(self):
@@ -625,8 +646,8 @@ class ContrastiveDataset(Dataset):
             if self.transform
             else anchor_data
         )
-        if self.transform:
-            print("Positive transformation applied")
+        # if self.transform:
+        #     print("Positive transformation applied")
 
         negative_idx = idx
         while negative_idx == idx:
@@ -639,13 +660,13 @@ class ContrastiveDataset(Dataset):
             if self.transform
             else negative_data
         )
-        if self.transform:
-            print("Negative transformation applied")
+        # if self.transform:
+        #     print("Negative transformation applied")
 
-        print("shapes of tensors")
-        print(torch.tensor(anchor_data).shape)
-        print(torch.tensor(positive_data).shape)
-        print(torch.tensor(negative_data).shape)
+        # print("shapes of tensors")
+        # print(torch.tensor(anchor_data).shape)
+        # print(torch.tensor(positive_data).shape)
+        # print(torch.tensor(negative_data).shape)
         return (
             torch.tensor(anchor_data),
             torch.tensor(positive_data),
@@ -654,13 +675,13 @@ class ContrastiveDataset(Dataset):
 
     def load_data(self, position_path):
         position = self.ds[position_path]
-        print(f"Loading data from position: {position_path}")
+        # print(f"Loading data from position: {position_path}")
         zarr_array = position["0"][:]
-        print("Shape before:", zarr_array.shape)
+        # print("Shape before:", zarr_array.shape)
         data = self.restructure_data(zarr_array, position_path)
         if self.z_range:
             data = data[:, self.z_range[0] : self.z_range[1], :, :]
-        print("Shape after:", data.shape)
+        # print("Shape after:", data.shape)
         return data
 
     def restructure_data(self, data, position_path):
@@ -700,29 +721,28 @@ class ContrastiveDataset(Dataset):
 def get_transforms():
     transforms = Compose(
         [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.5, 2.0)),
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.8, 1.2)),
             RandAffined(
                 keys=["image"],
                 prob=0.5,
-                rotate_range=(0.2, 0.2),
-                shear_range=(0.2, 0.2),
-                scale_range=(0.2, 0.2),
+                rotate_range=(0.1, 0.1),
+                shear_range=(0.1, 0.1),
+                scale_range=(0.1, 0.1),
             ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.1),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.05),
             RandGaussianSmoothd(
                 keys=["image"],
                 prob=0.5,
-                sigma_x=(0.5, 1.0),
-                sigma_y=(0.5, 1.0),
-                sigma_z=(0.5, 1.0),
+                sigma_x=(0.1, 0.5),
+                sigma_y=(0.1, 0.5),
+                sigma_z=(0.1, 0.5),
             ),
-            RandScaleIntensityd(keys=["image"], factors=(0.5, 2.0), prob=0.5),
+            RandScaleIntensityd(keys=["image"], factors=(0.8, 1.2), prob=0.5),
         ]
     )
     return transforms
 
-
-class ContrastiveDataModule(pl.LightningDataModule):
+class ContrastiveDataModule(LightningDataModule):
     def __init__(
         self,
         base_path: str,
@@ -793,6 +813,8 @@ class ContrastiveDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
+            prefetch_factor=2,  
+            persistent_workers=True  
         )
 
     def val_dataloader(self):
@@ -801,6 +823,8 @@ class ContrastiveDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            prefetch_factor=2,  
+            persistent_workers=True  
         )
 
     def test_dataloader(self):
@@ -809,6 +833,8 @@ class ContrastiveDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            prefetch_factor=2,  
+            persistent_workers=True  
         )
 
     def predict_dataloader(self):
@@ -821,4 +847,6 @@ class ContrastiveDataModule(pl.LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
+            prefetch_factor=2,  
+            persistent_workers=True  
         )
