@@ -8,7 +8,7 @@ import wandb
 from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
-os.environ["WANDB_DIR"] = f"/hpc/mydata/{os.environ['USER']}/wandb_logs/"
+os.environ["WANDB_DIR"] = f"/hpc/mydata/{os.environ['USER']}/"
 data_on_lustre = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
 data_on_vast = Path("/hpc/projects/virtual_staining/viral_sensor_test_dataio/")
 wandb.init(project="contrastive_model", entity="alishba_imran-CZ Biohub")
@@ -101,10 +101,13 @@ def profile_dataio(top_dir, num_epochs=1):
 
 
 # %% Testing the data i/o with data stored on Vast
+print("Profiling data i/o with data stored on VAST \n ------- \n")
 profile_dataio(data_on_vast)
 
 
 # %%  Testing the data i/o with data stored on Lustre
+print("Profiling data i/o with data stored on Lustre\n ------- \n")
+
 profile_dataio(data_on_lustre)
 
 # %%
