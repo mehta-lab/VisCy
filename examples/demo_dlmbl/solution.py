@@ -9,7 +9,7 @@
     <div style="text-align: center;">
         <br><br>
         <figure>
-            <a href="https://github-production-user-asset-6210df.s3.amazonaws.com/67518483/343891935-d53a81eb-eb37-44f3-b522-8bd7bddc7755.mp4?X-Amz-Algorithm=AWS4-HMAC-SHA256&X-Amz-Credential=AKIAVCODYLSA53PQK4ZA%2F20240705%2Fus-east-1%2Fs3%2Faws4_request&X-Amz-Date=20240705T004603Z&X-Amz-Expires=300&X-Amz-Signature=8fa0e0f15e8925c8c1bbafa6d5531c4c3a725a677df82ba780097747cbdc993d&X-Amz-SignedHeaders=host&actor_id=10470962&key_id=0&repo_id=647381053" target="_blank">
+            <a href="https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755" target="_blank">
                 <img src="https://raw.githubusercontent.com/mehta-lab/VisCy/main/docs/figures/svideo_1.png" alt="Virtual Staining" style="width:800px;"/>
             </a>
             <figcaption>(click image to play)</figcaption>
@@ -132,10 +132,13 @@ from viscy.light.trainer import VSTrainer
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-top_dir = Path(f"/hpc/mydata/{os.environ['USER']},data/")
+top_dir = Path(f"/hpc/mydata/{os.environ['USER']},data/") #TODO: Change this to point to your data directory.
 data_path = top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
 log_dir = top_dir / "06_image_translation/logs/"
 
+if not data_path.exists():
+    raise FileNotFoundError(f"Data not found at {data_path}. Please check the top_dir and data_path variables.")
+#%%
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
 
