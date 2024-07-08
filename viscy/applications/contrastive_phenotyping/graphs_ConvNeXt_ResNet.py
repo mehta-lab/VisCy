@@ -1,15 +1,9 @@
 # %% Imports and paths.
 import os
 import torch
-from viscy.light.engine import ContrastiveModule
-from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.representation.contrastive import ContrastiveEncoder
-from pathlib import Path
 import torchview
 
-top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
-input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/patch_final.zarr"
-model_dir = top_dir / "infection_classification/models/infection_score"
 
 %load_ext autoreload
 %autoreload 2
@@ -23,6 +17,7 @@ model_graph = torchview.draw_graph(
     device="cpu",
 )
 # Print the image of the model.
+model_graph.resize_graph(scale=2.5)
 model_graph.visual_graph
 
 # %% Initialize a resent50 model and log the graph.
@@ -52,11 +47,6 @@ model_graph = torchview.draw_graph(
 )
 # Print the image of the model.
 model_graph.visual_graph
-
-# %% Initialize the data module and view the data.
-
-# %% Train the model.
-
 
 # %% Playground
 import timm

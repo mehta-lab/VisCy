@@ -1,8 +1,11 @@
 import timm
 import torch.nn as nn
 
-from viscy.unet.networks.resnet import resnetStem
+# from viscy.unet.networks.resnet import resnetStem
+# Currently identical to resnetStem, but could be different in the future.
+
 from viscy.unet.networks.unext2 import UNeXt2Stem
+
 
 class ContrastiveEncoder(nn.Module):
     def __init__(
@@ -88,7 +91,7 @@ class ContrastiveEncoder(nn.Module):
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
             in_channels_encoder = self.model.conv1.out_channels
-            stem = resnetStem(
+            stem = UNeXt2Stem(
                 in_channels=in_channels,
                 out_channels=in_channels_encoder,
                 kernel_size=stem_kernel_size,

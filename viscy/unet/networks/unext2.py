@@ -65,7 +65,7 @@ def _get_convnext_stage(
 
 
 class UNeXt2Stem(nn.Module):
-    """Stem for UNeXt2 networks."""
+    """Stem for UNeXt2 and ContrastiveEncoder networks."""
 
     def __init__(
         self,

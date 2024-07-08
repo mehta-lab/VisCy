@@ -4,6 +4,8 @@ from torch import Tensor, nn
 class resnetStem(nn.Module):
     """Stem for ResNet networks to handle 3D multi-channel input."""
 
+    # Currently identical to UNeXt2Stem, but could be different in the future. This module is unused for now.
+
     def __init__(
         self,
         in_channels: int,
