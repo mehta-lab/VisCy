@@ -28,9 +28,6 @@ def profile_dataio(top_dir, num_epochs=1):
     )
     timesteps_csv_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
 
-    wandb.config.data_path = str(base_path)
-    wandb.config.num_epochs = num_epochs
-
     data_module = ContrastiveDataModule(
         base_path=base_path,
         channels=channels,
@@ -101,12 +98,12 @@ def profile_dataio(top_dir, num_epochs=1):
 
 
 # %% Testing the data i/o with data stored on Vast
-print("Profiling data i/o with data stored on VAST \n ------- \n")
+print(f"Profiling data i/o with data stored on VAST\n{data_on_vast}\n")
 profile_dataio(data_on_vast)
 
 
 # %%  Testing the data i/o with data stored on Lustre
-print("Profiling data i/o with data stored on Lustre\n ------- \n")
+print(f"Profiling data i/o with data stored on Lustre\n{data_on_lustre}\n")
 
 profile_dataio(data_on_lustre)
 
