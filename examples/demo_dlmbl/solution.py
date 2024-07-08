@@ -4,7 +4,7 @@
     <h1>Image translation (Virtual Staining)</h1>
     <hr>
     <h3>Overview</h3>
-    <p>In this exercise, we will solve an image translation task to predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells. In other words, we will <i>virtually stain</i> the nuclei and cell membrane visible in the phase image. We will apply a series of spatial and intensity augmentations to train robust models and evaluate their performance. Finally, we will apply the inverse process of predicting a phase image from a fluorescence membrane label.</p>
+    <p>In this exercise, we will predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells, i.e., we will <i>virtually stain</i> the nuclei and cell membrane visible in the phase image. This is an example of an image translation task. We will apply spatial and intensity augmentations to train robust models and evaluate their performance. Finally, we will explore the opposite process of predicting a phase image from a fluorescence membrane label.</p>
 
     <div style="text-align: center;">
         <br><br>
@@ -22,13 +22,13 @@
 """
 ### Goals
 
-**Part 1: Familiarization with iohub (I/O library), VisCy dataloaders, and tensorboard.**
+#### Part 1: Familiarization with iohub (I/O library), VisCy dataloaders, and tensorboard.
 
   - Use a `ome-zarr` dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549), each FOV has 3 channels (phase, nuclei, and cell membrane). The nuclei were stained with DAPI and the cell membrane with Cellmask.
   - Explore the OME-zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html) and the high-content-screen (HCS) format.
   - Use [MONAI](https://monai.io/) to implement data augmentations.
-
-**Part 2: Train a phase to fluorescence model using a UNeXt2 and evaluate it and vice versa.**
+  
+#### Part 2: Train a model that predicts fluorescence from phase, and vice versa, using the UNeXt2 architecture.
 
   - Create a model for image translation mapping from source domain to target domain where the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density).
   - Use the UNeXt2 architecture, a _purely convolutional architecture_ that draws on the design principles of transformer models to complete this task. Here we will use a *UNeXt2*, an efficient image translation architecture inspired by ConvNeXt v2, SparK.
@@ -36,7 +36,7 @@
   - Reuse the same architecture as above and create a similar model doing the inverse task (fluorescence to phase).
   - Evaluate the model.
 
-**(Extra) Play with the hyperparameters to improve the models or train a 3D UNeXt2**
+#### (Extra) Play with the hyperparameters to improve the models or train a 3D UNeXt2**
 
 Our guesstimate is that each of the three parts will take ~1-1.5 hours. A reasonable 2D UNet can be trained in ~30 min on a typical AWS node.
 The focus of the exercise is on understanding the information content of the data, how to train and evaluate 2D image translation models, and exploring some hyperparameters of the model. If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
@@ -47,6 +47,7 @@ Checkout [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos), o
 ---
 - [Liu, Z. and Hirata-Miyasaki, E. et al. (2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v2.full.pdf)
 - [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning. eLife](https://elifesciences.org/articles/55502)   
+
 
 Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San Francisco.
 """
@@ -131,11 +132,9 @@ from viscy.light.trainer import VSTrainer
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-data_path = Path(
-    Path("~/data/06_image_translation/training/a549_hoechst_cellmask_train_val.zarr")
-).expanduser()
-
-log_dir = Path("~/data/06_image_translation/logs/").expanduser()
+top_dir = Path(f"/hpc/mydata/{os.environ['USER']},data/")
+data_path = top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
+log_dir = top_dir / "06_image_translation/logs/"
 
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
@@ -636,9 +635,7 @@ For each of the above metrics, write a brief definition of what they are and wha
 # - Structural similarity:
 
 # %% Compute metrics directly and plot here.
-test_data_path = Path(
-    "~/data/06_image_translation/test/a549_hoechst_cellmask_test.zarr"
-).expanduser()
+test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
 
 test_data = HCSDataModule(
     test_data_path,
