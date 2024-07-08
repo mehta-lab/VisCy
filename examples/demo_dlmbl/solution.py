@@ -85,7 +85,7 @@ Set your python kernel to <span style="color:black;">06_image_translation</span>
 
 Learning goals:
 
-- Load the OME-zarr dataset and examine the channels (A54).
+- Load the OME-zarr dataset and examine the channels (A549).
 - Configure and understand the data loader.
 - Log some patches to tensorboard.
 - Initialize a 2D UNeXt2 model for virtual staining of nuclei and membrane from phase.
@@ -567,7 +567,13 @@ Start training by running the following cell. Check the new logs on the tensorbo
 """
 
 # %%
-GPU_ID = 1
+# Check if GPU is available
+if torch.cuda.is_available():
+    # Get the GPU ID (you can change the logic to select the appropriate GPU if you have multiple)
+    GPU_ID = torch.cuda.current_device()
+else:
+    raise ValueError("No GPU available")
+    
 n_samples = len(phase2fluor_2D_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 n_epochs = 50  # Set this to 50 or the number of epochs you want to train for.
