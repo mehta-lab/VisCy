@@ -1,21 +1,21 @@
 # %% [markdown]
 """
-<div style="text-align: left;">
-    <h1>Image translation (Virtual Staining)</h1>
-    <hr>
-    <h3>Overview</h3>
-    <p>In this exercise, we will predict fluorescence images of nuclei and membrane markers from quantitative phase images of cells, i.e., we will <i>virtually stain</i> the nuclei and cell membrane visible in the phase image. This is an example of an image translation task. We will apply spatial and intensity augmentations to train robust models and evaluate their performance. Finally, we will explore the opposite process of predicting a phase image from a fluorescence membrane label.</p>
+# Image translation (Virtual Staining)
 
-    <div style="text-align: center;">
-        <br><br>
-        <figure>
-            <a href="https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755" target="_blank">
-                <img src="https://raw.githubusercontent.com/mehta-lab/VisCy/main/docs/figures/svideo_1.png" alt="Virtual Staining" style="width:800px;"/>
-            </a>
-            <figcaption>(click image to play)</figcaption>
-        </figure>
-    </div>
-</div>
+## Overview
+
+In this exercise, we will predict fluorescence images of
+nuclei and plasma membrane markers from quantitative phase images of cells,
+i.e., we will _virtually stain_ the nuclei and plasma membrane
+visible in the phase image.
+This is an example of an image translation task.
+We will apply spatial and intensity augmentations to train robust models
+and evaluate their performance.
+Finally, we will explore the opposite process of predicting a phase image
+from a fluorescence membrane label.
+
+[![HEK293T](https://raw.githubusercontent.com/mehta-lab/VisCy/main/docs/figures/svideo_1.png)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755)
+(Click on image to play video)
 """
 
 # %% [markdown]
