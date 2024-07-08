@@ -1,8 +1,10 @@
 import timm
-from viscy.unet.networks.unext2 import UNeXt2Stem
-
 import torch.nn as nn
-import torch.nn.functional as F
+
+# from viscy.unet.networks.resnet import resnetStem
+# Currently identical to resnetStem, but could be different in the future.
+
+from viscy.unet.networks.unext2 import UNeXt2Stem
 
 class ContrastiveEncoder(nn.Module):
     def __init__(
@@ -86,7 +88,36 @@ class ContrastiveEncoder(nn.Module):
             """
         elif "resnet" in backbone:
             # Adapt stem and projection head of resnet here.
-            pass
+            # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
+            in_channels_encoder = self.model.conv1.out_channels
+            stem = UNeXt2Stem(
+                in_channels=in_channels,
+                out_channels=in_channels_encoder,
+                kernel_size=stem_kernel_size,
+                in_stack_depth=in_stack_depth,
+            )
+            self.model.conv1 = stem
+
+            self.model.fc = nn.Sequential(
+                self.model.fc,
+                nn.ReLU(inplace=True),
+                nn.Linear(4 * embedding_len, embedding_len),
+            )
+            """ 
+            head of resnet
+            -------------------
+            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Flatten(start_dim=1, end_dim=-1))
+            (fc): Linear(in_features=2048, out_features=1024, bias=True)
+
+
+            head of resnet for contrastive learning
+            ----------------------------
+            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Flatten(start_dim=1, end_dim=-1))
+            (fc): Sequential(
+            (0): Linear(in_features=2048, out_features=1024, bias=True)
+            (1): ReLU(inplace=True)
+            (2): Linear(in_features=1024, out_features=256, bias=True)
+            """
 
     def forward(self, x):
         return self.model(x)

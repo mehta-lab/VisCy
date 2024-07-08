@@ -641,3 +641,4 @@ class ContrastiveModule(LightningModule):
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
+

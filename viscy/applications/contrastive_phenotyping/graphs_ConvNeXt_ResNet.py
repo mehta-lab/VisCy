@@ -1,23 +1,15 @@
 # %% Imports and paths.
 import os
 import torch
-from viscy.light.engine import ContrastiveModule
-from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.representation.contrastive import ContrastiveEncoder
-from pathlib import Path
 import torchview
 
-top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
-input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/patch_final.zarr"
-model_dir = top_dir / "infection_classification/models/infection_score"
 
 %load_ext autoreload
 %autoreload 2
 # %% Initialize the model and log the graph.
-contra_model = ContrastiveEncoder(backbone = "convnext_tiny")
+contra_model = ContrastiveEncoder(backbone = "convnext_tiny") # other options: convnext_tiny resnet50
 print(contra_model)
-
-# %% 
 model_graph = torchview.draw_graph(
     contra_model,
     torch.randn(1, 2, 15, 224, 224),
@@ -25,7 +17,22 @@ model_graph = torchview.draw_graph(
     device="cpu",
 )
 # Print the image of the model.
+model_graph.resize_graph(scale=2.5)
 model_graph.visual_graph
+
+# %% Initialize a resent50 model and log the graph.
+contra_model = ContrastiveEncoder(backbone = "resnet50", in_stack_depth = 16, stem_kernel_size = (4, 3, 3)) # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
+print(contra_model)
+model_graph = torchview.draw_graph(
+    contra_model,
+    torch.randn(1, 2, 16, 224, 224),
+    depth=3,  # adjust depth to zoom in.
+    device="cpu",
+)
+# Print the image of the model.
+model_graph.resize_graph(scale=2.5)
+model_graph.visual_graph
+
 
 # %% Initiatlize the lightning module and view the model.
 contrastive_module = ContrastiveModule()
@@ -40,11 +47,6 @@ model_graph = torchview.draw_graph(
 )
 # Print the image of the model.
 model_graph.visual_graph
-
-# %% Initialize the data module and view the data.
-
-# %% Train the model.
-
 
 # %% Playground
 import timm
