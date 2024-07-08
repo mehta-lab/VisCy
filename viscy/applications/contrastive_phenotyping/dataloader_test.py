@@ -1,24 +1,35 @@
+# %% Imports and initialization.
 import warnings
 import os
 from pathlib import Path
 from viscy.data.hcs import ContrastiveDataModule
 import time
+import wandb
+from tqdm import tqdm
 
 warnings.filterwarnings("ignore")
+os.environ["WANDB_DIR"] = f"/hpc/mydata/{os.environ['USER']}/wandb_logs/"
 data_on_lustre = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
 data_on_vast = Path("/hpc/projects/virtual_staining/viral_sensor_test_dataio/")
+wandb.init(project="contrastive_model", entity="alishba_imran-CZ Biohub")
+
+# %% Method that iterates over two epochs and logs the resource usage.
 
 
-def profile_dataio(top_dir, num_epochs=2):
+def profile_dataio(top_dir, num_epochs=1):
+
     channels = 2
     x = 200
     y = 200
     z_range = (0, 10)
-    batch_size = 128
+    batch_size = 16
     base_path = (
         top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
     )
     timesteps_csv_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
+
+    wandb.config.data_path = str(base_path)
+    wandb.config.num_epochs = num_epochs
 
     data_module = ContrastiveDataModule(
         base_path=base_path,
@@ -34,9 +45,6 @@ def profile_dataio(top_dir, num_epochs=2):
     # for train and val
     data_module.setup()
 
-    total_data_size = os.path.getsize(base_path)  # Get the file size in bytes
-    total_data_size_mb = total_data_size / (1024 * 1024)  # Convert to MB
-
     print(
         f"Total dataset size: {len(data_module.train_dataset) + len(data_module.val_dataset) + len(data_module.test_dataset)}"
     )
@@ -49,24 +57,33 @@ def profile_dataio(top_dir, num_epochs=2):
 
     # Profile the data i/o
     for i in range(num_epochs):
-        for batch in data_module.train_dataloader():
+        # Train dataloader
+        train_dataloader = data_module.train_dataloader()
+        train_dataloader = tqdm(
+            train_dataloader, desc=f"Epoch {i+1}/{num_epochs} - Train"
+        )
+        for batch in train_dataloader:
             anchor_batch, positive_batch, negative_batch = batch
             total_bytes_transferred += (
                 anchor_batch.nbytes + positive_batch.nbytes + negative_batch.nbytes
             )
-            print("Anchor batch shape:", anchor_batch.shape)
-            print("Positive batch shape:", positive_batch.shape)
-            print("Negative batch shape:", negative_batch.shape)
-            break
-        for batch in data_module.val_dataloader():
+            # print("Anchor batch shape:", anchor_batch.shape)
+            # print("Positive batch shape:", positive_batch.shape)
+            # print("Negative batch shape:", negative_batch.shape)
+
+        # Validation dataloader
+        val_dataloader = data_module.val_dataloader()
+        val_dataloader = tqdm(
+            val_dataloader, desc=f"Epoch {i+1}/{num_epochs} - Validation"
+        )
+        for batch in val_dataloader:
             anchor_batch, positive_batch, negative_batch = batch
             total_bytes_transferred += (
                 anchor_batch.nbytes + positive_batch.nbytes + negative_batch.nbytes
             )
-            print("Anchor batch shape:", anchor_batch.shape)
-            print("Positive batch shape:", positive_batch.shape)
-            print("Negative batch shape:", negative_batch.shape)
-            break
+            # print("Anchor batch shape:", anchor_batch.shape)
+            # print("Positive batch shape:", positive_batch.shape)
+            # print("Negative batch shape:", negative_batch.shape)
 
     end_time = time.time()
     elapsed_time = end_time - start_time
@@ -74,13 +91,21 @@ def profile_dataio(top_dir, num_epochs=2):
         1024 * 1024
     )  # Calculate data transfer speed in MBPS
 
+    print("Anchor batch shape:", anchor_batch.shape)
+    print("Positive batch shape:", positive_batch.shape)
+    print("Negative batch shape:", negative_batch.shape)
+
     print(f"Elapsed time for {num_epochs} iterations: {elapsed_time} seconds")
     print(f"Average time per iteration: {elapsed_time/num_epochs} seconds")
     print(f"Data transfer speed: {data_transfer_speed} MBPS")
 
 
+# %% Testing the data i/o with data stored on Vast
+profile_dataio(data_on_vast)
+
+
 # %%  Testing the data i/o with data stored on Lustre
 profile_dataio(data_on_lustre)
 
-# %% Testing the data i/o with data stored on Vast
-profile_dataio(data_on_vast)
+# %%
+wandb.finish()
