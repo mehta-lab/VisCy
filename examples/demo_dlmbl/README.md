@@ -1,6 +1,6 @@
 # Exercise 6: Image translation - Part 1
 
-This demo script was developed for the DL@MBL 2023 course by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).
+This demo script was developed for the DL@MBL 2024 course by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).  
 
 
 
@@ -42,7 +42,8 @@ jupyter notebook
 
 ...and continue with the instructions in the notebook.
 
-If 06_image_translation is not available as a kernel in jupyter, run
+If `06_image_translation` is not available as a kernel in jupyter, run:
+
 ```
 python -m ipykernel install --user --name=06_image_translation
 ```
