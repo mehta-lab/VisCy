@@ -64,8 +64,8 @@ Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San F
 The exercise is organized in 3 parts + Extra part.
 
 <ul>
-<li><b>Part 1</b> - Familiarization with iohub (I/O library), VisCy dataloaders, and tensorboard.</li>
-<li><b>Part 2</b> - Train and evaluate the phase to fluorescence model and viceversa.</li>
+<li><b>Part 1</b> - Learn to use iohub (I/O library), VisCy dataloaders, and tensorboard.</li>
+<li><b>Part 2</b> - Train and evaluate the model to translate phase into fluorescence, and viceversa.</li>
 <li><b>Extra task</b> - Tune the models to improve performance.</li>
 </ul>
 
@@ -82,7 +82,6 @@ Set your python kernel to <span style="color:black;">06_image_translation</span>
 """
 # Part 1: Log training data to tensorboard, start training a model.
 ---------
-
 Learning goals:
 
 - Load the OME-zarr dataset and examine the channels (A549).
@@ -132,7 +131,7 @@ from viscy.light.trainer import VSTrainer
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
-top_dir = Path(f"/hpc/mydata/{os.environ['USER']},data/") #TODO: Change this to point to your data directory.
+top_dir = Path(f"/hpc/mydata/{os.environ['USER']}/data/") #TODO: Change this to point to your data directory.
 data_path = top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
 log_dir = top_dir / "06_image_translation/logs/"
 
