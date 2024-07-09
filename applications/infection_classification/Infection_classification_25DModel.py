@@ -9,7 +9,9 @@ from pytorch_lightning.callbacks import ModelCheckpoint
 from viscy.transforms import RandWeightedCropd
 from viscy.transforms import NormalizeSampled
 from viscy.data.hcs import HCSDataModule
-from viscy.scripts.infection_phenotyping.classify_infection_25D import SemanticSegUNet25D
+from applications.infection_classification.classify_infection_25D import (
+    SemanticSegUNet25D,
+)
 
 from iohub.ngff import open_ome_zarr
 
@@ -35,17 +37,21 @@ for well_id, well_data in zarr_input.wells():
 
     for pos_name, pos_data in well_data.positions():
         data = pos_data.data
-        T,C,Z,Y,X = data.shape
+        T, C, Z, Y, X = data.shape
         out_data = data.numpy()
         for time in range(T):
-            Inf_mask = out_data[time,in_chan_names.index("Inf_mask"),...]
+            Inf_mask = out_data[time, in_chan_names.index("Inf_mask"), ...]
             # Calculate the number of pixels valued 0, 1, and 2 in 'Inf_mask'
             num_pixels_bkg = num_pixels_bkg + (Inf_mask == 0).sum()
             num_pixels_uninf = num_pixels_uninf + (Inf_mask == 1).sum()
             num_pixels_inf = num_pixels_inf + (Inf_mask == 2).sum()
-            num_pixels = num_pixels + Z*X*Y
+            num_pixels = num_pixels + Z * X * Y
 
-pixel_ratio_1 = [num_pixels/num_pixels_bkg, num_pixels/num_pixels_uninf, num_pixels/num_pixels_inf]
+pixel_ratio_1 = [
+    num_pixels / num_pixels_bkg,
+    num_pixels / num_pixels_uninf,
+    num_pixels / num_pixels_inf,
+]
 pixel_ratio_sum = sum(pixel_ratio_1)
 pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
 
@@ -64,7 +70,7 @@ data_module = HCSDataModule(
     batch_size=32,
     normalizations=[
         NormalizeSampled(
-            keys=["Phase","HSP90"],
+            keys=["Phase", "HSP90"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
@@ -74,7 +80,7 @@ data_module = HCSDataModule(
         RandWeightedCropd(
             num_samples=4,
             spatial_size=[-1, 512, 512],
-            keys=["Phase","HSP90"],
+            keys=["Phase", "HSP90"],
             w_key="Inf_mask",
         )
     ],
@@ -90,23 +96,6 @@ data_module.setup(stage="fit")
 train_dm = data_module.train_dataloader()
 
 val_dm = data_module.val_dataloader()
-
-# Visualize the dataset and the batch using napari
-# Set the display
-# os.environ['DISPLAY'] = ':1'
-
-# # Create a napari viewer
-# viewer = napari.Viewer()
-
-# # Add the dataset to the viewer
-# for batch in dataloader:
-#     if isinstance(batch, dict):
-#         for k, v in batch.items():
-#             if isinstance(v, torch.Tensor):
-#                 viewer.add_image(v.cpu().numpy().astype(np.float32))
-
-# # Start the napari event loop
-# napari.run()
 
 
 # %% Define the logger
@@ -146,8 +135,7 @@ model = SemanticSegUNet25D(
 
 print(model)
 
-# %%
-# Run training.
+# %% Run training.
 
 trainer.fit(model, data_module)
 

@@ -6,13 +6,19 @@ import torch.nn as nn
 from pytorch_lightning.loggers import TensorBoardLogger
 from pytorch_lightning.callbacks import ModelCheckpoint
 
-from viscy.transforms import RandWeightedCropd, NormalizeSampled, RandScaleIntensityd, RandGaussianSmoothd
+from viscy.transforms import (
+    RandWeightedCropd,
+    NormalizeSampled,
+    RandScaleIntensityd,
+    RandGaussianSmoothd,
+)
 from viscy.data.hcs import HCSDataModule
-from viscy.scripts.infection_phenotyping.classify_infection_2D import SemanticSegUNet2D
-
+from applications.infection_classification.classify_infection_2D import (
+    SemanticSegUNet2D,
+)
 from iohub.ngff import open_ome_zarr
 
-# %% Create a dataloader and visualize the batches.
+# %% calculate the ratio of background, uninfected and infected pixels in the input dataset
 
 # Set the path to the dataset
 dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/4-human_annotation/train_data.zarr"
@@ -34,22 +40,26 @@ for well_id, well_data in zarr_input.wells():
 
     for pos_name, pos_data in well_data.positions():
         data = pos_data.data
-        T,C,Z,Y,X = data.shape
+        T, C, Z, Y, X = data.shape
         out_data = data.numpy()
         for time in range(T):
-            Inf_mask = out_data[time,in_chan_names.index("Inf_mask"),...]
+            Inf_mask = out_data[time, in_chan_names.index("Inf_mask"), ...]
             # Calculate the number of pixels valued 0, 1, and 2 in 'Inf_mask'
             num_pixels_bkg = num_pixels_bkg + (Inf_mask == 0).sum()
             num_pixels_uninf = num_pixels_uninf + (Inf_mask == 1).sum()
             num_pixels_inf = num_pixels_inf + (Inf_mask == 2).sum()
-            num_pixels = num_pixels + Z*X*Y
+            num_pixels = num_pixels + Z * X * Y
 
-pixel_ratio_1 = [num_pixels/num_pixels_bkg, num_pixels/num_pixels_uninf, num_pixels/num_pixels_inf]
+pixel_ratio_1 = [
+    num_pixels / num_pixels_bkg,
+    num_pixels / num_pixels_uninf,
+    num_pixels / num_pixels_inf,
+]
 pixel_ratio_sum = sum(pixel_ratio_1)
 pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
 
-# %%
-# Create an instance of HCSDataModule
+# %% Create an instance of HCSDataModule
+
 data_module = HCSDataModule(
     dataset_path,
     source_channel=["TXR_Density3D", "Phase3D"],
@@ -101,25 +111,9 @@ train_dm = data_module.train_dataloader()
 
 val_dm = data_module.val_dataloader()
 
-# Visualize the dataset and the batch using napari
-# Set the display
-# os.environ['DISPLAY'] = ':1'
+# %% Set up for training
 
-# # Create a napari viewer
-# viewer = napari.Viewer()
-
-# # Add the dataset to the viewer
-# for batch in dataloader:
-#     if isinstance(batch, dict):
-#         for k, v in batch.items():
-#             if isinstance(v, torch.Tensor):
-#                 viewer.add_image(v.cpu().numpy().astype(np.float32))
-
-# # Start the napari event loop
-# napari.run()
-
-
-# %% Define the logger
+# define the logger
 logger = TensorBoardLogger(
     "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/",
     name="logs",
@@ -154,9 +148,10 @@ model = SemanticSegUNet2D(
     loss_function=nn.CrossEntropyLoss(weight=torch.tensor(pixel_ratio)),
 )
 
+# visualize the model
 print(model)
-# %%
-# Run training.
+
+# %% Run training.
 
 trainer.fit(model, data_module)
 

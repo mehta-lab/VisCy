@@ -1,4 +1,3 @@
-
 import torch
 import torch.nn as nn
 import lightning.pytorch as pl
@@ -18,8 +17,9 @@ from monai.transforms import DivisiblePad
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.data.hcs import Sample
 
-# 
+#
 # %% Methods to compute confusion matrix per cell using torchmetrics
+
 
 # The confusion matrix at the single-cell resolution.
 def confusion_matrix_per_cell(
@@ -63,7 +63,11 @@ def compute_confusion_matrix(
         y_pred_cpu = y_pred[i].cpu().numpy()
         y_true_reshaped = y_true_cpu.reshape(y_true_cpu.shape[-2:])
         y_pred_reshaped = y_pred_cpu.reshape(y_pred_cpu.shape[-2:])
-        y_pred_resized = cv2.resize(y_pred_reshaped, dsize=y_true_reshaped.shape[::-1], interpolation=cv2.INTER_NEAREST)
+        y_pred_resized = cv2.resize(
+            y_pred_reshaped,
+            dsize=y_true_reshaped.shape[::-1],
+            interpolation=cv2.INTER_NEAREST,
+        )
         y_pred_resized = np.where(y_true_reshaped > 0, y_pred_resized, 0)
 
         # find objects in every image
@@ -78,16 +82,17 @@ def compute_confusion_matrix(
                 test_id = y_true_reshaped[int(row), int(col)]
 
                 if pred_id == 1 and test_id == 1:
-                    conf_mat[1,1] += 1
+                    conf_mat[1, 1] += 1
                 if pred_id == 1 and test_id == 2:
-                    conf_mat[0,1] += 1
+                    conf_mat[0, 1] += 1
                 if pred_id == 2 and test_id == 1:
-                    conf_mat[1,0] += 1
+                    conf_mat[1, 0] += 1
                 if pred_id == 2 and test_id == 2:
-                    conf_mat[0,0] += 1
+                    conf_mat[0, 0] += 1
         # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
     # Find all instances of nuclei in ground truth and compute the class of the nuclei in both ground truth and prediction.
     return conf_mat
+
 
 def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
     # Create a figure and axis to plot the confusion matrix
@@ -97,7 +102,9 @@ def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
     cax = ax.matshow(confusion_matrix, cmap="viridis")
 
     # Create a colorbar and set the label
-    index_to_label_dict = dict(enumerate(index_to_label_dict))  # Convert list to dictionary
+    index_to_label_dict = dict(
+        enumerate(index_to_label_dict)
+    )  # Convert list to dictionary
     fig.colorbar(cax, label="Frequency")
 
     # Set labels for the classes
@@ -124,7 +131,10 @@ def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
 
     # plt.show(fig)  # Show the figure
     return fig
+
+
 # Define a 25d unet model for infection classification as a lightning module.
+
 
 class SemanticSegUNet25D(pl.LightningModule):
     # Model for semantic segmentation.
@@ -143,7 +153,12 @@ class SemanticSegUNet25D(pl.LightningModule):
     ):
         super(SemanticSegUNet25D, self).__init__()  # Call the superclass initializer
         # Initialize the UNet model
-        self.unet_model = Unet25d(in_channels=in_channels, out_channels=out_channels, num_blocks=4, num_block_layers=4)
+        self.unet_model = Unet25d(
+            in_channels=in_channels,
+            out_channels=out_channels,
+            num_blocks=4,
+            num_block_layers=4,
+        )
         if ckpt_path is not None:
             state_dict = torch.load(ckpt_path, map_location=torch.device("cpu"))[
                 "state_dict"
@@ -168,7 +183,6 @@ class SemanticSegUNet25D(pl.LightningModule):
         self.pred_cm = None  # Initialize the confusion matrix
         self.index_to_label_dict = ["Infected", "Uninfected"]
 
-        
     # Define the forward pass
     def forward(self, x):
         return self.unet_model(x)  # Pass the input through the UNet model
@@ -239,39 +253,45 @@ class SemanticSegUNet25D(pl.LightningModule):
     # Define the prediction step
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
         source = self._predict_pad(batch["source"])  # Pad the source
-        logits = self._predict_pad.inverse(self.forward(source))  # Predict and remove padding.
+        logits = self._predict_pad.inverse(
+            self.forward(source)
+        )  # Predict and remove padding.
         prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
         # Go from probabilities/one-hot encoded data to class labels.
-        labels_pred = torch.argmax(prob_pred, dim=1, keepdim=True)  # Calculate the predicted labels
+        labels_pred = torch.argmax(
+            prob_pred, dim=1, keepdim=True
+        )  # Calculate the predicted labels
         # prob_chan = prob_pred[:, 2, :, :]
         # prob_chan = prob_chan.unsqueeze(1)
         return labels_pred  # log the class predicted image
         # return prob_chan  # log the probability predicted image
-    
+
     def on_test_start(self):
-        self.pred_cm = torch.zeros((2,2))
+        self.pred_cm = torch.zeros((2, 2))
         down_factor = 2**self.unet_model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
-    
+
     def test_step(self, batch: Sample):
         source = self._predict_pad(batch["source"])  # Pad the source
         logits = self._predict_pad.inverse(self.forward(source))
         prob_pred = F.softmax(logits, dim=1)  # Calculate the probabilities
-        labels_pred = torch.argmax(prob_pred, dim=1, keepdim=True)  # Calculate the predicted labels
-        
+        labels_pred = torch.argmax(
+            prob_pred, dim=1, keepdim=True
+        )  # Calculate the predicted labels
+
         target = self._predict_pad(batch["target"])  # Extract the target from the batch
         pred_cm = confusion_matrix_per_cell(
             target, labels_pred, num_classes=2
         )  # Calculate the confusion matrix per cell
         self.pred_cm += pred_cm  # Append the confusion matrix to pred_cm
-        
+
         self.logger.experiment.add_figure(
             "Confusion Matrix per Cell",
             plot_confusion_matrix(pred_cm, self.index_to_label_dict),
             self.current_epoch,
         )
 
-    # Accumulate the confusion matrix at the end of test epoch and log. 
+    # Accumulate the confusion matrix at the end of test epoch and log.
     def on_test_end(self):
         confusion_matrix_sum = self.pred_cm
         self.logger.experiment.add_figure(
@@ -332,4 +352,6 @@ class SemanticSegUNet25D(pl.LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
+
+
 # %%

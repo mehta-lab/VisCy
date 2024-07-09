@@ -3,18 +3,19 @@
 from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.data.hcs import HCSDataModule
 import lightning.pytorch as pl
-from viscy.scripts.infection_phenotyping.classify_infection_2D import SemanticSegUNet2D
+from applications.infection_classification.classify_infection_2D import (
+    SemanticSegUNet2D,
+)
 from viscy.transforms import NormalizeSampled
 
 # %% # %% write the predictions to a zarr file
 
-# pred_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/1-predict_infection/2024_04_25_BJ5a_DENV_TimeCourse_2D.zarr"
-pred_datapath = '/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/A549_63X/2024_02_04_A549_DENV_ZIKV_timelapse/0-train_test_data/2024_02_04_A549_DENV_ZIKV_timelapse_test_2D.zarr'
+pred_datapath = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/A549_63X/2024_02_04_A549_DENV_ZIKV_timelapse/0-train_test_data/2024_02_04_A549_DENV_ZIKV_timelapse_test_2D.zarr"
 
 data_module = HCSDataModule(
     data_path=pred_datapath,
-    source_channel=['RFP', 'Phase3D'],
-    target_channel=['Inf_mask'],
+    source_channel=["RFP", "Phase3D"],
+    target_channel=["Inf_mask"],
     split_ratio=0.7,
     z_window_size=1,
     architecture="2D",
@@ -32,11 +33,6 @@ data_module = HCSDataModule(
 
 data_module.setup(stage="predict")
 
-# model = SemanticSegUNet2D(
-#     in_channels=2,
-#     out_channels=3,
-#     ckpt_path="/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/logs/checkpoint_epoch=206.ckpt",
-# )
 model = SemanticSegUNet2D(
     in_channels=2,
     out_channels=3,
@@ -45,14 +41,7 @@ model = SemanticSegUNet2D(
 
 # %% perform prediction
 
-# output_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/1-predict_infection/2024_04_25_BJ5a_DENV_TimeCourse_2D_pred.zarr"
-output_path = '/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/A549_63X/2024_02_04_A549_DENV_ZIKV_timelapse/2-predict_infection/2024_02_04_A549_DENV_ZIKV_timelapse_pred_2D_new.zarr'
-
-# trainer = pl.Trainer(
-#     default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/logs",
-#     callbacks=[HCSPredictionWriter(output_path, write_input=False)],
-#     devices=1,  # Set the number of GPUs to use. This avoids run-time exception from distributed training when the node has multiple GPUs
-# )
+output_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/A549_63X/2024_02_04_A549_DENV_ZIKV_timelapse/2-predict_infection/2024_02_04_A549_DENV_ZIKV_timelapse_pred_2D_new.zarr"
 
 trainer = pl.Trainer(
     default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/A549_63X/2024_02_04_A549_DENV_ZIKV_timelapse/1-model_train/logs",
