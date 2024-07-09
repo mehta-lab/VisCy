@@ -15,7 +15,7 @@ from iohub.ngff import open_ome_zarr
 # %% Create a dataloader and visualize the batches.
 
 # Set the path to the dataset
-dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/0_training_test_data/2024_05_03_DENV_eFT226_Timecourse_trainVal_2D.zarr"
+dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/4-human_annotation/train_data.zarr"
 
 # find ratio of background, uninfected and infected pixels
 zarr_input = open_ome_zarr(
@@ -52,17 +52,17 @@ pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
 # Create an instance of HCSDataModule
 data_module = HCSDataModule(
     dataset_path,
-    source_channel=["mCherry", "Phase3D"],
+    source_channel=["TXR_Density3D", "Phase3D"],
     target_channel=["Inf_mask"],
     yx_patch_size=[128, 128],
-    split_ratio=0.5,
+    split_ratio=0.7,
     z_window_size=1,
     architecture="2D",
     num_workers=1,
-    batch_size=128,
+    batch_size=256,
     normalizations=[
         NormalizeSampled(
-            keys=["Phase3D", "mCherry"],
+            keys=["Phase3D", "TXR_Density3D"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
@@ -70,18 +70,18 @@ data_module = HCSDataModule(
     ],
     augmentations=[
         RandWeightedCropd(
-            num_samples=8,
+            num_samples=16,
             spatial_size=[-1, 128, 128],
-            keys=["mCherry", "Phase3D", "Inf_mask"],
+            keys=["TXR_Density3D", "Phase3D", "Inf_mask"],
             w_key="Inf_mask",
         ),
         RandScaleIntensityd(
-            keys=["mCherry", "Phase3D"],
-            factors=[0.1, 0.5],
+            keys=["TXR_Density3D", "Phase3D"],
+            factors=[0.5, 0.5],
             prob=0.5,
         ),
         RandGaussianSmoothd(
-            keys=["mCherry", "Phase3D"],
+            keys=["TXR_Density3D", "Phase3D"],
             prob=0.5,
             sigma_x=[0.5, 1.0],
             sigma_y=[0.5, 1.0],
@@ -121,7 +121,7 @@ val_dm = data_module.val_dataloader()
 
 # %% Define the logger
 logger = TensorBoardLogger(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/",
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/",
     name="logs",
 )
 
@@ -129,14 +129,14 @@ logger = TensorBoardLogger(
 trainer = pl.Trainer(
     logger=logger,
     max_epochs=500,
-    default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/logs/",
+    default_root_dir="/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/logs/",
     log_every_n_steps=1,
     devices=1,  # Set the number of GPUs to use. This avoids run-time exception from distributed training when the node has multiple GPUs
 )
 
 # Define the checkpoint callback
 checkpoint_callback = ModelCheckpoint(
-    dirpath="/hpc/projects/intracellular_dashboard/viral-sensor/2024_05_03_DENV_eFT226_Timecourse/4-infection-classification/1_model_training/logs/",
+    dirpath="/hpc/projects/intracellular_dashboard/viral-sensor/2024_04_25_BJ5a_DENV_TimeCourse/5-infection_classifier/0-model_training/logs/",
     filename="checkpoint_{epoch:02d}",
     save_top_k=-1,
     verbose=True,
