@@ -43,6 +43,9 @@ dev = [
 [project.scripts]
 viscy = "viscy.cli.cli:main"
 
+[tool.setuptools]
+packages = ["viscy"]
+
 [tool.setuptools_scm]
 write_to = "viscy/_version.py"
 
