@@ -22,7 +22,7 @@ from a fluorescence membrane label.
 """
 ### Goals
 
-#### Part 1: Familiarization with iohub (I/O library), VisCy dataloaders, and tensorboard.
+#### Part 1: Learn to use iohub (I/O library), VisCy dataloaders, and tensorboard.
 
   - Use a `ome-zarr` dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549), each FOV has 3 channels (phase, nuclei, and cell membrane). The nuclei were stained with DAPI and the cell membrane with Cellmask.
   - Explore the OME-zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html) and the high-content-screen (HCS) format.
@@ -65,7 +65,7 @@ The exercise is organized in 3 parts + Extra part.
 
 <ul>
 <li><b>Part 1</b> - Learn to use iohub (I/O library), VisCy dataloaders, and tensorboard.</li>
-<li><b>Part 2</b> - Train and evaluate the model to translate phase into fluorescence, and viceversa.</li>
+<li><b>Part 2</b> - Train and evaluate the model to translate phase into fluorescence, and vice versa.</li>
 <li><b>Extra task</b> - Tune the models to improve performance.</li>
 </ul>
 
@@ -476,7 +476,12 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` ([source code](https://github.com/meht
 """
 # %%
 # Create a 2D UNet.
-GPU_ID = 1
+if torch.cuda.is_available():
+    # Get the GPU ID (you can change the logic to select the appropriate GPU if you have multiple)
+    GPU_ID = torch.cuda.current_device()
+else:
+    raise ValueError("No GPU available")
+
 BATCH_SIZE = 12
 YX_PATCH_SIZE = (256, 256)
 
