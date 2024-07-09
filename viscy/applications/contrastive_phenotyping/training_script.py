@@ -25,18 +25,22 @@ os.environ["WANDB_DIR"] = "/hpc/mydata/alishba.imran/wandb_logs/"
 #wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
 
 top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
-input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
+#input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
+input_zarr = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 model_dir = top_dir / "infection_classification/models/infection_score"
 timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
 
 # Data parameters
-base_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
-channels = 2
+base_path = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
+channels = 1
 x = 200
 y = 200
 z = 15
 z_range = (28, 43)
 batch_size = 32
+channel_names = ["Phase3D"]
+
+torch.set_float32_matmul_precision('medium')
 
 # %% Initialize the model and log the graph
 #contra_model = ContrastiveEncoder(backbone="convnext_tiny")
@@ -95,6 +99,7 @@ def main(hparams):
         x=x,
         y=y,
         timesteps_csv_path=timesteps_csv_path,
+        channel_names=channel_names,
         batch_size=batch_size,
         z_range=z_range,
     )
@@ -169,13 +174,13 @@ if __name__ == "__main__":
             "margin": 0.5,
             "lr": 1e-3,
             "schedule": "Constant",
-            "log_batches_per_epoch": 8,
+            "log_batches_per_epoch": 4,
             "log_samples_per_batch": 1,
             "embedding_len": 256,
             "max_epochs": 100,
             "accelerator": "gpu",
-            "devices": 1,  # Set to 4 GPUs
-            "num_nodes": 2,
+            "devices": 1,  # 1 GPU
+            "num_nodes": 1, # 1 node 
             "log_every_n_steps": 1,
         }
         class HParams:
@@ -189,7 +194,7 @@ if __name__ == "__main__":
         parser.add_argument("--margin", type=float, default=0.5)
         parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--schedule", type=str, default="Constant")
-        parser.add_argument("--log_batches_per_epoch", type=int, default=8)
+        parser.add_argument("--log_batches_per_epoch", type=int, default=26)
         parser.add_argument("--log_samples_per_batch", type=int, default=1)
         parser.add_argument("--embedding_len", type=int, default=256)
         parser.add_argument("--max_epochs", type=int, default=100)

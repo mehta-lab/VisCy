@@ -606,7 +606,6 @@ class HCSDataModule(LightningDataModule):
         logging.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
 
-
 # dataloader for organelle phenotyping
 class ContrastiveDataset(Dataset):
     def __init__(
@@ -616,6 +615,7 @@ class ContrastiveDataset(Dataset):
         x,
         y,
         timesteps_csv_path,
+        channel_names,
         transform=None,
         z_range=None,
     ):
@@ -624,12 +624,14 @@ class ContrastiveDataset(Dataset):
         self.x = x
         self.y = y
         self.z_range = z_range
-        self.transform = transform
+        self.channel_names = channel_names
+        self.transform = get_transforms()
         self.ds = self.open_zarr_store(self.base_path)
         self.positions = list(self.ds.positions())
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
+        self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
         print(f"Initialized dataset with {len(self.positions)} positions.")
-
+        
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         #print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
@@ -640,12 +642,15 @@ class ContrastiveDataset(Dataset):
     def __getitem__(self, idx):
         anchor_position_path = self.positions[idx][0]
         anchor_data = self.load_data(anchor_position_path)
+        anchor_data = self.normalize_data(anchor_data)
 
         positive_data = (
             self.transform({"image": anchor_data})["image"]
             if self.transform
             else anchor_data
         )
+        positive_data = self.normalize_data(positive_data)
+
         # if self.transform:
         #     print("Positive transformation applied")
 
@@ -654,12 +659,15 @@ class ContrastiveDataset(Dataset):
             negative_idx = random.randint(0, self.__len__() - 1)
         negative_position_path = self.positions[negative_idx][0]
         negative_data = self.load_data(negative_position_path)
+        negative_data = self.normalize_data(negative_data) 
 
         negative_data = (
             self.transform({"image": negative_data})["image"]
             if self.transform
             else negative_data
         )
+        negative_data = self.normalize_data(negative_data)
+
         # if self.transform:
         #     print("Negative transformation applied")
 
@@ -668,20 +676,23 @@ class ContrastiveDataset(Dataset):
         # print(torch.tensor(positive_data).shape)
         # print(torch.tensor(negative_data).shape)
         return (
-            torch.tensor(anchor_data),
-            torch.tensor(positive_data),
-            torch.tensor(negative_data),
+            torch.tensor(anchor_data, dtype=torch.float32),
+            torch.tensor(positive_data, dtype=torch.float32),
+            torch.tensor(negative_data, dtype=torch.float32),
         )
 
     def load_data(self, position_path):
         position = self.ds[position_path]
         # print(f"Loading data from position: {position_path}")
+
         zarr_array = position["0"][:]
         # print("Shape before:", zarr_array.shape)
         data = self.restructure_data(zarr_array, position_path)
         if self.z_range:
-            data = data[:, self.z_range[0] : self.z_range[1], :, :]
-        # print("Shape after:", data.shape)
+            data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
+
+        # print("shape after!")
+        # print(data.shape)
         return data
 
     def restructure_data(self, data, position_path):
@@ -717,27 +728,120 @@ class ContrastiveDataset(Dataset):
         reshaped_data = data[random_timestep]
         return reshaped_data
 
+    def normalize_data(self, data):
+        mean = np.mean(data)
+        std = np.std(data)
+        return (data - mean) / (std + 1e-6)  
+    
+#     def apply_transform(self, data):
+#         # print("Applying transform to data")
+#         # print(data.shape) # data shape when 2 channels: (2, 15, 200, 200)
+#         # transformed_data = np.empty_like(data)
+#         # for channel_idx in range(data.shape[0]):  
+#         #     channel_data = data[channel_idx]
+#         #     transform = get_transforms(channel_data)
+#         #     transformed_data[channel_idx] = transform({"image": channel_data})["image"]
+#         # return transformed_data
+#         transformed_data = np.empty_like(data)
+#         for channel_idx, channel_name in enumerate(self.channel_names):  
+#             channel_data = data[channel_idx]
+#             transform = get_transforms(channel_data, channel_name)
+#             transformed_data[channel_idx] = transform({"image": channel_data})["image"]
+#         return transformed_data
+
+# def get_transforms(image, channel):
+#     mean = np.mean(image)
+#     std = np.std(image)
+#     if channel == 'RFP':
+#         if std < 0.1:
+#             gamma_range = (0.97, 1.03)
+#         else:
+#             gamma_range = (0.9, 1.1)
+        
+#         if mean < 0.5:
+#             scale_factors = (0.95, 1.05)
+#         else:
+#             scale_factors = (0.93, 1.07)
+#     elif channel == 'Phase3D':
+#         if std < 0.1:
+#             gamma_range = (0.98, 1.02)
+#         else:
+#             gamma_range = (0.95, 1.05)
+        
+#         if mean < 0.5:
+#             scale_factors = (0.98, 1.02)
+#         else:
+#             scale_factors = (0.95, 1.05)
+
+#     # if std < 0.1:
+#     #     gamma_range = (0.95, 1.05)  # Narrower range for low variance images
+#     # else:
+#     #     gamma_range = (0.85, 1.15)  # Slightly adjusted range for higher variance
+    
+#     # if mean < 0.5:
+#     #     scale_factors = (0.95, 1.05)  # Narrower range for lower intensity images
+#     # else:
+#     #     scale_factors = (0.85, 1.15)  # Slightly adjusted range for higher intensity images
+
+#     # if std < 0.1:
+#     #     gamma_range = (0.97, 1.03)  # Even narrower range for low variance images
+#     # else:
+#     #     gamma_range = (0.9, 1.1)  # Narrower range for higher variance
+    
+#     # if mean < 0.5:
+#     #     scale_factors = (0.95, 1.05)  # Narrower range for lower intensity images
+#     # else:
+#     #     scale_factors = (0.93, 1.07)  # Even narrower range for higher intensity images
+
+#     # normalization for both channels 
+#     # log mean, std for each anhchor, positive, negative
+#     # mean, std of anchor and positive get closer 
+#     # mean, std of anchor and negative further (0.5 margin)
+#     transforms = Compose(
+#         [
+#             RandAdjustContrastd(keys=["image"], prob=0.5, gamma=gamma_range),
+#             RandAffined(
+#                 keys=["image"],
+#                 prob=0.5,
+#                 rotate_range=(0.07, 0.07),
+#                 shear_range=(0.07, 0.07),
+#                 scale_range=(0.07, 0.07),
+#             ),
+#             RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=std * 0.1),
+#             RandGaussianSmoothd(
+#                 keys=["image"],
+#                 prob=0.5,
+#                 sigma_x=(0.1, 0.3),
+#                 sigma_y=(0.1, 0.3),
+#                 sigma_z=(0.1, 0.3),
+#             ),
+#             RandScaleIntensityd(keys=["image"], factors=scale_factors, prob=0.5),
+#         ]
+#     )
+#     return transforms
+
+
 
 def get_transforms():
     transforms = Compose(
         [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.8, 1.2)),
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.9, 1.1)),
             RandAffined(
                 keys=["image"],
                 prob=0.5,
-                rotate_range=(0.1, 0.1),
-                shear_range=(0.1, 0.1),
-                scale_range=(0.1, 0.1),
+                rotate_range=(0.07, 0.07),
+                shear_range=(0.07, 0.07),
+                scale_range=(0.07, 0.07),
             ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.05),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.01),
             RandGaussianSmoothd(
                 keys=["image"],
                 prob=0.5,
-                sigma_x=(0.1, 0.5),
-                sigma_y=(0.1, 0.5),
-                sigma_z=(0.1, 0.5),
+                sigma_x=(0.05, 0.1),
+                sigma_y=(0.05, 0.1),
+                sigma_z=(0.05, 0.1),
             ),
-            RandScaleIntensityd(keys=["image"], factors=(0.8, 1.2), prob=0.5),
+            RandScaleIntensityd(keys=["image"], factors=(0.95, 1.05), prob=0.5),
         ]
     )
     return transforms
@@ -750,13 +854,14 @@ class ContrastiveDataModule(LightningDataModule):
         x: int,
         y: int,
         timesteps_csv_path: str,
+        channel_names: list,
+        transform=None,
         predict_base_path: str = None,
         train_split_ratio: float = 0.64,
         val_split_ratio: float = 0.16,
         batch_size: int = 4,
         num_workers: int = 8,
         z_range: tuple[int, int] = None,
-        transform=None,
     ):
         super().__init__()
         self.base_path = Path(base_path)
@@ -764,13 +869,14 @@ class ContrastiveDataModule(LightningDataModule):
         self.x = x
         self.y = y
         self.timesteps_csv_path = timesteps_csv_path
+        self.channel_names = channel_names
+        self.transform = get_transforms()
         self.predict_base_path = Path(predict_base_path) if predict_base_path else None
         self.train_split_ratio = train_split_ratio
         self.val_split_ratio = val_split_ratio
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.z_range = z_range
-        self.transform = transform or get_transforms()
         self.train_dataset = None
         self.val_dataset = None
         self.test_dataset = None
@@ -783,6 +889,7 @@ class ContrastiveDataModule(LightningDataModule):
             self.x,
             self.y,
             self.timesteps_csv_path,
+            channel_names=self.channel_names,
             transform=self.transform,
             z_range=self.z_range,
         )
@@ -803,6 +910,7 @@ class ContrastiveDataModule(LightningDataModule):
                 self.x,
                 self.y,
                 self.timesteps_csv_path,
+                channel_names=self.channel_names,
                 transform=self.transform,
                 z_range=self.z_range,
             )

@@ -10,6 +10,9 @@ from imageio import imwrite
 #from lightning import LightningModule
 from torch.optim import Adam
 
+import torch.nn.functional as F
+
+
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 
 from matplotlib.pyplot import get_cmap
@@ -480,7 +483,7 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
-        in_channels: int = 2,
+        in_channels: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
@@ -519,25 +522,42 @@ class ContrastiveModule(LightningModule):
         projections = self.encoder(x)
         return projections
 
-    def log_images(self, anchor, positive, negative, step_name, step_idx, epoch):
+    def log_feature_statistics(self, embeddings: Tensor, step_name: str, batch_idx: int, epoch: int, prefix: str):
+        mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
+        std = torch.std(embeddings, dim=0).detach().cpu().numpy()
+        
+        print(f"{step_name}/{prefix}_mean_epoch{epoch}_batch{batch_idx}: {mean}")
+        print(f"{step_name}/{prefix}_std_epoch{epoch}_batch{batch_idx}: {std}")
+
+    def log_metrics(self, anchor, positive, negative, step_name, batch_idx, epoch):
+        if batch_idx % 4 == 0:
+            # Calculate cosine similarities
+            cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean().item()
+            cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean().item()
+
+            # Calculate Euclidean distances
+            euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean().item()
+            euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean().item()
+
+            # Log metrics
+            print(f"{step_name}/cosine_similarity_positive_epoch{epoch}_batch{batch_idx}: {cosine_sim_pos}")
+            print(f"{step_name}/cosine_similarity_negative_epoch{epoch}_batch{batch_idx}: {cosine_sim_neg}")
+            print(f"{step_name}/euclidean_distance_positive_epoch{epoch}_batch{batch_idx}: {euclidean_dist_pos}")
+            print(f"{step_name}/euclidean_distance_negative_epoch{epoch}_batch{batch_idx}: {euclidean_dist_neg}")
+
+    def log_images(self, anchor, positive, negative, step_name, batch_idx, epoch):
         #  middle z-slice
         z_idx = 7
         
-        # 7th z-slice from both channels for the first sample
-        anchor_img_channel1 = anchor[0, 0, z_idx, :, :].cpu().numpy()
-        anchor_img_channel2 = anchor[0, 1, z_idx, :, :].cpu().numpy()
-        positive_img_channel1 = positive[0, 0, z_idx, :, :].cpu().numpy()
-        positive_img_channel2 = positive[0, 1, z_idx, :, :].cpu().numpy()
-        negative_img_channel1 = negative[0, 0, z_idx, :, :].cpu().numpy()
-        negative_img_channel2 = negative[0, 1, z_idx, :, :].cpu().numpy()
+        # 7th z-slice from channels for the first sample
+        anchor_img_channel2 = anchor[0, 0, z_idx, :, :].cpu().numpy()
+        positive_img_channel2 = positive[0, 0, z_idx, :, :].cpu().numpy()
+        negative_img_channel2 = negative[0, 0, z_idx, :, :].cpu().numpy()
 
         images = {
-            f"{step_name}/anchor_channel1_epoch{epoch}_{step_idx}": wandb.Image(anchor_img_channel1),
-            f"{step_name}/anchor_channel2_epoch{epoch}_{step_idx}": wandb.Image(anchor_img_channel2),
-            f"{step_name}/positive_channel1_epoch{epoch}_{step_idx}": wandb.Image(positive_img_channel1),
-            f"{step_name}/positive_channel2_epoch{epoch}_{step_idx}": wandb.Image(positive_img_channel2),
-            f"{step_name}/negative_channel1_epoch{epoch}_{step_idx}": wandb.Image(negative_img_channel1),
-            f"{step_name}/negative_channel2_epoch{epoch}_{step_idx}": wandb.Image(negative_img_channel2),
+            f"{step_name}/anchor_phase_epoch{epoch}_batch{batch_idx}": wandb.Image(anchor_img_channel2),
+            f"{step_name}/positive_phase_epoch{epoch}_batch{batch_idx}": wandb.Image(positive_img_channel2),
+            f"{step_name}/negative_phase_epoch{epoch}_batch{batch_idx}": wandb.Image(negative_img_channel2),
         }
 
         self.logger.experiment.log(images)
@@ -563,8 +583,18 @@ class ContrastiveModule(LightningModule):
 
         self.log("train/loss", loss, on_step=True, prog_bar=True, logger=True)
         
-        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+        # if self.current_epoch == 0 and batch_idx == 0:
+        #     print(f"Shapes of anchor, positive, negative for the first batch of the first epoch (training):")
+        #     print(f"Anchor: {anchor.shape}")
+        #     print(f"Positive: {pos_img.shape}")
+        #     print(f"Negative: {neg_img.shape}")
+
+
+        if self.current_epoch in [0, 1, 2] and batch_idx % self.log_batches_per_epoch == 0:
             self.log_images(anchor, pos_img, neg_img, "train", batch_idx, self.current_epoch)
+
+
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "train", batch_idx, self.current_epoch)
 
         self.training_step_outputs.append(loss)
         return {'loss': loss}
@@ -595,8 +625,16 @@ class ContrastiveModule(LightningModule):
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+        # if self.current_epoch == 0 and batch_idx == 0:
+        #     print(f"Shapes of anchor, positive, negative for the first batch of the first epoch (validation):")
+        #     print(f"Anchor: {anchor.shape}")
+        #     print(f"Positive: {pos_img.shape}")
+        #     print(f"Negative: {neg_img.shape}")
+
+        if self.current_epoch in [0, 1, 2] and batch_idx % self.log_batches_per_epoch == 0:
             self.log_images(anchor, pos_img, neg_img, "validation", batch_idx, self.current_epoch)
+
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "validation", batch_idx, self.current_epoch)
 
         self.validation_step_outputs.append(loss)
         return {'loss': loss}
@@ -627,8 +665,16 @@ class ContrastiveModule(LightningModule):
         
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        if self.current_epoch in [0, 1, 2] and batch_idx == 0:
+        # if self.current_epoch == 0 and batch_idx == 0:
+        #     print(f"Shapes of anchor, positive, negative for the first batch of the first epoch (testing):")
+        #     print(f"Anchor: {anchor.shape}")
+        #     print(f"Positive: {pos_img.shape}")
+        #     print(f"Negative: {neg_img.shape}")
+
+        if self.current_epoch in [0, 1, 2] and batch_idx % self.log_batches_per_epoch == 0:
             self.log_images(anchor, pos_img, neg_img, "test", batch_idx, self.current_epoch)
+
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "test", batch_idx, self.current_epoch)
 
         self.test_step_outputs.append(loss)
         return {'loss': loss}

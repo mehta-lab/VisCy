@@ -10,7 +10,7 @@ class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
         backbone: str = "convnext_tiny",
-        in_channels: int = 2,
+        in_channels: int = 1,
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
@@ -44,6 +44,7 @@ class ContrastiveEncoder(nn.Module):
         )
 
         if "convnext_tiny" in backbone:
+            print("Using ConvNext backbone.")
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
             in_channels_encoder = self.model.stem[0].out_channels
             stem = UNeXt2Stem(
@@ -87,6 +88,7 @@ class ContrastiveEncoder(nn.Module):
             )
             """
         elif "resnet" in backbone:
+            print("Using ResNet backbone.")
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
             in_channels_encoder = self.model.conv1.out_channels
