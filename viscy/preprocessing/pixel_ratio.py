@@ -14,9 +14,9 @@ def sematic_class_weights(dataset_path: str, target_channel: str) -> NDArray:
     :return NDArray: inverted ratio of background, uninfected and infected pixels
     """
     dataset = open_ome_zarr(dataset_path)
-    arrays = [da.from_zarr(pos, "0") for _, pos in dataset.positions()]
+    arrays = [da.from_zarr(pos["0"]) for _, pos in dataset.positions()]
     imgs = da.stack(arrays, axis=0)[
-        :, dataset.get_channel_index(target_channel)
+        :, :, dataset.get_channel_index(target_channel)
     ]
     ratio, _ = da.histogram(imgs, bins=range(4), density=True)
     weights = 1 / ratio
