@@ -10,3 +10,6 @@ def test_sematic_class_weights(small_hcs_dataset):
     # infinity
     assert weights[1] > 1.0
     assert weights[2] > 1.0
+    assert sematic_class_weights(
+        small_hcs_dataset, "GFP", num_classes=2
+    ).shape == (2,)
