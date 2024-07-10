@@ -1,5 +1,3 @@
-""" compute the pixel ratio of background (0), uninfected (1) and infected (2) pixels in the zarr dataset"""
-
 import dask.array as da
 from iohub.ngff import open_ome_zarr
 from numpy.typing import NDArray
