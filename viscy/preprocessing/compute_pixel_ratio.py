@@ -1,7 +1,7 @@
-
-''' compute the pixel ratio of background (0), uninfected (1) and infected (2) pixels in the zarr dataset'''
+""" compute the pixel ratio of background (0), uninfected (1) and infected (2) pixels in the zarr dataset"""
 
 from iohub.ngff import open_ome_zarr
+
 
 def calculate_pixel_ratio(dataset_path: str, target_channel: str):
     """
@@ -9,6 +9,7 @@ def calculate_pixel_ratio(dataset_path: str, target_channel: str):
         in the input dataset
     Args:
         dataset_path (str): Path to the dataset
+        target_channel (str): Name of the manual annotation channel
     Returns:
         pixel_ratio (list): List of ratios of background, uninfected and infected pixels
     """
