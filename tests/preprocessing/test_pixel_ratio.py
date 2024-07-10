@@ -1,4 +1,3 @@
-from iohub.ngff import open_ome_zarr
 from numpy.testing import assert_allclose
 
 from viscy.preprocessing.pixel_ratio import sematic_class_weights
