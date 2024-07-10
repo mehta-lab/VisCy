@@ -1,11 +1,12 @@
 # %%
 
-from viscy.light.predict_writer import HCSPredictionWriter
-from viscy.data.hcs import HCSDataModule
 import lightning.pytorch as pl
 from applications.infection_classification.classify_infection_2D import (
     SemanticSegUNet2D,
 )
+
+from viscy.data.hcs import HCSDataModule
+from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.transforms import NormalizeSampled
 
 # %% # %% write the predictions to a zarr file

@@ -1,10 +1,11 @@
 # %%
-from viscy.data.hcs import HCSDataModule
 import lightning.pytorch as pl
 from applications.infection_classification.classify_infection_2D import (
     SemanticSegUNet2D,
 )
 from pytorch_lightning.loggers import TensorBoardLogger
+
+from viscy.data.hcs import HCSDataModule
 from viscy.transforms import NormalizeSampled
 
 # %% test the model on the test set

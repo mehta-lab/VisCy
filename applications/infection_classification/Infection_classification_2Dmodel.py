@@ -1,22 +1,21 @@
 # %%
-import torch
 import lightning.pytorch as pl
+import torch
 import torch.nn as nn
-
-from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-from viscy.transforms import (
-    RandWeightedCropd,
-    NormalizeSampled,
-    RandScaleIntensityd,
-    RandGaussianSmoothd,
-)
-from viscy.data.hcs import HCSDataModule
 from applications.infection_classification.classify_infection_2D import (
     SemanticSegUNet2D,
 )
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from viscy.data.hcs import HCSDataModule
 from viscy.preprocessing import calculate_pixel_ratio
+from viscy.transforms import (
+    NormalizeSampled,
+    RandGaussianSmoothd,
+    RandScaleIntensityd,
+    RandWeightedCropd,
+)
 
 # %% calculate the ratio of background, uninfected and infected pixels in the input dataset
 

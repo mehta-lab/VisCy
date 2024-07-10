@@ -1,19 +1,16 @@
 # %%
-import torch
 import lightning.pytorch as pl
+import torch
 import torch.nn as nn
-
-from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-from viscy.transforms import RandWeightedCropd
-from viscy.transforms import NormalizeSampled
-from viscy.data.hcs import HCSDataModule
 from applications.infection_classification.classify_infection_25D import (
     SemanticSegUNet25D,
 )
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from viscy.data.hcs import HCSDataModule
 from viscy.preprocessing import calculate_pixel_ratio
-from iohub.ngff import open_ome_zarr
+from viscy.transforms import NormalizeSampled, RandWeightedCropd
 
 # %% Create a dataloader and visualize the batches.
 
@@ -51,7 +48,7 @@ data_module = HCSDataModule(
     ],
 )
 
-pixel_ratio = calculate_pixel_ratio(dataset_path,target_channel="Inf_mask")
+pixel_ratio = calculate_pixel_ratio(dataset_path, target_channel="Inf_mask")
 
 # Prepare the data
 data_module.prepare_data()

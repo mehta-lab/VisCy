@@ -1,25 +1,24 @@
 # %% lightning moules for infection classification using the viscy library
 
-import torch
-import torch.nn as nn
-import lightning.pytorch as pl
-import torch.nn.functional as F
-from torch import Tensor
-import cv2
-
 # import torchview
 from typing import Literal, Sequence
-from skimage.exposure import rescale_intensity
-from matplotlib.cm import get_cmap
-from skimage.measure import regionprops, label
-import numpy as np
-import matplotlib.pyplot as plt
 
+import cv2
+import lightning.pytorch as pl
+import matplotlib.pyplot as plt
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from matplotlib.cm import get_cmap
 from monai.transforms import DivisiblePad
-from viscy.unet.networks.Unet2D import Unet2d
+from skimage.exposure import rescale_intensity
+from skimage.measure import label, regionprops
+from torch import Tensor
 
 # from viscy.unet.networks.Unet25D import Unet25d
 from viscy.data.hcs import Sample
+from viscy.unet.networks.Unet2D import Unet2d
 
 #
 # %% Methods to compute confusion matrix per cell using torchmetrics

@@ -1,20 +1,18 @@
 # %%
 # import sys
 # sys.path.append("/hpc/mydata/soorya.pradeep/viscy_infection_phenotyping/Viscy/")
-import torch
 import lightning.pytorch as pl
+import torch
 import torch.nn as nn
-
-from pytorch_lightning.loggers import TensorBoardLogger
-from pytorch_lightning.callbacks import ModelCheckpoint
-
-from viscy.transforms import RandWeightedCropd
-from viscy.transforms import NormalizeSampled
-from viscy.data.hcs import HCSDataModule
 from applications.infection_classification.classify_infection_covnext import (
     SemanticSegUNet22D,
 )
+from pytorch_lightning.callbacks import ModelCheckpoint
+from pytorch_lightning.loggers import TensorBoardLogger
+
+from viscy.data.hcs import HCSDataModule
 from viscy.preprocessing import calculate_pixel_ratio
+from viscy.transforms import NormalizeSampled, RandWeightedCropd
 
 # %% Create a dataloader and visualize the batches.
 
