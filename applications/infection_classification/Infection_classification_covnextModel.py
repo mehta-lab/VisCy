@@ -14,48 +14,12 @@ from viscy.data.hcs import HCSDataModule
 from applications.infection_classification.classify_infection_covnext import (
     SemanticSegUNet22D,
 )
-
-from iohub.ngff import open_ome_zarr
+from viscy.preprocessing import calculate_pixel_ratio
 
 # %% Create a dataloader and visualize the batches.
 
 # Set the path to the dataset
 dataset_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/datasets/Exp_2023_11_08_Opencell_infection/OC43_infection_timelapse_all_curated_train.zarr"
-
-# find ratio of background, uninfected and infected pixels
-zarr_input = open_ome_zarr(
-    dataset_path,
-    layout="hcs",
-    mode="r+",
-)
-in_chan_names = zarr_input.channel_names
-
-num_pixels_bkg = 0
-num_pixels_uninf = 0
-num_pixels_inf = 0
-num_pixels = 0
-for well_id, well_data in zarr_input.wells():
-    well_name, well_no = well_id.split("/")
-
-    for pos_name, pos_data in well_data.positions():
-        data = pos_data.data
-        T, C, Z, Y, X = data.shape
-        out_data = data.numpy()
-        for time in range(T):
-            Inf_mask = out_data[time, in_chan_names.index("Inf_mask"), ...]
-            # Calculate the number of pixels valued 0, 1, and 2 in 'Inf_mask'
-            num_pixels_bkg = num_pixels_bkg + (Inf_mask == 0).sum()
-            num_pixels_uninf = num_pixels_uninf + (Inf_mask == 1).sum()
-            num_pixels_inf = num_pixels_inf + (Inf_mask == 2).sum()
-            num_pixels = num_pixels + Z * X * Y
-
-pixel_ratio_1 = [
-    num_pixels / num_pixels_bkg,
-    num_pixels / num_pixels_uninf,
-    num_pixels / num_pixels_inf,
-]
-pixel_ratio_sum = sum(pixel_ratio_1)
-pixel_ratio = [ratio / pixel_ratio_sum for ratio in pixel_ratio_1]
 
 # %% craete data module
 
@@ -87,6 +51,7 @@ data_module = HCSDataModule(
         )
     ],
 )
+pixel_ratio = calculate_pixel_ratio(dataset_path, target_channel="Inf_mask")
 
 # Prepare the data
 data_module.prepare_data()

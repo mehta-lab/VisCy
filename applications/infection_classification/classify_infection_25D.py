@@ -17,7 +17,6 @@ from monai.transforms import DivisiblePad
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.data.hcs import Sample
 
-#
 # %% Methods to compute confusion matrix per cell using torchmetrics
 
 

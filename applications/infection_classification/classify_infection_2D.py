@@ -21,8 +21,6 @@ from viscy.unet.networks.Unet2D import Unet2d
 # from viscy.unet.networks.Unet25D import Unet25d
 from viscy.data.hcs import Sample
 
-# from skimage.io import imsave
-
 #
 # %% Methods to compute confusion matrix per cell using torchmetrics
 

@@ -52,7 +52,7 @@ trainer = pl.Trainer(
 trainer.predict(
     model=model,
     datamodule=data_module,
-    return_predictions=True,
+    return_predictions=False,
 )
 
 # %%
