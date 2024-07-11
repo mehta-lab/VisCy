@@ -43,6 +43,7 @@ _UNET_ARCHITECTURE = {
     "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
+    "UNeXt2_2D": FullyConvolutionalMAE,
 }
 
 
@@ -117,7 +118,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,

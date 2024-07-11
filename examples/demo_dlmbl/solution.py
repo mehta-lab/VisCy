@@ -78,7 +78,7 @@ The exercise is organized in 3 parts + Extra part.
 Set your python kernel to <span style="color:black;">06_image_translation</span>
 </div>
 """
-# %% <a [markdown] id='1_phase2fluor'></a>
+# %% [markdown]
 """
 # Part 1: Log training data to tensorboard, start training a model.
 ---------
@@ -143,41 +143,72 @@ log_dir.mkdir(parents=True, exist_ok=True)
 
 # %% [markdown] tags=[]
 """
-The next cell starts tensorboard within the notebook.
+The next cell starts tensorboard.
 
 <div class="alert alert-danger">
 If you launched jupyter lab from ssh terminal, add <code>--host &lt;your-server-name&gt;</code> to the tensorboard command below. <code>&lt;your-server-name&gt;</code> is the address of your compute node that ends in amazonaws.com.
 
-You can also launch tensorboard in an independent tab (instead of in the notebook) by changing the `%` to `!`
 </div>
 """
 
 # %% Imports and paths tags=[]
-%reload_ext tensorboard
-%tensorboard --logdir {log_dir}
 
+# Function to find an available port
+def find_free_port():
+    import socket
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.bind(('', 0))
+        return s.getsockname()[1]
+
+# Launch TensorBoard on the browser 
+def launch_tensorboard(log_dir):
+    import subprocess
+    port = find_free_port()
+    tensorboard_cmd = f"tensorboard --logdir={log_dir} --port={port}"
+    process = subprocess.Popen(tensorboard_cmd, shell=True)
+    print(f"TensorBoard started at http://localhost:{port}")
+    return process
+# Launch tensorboard and click on the link to view the logs.
+tensorboard_process = launch_tensorboard(log_dir)
+
+#%%[markdown]
+"""
+<div class="alert alert-warning">
+If you are using VSCode and a remote server, you will need to forward the port to view the tensorboard. <br>
+Take note of the port number was assigned in the previous cell.(i.e <code> http://localhost:{port_number_assigned}</code>) <br>
+
+Locate the your VSCode terminal and select the <code>Ports</code> tab <br>
+<ul>
+<li>Add a new port with the <code>port_number_assigned</code>
+<li>Change the port to <code>4000</code> and ensure that the forwarded Adress: <code>localhost:{port_number_assigned}</code>
+</ul>
+Click on the link to view the tensorboard and it should open in your browser.
+</div>
+"""
 # %% [markdown]
 """
-## Load OME-Zarr Dataset.
+## Load OME-Zarr Dataset
 
 There should be 34 FOVs in the dataset.
 
 Each FOV consists of 3 channels of 2048x2048 images,
-saved in the <a href="https://ngff.openmicroscopy.org/latest/#hcs-layout">
-High-Content Screening (HCS) layout</a>
+saved in the [High-Content Screening (HCS) layout](https://ngff.openmicroscopy.org/latest/#hcs-layout)
 specified by the Open Microscopy Environment Next Generation File Format
 (OME-NGFF).
 
-The layout on the disk is: row/col/field/pyramid_level/timepoint/channel/z/y/x.
+- The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
 """
 
 # %%[markdown]
 """
+<div class="alert alert-warning">
 You can inspect the tree structure by using your terminal:
-`iohub info -v <path-to-zarr>`  
+<code> iohub info -v "path-to-ome-zarr" </code>
 
+<br>
 More info on the CLI:
-`iohub info -h` to see the help menu.
+<code>iohub info --help </code> to see the help menu.
+</div>
 """
 #%%
 # This is the python function called by `iohub info` CLI command
@@ -355,7 +386,7 @@ BATCH_SIZE = 6
 data_module = HCSDataModule(
     data_path,
     z_window_size=1,
-    architecture='fcmae',
+    architecture='UNeXt2_2D',
     source_channel=["Phase3D"],
     target_channel=['Nucl','Mem'],
     split_ratio=0.8,
@@ -382,7 +413,7 @@ writer.close()
 
 
 # %% [markdown]
-# Visualize directly on Jupyter ☄️, if your tensorboard is causing issues.
+# If your tensorboard is causing issues, you can visualize directly on Jupyter ☄️/VSCode
 
 # %%
 %matplotlib inline
@@ -402,15 +433,15 @@ log_batch_jupyter(batch)
 # 
 # Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
 #
-# Hint: `RandAffined()` and `RandGaussianNoised()` from `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py).
+# HINT: `RandAffined()` and `RandGaussianNoised()` from `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py).
 # *Note* these are MONAI transforms that have been redefined for VisCy.
 
 # Can you tell what augmentation were applied from looking at the augmented images in Tensorboard?
 
 #
-# HINT:[Check your augmentations here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
+#
+# HINT:[Compare your choice of augmentations here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
 # </div>
-
 # %%
 # Here we turn on data augmentation and rerun setup
 source_channel= ['Phase3D']
@@ -476,17 +507,13 @@ See ``viscy.unet.networks.Unet2D.Unet2d`` ([source code](https://github.com/meht
 """
 # %%
 # Create a 2D UNet.
-if torch.cuda.is_available():
-    # Get the GPU ID (you can change the logic to select the appropriate GPU if you have multiple)
-    GPU_ID = torch.cuda.current_device()
-else:
-    raise ValueError("No GPU available")
+GPU_ID = 0
 
 BATCH_SIZE = 12
 YX_PATCH_SIZE = (256, 256)
 
-
 # Dictionary that specifies key parameters of the model.
+
 phase2fluor_config=dict(
     in_channels=1,
     out_channels=2,
@@ -499,7 +526,7 @@ phase2fluor_config=dict(
 )
 
 phase2fluor_model = VSUNet(
-    architecture='fcmae', #2D UNeXt2 architecture
+    architecture='UNeXt2_2D', #2D UNeXt2 architecture
     model_config=phase2fluor_config.copy(),
     loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     schedule="WarmupCosine",
@@ -513,12 +540,14 @@ phase2fluor_model = VSUNet(
 ### Instantiate data module and trainer, test that we are setup to launch training.
 """
 # %%
+source_channel= ['Phase3D']
+target_channel=['Nucl','Mem']
 # Setup the data module.
-phase2fluor_2D_data = HCSDataModule(
+phase2fluor_2D_data= HCSDataModule(
     data_path,
-    architecture="fcmae",
-    source_channel=["Phase3D"],
-    target_channel=["Nucl", "Mem"],
+    architecture="UNeXt2_2D",
+    source_channel=source_channel,
+    target_channel=target_channel,
     z_window_size=1,
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
@@ -572,11 +601,7 @@ Start training by running the following cell. Check the new logs on the tensorbo
 
 # %%
 # Check if GPU is available
-if torch.cuda.is_available():
-    # Get the GPU ID (you can change the logic to select the appropriate GPU if you have multiple)
-    GPU_ID = torch.cuda.current_device()
-else:
-    raise ValueError("No GPU available")
+GPU_ID=0
     
 n_samples = len(phase2fluor_2D_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
@@ -610,14 +635,11 @@ we can come back after a while and evaluate the performance!
 </div>
 """
 
-# %% <a [markdown] id='1_fluor2phase'></a>
+# %% [markdown]
 """
 # Part 2: Assess previous model, train fluorescence to phase contrast translation model.
 --------------------------------------------------
-"""
 
-# %% [markdown]
-"""
 We now look at some metrics of performance of previous model. We typically evaluate the model performance on a held out test data. We will use the following metrics to evaluate the accuracy of regression of the model:
 - [Person Correlation](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient).
 - [Structural similarity](https://en.wikipedia.org/wiki/Structural_similarity) (SSIM).
@@ -629,7 +651,7 @@ You should also look at the validation samples on tensorboard (hint: the experim
 """
 <div class="alert alert-info">
 
-### Task 2.1 Define metrics
+<b> Task 2.1 Define metrics </b><br>
 
 For each of the above metrics, write a brief definition of what they are and what they mean for this image translation task.
 
@@ -649,7 +671,8 @@ For each of the above metrics, write a brief definition of what they are and wha
 
 # %% Compute metrics directly and plot here.
 test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
-
+source_channel = ['Phase3D']
+target_channel = ['Nucl','Mem']
 test_data = HCSDataModule(
     test_data_path,
     source_channel=source_channel,
@@ -709,43 +732,52 @@ test_metrics.boxplot(
 channel_titles = ['Phase', 'Nuclei', 'Membrane']
 fig, axes = plt.subplots(2, 3, figsize=(30, 20))
 
-# Plot the phase image
-channel_image = phase_image[0, 0]
-p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-channel_image = np.clip(channel_image, p_low, p_high)
-axes[0, 0].imshow(channel_image)
-axes[0, 0].axis("off")
-axes[0, 0].set_title(channel_titles[0])
-
-# Plot the predicted images
-for i in range(predicted_image.shape[-4]):
-    channel_image = predicted_image[i, 0]
+for i, sample in enumerate(test_data.test_dataloader()):
+    # Plot the phase image
+    phase_image = sample["source"]
+    channel_image = phase_image[0, 0,0]
     p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
     channel_image = np.clip(channel_image, p_low, p_high)
-    axes[0, i + 1].imshow(channel_image, cmap="gray")
-    axes[0, i + 1].axis("off")
-    axes[0, i + 1].set_title(f"VS {channel_titles[i + 1]}")
+    axes[0, 0].imshow(channel_image,cmap="gray")
+    axes[0, 0].axis("off")
+    axes[0, 0].set_title(channel_titles[0])
 
-# Plot the target images
-for i in range(target_image.shape[-4]):
-    channel_image = target_image[i, 0]
-    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-    channel_image = np.clip(channel_image, p_low, p_high)
-    axes[1, i+1].imshow(channel_image, cmap="gray")
-    axes[1, i+1].axis("off")
-    axes[1, i+1].set_title(f"Target {dataset.channel_names[i+1]}")
+    with torch.inference_mode():  # turn off gradient computation.
+        predicted_image = phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
 
-# Remove any unused subplots
-for j in range(i + 1, 3):
-    fig.delaxes(axes[1, j])
+    target_image = (
+        sample["target"].cpu().numpy().squeeze(0)
+    )
+    # Plot the predicted images
+    for i in range(predicted_image.shape[-4]):
+        channel_image = predicted_image[i, 0]
+        p_low, p_high = np.percentile(channel_image, (0.1, 99.5))
+        channel_image = np.clip(channel_image, p_low, p_high)
+        axes[0, i + 1].imshow(channel_image, cmap="gray")
+        axes[0, i + 1].axis("off")
+        axes[0, i + 1].set_title(f"VS {channel_titles[i + 1]}")
 
-plt.tight_layout()
-plt.show()
+    # Plot the target images
+    for i in range(target_image.shape[-4]):
+        channel_image = target_image[i, 0]
+        p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+        channel_image = np.clip(channel_image, p_low, p_high)
+        axes[1, i].imshow(channel_image, cmap="gray")
+        axes[1, i].axis("off")
+        axes[1, i].set_title(f"Target {dataset.channel_names[i+1]}")
+
+    # Remove any unused subplots
+    for j in range(i + 1, 3):
+        fig.delaxes(axes[1, j])
+
+    plt.tight_layout()
+    plt.show()
+    break
 # %% [markdown] tags=[]
 """
 <div class="alert alert-info">
 
-### Task 2.2 Train fluorescence to phase contrast translation model
+<b>Task 2.2 Train fluorescence to phase contrast translation model</b><br>
 
 Instantiate a data module, model, and trainer for fluorescence to phase contrast translation. Copy over the code from previous cells and update the parameters. Give the variables and paths a different name/suffix (fluor2phase) to avoid overwriting objects used to train phase2fluor models.
 </div>
@@ -791,8 +823,12 @@ model_graph_fluor2phase.visual_graph
 ##########################
 
 # The entire training loop is contained in this cell.
-source_channel=['Mem']  # or 'Nuc' depending on choice
+source_channel=["Mem"]  # or 'Nuc' depending on choice
 target_channel = ["Phase3D"]
+YX_PATCH_SIZE = (256,256)
+BATCH_SIZE = 12
+n_epochs= 50
+steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 
 #Setup the new augmentations
 augmentations = [
@@ -834,7 +870,7 @@ normalizations=[
 #Setup the dataloader
 fluor2phase_data = HCSDataModule(
     data_path,
-    architecture="fcmae",
+    architecture="UNeXt2_2D",
     source_channel=source_channel,
     target_channel=target_channel,
     z_window_size=1,
@@ -850,7 +886,7 @@ fluor2phase_data.setup("fit")
 # Dictionary that specifies key parameters of the model.
 fluor2phase_config=dict(
     in_channels=1,
-    out_channels=2,
+    out_channels=1,
     encoder_blocks=[3, 3, 9, 3],
     dims=[96, 192, 384, 768],
     decoder_conv_blocks=2,
@@ -860,8 +896,8 @@ fluor2phase_config=dict(
 )
 
 fluor2phase_model = VSUNet(
-    architecture='fcmae',
-    model_config=phase2fluor_config.copy(),
+    architecture='UNeXt2_2D',
+    model_config=fluor2phase_config.copy(),
     loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     schedule="WarmupCosine",
     lr=2e-4,
@@ -913,7 +949,7 @@ test_data_path = Path(
 test_data = HCSDataModule(
     test_data_path,
     source_channel="Mem",  # or Nuc, depending on your choice of source
-    target_channel="Phase",
+    target_channel="Phase3D",
     z_window_size=1,
     batch_size=1,
     num_workers=8,
@@ -958,6 +994,47 @@ test_metrics.boxplot(
     column=["pearson_phase", "SSIM_phase"],
     rot=30,
 )
+#%%
+#Plot the predicted image
+channel_titles = ['Membrane','Target Phase','Predicted_Phase',]
+fig, axes = plt.subplots(1, 3, figsize=(30, 20))
+
+for i, sample in enumerate(test_data.test_dataloader()):
+    # Plot the phase image
+    mem_image = sample["source"]
+    channel_image = mem_image[0,0,0]
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[0].imshow(channel_image,cmap="gray")
+    axes[0].axis("off")
+    axes[0].set_title(channel_titles[0])
+
+    with torch.inference_mode():  # turn off gradient computation.
+        predicted_image = phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
+
+    target_image = (
+        sample["target"].cpu().numpy().squeeze(0)
+    )
+    # Plot the predicted images
+    channel_image = target_image[0,0]
+    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[1].imshow(channel_image,cmap="gray")
+    axes[1].axis("off")
+    axes[1].set_title(channel_titles[1])
+
+
+    channel_image = predicted_image[1, 0]
+    p_low, p_high = np.percentile(channel_image, (0.1, 99.5))
+    channel_image = np.clip(channel_image, p_low, p_high)
+    axes[2].imshow(channel_image, cmap="gray")
+    axes[2].axis("off")
+    axes[2].set_title(f"VS {channel_titles[2]}")
+
+
+    plt.tight_layout()
+    plt.show()
+    break
 
 # %% [markdown] tags=[]
 """
@@ -1048,7 +1125,7 @@ phase2fluor_config=dict(
 )
 
 phase2fluor_model_low_lr= VSUNet(
-    architecture='fcmae',
+    architecture='UNeXt2_2D',
     model_config=phase2fluor_config.copy(),
     loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5), #Changed the loss function to MixedLoss L1 and MS-SSIM
     schedule="WarmupCosine",
@@ -1091,7 +1168,7 @@ wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.
 
 data_path = Path() #TODO: Point to a 3D dataset (HEK, Neuromast)
 BATCH_SIZE = 4
-YX_PATCH_SIZE = (384, 384)
+YX_PATCH_SIZE = (256, 256)
 
 ## For 3D training - VSCyto3D
 source_channel=['Phase3D']
