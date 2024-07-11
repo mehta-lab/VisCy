@@ -6,6 +6,7 @@ from argparse import ArgumentParser
 import torch
 import torchview
 from torch.optim import Adam
+from lightning.pytorch.strategies import DDPStrategy
 
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint, RichProgressBar
@@ -14,13 +15,24 @@ from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import TQDMProgressBar
 import wandb
 from tqdm import tqdm
+from lightning.pytorch.utilities.rank_zero import rank_zero_only
 
 from viscy.light.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.data.hcs import ContrastiveDataModule  
+import logging
+
+# Set W&B logging level to suppress warnings
+logging.getLogger("wandb").setLevel(logging.ERROR)
 
 # %% Paths and constants
 os.environ["WANDB_DIR"] = "/hpc/mydata/alishba.imran/wandb_logs/"
+
+# @rank_zero_only
+# def init_wandb():
+#     wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
+
+# init_wandb()
 
 #wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
 
@@ -28,17 +40,18 @@ top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
 #input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 input_zarr = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 model_dir = top_dir / "infection_classification/models/infection_score"
+# checkpoint dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/multiple_channels
 timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
 
 # Data parameters
 base_path = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
-channels = 1
+channels = 2
 x = 200
 y = 200
 z = 15
 z_range = (28, 43)
 batch_size = 32
-channel_names = ["Phase3D"]
+channel_names = ["RFP", "Phase3D"] #training w/ both channels
 
 torch.set_float32_matmul_precision('medium')
 
@@ -65,23 +78,6 @@ torch.set_float32_matmul_precision('medium')
 # )
 # model_graph.visual_graph
 
-# %% Progress bar 
-
-class LitProgressBar(TQDMProgressBar):
-    def init_validation_tqdm(self):
-        bar = super().init_validation_tqdm()
-        bar.set_description("Running validation...")
-        return bar
-    
-    def init_train_tqdm(self):
-        bar = super().init_train_tqdm()
-        bar.set_description("Training...")
-        return bar
-    
-    def init_test_tqdm(self):
-        bar = super().init_test_tqdm()
-        bar.set_description("Testing...")
-        return bar
 
 # %% Define the main function for training
 def main(hparams):
@@ -114,7 +110,6 @@ def main(hparams):
     print(f"Validation dataset size: {len(data_module.val_dataset)}")
     print(f"Test dataset size: {len(data_module.test_dataset)}")
     
-
     # Initialize the model
     model = ContrastiveModule(
         backbone=hparams.backbone,
@@ -122,8 +117,7 @@ def main(hparams):
         margin=hparams.margin,
         lr=hparams.lr,
         schedule=hparams.schedule,
-        log_batches_per_epoch=hparams.log_batches_per_epoch,
-        log_samples_per_batch=hparams.log_samples_per_batch,
+        log_steps_per_epoch=hparams.log_steps_per_epoch,
         in_channels=channels,
         example_input_yx_shape=(x, y),
         in_stack_depth=z,
@@ -133,10 +127,11 @@ def main(hparams):
 
     # Initialize logger
     wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
-
+    
+    custom_folder_name = "multiple_channels"
     checkpoint_callback = ModelCheckpoint(
-        dirpath=model_dir,
-        filename="contrastive_model-{epoch:02d}-{val_loss:.2f}",
+        dirpath=os.path.join(model_dir, custom_folder_name),
+        filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
         save_top_k=3,
         mode="min",
         monitor="val/loss_epoch",
@@ -149,10 +144,16 @@ def main(hparams):
         accelerator=hparams.accelerator,
         devices=hparams.devices,
         num_nodes=hparams.num_nodes,
-        strategy="ddp",
+        strategy=DDPStrategy(find_unused_parameters=True),
         log_every_n_steps=hparams.log_every_n_steps,
         num_sanity_val_steps=0
     )
+
+    train_loader = data_module.train_dataloader()
+    example_batch = next(iter(train_loader))
+    example_input = example_batch[0]
+
+    wandb_logger.watch(model, log="all", log_graph=(example_input,))
 
     # Fetches batches from the training dataloader, 
     # Calls the training_step method on the model for each batch
@@ -174,8 +175,7 @@ if __name__ == "__main__":
             "margin": 0.5,
             "lr": 1e-3,
             "schedule": "Constant",
-            "log_batches_per_epoch": 4,
-            "log_samples_per_batch": 1,
+            "log_steps_per_epoch": 5,
             "embedding_len": 256,
             "max_epochs": 100,
             "accelerator": "gpu",
@@ -194,13 +194,12 @@ if __name__ == "__main__":
         parser.add_argument("--margin", type=float, default=0.5)
         parser.add_argument("--lr", type=float, default=1e-3)
         parser.add_argument("--schedule", type=str, default="Constant")
-        parser.add_argument("--log_batches_per_epoch", type=int, default=26)
-        parser.add_argument("--log_samples_per_batch", type=int, default=1)
+        parser.add_argument("--log_steps_per_epoch", type=int, default=10)
         parser.add_argument("--embedding_len", type=int, default=256)
         parser.add_argument("--max_epochs", type=int, default=100)
         parser.add_argument("--accelerator", type=str, default="gpu")
         parser.add_argument("--devices", type=int, default=1)  # 4 GPUs
-        parser.add_argument("--num_nodes", type=int, default=2)
+        parser.add_argument("--num_nodes", type=int, default=1)
         parser.add_argument("--log_every_n_steps", type=int, default=1)
         args = parser.parse_args()
 

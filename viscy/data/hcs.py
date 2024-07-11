@@ -7,6 +7,7 @@ from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
 #import pytorch_lightning as pl
+from monai.transforms import MapTransform
 
 import numpy as np
 import torch
@@ -16,13 +17,8 @@ from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 #from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
-from monai.transforms import (
-    CenterSpatialCropd,
-    Compose,
-    MapTransform,
-    MultiSampleTrait,
-    RandAffined,
-)
+from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandGaussianNoised, RandGaussianSmoothd, RandScaleIntensityd, RandShiftIntensityd, RandZoomd, Rand3DElasticd, RandGaussianSharpend
+
 
 
 from torch import Tensor
@@ -31,14 +27,7 @@ from torch.utils.data import DataLoader, Dataset
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
 
 import random
-from viscy.transforms import (
-    RandAdjustContrastd,
-    RandAffined,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-)
-from monai.transforms import Compose
+
 from iohub import open_ome_zarr
 import pandas as pd
 import warnings
@@ -630,6 +619,8 @@ class ContrastiveDataset(Dataset):
         self.positions = list(self.ds.positions())
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
         self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
+        print("channel indices!")
+        print(self.channel_indices)
         print(f"Initialized dataset with {len(self.positions)} positions.")
         
     def open_zarr_store(self, path, layout="hcs", mode="r"):
@@ -688,11 +679,10 @@ class ContrastiveDataset(Dataset):
         zarr_array = position["0"][:]
         # print("Shape before:", zarr_array.shape)
         data = self.restructure_data(zarr_array, position_path)
-        if self.z_range:
-            data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
+        data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
 
-        # print("shape after!")
-        # print(data.shape)
+        #print("shape after!")
+        #print(data.shape)
         return data
 
     def restructure_data(self, data, position_path):
@@ -729,9 +719,13 @@ class ContrastiveDataset(Dataset):
         return reshaped_data
 
     def normalize_data(self, data):
-        mean = np.mean(data)
-        std = np.std(data)
-        return (data - mean) / (std + 1e-6)  
+        normalized_data = np.empty_like(data)
+        for i in range(data.shape[0]):  # iterate over each channel
+            channel_data = data[i]
+            mean = np.mean(channel_data)
+            std = np.std(channel_data)
+            normalized_data[i] = (channel_data - mean) / (std + 1e-6)
+        return normalized_data
     
 #     def apply_transform(self, data):
 #         # print("Applying transform to data")
@@ -821,7 +815,6 @@ class ContrastiveDataset(Dataset):
 #     return transforms
 
 
-
 def get_transforms():
     transforms = Compose(
         [
@@ -845,6 +838,7 @@ def get_transforms():
         ]
     )
     return transforms
+
 
 class ContrastiveDataModule(LightningDataModule):
     def __init__(

@@ -10,7 +10,7 @@ class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
         backbone: str = "convnext_tiny",
-        in_channels: int = 1,
+        in_channels: int = 2,
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
@@ -55,12 +55,12 @@ class ContrastiveEncoder(nn.Module):
             )
             self.model.stem = stem
 
-            # replace the fully connected layer with projection head (Linear->ReLU->Linear).
             self.model.head.fc = nn.Sequential(
                 self.model.head.fc,
                 nn.ReLU(inplace=True),
                 nn.Linear(4 * embedding_len, embedding_len),
             )
+
             """ 
             head of convnext
             -------------------
@@ -87,6 +87,8 @@ class ContrastiveEncoder(nn.Module):
             (2): Linear(in_features=1024, out_features=256, bias=True)
             )
             """
+
+        # TO-DO: need to debug further
         elif "resnet" in backbone:
             print("Using ResNet backbone.")
             # Adapt stem and projection head of resnet here.
@@ -100,11 +102,12 @@ class ContrastiveEncoder(nn.Module):
             )
             self.model.conv1 = stem
 
-            self.model.fc = nn.Sequential(
-                self.model.fc,
+            self.model.head.fc = nn.Sequential(
+                self.model.head.fc,
                 nn.ReLU(inplace=True),
                 nn.Linear(4 * embedding_len, embedding_len),
             )
+
             """ 
             head of resnet
             -------------------
@@ -122,4 +125,8 @@ class ContrastiveEncoder(nn.Module):
             """
 
     def forward(self, x):
-        return self.model(x)
+        features = self.model.forward_features(x)  # extract features
+        intermediate_embeddings = self.model.head.global_pool(features)  # apply global pooling
+        intermediate_embeddings = self.model.head.flatten(intermediate_embeddings)  # flatten features
+        projected_embeddings = self.model.head.fc(intermediate_embeddings)  # apply projection head
+        return intermediate_embeddings, projected_embeddings
