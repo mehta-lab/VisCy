@@ -1,15 +1,15 @@
 import argparse
-from traitlets.config import Config
-import nbformat as nbf
-from nbconvert.preprocessors import TagRemovePreprocessor, ClearOutputPreprocessor
+
 from nbconvert.exporters import NotebookExporter
+from nbconvert.preprocessors import ClearOutputPreprocessor, TagRemovePreprocessor
+from traitlets.config import Config
 
 
 def get_arg_parser():
     parser = argparse.ArgumentParser()
 
-    parser.add_argument('input_file')
-    parser.add_argument('output_file')
+    parser.add_argument("input_file")
+    parser.add_argument("output_file")
 
     return parser
 
@@ -21,7 +21,7 @@ def convert(input_file, output_file):
     c.ClearOutputPreprocesser.enabled = True
     c.NotebookExporter.preprocessors = [
         "nbconvert.preprocessors.TagRemovePreprocessor",
-        "nbconvert.preprocessors.ClearOutputPreprocessor"
+        "nbconvert.preprocessors.ClearOutputPreprocessor",
     ]
 
     exporter = NotebookExporter(config=c)
@@ -29,7 +29,7 @@ def convert(input_file, output_file):
     exporter.register_preprocessor(ClearOutputPreprocessor(), True)
 
     output = NotebookExporter(config=c).from_filename(input_file)
-    with open(output_file, 'w') as f:
+    with open(output_file, "w") as f:
         f.write(output[0])
 
 
@@ -38,4 +38,4 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     convert(args.input_file, args.output_file)
-    print(f'Converted {args.input_file} to {args.output_file}')
+    print(f"Converted {args.input_file} to {args.output_file}")
