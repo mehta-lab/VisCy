@@ -184,10 +184,13 @@ def find_free_port():
 # Launch TensorBoard on the browser
 def launch_tensorboard(log_dir):
     import subprocess
+
     port = find_free_port()
     tensorboard_cmd = f"tensorboard --logdir={log_dir} --port={port}"
     process = subprocess.Popen(tensorboard_cmd, shell=True)
-    print(f"TensorBoard started at http://localhost:{port}. \n If you are using VSCode remote session, forward the port using the PORTS tab next to TERMINAL.")
+    print(
+        f"TensorBoard started at http://localhost:{port}. \n If you are using VSCode remote session, forward the port using the PORTS tab next to TERMINAL."
+    )
     return process
 
 
@@ -805,12 +808,6 @@ fluor2phase_model = VSUNet(
     # Your code here (copy from above and modify as needed)
 )
 
-trainer = VSTrainer(
-    # Your code here (copy from above and modify as needed)
-)
-trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
-
-
 # Visualize the graph of fluor2phase model as image.
 model_graph_fluor2phase = torchview.draw_graph(
     fluor2phase_model,
@@ -909,6 +906,27 @@ fluor2phase_model = VSUNet(
     freeze_encoder=False,
 )
 
+# Visualize the graph of fluor2phase model as image.
+model_graph_fluor2phase = torchview.draw_graph(
+    fluor2phase_model,
+    fluor2phase_data.train_dataset[0]["source"],
+    depth=2,  # adjust depth to zoom in.
+    device="cpu",
+)
+model_graph_fluor2phase.visual_graph
+
+# %% tags=[]
+##########################
+######## TODO ########
+##########################
+
+trainer = VSTrainer(
+    # Your code here (copy from above and modify as needed)
+)
+trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
+
+
+# %%  tags=["solution"]
 trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
@@ -924,20 +942,13 @@ trainer = VSTrainer(
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
 # %%
-# Visualize the graph of fluor2phase model as image.
-model_graph_fluor2phase = torchview.draw_graph(
-    fluor2phase_model,
-    fluor2phase_data.train_dataset[0]["source"],
-    depth=2,  # adjust depth to zoom in.
-    device="cpu",
-)
-model_graph_fluor2phase.visual_graph
+
 
 # %% [markdown] tags=[]
 """
 <div class="alert alert-info">
 
-### Task 2.3
+<b>Task 2.3 </b><br>
 
 While your model is training, let's think about the following questions:
 - What is the information content of each channel in the dataset?
