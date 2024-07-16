@@ -1,0 +1,24 @@
+mem_model_path: "/hpc/projects/jacobo_group/Code/timelapse_seg_tracking_pipeline/3_segmentation/membrane/cellpose_2Chan_scratch_2024_04_30_11_12_00"
+membrane_kwargs:
+  diameter: 65
+  channels:
+    - 2
+    - 1
+  cellprob_threshold: 0.4
+  invert: false
+  do_3D: true
+  anisotropy: 3.26
+  min_size: 8000
+
+nuc_model_path: "/hpc/projects/jacobo_group/projects/cellpose/Nuclei/Deconvolved/Fine_Tune/models/cellpose_Slices_decon_nuclei_nuclei_v7_2023_06_28_16_54"
+nucleus_kwargs:
+  diameter: 60
+  channels:
+    - 1
+    - 0
+  cellprob_threshold: 0.0
+  invert: false
+  do_3D: true
+  anisotropy: 3.26
+  min_size: 8000
+
