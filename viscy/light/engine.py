@@ -2,7 +2,7 @@ import logging
 import os
 from typing import Literal, Sequence, Union
 import matplotlib.pyplot as plt
-
+import pandas as pd
 import numpy as np
 import torch
 import wandb
@@ -489,6 +489,7 @@ class ContrastiveModule(LightningModule):
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
+        predict: bool = False
     ) -> None:
         super().__init__()
 
@@ -503,6 +504,7 @@ class ContrastiveModule(LightningModule):
         self.training_metrics = []
         self.validation_metrics = []
         self.test_metrics = []
+        self.processed_order = []
 
         self.encoder = ContrastiveEncoder(
             backbone=backbone,
@@ -510,6 +512,7 @@ class ContrastiveModule(LightningModule):
             in_stack_depth=in_stack_depth,
             stem_kernel_size=stem_kernel_size,
             embedding_len=embedding_len,
+            predict=predict
         )
 
         # required to log the graph.
@@ -526,8 +529,8 @@ class ContrastiveModule(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the model."""
-        features, projections = self.encoder(x)
-        return features, projections
+        projections = self.encoder(x)
+        return projections
         # features is without projection head and projects is with projection head 
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
@@ -536,6 +539,15 @@ class ContrastiveModule(LightningModule):
         
         print(f"{prefix}_mean: {mean}")
         print(f"{prefix}_std: {std}")
+
+    def print_embedding_norms(self, anchor, positive, negative, phase):
+        anchor_norm = torch.norm(anchor, dim=1).mean().item()
+        positive_norm = torch.norm(positive, dim=1).mean().item()
+        negative_norm = torch.norm(negative, dim=1).mean().item()
+        
+        print(f"{phase}/anchor_norm: {anchor_norm}")
+        print(f"{phase}/positive_norm: {positive_norm}")
+        print(f"{phase}/negative_norm: {negative_norm}")
 
     # logs over all steps 
     @rank_zero_only
@@ -602,9 +614,9 @@ class ContrastiveModule(LightningModule):
         """Training step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, emb_anchor = self.encoder(anchor)
-        _, emb_pos = self.encoder(pos_img)
-        _, emb_neg = self.encoder(neg_img)
+        emb_anchor = self.encoder(anchor)
+        emb_pos = self.encoder(pos_img)
+        emb_neg = self.encoder(neg_img)
         loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
         
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
@@ -614,11 +626,11 @@ class ContrastiveModule(LightningModule):
             self.log_images(anchor, pos_img, neg_img, self.current_epoch, "training_images")
         
         self.log_metrics(emb_anchor, emb_pos, emb_neg, 'train')
+        #self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
 
         self.training_step_outputs.append(loss)
         return {'loss': loss}
 
-    @rank_zero_only
     def on_train_epoch_end(self) -> None:
         epoch_loss = torch.stack(self.training_step_outputs).mean()
         self.log("train/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
@@ -641,9 +653,9 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, emb_anchor = self.encoder(anchor)
-        _, emb_pos = self.encoder(pos_img)
-        _, emb_neg = self.encoder(neg_img)
+        emb_anchor = self.encoder(anchor)
+        emb_pos = self.encoder(pos_img)
+        emb_neg = self.encoder(neg_img)
         loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
@@ -657,7 +669,6 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs.append(loss)
         return {'loss': loss}
     
-    @rank_zero_only
     def on_validation_epoch_end(self) -> None:
         epoch_loss = torch.stack(self.validation_step_outputs).mean()
         self.log("val/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
@@ -680,9 +691,9 @@ class ContrastiveModule(LightningModule):
         """Test step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, emb_anchor = self.encoder(anchor)
-        _, emb_pos = self.encoder(pos_img)
-        _, emb_neg = self.encoder(neg_img)
+        emb_anchor = self.encoder(anchor)
+        emb_pos = self.encoder(pos_img)
+        emb_neg = self.encoder(neg_img)
         loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
         
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
@@ -718,4 +729,50 @@ class ContrastiveModule(LightningModule):
             avg_metrics[f"{phase}/euclidean_distance_positive"] = sum(m[f"{phase}/euclidean_distance_positive"] for m in metrics) / len(metrics)
             avg_metrics[f"{phase}/euclidean_distance_negative"] = sum(m[f"{phase}/euclidean_distance_negative"] for m in metrics) / len(metrics)
         return avg_metrics
+    
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+        print("running predict step!")
+        """Prediction step for extracting embeddings."""
+        x, position_info = batch
+        features, projections = self.encoder(x)
+        self.processed_order.extend(position_info)
+        return features, projections
+    
+    # already saved, not needed again
+    # def on_predict_epoch_end(self) -> None:
+    #         print(f"Processed order: {self.processed_order}")
+    #         rows, columns, fovs, cell_ids = [], [], [], []
 
+    #         for position_path in self.processed_order:
+    #             try:
+    #                 parts = position_path.split("/")
+    #                 if len(parts) < 3:
+    #                     raise ValueError(f"Invalid position path: {position_path}")
+
+    #                 row = parts[0]
+    #                 column = parts[1]
+    #                 fov_cell = parts[2]
+                    
+    #                 fov = int(fov_cell.split("fov")[1].split("cell")[0])
+    #                 cell_id = int(fov_cell.split("cell")[1])
+
+    #                 rows.append(row)
+    #                 columns.append(column)
+    #                 fovs.append(fov)
+    #                 cell_ids.append(cell_id)
+                
+    #             except (IndexError, ValueError) as e:
+    #                 print(f"Skipping invalid position path: {position_path} with error: {e}")
+
+    #         # Save processed order
+    #         if rows and columns and fovs and cell_ids:
+    #             processed_order_df = pd.DataFrame({
+    #                 "Row": rows,
+    #                 "Column": columns,
+    #                 "FOV": fovs,
+    #                 "Cell ID": cell_ids
+    #             })
+    #             print(f"Saving processed order DataFrame: {processed_order_df}")
+    #             processed_order_df.to_csv("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/epoch66_processed_order.csv", index=False)
+    #         else:
+    #             print("No valid processed orders found to save.")

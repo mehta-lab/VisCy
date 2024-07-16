@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
 #import pytorch_lightning as pl
 from monai.transforms import MapTransform
-
+import random
 import numpy as np
 import torch
 import zarr
@@ -622,7 +622,36 @@ class ContrastiveDataset(Dataset):
         print("channel indices!")
         print(self.channel_indices)
         print(f"Initialized dataset with {len(self.positions)} positions.")
+
+        # self.statistics = self.compute_statistics()
+        # print("Channel Statistics:", self.statistics)
+    
+    def compute_statistics(self):
+        stats = {channel: {'mean': 0, 'sum_sq_diff': 0, 'min': np.inf, 'max': -np.inf} for channel in self.channel_names}
+        count = 0
+        total_elements = 0
+
+        for idx in range(len(self.positions)):
+            position_path = self.positions[idx][0]
+            data = self.load_data(position_path)
+            for i, channel in enumerate(self.channel_names):
+                channel_data = data[i]
+                mean = np.mean(channel_data)
+                stats[channel]['mean'] += mean
+                stats[channel]['min'] = min(stats[channel]['min'], np.min(channel_data))
+                stats[channel]['max'] = max(stats[channel]['max'], np.max(channel_data))
+                stats[channel]['sum_sq_diff'] += np.sum((channel_data - mean) ** 2)
+            count += 1
+            total_elements += np.prod(channel_data.shape)
+
+        for channel in self.channel_names:
+            stats[channel]['mean'] /= count
+            stats[channel]['std'] = np.sqrt(stats[channel]['sum_sq_diff'] / total_elements)
+            del stats[channel]['sum_sq_diff']
         
+        print("done!")
+        return stats
+
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         #print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
@@ -635,11 +664,7 @@ class ContrastiveDataset(Dataset):
         anchor_data = self.load_data(anchor_position_path)
         anchor_data = self.normalize_data(anchor_data)
 
-        positive_data = (
-            self.transform({"image": anchor_data})["image"]
-            if self.transform
-            else anchor_data
-        )
+        positive_data = self.apply_channel_transforms(anchor_data)
         positive_data = self.normalize_data(positive_data)
 
         # if self.transform:
@@ -652,11 +677,7 @@ class ContrastiveDataset(Dataset):
         negative_data = self.load_data(negative_position_path)
         negative_data = self.normalize_data(negative_data) 
 
-        negative_data = (
-            self.transform({"image": negative_data})["image"]
-            if self.transform
-            else negative_data
-        )
+        negative_data = self.apply_channel_transforms(negative_data)
         negative_data = self.normalize_data(negative_data)
 
         # if self.transform:
@@ -727,118 +748,64 @@ class ContrastiveDataset(Dataset):
             normalized_data[i] = (channel_data - mean) / (std + 1e-6)
         return normalized_data
     
-#     def apply_transform(self, data):
-#         # print("Applying transform to data")
-#         # print(data.shape) # data shape when 2 channels: (2, 15, 200, 200)
-#         # transformed_data = np.empty_like(data)
-#         # for channel_idx in range(data.shape[0]):  
-#         #     channel_data = data[channel_idx]
-#         #     transform = get_transforms(channel_data)
-#         #     transformed_data[channel_idx] = transform({"image": channel_data})["image"]
-#         # return transformed_data
-#         transformed_data = np.empty_like(data)
-#         for channel_idx, channel_name in enumerate(self.channel_names):  
-#             channel_data = data[channel_idx]
-#             transform = get_transforms(channel_data, channel_name)
-#             transformed_data[channel_idx] = transform({"image": channel_data})["image"]
-#         return transformed_data
-
-# def get_transforms(image, channel):
-#     mean = np.mean(image)
-#     std = np.std(image)
-#     if channel == 'RFP':
-#         if std < 0.1:
-#             gamma_range = (0.97, 1.03)
-#         else:
-#             gamma_range = (0.9, 1.1)
-        
-#         if mean < 0.5:
-#             scale_factors = (0.95, 1.05)
-#         else:
-#             scale_factors = (0.93, 1.07)
-#     elif channel == 'Phase3D':
-#         if std < 0.1:
-#             gamma_range = (0.98, 1.02)
-#         else:
-#             gamma_range = (0.95, 1.05)
-        
-#         if mean < 0.5:
-#             scale_factors = (0.98, 1.02)
-#         else:
-#             scale_factors = (0.95, 1.05)
-
-#     # if std < 0.1:
-#     #     gamma_range = (0.95, 1.05)  # Narrower range for low variance images
-#     # else:
-#     #     gamma_range = (0.85, 1.15)  # Slightly adjusted range for higher variance
-    
-#     # if mean < 0.5:
-#     #     scale_factors = (0.95, 1.05)  # Narrower range for lower intensity images
-#     # else:
-#     #     scale_factors = (0.85, 1.15)  # Slightly adjusted range for higher intensity images
-
-#     # if std < 0.1:
-#     #     gamma_range = (0.97, 1.03)  # Even narrower range for low variance images
-#     # else:
-#     #     gamma_range = (0.9, 1.1)  # Narrower range for higher variance
-    
-#     # if mean < 0.5:
-#     #     scale_factors = (0.95, 1.05)  # Narrower range for lower intensity images
-#     # else:
-#     #     scale_factors = (0.93, 1.07)  # Even narrower range for higher intensity images
-
-#     # normalization for both channels 
-#     # log mean, std for each anhchor, positive, negative
-#     # mean, std of anchor and positive get closer 
-#     # mean, std of anchor and negative further (0.5 margin)
-#     transforms = Compose(
-#         [
-#             RandAdjustContrastd(keys=["image"], prob=0.5, gamma=gamma_range),
-#             RandAffined(
-#                 keys=["image"],
-#                 prob=0.5,
-#                 rotate_range=(0.07, 0.07),
-#                 shear_range=(0.07, 0.07),
-#                 scale_range=(0.07, 0.07),
-#             ),
-#             RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=std * 0.1),
-#             RandGaussianSmoothd(
-#                 keys=["image"],
-#                 prob=0.5,
-#                 sigma_x=(0.1, 0.3),
-#                 sigma_y=(0.1, 0.3),
-#                 sigma_z=(0.1, 0.3),
-#             ),
-#             RandScaleIntensityd(keys=["image"], factors=scale_factors, prob=0.5),
-#         ]
-#     )
-#     return transforms
-
+    def apply_channel_transforms(self, data):
+        transformed_data = np.empty_like(data)
+        for i, channel_name in enumerate(self.channel_names):
+            channel_data = data[i]
+            transform = self.transform[channel_name]
+            transformed_data[i] = transform({"image": channel_data})["image"]
+            #print(f"transformed {channel_name}")
+        return transformed_data
 
 def get_transforms():
-    transforms = Compose(
+    rfp_transforms = Compose(
         [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.9, 1.1)),
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.75, 1.25)),
             RandAffined(
                 keys=["image"],
                 prob=0.5,
-                rotate_range=(0.07, 0.07),
-                shear_range=(0.07, 0.07),
-                scale_range=(0.07, 0.07),
+                rotate_range=(0.1, 0.1),
+                shear_range=(0.1, 0.1),
+                scale_range=(0.1, 0.1),
             ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.01),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.1),
             RandGaussianSmoothd(
                 keys=["image"],
                 prob=0.5,
-                sigma_x=(0.05, 0.1),
-                sigma_y=(0.05, 0.1),
-                sigma_z=(0.05, 0.1),
+                sigma_x=(0.1, 0.3),
+                sigma_y=(0.1, 0.3),
+                sigma_z=(0.1, 0.3),
             ),
-            RandScaleIntensityd(keys=["image"], factors=(0.95, 1.05), prob=0.5),
+            RandScaleIntensityd(keys=["image"], factors=(0.85, 1.15), prob=0.5),
         ]
     )
-    return transforms
 
+    phase_transforms = Compose(
+        [
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.97, 1.03)),
+            RandAffined(
+                keys=["image"],
+                prob=0.5,
+                rotate_range=(0.05, 0.05),
+                shear_range=(0.05, 0.05),
+                scale_range=(0.05, 0.05),
+            ),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.005),
+            RandGaussianSmoothd(
+                keys=["image"],
+                prob=0.5,
+                sigma_x=(0.03, 0.05),
+                sigma_y=(0.03, 0.05),
+                sigma_z=(0.03, 0.05),
+            ),
+            RandScaleIntensityd(keys=["image"], factors=(0.97, 1.03), prob=0.5),
+        ]
+    )
+
+    return {
+        "RFP": rfp_transforms,
+        "Phase3D": phase_transforms
+    }
 
 class ContrastiveDataModule(LightningDataModule):
     def __init__(
@@ -877,35 +844,36 @@ class ContrastiveDataModule(LightningDataModule):
         self.predict_dataset = None
 
     def setup(self, stage: str = None):
-        dataset = ContrastiveDataset(
-            self.base_path,
-            self.channels,
-            self.x,
-            self.y,
-            self.timesteps_csv_path,
-            channel_names=self.channel_names,
-            transform=self.transform,
-            z_range=self.z_range,
-        )
-
-        train_size = int(len(dataset) * self.train_split_ratio)
-        val_size = int(len(dataset) * self.val_split_ratio)
-        test_size = len(dataset) - train_size - val_size
-
-        self.train_dataset, self.val_dataset, self.test_dataset = (
-            torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
-        )
-
-        # setup prediction dataset (if needed)
-        if stage == "predict" and self.predict_base_path:
-            self.predict_dataset = ContrastiveDataset(
-                self.predict_base_path,
+        if stage == "fit":
+            dataset = ContrastiveDataset(
+                self.base_path,
                 self.channels,
                 self.x,
                 self.y,
                 self.timesteps_csv_path,
                 channel_names=self.channel_names,
                 transform=self.transform,
+                z_range=self.z_range,
+            )
+
+            train_size = int(len(dataset) * self.train_split_ratio)
+            val_size = int(len(dataset) * self.val_split_ratio)
+            test_size = len(dataset) - train_size - val_size
+
+            self.train_dataset, self.val_dataset, self.test_dataset = (
+                torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
+            )
+
+        # setup prediction dataset 
+        if stage == "predict" and self.predict_base_path:
+            print("setting up!")
+            self.predict_dataset = PredictDataset(
+                self.predict_base_path,
+                self.channels,
+                self.x,
+                self.y,
+                timesteps_csv_path=self.timesteps_csv_path,
+                channel_names=self.channel_names,
                 z_range=self.z_range,
             )
 
@@ -940,15 +908,104 @@ class ContrastiveDataModule(LightningDataModule):
         )
 
     def predict_dataloader(self):
+        print("running predict DataLoader!")
         if self.predict_dataset is None:
             raise ValueError(
                 "Predict dataset not set up. Call setup(stage='predict') first."
             )
+
+        
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,
-            shuffle=False,
+            shuffle=False, # False shuffle for prediction
             num_workers=self.num_workers,
             prefetch_factor=2,  
             persistent_workers=True  
         )
+
+class PredictDataset(Dataset):
+    def __init__(
+        self,
+        base_path,
+        channels,
+        x,
+        y,
+        timesteps_csv_path,
+        channel_names,
+        z_range=None,
+    ):
+        self.base_path = base_path
+        self.channels = channels
+        self.x = x
+        self.y = y
+        self.z_range = z_range
+        self.channel_names = channel_names
+        self.ds = self.open_zarr_store(self.base_path)
+        self.timesteps_csv_path = timesteps_csv_path
+        self.timesteps_df = pd.read_csv(timesteps_csv_path)
+        self.positions = list(self.ds.positions())
+        self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
+        print("channel indices!")
+        print(self.channel_indices)
+        print(f"Initialized predict dataset with {len(self.positions)} positions.")
+
+    def open_zarr_store(self, path, layout="hcs", mode="r"):
+        return open_ome_zarr(path, layout=layout, mode=mode)
+
+    # def get_positions_from_csv(self):
+    #     positions = []
+    #     #self.timesteps_df = pd.read_csv(self.timesteps_csv_path)
+    #     for idx, row in self.timesteps_df.iterrows():
+    #         position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
+    #         positions.append((position_path, row['Random Timestep']))
+    #     #print(positions)
+    #     return positions
+    
+    def __len__(self):
+        return len(self.positions)
+
+    def __getitem__(self, idx):
+        position_path = self.positions[idx][0]
+        #print(f"Position path: {position_path}")
+        data = self.load_data(position_path)
+        data = self.normalize_data(data)
+
+        return torch.tensor(data, dtype=torch.float32), (position_path)
+
+    # double check printing order 
+    def load_data(self, position_path):
+        position = self.ds[position_path]
+        #print(f"Loading data for position path: {position_path}")
+        zarr_array = position["0"][:]
+
+        parts = position_path.split("/")
+        row = parts[0]
+        column = parts[1]
+        fov_cell = parts[2]
+        fov = int(fov_cell.split("fov")[1].split("cell")[0])
+        cell_id = int(fov_cell.split("cell")[1])
+
+        combined_id = f"{row}/{column}/fov{fov}cell{cell_id}"
+        matched_rows = self.timesteps_df[
+            self.timesteps_df.apply(
+                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
+                axis=1,
+            ) == combined_id
+        ]
+
+        if matched_rows.empty:
+            raise ValueError(f"No matching entry found for position path: {position_path}")
+
+        random_timestep = matched_rows["Random Timestep"].values[0]
+        data = zarr_array[random_timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
+        return data
+
+    def normalize_data(self, data):
+        normalized_data = np.empty_like(data)
+        for i in range(data.shape[0]):  # iterate over each channel
+            channel_data = data[i]
+            mean = np.mean(channel_data)
+            std = np.std(channel_data)
+            normalized_data[i] = (channel_data - mean) / (std + 1e-6)
+        return normalized_data

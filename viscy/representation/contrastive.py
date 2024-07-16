@@ -1,5 +1,6 @@
 import timm
 import torch.nn as nn
+import torch.nn.functional as F
 
 # from viscy.unet.networks.resnet import resnetStem
 # Currently identical to resnetStem, but could be different in the future.
@@ -14,8 +15,11 @@ class ContrastiveEncoder(nn.Module):
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
+        predict: bool = False
     ):
         super().__init__()
+
+        self.predict = predict
 
         """
         ContrastiveEncoder network that uses ConvNext and ResNet backbons from timm.
@@ -125,8 +129,25 @@ class ContrastiveEncoder(nn.Module):
             """
 
     def forward(self, x):
-        features = self.model.forward_features(x)  # extract features
-        intermediate_embeddings = self.model.head.global_pool(features)  # apply global pooling
-        intermediate_embeddings = self.model.head.flatten(intermediate_embeddings)  # flatten features
-        projected_embeddings = self.model.head.fc(intermediate_embeddings)  # apply projection head
-        return intermediate_embeddings, projected_embeddings
+        if self.predict:
+            print("running predict forward!")
+            x = self.model.stem(x)
+            x = self.model.stages[0](x)
+            x = self.model.stages[1](x)
+            x = self.model.stages[2](x)
+            x = self.model.stages[3](x)
+            x = self.model.head.global_pool(x)
+            x = self.model.head.norm(x)
+            x = self.model.head.flatten(x)
+            features_before_projection = self.model.head.drop(x)
+            projections = self.model.head.fc(features_before_projection)
+            features_before_projection = F.normalize(features_before_projection, p=2, dim=1)
+            projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
+            print(features_before_projection.shape, projections.shape)
+            return features_before_projection, projections
+        # feature is without projection head
+        else:
+            print("running forward without predict!")
+            projections = self.model(x)
+            projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
+            return projections

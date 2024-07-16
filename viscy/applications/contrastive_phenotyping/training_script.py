@@ -40,7 +40,7 @@ top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
 #input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 input_zarr = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 model_dir = top_dir / "infection_classification/models/infection_score"
-# checkpoint dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/multiple_channels
+# checkpoint dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels
 timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
 
 # Data parameters
@@ -55,28 +55,27 @@ channel_names = ["RFP", "Phase3D"] #training w/ both channels
 
 torch.set_float32_matmul_precision('medium')
 
-# %% Initialize the model and log the graph
-#contra_model = ContrastiveEncoder(backbone="convnext_tiny")
-# print(contra_model)
+contra_model = ContrastiveEncoder(backbone="convnext_tiny")
+print(contra_model)
 
-# model_graph = torchview.draw_graph(
-#     contra_model,
-#     torch.randn(1, 2, 15, 224, 224),
-#     depth=3,
-#     device="cpu",
-# )
-# model_graph.visual_graph
+model_graph = torchview.draw_graph(
+    contra_model,
+    torch.randn(1, 2, 15, 224, 224),
+    depth=3,
+    device="cpu",
+)
+model_graph.visual_graph
 
-#contrastive_module = ContrastiveModule()
-# print(contrastive_module.encoder)
+contrastive_module = ContrastiveModule()
+print(contrastive_module.encoder)
 
-# model_graph = torchview.draw_graph(
-#     contrastive_module.encoder,
-#     torch.randn(1, 2, 15, 200, 200),
-#     depth=3,
-#     device="cpu",
-# )
-# model_graph.visual_graph
+model_graph = torchview.draw_graph(
+    contrastive_module.encoder,
+    torch.randn(1, 2, 15, 200, 200),
+    depth=3,
+    device="cpu",
+)
+model_graph.visual_graph
 
 
 # %% Define the main function for training
@@ -128,7 +127,8 @@ def main(hparams):
     # Initialize logger
     wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
     
-    custom_folder_name = "multiple_channels"
+    # set for each run to avoid overwritting!
+    custom_folder_name = "updated_multiple_channels"
     checkpoint_callback = ModelCheckpoint(
         dirpath=os.path.join(model_dir, custom_folder_name),
         filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
@@ -144,7 +144,7 @@ def main(hparams):
         accelerator=hparams.accelerator,
         devices=hparams.devices,
         num_nodes=hparams.num_nodes,
-        strategy=DDPStrategy(find_unused_parameters=True),
+        strategy=DDPStrategy(),
         log_every_n_steps=hparams.log_every_n_steps,
         num_sanity_val_steps=0
     )
@@ -183,6 +183,7 @@ if __name__ == "__main__":
             "num_nodes": 1, # 1 node 
             "log_every_n_steps": 1,
         }
+        
         class HParams:
             def __init__(self, **kwargs):
                 self.__dict__.update(kwargs)
@@ -199,7 +200,7 @@ if __name__ == "__main__":
         parser.add_argument("--max_epochs", type=int, default=100)
         parser.add_argument("--accelerator", type=str, default="gpu")
         parser.add_argument("--devices", type=int, default=1)  # 4 GPUs
-        parser.add_argument("--num_nodes", type=int, default=1)
+        parser.add_argument("--num_nodes", type=int, default=2)
         parser.add_argument("--log_every_n_steps", type=int, default=1)
         args = parser.parse_args()
 
