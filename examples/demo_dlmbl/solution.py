@@ -151,9 +151,21 @@ log_dir.mkdir(parents=True, exist_ok=True)
 """
 The next cell starts tensorboard.
 
-<div class="alert alert-danger">
+<div class="alert alert-warning">
 If you launched jupyter lab from ssh terminal, add <code>--host &lt;your-server-name&gt;</code> to the tensorboard command below. <code>&lt;your-server-name&gt;</code> is the address of your compute node that ends in amazonaws.com.
 
+</div>
+
+<div class="alert alert-warning">
+If you are using VSCode and a remote server, you will need to forward the port to view the tensorboard. <br>
+Take note of the port number was assigned in the previous cell.(i.e <code> http://localhost:{port_number_assigned}</code>) <br>
+
+Locate the your VSCode terminal and select the <code>Ports</code> tab <br>
+<ul>
+<li>Add a new port with the <code>port_number_assigned</code>
+<li>Change the port to <code>4000</code> and ensure that the forwarded Adress: <code>localhost:{port_number_assigned}</code>
+</ul>
+Click on the link to view the tensorboard and it should open in your browser.
 </div>
 """
 
@@ -172,31 +184,16 @@ def find_free_port():
 # Launch TensorBoard on the browser
 def launch_tensorboard(log_dir):
     import subprocess
-
     port = find_free_port()
     tensorboard_cmd = f"tensorboard --logdir={log_dir} --port={port}"
     process = subprocess.Popen(tensorboard_cmd, shell=True)
-    print(f"TensorBoard started at http://localhost:{port}")
+    print(f"TensorBoard started at http://localhost:{port}. \n If you are using VSCode remote session, forward the port using the PORTS tab next to TERMINAL.")
     return process
 
 
 # Launch tensorboard and click on the link to view the logs.
 tensorboard_process = launch_tensorboard(log_dir)
 
-# %%[markdown]
-"""
-<div class="alert alert-warning">
-If you are using VSCode and a remote server, you will need to forward the port to view the tensorboard. <br>
-Take note of the port number was assigned in the previous cell.(i.e <code> http://localhost:{port_number_assigned}</code>) <br>
-
-Locate the your VSCode terminal and select the <code>Ports</code> tab <br>
-<ul>
-<li>Add a new port with the <code>port_number_assigned</code>
-<li>Change the port to <code>4000</code> and ensure that the forwarded Adress: <code>localhost:{port_number_assigned}</code>
-</ul>
-Click on the link to view the tensorboard and it should open in your browser.
-</div>
-"""
 # %% [markdown]
 """
 ## Load OME-Zarr Dataset
