@@ -466,7 +466,7 @@ log_batch_jupyter(batch)
 # Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
 #
 # HINT: `RandAffined()` and `RandGaussianNoised()` from `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py).
-# *Note* these are MONAI transforms that have been redefined for VisCy.
+# *Note these are MONAI transforms that have been redefined for VisCy.*
 
 # Can you tell what augmentation were applied from looking at the augmented images in Tensorboard?
 
