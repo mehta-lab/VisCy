@@ -63,7 +63,7 @@ VisCy exploits recent advances in data and metadata formats
 [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/).
 
 ### References
----
+
 - [Liu, Z. and Hirata-Miyasaki, E. et al. (2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v2.full.pdf)
 - [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning. eLife](https://elifesciences.org/articles/55502)
 """
