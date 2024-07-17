@@ -62,7 +62,7 @@ VisCy exploits recent advances in data and metadata formats
 ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks,
 [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/).
 
-## References
+### References
 ---
 - [Liu, Z. and Hirata-Miyasaki, E. et al. (2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v2.full.pdf)
 - [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning. eLife](https://elifesciences.org/articles/55502)
@@ -71,7 +71,9 @@ VisCy exploits recent advances in data and metadata formats
 
 # %% [markdown]
 """
-📖 As you work through parts 2 and 3, please share the layouts of your models (output of torchview) and their performance with everyone via [this Google Doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing). 📖
+📖 As you work through parts 2 and 3, please share the layouts of your models (output of torchview)
+and their performance with everyone via
+[this Google Doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing). 📖
 """
 # %% [markdown]
 """
@@ -95,7 +97,7 @@ Set your python kernel to <span style="color:black;">06_image_translation</span>
 """
 # %% [markdown]
 """
-# Part 1: Log training data to tensorboard, start training a model.
+## Part 1: Log training data to tensorboard, start training a model.
 ---------
 Learning goals:
 
@@ -662,7 +664,7 @@ we can come back after a while and evaluate the performance!
 
 # %% [markdown]
 """
-# Part 2: Assess previous model, train fluorescence to phase contrast translation model.
+## Part 2: Assess previous model, train fluorescence to phase contrast translation model.
 --------------------------------------------------
 
 We now look at some metrics of performance of previous model. We typically evaluate the model performance on a held out test data. We will use the following metrics to evaluate the accuracy of regression of the model:
@@ -1078,7 +1080,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 
 # %% <a [markdown] id='4_tuning'></a> tags=[]
 """
-# (Extra)Tune the models and explore other architectures from [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos)
+## (Extra)Tune the models and explore other architectures from [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos)
 --------------------------------------------------
 Learning goals:
 - Understand how data, model capacity, and training parameters control the performance of the model. Your goal is to try to underfit or overfit the model.
@@ -1247,11 +1249,19 @@ trainer.fit(phase2fluor_3D, datamodule=phase2fluor_3D_data)
 # %% [markdown] tags=[]
 """
 <div class="alert alert-success">
-    
-## 🎉 The end of the notebook 🎉
+
+<h2> 
+🎉 The end of the notebook 🎉
+</h2>
 
 Congratulations! You have trained several image translation models now!
-Please remember to document the hyperparameters, snapshots of predictions on validation set, and loss curves for your models and add the final perforance in [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing). We'll discuss our combined results as a group.
+<br>
+Please remember to document the hyperparameters,
+snapshots of predictions on validation set,
+and loss curves for your models and add the final performance in
+<a href=https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing>
+this google doc</a>.
+We'll discuss our combined results as a group.
 </div>
 """
 
