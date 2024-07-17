@@ -614,7 +614,8 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 # <div class="alert alert-info">
 #
 # ### Task 1.4
-# Run the next cell to generate a graph representation of the model architecture. Can you recognize the UNet structure and skip connections in this graph visualization?
+# Run the next cell to generate a graph representation of the model architecture.
+# Can you recognize the UNet structure and skip connections in this graph visualization?
 # </div>
 
 # %%
@@ -679,13 +680,16 @@ we can come back after a while and evaluate the performance!
 # %% [markdown]
 """
 ## Part 2: Assess previous model, train fluorescence to phase contrast translation model.
---------------------------------------------------
 
-We now look at some metrics of performance of previous model. We typically evaluate the model performance on a held out test data. We will use the following metrics to evaluate the accuracy of regression of the model:
+We now look at some metrics of performance of previous model.
+We typically evaluate the model performance on a held out test data.
+We will use the following metrics to evaluate the accuracy of regression of the model:
+
 - [Person Correlation](https://en.wikipedia.org/wiki/Pearson_correlation_coefficient).
 - [Structural similarity](https://en.wikipedia.org/wiki/Structural_similarity) (SSIM).
 
-You should also look at the validation samples on tensorboard (hint: the experimental data in nuclei channel is imperfect.)
+You should also look at the validation samples on tensorboard
+(hint: the experimental data in nuclei channel is imperfect.)
 """
 
 # %% [markdown]
@@ -694,7 +698,8 @@ You should also look at the validation samples on tensorboard (hint: the experim
 
 <b> Task 2.1 Define metrics </b><br>
 
-For each of the above metrics, write a brief definition of what they are and what they mean for this image translation task.
+For each of the above metrics, write a brief definition of what they are and what they mean
+for this image translation task.
 
 </div>
 """
@@ -728,11 +733,6 @@ test_data.setup("test")
 test_metrics = pd.DataFrame(
     columns=["pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"]
 )
-
-
-def min_max_scale(input):
-    return (input - np.min(input)) / (np.max(input) - np.min(input))
-
 
 # %% Compute metrics directly and plot here.
 for i, sample in enumerate(test_data.test_dataloader()):
