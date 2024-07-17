@@ -735,6 +735,12 @@ test_metrics = pd.DataFrame(
 )
 
 # %% Compute metrics directly and plot here.
+
+def min_max_scale(input):
+    return (input - np.min(input)) / (np.max(input) - np.min(input))
+
+
+
 for i, sample in enumerate(test_data.test_dataloader()):
     phase_image = sample["source"]
     with torch.inference_mode():  # turn off gradient computation.
@@ -1004,10 +1010,6 @@ test_data = HCSDataModule(
 test_data.setup("test")
 
 test_metrics = pd.DataFrame(columns=["pearson_phase", "SSIM_phase"])
-
-
-def min_max_scale(input):
-    return (input - np.min(input)) / (np.max(input) - np.min(input))
 
 
 # %%
