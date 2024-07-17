@@ -872,7 +872,6 @@ target_channel = ["Phase3D"]
 YX_PATCH_SIZE = (256, 256)
 BATCH_SIZE = 12
 n_epochs = 50
-steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 
 # Setup the new augmentations
 augmentations = [
@@ -927,6 +926,10 @@ fluor2phase_data = HCSDataModule(
 )
 fluor2phase_data.setup("fit")
 
+n_samples = len(fluor2phase_data.train_dataset)
+
+steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
+
 # Dictionary that specifies key parameters of the model.
 fluor2phase_config = dict(
     in_channels=1,
@@ -953,7 +956,7 @@ fluor2phase_model = VSUNet(
 model_graph_fluor2phase = torchview.draw_graph(
     fluor2phase_model,
     next(iter(fluor2phase_data.train_dataloader()))["source"],
-    depth=2,  # adjust depth to zoom in.
+    depth=3,  # adjust depth to zoom in.
     device="cpu",
 )
 model_graph_fluor2phase.visual_graph
