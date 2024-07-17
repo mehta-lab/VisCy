@@ -23,7 +23,7 @@ def main(hparams):
     top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
     timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/predict_timesteps.csv"
     predict_base_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/all_annotations_patch.zarr"
-    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels/contrastive_model-test-epoch=88-val_loss=0.00.ckpt"
+    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels/contrastive_model-test-epoch=97-val_loss=0.00.ckpt"
 
     # Data parameters
     channels = 2
@@ -78,8 +78,8 @@ def main(hparams):
     all_projections = np.concatenate(projections_list, axis=0)
 
     # Save features and projections
-    np.save("updated_epoch88_predicted_features.npy", all_features)
-    np.save("updated_epoch88_predicted_projections.npy", all_projections)
+    np.save("updated_epoch97_predicted_features.npy", all_features)
+    np.save("updated_epoch97_predicted_projections.npy", all_projections)
 
 if __name__ == "__main__":
     parser = ArgumentParser()
