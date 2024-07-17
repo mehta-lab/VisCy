@@ -600,7 +600,15 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 # %% [markdown]
 # ## View model graph.
 #
-# PyTorch uses dynamic graphs under the hood. The graphs are constructed on the fly. This is in contrast to TensorFlow, where the graph is constructed before the training loop and remains static. In other words, the graph of the network can change with every forward pass. Therefore, we need to supply an input tensor to construct the graph. The input tensor can be a random tensor of the correct shape and type. We can also supply a real image from the dataset. The latter is more useful for debugging.
+# PyTorch uses dynamic graphs under the hood.
+# The graphs are constructed on the fly.
+# This is in contrast to TensorFlow,
+# where the graph is constructed before the training loop and remains static.
+# In other words, the graph of the network can change with every forward pass.
+# Therefore, we need to supply an input tensor to construct the graph.
+# The input tensor can be a random tensor of the correct shape and type.
+# We can also supply a real image from the dataset.
+# The latter is more useful for debugging.
 
 # %% [markdown]
 # <div class="alert alert-info">
