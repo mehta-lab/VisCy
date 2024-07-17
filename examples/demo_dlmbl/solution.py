@@ -209,7 +209,8 @@ def launch_tensorboard(log_dir):
     tensorboard_cmd = f"tensorboard --logdir={log_dir} --port={port}"
     process = subprocess.Popen(tensorboard_cmd, shell=True)
     print(
-        f"TensorBoard started at http://localhost:{port}. \n If you are using VSCode remote session, forward the port using the PORTS tab next to TERMINAL."
+        f"TensorBoard started at http://localhost:{port}. \n"
+        "If you are using VSCode remote session, forward the port using the PORTS tab next to TERMINAL."
     )
     return process
 
