@@ -784,7 +784,12 @@ for i, sample in enumerate(test_data.test_dataloader()):
     axes[0, 0].set_title(channel_titles[0])
 
     with torch.inference_mode():  # turn off gradient computation.
-        predicted_image = phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
+        predicted_image = (
+            phase2fluor_model(phase_image.to(phase2fluor_model.device))
+            .cpu()
+            .numpy()
+            .squeeze(0)
+        )
 
     target_image = sample["target"].cpu().numpy().squeeze(0)
     # Plot the predicted images
