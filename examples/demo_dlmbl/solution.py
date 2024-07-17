@@ -461,7 +461,7 @@ log_batch_jupyter(batch)
 #
 # How do they make the model more robust?
 #
-# Add augmentations to rotate about $\pi$ along z-axis, 30% scale in y,x,
+# Add augmentations to rotate about $\pi$ around z-axis, 30% scale in y,x,
 # shearing of 10% and no padding with zeros with a probablity of 80%.
 #
 # Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
