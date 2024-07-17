@@ -941,8 +941,6 @@ trainer = VSTrainer(
 )
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 
-# %%
-
 
 # %% [markdown] tags=[]
 """
