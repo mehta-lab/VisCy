@@ -108,7 +108,7 @@ Learning goals:
 - Start training the model to predict nuclei and membrane from phase.
 """
 
-# %% Imports and paths
+# %% Imports
 import os
 from pathlib import Path
 
@@ -124,7 +124,6 @@ from lightning.pytorch import seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from skimage import metrics  # for metrics.
 
-# %% Imports and paths
 # pytorch lightning wrapper for Tensorboard.
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 
@@ -146,6 +145,8 @@ from viscy.transforms import (
     RandWeightedCropd,
 )
 
+# %%
+# seed random number generators for reproducibility.
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
@@ -161,6 +162,7 @@ if not data_path.exists():
     raise FileNotFoundError(
         f"Data not found at {data_path}. Please check the top_dir and data_path variables."
     )
+
 # %%
 # Create log directory if needed, and launch tensorboard
 log_dir.mkdir(parents=True, exist_ok=True)
