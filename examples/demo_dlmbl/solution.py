@@ -736,9 +736,9 @@ test_metrics = pd.DataFrame(
 
 # %% Compute metrics directly and plot here.
 
+
 def min_max_scale(input):
     return (input - np.min(input)) / (np.max(input) - np.min(input))
-
 
 
 for i, sample in enumerate(test_data.test_dataloader()):
@@ -791,7 +791,11 @@ for i, sample in enumerate(test_data.test_dataloader()):
 
     with torch.inference_mode():  # turn off gradient computation.
         predicted_image = (
-            phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
+            phase2fluor_model(phase_image.to(phase2fluor_model.device))
+            .cpu()
+            .numpy()
+            .squeeze(0)
+        )
 
     target_image = sample["target"].cpu().numpy().squeeze(0)
     # Plot the predicted images
@@ -1016,7 +1020,7 @@ test_metrics = pd.DataFrame(columns=["pearson_phase", "SSIM_phase"])
 for i, sample in enumerate(test_data.test_dataloader()):
     source_image = sample["source"]
     with torch.inference_mode():  # turn off gradient computation.
-        predicted_image = fluor2phase_model(source_image)
+        predicted_image = fluor2phase_model(source_image.to(fluor2phase_model.device))
 
     target_image = (
         sample["target"].cpu().numpy().squeeze(0)
@@ -1062,7 +1066,12 @@ for i, sample in enumerate(test_data.test_dataloader()):
     axes[0].set_title(channel_titles[0])
 
     with torch.inference_mode():  # turn off gradient computation.
-        predicted_image = phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
+        predicted_image = (
+            phase2fluor_model(phase_image.to(phase2fluor_model.device))
+            .cpu()
+            .numpy()
+            .squeeze(0)
+        )
 
     target_image = sample["target"].cpu().numpy().squeeze(0)
     # Plot the predicted images
@@ -1106,21 +1115,20 @@ Learning goals:
 
 
 # %% [markdown] tags=[]
-"""
-<div class="alert alert-info">
+# <div class="alert alert-info">
+#
+# ### Extra Part
+#
+# - Choose a model you want to train (phase2fluor or fluor2phase).
+# - Set up a configuration that you think will improve the performance of the model
+# - Consider modifying the learning rate and see how it changes performance
+# - Use training loop illustrated in previous cells to train phase2fluor and fluor2phase models to prototype your own training loop.
+# - Add code to evaluate the model using Pearson Correlation and SSIM
+# As your model is training, please document hyperparameters, snapshots of predictions on validation set,
+# and loss curves for your models in
+# [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing)
+# </div>
 
-### Extra Part
-
-- Choose a model you want to train (phase2fluor or fluor2phase).
-- Set up a configuration that you think will improve the performance of the model
-- Consider modifying the learning rate and see how it changes performance
-- Use training loop illustrated in previous cells to train phase2fluor and fluor2phase models to prototype your own training loop.
-- Add code to evaluate the model using Pearson Correlation and SSIM
-
-As your model is training, please document hyperparameters, snapshots of predictions on validation set, and loss curves for your models in [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing)
-
-</div>
-"""
 # %% tags=[]
 ##########################
 ######## TODO ########
