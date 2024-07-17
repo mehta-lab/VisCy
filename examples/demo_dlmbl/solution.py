@@ -393,7 +393,9 @@ def log_batch_jupyter(batch):
     batch_phase = np.clip((batch_phase - p1) / (p99 - p1), 0, 1)
 
     plt.figure()
-    fig, axes = plt.subplots(batch_size, n_channels, figsize=(10, 10))
+    fig, axes = plt.subplots(
+        batch_size, n_channels, figsize=(n_channels * 2, batch_size * 2)
+    )
     [N, C, H, W] = batch_phase.shape
     for sample_id in range(batch_size):
         axes[sample_id, 0].imshow(batch_phase[sample_id, 0])
