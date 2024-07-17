@@ -461,18 +461,18 @@ log_batch_jupyter(batch)
 #
 # How do they make the model more robust?
 #
-# Add augmentations to rotate about `pi` along z-axis, 30% scale in y,x, shearing of 10% and no padding with zeros with a probablity of 80%.
+# Add augmentations to rotate about $\pi$ along z-axis, 30% scale in y,x,
+# shearing of 10% and no padding with zeros with a probablity of 80%.
 #
 # Add a Gaussian noise with a mean of 0.0 and standard deviation of 0.3 with a probability of 50%.
 #
-# HINT: `RandAffined()` and `RandGaussianNoised()` from `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py).
+# HINT: `RandAffined()` and `RandGaussianNoised()` are from
+# `viscy.transforms` [here](https://github.com/mehta-lab/VisCy/blob/main/viscy/transforms.py).
 # *Note these are MONAI transforms that have been redefined for VisCy.*
-
 # Can you tell what augmentation were applied from looking at the augmented images in Tensorboard?
-
 #
-#
-# HINT:[Compare your choice of augmentations here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
+# HINT:
+# [Compare your choice of augmentations here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
 # </div>
 # %%
 # Here we turn on data augmentation and rerun setup
