@@ -785,11 +785,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 
     with torch.inference_mode():  # turn off gradient computation.
         predicted_image = (
-            phase2fluor_model(phase_image.to(phase2fluor_model.device))
-            .cpu()
-            .numpy()
-            .squeeze(0)
-        )
+            phase2fluor_model(phase_image).cpu().numpy().squeeze(0)
 
     target_image = sample["target"].cpu().numpy().squeeze(0)
     # Plot the predicted images
@@ -946,7 +942,7 @@ fluor2phase_model = VSUNet(
 # Visualize the graph of fluor2phase model as image.
 model_graph_fluor2phase = torchview.draw_graph(
     fluor2phase_model,
-    fluor2phase_data.train_dataset[0]["source"],
+    next(iter(fluor2phase_data.train_dataloader()))["source"],
     depth=2,  # adjust depth to zoom in.
     device="cpu",
 )
