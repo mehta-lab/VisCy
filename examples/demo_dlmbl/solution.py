@@ -2,6 +2,8 @@
 """
 # Image translation (Virtual Staining)
 
+Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San Francisco.
+
 ## Overview
 
 In this exercise, we will predict fluorescence images of
@@ -22,34 +24,48 @@ from a fluorescence membrane label.
 """
 ### Goals
 
-#### Part 1: Learn to use iohub (I/O library), VisCy dataloaders, and tensorboard.
+#### Part 1: Learn to use iohub (I/O library), VisCy dataloaders, and TensorBoard.
 
-  - Use a `ome-zarr` dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549), each FOV has 3 channels (phase, nuclei, and cell membrane). The nuclei were stained with DAPI and the cell membrane with Cellmask.
-  - Explore the OME-zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html) and the high-content-screen (HCS) format.
+  - Use a OME-Zarr dataset of 34 FOVs of adenocarcinomic human alveolar basal epithelial cells (A549),
+  each FOV has 3 channels (phase, nuclei, and cell membrane).
+  The nuclei were stained with DAPI and the cell membrane with Cellmask.
+  - Explore OME-Zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html)
+  and the high-content-screen (HCS) format.
   - Use [MONAI](https://monai.io/) to implement data augmentations.
   
 #### Part 2: Train a model that predicts fluorescence from phase, and vice versa, using the UNeXt2 architecture.
 
-  - Create a model for image translation mapping from source domain to target domain where the source domain is label-free microscopy (material density) and the target domain is fluorescence microscopy (fluorophore density).
-  - Use the UNeXt2 architecture, a _purely convolutional architecture_ that draws on the design principles of transformer models to complete this task. Here we will use a *UNeXt2*, an efficient image translation architecture inspired by ConvNeXt v2, SparK.
-  - We will perform the preprocessing, training, prediction, evaluation, and deployment steps that borrow from our computer vision pipeline for single-cell analysis in our pipeline called [VisCy](https://github.com/mehta-lab/VisCy).
+  - Create a model for image translation mapping from source domain to target domain
+  where the source domain is label-free microscopy (material density)
+  and the target domain is fluorescence microscopy (fluorophore density).
+  - Use the UNeXt2 architecture, a _purely convolutional architecture_
+  that draws on the design principles of transformer models to complete this task.
+  Here we will use a *UNeXt2*, an efficient image translation architecture inspired by ConvNeXt v2 and SparK.
+  - We will perform the preprocessing, training, prediction, evaluation, and deployment steps
+  that borrow from our computer vision pipeline for single-cell analysis in
+  our pipeline called [VisCy](https://github.com/mehta-lab/VisCy).
   - Reuse the same architecture as above and create a similar model doing the inverse task (fluorescence to phase).
   - Evaluate the model.
 
-#### (Extra) Play with the hyperparameters to improve the models or train a 3D UNeXt2**
+#### (Extra) Play with the hyperparameters to improve the models or train a 3D UNeXt2
 
-Our guesstimate is that each of the three parts will take ~1-1.5 hours. A reasonable 2D UNet can be trained in ~30 min on a typical AWS node.
-The focus of the exercise is on understanding the information content of the data, how to train and evaluate 2D image translation models, and exploring some hyperparameters of the model. If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
+Our guesstimate is that each of the three parts will take ~1-1.5 hours.
+A reasonable 2D UNet can be trained in ~30 min on a typical AWS node.
+The focus of the exercise is on understanding the information content of the data,
+how to train and evaluate 2D image translation models, and exploring some hyperparameters of the model.
+If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
 
-Checkout [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos), our deep learning pipeline for training and deploying computer vision models for image-based phenotyping including the robust virtual staining of landmark organelles. VisCy exploits recent advances in data and metadata formats ([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks, [PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/).
+Checkout [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos),
+our deep learning pipeline for training and deploying computer vision models
+for image-based phenotyping including the robust virtual staining of landmark organelles.
+VisCy exploits recent advances in data and metadata formats
+([OME-zarr](https://www.nature.com/articles/s41592-021-01326-w)) and DL frameworks,
+[PyTorch Lightning](https://lightning.ai/) and [MONAI](https://monai.io/).
 
 ## References
 ---
 - [Liu, Z. and Hirata-Miyasaki, E. et al. (2024) Robust Virtual Staining of Cellular Landmarks](https://www.biorxiv.org/content/10.1101/2024.05.31.596901v2.full.pdf)
-- [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning. eLife](https://elifesciences.org/articles/55502)   
-
-
-Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San Francisco.
+- [Guo et al. (2020) Revealing architectural order with quantitative label-free imaging and deep learning. eLife](https://elifesciences.org/articles/55502)
 """
 
 
