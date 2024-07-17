@@ -434,7 +434,8 @@ data_module = HCSDataModule(
 data_module.setup("fit")
 
 print(
-    f"FOVs in training set: {len(data_module.train_dataset)}, FOVs in validation set:{len(data_module.val_dataset)}"
+    f"Samples in training set: {len(data_module.train_dataset)}, "
+    f"samples in validation set:{len(data_module.val_dataset)}"
 )
 train_dataloader = data_module.train_dataloader()
 
