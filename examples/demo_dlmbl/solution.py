@@ -231,7 +231,7 @@ specified by the Open Microscopy Environment Next Generation File Format
 - The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
 """
 
-# %%[markdown]
+# %% [markdown]
 """
 <div class="alert alert-warning">
 You can inspect the tree structure by using your terminal:
