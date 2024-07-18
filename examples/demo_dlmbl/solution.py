@@ -495,7 +495,6 @@ augmentations = [
         sigma_z=(0.0, 0.0),
         prob=0.5,
     ),
-
     # #######################
     # ##### TODO  ########
     # #######################
@@ -526,7 +525,7 @@ augmented_batch = next(iter(augmented_train_dataloader))
 log_batch_tensorboard(augmented_batch, 0, writer, "augmentation/some")
 writer.close()
 
-#%% tags=["solution"]
+# %% tags=["solution"]
 # #######################
 # ##### SOLUTION ########
 # #######################
@@ -582,9 +581,8 @@ log_batch_tensorboard(augmented_batch, 0, writer, "augmentation/some")
 writer.close()
 
 
-
 # %% [markdown]
-# Visualize directly on Jupyter ☄️
+# Visualize directly on Jupyter
 
 # %%
 log_batch_jupyter(augmented_batch)
@@ -768,7 +766,7 @@ for this image translation task. Use your favorite search engine and/or resource
 # #######################
 # ##### Todo ############
 # #######################
-# 
+#
 # ```
 #
 # - Pearson Correlation:
