@@ -409,10 +409,10 @@ def log_batch_jupyter(batch):
 # %%
 # Initialize the data module.
 
-BATCH_SIZE = 4
+BATCH_SIZE = 5
 
-# 6 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
-# More seriously, batch size does not have to be a power of 2.
+# 5 is a perfectly reasonable batch size
+# (batch size does not have to be a power of 2)
 # See: https://sebastianraschka.com/blog/2022/batch-size-2.html
 
 data_module = HCSDataModule(
