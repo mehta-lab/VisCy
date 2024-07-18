@@ -183,7 +183,6 @@ Take note of the port number was assigned in the previous cell.(i.e <code> http:
 Locate the your VSCode terminal and select the <code>Ports</code> tab <br>
 <ul>
 <li>Add a new port with the <code>port_number_assigned</code>
-<li>Change the port to <code>4000</code> and ensure that the forwarded Adress: <code>localhost:{port_number_assigned}</code>
 </ul>
 Click on the link to view the tensorboard and it should open in your browser.
 </div>
@@ -362,8 +361,6 @@ def log_batch_tensorboard(batch, batchno, writer, card_name):
 
 # %%
 # Define a function to visualize a batch on jupyter, in case tensorboard is finicky
-
-
 def log_batch_jupyter(batch):
     """
     Logs a batch of images on jupyter using ipywidget.
@@ -412,7 +409,7 @@ def log_batch_jupyter(batch):
 # %%
 # Initialize the data module.
 
-BATCH_SIZE = 6
+BATCH_SIZE = 4
 
 # 6 is a perfectly reasonable batch size. After all, it is the answer to the ultimate question of life, the universe and everything.
 # More seriously, batch size does not have to be a power of 2.
@@ -449,12 +446,12 @@ writer.close()
 
 
 # %% [markdown]
-# If your tensorboard is causing issues, you can visualize directly on Jupyter ☄️/VSCode
+# If your tensorboard is causing issues, you can visualize directly on Jupyter /VSCode
 
 # %%
 log_batch_jupyter(batch)
 
-# %% [markdown]
+# %% [markdown] tags=[]
 # <div class="alert alert-info">
 #
 # ### Task 1.3
@@ -498,6 +495,10 @@ augmentations = [
         sigma_z=(0.0, 0.0),
         prob=0.5,
     ),
+
+    # #######################
+    # ##### TODO  ########
+    # #######################
     ##TODO: Add rotation agumentations
     ## Write code below
     ## TODO: Add Random Gaussian Noise
@@ -508,7 +509,7 @@ normalizations = [
     NormalizeSampled(
         keys=source_channel + target_channel,
         level="fov_statistics",
-        subtrahend="median",
+        subtrahend="mean",
         divisor="std",
     )
 ]
@@ -524,6 +525,63 @@ writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
 augmented_batch = next(iter(augmented_train_dataloader))
 log_batch_tensorboard(augmented_batch, 0, writer, "augmentation/some")
 writer.close()
+
+#%% tags=["solution"]
+# #######################
+# ##### SOLUTION ########
+# #######################
+source_channel = ["Phase3D"]
+target_channel = ["Nucl", "Mem"]
+
+augmentations = [
+    RandWeightedCropd(
+        keys=source_channel + target_channel,
+        spatial_size=(1, 384, 384),
+        num_samples=2,
+        w_key=target_channel[0],
+    ),
+    RandAffined(
+        keys=source_channel + target_channel,
+        rotate_range=[3.14, 0.0, 0.0],
+        scale_range=[0.0, 0.3, 0.3],
+        prob=0.8,
+        padding_mode="zeros",
+        shear_range=[0.0, 0.01, 0.01],
+    ),
+    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
+    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
+    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
+    RandGaussianSmoothd(
+        keys=source_channel,
+        sigma_x=(0.25, 0.75),
+        sigma_y=(0.25, 0.75),
+        sigma_z=(0.0, 0.0),
+        prob=0.5,
+    ),
+]
+
+normalizations = [
+    NormalizeSampled(
+        keys=source_channel + target_channel,
+        level="fov_statistics",
+        subtrahend="mean",
+        divisor="std",
+    )
+]
+
+data_module.augmentations = augmentations
+data_module.setup("fit")
+
+# get the new data loader with augmentation turned on
+augmented_train_dataloader = data_module.train_dataloader()
+
+# Draw batches and write to tensorboard
+writer = SummaryWriter(log_dir=f"{log_dir}/view_batch")
+augmented_batch = next(iter(augmented_train_dataloader))
+log_batch_tensorboard(augmented_batch, 0, writer, "augmentation/some")
+writer.close()
+
+
 
 # %% [markdown]
 # Visualize directly on Jupyter ☄️
@@ -636,13 +694,14 @@ model_graph_phase2fluor.visual_graph
 """
 <div class="alert alert-info">
 
-### Task 1.5
+<h3> Task 1.5 </h3>
 Start training by running the following cell. Check the new logs on the tensorboard.
 </div>
 """
 
 # %%
 # Check if GPU is available
+# You can check by typing `nvidia-smi`
 GPU_ID = 0
 
 n_samples = len(phase2fluor_2D_data.train_dataset)
@@ -669,7 +728,7 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 """
 <div class="alert alert-success">
 
-## Checkpoint 1
+<h2> Checkpoint 1 </h2>
 
 Now the training has started,
 we can come back after a while and evaluate the performance!
@@ -696,10 +755,10 @@ You should also look at the validation samples on tensorboard
 """
 <div class="alert alert-info">
 
-<b> Task 2.1 Define metrics </b><br>
+<h3> Task 2.1 Define metrics </h3>
 
 For each of the above metrics, write a brief definition of what they are and what they mean
-for this image translation task.
+for this image translation task. Use your favorite search engine and/or resources.
 
 </div>
 """
@@ -709,16 +768,23 @@ for this image translation task.
 # #######################
 # ##### Todo ############
 # #######################
+# 
 # ```
 #
 # - Pearson Correlation:
 #
 # - Structural similarity:
 
-# %% Compute metrics directly and plot here.
+# %% [markdown]
+"""
+Let's compute metrics directly and plot below.
+"""
+# %%
+# Setup the test data module.
 test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
 source_channel = ["Phase3D"]
 target_channel = ["Nucl", "Mem"]
+
 test_data = HCSDataModule(
     test_data_path,
     source_channel=source_channel,
@@ -827,7 +893,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 """
 <div class="alert alert-info">
 
-<b>Task 2.2 Train fluorescence to phase contrast translation model</b><br>
+<h3>Task 2.2 Train fluorescence to phase contrast translation model</h3>
 
 Instantiate a data module, model, and trainer for fluorescence to phase contrast translation. Copy over the code from previous cells and update the parameters. Give the variables and paths a different name/suffix (fluor2phase) to avoid overwriting objects used to train phase2fluor models.
 </div>
@@ -905,7 +971,7 @@ normalizations = [
     NormalizeSampled(
         keys=source_channel + target_channel,
         level="fov_statistics",
-        subtrahend="median",
+        subtrahend="mean",
         divisor="std",
     )
 ]
@@ -992,7 +1058,7 @@ trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
 """
 <div class="alert alert-info">
 
-<b>Task 2.3 </b><br>
+<h3>Task 2.3 </h3>
 
 While your model is training, let's think about the following questions:
 - What is the information content of each channel in the dataset?
@@ -1107,20 +1173,27 @@ for i, sample in enumerate(test_data.test_dataloader()):
 """
 
 
-# %% <a [markdown] id='4_tuning'></a> tags=[]
+# %% [markdown] tags=[]
 """
-## (Extra)Tune the models and explore other architectures from [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos)
---------------------------------------------------
-Learning goals:
-- Understand how data, model capacity, and training parameters control the performance of the model. Your goal is to try to underfit or overfit the model.
-- How can we scale it up from 2D to 3D training and predictions?
+<div class="alert alert-info">
+
+<h3>Extra exercises</h3>
+<b>Tune the models and explore other architectures from <a href="https://github.com/mehta-lab/VisCy/tree/main/examples/demos">VisCy</a></b>
+<br>
+<p>Learning goals:</p>
+<ul>
+    <li>Understand how data, model capacity, and training parameters control the performance of the model. Your goal is to try to underfit or overfit the model.</li>
+    <li>How can we scale it up from 2D to 3D training and predictions?</li>
+</ul>
+</div>
+
 """
 
 
 # %% [markdown] tags=[]
 # <div class="alert alert-info">
 #
-# ### Extra Part
+# ### Extra Example 1: Hyperparameter tuning
 #
 # - Choose a model you want to train (phase2fluor or fluor2phase).
 # - Set up a configuration that you think will improve the performance of the model
@@ -1208,6 +1281,33 @@ trainer = VSTrainer(
     fast_dev_run=True,
 )  # Set fast_dev_run to False to train the model.
 trainer.fit(phase2fluor_model_low_lr, datamodule=phase2fluor_2D_data)
+# %% [markdown]
+"""
+<div class="alert alert-info">
+<h3>
+Extra Example 2: 3D Virtual Staining
+</h3>
+Now, let's implement a 3D virtual staining model(Phase->Fluorescence)<br>
+<b>Note:</b> This task might take longer to train +1 hr. Try it out in your free-time.
+
+</div>
+"""
+
+# %% tags=["task"]
+data_path = Path()  # TODO: Point to a 3D dataset (HEK, Neuromast)
+BATCH_SIZE = 4
+YX_PATCH_SIZE = (256, 256)
+
+phase2fluor_3D_config = ...
+
+phase2fluor_3D_data = HCSDataModule(...)
+
+phase2fluor_3D = VSUNet(...)
+
+trainer = VSTrainer(...)
+
+# Start the training
+trainer.fit(...)
 
 # %% tags=["solution"]
 
@@ -1226,8 +1326,8 @@ wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.
 ```
 
 """
-
-data_path = Path()  # TODO: Point to a 3D dataset (HEK, Neuromast)
+# TODO: Point to a 3D dataset (HEK, Neuromast)
+data_path = Path("./raw-and-reconstructed.zarr")
 BATCH_SIZE = 4
 YX_PATCH_SIZE = (256, 256)
 
@@ -1235,6 +1335,14 @@ YX_PATCH_SIZE = (256, 256)
 source_channel = ["Phase3D"]
 target_channel = ["Nucl", "Mem"]
 
+phase2fluor_3D_config = dict(
+    in_channels=1,
+    out_channels=2,
+    in_stack_depth=5,
+    backbone="convnextv2_tiny",
+    deconder_conv_blocks=2,
+    head_expansion_ratio=4,
+)
 phase2fluor_3D_data = HCSDataModule(
     data_path,
     architecture="UNeXt2",
@@ -1251,7 +1359,7 @@ phase2fluor_3D_data = HCSDataModule(
 
 phase2fluor_3D = VSUNet(
     architecture="UNeXt2",
-    model_config=phase2fluor_config.copy(),
+    model_config=phase2fluor_3D_config.copy(),
     loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
     lr=2e-4,
     schedule="WarmupCosine",
@@ -1286,11 +1394,8 @@ Congratulations! You have trained several image translation models now!
 <br>
 Please remember to document the hyperparameters,
 snapshots of predictions on validation set,
-and loss curves for your models and add the final performance in
-<a href=https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing>
-this google doc</a>.
+and loss curves for your models and add the final performance in <a href=https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing>
+this google doc </a>.
 We'll discuss our combined results as a group.
 </div>
 """
-
-# %%
