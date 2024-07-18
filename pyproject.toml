@@ -19,6 +19,7 @@ dependencies = [
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image",
     "matplotlib>=3.9.0",
+    "numpy<2",
 ]
 dynamic = ["version"]
 
