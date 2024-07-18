@@ -1394,8 +1394,10 @@ Congratulations! You have trained several image translation models now!
 <br>
 Please remember to document the hyperparameters,
 snapshots of predictions on validation set,
-and loss curves for your models and add the final performance in <a href=https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing>
-this google doc </a>.
+and loss curves for your models and add the final performance in
+<a href="https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing">
+this google doc
+</a>.
 We'll discuss our combined results as a group.
 </div>
 """
