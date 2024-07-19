@@ -19,7 +19,7 @@ from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad
+from monai.transforms import DivisiblePad, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.nn import functional as F
@@ -55,6 +55,7 @@ _UNET_ARCHITECTURE = {
     "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
+    "UNeXt2_2D": FullyConvolutionalMAE,
 }
 
 
@@ -124,11 +125,15 @@ class VSUNet(LightningModule):
     :param bool test_evaluate_cellpose:
         evaluate the performance of the CellPose model instead of the trained model
         in test stage, defaults to False
+    :param bool test_time_augmentations:
+        apply test time augmentations in test stage, defaults to False
+    :param Literal['mean', 'median', 'product'] tta_type:
+        type of test time augmentations aggregation, defaults to "mean"
     """
 
     def __init__(
         self,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
         loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
@@ -141,6 +146,8 @@ class VSUNet(LightningModule):
         test_cellpose_model_path: str = None,
         test_cellpose_diameter: float = None,
         test_evaluate_cellpose: bool = False,
+        test_time_augmentations: bool = False,
+        tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -173,7 +180,10 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        self.test_time_augmentations = test_time_augmentations
+        self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
+        self._original_shape_yx = None
         if ckpt_path is not None:
             self.load_state_dict(
                 torch.load(ckpt_path)["state_dict"]
@@ -326,8 +336,50 @@ class VSUNet(LightningModule):
         )
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source = self._predict_pad(batch["source"])
-        return self._predict_pad.inverse(self.forward(source))
+        source = batch["source"]
+        if self.test_time_augmentations:
+            prediction = self.perform_test_time_augmentations(source)
+        else:
+            source = self._predict_pad(source)
+            prediction = self.forward(source)
+            prediction = self._predict_pad.inverse(prediction)
+
+        return prediction
+
+    def perform_test_time_augmentations(self, source: Tensor) -> Tensor:
+        """Perform test time augmentations on the input source
+        and aggregate the predictions using the specified method.
+
+        :param source: input tensor
+        :return: aggregated prediction
+        """
+
+        # Save the yx coords to crop post rotations
+        self._original_shape_yx = source.shape[-2:]
+        predictions = []
+        for i in range(4):
+            augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
+            augmented = self._predict_pad(augmented)
+            augmented_prediction = self.forward(augmented)
+            de_augmented_prediction = self._predict_pad.inverse(augmented_prediction)
+            de_augmented_prediction = self._rotate_volume(
+                de_augmented_prediction, k=4 - i, spatial_axes=(1, 2)
+            )
+            de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
+
+            # Undo rotation and padding
+            predictions.append(de_augmented_prediction)
+
+        if self.tta_type == "mean":
+            prediction = torch.stack(predictions).mean(dim=0)
+        elif self.tta_type == "median":
+            prediction = torch.stack(predictions).median(dim=0).values
+        elif self.tta_type == "product":
+            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
+            log_prediction_sum = log_predictions.sum(dim=0)
+            prediction = torch.exp(log_prediction_sum)
+        return prediction
 
     def on_train_epoch_end(self):
         self._log_samples("train_samples", self.training_step_outputs)
@@ -413,6 +465,33 @@ class VSUNet(LightningModule):
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
+
+    def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
+        # Padding to ensure square shape
+        max_dim = max(tensor.shape[-2], tensor.shape[-1])
+        pad_transform = DivisiblePad((0, 0, max_dim, max_dim))
+        padded_tensor = pad_transform(tensor)
+
+        # Rotation
+        rotated_tensor = []
+        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
+        for b in range(padded_tensor.shape[0]):  # iterate over batch
+            rotated_tensor.append(rotate(padded_tensor[b]))
+
+        # Stack the list of tensors back into a single tensor
+        rotated_tensor = torch.stack(rotated_tensor)
+        del padded_tensor
+        # # Cropping to original shape
+        return rotated_tensor
+
+    def _crop_to_original(self, tensor: Tensor) -> Tensor:
+        original_y, original_x = self._original_shape_yx
+        pad_y = (tensor.shape[-2] - original_y) // 2
+        pad_x = (tensor.shape[-1] - original_x) // 2
+        cropped_tensor = tensor[
+            ..., pad_y : pad_y + original_y, pad_x : pad_x + original_x
+        ]
+        return cropped_tensor
 
 
 class FcmaeUNet(VSUNet):

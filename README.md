@@ -75,26 +75,23 @@ publisher = {eLife Sciences Publications, Ltd},
     # conda create --prefix /path/to/conda/envs/viscy python=3.10
     ```
 
-2. Clone this repository and install with pip:
+2. Install a released version of VisCy from PyPI:
 
     ```sh
-    git clone https://github.com/mehta-lab/VisCy.git
-    # change to project root directory (parent folder of pyproject.toml)
-    cd VisCy
-    pip install .
+    pip install viscy
     ```
 
     If evaluating virtually stained images for segmentation tasks,
     install additional dependencies:
 
     ```sh
-    pip install ".[metrics]"
+    pip install "viscy[metrics]"
     ```
 
     Visualizing the model architecture requires `visual` dependencies:
 
     ```sh
-    pip install ".[visual]"
+    pip install "viscy[visual]"
     ```
 
 3. Verify installation by accessing the CLI help message:

@@ -464,7 +464,10 @@ class HCSDataModule(LightningDataModule):
                 **dataset_settings,
             )
 
-    def _setup_predict(self, dataset_settings: dict):
+    def _setup_predict(
+        self,
+        dataset_settings: dict,
+    ):
         """Set up the predict stage."""
         # track metadata for inverting transform
         set_track_meta(True)

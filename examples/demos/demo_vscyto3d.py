@@ -29,8 +29,8 @@ The dataset and model checkpoint files need to be downloaded before running this
 
 # %%
 # Download from
-# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto3D/hek_h2b_caax_63x.zarr
-input_data_path = "datasets/testing/VSCyto3D/hek_h2b_caax_63x.zarr"
+# https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/test/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr/
+input_data_path = "VSCyto3D/test/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
 # Download from GitHub release page of v0.1.0
 model_ckpt_path = "VisCy-0.1.0-VS-models/VSCyto3D/epoch=48-step=18130.ckpt"
 # Zarr store to save the predictions
