@@ -11,15 +11,9 @@ conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name 0
 # conda activate sometimes doesn't work from within shell scripts.
 
 # install viscy and its dependencies`s in the environment using pip.
-mkdir -p ~/code/
-cd ~/code/
-git clone https://github.com/mehta-lab/viscy.git
-cd viscy
-git checkout main #FIXME: change after merging this PR   # Exercise is tested with this commit of viscy
-
 # Find path to the environment - conda activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep 06_image_translation | awk '{print $NF}')
-$ENV_PATH/bin/pip install ".[metrics,visual]"
+$ENV_PATH/bin/pip install "viscy[metrics,visual]==0.2.0"
 
 # Create the directory structure
 mkdir -p ~/data/06_image_translation/training
