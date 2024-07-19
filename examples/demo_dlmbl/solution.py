@@ -1327,19 +1327,59 @@ wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.
 # TODO: Point to a 3D dataset (HEK, Neuromast)
 data_path = Path("./raw-and-reconstructed.zarr")
 BATCH_SIZE = 4
-YX_PATCH_SIZE = (256, 256)
+YX_PATCH_SIZE = (384, 384)
+GPU_ID = 0
+n_epochs = 50
 
 ## For 3D training - VSCyto3D
-source_channel = ["Phase3D"]
-target_channel = ["Nucl", "Mem"]
+source_channel = ["reconstructed-labelfree"]
+target_channel = ["reconstructed-nucleus", "reconstructed-membrane"]
+
+# Setup the new augmentations
+augmentations = [
+    RandWeightedCropd(
+        keys=source_channel + target_channel,
+        spatial_size=(-1, 384, 384),
+        num_samples=2,
+        w_key=target_channel[0],
+    ),
+    RandAffined(
+        keys=source_channel + target_channel,
+        rotate_range=[3.14, 0.0, 0.0],
+        scale_range=[0.0, 0.3, 0.3],
+        prob=0.8,
+        padding_mode="zeros",
+        shear_range=[0.0, 0.01, 0.01],
+    ),
+    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
+    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
+    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
+    RandGaussianSmoothd(
+        keys=source_channel,
+        sigma_x=(0.25, 0.75),
+        sigma_y=(0.25, 0.75),
+        sigma_z=(0.0, 0.0),
+        prob=0.5,
+    ),
+]
+
+normalizations = [
+    NormalizeSampled(
+        keys=source_channel + target_channel,
+        level="fov_statistics",
+        subtrahend="mean",
+        divisor="std",
+    )
+]
 
 phase2fluor_3D_config = dict(
     in_channels=1,
     out_channels=2,
     in_stack_depth=5,
     backbone="convnextv2_tiny",
-    deconder_conv_blocks=2,
+    decoder_conv_blocks=2,
     head_expansion_ratio=4,
+    stem_kernel_size=(5, 4, 4),
 )
 phase2fluor_3D_data = HCSDataModule(
     data_path,
@@ -1354,6 +1394,10 @@ phase2fluor_3D_data = HCSDataModule(
     augmentations=augmentations,
     normalizations=normalizations,
 )
+phase2fluor_3D_data.setup("fit")
+
+n_samples = len(phase2fluor_3D_data.train_dataset)
+steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 
 phase2fluor_3D = VSUNet(
     architecture="UNeXt2",
@@ -1371,14 +1415,13 @@ trainer = VSTrainer(
     log_every_n_steps=steps_per_epoch,
     logger=TensorBoardLogger(
         save_dir=log_dir,
-        name="phase2fluor",
+        name="phase2fluor_3D",
         version="3D_UNeXt2",
         log_graph=True,
     ),
-    fast_dev_run=True,
+    fast_dev_run=True,  # TODO: Set to False to run full-training
 )
 trainer.fit(phase2fluor_3D, datamodule=phase2fluor_3D_data)
-
 
 # %% [markdown] tags=[]
 """
