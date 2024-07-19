@@ -10,7 +10,8 @@ from lightning.pytorch.strategies import DDPStrategy
 
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import ModelCheckpoint, RichProgressBar
-#from lightning.pytorch.loggers import TensorBoardLogger
+
+# from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import TQDMProgressBar
 import wandb
@@ -19,7 +20,7 @@ from lightning.pytorch.utilities.rank_zero import rank_zero_only
 
 from viscy.light.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
-from viscy.data.hcs import ContrastiveDataModule  
+from viscy.data.hcs import ContrastiveDataModule
 import logging
 
 # Set W&B logging level to suppress warnings
@@ -34,14 +35,16 @@ os.environ["WANDB_DIR"] = "/hpc/mydata/alishba.imran/wandb_logs/"
 
 # init_wandb()
 
-#wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
+# wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
 
 top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
-#input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
+# input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 input_zarr = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 model_dir = top_dir / "infection_classification/models/infection_score"
 # checkpoint dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels
-timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
+timesteps_csv_path = (
+    top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
+)
 
 # Data parameters
 base_path = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
@@ -51,9 +54,9 @@ y = 200
 z = 15
 z_range = (28, 43)
 batch_size = 32
-channel_names = ["RFP", "Phase3D"] #training w/ both channels
+channel_names = ["RFP", "Phase3D"]  # training w/ both channels
 
-torch.set_float32_matmul_precision('medium')
+torch.set_float32_matmul_precision("medium")
 
 contra_model = ContrastiveEncoder(backbone="convnext_tiny")
 print(contra_model)
@@ -85,7 +88,7 @@ def main(hparams):
 
     num_gpus = torch.cuda.device_count()
     print(f"Number of GPUs available: {num_gpus}")
-    
+
     print("Starting data module..")
     # Initialize the data module
     data_module = ContrastiveDataModule(
@@ -100,15 +103,17 @@ def main(hparams):
     )
 
     print("data module set up!")
-    
+
     # Setup the data module for training, val and testing
-    data_module.setup(stage='fit')
-    
-    print(f"Total dataset size: {len(data_module.train_dataset) + len(data_module.val_dataset) + len(data_module.test_dataset)}")
+    data_module.setup(stage="fit")
+
+    print(
+        f"Total dataset size: {len(data_module.train_dataset) + len(data_module.val_dataset) + len(data_module.test_dataset)}"
+    )
     print(f"Training dataset size: {len(data_module.train_dataset)}")
     print(f"Validation dataset size: {len(data_module.val_dataset)}")
     print(f"Test dataset size: {len(data_module.test_dataset)}")
-    
+
     # Initialize the model
     model = ContrastiveModule(
         backbone=hparams.backbone,
@@ -126,7 +131,7 @@ def main(hparams):
 
     # Initialize logger
     wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
-    
+
     # set for each run to avoid overwritting!
     custom_folder_name = "updated_multiple_channels"
     checkpoint_callback = ModelCheckpoint(
@@ -146,7 +151,7 @@ def main(hparams):
         num_nodes=hparams.num_nodes,
         strategy=DDPStrategy(),
         log_every_n_steps=hparams.log_every_n_steps,
-        num_sanity_val_steps=0
+        num_sanity_val_steps=0,
     )
 
     train_loader = data_module.train_dataloader()
@@ -155,7 +160,7 @@ def main(hparams):
 
     wandb_logger.watch(model, log="all", log_graph=(example_input,))
 
-    # Fetches batches from the training dataloader, 
+    # Fetches batches from the training dataloader,
     # Calls the training_step method on the model for each batch
     # Aggregates the losses and performs optimization steps
     trainer.fit(model, datamodule=data_module)
@@ -166,8 +171,10 @@ def main(hparams):
     # Test the model
     trainer.test(model, datamodule=data_module)
 
+
 if __name__ == "__main__":
     import sys
+
     if "ipykernel_launcher" in sys.argv[0]:
         # Jupyter Notebook environment
         args = {
@@ -180,13 +187,14 @@ if __name__ == "__main__":
             "max_epochs": 100,
             "accelerator": "gpu",
             "devices": 1,  # 1 GPU
-            "num_nodes": 1, # 1 node 
+            "num_nodes": 1,  # 1 node
             "log_every_n_steps": 1,
         }
-        
+
         class HParams:
             def __init__(self, **kwargs):
                 self.__dict__.update(kwargs)
+
         hparams = HParams(**args)
         main(hparams)
     else:

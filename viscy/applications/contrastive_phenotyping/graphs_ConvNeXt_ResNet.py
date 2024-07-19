@@ -5,10 +5,12 @@ from viscy.representation.contrastive import ContrastiveEncoder
 import torchview
 
 
-%load_ext autoreload
-%autoreload 2
+# %load_ext autoreload
+# %autoreload 2
 # %% Initialize the model and log the graph.
-contra_model = ContrastiveEncoder(backbone = "convnext_tiny") # other options: convnext_tiny resnet50
+contra_model = ContrastiveEncoder(
+    backbone="convnext_tiny"
+)  # other options: convnext_tiny resnet50
 print(contra_model)
 model_graph = torchview.draw_graph(
     contra_model,
@@ -21,7 +23,9 @@ model_graph.resize_graph(scale=2.5)
 model_graph.visual_graph
 
 # %% Initialize a resent50 model and log the graph.
-contra_model = ContrastiveEncoder(backbone = "resnet50", in_stack_depth = 16, stem_kernel_size = (4, 3, 3)) # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
+contra_model = ContrastiveEncoder(
+    backbone="resnet50", in_stack_depth=16, stem_kernel_size=(4, 3, 3)
+)  # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
 print(contra_model)
 model_graph = torchview.draw_graph(
     contra_model,

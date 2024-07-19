@@ -7,6 +7,7 @@ import torch.nn.functional as F
 
 from viscy.unet.networks.unext2 import UNeXt2Stem
 
+
 class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
@@ -15,7 +16,7 @@ class ContrastiveEncoder(nn.Module):
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
-        predict: bool = False
+        predict: bool = False,
     ):
         super().__init__()
 
@@ -141,7 +142,9 @@ class ContrastiveEncoder(nn.Module):
             x = self.model.head.flatten(x)
             features_before_projection = self.model.head.drop(x)
             projections = self.model.head.fc(features_before_projection)
-            features_before_projection = F.normalize(features_before_projection, p=2, dim=1)
+            features_before_projection = F.normalize(
+                features_before_projection, p=2, dim=1
+            )
             projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
             print(features_before_projection.shape, projections.shape)
             return features_before_projection, projections

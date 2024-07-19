@@ -6,7 +6,8 @@ import tempfile
 from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
-#import pytorch_lightning as pl
+
+# import pytorch_lightning as pl
 from monai.transforms import MapTransform
 import random
 import numpy as np
@@ -14,11 +15,22 @@ import torch
 import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-#from lightning.pytorch import LightningDataModule
+
+# from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
-from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandGaussianNoised, RandGaussianSmoothd, RandScaleIntensityd, RandShiftIntensityd, RandZoomd, Rand3DElasticd, RandGaussianSharpend
-
+from monai.transforms import (
+    Compose,
+    RandAdjustContrastd,
+    RandAffined,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandScaleIntensityd,
+    RandShiftIntensityd,
+    RandZoomd,
+    Rand3DElasticd,
+    RandGaussianSharpend,
+)
 
 
 from torch import Tensor
@@ -38,6 +50,7 @@ from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from pathlib import Path
 
 warnings.filterwarnings("ignore")
+
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
@@ -598,6 +611,7 @@ class HCSDataModule(LightningDataModule):
         logging.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
 
+
 # dataloader for organelle phenotyping
 class ContrastiveDataset(Dataset):
     def __init__(
@@ -621,16 +635,21 @@ class ContrastiveDataset(Dataset):
         self.ds = self.open_zarr_store(self.base_path)
         self.positions = list(self.ds.positions())
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
-        self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
+        self.channel_indices = [
+            self.ds.channel_names.index(channel) for channel in self.channel_names
+        ]
         print("channel indices!")
         print(self.channel_indices)
         print(f"Initialized dataset with {len(self.positions)} positions.")
 
         # self.statistics = self.compute_statistics()
         # print("Channel Statistics:", self.statistics)
-    
+
     def compute_statistics(self):
-        stats = {channel: {'mean': 0, 'sum_sq_diff': 0, 'min': np.inf, 'max': -np.inf} for channel in self.channel_names}
+        stats = {
+            channel: {"mean": 0, "sum_sq_diff": 0, "min": np.inf, "max": -np.inf}
+            for channel in self.channel_names
+        }
         count = 0
         total_elements = 0
 
@@ -640,23 +659,25 @@ class ContrastiveDataset(Dataset):
             for i, channel in enumerate(self.channel_names):
                 channel_data = data[i]
                 mean = np.mean(channel_data)
-                stats[channel]['mean'] += mean
-                stats[channel]['min'] = min(stats[channel]['min'], np.min(channel_data))
-                stats[channel]['max'] = max(stats[channel]['max'], np.max(channel_data))
-                stats[channel]['sum_sq_diff'] += np.sum((channel_data - mean) ** 2)
+                stats[channel]["mean"] += mean
+                stats[channel]["min"] = min(stats[channel]["min"], np.min(channel_data))
+                stats[channel]["max"] = max(stats[channel]["max"], np.max(channel_data))
+                stats[channel]["sum_sq_diff"] += np.sum((channel_data - mean) ** 2)
             count += 1
             total_elements += np.prod(channel_data.shape)
 
         for channel in self.channel_names:
-            stats[channel]['mean'] /= count
-            stats[channel]['std'] = np.sqrt(stats[channel]['sum_sq_diff'] / total_elements)
-            del stats[channel]['sum_sq_diff']
-        
+            stats[channel]["mean"] /= count
+            stats[channel]["std"] = np.sqrt(
+                stats[channel]["sum_sq_diff"] / total_elements
+            )
+            del stats[channel]["sum_sq_diff"]
+
         print("done!")
         return stats
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
-        #print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
+        # print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
 
     def __len__(self):
@@ -678,7 +699,7 @@ class ContrastiveDataset(Dataset):
             negative_idx = random.randint(0, self.__len__() - 1)
         negative_position_path = self.positions[negative_idx][0]
         negative_data = self.load_data(negative_position_path)
-        negative_data = self.normalize_data(negative_data) 
+        negative_data = self.normalize_data(negative_data)
 
         negative_data = self.apply_channel_transforms(negative_data)
         negative_data = self.normalize_data(negative_data)
@@ -705,8 +726,8 @@ class ContrastiveDataset(Dataset):
         data = self.restructure_data(zarr_array, position_path)
         data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
 
-        #print("shape after!")
-        #print(data.shape)
+        # print("shape after!")
+        # print(data.shape)
         return data
 
     def restructure_data(self, data, position_path):
@@ -750,15 +771,16 @@ class ContrastiveDataset(Dataset):
             std = np.std(channel_data)
             normalized_data[i] = (channel_data - mean) / (std + 1e-6)
         return normalized_data
-    
+
     def apply_channel_transforms(self, data):
         transformed_data = np.empty_like(data)
         for i, channel_name in enumerate(self.channel_names):
             channel_data = data[i]
             transform = self.transform[channel_name]
             transformed_data[i] = transform({"image": channel_data})["image"]
-            #print(f"transformed {channel_name}")
+            # print(f"transformed {channel_name}")
         return transformed_data
+
 
 def get_transforms():
     rfp_transforms = Compose(
@@ -805,10 +827,8 @@ def get_transforms():
         ]
     )
 
-    return {
-        "RFP": rfp_transforms,
-        "Phase3D": phase_transforms
-    }
+    return {"RFP": rfp_transforms, "Phase3D": phase_transforms}
+
 
 class ContrastiveDataModule(LightningDataModule):
     def __init__(
@@ -864,10 +884,12 @@ class ContrastiveDataModule(LightningDataModule):
             test_size = len(dataset) - train_size - val_size
 
             self.train_dataset, self.val_dataset, self.test_dataset = (
-                torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
+                torch.utils.data.random_split(
+                    dataset, [train_size, val_size, test_size]
+                )
             )
 
-        # setup prediction dataset 
+        # setup prediction dataset
         if stage == "predict" and self.predict_base_path:
             print("setting up!")
             self.predict_dataset = PredictDataset(
@@ -886,8 +908,8 @@ class ContrastiveDataModule(LightningDataModule):
             batch_size=self.batch_size,
             shuffle=True,
             num_workers=self.num_workers,
-            prefetch_factor=2,  
-            persistent_workers=True  
+            prefetch_factor=2,
+            persistent_workers=True,
         )
 
     def val_dataloader(self):
@@ -896,8 +918,8 @@ class ContrastiveDataModule(LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            prefetch_factor=2,  
-            persistent_workers=True  
+            prefetch_factor=2,
+            persistent_workers=True,
         )
 
     def test_dataloader(self):
@@ -906,8 +928,8 @@ class ContrastiveDataModule(LightningDataModule):
             batch_size=self.batch_size,
             shuffle=False,
             num_workers=self.num_workers,
-            prefetch_factor=2,  
-            persistent_workers=True  
+            prefetch_factor=2,
+            persistent_workers=True,
         )
 
     def predict_dataloader(self):
@@ -917,15 +939,15 @@ class ContrastiveDataModule(LightningDataModule):
                 "Predict dataset not set up. Call setup(stage='predict') first."
             )
 
-        
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,
-            shuffle=False, # False shuffle for prediction
+            shuffle=False,  # False shuffle for prediction
             num_workers=self.num_workers,
-            prefetch_factor=2,  
-            persistent_workers=True  
+            prefetch_factor=2,
+            persistent_workers=True,
         )
+
 
 class PredictDataset(Dataset):
     def __init__(
@@ -948,7 +970,9 @@ class PredictDataset(Dataset):
         self.timesteps_csv_path = timesteps_csv_path
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
         self.positions = list(self.ds.positions())
-        self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
+        self.channel_indices = [
+            self.ds.channel_names.index(channel) for channel in self.channel_names
+        ]
         print("channel indices!")
         print(self.channel_indices)
         print(f"Initialized predict dataset with {len(self.positions)} positions.")
@@ -964,22 +988,22 @@ class PredictDataset(Dataset):
     #         positions.append((position_path, row['Random Timestep']))
     #     #print(positions)
     #     return positions
-    
+
     def __len__(self):
         return len(self.positions)
 
     def __getitem__(self, idx):
         position_path = self.positions[idx][0]
-        #print(f"Position path: {position_path}")
+        # print(f"Position path: {position_path}")
         data = self.load_data(position_path)
         data = self.normalize_data(data)
 
         return torch.tensor(data, dtype=torch.float32), (position_path)
 
-    # double check printing order 
+    # double check printing order
     def load_data(self, position_path):
         position = self.ds[position_path]
-        #print(f"Loading data for position path: {position_path}")
+        # print(f"Loading data for position path: {position_path}")
         zarr_array = position["0"][:]
 
         parts = position_path.split("/")
@@ -994,14 +1018,23 @@ class PredictDataset(Dataset):
             self.timesteps_df.apply(
                 lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
                 axis=1,
-            ) == combined_id
+            )
+            == combined_id
         ]
 
         if matched_rows.empty:
-            raise ValueError(f"No matching entry found for position path: {position_path}")
+            raise ValueError(
+                f"No matching entry found for position path: {position_path}"
+            )
 
         random_timestep = matched_rows["Random Timestep"].values[0]
-        data = zarr_array[random_timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
+        data = zarr_array[
+            random_timestep,
+            self.channel_indices,
+            self.z_range[0] : self.z_range[1],
+            :,
+            :,
+        ]
         return data
 
     def normalize_data(self, data):
