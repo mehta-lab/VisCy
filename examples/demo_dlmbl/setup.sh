@@ -19,7 +19,7 @@ git checkout main #FIXME: change after merging this PR   # Exercise is tested wi
 
 # Find path to the environment - conda activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep 06_image_translation | awk '{print $NF}')
-$ENV_PATH/bin/pip install ".[metrics]"
+$ENV_PATH/bin/pip install ".[metrics,visual]"
 
 # Create the directory structure
 mkdir -p ~/data/06_image_translation/training
