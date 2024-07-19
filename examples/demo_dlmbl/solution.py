@@ -472,7 +472,7 @@ log_batch_jupyter(batch)
 # Can you tell what augmentation were applied from looking at the augmented images in Tensorboard?
 #
 # HINT:
-# [Compare your choice of augmentations here](https://github.com/mehta-lab/VisCy/blob/b89f778b34735553cf155904eef134c756708ff2/viscy/light/data.py#L529).
+# [Compare your choice of augmentations by dowloading the pretrained models and config files](https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip).
 # </div>
 # %%
 # Here we turn on data augmentation and rerun setup
@@ -1339,7 +1339,7 @@ target_channel = ["reconstructed-nucleus", "reconstructed-membrane"]
 augmentations = [
     RandWeightedCropd(
         keys=source_channel + target_channel,
-        spatial_size=(-1, 384, 384),
+        spatial_size=(-1, 512, 512),
         num_samples=2,
         w_key=target_channel[0],
     ),
