@@ -1,22 +1,13 @@
-from viscy.data.hcs import ContrastiveDataModule, PredictDataset
-from viscy.light.engine import ContrastiveModule
-import os
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 
-import torch
-from torch.optim import Adam
-from lightning.pytorch.strategies import DDPStrategy
-from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.callbacks import ModelCheckpoint, RichProgressBar
-from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import TQDMProgressBar
-from lightning.pytorch.utilities.rank_zero import rank_zero_only
-import wandb
-from tqdm import tqdm
-import logging
 import numpy as np
-import pandas as pd
+from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import TQDMProgressBar
+from lightning.pytorch.strategies import DDPStrategy
+
+from viscy.data.hcs import ContrastiveDataModule
+from viscy.light.engine import ContrastiveModule
 
 
 def main(hparams):

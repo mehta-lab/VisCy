@@ -1,9 +1,10 @@
 # %% Imports and paths.
-import os
+import timm
 import torch
-from viscy.representation.contrastive import ContrastiveEncoder
 import torchview
 
+from viscy.light.engine import ContrastiveModule
+from viscy.representation.contrastive import ContrastiveEncoder, UNeXt2Stem
 
 # %load_ext autoreload
 # %autoreload 2
@@ -53,7 +54,6 @@ model_graph = torchview.draw_graph(
 model_graph.visual_graph
 
 # %% Playground
-import timm
 
 available_models = timm.list_models(pretrained=True)
 

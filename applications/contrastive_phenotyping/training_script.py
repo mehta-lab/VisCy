@@ -1,27 +1,23 @@
 # %% Imports and paths.
+import logging
 import os
-from pathlib import Path
 from argparse import ArgumentParser
+from pathlib import Path
 
 import torch
 import torchview
-from torch.optim import Adam
-from lightning.pytorch.strategies import DDPStrategy
-
-from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.callbacks import ModelCheckpoint, RichProgressBar
+from lightning.pytorch import Trainer
+from lightning.pytorch.callbacks import (
+    ModelCheckpoint,
+)
 
 # from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.loggers import WandbLogger
-from lightning.pytorch.callbacks import TQDMProgressBar
-import wandb
-from tqdm import tqdm
-from lightning.pytorch.utilities.rank_zero import rank_zero_only
+from lightning.pytorch.strategies import DDPStrategy
 
+from viscy.data.hcs import ContrastiveDataModule
 from viscy.light.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
-from viscy.data.hcs import ContrastiveDataModule
-import logging
 
 # Set W&B logging level to suppress warnings
 logging.getLogger("wandb").setLevel(logging.ERROR)
