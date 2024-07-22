@@ -5,7 +5,7 @@ import re
 import tempfile
 from glob import glob
 from pathlib import Path
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
@@ -274,9 +274,9 @@ class HCSDataModule(LightningDataModule):
     """Lightning data module for a preprocessed HCS NGFF Store.
 
     :param str data_path: path to the data store
-    :param Union[str, Sequence[str]] source_channel: name(s) of the source channel,
+    :param str | Sequence[str] source_channel: name(s) of the source channel,
         e.g. ``'Phase'``
-    :param Union[str, Sequence[str]] target_channel: name(s) of the target channel,
+    :param str | Sequence[str] target_channel: name(s) of the target channel,
         e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
@@ -295,7 +295,7 @@ class HCSDataModule(LightningDataModule):
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
-    :param Optional[Path] ground_truth_masks: path to the ground truth masks,
+    :param Path | None ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
     """
@@ -303,8 +303,8 @@ class HCSDataModule(LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        source_channel: Union[str, Sequence[str]],
-        target_channel: Union[str, Sequence[str]],
+        source_channel: str | Sequence[str],
+        target_channel: str | Sequence[str],
         z_window_size: int,
         split_ratio: float = 0.8,
         batch_size: int = 16,
@@ -314,7 +314,7 @@ class HCSDataModule(LightningDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        ground_truth_masks: Optional[Path] = None,
+        ground_truth_masks: Path | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -464,7 +464,7 @@ class HCSDataModule(LightningDataModule):
         set_track_meta(True)
         if self.caching:
             _logger.warning("Ignoring caching config in 'predict' stage.")
-        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
+        dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
                 plate_path = self.data_path.parent.parent.parent
