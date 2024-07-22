@@ -3,7 +3,6 @@ import math
 import os
 import re
 import tempfile
-from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Sequence
 
@@ -249,8 +248,8 @@ class MaskTestDataset(SlidingWindowDataset):
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}
-        for img_path in glob(os.path.join(ground_truth_masks, "*cp_masks.png")):
-            img_name = os.path.basename(img_path)
+        for img_path in Path(ground_truth_masks).glob("*cp_masks.png"):
+            img_name = img_path.name
             position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
             # TODO: specify time index in the file name
             t_idx = 0
