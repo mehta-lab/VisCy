@@ -33,6 +33,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
 
+_logger = logging.getLogger("lightning.pytorch")
+
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
@@ -262,7 +264,7 @@ class MaskTestDataset(SlidingWindowDataset):
             # channel_name = re.search(r"^.+(?=_p\d{3})", img_name).group()
             z_idx = _search_int_in_str(r"(?<=_z)\d+", img_name)
             self.masks[(int(position_name), int(t_idx), int(z_idx))] = img_path
-        logging.info(str(self.masks))
+        _logger.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
         sample = super().__getitem__(index)
@@ -439,7 +441,7 @@ class HCSDataModule(LightningDataModule):
     def _setup_test(self, dataset_settings: dict):
         """Set up the test stage."""
         if self.batch_size != 1:
-            logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
+            _logger.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.cache_path if self.caching else self.data_path
@@ -467,7 +469,7 @@ class HCSDataModule(LightningDataModule):
         # track metadata for inverting transform
         set_track_meta(True)
         if self.caching:
-            logging.warning("Ignoring caching config in 'predict' stage.")
+            _logger.warning("Ignoring caching config in 'predict' stage.")
         dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
@@ -590,7 +592,7 @@ class HCSDataModule(LightningDataModule):
             self.train_z_scale_range = z_scale_range
         else:
             self.train_z_scale_range = (0.0, 0.0)
-        logging.debug(f"Training augmentations: {self.augmentations}")
+        _logger.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
 
 
@@ -620,12 +622,8 @@ class ContrastiveDataset(Dataset):
         self.channel_indices = [
             self.ds.channel_names.index(channel) for channel in self.channel_names
         ]
-        print("channel indices!")
-        print(self.channel_indices)
-        print(f"Initialized dataset with {len(self.positions)} positions.")
-
-        # self.statistics = self.compute_statistics()
-        # print("Channel Statistics:", self.statistics)
+        _logger.debug(f"Initialized dataset with {len(self.positions)} positions.")
+        _logger.debug(f"Channel indices: {self.channel_indices}")
 
     def compute_statistics(self):
         stats = {
@@ -655,11 +653,11 @@ class ContrastiveDataset(Dataset):
             )
             del stats[channel]["sum_sq_diff"]
 
-        print("done!")
+        _logger.debug("done!")
         return stats
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
-        # print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
+        # _logger.debug(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
 
     def __len__(self):
@@ -674,7 +672,7 @@ class ContrastiveDataset(Dataset):
         positive_data = self.normalize_data(positive_data)
 
         # if self.transform:
-        #     print("Positive transformation applied")
+        #     _logger.debug("Positive transformation applied")
 
         negative_idx = idx
         while negative_idx == idx:
@@ -687,12 +685,12 @@ class ContrastiveDataset(Dataset):
         negative_data = self.normalize_data(negative_data)
 
         # if self.transform:
-        #     print("Negative transformation applied")
+        #     _logger.debug("Negative transformation applied")
 
-        # print("shapes of tensors")
-        # print(torch.tensor(anchor_data).shape)
-        # print(torch.tensor(positive_data).shape)
-        # print(torch.tensor(negative_data).shape)
+        # _logger.debug("shapes of tensors")
+        # _logger.debug(torch.tensor(anchor_data).shape)
+        # _logger.debug(torch.tensor(positive_data).shape)
+        # _logger.debug(torch.tensor(negative_data).shape)
         return (
             torch.tensor(anchor_data, dtype=torch.float32),
             torch.tensor(positive_data, dtype=torch.float32),
@@ -701,15 +699,15 @@ class ContrastiveDataset(Dataset):
 
     def load_data(self, position_path):
         position = self.ds[position_path]
-        # print(f"Loading data from position: {position_path}")
+        # _logger.debug(f"Loading data from position: {position_path}")
 
         zarr_array = position["0"][:]
-        # print("Shape before:", zarr_array.shape)
+        # _logger.debug("Shape before:", zarr_array.shape)
         data = self.restructure_data(zarr_array, position_path)
         data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
 
-        # print("shape after!")
-        # print(data.shape)
+        # _logger.debug("shape after!")
+        # _logger.debug(data.shape)
         return data
 
     def restructure_data(self, data, position_path):
@@ -760,7 +758,7 @@ class ContrastiveDataset(Dataset):
             channel_data = data[i]
             transform = self.transform[channel_name]
             transformed_data[i] = transform({"image": channel_data})["image"]
-            # print(f"transformed {channel_name}")
+            # _logger.debug(f"transformed {channel_name}")
         return transformed_data
 
 
@@ -873,7 +871,7 @@ class ContrastiveDataModule(LightningDataModule):
 
         # setup prediction dataset
         if stage == "predict" and self.predict_base_path:
-            print("setting up!")
+            _logger.debug("setting up!")
             self.predict_dataset = PredictDataset(
                 self.predict_base_path,
                 self.channels,
@@ -915,7 +913,7 @@ class ContrastiveDataModule(LightningDataModule):
         )
 
     def predict_dataloader(self):
-        print("running predict DataLoader!")
+        _logger.debug("running predict DataLoader!")
         if self.predict_dataset is None:
             raise ValueError(
                 "Predict dataset not set up. Call setup(stage='predict') first."
@@ -955,9 +953,11 @@ class PredictDataset(Dataset):
         self.channel_indices = [
             self.ds.channel_names.index(channel) for channel in self.channel_names
         ]
-        print("channel indices!")
-        print(self.channel_indices)
-        print(f"Initialized predict dataset with {len(self.positions)} positions.")
+        _logger.debug("channel indices!")
+        _logger.debug(self.channel_indices)
+        _logger.debug(
+            f"Initialized predict dataset with {len(self.positions)} positions."
+        )
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         return open_ome_zarr(path, layout=layout, mode=mode)
@@ -968,7 +968,7 @@ class PredictDataset(Dataset):
     #     for idx, row in self.timesteps_df.iterrows():
     #         position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
     #         positions.append((position_path, row['Random Timestep']))
-    #     #print(positions)
+    #     #_logger.debug(positions)
     #     return positions
 
     def __len__(self):
@@ -976,7 +976,7 @@ class PredictDataset(Dataset):
 
     def __getitem__(self, idx):
         position_path = self.positions[idx][0]
-        # print(f"Position path: {position_path}")
+        # _logger.debug(f"Position path: {position_path}")
         data = self.load_data(position_path)
         data = self.normalize_data(data)
 
@@ -985,7 +985,7 @@ class PredictDataset(Dataset):
     # double check printing order
     def load_data(self, position_path):
         position = self.ds[position_path]
-        # print(f"Loading data for position path: {position_path}")
+        # _logger.debug(f"Loading data for position path: {position_path}")
         zarr_array = position["0"][:]
 
         parts = position_path.split("/")
