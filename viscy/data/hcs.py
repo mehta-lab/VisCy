@@ -4,7 +4,6 @@ import os
 import random
 import re
 import tempfile
-import warnings
 from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
@@ -33,8 +32,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
-
-warnings.filterwarnings("ignore")
 
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
