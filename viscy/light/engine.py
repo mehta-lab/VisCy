@@ -1,29 +1,22 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
-import matplotlib.pyplot as plt
-import pandas as pd
+
 import numpy as np
 import torch
-import wandb
+import torch.nn.functional as F
 from imageio import imwrite
+from lightning.pytorch import LightningModule
+from matplotlib.pyplot import get_cmap
+from monai.optimizers import WarmupCosineSchedule
+from monai.transforms import DivisiblePad, Rotate90
+from pytorch_lightning.utilities import rank_zero_only
+from skimage.exposure import rescale_intensity
+from torch import Tensor, nn
 
 # from lightning.pytorch import LightningModule
 # from lightning import LightningModule
 from torch.optim import Adam
-from PIL import Image
-
-import torch.nn.functional as F
-from pytorch_lightning.utilities import rank_zero_only
-
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-
-from matplotlib.pyplot import get_cmap
-from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad, Rotate90
-from skimage.exposure import rescale_intensity
-from torch import Tensor, nn
-from torch.nn import functional as F
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
@@ -39,17 +32,21 @@ from torchmetrics.functional import (
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
+from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
-from viscy.representation.contrastive import ContrastiveEncoder
 
 try:
     from cellpose.models import CellposeModel
 except ImportError:
     CellposeModel = None
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -137,18 +134,18 @@ class VSUNet(LightningModule):
         self,
         architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
-        loss_function: Union[nn.Module, MixedLoss] = None,
+        loss_function: Union[nn.Module, MixedLoss] | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         freeze_encoder: bool = False,
-        ckpt_path: str = None,
+        ckpt_path: str | None = None,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
-        test_cellpose_model_path: str = None,
-        test_cellpose_diameter: float = None,
-        test_evaluate_cellpose: bool = False,
-        test_time_augmentations: bool = False,
+        test_cellpose_model_path: str | None = None,
+        test_cellpose_diameter: float | None = None,
+        test_evaluate_cellpose: bool | None = False,
+        test_time_augmentations: bool | None = False,
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
@@ -574,7 +571,10 @@ class ContrastiveModule(LightningModule):
         predict: bool = False,
     ) -> None:
         super().__init__()
-
+        if wandb is None:
+            raise ImportError(
+                f"wandb is required for logging of {type(self).__name__}."
+            )
         self.loss_function = loss_function
         self.margin = margin
         self.lr = lr

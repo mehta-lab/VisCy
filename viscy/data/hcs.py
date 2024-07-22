@@ -1,53 +1,38 @@
 import logging
 import math
 import os
+import random
 import re
 import tempfile
+import warnings
 from glob import glob
 from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
 
-# import pytorch_lightning as pl
-from monai.transforms import MapTransform
-import random
 import numpy as np
+import pandas as pd
 import torch
 import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-
-# from lightning.pytorch import LightningDataModule
+from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
+    CenterSpatialCropd,
     Compose,
+    MapTransform,
+    MultiSampleTrait,
     RandAdjustContrastd,
     RandAffined,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
-    RandShiftIntensityd,
-    RandZoomd,
-    Rand3DElasticd,
-    RandGaussianSharpend,
 )
-
-
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
-
-import random
-
-from iohub import open_ome_zarr
-import pandas as pd
-import warnings
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-
-
-# from viscy.data.typing import Optional
-from pathlib import Path
 
 warnings.filterwarnings("ignore")
 

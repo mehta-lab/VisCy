@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 # from viscy.unet.networks.resnet import resnetStem
 # Currently identical to resnetStem, but could be different in the future.
-
 from viscy.unet.networks.unext2 import UNeXt2Stem
 
 
