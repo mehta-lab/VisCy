@@ -1,28 +1,22 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
-import matplotlib.pyplot as plt
-import pandas as pd
+
 import numpy as np
 import torch
-import wandb
-from imageio import imwrite
-#from lightning.pytorch import LightningModule
-#from lightning import LightningModule
-from torch.optim import Adam
-from PIL import Image
-
 import torch.nn.functional as F
-from pytorch_lightning.utilities import rank_zero_only
-
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-
+from imageio import imwrite
+from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad
+from monai.transforms import DivisiblePad, Rotate90
+from pytorch_lightning.utilities import rank_zero_only
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
-from torch.nn import functional as F
+
+# from lightning.pytorch import LightningModule
+# from lightning import LightningModule
+from torch.optim import Adam
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
@@ -38,23 +32,28 @@ from torchmetrics.functional import (
 
 from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
+from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
-from viscy.representation.contrastive import ContrastiveEncoder
 
 try:
     from cellpose.models import CellposeModel
 except ImportError:
     CellposeModel = None
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
     "fcmae": FullyConvolutionalMAE,
+    "UNeXt2_2D": FullyConvolutionalMAE,
 }
 
 
@@ -94,6 +93,7 @@ class MixedLoss(nn.Module):
             loss += (1 - ms_ssim) * self.ms_dssim_alpha
         return loss
 
+
 class VSUNet(LightningModule):
     """Regression U-Net module for virtual staining.
 
@@ -124,23 +124,29 @@ class VSUNet(LightningModule):
     :param bool test_evaluate_cellpose:
         evaluate the performance of the CellPose model instead of the trained model
         in test stage, defaults to False
+    :param bool test_time_augmentations:
+        apply test time augmentations in test stage, defaults to False
+    :param Literal['mean', 'median', 'product'] tta_type:
+        type of test time augmentations aggregation, defaults to "mean"
     """
 
     def __init__(
         self,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
-        loss_function: Union[nn.Module, MixedLoss] = None,
+        loss_function: Union[nn.Module, MixedLoss] | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         freeze_encoder: bool = False,
-        ckpt_path: str = None,
+        ckpt_path: str | None = None,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
-        test_cellpose_model_path: str = None,
-        test_cellpose_diameter: float = None,
-        test_evaluate_cellpose: bool = False,
+        test_cellpose_model_path: str | None = None,
+        test_cellpose_diameter: float | None = None,
+        test_evaluate_cellpose: bool | None = False,
+        test_time_augmentations: bool | None = False,
+        tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
         net_class = _UNET_ARCHITECTURE.get(architecture)
@@ -173,7 +179,10 @@ class VSUNet(LightningModule):
         self.test_cellpose_model_path = test_cellpose_model_path
         self.test_cellpose_diameter = test_cellpose_diameter
         self.test_evaluate_cellpose = test_evaluate_cellpose
+        self.test_time_augmentations = test_time_augmentations
+        self.tta_type = tta_type
         self.freeze_encoder = freeze_encoder
+        self._original_shape_yx = None
         if ckpt_path is not None:
             self.load_state_dict(
                 torch.load(ckpt_path)["state_dict"]
@@ -326,8 +335,50 @@ class VSUNet(LightningModule):
         )
 
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source = self._predict_pad(batch["source"])
-        return self._predict_pad.inverse(self.forward(source))
+        source = batch["source"]
+        if self.test_time_augmentations:
+            prediction = self.perform_test_time_augmentations(source)
+        else:
+            source = self._predict_pad(source)
+            prediction = self.forward(source)
+            prediction = self._predict_pad.inverse(prediction)
+
+        return prediction
+
+    def perform_test_time_augmentations(self, source: Tensor) -> Tensor:
+        """Perform test time augmentations on the input source
+        and aggregate the predictions using the specified method.
+
+        :param source: input tensor
+        :return: aggregated prediction
+        """
+
+        # Save the yx coords to crop post rotations
+        self._original_shape_yx = source.shape[-2:]
+        predictions = []
+        for i in range(4):
+            augmented = self._rotate_volume(source, k=i, spatial_axes=(1, 2))
+            augmented = self._predict_pad(augmented)
+            augmented_prediction = self.forward(augmented)
+            de_augmented_prediction = self._predict_pad.inverse(augmented_prediction)
+            de_augmented_prediction = self._rotate_volume(
+                de_augmented_prediction, k=4 - i, spatial_axes=(1, 2)
+            )
+            de_augmented_prediction = self._crop_to_original(de_augmented_prediction)
+
+            # Undo rotation and padding
+            predictions.append(de_augmented_prediction)
+
+        if self.tta_type == "mean":
+            prediction = torch.stack(predictions).mean(dim=0)
+        elif self.tta_type == "median":
+            prediction = torch.stack(predictions).median(dim=0).values
+        elif self.tta_type == "product":
+            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
+            log_prediction_sum = log_predictions.sum(dim=0)
+            prediction = torch.exp(log_prediction_sum)
+        return prediction
 
     def on_train_epoch_end(self):
         self._log_samples("train_samples", self.training_step_outputs)
@@ -414,6 +465,33 @@ class VSUNet(LightningModule):
             key, grid, self.current_epoch, dataformats="HWC"
         )
 
+    def _rotate_volume(self, tensor: Tensor, k: int, spatial_axes: tuple) -> Tensor:
+        # Padding to ensure square shape
+        max_dim = max(tensor.shape[-2], tensor.shape[-1])
+        pad_transform = DivisiblePad((0, 0, max_dim, max_dim))
+        padded_tensor = pad_transform(tensor)
+
+        # Rotation
+        rotated_tensor = []
+        rotate = Rotate90(k=k, spatial_axes=spatial_axes)
+        for b in range(padded_tensor.shape[0]):  # iterate over batch
+            rotated_tensor.append(rotate(padded_tensor[b]))
+
+        # Stack the list of tensors back into a single tensor
+        rotated_tensor = torch.stack(rotated_tensor)
+        del padded_tensor
+        # # Cropping to original shape
+        return rotated_tensor
+
+    def _crop_to_original(self, tensor: Tensor) -> Tensor:
+        original_y, original_x = self._original_shape_yx
+        pad_y = (tensor.shape[-2] - original_y) // 2
+        pad_x = (tensor.shape[-1] - original_x) // 2
+        cropped_tensor = tensor[
+            ..., pad_y : pad_y + original_y, pad_x : pad_x + original_x
+        ]
+        return cropped_tensor
+
 
 class FcmaeUNet(VSUNet):
     def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
@@ -471,6 +549,7 @@ class FcmaeUNet(VSUNet):
                 self._detach_sample((source, target * mask.unsqueeze(2), pred))
             )
 
+
 class ContrastiveModule(LightningModule):
     """Contrastive Learning Model for self-supervised learning."""
 
@@ -489,10 +568,13 @@ class ContrastiveModule(LightningModule):
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
-        predict: bool = False
+        predict: bool = False,
     ) -> None:
         super().__init__()
-
+        if wandb is None:
+            raise ImportError(
+                f"wandb is required for logging of {type(self).__name__}."
+            )
         self.loss_function = loss_function
         self.margin = margin
         self.lr = lr
@@ -512,7 +594,7 @@ class ContrastiveModule(LightningModule):
             in_stack_depth=in_stack_depth,
             stem_kernel_size=stem_kernel_size,
             embedding_len=embedding_len,
-            predict=predict
+            predict=predict,
         )
 
         # required to log the graph.
@@ -531,12 +613,12 @@ class ContrastiveModule(LightningModule):
         """Forward pass of the model."""
         projections = self.encoder(x)
         return projections
-        # features is without projection head and projects is with projection head 
+        # features is without projection head and projects is with projection head
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
         mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
         std = torch.std(embeddings, dim=0).detach().cpu().numpy()
-        
+
         print(f"{prefix}_mean: {mean}")
         print(f"{prefix}_std: {std}")
 
@@ -544,12 +626,12 @@ class ContrastiveModule(LightningModule):
         anchor_norm = torch.norm(anchor, dim=1).mean().item()
         positive_norm = torch.norm(positive, dim=1).mean().item()
         negative_norm = torch.norm(negative, dim=1).mean().item()
-        
+
         print(f"{phase}/anchor_norm: {anchor_norm}")
         print(f"{phase}/positive_norm: {positive_norm}")
         print(f"{phase}/negative_norm: {negative_norm}")
 
-    # logs over all steps 
+    # logs over all steps
     @rank_zero_only
     def log_metrics(self, anchor, positive, negative, phase):
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean().item()
@@ -562,18 +644,18 @@ class ContrastiveModule(LightningModule):
             f"{phase}/cosine_similarity_positive": cosine_sim_pos,
             f"{phase}/cosine_similarity_negative": cosine_sim_neg,
             f"{phase}/euclidean_distance_positive": euclidean_dist_pos,
-            f"{phase}/euclidean_distance_negative": euclidean_dist_neg
+            f"{phase}/euclidean_distance_negative": euclidean_dist_neg,
         }
 
         wandb.log(metrics)
-        
-        if phase == 'train':
+
+        if phase == "train":
             self.training_metrics.append(metrics)
-        elif phase == 'val':
+        elif phase == "val":
             self.validation_metrics.append(metrics)
-        elif phase == 'test':
+        elif phase == "test":
             self.test_metrics.append(metrics)
-    
+
     @rank_zero_only
     # logs only one sample from the first batch per epoch
     def log_images(self, anchor, positive, negative, epoch, step_name):
@@ -589,19 +671,37 @@ class ContrastiveModule(LightningModule):
 
         # Debug prints to check the contents of the images
         print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
-        print(f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}")
-        print(f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}")
+        print(
+            f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}"
+        )
+        print(
+            f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
+        )
 
-        print(f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}")
-        print(f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}")
-        print(f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}")
+        print(
+            f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
+        )
+        print(
+            f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
+        )
+        print(
+            f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
+        )
 
         # combine the images side by side
-        combined_img_rfp = np.concatenate((anchor_img_rfp, positive_img_rfp, negative_img_rfp), axis=1)
-        combined_img_phase = np.concatenate((anchor_img_phase, positive_img_phase, negative_img_phase), axis=1)
+        combined_img_rfp = np.concatenate(
+            (anchor_img_rfp, positive_img_rfp, negative_img_rfp), axis=1
+        )
+        combined_img_phase = np.concatenate(
+            (anchor_img_phase, positive_img_phase, negative_img_phase), axis=1
+        )
         combined_img = np.concatenate((combined_img_rfp, combined_img_phase), axis=0)
 
-        self.images_to_log.append(wandb.Image(combined_img, caption=f"Anchor | Positive | Negative (Epoch {epoch})"))
+        self.images_to_log.append(
+            wandb.Image(
+                combined_img, caption=f"Anchor | Positive | Negative (Epoch {epoch})"
+            )
+        )
 
         wandb.log({f"{step_name}": self.images_to_log})
         self.images_to_log = []
@@ -618,33 +718,57 @@ class ContrastiveModule(LightningModule):
         emb_pos = self.encoder(pos_img)
         emb_neg = self.encoder(neg_img)
         loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
-        
+
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
-        
+
         self.train_batch_counter += 1
         if self.train_batch_counter % self.log_steps_per_epoch == 0:
-            self.log_images(anchor, pos_img, neg_img, self.current_epoch, "training_images")
-        
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, 'train')
-        #self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
+            self.log_images(
+                anchor, pos_img, neg_img, self.current_epoch, "training_images"
+            )
+
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "train")
+        # self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
 
         self.training_step_outputs.append(loss)
-        return {'loss': loss}
+        return {"loss": loss}
 
     def on_train_epoch_end(self) -> None:
         epoch_loss = torch.stack(self.training_step_outputs).mean()
-        self.log("train/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
-        self.training_step_outputs.clear() 
+        self.log(
+            "train/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True
+        )
+        self.training_step_outputs.clear()
 
         if self.training_metrics:
-            avg_metrics = self.aggregate_metrics(self.training_metrics, 'train')
-            self.log("train/avg_cosine_similarity_positive", avg_metrics["train/cosine_similarity_positive"], on_epoch=True, logger=True)
-            self.log("train/avg_cosine_similarity_negative", avg_metrics["train/cosine_similarity_negative"], on_epoch=True, logger=True)
-            self.log("train/avg_euclidean_distance_positive", avg_metrics["train/euclidean_distance_positive"], on_epoch=True, logger=True)
-            self.log("train/avg_euclidean_distance_negative", avg_metrics["train/euclidean_distance_negative"], on_epoch=True, logger=True)
+            avg_metrics = self.aggregate_metrics(self.training_metrics, "train")
+            self.log(
+                "train/avg_cosine_similarity_positive",
+                avg_metrics["train/cosine_similarity_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "train/avg_cosine_similarity_negative",
+                avg_metrics["train/cosine_similarity_negative"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "train/avg_euclidean_distance_positive",
+                avg_metrics["train/euclidean_distance_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "train/avg_euclidean_distance_negative",
+                avg_metrics["train/euclidean_distance_negative"],
+                on_epoch=True,
+                logger=True,
+            )
             self.training_metrics.clear()
         self.train_batch_counter = 0
-        
+
     def validation_step(
         self,
         batch: tuple[Tensor],
@@ -662,24 +786,48 @@ class ContrastiveModule(LightningModule):
 
         self.val_batch_counter += 1
         if self.val_batch_counter % self.log_steps_per_epoch == 0:
-            self.log_images(anchor, pos_img, neg_img, self.current_epoch, "validation_images")
-        
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, 'val')
+            self.log_images(
+                anchor, pos_img, neg_img, self.current_epoch, "validation_images"
+            )
+
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "val")
 
         self.validation_step_outputs.append(loss)
-        return {'loss': loss}
-    
+        return {"loss": loss}
+
     def on_validation_epoch_end(self) -> None:
         epoch_loss = torch.stack(self.validation_step_outputs).mean()
-        self.log("val/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
-        self.validation_step_outputs.clear()  
+        self.log(
+            "val/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True
+        )
+        self.validation_step_outputs.clear()
 
         if self.validation_metrics:
-            avg_metrics = self.aggregate_metrics(self.validation_metrics, 'val')
-            self.log("val/avg_cosine_similarity_positive", avg_metrics["val/cosine_similarity_positive"], on_epoch=True, logger=True)
-            self.log("val/avg_cosine_similarity_negative", avg_metrics["val/cosine_similarity_negative"], on_epoch=True, logger=True)
-            self.log("val/avg_euclidean_distance_positive", avg_metrics["val/euclidean_distance_positive"], on_epoch=True, logger=True)
-            self.log("val/avg_euclidean_distance_negative", avg_metrics["val/euclidean_distance_negative"], on_epoch=True, logger=True)
+            avg_metrics = self.aggregate_metrics(self.validation_metrics, "val")
+            self.log(
+                "val/avg_cosine_similarity_positive",
+                avg_metrics["val/cosine_similarity_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "val/avg_cosine_similarity_negative",
+                avg_metrics["val/cosine_similarity_negative"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "val/avg_euclidean_distance_positive",
+                avg_metrics["val/euclidean_distance_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "val/avg_euclidean_distance_negative",
+                avg_metrics["val/euclidean_distance_negative"],
+                on_epoch=True,
+                logger=True,
+            )
             self.validation_metrics.clear()
         self.val_batch_counter = 0
 
@@ -695,41 +843,71 @@ class ContrastiveModule(LightningModule):
         emb_pos = self.encoder(pos_img)
         emb_neg = self.encoder(neg_img)
         loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
-        
+
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, 'test')
+        self.log_metrics(emb_anchor, emb_pos, emb_neg, "test")
 
         self.test_step_outputs.append(loss)
-        return {'loss': loss}
+        return {"loss": loss}
 
     @rank_zero_only
     def on_test_epoch_end(self) -> None:
         epoch_loss = torch.stack(self.test_step_outputs).mean()
-        self.log("test/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True)
-        self.test_step_outputs.clear()  
+        self.log(
+            "test/loss_epoch", epoch_loss, on_epoch=True, prog_bar=True, logger=True
+        )
+        self.test_step_outputs.clear()
 
         if self.test_metrics:
-            avg_metrics = self.aggregate_metrics(self.test_metrics, 'test')
-            self.log("test/avg_cosine_similarity_positive", avg_metrics["test/cosine_similarity_positive"], on_epoch=True, logger=True)
-            self.log("test/avg_cosine_similarity_negative", avg_metrics["test/cosine_similarity_negative"], on_epoch=True, logger=True)
-            self.log("test/avg_euclidean_distance_positive", avg_metrics["test/euclidean_distance_positive"], on_epoch=True, logger=True)
-            self.log("test/avg_euclidean_distance_negative", avg_metrics["test/euclidean_distance_negative"], on_epoch=True, logger=True)
+            avg_metrics = self.aggregate_metrics(self.test_metrics, "test")
+            self.log(
+                "test/avg_cosine_similarity_positive",
+                avg_metrics["test/cosine_similarity_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "test/avg_cosine_similarity_negative",
+                avg_metrics["test/cosine_similarity_negative"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "test/avg_euclidean_distance_positive",
+                avg_metrics["test/euclidean_distance_positive"],
+                on_epoch=True,
+                logger=True,
+            )
+            self.log(
+                "test/avg_euclidean_distance_negative",
+                avg_metrics["test/euclidean_distance_negative"],
+                on_epoch=True,
+                logger=True,
+            )
             self.test_metrics.clear()
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
-    
+
     def aggregate_metrics(self, metrics, phase):
         avg_metrics = {}
         if metrics:
-            avg_metrics[f"{phase}/cosine_similarity_positive"] = sum(m[f"{phase}/cosine_similarity_positive"] for m in metrics) / len(metrics)
-            avg_metrics[f"{phase}/cosine_similarity_negative"] = sum(m[f"{phase}/cosine_similarity_negative"] for m in metrics) / len(metrics)
-            avg_metrics[f"{phase}/euclidean_distance_positive"] = sum(m[f"{phase}/euclidean_distance_positive"] for m in metrics) / len(metrics)
-            avg_metrics[f"{phase}/euclidean_distance_negative"] = sum(m[f"{phase}/euclidean_distance_negative"] for m in metrics) / len(metrics)
+            avg_metrics[f"{phase}/cosine_similarity_positive"] = sum(
+                m[f"{phase}/cosine_similarity_positive"] for m in metrics
+            ) / len(metrics)
+            avg_metrics[f"{phase}/cosine_similarity_negative"] = sum(
+                m[f"{phase}/cosine_similarity_negative"] for m in metrics
+            ) / len(metrics)
+            avg_metrics[f"{phase}/euclidean_distance_positive"] = sum(
+                m[f"{phase}/euclidean_distance_positive"] for m in metrics
+            ) / len(metrics)
+            avg_metrics[f"{phase}/euclidean_distance_negative"] = sum(
+                m[f"{phase}/euclidean_distance_negative"] for m in metrics
+            ) / len(metrics)
         return avg_metrics
-    
+
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
@@ -737,7 +915,7 @@ class ContrastiveModule(LightningModule):
         features, projections = self.encoder(x)
         self.processed_order.extend(position_info)
         return features, projections
-    
+
     # already saved, not needed again
     # def on_predict_epoch_end(self) -> None:
     #         print(f"Processed order: {self.processed_order}")
@@ -752,7 +930,7 @@ class ContrastiveModule(LightningModule):
     #                 row = parts[0]
     #                 column = parts[1]
     #                 fov_cell = parts[2]
-                    
+
     #                 fov = int(fov_cell.split("fov")[1].split("cell")[0])
     #                 cell_id = int(fov_cell.split("cell")[1])
 
@@ -760,7 +938,7 @@ class ContrastiveModule(LightningModule):
     #                 columns.append(column)
     #                 fovs.append(fov)
     #                 cell_ids.append(cell_id)
-                
+
     #             except (IndexError, ValueError) as e:
     #                 print(f"Skipping invalid position path: {position_path} with error: {e}")
 

@@ -4,8 +4,8 @@ import torch.nn.functional as F
 
 # from viscy.unet.networks.resnet import resnetStem
 # Currently identical to resnetStem, but could be different in the future.
-
 from viscy.unet.networks.unext2 import UNeXt2Stem
+from viscy.unet.networks.unext2 import UNeXt2StemResNet
 
 class ContrastiveEncoder(nn.Module):
     def __init__(
@@ -15,7 +15,7 @@ class ContrastiveEncoder(nn.Module):
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
-        predict: bool = False
+        predict: bool = False,
     ):
         super().__init__()
 
@@ -98,19 +98,34 @@ class ContrastiveEncoder(nn.Module):
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
             in_channels_encoder = self.model.conv1.out_channels
-            stem = UNeXt2Stem(
+            print("in_channels_encoder", in_channels_encoder)
+
+            out_channels_encoder = self.model.bn1.num_features
+            print("out_channels_bn", out_channels_encoder)
+
+            stem = UNeXt2StemResNet(
                 in_channels=in_channels,
-                out_channels=in_channels_encoder,
+                out_channels=out_channels_encoder,
                 kernel_size=stem_kernel_size,
                 in_stack_depth=in_stack_depth,
             )
             self.model.conv1 = stem
 
-            self.model.head.fc = nn.Sequential(
-                self.model.head.fc,
+            self.model.bn1 = nn.BatchNorm2d(out_channels_encoder)
+
+            print(f'Updated out_channels_encoder: {out_channels_encoder}')
+
+            self.model.fc = nn.Sequential(
+                nn.Linear(self.model.fc.in_features, 4 * embedding_len),
                 nn.ReLU(inplace=True),
                 nn.Linear(4 * embedding_len, embedding_len),
             )
+
+            # self.model.fc = nn.Sequential(
+            # nn.Linear(self.model.fc.in_features, 1024),
+            # nn.ReLU(inplace=True),
+            # nn.Linear(1024, embedding_len),
+            # )
 
             """ 
             head of resnet
@@ -141,13 +156,40 @@ class ContrastiveEncoder(nn.Module):
             x = self.model.head.flatten(x)
             features_before_projection = self.model.head.drop(x)
             projections = self.model.head.fc(features_before_projection)
-            features_before_projection = F.normalize(features_before_projection, p=2, dim=1)
+            features_before_projection = F.normalize(
+                features_before_projection, p=2, dim=1
+            )
             projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
             print(features_before_projection.shape, projections.shape)
             return features_before_projection, projections
         # feature is without projection head
         else:
             print("running forward without predict!")
-            projections = self.model(x)
-            projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
-            return projections
+            print("Running forward without predict!")
+            x = self.model.conv1(x)
+            print(f'After conv1: {x.shape}')  # Debugging statement
+            x = self.model.bn1(x)
+            print(f'After bn1: {x.shape}')  # Debugging statement
+            x = self.model.act1(x)
+            print(f'After act1: {x.shape}')  # Debugging statement
+            x = self.model.maxpool(x)
+            print(f'After maxpool: {x.shape}')  # Debugging statement
+            x = self.model.layer1(x)
+            print(f'After layer1: {x.shape}')  # Debugging statement
+            x = self.model.layer2(x)
+            print(f'After layer2: {x.shape}')  # Debugging statement
+            x = self.model.layer3(x)
+            print(f'After layer3: {x.shape}')  # Debugging statement
+            x = self.model.layer4(x)
+            print(f'After layer4: {x.shape}')  # Debugging statement
+            x = self.model.global_pool(x)
+            print(f'After global_pool: {x.shape}')  # Debugging statement
+            x = x.flatten(1)
+            x = self.model.fc(x)
+            print(f'After fc: {x.shape}')  # Debugging statement
+            x = F.normalize(x, p=2, dim=1)  # L2 normalization
+            return x
+            
+            # projections = self.model(x)
+            # projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
+            # return projections

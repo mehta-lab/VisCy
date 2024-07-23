@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
 #import pytorch_lightning as pl
 from monai.transforms import MapTransform
+
 import random
 import numpy as np
 import torch
@@ -18,26 +19,18 @@ from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
 from monai.transforms import Compose, RandAdjustContrastd, RandAffined, RandGaussianNoised, RandGaussianSmoothd, RandScaleIntensityd, RandShiftIntensityd, RandZoomd, Rand3DElasticd, RandGaussianSharpend
-
-
-
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-
 from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
-
 import random
-
 from iohub import open_ome_zarr
 import pandas as pd
 import warnings
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-
-
 # from viscy.data.typing import Optional
 from pathlib import Path
 
-warnings.filterwarnings("ignore")
+_logger = logging.getLogger("lightning.pytorch")
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
@@ -258,8 +251,8 @@ class MaskTestDataset(SlidingWindowDataset):
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}
-        for img_path in glob(os.path.join(ground_truth_masks, "*cp_masks.png")):
-            img_name = os.path.basename(img_path)
+        for img_path in Path(ground_truth_masks).glob("*cp_masks.png"):
+            img_name = img_path.name
             position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
             # TODO: specify time index in the file name
             t_idx = 0
@@ -267,7 +260,7 @@ class MaskTestDataset(SlidingWindowDataset):
             # channel_name = re.search(r"^.+(?=_p\d{3})", img_name).group()
             z_idx = _search_int_in_str(r"(?<=_z)\d+", img_name)
             self.masks[(int(position_name), int(t_idx), int(z_idx))] = img_path
-        logging.info(str(self.masks))
+        _logger.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
         sample = super().__getitem__(index)
@@ -283,9 +276,9 @@ class HCSDataModule(LightningDataModule):
     """Lightning data module for a preprocessed HCS NGFF Store.
 
     :param str data_path: path to the data store
-    :param Union[str, Sequence[str]] source_channel: name(s) of the source channel,
+    :param str | Sequence[str] source_channel: name(s) of the source channel,
         e.g. ``'Phase'``
-    :param Union[str, Sequence[str]] target_channel: name(s) of the target channel,
+    :param str | Sequence[str] target_channel: name(s) of the target channel,
         e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
@@ -304,7 +297,7 @@ class HCSDataModule(LightningDataModule):
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
-    :param Optional[Path] ground_truth_masks: path to the ground truth masks,
+    :param Path | None ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
     """
@@ -312,8 +305,8 @@ class HCSDataModule(LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        source_channel: Union[str, Sequence[str]],
-        target_channel: Union[str, Sequence[str]],
+        source_channel: str | Sequence[str],
+        target_channel: str | Sequence[str],
         z_window_size: int,
         split_ratio: float = 0.8,
         batch_size: int = 16,
@@ -323,7 +316,7 @@ class HCSDataModule(LightningDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        ground_truth_masks: Optional[Path] = None,
+        ground_truth_masks: Path | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -444,7 +437,7 @@ class HCSDataModule(LightningDataModule):
     def _setup_test(self, dataset_settings: dict):
         """Set up the test stage."""
         if self.batch_size != 1:
-            logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
+            _logger.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
         data_path = self.cache_path if self.caching else self.data_path
@@ -464,13 +457,16 @@ class HCSDataModule(LightningDataModule):
                 **dataset_settings,
             )
 
-    def _setup_predict(self, dataset_settings: dict):
+    def _setup_predict(
+        self,
+        dataset_settings: dict,
+    ):
         """Set up the predict stage."""
         # track metadata for inverting transform
         set_track_meta(True)
         if self.caching:
-            logging.warning("Ignoring caching config in 'predict' stage.")
-        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
+            _logger.warning("Ignoring caching config in 'predict' stage.")
+        dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
                 plate_path = self.data_path.parent.parent.parent
@@ -592,7 +588,7 @@ class HCSDataModule(LightningDataModule):
             self.train_z_scale_range = z_scale_range
         else:
             self.train_z_scale_range = (0.0, 0.0)
-        logging.debug(f"Training augmentations: {self.augmentations}")
+        _logger.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
 
 # dataloader for organelle phenotyping
@@ -821,7 +817,7 @@ class ContrastiveDataModule(LightningDataModule):
         train_split_ratio: float = 0.64,
         val_split_ratio: float = 0.16,
         batch_size: int = 4,
-        num_workers: int = 1, #for analysis purposes reduced to 1
+        num_workers: int = 15, #for analysis purposes reduced to 1
         z_range: tuple[int, int] = None,
         analysis: bool = False,
     ):
@@ -937,6 +933,7 @@ class ContrastiveDataModule(LightningDataModule):
             prefetch_factor=2,  
             persistent_workers=True  
         )
+
 
 class PredictDataset(Dataset):
     def __init__(

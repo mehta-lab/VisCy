@@ -90,6 +90,30 @@ class UNeXt2Stem(nn.Module):
         # return a view when possible (contiguous)
         return x.reshape(b, c * d, h, w)
 
+class UNeXt2StemResNet(nn.Module):
+    """Stem for ResNet in ContrastiveEncoder networks."""
+
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        kernel_size: tuple[int, int, int],
+        in_stack_depth: int,
+    ) -> None:
+        super().__init__()
+        self.conv = nn.Conv3d(
+            in_channels=in_channels,
+            out_channels=out_channels,  # matches the expected BatchNorm2d input channels
+            kernel_size=kernel_size,
+            stride=kernel_size,
+        )
+
+    def forward(self, x: Tensor):
+        x = self.conv(x)
+        b, c, d, h, w = x.shape
+        print(f'After Conv3d: {x.shape}')
+        return x.reshape(b, c * d, h, w)
+
 
 class UNeXt2UpStage(nn.Module):
     def __init__(
