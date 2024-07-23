@@ -20,8 +20,9 @@ import pandas as pd
 
 def main(hparams):
     # Set paths
+    # this CSV defines the order in which embeddings should be processed. Currently using num_workers = 1 to keep order
     top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
-    timesteps_csv_path = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/predict_timesteps.csv"
+    timesteps_csv_path = "/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/expanded_transitioning_cells_metadata.csv"
     predict_base_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/all_annotations_patch.zarr"
     checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels/contrastive_model-test-epoch=97-val_loss=0.00.ckpt"
 
@@ -30,7 +31,7 @@ def main(hparams):
     x = 200
     y = 200
     z_range = (28, 43)
-    batch_size = 11
+    batch_size = 12
     channel_names = ["RFP", "Phase3D"]
 
     # Initialize the data module for prediction
@@ -43,7 +44,8 @@ def main(hparams):
             channel_names=channel_names,
             batch_size=batch_size,
             z_range=z_range,
-            predict_base_path=predict_base_path 
+            predict_base_path=predict_base_path,
+            analysis=True, # for self-supervised results 
     )
 
     data_module.setup(stage='predict')
@@ -78,8 +80,15 @@ def main(hparams):
     all_projections = np.concatenate(projections_list, axis=0)
 
     # Save features and projections
-    np.save("updated_epoch97_predicted_features.npy", all_features)
-    np.save("updated_epoch97_predicted_projections.npy", all_projections)
+    # Save in sub-folder instead for the specific FOV 
+
+    # for saving visualizations embeddings 
+    base_dir = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/test_visualizations"
+    features_path = os.path.join(base_dir, 'B', '4', '2', 'before_projected_embeddings', 'test_epoch88_predicted_features.npy')
+    projections_path = os.path.join(base_dir, 'B', '4', '2', 'projected_embeddings', 'test_epoch88_predicted_projections.npy')
+
+    np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_features.npy", all_features)
+    np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_projections.npy", all_projections)
 
 if __name__ == "__main__":
     parser = ArgumentParser()

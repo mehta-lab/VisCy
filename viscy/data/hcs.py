@@ -821,8 +821,9 @@ class ContrastiveDataModule(LightningDataModule):
         train_split_ratio: float = 0.64,
         val_split_ratio: float = 0.16,
         batch_size: int = 4,
-        num_workers: int = 8,
+        num_workers: int = 1, #for analysis purposes reduced to 1
         z_range: tuple[int, int] = None,
+        analysis: bool = False,
     ):
         super().__init__()
         self.base_path = Path(base_path)
@@ -831,7 +832,7 @@ class ContrastiveDataModule(LightningDataModule):
         self.y = y
         self.timesteps_csv_path = timesteps_csv_path
         self.channel_names = channel_names
-        self.transform = get_transforms()
+        self.transform = transform
         self.predict_base_path = Path(predict_base_path) if predict_base_path else None
         self.train_split_ratio = train_split_ratio
         self.val_split_ratio = val_split_ratio
@@ -842,6 +843,7 @@ class ContrastiveDataModule(LightningDataModule):
         self.val_dataset = None
         self.test_dataset = None
         self.predict_dataset = None
+        self.analysis = analysis
 
     def setup(self, stage: str = None):
         if stage == "fit":
@@ -865,7 +867,7 @@ class ContrastiveDataModule(LightningDataModule):
             )
 
         # setup prediction dataset 
-        if stage == "predict" and self.predict_base_path:
+        if stage == "predict" and self.predict_base_path and not self.analysis:
             print("setting up!")
             self.predict_dataset = PredictDataset(
                 self.predict_base_path,
@@ -877,6 +879,19 @@ class ContrastiveDataModule(LightningDataModule):
                 z_range=self.z_range,
             )
 
+        if stage == "predict" and self.analysis == True:
+            print("doing analysis set up!")
+            self.predict_dataset = PredictDataset(
+                self.predict_base_path,
+                self.channels,
+                self.x,
+                self.y,
+                timesteps_csv_path=self.timesteps_csv_path,
+                channel_names=self.channel_names,
+                z_range=self.z_range,
+                analysis=True,
+            )
+        
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
@@ -914,7 +929,6 @@ class ContrastiveDataModule(LightningDataModule):
                 "Predict dataset not set up. Call setup(stage='predict') first."
             )
 
-        
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,
@@ -934,6 +948,7 @@ class PredictDataset(Dataset):
         timesteps_csv_path,
         channel_names,
         z_range=None,
+        analysis=False,
     ):
         self.base_path = base_path
         self.channels = channels
@@ -944,14 +959,35 @@ class PredictDataset(Dataset):
         self.ds = self.open_zarr_store(self.base_path)
         self.timesteps_csv_path = timesteps_csv_path
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
-        self.positions = list(self.ds.positions())
+        self.positions = list(self.ds.positions()) if not analysis else self.filter_positions_from_csv()
         self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
+        self.current_position_idx = 0
+        self.current_timestep_idx = 0
+        self.analysis = analysis
         print("channel indices!")
         print(self.channel_indices)
         print(f"Initialized predict dataset with {len(self.positions)} positions.")
 
+        self.position_to_timesteps = {
+            position: self.timesteps_df[self.timesteps_df.apply(
+                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
+                axis=1) == position]['Timestep'].values
+            for position in self.positions
+        }
+
+        #print(self.positions[0])
+
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         return open_ome_zarr(path, layout=layout, mode=mode)
+
+    def filter_positions_from_csv(self):
+        unique_positions = self.timesteps_df[['Row', 'Column', 'FOV', 'Cell ID']].drop_duplicates()
+        valid_positions = []
+        for idx, row in unique_positions.iterrows():
+            position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
+            valid_positions.append(position_path)
+        #print(valid_positions)
+        return valid_positions
 
     # def get_positions_from_csv(self):
     #     positions = []
@@ -963,42 +999,51 @@ class PredictDataset(Dataset):
     #     return positions
     
     def __len__(self):
-        return len(self.positions)
+        if self.analysis:
+            return sum(len(timesteps) for timesteps in self.position_to_timesteps.values())
+        else:
+            return len(self.positions)
 
     def __getitem__(self, idx):
-        position_path = self.positions[idx][0]
-        #print(f"Position path: {position_path}")
-        data = self.load_data(position_path)
-        data = self.normalize_data(data)
+        position_path = None
+        timestep = None
 
-        return torch.tensor(data, dtype=torch.float32), (position_path)
+        if self.analysis:
+            # Determine the position and timestep based on the index
+            accumulated_idx = 0
+            for position_path, timesteps in self.position_to_timesteps.items():
+                if idx < accumulated_idx + len(timesteps):
+                    timestep_idx = idx - accumulated_idx
+                    timestep = timesteps[timestep_idx]
+                    break
+                accumulated_idx += len(timesteps)
+
+            if timestep is None or position_path is None:
+                raise ValueError(f"Timestep or position_path could not be determined for index: {idx}")
+
+            #print(f"Analysis mode: Index: {idx}, Position: {position_path}, Timestep: {timestep}")
+            data = self.load_data(position_path, timestep)
+        else:
+            if idx >= len(self.positions):
+                raise IndexError(f"Index {idx} out of range for positions of length {len(self.positions)}")
+
+            position_path = self.positions[idx]
+            print(f"Non-analysis mode: Index: {idx}, Position: {position_path}")
+            data = self.load_data(position_path)
+
+        data = self.normalize_data(data)
+        return torch.tensor(data, dtype=torch.float32), position_path
 
     # double check printing order 
-    def load_data(self, position_path):
+    def load_data(self, position_path, timestep=None):
         position = self.ds[position_path]
-        #print(f"Loading data for position path: {position_path}")
+        print(f"Loading data for position path: {position_path}" + (f" at Timestep: {timestep}" if timestep is not None else ""))
         zarr_array = position["0"][:]
 
-        parts = position_path.split("/")
-        row = parts[0]
-        column = parts[1]
-        fov_cell = parts[2]
-        fov = int(fov_cell.split("fov")[1].split("cell")[0])
-        cell_id = int(fov_cell.split("cell")[1])
+        if timestep is None:
+            raise ValueError("Timestep must be provided for analysis")
 
-        combined_id = f"{row}/{column}/fov{fov}cell{cell_id}"
-        matched_rows = self.timesteps_df[
-            self.timesteps_df.apply(
-                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
-                axis=1,
-            ) == combined_id
-        ]
-
-        if matched_rows.empty:
-            raise ValueError(f"No matching entry found for position path: {position_path}")
-
-        random_timestep = matched_rows["Random Timestep"].values[0]
-        data = zarr_array[random_timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
+        data = zarr_array[timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
         return data
 
     def normalize_data(self, data):
