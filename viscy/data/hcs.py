@@ -24,7 +24,7 @@ from monai.transforms import (
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
+from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -102,7 +102,7 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] | None transform:
+    :param DictTransform | None transform:
         a callable that transforms data, defaults to None
     """
 
@@ -111,7 +111,7 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
+        transform: DictTransform | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -179,6 +179,7 @@ class SlidingWindowDataset(Dataset):
     def __len__(self) -> int:
         return self._max_window
 
+    # TODO: refactor to a top level function
     def _stack_channels(
         self,
         sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
@@ -234,8 +235,9 @@ class MaskTestDataset(SlidingWindowDataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
+    :param DictTransform transform:
         a callable that transforms data, defaults to None
+    :param str | None ground_truth_masks: path to the ground truth masks
     """
 
     def __init__(
@@ -243,8 +245,8 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
-        ground_truth_masks: str = None,
+        transform: DictTransform | None = None,
+        ground_truth_masks: str | None = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}

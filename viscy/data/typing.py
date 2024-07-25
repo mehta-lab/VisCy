@@ -1,9 +1,13 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, NamedTuple, Sequence, TypedDict, TypeVar
+from typing import TYPE_CHECKING, Callable, NamedTuple, Sequence, TypedDict, TypeVar
 
 if TYPE_CHECKING:
     from torch import Tensor
+
+
+DictTransform = Callable[[dict[str, Tensor]], dict[str, Tensor]]
+
 
 T = TypeVar("T")
 OneOrSeq = T | Sequence[T]
