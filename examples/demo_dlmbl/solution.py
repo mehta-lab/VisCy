@@ -32,28 +32,12 @@ from a fluorescence membrane label.
   - Explore OME-Zarr using [iohub](https://czbiohub-sf.github.io/iohub/main/index.html)
   and the high-content-screen (HCS) format.
   - Use [MONAI](https://monai.io/) to implement data augmentations.
-  
-#### Part 2: Train a model that predicts fluorescence from phase, and vice versa, using the UNeXt2 architecture.
 
-  - Create a model for image translation mapping from source domain to target domain
-  where the source domain is label-free microscopy (material density)
-  and the target domain is fluorescence microscopy (fluorophore density).
-  - Use the UNeXt2 architecture, a _purely convolutional architecture_
-  that draws on the design principles of transformer models to complete this task.
-  Here we will use a *UNeXt2*, an efficient image translation architecture inspired by ConvNeXt v2 and SparK.
-  - We will perform the preprocessing, training, prediction, evaluation, and deployment steps
-  that borrow from our computer vision pipeline for single-cell analysis in
-  our pipeline called [VisCy](https://github.com/mehta-lab/VisCy).
-  - Reuse the same architecture as above and create a similar model doing the inverse task (fluorescence to phase).
-  - Evaluate the model.
+#### Part 2: Train and evaluate the model to translate phase into fluorescence, and vice versa.
+  - Train a 2D UNeXt2 model to predict nuclei and membrane from phase images.
+  - Compare the performance of the trained model and a pre-trained model.
+  - Evaluate the model using pixel-level and instance-level metrics.
 
-#### (Extra) Play with the hyperparameters to improve the models or train a 3D UNeXt2
-
-Our guesstimate is that each of the three parts will take ~1-1.5 hours.
-A reasonable 2D UNet can be trained in ~30 min on a typical AWS node.
-The focus of the exercise is on understanding the information content of the data,
-how to train and evaluate 2D image translation models, and exploring some hyperparameters of the model.
-If you complete this exercise and have time to spare, try the bonus exercise on 3D image translation.
 
 Checkout [VisCy](https://github.com/mehta-lab/VisCy/tree/main/examples/demos),
 our deep learning pipeline for training and deploying computer vision models
@@ -71,19 +55,18 @@ VisCy exploits recent advances in data and metadata formats
 
 # %% [markdown]
 """
-📖 As you work through parts 2 and 3, please share the layouts of your models (output of torchview)
+📖 As you work through parts 2, please share the layouts of your models (output of torchview)
 and their performance with everyone via
 [this Google Doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing). 📖
 """
 # %% [markdown]
 """
 <div class="alert alert-warning">
-The exercise is organized in 3 parts + Extra part.
+The exercise is organized in 2 parts 
 
 <ul>
 <li><b>Part 1</b> - Learn to use iohub (I/O library), VisCy dataloaders, and tensorboard.</li>
-<li><b>Part 2</b> - Train and evaluate the model to translate phase into fluorescence, and vice versa.</li>
-<li><b>Extra task</b> - Tune the models to improve performance.</li>
+<li><b>Part 2</b> - Train and evaluate the model to translate phase into fluorescence.</li>
 </ul>
 
 </div>
@@ -728,6 +711,11 @@ trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 
 <h2> Checkpoint 1 </h2>
 
+While your model is training, let's think about the following questions:
+- What is the information content of each channel in the dataset?
+- How would you use image translation models?
+- What can you try to improve the performance of each model?
+
 Now the training has started,
 we can come back after a while and evaluate the performance!
 
@@ -736,9 +724,9 @@ we can come back after a while and evaluate the performance!
 
 # %% [markdown]
 """
-## Part 2: Assess previous model, train fluorescence to phase contrast translation model.
+## Part 2: Assess your trained model
 
-We now look at some metrics of performance of previous model.
+Now we will look at some metrics of performance of previous model.
 We typically evaluate the model performance on a held out test data.
 We will use the following metrics to evaluate the accuracy of regression of the model:
 
@@ -887,541 +875,20 @@ for i, sample in enumerate(test_data.test_dataloader()):
     plt.tight_layout()
     plt.show()
     break
-# %% [markdown] tags=[]
-"""
-<div class="alert alert-info">
-
-<h3>Task 2.2 Train fluorescence to phase contrast translation model</h3>
-
-Instantiate a data module, model, and trainer for fluorescence to phase contrast translation. Copy over the code from previous cells and update the parameters. Give the variables and paths a different name/suffix (fluor2phase) to avoid overwriting objects used to train phase2fluor models.
-</div>
-"""
-# %% tags=[]
-##########################
-######## TODO ########
-##########################
-
-fluor2phase_data = HCSDataModule(
-    # Your code here (copy from above and modify as needed)
-)
-fluor2phase_data.setup("fit")
-
-# Dictionary that specifies key parameters of the model.
-fluor2phase_config = {
-    # Your config here
-}
-
-fluor2phase_model = VSUNet(
-    # Your code here (copy from above and modify as needed)
-)
-
-# Visualize the graph of fluor2phase model as image.
-model_graph_fluor2phase = torchview.draw_graph(
-    fluor2phase_model,
-    fluor2phase_data.train_dataset[0]["source"],
-    depth=2,  # adjust depth to zoom in.
-    device="cpu",
-)
-model_graph_fluor2phase.visual_graph
-
-# %% tags=["solution"]
-
-##########################
-######## Solution ########
-##########################
-
-# The entire training loop is contained in this cell.
-source_channel = ["Mem"]  # or 'Nuc' depending on choice
-target_channel = ["Phase3D"]
-YX_PATCH_SIZE = (256, 256)
-BATCH_SIZE = 12
-n_epochs = 50
-
-# Setup the new augmentations
-augmentations = [
-    RandWeightedCropd(
-        keys=source_channel + target_channel,
-        spatial_size=(1, 384, 384),
-        num_samples=2,
-        w_key=target_channel[0],
-    ),
-    RandAffined(
-        keys=source_channel + target_channel,
-        rotate_range=[3.14, 0.0, 0.0],
-        scale_range=[0.0, 0.3, 0.3],
-        prob=0.8,
-        padding_mode="zeros",
-        shear_range=[0.0, 0.01, 0.01],
-    ),
-    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
-    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
-    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
-    RandGaussianSmoothd(
-        keys=source_channel,
-        sigma_x=(0.25, 0.75),
-        sigma_y=(0.25, 0.75),
-        sigma_z=(0.0, 0.0),
-        prob=0.5,
-    ),
-]
-
-normalizations = [
-    NormalizeSampled(
-        keys=source_channel + target_channel,
-        level="fov_statistics",
-        subtrahend="mean",
-        divisor="std",
-    )
-]
-
-# Setup the dataloader
-fluor2phase_data = HCSDataModule(
-    data_path,
-    architecture="UNeXt2_2D",
-    source_channel=source_channel,
-    target_channel=target_channel,
-    z_window_size=1,
-    split_ratio=0.8,
-    batch_size=BATCH_SIZE,
-    num_workers=8,
-    yx_patch_size=YX_PATCH_SIZE,
-    augmentations=augmentations,
-    normalizations=normalizations,
-)
-fluor2phase_data.setup("fit")
-
-n_samples = len(fluor2phase_data.train_dataset)
-
-steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
-
-# Dictionary that specifies key parameters of the model.
-fluor2phase_config = dict(
-    in_channels=1,
-    out_channels=1,
-    encoder_blocks=[3, 3, 9, 3],
-    dims=[96, 192, 384, 768],
-    decoder_conv_blocks=2,
-    stem_kernel_size=(1, 2, 2),
-    in_stack_depth=1,
-    pretraining=False,
-)
-
-fluor2phase_model = VSUNet(
-    architecture="UNeXt2_2D",
-    model_config=fluor2phase_config.copy(),
-    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
-    schedule="WarmupCosine",
-    lr=2e-4,
-    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
-    freeze_encoder=False,
-)
-
-# Visualize the graph of fluor2phase model as image.
-model_graph_fluor2phase = torchview.draw_graph(
-    fluor2phase_model,
-    next(iter(fluor2phase_data.train_dataloader()))["source"],
-    depth=3,  # adjust depth to zoom in.
-    device="cpu",
-)
-model_graph_fluor2phase.visual_graph
-
-# %% tags=[]
-##########################
-######## TODO ########
-##########################
-
-trainer = VSTrainer(
-    # Your code here (copy from above and modify as needed)
-)
-trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
-
-
-# %%  tags=["solution"]
-trainer = VSTrainer(
-    accelerator="gpu",
-    devices=[GPU_ID],
-    max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch // 2,
-    logger=TensorBoardLogger(
-        save_dir=log_dir,
-        # lightning trainer transparently saves logs and model checkpoints in this directory.
-        name="fluor2phase",
-        log_graph=True,
-    ),
-)
-trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
-
 
 # %% [markdown] tags=[]
 """
 <div class="alert alert-info">
 
-<h3>Task 2.3 </h3>
+<h3> Task 2.2 Compare your trained model with the pretrained model </h3>
+Here we will compare your model with the VSCyto2D pretrained model.
 
-While your model is training, let's think about the following questions:
-- What is the information content of each channel in the dataset?
-- How would you use image translation models?
-- What can you try to improve the performance of each model?
-</div>
-"""
-# %%
-test_data_path = Path(
-    "~/data/06_image_translation/test/a549_hoechst_cellmask_test.zarr"
-).expanduser()
-
-test_data = HCSDataModule(
-    test_data_path,
-    source_channel="Mem",  # or Nuc, depending on your choice of source
-    target_channel="Phase3D",
-    z_window_size=1,
-    batch_size=1,
-    num_workers=8,
-    architecture="UNeXt2",
-)
-test_data.setup("test")
-
-test_metrics = pd.DataFrame(columns=["pearson_phase", "SSIM_phase"])
-
-
-# %%
-for i, sample in enumerate(test_data.test_dataloader()):
-    source_image = sample["source"]
-    with torch.inference_mode():  # turn off gradient computation.
-        predicted_image = fluor2phase_model(source_image.to(fluor2phase_model.device))
-
-    target_image = (
-        sample["target"].cpu().numpy().squeeze(0)
-    )  # Squeezing batch dimension.
-    predicted_image = predicted_image.cpu().numpy().squeeze(0)
-    source_image = source_image.cpu().numpy().squeeze(0)
-    target_phase = min_max_scale(target_image[0, 0, :, :])
-    # slicing channel dimension, squeezing z-dimension.
-    predicted_phase = min_max_scale(predicted_image[0, :, :, :].squeeze(0))
-
-    # Compute SSIM and pearson correlation.
-    ssim_phase = metrics.structural_similarity(
-        target_phase, predicted_phase, data_range=1
-    )
-    pearson_phase = np.corrcoef(target_phase.flatten(), predicted_phase.flatten())[0, 1]
-
-    test_metrics.loc[i] = {
-        "pearson_phase": pearson_phase,
-        "SSIM_phase": ssim_phase,
-    }
-
-test_metrics.boxplot(
-    column=["pearson_phase", "SSIM_phase"],
-    rot=30,
-)
-# %%
-# Plot the predicted image
-channel_titles = [
-    "Membrane",
-    "Target Phase",
-    "Predicted_Phase",
-]
-fig, axes = plt.subplots(1, 3, figsize=(30, 20))
-
-for i, sample in enumerate(test_data.test_dataloader()):
-    # Plot the phase image
-    mem_image = sample["source"]
-    channel_image = mem_image[0, 0, 0]
-    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-    channel_image = np.clip(channel_image, p_low, p_high)
-    axes[0].imshow(channel_image, cmap="gray")
-    axes[0].axis("off")
-    axes[0].set_title(channel_titles[0])
-
-    with torch.inference_mode():  # turn off gradient computation.
-        predicted_image = (
-            phase2fluor_model(phase_image.to(phase2fluor_model.device))
-            .cpu()
-            .numpy()
-            .squeeze(0)
-        )
-
-    target_image = sample["target"].cpu().numpy().squeeze(0)
-    # Plot the predicted images
-    channel_image = target_image[0, 0]
-    p_low, p_high = np.percentile(channel_image, (0.5, 99.5))
-    channel_image = np.clip(channel_image, p_low, p_high)
-    axes[1].imshow(channel_image, cmap="gray")
-    axes[1].axis("off")
-    axes[1].set_title(channel_titles[1])
-
-    channel_image = predicted_image[1, 0]
-    p_low, p_high = np.percentile(channel_image, (0.1, 99.5))
-    channel_image = np.clip(channel_image, p_low, p_high)
-    axes[2].imshow(channel_image, cmap="gray")
-    axes[2].axis("off")
-    axes[2].set_title(f"VS {channel_titles[2]}")
-
-    plt.tight_layout()
-    plt.show()
-    break
-
-# %% [markdown] tags=[]
-"""
-<div class="alert alert-success">
-
-<h2> Checkpoint 2 </h2>
-<p>When your model finishes training, please summarize hyperparameters and performance of your models in the <a href="https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing" target="_blank">this google doc</a></p>
-
-</div>
-"""
-
-
-# %% [markdown] tags=[]
-"""
-<div class="alert alert-info">
-
-<h3>Extra exercises</h3>
-<b>Tune the models and explore other architectures from <a href="https://github.com/mehta-lab/VisCy/tree/main/examples/demos">VisCy</a></b>
-<br>
-<p>Learning goals:</p>
-<ul>
-    <li>Understand how data, model capacity, and training parameters control the performance of the model. Your goal is to try to underfit or overfit the model.</li>
-    <li>How can we scale it up from 2D to 3D training and predictions?</li>
-</ul>
-</div>
-
-"""
-
-
-# %% [markdown] tags=[]
-# <div class="alert alert-info">
-#
-# ### Extra Example 1: Hyperparameter tuning
-#
-# - Choose a model you want to train (phase2fluor or fluor2phase).
-# - Set up a configuration that you think will improve the performance of the model
-# - Consider modifying the learning rate and see how it changes performance
-# - Use training loop illustrated in previous cells to train phase2fluor and fluor2phase models to prototype your own training loop.
-# - Add code to evaluate the model using Pearson Correlation and SSIM
-# As your model is training, please document hyperparameters, snapshots of predictions on validation set,
-# and loss curves for your models in
-# [this google doc](https://docs.google.com/document/d/1Mq-yV8FTG02xE46Mii2vzPJVYSRNdeOXkeU-EKu-irE/edit?usp=sharing)
-# </div>
-
-# %% tags=[]
-##########################
-######## TODO ########
-##########################
-
-tune_data = HCSDataModule(
-    # Your code here (copy from above and modify as needed)
-)
-tune_data.setup("fit")
-
-# Dictionary that specifies key parameters of the model.
-tune_config = {
-    # Your config here
-}
-
-tune_model = VSUNet(
-    # Your code here (copy from above and modify as needed)
-)
-
-trainer = VSTrainer(
-    # Your code here (copy from above and modify as needed)
-)
-trainer.fit(tune_model, datamodule=tune_data)
-
-
-# Visualize the graph of fluor2phase model as image.
-model_graph_tune = torchview.draw_graph(
-    tune_model,
-    tune_data.train_dataset[0]["source"],
-    depth=2,  # adjust depth to zoom in.
-    device="cpu",
-)
-model_graph_tune.visual_graph
-
-
-# %% tags=["solution"]
-
-##########################
-######## Solution ########
-##########################
-phase2fluor_config = dict(
-    in_channels=1,
-    out_channels=2,
-    encoder_blocks=[3, 3, 9, 3],
-    dims=[96, 192, 384, 768],
-    decoder_conv_blocks=2,
-    stem_kernel_size=(1, 2, 2),
-    in_stack_depth=1,
-    pretraining=False,
-)
-
-phase2fluor_model_low_lr = VSUNet(
-    architecture="UNeXt2_2D",
-    model_config=phase2fluor_config.copy(),
-    loss_function=MixedLoss(
-        l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5
-    ),  # Changed the loss function to MixedLoss L1 and MS-SSIM
-    schedule="WarmupCosine",
-    lr=2e-5,  # lower learning rate by factor of 10
-    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
-)
-
-trainer = VSTrainer(
-    accelerator="gpu",
-    devices=[GPU_ID],
-    max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch,
-    logger=TensorBoardLogger(
-        save_dir=log_dir,
-        name="phase2fluor",
-        version="phase2fluor_low_lr",
-        log_graph=True,
-    ),
-    fast_dev_run=True,
-)  # Set fast_dev_run to False to train the model.
-trainer.fit(phase2fluor_model_low_lr, datamodule=phase2fluor_2D_data)
-# %% [markdown]
-"""
-<div class="alert alert-info">
-<h3>
-Extra Example 2: 3D Virtual Staining
-</h3>
-Now, let's implement a 3D virtual staining model(Phase->Fluorescence)<br>
-<b>Note:</b> This task might take longer to train +1 hr. Try it out in your free-time.
-
-</div>
-"""
-
-# %% tags=["task"]
-data_path = Path()  # TODO: Point to a 3D dataset (HEK, Neuromast)
-BATCH_SIZE = 4
-YX_PATCH_SIZE = (256, 256)
-
-phase2fluor_3D_config = ...
-
-phase2fluor_3D_data = HCSDataModule(...)
-
-phase2fluor_3D = VSUNet(...)
-
-trainer = VSTrainer(...)
-
-# Start the training
-trainer.fit(...)
-
-# %% tags=["solution"]
-
-##########################
-######## Solution ########
-##########################
-"""
 You can download the file and place it in the data folder.
 https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/train/raw-and-reconstructed.zarr/
 
-You can run the following shell script:
-```
-cd ~/data/hek3d/training
-# Download the Zarr dataset recursively (if the server supports it)
-wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/train/raw-and-reconstructed.zarr/"
-```
-
+</div>
 """
-# TODO: Point to a 3D dataset (HEK, Neuromast)
-data_path = Path("./raw-and-reconstructed.zarr")
-BATCH_SIZE = 4
-YX_PATCH_SIZE = (384, 384)
-GPU_ID = 0
-n_epochs = 50
 
-## For 3D training - VSCyto3D
-source_channel = ["reconstructed-labelfree"]
-target_channel = ["reconstructed-nucleus", "reconstructed-membrane"]
-
-# Setup the new augmentations
-augmentations = [
-    RandWeightedCropd(
-        keys=source_channel + target_channel,
-        spatial_size=(-1, 512, 512),
-        num_samples=2,
-        w_key=target_channel[0],
-    ),
-    RandAffined(
-        keys=source_channel + target_channel,
-        rotate_range=[3.14, 0.0, 0.0],
-        scale_range=[0.0, 0.3, 0.3],
-        prob=0.8,
-        padding_mode="zeros",
-        shear_range=[0.0, 0.01, 0.01],
-    ),
-    RandAdjustContrastd(keys=source_channel, prob=0.5, gamma=(0.8, 1.2)),
-    RandScaleIntensityd(keys=source_channel, factors=0.5, prob=0.5),
-    RandGaussianNoised(keys=source_channel, prob=0.5, mean=0.0, std=0.3),
-    RandGaussianSmoothd(
-        keys=source_channel,
-        sigma_x=(0.25, 0.75),
-        sigma_y=(0.25, 0.75),
-        sigma_z=(0.0, 0.0),
-        prob=0.5,
-    ),
-]
-
-normalizations = [
-    NormalizeSampled(
-        keys=source_channel + target_channel,
-        level="fov_statistics",
-        subtrahend="mean",
-        divisor="std",
-    )
-]
-
-phase2fluor_3D_config = dict(
-    in_channels=1,
-    out_channels=2,
-    in_stack_depth=5,
-    backbone="convnextv2_tiny",
-    decoder_conv_blocks=2,
-    head_expansion_ratio=4,
-    stem_kernel_size=(5, 4, 4),
-)
-phase2fluor_3D_data = HCSDataModule(
-    data_path,
-    architecture="UNeXt2",
-    source_channel=source_channel,
-    target_channel=target_channel,
-    z_window_size=5,
-    split_ratio=0.8,
-    batch_size=BATCH_SIZE,
-    num_workers=8,
-    yx_patch_size=YX_PATCH_SIZE,
-    augmentations=augmentations,
-    normalizations=normalizations,
-)
-phase2fluor_3D_data.setup("fit")
-
-n_samples = len(phase2fluor_3D_data.train_dataset)
-steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
-
-phase2fluor_3D = VSUNet(
-    architecture="UNeXt2",
-    model_config=phase2fluor_3D_config.copy(),
-    loss_function=MixedLoss(l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5),
-    lr=2e-4,
-    schedule="WarmupCosine",
-    log_batches_per_epoch=5,
-)
-
-trainer = VSTrainer(
-    accelerator="gpu",
-    devices=[GPU_ID],
-    max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch,
-    logger=TensorBoardLogger(
-        save_dir=log_dir,
-        name="phase2fluor_3D",
-        version="3D_UNeXt2",
-        log_graph=True,
-    ),
-    fast_dev_run=True,  # TODO: Set to False to run full-training
-)
-trainer.fit(phase2fluor_3D, datamodule=phase2fluor_3D_data)
 
 # %% [markdown] tags=[]
 """
