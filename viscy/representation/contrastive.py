@@ -87,6 +87,7 @@ class ContrastiveEncoder(nn.Module):
         x = self.stem(x)
         embedding = self.encoder(x)
         projections = self.projection(embedding)
+        projections = F.normalize(projections, p=2, dim=1)
         return (
             embedding,
             projections,
