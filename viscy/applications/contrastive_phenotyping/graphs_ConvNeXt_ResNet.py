@@ -5,10 +5,9 @@ from viscy.representation.contrastive import ContrastiveEncoder
 import torchview
 import timm
 
-# fmt: off
-%load_ext autoreload
-%autoreload 2
-# fmt: on
+# uncomment if you are using jupyter and want to autoreload the updated code.
+# %load_ext autoreload
+# %autoreload 2
 
 # %% Explore model graphs returned by timm
 
