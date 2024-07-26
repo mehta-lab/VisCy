@@ -88,6 +88,6 @@ class ContrastiveEncoder(nn.Module):
         embedding = self.encoder(x)
         projections = self.projection(embedding)
         return (
-            projections,
             embedding,
+            projections,
         )  # Compute the loss on projections, analyze the embeddings.

@@ -5,13 +5,16 @@ from viscy.representation.contrastive import ContrastiveEncoder
 import torchview
 import timm
 
-
+# fmt: off
 %load_ext autoreload
 %autoreload 2
+# fmt: on
 
 # %% Explore model graphs returned by timm
 
-convnextv1 = timm.create_model("convnext_tiny", pretrained=False, features_only=False, num_classes=200)
+convnextv1 = timm.create_model(
+    "convnext_tiny", pretrained=False, features_only=False, num_classes=200
+)
 print(convnextv1)
 output = convnextv1(torch.randn(1, 3, 256, 256))
 print(output.shape)
@@ -19,36 +22,56 @@ print(output.shape)
 in_channels = 1
 in_stack_depth = 15
 
-contrastive_convnext1 = ContrastiveEncoder(backbone = "convnext_tiny", in_channels= in_channels, in_stack_depth=in_stack_depth)
+contrastive_convnext1 = ContrastiveEncoder(
+    backbone="convnext_tiny", in_channels=in_channels, in_stack_depth=in_stack_depth
+)
 print(contrastive_convnext1)
 
 
-projections, embedding = contrastive_convnext1(torch.randn(1, in_channels, in_stack_depth, 256, 256))
-print(f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}")
-# %% 
+projections, embedding = contrastive_convnext1(
+    torch.randn(1, in_channels, in_stack_depth, 256, 256)
+)
+print(
+    f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}"
+)
+# %%
 
 in_channels = 3
 in_stack_depth = 10
 
-contrastive_convnext2 = ContrastiveEncoder(backbone = "convnextv2_tiny", in_channels= in_channels, in_stack_depth=in_stack_depth) 
+contrastive_convnext2 = ContrastiveEncoder(
+    backbone="convnextv2_tiny", in_channels=in_channels, in_stack_depth=in_stack_depth
+)
 print(contrastive_convnext2)
-projections, embedding = contrastive_convnext2(torch.randn(1, in_channels, in_stack_depth, 256, 256))
-print(f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}")
+projections, embedding = contrastive_convnext2(
+    torch.randn(1, in_channels, in_stack_depth, 256, 256)
+)
+print(
+    f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}"
+)
 
-# %% 
+# %%
 in_channels = 10
 in_stack_depth = 11
-contrastive_resnet = ContrastiveEncoder(backbone = "resnet50", in_channels= in_channels, in_stack_depth=in_stack_depth) 
+contrastive_resnet = ContrastiveEncoder(
+    backbone="resnet50", in_channels=in_channels, in_stack_depth=in_stack_depth
+)
 print(contrastive_resnet)
-projections, embedding = contrastive_resnet(torch.randn(1, in_channels, in_stack_depth, 256, 256))
-print(f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}")
+projections, embedding = contrastive_resnet(
+    torch.randn(1, in_channels, in_stack_depth, 256, 256)
+)
+print(
+    f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}"
+)
 
-# %% 
+# %%
 print(contra_model)
 out = contra_model(torch.randn(1, 2, 15, 256, 256))
 print(out.shape)
 
-contra_model = ContrastiveEncoder(backbone = "resnet") # other options: convnext_tiny resnet50
+contra_model = ContrastiveEncoder(
+    backbone="resnet"
+)  # other options: convnext_tiny resnet50
 print(contra_model)
 out = contra_model(torch.randn(1, 2, 15, 256, 256))
 print(out.shape)
@@ -65,7 +88,9 @@ print(out.shape)
 # model_graph.visual_graph
 
 # %% Initialize a resent50 model and log the graph.
-contra_model = ContrastiveEncoder(backbone = "resnet50", in_stack_depth = 16, stem_kernel_size = (4, 3, 3)) # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
+contra_model = ContrastiveEncoder(
+    backbone="resnet50", in_stack_depth=16, stem_kernel_size=(4, 3, 3)
+)  # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
 print(contra_model)
 model_graph = torchview.draw_graph(
     contra_model,

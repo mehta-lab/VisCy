@@ -611,7 +611,7 @@ class ContrastiveModule(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the model."""
-        projections = self.encoder(x)
+        _, projections = self.encoder(x)
         return projections
         # features is without projection head and projects is with projection head
 
@@ -714,10 +714,12 @@ class ContrastiveModule(LightningModule):
         """Training step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.encoder(anchor)
+        _, negativeProjection = self.encoder(neg_img)
+        _, positiveProjection = self.encoder(pos_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -727,7 +729,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "training_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "train")
+        self.log_metrics(
+            anchorProjection, positiveProjection, negativeProjection, "train"
+        )
         # self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
 
         self.training_step_outputs.append(loss)
@@ -777,10 +781,12 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.encoder(anchor)
+        _, positiveProjection = self.encoder(pos_img)
+        _, negativeProjection = self.encoder(neg_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -790,7 +796,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "validation_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "val")
+        self.log_metrics(
+            anchorProjection, positiveProjection, negativeProjection, "val"
+        )
 
         self.validation_step_outputs.append(loss)
         return {"loss": loss}
@@ -839,14 +847,16 @@ class ContrastiveModule(LightningModule):
         """Test step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.encoder(anchor)
+        _, positiveProjection = self.encoder(pos_img)
+        _, negativeProjection = self.encoder(neg_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "test")
+        self.log_metrics(emb_anchor, positiveProjection, negativeProjection, "test")
 
         self.test_step_outputs.append(loss)
         return {"loss": loss}
