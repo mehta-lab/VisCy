@@ -588,7 +588,7 @@ class ContrastiveModule(LightningModule):
         self.test_metrics = []
         self.processed_order = []
 
-        self.encoder = ContrastiveEncoder(
+        self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
@@ -611,7 +611,7 @@ class ContrastiveModule(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the model."""
-        _, projections = self.encoder(x)
+        _, projections = self.model(x)
         return projections
         # features is without projection head and projects is with projection head
 
@@ -714,9 +714,9 @@ class ContrastiveModule(LightningModule):
         """Training step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, anchorProjection = self.encoder(anchor)
-        _, negativeProjection = self.encoder(neg_img)
-        _, positiveProjection = self.encoder(pos_img)
+        _, anchorProjection = self.model(anchor)
+        _, negativeProjection = self.model(neg_img)
+        _, positiveProjection = self.model(pos_img)
         loss = self.loss_function(
             anchorProjection, positiveProjection, negativeProjection
         )
@@ -781,9 +781,9 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, anchorProjection = self.encoder(anchor)
-        _, positiveProjection = self.encoder(pos_img)
-        _, negativeProjection = self.encoder(neg_img)
+        _, anchorProjection = self.model(anchor)
+        _, positiveProjection = self.model(pos_img)
+        _, negativeProjection = self.model(neg_img)
         loss = self.loss_function(
             anchorProjection, positiveProjection, negativeProjection
         )
@@ -847,9 +847,9 @@ class ContrastiveModule(LightningModule):
         """Test step of the model."""
 
         anchor, pos_img, neg_img = batch
-        _, anchorProjection = self.encoder(anchor)
-        _, positiveProjection = self.encoder(pos_img)
-        _, negativeProjection = self.encoder(neg_img)
+        _, anchorProjection = self.model(anchor)
+        _, positiveProjection = self.model(pos_img)
+        _, negativeProjection = self.model(neg_img)
         loss = self.loss_function(
             anchorProjection, positiveProjection, negativeProjection
         )
@@ -922,7 +922,7 @@ class ContrastiveModule(LightningModule):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
         x, position_info = batch
-        features, projections = self.encoder(x)
+        features, projections = self.model(x)
         self.processed_order.extend(position_info)
         return features, projections
 
