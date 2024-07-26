@@ -1,7 +1,6 @@
 import logging
 from typing import Sequence
 
-import numpy as np
 import pandas as pd
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
@@ -112,7 +111,7 @@ class TripletDataset(Dataset):
         ]
         return torch.from_numpy(patch)
 
-    def __getitem__(self, index: int) -> tuple[Tensor, ...]:
+    def __getitem__(self, index: int) -> dict[str, Tensor]:
         anchor_row = self.tracks.iloc[index]
         anchor_patch = self._slice_patch(anchor_row)
         if self.fit:
@@ -137,10 +136,15 @@ class TripletDataset(Dataset):
                 channel_names=self.channel_names,
                 patch=anchor_patch,
             )
+        sample = {"anchor": anchor_patch}
         if self.fit:
-            return (anchor_patch, positive_patch, negative_patch)
-        else:
-            return (anchor_patch,)
+            sample.update(
+                {
+                    "positive": positive_patch,
+                    "negative": negative_patch,
+                }
+            )
+        return sample
 
 
 class TripletDataModule(HCSDataModule):
@@ -149,10 +153,10 @@ class TripletDataModule(HCSDataModule):
         data_path: str,
         tracks_path: str,
         source_channel: str | Sequence[str],
+        z_range: tuple[int, int],
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        z_range: tuple[int, int] = None,
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
@@ -205,103 +209,3 @@ class TripletDataModule(HCSDataModule):
             channel_names=self.channel_names,
             z_range=self.z_range,
         )
-
-
-class PredictDataset(Dataset):
-    def __init__(
-        self,
-        base_path,
-        channels,
-        x,
-        y,
-        timesteps_csv_path,
-        channel_names,
-        z_range=None,
-    ):
-        self.base_path = base_path
-        self.channels = channels
-        self.x = x
-        self.y = y
-        self.z_range = z_range
-        self.channel_names = channel_names
-        self.ds = self.open_zarr_store(self.base_path)
-        self.timesteps_csv_path = timesteps_csv_path
-        self.timesteps_df = pd.read_csv(timesteps_csv_path)
-        self.positions = list(self.ds.positions())
-        self.channel_indices = [
-            self.ds.channel_names.index(channel) for channel in self.channel_names
-        ]
-        _logger.debug("channel indices!")
-        _logger.debug(self.channel_indices)
-        _logger.debug(
-            f"Initialized predict dataset with {len(self.positions)} positions."
-        )
-
-    def open_zarr_store(self, path, layout="hcs", mode="r"):
-        return open_ome_zarr(path, layout=layout, mode=mode)
-
-    # def get_positions_from_csv(self):
-    #     positions = []
-    #     #self.timesteps_df = pd.read_csv(self.timesteps_csv_path)
-    #     for idx, row in self.timesteps_df.iterrows():
-    #         position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
-    #         positions.append((position_path, row['Random Timestep']))
-    #     #_logger.debug(positions)
-    #     return positions
-
-    def __len__(self):
-        return len(self.positions)
-
-    def __getitem__(self, idx):
-        position_path = self.positions[idx][0]
-        # _logger.debug(f"Position path: {position_path}")
-        data = self.load_data(position_path)
-        data = self.normalize_data(data)
-
-        return torch.tensor(data, dtype=torch.float32), (position_path)
-
-    # double check printing order
-    def load_data(self, position_path):
-        position = self.ds[position_path]
-        # _logger.debug(f"Loading data for position path: {position_path}")
-        zarr_array = position["0"][:]
-
-        parts = position_path.split("/")
-        row = parts[0]
-        column = parts[1]
-        fov_cell = parts[2]
-        fov = int(fov_cell.split("fov")[1].split("cell")[0])
-        cell_id = int(fov_cell.split("cell")[1])
-
-        combined_id = f"{row}/{column}/fov{fov}cell{cell_id}"
-        matched_rows = self.timesteps_df[
-            self.timesteps_df.apply(
-                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
-                axis=1,
-            )
-            == combined_id
-        ]
-
-        if matched_rows.empty:
-            raise ValueError(
-                f"No matching entry found for position path: {position_path}"
-            )
-
-        random_timestep = matched_rows["Random Timestep"].values[0]
-        data = zarr_array[
-            random_timestep,
-            self.channel_indices,
-            self.z_range[0] : self.z_range[1],
-            :,
-            :,
-        ]
-        return data
-
-    def normalize_data(self, data):
-        normalized_data = np.empty_like(data)
-        for i in range(data.shape[0]):  # iterate over each channel
-            channel_data = data[i]
-            mean = np.mean(channel_data)
-            std = np.std(channel_data)
-            normalized_data[i] = (channel_data - mean) / (std + 1e-6)
-        return normalized_data
