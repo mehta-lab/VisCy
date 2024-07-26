@@ -37,13 +37,13 @@ print(
 # %%
 
 in_channels = 3
-in_stack_depth = 10
+in_stack_depth = 18
 
 contrastive_convnext2 = ContrastiveEncoder(
     backbone="convnextv2_tiny", in_channels=in_channels, in_stack_depth=in_stack_depth
 )
 print(contrastive_convnext2)
-projections, embedding = contrastive_convnext2(
+embedding, projections = contrastive_convnext2(
     torch.randn(1, in_channels, in_stack_depth, 256, 256)
 )
 print(
@@ -57,7 +57,7 @@ contrastive_resnet = ContrastiveEncoder(
     backbone="resnet50", in_channels=in_channels, in_stack_depth=in_stack_depth
 )
 print(contrastive_resnet)
-projections, embedding = contrastive_resnet(
+embedding, projections = contrastive_resnet(
     torch.randn(1, in_channels, in_stack_depth, 256, 256)
 )
 print(
@@ -65,27 +65,16 @@ print(
 )
 
 # %%
-print(contra_model)
-out = contra_model(torch.randn(1, 2, 15, 256, 256))
-print(out.shape)
-
-contra_model = ContrastiveEncoder(
-    backbone="resnet"
-)  # other options: convnext_tiny resnet50
-print(contra_model)
-out = contra_model(torch.randn(1, 2, 15, 256, 256))
-print(out.shape)
-
-
-# model_graph = torchview.draw_graph(
-#     contra_model,
-#     torch.randn(1, 2, 16, 224, 224),
-#     depth=3,  # adjust depth to zoom in.
-#     device="cpu",
-# )
-# # Print the image of the model.
-# model_graph.resize_graph(scale=2.5)
-# model_graph.visual_graph
+plot_model = contrastive_resnet
+model_graph = torchview.draw_graph(
+    plot_model,
+    input_size=(20, in_channels, in_stack_depth, 224, 224),
+    depth=3,  # adjust depth to zoom in.
+    device="cpu",
+)
+# Print the image of the model.
+model_graph.resize_graph(scale=2.5)
+model_graph.visual_graph
 
 # %% Initialize a resent50 model and log the graph.
 contra_model = ContrastiveEncoder(
@@ -110,7 +99,7 @@ print(contrastive_module.encoder)
 # %%
 model_graph = torchview.draw_graph(
     contrastive_module.encoder,
-    torch.randn(1, 2, 15, 200, 200),
+    torch.randn(1, in_channels, in_stack_depth, 200, 200),
     depth=3,  # adjust depth to zoom in.
     device="cpu",
 )
@@ -118,7 +107,6 @@ model_graph = torchview.draw_graph(
 model_graph.visual_graph
 
 # %% Playground
-import timm
 
 available_models = timm.list_models(pretrained=True)
 

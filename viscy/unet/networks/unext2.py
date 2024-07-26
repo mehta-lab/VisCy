@@ -122,7 +122,7 @@ class StemDepthtoChannels(nn.Module):
         channel_mismatch = in_channels_encoder - stem3d_out_depth * stem3d_out_channels
         if channel_mismatch != 0:
             raise ValueError(
-                f"Stem needs to output {channel_mismatch} more channels to match the encoder. Adjust the in_stack_depth or stem_kernel_size."
+                f"Stem needs to output {channel_mismatch} more channels to match the encoder. Adjust the in_stack_depth."
             )
         return stem3d_out_channels
 
