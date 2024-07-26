@@ -54,7 +54,7 @@ class TripletDataset(Dataset):
         tracks_tables: list[pd.DataFrame],
         channel_names: list[str],
         yx_patch_size: tuple[int, int],
-        z_range: slice | None = None,
+        z_range: slice,
         anchor_transform: DictTransform | None = None,
         positive_transform: DictTransform | None = None,
         negative_transform: DictTransform | None = None,
@@ -75,12 +75,18 @@ class TripletDataset(Dataset):
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         filtered_tracks = []
-        y_exclude, x_exclude = (yx_patch_size[0] // 2, yx_patch_size[1] // 2)
+        y_exclude, x_exclude = (self.yx_patch_size[0] // 2, self.yx_patch_size[1] // 2)
         for pos, tracks in zip(self.positions, tracks_tables, strict=True):
-            tracks["position"] = pos
+            tracks["position"] = [pos] * len(tracks)
             tracks["fov_name"] = pos.zgroup.name
-            tracks["global_track_id"] = tracks["fov_name"].str.cat(tracks["track_id"])
+            tracks["global_track_id"] = tracks["fov_name"].str.cat(
+                tracks["track_id"].astype(str), sep="_"
+            )
             image: ImageArray = pos["0"]
+            if self.z_range.stop > image.slices:
+                raise ValueError(
+                    f"Z range {self.z_range} exceeds image with Z={image.slices}"
+                )
             y_range = (y_exclude, image.height - y_exclude)
             x_range = (x_exclude, image.width - x_exclude)
             filtered_tracks.append(
