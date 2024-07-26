@@ -6,7 +6,8 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.strategies import DDPStrategy
 from viscy.data.hcs import ContrastiveDataModule
 from viscy.light.engine import ContrastiveModule
-import os 
+import os
+
 
 def main(hparams):
     # Set paths
@@ -35,7 +36,7 @@ def main(hparams):
         batch_size=batch_size,
         z_range=z_range,
         predict_base_path=predict_base_path,
-        analysis=True, # for self-supervised results 
+        analysis=True,  # for self-supervised results
     )
 
     data_module.setup(stage="predict")
@@ -54,7 +55,7 @@ def main(hparams):
 
     # Run prediction
     predictions = trainer.predict(model, datamodule=data_module)
-    
+
     # Collect features and projections
     features_list = []
     projections_list = []
@@ -66,13 +67,33 @@ def main(hparams):
     all_features = np.concatenate(features_list, axis=0)
     all_projections = np.concatenate(projections_list, axis=0)
 
-    # for saving visualizations embeddings 
+    # for saving visualizations embeddings
     base_dir = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/test_visualizations"
-    features_path = os.path.join(base_dir, 'B', '4', '2', 'before_projected_embeddings', 'test_epoch88_predicted_features.npy')
-    projections_path = os.path.join(base_dir, 'B', '4', '2', 'projected_embeddings', 'test_epoch88_predicted_projections.npy')
+    features_path = os.path.join(
+        base_dir,
+        "B",
+        "4",
+        "2",
+        "before_projected_embeddings",
+        "test_epoch88_predicted_features.npy",
+    )
+    projections_path = os.path.join(
+        base_dir,
+        "B",
+        "4",
+        "2",
+        "projected_embeddings",
+        "test_epoch88_predicted_projections.npy",
+    )
 
-    np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_features.npy", all_features)
-    np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_projections.npy", all_projections)
+    np.save(
+        "/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_features.npy",
+        all_features,
+    )
+    np.save(
+        "/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/ss1_epoch97_predicted_projections.npy",
+        all_projections,
+    )
 
 
 if __name__ == "__main__":
