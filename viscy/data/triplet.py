@@ -1,30 +1,16 @@
 import logging
-import random
-from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Sequence
 
 import numpy as np
 import pandas as pd
 import torch
-from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-from monai.data import set_track_meta
-from monai.data.utils import collate_meta_tensor
-from monai.transforms import (
-    CenterSpatialCropd,
-    Compose,
-    MapTransform,
-    MultiSampleTrait,
-    RandAdjustContrastd,
-    RandAffined,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-)
+from iohub.ngff import ImageArray, Position, open_ome_zarr
+from monai.transforms import MapTransform
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule
-from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
+from viscy.data.typing import DictTransform, NormMeta
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -105,6 +91,9 @@ class TripletDataset(Dataset):
             (self.tracks["global_track_id"] != anchor_row["global_track_id"])
         ]
         # NOTE: Random sampling
+        # this is to avoid combinatorial length growth at fitting time
+        # since each cell can pair with any other cell
+        # (3e4 instances will make 1e9 pairs)
         # reproducibility relies on setting a global seed for numpy
         return candidates.sample(n=1).iloc[0]
 
