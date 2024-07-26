@@ -51,9 +51,12 @@ print(
 
 # %%
 in_channels = 10
-in_stack_depth = 11
+in_stack_depth = 12
 contrastive_resnet = ContrastiveEncoder(
-    backbone="resnet50", in_channels=in_channels, in_stack_depth=in_stack_depth
+    backbone="resnet50",
+    in_channels=in_channels,
+    in_stack_depth=in_stack_depth,
+    embedding_len=256,
 )
 print(contrastive_resnet)
 embedding, projections = contrastive_resnet(
