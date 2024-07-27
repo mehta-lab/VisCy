@@ -4,10 +4,6 @@ import torch.nn.functional as F
 
 from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.unet.networks.unext2 import StemDepthtoChannels
-<<<<<<< HEAD
-=======
-
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
 
 class ContrastiveEncoder(nn.Module):
     def __init__(
@@ -23,11 +19,7 @@ class ContrastiveEncoder(nn.Module):
         super().__init__()
 
         self.predict = predict
-<<<<<<< HEAD
         self.backbone = backbone 
-=======
-        self.backbone = backbone
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
 
         """
         ContrastiveEncoder network that uses ConvNext and ResNet backbons from timm.
@@ -40,7 +32,6 @@ class ContrastiveEncoder(nn.Module):
         - embedding_len (int): Length of the embedding. Default is 1000.
         """
 
-<<<<<<< HEAD
         # if in_stack_depth % stem_kernel_size[0] != 0:
         #     raise ValueError(
         #         f"Input stack depth {in_stack_depth} is not divisible "
@@ -56,9 +47,6 @@ class ContrastiveEncoder(nn.Module):
         #     num_classes=4 * embedding_len,
         # )
 
-=======
-        # encoder from timm
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
         encoder = timm.create_model(
             backbone,
             pretrained=True,
@@ -67,7 +55,6 @@ class ContrastiveEncoder(nn.Module):
             num_classes=3 * embedding_len,
         )
 
-<<<<<<< HEAD
         if "convnext" in backbone:
             print("Using ConvNext backbone.")
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
@@ -75,15 +62,6 @@ class ContrastiveEncoder(nn.Module):
 
             in_channels_encoder = encoder.stem[0].out_channels
 
-=======
-        # Do encoder surgery and setup stem and projection head.
-
-        if "convnext" in backbone:
-            # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
-            in_channels_encoder = encoder.stem[0].out_channels
-            # in_channels_encoder can be 96 or 64, and in_channels can be 1,2,or 3.
-
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
             # Remove the convolution layer of stem, but keep the layernorm.
             encoder.stem[0] = nn.Identity()
 
@@ -93,7 +71,6 @@ class ContrastiveEncoder(nn.Module):
                 nn.ReLU(inplace=True),
                 nn.Linear(3 * embedding_len, embedding_len),
             )
-<<<<<<< HEAD
 
             encoder.head.fc = nn.Identity()
 
@@ -110,12 +87,8 @@ class ContrastiveEncoder(nn.Module):
             #     nn.ReLU(inplace=True),
             #     nn.Linear(4 * embedding_len, embedding_len),
             # )
-=======
-            encoder.head.fc = nn.Identity()
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
 
         elif "resnet" in backbone:
-<<<<<<< HEAD
             print("Using ResNet backbone.")
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
@@ -123,18 +96,12 @@ class ContrastiveEncoder(nn.Module):
             in_channels_encoder = encoder.conv1.out_channels
             encoder.conv1 = nn.Identity()
 
-=======
-            in_channels_encoder = encoder.conv1.out_channels
-            encoder.conv1 = nn.Identity()
-
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
             projection = nn.Sequential(
                 nn.Linear(encoder.fc.in_features, 3 * embedding_len),
                 nn.ReLU(inplace=True),
                 nn.Linear(3 * embedding_len, embedding_len),
             )
             encoder.fc = nn.Identity()
-<<<<<<< HEAD
 
         # Create a new stem that can handle 3D multi-channel input.
         print("using stem kernel size", stem_kernel_size)
@@ -165,17 +132,6 @@ class ContrastiveEncoder(nn.Module):
             #     nn.ReLU(inplace=True),
             #     nn.Linear(4 * embedding_len, embedding_len),
             # )
-=======
-
-        # Create a new stem that can handle 3D multi-channel input.
-        self.stem = StemDepthtoChannels(
-            in_channels, in_stack_depth, in_channels_encoder
-        )
-        # Append modified encoder.
-        self.encoder = encoder
-        # Append modified projection head.
-        self.projection = projection
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
 
     def forward(self, x):
         x = self.stem(x)
@@ -186,7 +142,6 @@ class ContrastiveEncoder(nn.Module):
             embedding,
             projections,
         )  # Compute the loss on projections, analyze the embeddings.
-<<<<<<< HEAD
 
         # if self.predict:
         #     print("running predict forward!")
@@ -253,5 +208,3 @@ class ContrastiveEncoder(nn.Module):
         #     projections = self.model(x)
         #     projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
         #     return projections
-=======
->>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
