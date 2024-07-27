@@ -8,6 +8,12 @@ from pathlib import Path
 from typing import Callable, Literal, Optional, Sequence, Union
 #import pytorch_lightning as pl
 from monai.transforms import MapTransform
+from collections import defaultdict
+from torch.utils.data import Sampler, Dataset, DataLoader
+from torch.multiprocessing import Manager
+import torch.distributed as dist
+from torch.utils.data import DataLoader
+from torch.utils.data.distributed import DistributedSampler
 
 import random
 import numpy as np
@@ -619,9 +625,21 @@ class ContrastiveDataset(Dataset):
         print(self.channel_indices)
         print(f"Initialized dataset with {len(self.positions)} positions.")
 
-        # self.statistics = self.compute_statistics()
-        # print("Channel Statistics:", self.statistics)
-    
+        #self.statistics = self.compute_statistics()
+        #self.print_channel_statistics()
+
+    def print_statistics(self, data, data_label):
+        mean = np.mean(data)
+        std = np.std(data)
+        min_val = np.min(data)
+        max_val = np.max(data)
+        
+        print(f"{data_label} Statistics:")
+        print(f"  Mean: {mean}")
+        print(f"  Std: {std}")
+        print(f"  Min: {min_val}")
+        print(f"  Max: {max_val}")
+
     def compute_statistics(self):
         stats = {channel: {'mean': 0, 'sum_sq_diff': 0, 'min': np.inf, 'max': -np.inf} for channel in self.channel_names}
         count = 0
@@ -648,6 +666,14 @@ class ContrastiveDataset(Dataset):
         print("done!")
         return stats
 
+    def print_channel_statistics(self):
+        for channel, channel_stats in self.statistics.items():
+            print(f"Channel: {channel}")
+            print(f"  Mean: {channel_stats['mean']}")
+            print(f"  Std: {channel_stats['std']}")
+            print(f"  Min: {channel_stats['min']}")
+            print(f"  Max: {channel_stats['max']}")
+
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         #print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
         return open_ome_zarr(path, layout=layout, mode=mode)
@@ -657,11 +683,13 @@ class ContrastiveDataset(Dataset):
 
     def __getitem__(self, idx):
         anchor_position_path = self.positions[idx][0]
-        anchor_data = self.load_data(anchor_position_path)
-        anchor_data = self.normalize_data(anchor_data)
+        anchor_data_load = self.load_data(anchor_position_path)
+        anchor_data = self.normalize_data(anchor_data_load)
+        #self.print_statistics(anchor_data, "Anchor Data")
 
-        positive_data = self.apply_channel_transforms(anchor_data)
+        positive_data = self.apply_channel_transforms(anchor_data_load)
         positive_data = self.normalize_data(positive_data)
+        #self.print_statistics(positive_data, "Positive Data")
 
         # if self.transform:
         #     print("Positive transformation applied")
@@ -671,8 +699,7 @@ class ContrastiveDataset(Dataset):
             negative_idx = random.randint(0, self.__len__() - 1)
         negative_position_path = self.positions[negative_idx][0]
         negative_data = self.load_data(negative_position_path)
-        negative_data = self.normalize_data(negative_data) 
-
+    
         negative_data = self.apply_channel_transforms(negative_data)
         negative_data = self.normalize_data(negative_data)
 
@@ -683,6 +710,9 @@ class ContrastiveDataset(Dataset):
         # print(torch.tensor(anchor_data).shape)
         # print(torch.tensor(positive_data).shape)
         # print(torch.tensor(negative_data).shape)
+
+        #self.print_statistics(negative_data, "Negative Data")
+
         return (
             torch.tensor(anchor_data, dtype=torch.float32),
             torch.tensor(positive_data, dtype=torch.float32),
@@ -754,54 +784,58 @@ class ContrastiveDataset(Dataset):
         return transformed_data
 
 def get_transforms():
+    # phase_transforms = Compose(
+    #     [
+    #         RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.95, 1.05)),
+    #         RandAffined(
+    #             keys=["image"],
+    #             prob=0.5,
+    #             rotate_range=(0.05, 0.05),  # Reduced rotation range
+    #             shear_range=(0.05, 0.05),   # Reduced shear range
+    #             scale_range=(0.05, 0.05),   # Reduced scale range
+    #         ),
+    #         RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.01),  # Appropriate std
+    #         RandGaussianSmoothd(
+    #             keys=["image"],
+    #             prob=0.5,
+    #             sigma_x=(0.02, 0.05),  # Adjusted sigma values
+    #             sigma_y=(0.02, 0.05),
+    #             sigma_z=(0.02, 0.05),
+    #         ),
+    #         RandScaleIntensityd(keys=["image"], factors=(0.98, 1.02), prob=0.5),  # Subtle scaling factors
+    #     ]
+    # )
+
     rfp_transforms = Compose(
         [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.75, 1.25)),
+            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.8, 1.2)),
             RandAffined(
                 keys=["image"],
                 prob=0.5,
-                rotate_range=(0.1, 0.1),
-                shear_range=(0.1, 0.1),
-                scale_range=(0.1, 0.1),
+                rotate_range=(0.05, 0.05),  
+                shear_range=(0.05, 0.05),   
+                scale_range=(0.05, 0.05),   
             ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.1),
+            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.5),  
             RandGaussianSmoothd(
                 keys=["image"],
                 prob=0.5,
-                sigma_x=(0.1, 0.3),
-                sigma_y=(0.1, 0.3),
-                sigma_z=(0.1, 0.3),
+                sigma_x=(0.1, 0.2),  
+                sigma_y=(0.1, 0.2),
+                sigma_z=(0.1, 0.2),
             ),
-            RandScaleIntensityd(keys=["image"], factors=(0.85, 1.15), prob=0.5),
-        ]
-    )
-
-    phase_transforms = Compose(
-        [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.97, 1.03)),
-            RandAffined(
-                keys=["image"],
-                prob=0.5,
-                rotate_range=(0.05, 0.05),
-                shear_range=(0.05, 0.05),
-                scale_range=(0.05, 0.05),
-            ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.005),
-            RandGaussianSmoothd(
-                keys=["image"],
-                prob=0.5,
-                sigma_x=(0.03, 0.05),
-                sigma_y=(0.03, 0.05),
-                sigma_z=(0.03, 0.05),
-            ),
-            RandScaleIntensityd(keys=["image"], factors=(0.97, 1.03), prob=0.5),
+            RandScaleIntensityd(keys=["image"], factors=(0.9, 1.1), prob=0.5),  
         ]
     )
 
     return {
-        "RFP": rfp_transforms,
-        "Phase3D": phase_transforms
+        "RFP": rfp_transforms
     }
+    
+    # return {
+    #     "Phase3D": phase_transforms
+    # }
+
 
 class ContrastiveDataModule(LightningDataModule):
     def __init__(
@@ -814,8 +848,8 @@ class ContrastiveDataModule(LightningDataModule):
         channel_names: list,
         transform=None,
         predict_base_path: str = None,
-        train_split_ratio: float = 0.64,
-        val_split_ratio: float = 0.16,
+        train_split_ratio: float = 0.70,
+        val_split_ratio: float = 0.20,
         batch_size: int = 4,
         num_workers: int = 15, #for analysis purposes reduced to 1
         z_range: tuple[int, int] = None,
@@ -840,6 +874,7 @@ class ContrastiveDataModule(LightningDataModule):
         self.test_dataset = None
         self.predict_dataset = None
         self.analysis = analysis
+        self.position_to_timesteps = None
 
     def setup(self, stage: str = None):
         if stage == "fit":
@@ -862,19 +897,20 @@ class ContrastiveDataModule(LightningDataModule):
                 torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
             )
 
-        # setup prediction dataset 
-        if stage == "predict" and self.predict_base_path and not self.analysis:
-            print("setting up!")
-            self.predict_dataset = PredictDataset(
-                self.predict_base_path,
-                self.channels,
-                self.x,
-                self.y,
-                timesteps_csv_path=self.timesteps_csv_path,
-                channel_names=self.channel_names,
-                z_range=self.z_range,
-            )
+        # # setup prediction dataset 
+        # if stage == "predict" and self.predict_base_path and not self.analysis:
+        #     print("setting up!")
+        #     self.predict_dataset = PredictDataset(
+        #         self.predict_base_path,
+        #         self.channels,
+        #         self.x,
+        #         self.y,
+        #         timesteps_csv_path=self.timesteps_csv_path,
+        #         channel_names=self.channel_names,
+        #         z_range=self.z_range,
+        #     )
 
+        # both should be on for extracting embeddings  
         if stage == "predict" and self.analysis == True:
             print("doing analysis set up!")
             self.predict_dataset = PredictDataset(
@@ -887,6 +923,7 @@ class ContrastiveDataModule(LightningDataModule):
                 z_range=self.z_range,
                 analysis=True,
             )
+            self.position_to_timesteps = self.predict_dataset.position_to_timesteps
         
     def train_dataloader(self):
         return DataLoader(
@@ -924,16 +961,39 @@ class ContrastiveDataModule(LightningDataModule):
             raise ValueError(
                 "Predict dataset not set up. Call setup(stage='predict') first."
             )
+        
+        # Check if distributed training is initialized
+        if dist.is_available() and dist.is_initialized():
+            rank = dist.get_rank()
+            num_replicas = dist.get_world_size()
+        else:
+            rank = 0
+            num_replicas = 1
+
+        sampler = DistributedSampler(
+            self.predict_dataset,
+            num_replicas=num_replicas,
+            rank=rank,
+            shuffle=False
+        )
 
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,
-            shuffle=False, # False shuffle for prediction
+            shuffle=False,
+            sampler=sampler,  # Use DistributedSampler
             num_workers=self.num_workers,
-            prefetch_factor=2,  
-            persistent_workers=True  
+            collate_fn=ContrastiveDataModule.custom_collate_fn,  # Use custom collate function
+            prefetch_factor=2,
+            persistent_workers=True
         )
-
+    
+    @staticmethod
+    def custom_collate_fn(batch):
+        # Sort the batch by position_path and timestep
+        batch.sort(key=lambda x: (x[1], x[2]))
+        data, positions, timesteps = zip(*batch)
+        return torch.stack(data), positions, timesteps
 
 class PredictDataset(Dataset):
     def __init__(
@@ -946,6 +1006,8 @@ class PredictDataset(Dataset):
         channel_names,
         z_range=None,
         analysis=False,
+        embeddings_dict=None,  # Shared dict to store embeddings
+        order_dict=None,  # Shared dict to store order
     ):
         self.base_path = base_path
         self.channels = channels
@@ -958,9 +1020,9 @@ class PredictDataset(Dataset):
         self.timesteps_df = pd.read_csv(timesteps_csv_path)
         self.positions = list(self.ds.positions()) if not analysis else self.filter_positions_from_csv()
         self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
-        self.current_position_idx = 0
-        self.current_timestep_idx = 0
         self.analysis = analysis
+        self.embeddings_dict = embeddings_dict if embeddings_dict is not None else Manager().dict()
+        self.order_dict = order_dict if order_dict is not None else Manager().dict()
         print("channel indices!")
         print(self.channel_indices)
         print(f"Initialized predict dataset with {len(self.positions)} positions.")
@@ -972,74 +1034,37 @@ class PredictDataset(Dataset):
             for position in self.positions
         }
 
-        #print(self.positions[0])
+        self.position_timestep_pairs = [
+            (position, timestep)
+            for position in self.positions
+            for timestep in self.position_to_timesteps[position]
+        ]
+
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         return open_ome_zarr(path, layout=layout, mode=mode)
 
     def filter_positions_from_csv(self):
         unique_positions = self.timesteps_df[['Row', 'Column', 'FOV', 'Cell ID']].drop_duplicates()
-        valid_positions = []
-        for idx, row in unique_positions.iterrows():
-            position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
-            valid_positions.append(position_path)
-        #print(valid_positions)
+        valid_positions = [
+            f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
+            for _, row in unique_positions.iterrows()
+        ]
         return valid_positions
 
-    # def get_positions_from_csv(self):
-    #     positions = []
-    #     #self.timesteps_df = pd.read_csv(self.timesteps_csv_path)
-    #     for idx, row in self.timesteps_df.iterrows():
-    #         position_path = f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
-    #         positions.append((position_path, row['Random Timestep']))
-    #     #print(positions)
-    #     return positions
-    
     def __len__(self):
-        if self.analysis:
-            return sum(len(timesteps) for timesteps in self.position_to_timesteps.values())
-        else:
-            return len(self.positions)
+        return len(self.position_timestep_pairs)
 
     def __getitem__(self, idx):
-        position_path = None
-        timestep = None
-
-        if self.analysis:
-            # Determine the position and timestep based on the index
-            accumulated_idx = 0
-            for position_path, timesteps in self.position_to_timesteps.items():
-                if idx < accumulated_idx + len(timesteps):
-                    timestep_idx = idx - accumulated_idx
-                    timestep = timesteps[timestep_idx]
-                    break
-                accumulated_idx += len(timesteps)
-
-            if timestep is None or position_path is None:
-                raise ValueError(f"Timestep or position_path could not be determined for index: {idx}")
-
-            #print(f"Analysis mode: Index: {idx}, Position: {position_path}, Timestep: {timestep}")
-            data = self.load_data(position_path, timestep)
-        else:
-            if idx >= len(self.positions):
-                raise IndexError(f"Index {idx} out of range for positions of length {len(self.positions)}")
-
-            position_path = self.positions[idx]
-            print(f"Non-analysis mode: Index: {idx}, Position: {position_path}")
-            data = self.load_data(position_path)
-
+        position_path, timestep = self.position_timestep_pairs[idx]
+        data = self.load_data(position_path, timestep)
         data = self.normalize_data(data)
-        return torch.tensor(data, dtype=torch.float32), position_path
+        return torch.tensor(data, dtype=torch.float32), position_path, timestep
 
     # double check printing order 
     def load_data(self, position_path, timestep=None):
         position = self.ds[position_path]
-        print(f"Loading data for position path: {position_path}" + (f" at Timestep: {timestep}" if timestep is not None else ""))
         zarr_array = position["0"][:]
-
-        if timestep is None:
-            raise ValueError("Timestep must be provided for analysis")
-
         data = zarr_array[timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
         return data
 
@@ -1051,3 +1076,4 @@ class PredictDataset(Dataset):
             std = np.std(channel_data)
             normalized_data[i] = (channel_data - mean) / (std + 1e-6)
         return normalized_data
+    

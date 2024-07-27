@@ -1,6 +1,7 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
+from torch.multiprocessing import Manager
 
 import numpy as np
 import torch
@@ -13,6 +14,7 @@ from monai.transforms import DivisiblePad, Rotate90
 from pytorch_lightning.utilities import rank_zero_only
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
+import pandas as pd 
 
 # from lightning.pytorch import LightningModule
 # from lightning import LightningModule
@@ -563,12 +565,13 @@ class ContrastiveModule(LightningModule):
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_steps_per_epoch: int = 8,
-        in_channels: int = 2,
+        in_channels: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
         predict: bool = False,
+        position_to_timesteps: dict = None,
     ) -> None:
         super().__init__()
         if wandb is None:
@@ -587,8 +590,9 @@ class ContrastiveModule(LightningModule):
         self.validation_metrics = []
         self.test_metrics = []
         self.processed_order = []
+        self.position_to_timesteps = position_to_timesteps
 
-        self.encoder = ContrastiveEncoder(
+        self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
@@ -611,7 +615,7 @@ class ContrastiveModule(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the model."""
-        projections = self.encoder(x)
+        _, projections = self.model(x)
         return projections
         # features is without projection head and projects is with projection head
 
@@ -665,9 +669,9 @@ class ContrastiveModule(LightningModule):
         positive_img_rfp = positive[0, 0, z_idx, :, :].cpu().numpy()
         negative_img_rfp = negative[0, 0, z_idx, :, :].cpu().numpy()
 
-        anchor_img_phase = anchor[0, 1, z_idx, :, :].cpu().numpy()
-        positive_img_phase = positive[0, 1, z_idx, :, :].cpu().numpy()
-        negative_img_phase = negative[0, 1, z_idx, :, :].cpu().numpy()
+        # anchor_img_phase = anchor[0, 0, z_idx, :, :].cpu().numpy()
+        # positive_img_phase = positive[0, 0, z_idx, :, :].cpu().numpy()
+        # negative_img_phase = negative[0, 0, z_idx, :, :].cpu().numpy()
 
         # Debug prints to check the contents of the images
         print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
@@ -678,28 +682,30 @@ class ContrastiveModule(LightningModule):
             f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
         )
 
-        print(
-            f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
-        )
-        print(
-            f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
-        )
-        print(
-            f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
-        )
+        # print(
+        #     f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
+        # )
+        # print(
+        #     f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
+        # )
+        # print(
+        #     f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
+        # )
 
-        # combine the images side by side
+        #combine the images side by side
         combined_img_rfp = np.concatenate(
             (anchor_img_rfp, positive_img_rfp, negative_img_rfp), axis=1
         )
-        combined_img_phase = np.concatenate(
-            (anchor_img_phase, positive_img_phase, negative_img_phase), axis=1
-        )
-        combined_img = np.concatenate((combined_img_rfp, combined_img_phase), axis=0)
+
+        # combined_img_phase = np.concatenate(
+        #     (anchor_img_phase, positive_img_phase, negative_img_phase), axis=1
+        # )
+        
+        #combined_img = np.concatenate((combined_img_rfp, combined_img_phase), axis=0)
 
         self.images_to_log.append(
             wandb.Image(
-                combined_img, caption=f"Anchor | Positive | Negative (Epoch {epoch})"
+                combined_img_rfp, caption=f"Anchor | Positive | Negative (Epoch {epoch})"
             )
         )
 
@@ -714,10 +720,12 @@ class ContrastiveModule(LightningModule):
         """Training step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.model(anchor)
+        _, negativeProjection = self.model(neg_img)
+        _, positiveProjection = self.model(pos_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -727,7 +735,7 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "training_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "train")
+        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "train")
         # self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
 
         self.training_step_outputs.append(loss)
@@ -777,10 +785,12 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.model(anchor)
+        _, positiveProjection = self.model(pos_img)
+        _, negativeProjection = self.model(neg_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -790,7 +800,7 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "validation_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "val")
+        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "val")
 
         self.validation_step_outputs.append(loss)
         return {"loss": loss}
@@ -839,14 +849,16 @@ class ContrastiveModule(LightningModule):
         """Test step of the model."""
 
         anchor, pos_img, neg_img = batch
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchorProjection = self.model(anchor)
+        _, positiveProjection = self.model(pos_img)
+        _, negativeProjection = self.model(neg_img)
+        loss = self.loss_function(
+            anchorProjection, positiveProjection, negativeProjection
+        )
 
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "test")
+        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "test")
 
         self.test_step_outputs.append(loss)
         return {"loss": loss}
@@ -911,46 +923,67 @@ class ContrastiveModule(LightningModule):
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
-        x, position_info = batch
-        features, projections = self.encoder(x)
-        self.processed_order.extend(position_info)
+        x, position_info, timestep = batch
+        features, projections = self.model(x)
+        for pos_info, feature, projection in zip(position_info, features, projections):
+            if pos_info not in self.processed_order:
+                self.processed_order.append(pos_info)
+            self.embeddings_dict[pos_info] = (feature.cpu().numpy(), projection.cpu().numpy())
         return features, projections
 
-    # already saved, not needed again
-    # def on_predict_epoch_end(self) -> None:
-    #         print(f"Processed order: {self.processed_order}")
-    #         rows, columns, fovs, cell_ids = [], [], [], []
+    def on_predict_epoch_end(self) -> None:
+        # Combine results from all workers
+        combined_features = []
+        combined_projections = []
+        combined_order = []
+        accumulated_data = []
 
-    #         for position_path in self.processed_order:
-    #             try:
-    #                 parts = position_path.split("/")
-    #                 if len(parts) < 3:
-    #                     raise ValueError(f"Invalid position path: {position_path}")
+        for pos_info in self.processed_order:
+            feature, projection = self.embeddings_dict[pos_info]
+            combined_features.append(feature)
+            combined_projections.append(projection)
 
-    #                 row = parts[0]
-    #                 column = parts[1]
-    #                 fov_cell = parts[2]
+            # Extract row, column, FOV, cell ID, and timestep from pos_info
+            parts = pos_info.split('/')
+            if len(parts) < 3:
+                raise ValueError(f"Invalid position path: {pos_info}")
 
-    #                 fov = int(fov_cell.split("fov")[1].split("cell")[0])
-    #                 cell_id = int(fov_cell.split("cell")[1])
+            row = parts[0]
+            column = parts[1]
+            fov_cell = parts[2]
 
-    #                 rows.append(row)
-    #                 columns.append(column)
-    #                 fovs.append(fov)
-    #                 cell_ids.append(cell_id)
+            fov = int(fov_cell.split("fov")[1].split("cell")[0])
+            cell_id = int(fov_cell.split("cell")[1])
 
-    #             except (IndexError, ValueError) as e:
-    #                 print(f"Skipping invalid position path: {position_path} with error: {e}")
+            # Assuming timestep is part of pos_info, if not you need to adapt this part accordingly
+            timesteps = self.position_to_timesteps[pos_info]
 
-    #         # Save processed order
-    #         if rows and columns and fovs and cell_ids:
-    #             processed_order_df = pd.DataFrame({
-    #                 "Row": rows,
-    #                 "Column": columns,
-    #                 "FOV": fovs,
-    #                 "Cell ID": cell_ids
-    #             })
-    #             print(f"Saving processed order DataFrame: {processed_order_df}")
-    #             processed_order_df.to_csv("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/epoch66_processed_order.csv", index=False)
-    #         else:
-    #             print("No valid processed orders found to save.")
+            for timestep in timesteps:
+                accumulated_data.append((row, column, fov, cell_id, timestep))
+                combined_order.append(pos_info)
+
+        combined_features = np.array(combined_features)
+        combined_projections = np.array(combined_projections)
+
+        print(f"Combined features shape: {combined_features.shape}")
+        print(f"Combined projections shape: {combined_projections.shape}")
+
+        np.save("test_combined_features.npy", combined_features)
+        np.save("test_combined_projections.npy", combined_projections)
+
+        # Create separate lists for DataFrame
+        rows, columns, fovs, cell_ids, timesteps = zip(*accumulated_data)
+
+        # Debugging prints to check lengths
+        print(f"Lengths - Rows: {len(rows)}, Columns: {len(columns)}, FOVs: {len(fovs)}, Cell IDs: {len(cell_ids)}, Timesteps: {len(timesteps)}")
+
+        # Create a DataFrame and save to CSV
+        df = pd.DataFrame({
+            "Row": rows,
+            "Column": columns,
+            "FOV": fovs,
+            "Cell ID": cell_ids,
+            "Timestep": timesteps
+        })
+
+        df.to_csv("test_combined_order.csv", index=False)
