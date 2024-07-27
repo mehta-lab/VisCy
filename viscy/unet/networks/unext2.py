@@ -89,6 +89,10 @@ class UNeXt2Stem(nn.Module):
         # return a view when possible (contiguous)
         return x.reshape(b, c * d, h, w)
 
+<<<<<<< HEAD
+=======
+
+>>>>>>> 240293c92b54e256a15838abb60c14b26273dedf
 class StemDepthtoChannels(nn.Module):
     """Stem with 3D convolution that maps depth to channels."""
 

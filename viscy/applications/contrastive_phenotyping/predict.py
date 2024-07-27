@@ -39,7 +39,7 @@ def main(hparams):
         batch_size=batch_size,
         z_range=z_range,
         predict_base_path=predict_base_path,
-        analysis=True, # for self-supervised results 
+        analysis=True,  # for self-supervised results
     )
 
     data_module.setup(stage="predict")
