@@ -1053,23 +1053,34 @@ class PredictDataset(Dataset):
         print(self.channel_indices)
         print(f"Initialized predict dataset with {len(self.positions)} positions.")
 
+        # Vectorized creation of position_to_timesteps and position_timestep_pairs
+        self.timesteps_df["Position"] = self.timesteps_df.apply(
+            lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
+            axis=1,
+        )
+
+        # Filter timesteps_df to only include positions that are in self.positions
+        filtered_timesteps_df = self.timesteps_df[
+            self.timesteps_df["Position"].isin(self.positions)
+        ]
+
+        # Group by position and collect timesteps
+        position_groups = filtered_timesteps_df.groupby("Position")
+
         self.position_to_timesteps = {
-            position: self.timesteps_df[
-                self.timesteps_df.apply(
-                    lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
-                    axis=1,
-                )
-                == position
-            ]["Timestep"].values
-            for position in self.positions
+            position: group["Timestep"].tolist()
+            for position, group in position_groups
         }
+
+        print("done position_to_timesteps!")
 
         self.position_timestep_pairs = [
             (position, timestep)
-            for position in self.positions
-            for timestep in self.position_to_timesteps[position]
+            for position, timesteps in self.position_to_timesteps.items()
+            for timestep in timesteps
         ]
 
+        print("done position_timestep_pairs!")
 
     def open_zarr_store(self, path, layout="hcs", mode="r"):
         return open_ome_zarr(path, layout=layout, mode=mode)
@@ -1089,7 +1100,9 @@ class PredictDataset(Dataset):
         position_path, timestep = self.position_timestep_pairs[idx]
         data = self.load_data(position_path, timestep)
         data = self.normalize_data(data)
-        return torch.tensor(data, dtype=torch.float32), position_path, timestep
+        # Combine position path and timestep into a single identifier
+        combined_pos_info = f"{position_path}/t{timestep}"
+        return torch.tensor(data, dtype=torch.float32), combined_pos_info, timestep
 
     # double check printing order
     def load_data(self, position_path, timestep=None):

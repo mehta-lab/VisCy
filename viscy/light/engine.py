@@ -935,7 +935,6 @@ class ContrastiveModule(LightningModule):
         # Combine results from all workers
         combined_features = []
         combined_projections = []
-        combined_order = []
         accumulated_data = []
 
         for pos_info in self.processed_order:
@@ -945,22 +944,18 @@ class ContrastiveModule(LightningModule):
 
             # Extract row, column, FOV, cell ID, and timestep from pos_info
             parts = pos_info.split('/')
-            if len(parts) < 3:
+            if len(parts) < 4:  # Adjust to 4 to include timestep
                 raise ValueError(f"Invalid position path: {pos_info}")
 
             row = parts[0]
             column = parts[1]
             fov_cell = parts[2]
+            timestep = int(parts[3].replace('t', ''))  # Extract timestep
 
             fov = int(fov_cell.split("fov")[1].split("cell")[0])
             cell_id = int(fov_cell.split("cell")[1])
 
-            # Assuming timestep is part of pos_info, if not you need to adapt this part accordingly
-            timesteps = self.position_to_timesteps[pos_info]
-
-            for timestep in timesteps:
-                accumulated_data.append((row, column, fov, cell_id, timestep))
-                combined_order.append(pos_info)
+            accumulated_data.append((row, column, fov, cell_id, timestep))
 
         combined_features = np.array(combined_features)
         combined_projections = np.array(combined_projections)
@@ -968,8 +963,8 @@ class ContrastiveModule(LightningModule):
         print(f"Combined features shape: {combined_features.shape}")
         print(f"Combined projections shape: {combined_projections.shape}")
 
-        np.save("test_combined_features.npy", combined_features)
-        np.save("test_combined_projections.npy", combined_projections)
+        np.save("embeddings1/uninf_resnet_stem_phase_features.npy", combined_features)
+        np.save("embeddings1/uninf_resnet_stem_phase_projections.npy", combined_projections)
 
         # Create separate lists for DataFrame
         rows, columns, fovs, cell_ids, timesteps = zip(*accumulated_data)
@@ -986,4 +981,4 @@ class ContrastiveModule(LightningModule):
             "Timestep": timesteps
         })
 
-        df.to_csv("test_combined_order.csv", index=False)
+        df.to_csv("embeddings1/uninf_resnet_stem_phase_order.csv", index=False)

@@ -11,18 +11,21 @@ from torch.multiprocessing import Manager
 
 def main(hparams):
     # Set paths
-    # this CSV defines the order in which embeddings should be processed. Currently using num_workers = 1 to keep order
     top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
+    # /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/expanded_final_track_timesteps.csv
+    # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/uninfected_cells.csv
+    # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/expanded_transitioning_cells_metadata.csv
     timesteps_csv_path = "/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/uninfected_cells.csv"
     predict_base_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/all_annotations_patch.zarr"
-    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/contrastive_model-test-epoch=26-val_loss=0.00.ckpt"
+    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/phase_resnet_stem/contrastive_model-test-epoch=134-val_loss=0.00.ckpt"
 
     channels = 1
     x = 200
     y = 200
     z_range = (26, 38)
+    # set to 14 for full, 12 for infected, and 8 for uninfected
     batch_size = 8
-    channel_names = ["RFP"]
+    channel_names = ["Phase3D"]
 
     manager = Manager()
     embeddings_dict = manager.dict()
@@ -64,7 +67,7 @@ def main(hparams):
 
     # Initialize the trainer
     trainer = Trainer(
-        accelerator="cpu",
+        accelerator="gpu",
         devices=1,
         num_nodes=1,
         strategy=DDPStrategy(find_unused_parameters=False),
@@ -102,7 +105,7 @@ if __name__ == "__main__":
     parser.add_argument("--log_steps_per_epoch", type=int, default=10)
     parser.add_argument("--embedding_len", type=int, default=256)
     parser.add_argument("--max_epochs", type=int, default=100)
-    parser.add_argument("--accelerator", type=str, default="cpu")
+    parser.add_argument("--accelerator", type=str, default="gpu")
     parser.add_argument("--devices", type=int, default=1)
     parser.add_argument("--num_nodes", type=int, default=2)
     parser.add_argument("--log_every_n_steps", type=int, default=1)
