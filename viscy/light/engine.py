@@ -30,7 +30,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.data.hcs import Sample
+from viscy.data.typing import Sample, TripletSample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -708,7 +708,7 @@ class ContrastiveModule(LightningModule):
 
     def training_step(
         self,
-        batch: dict[str, Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Training step of the model."""
@@ -772,7 +772,7 @@ class ContrastiveModule(LightningModule):
 
     def validation_step(
         self,
-        batch: dict[str, Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Validation step of the model."""
@@ -835,7 +835,7 @@ class ContrastiveModule(LightningModule):
 
     def test_step(
         self,
-        batch: dict[str, Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Test step of the model."""
@@ -911,12 +911,12 @@ class ContrastiveModule(LightningModule):
             ) / len(metrics)
         return avg_metrics
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
-        x, position_info = batch
-        features, projections = self.encoder(x)
-        self.processed_order.extend(position_info)
+        features, projections = self.encoder(batch["anchor"])
+        # FIXME: fix in prediction writer
+        self.processed_order.extend(batch["index"])
         return features, projections
 
     # already saved, not needed again

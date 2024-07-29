@@ -10,7 +10,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule
-from viscy.data.typing import DictTransform, NormMeta
+from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -112,7 +112,7 @@ class TripletDataset(Dataset):
         ]
         return torch.from_numpy(patch)
 
-    def __getitem__(self, index: int) -> dict[str, Tensor | dict[str, int | str]]:
+    def __getitem__(self, index: int) -> TripletSample:
         anchor_row = self.tracks.iloc[index]
         anchor_patch = self._slice_patch(anchor_row)
         if self.fit:
