@@ -599,10 +599,10 @@ class ContrastiveModule(LightningModule):
 
         # required to log the graph.
         self.example_input_array = torch.rand(
-            1,  # batch size
+            1,
             in_channels,
             in_stack_depth,
-            *example_input_yx_shape,
+            *example_input_yx_shape,  # batch size
         )
 
         self.images_to_log = []
@@ -708,12 +708,13 @@ class ContrastiveModule(LightningModule):
 
     def training_step(
         self,
-        batch: tuple[Tensor],
+        batch: dict[str, Tensor],
         batch_idx: int,
     ) -> Tensor:
         """Training step of the model."""
-
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         emb_anchor = self.encoder(anchor)
         emb_pos = self.encoder(pos_img)
         emb_neg = self.encoder(neg_img)
@@ -771,12 +772,13 @@ class ContrastiveModule(LightningModule):
 
     def validation_step(
         self,
-        batch: tuple[Tensor],
+        batch: dict[str, Tensor],
         batch_idx: int,
     ) -> Tensor:
         """Validation step of the model."""
-
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         emb_anchor = self.encoder(anchor)
         emb_pos = self.encoder(pos_img)
         emb_neg = self.encoder(neg_img)
@@ -833,12 +835,13 @@ class ContrastiveModule(LightningModule):
 
     def test_step(
         self,
-        batch: tuple[Tensor],
+        batch: dict[str, Tensor],
         batch_idx: int,
     ) -> Tensor:
         """Test step of the model."""
-
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         emb_anchor = self.encoder(anchor)
         emb_pos = self.encoder(pos_img)
         emb_neg = self.encoder(neg_img)
