@@ -30,9 +30,9 @@ The dataset and model checkpoint files need to be downloaded before running this
 # Set download paths
 root_dir = Path("")
 # Download from
-# https://public.czbiohub.org/comp.micro/viscy/datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr
+# https://public.czbiohub.org/comp.micro/viscy/VSCyto2D/test/a549_hoechst_cellmask_test.zarr/
 input_data_path = (
-    root_dir / "datasets/testing/VSCyto2D/a549_hoechst_cellmask_test.zarr"
+    root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
 )
 # Download from GitHub release page of v0.1.0
 model_ckpt_path = (

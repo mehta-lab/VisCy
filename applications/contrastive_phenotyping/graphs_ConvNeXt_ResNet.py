@@ -1,4 +1,5 @@
 # %% Imports and paths.
+<<<<<<< HEAD
 import os
 import torch
 from viscy.representation.contrastive import ContrastiveEncoder
@@ -71,6 +72,25 @@ plot_model = contrastive_resnet
 model_graph = torchview.draw_graph(
     plot_model,
     input_size=(20, in_channels, in_stack_depth, 224, 224),
+=======
+import timm
+import torch
+import torchview
+
+from viscy.light.engine import ContrastiveModule
+from viscy.representation.contrastive import ContrastiveEncoder, UNeXt2Stem
+
+# %load_ext autoreload
+# %autoreload 2
+# %% Initialize the model and log the graph.
+contra_model = ContrastiveEncoder(
+    backbone="convnext_tiny"
+)  # other options: convnext_tiny resnet50
+print(contra_model)
+model_graph = torchview.draw_graph(
+    contra_model,
+    torch.randn(1, 2, 15, 224, 224),
+>>>>>>> contrastive_phenotyping
     depth=3,  # adjust depth to zoom in.
     device="cpu",
 )
@@ -101,7 +121,11 @@ print(contrastive_module.encoder)
 # %%
 model_graph = torchview.draw_graph(
     contrastive_module.encoder,
+<<<<<<< HEAD
     torch.randn(1, in_channels, in_stack_depth, 200, 200),
+=======
+    torch.randn(1, 2, 15, 200, 200),
+>>>>>>> contrastive_phenotyping
     depth=3,  # adjust depth to zoom in.
     device="cpu",
 )

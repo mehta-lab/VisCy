@@ -3,52 +3,28 @@ import math
 import os
 import re
 import tempfile
-from glob import glob
 from pathlib import Path
-from typing import Callable, Literal, Optional, Sequence, Union
+from typing import Callable, Literal, Sequence
 
-# import pytorch_lightning as pl
-from monai.transforms import MapTransform
-from collections import defaultdict
-from torch.utils.data import Sampler, Dataset, DataLoader
-from torch.multiprocessing import Manager
-import torch.distributed as dist
-from torch.utils.data import DataLoader
-from torch.utils.data.distributed import DistributedSampler
-
-import random
 import numpy as np
 import torch
 import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-
-# from lightning.pytorch import LightningDataModule
+from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
 from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
+    CenterSpatialCropd,
     Compose,
-    RandAdjustContrastd,
+    MapTransform,
+    MultiSampleTrait,
     RandAffined,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-    RandShiftIntensityd,
-    RandZoomd,
-    Rand3DElasticd,
-    RandGaussianSharpend,
 )
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
-import random
-from iohub import open_ome_zarr
-import pandas as pd
-import warnings
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 
-# from viscy.data.typing import Optional
-from pathlib import Path
+from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -126,7 +102,7 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] | None transform:
+    :param DictTransform | None transform:
         a callable that transforms data, defaults to None
     """
 
@@ -135,7 +111,7 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
+        transform: DictTransform | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -203,6 +179,7 @@ class SlidingWindowDataset(Dataset):
     def __len__(self) -> int:
         return self._max_window
 
+    # TODO: refactor to a top level function
     def _stack_channels(
         self,
         sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
@@ -258,8 +235,9 @@ class MaskTestDataset(SlidingWindowDataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
+    :param DictTransform transform:
         a callable that transforms data, defaults to None
+    :param str | None ground_truth_masks: path to the ground truth masks
     """
 
     def __init__(
@@ -267,8 +245,8 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
-        ground_truth_masks: str = None,
+        transform: DictTransform | None = None,
+        ground_truth_masks: str | None = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}
@@ -363,6 +341,10 @@ class HCSDataModule(LightningDataModule):
             self.data_path.name,
         )
 
+    @property
+    def maybe_cached_data_path(self):
+        return self.cache_path if self.caching else self.data_path
+
     def _data_log_path(self) -> Path:
         log_dir = Path.cwd()
         if self.trainer:
@@ -401,9 +383,15 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
+    @property
+    def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
+        return {
+            "channels": {"source": self.source_channel},
+            "z_window_size": self.z_window_size,
+        }
+
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
-        channels = {"source": self.source_channel}
-        dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
+        dataset_settings = self._base_dataset_settings
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
         elif stage == "test":
@@ -413,25 +401,22 @@ class HCSDataModule(LightningDataModule):
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _setup_fit(self, dataset_settings: dict):
-        """Set up the training and validation datasets."""
-        # Setup the transformations
-        # TODO: These have a fixed order for now... (normalization->augmentation->fit_transform)
-        fit_transform = self._fit_transform()
-        train_transform = Compose(
-            self.normalizations + self._train_transform() + fit_transform
-        )
-        val_transform = Compose(self.normalizations + fit_transform)
-
-        dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.cache_path if self.caching else self.data_path
-        plate = open_ome_zarr(data_path, mode="r")
-
+    def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
+        return torch.randperm(num_positions)
+
+    def _setup_fit(self, dataset_settings: dict):
+        """Set up the training and validation datasets."""
+        train_transform, val_transform = self._fit_transform()
+        dataset_settings["channels"]["target"] = self.target_channel
+        data_path = self.maybe_cached_data_path
+        plate = open_ome_zarr(data_path, mode="r")
+
+        # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
-        shuffled_indices = torch.randperm(len(positions))
+        shuffled_indices = self._set_fit_global_state(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
@@ -461,7 +446,7 @@ class HCSDataModule(LightningDataModule):
             _logger.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.cache_path if self.caching else self.data_path
+        data_path = self.maybe_cached_data_path
         plate = open_ome_zarr(data_path, mode="r")
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
@@ -478,15 +463,13 @@ class HCSDataModule(LightningDataModule):
                 **dataset_settings,
             )
 
-    def _setup_predict(
-        self,
-        dataset_settings: dict,
-    ):
-        """Set up the predict stage."""
+    def _set_predict_global_state(self) -> None:
         # track metadata for inverting transform
         set_track_meta(True)
         if self.caching:
             _logger.warning("Ignoring caching config in 'predict' stage.")
+
+    def _positions_maybe_single(self) -> list[Position]:
         dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
@@ -500,9 +483,17 @@ class HCSDataModule(LightningDataModule):
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):
             positions = [p for _, p in dataset.positions()]
+        return positions
+
+    def _setup_predict(
+        self,
+        dataset_settings: dict,
+    ):
+        """Set up the predict stage."""
+        self._set_predict_global_state()
         predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
-            positions=positions,
+            positions=self._positions_maybe_single(),
             transform=predict_transform,
             **dataset_settings,
         )
@@ -560,9 +551,11 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def _fit_transform(self):
-        """Deterministic center crop as the last step of training and validation."""
-        return [
+    def _fit_transform(self) -> tuple[Compose, Compose]:
+        """(normalization -> maybe augmentation -> center crop)
+        Deterministic center crop as the last step of training and validation."""
+        # TODO: These have a fixed order for now... ()
+        final_crop = [
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
                 roi_size=(
@@ -572,6 +565,11 @@ class HCSDataModule(LightningDataModule):
                 ),
             )
         ]
+        train_transform = Compose(
+            self.normalizations + self._train_transform() + final_crop
+        )
+        val_transform = Compose(self.normalizations + final_crop)
+        return train_transform, val_transform
 
     def _train_transform(self) -> list[Callable]:
         """Setup training augmentations: check input values,
@@ -611,512 +609,3 @@ class HCSDataModule(LightningDataModule):
             self.train_z_scale_range = (0.0, 0.0)
         _logger.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
-
-
-# dataloader for organelle phenotyping
-class ContrastiveDataset(Dataset):
-    def __init__(
-        self,
-        base_path,
-        channels,
-        x,
-        y,
-        timesteps_csv_path,
-        channel_names,
-        transform=None,
-        z_range=None,
-    ):
-        self.base_path = base_path
-        self.channels = channels
-        self.x = x
-        self.y = y
-        self.z_range = z_range
-        self.channel_names = channel_names
-        self.transform = get_transforms()
-        self.ds = self.open_zarr_store(self.base_path)
-        self.positions = list(self.ds.positions())
-        self.timesteps_df = pd.read_csv(timesteps_csv_path)
-        self.channel_indices = [
-            self.ds.channel_names.index(channel) for channel in self.channel_names
-        ]
-        print("channel indices!")
-        print(self.channel_indices)
-        print(f"Initialized dataset with {len(self.positions)} positions.")
-
-        #self.statistics = self.compute_statistics()
-        #self.print_channel_statistics()
-
-    def print_statistics(self, data, data_label):
-        mean = np.mean(data)
-        std = np.std(data)
-        min_val = np.min(data)
-        max_val = np.max(data)
-        
-        print(f"{data_label} Statistics:")
-        print(f"  Mean: {mean}")
-        print(f"  Std: {std}")
-        print(f"  Min: {min_val}")
-        print(f"  Max: {max_val}")
-
-    def compute_statistics(self):
-        stats = {
-            channel: {"mean": 0, "sum_sq_diff": 0, "min": np.inf, "max": -np.inf}
-            for channel in self.channel_names
-        }
-        count = 0
-        total_elements = 0
-
-        for idx in range(len(self.positions)):
-            position_path = self.positions[idx][0]
-            data = self.load_data(position_path)
-            for i, channel in enumerate(self.channel_names):
-                channel_data = data[i]
-                mean = np.mean(channel_data)
-                stats[channel]["mean"] += mean
-                stats[channel]["min"] = min(stats[channel]["min"], np.min(channel_data))
-                stats[channel]["max"] = max(stats[channel]["max"], np.max(channel_data))
-                stats[channel]["sum_sq_diff"] += np.sum((channel_data - mean) ** 2)
-            count += 1
-            total_elements += np.prod(channel_data.shape)
-
-        for channel in self.channel_names:
-            stats[channel]["mean"] /= count
-            stats[channel]["std"] = np.sqrt(
-                stats[channel]["sum_sq_diff"] / total_elements
-            )
-            del stats[channel]["sum_sq_diff"]
-
-        print("done!")
-        return stats
-
-    def print_channel_statistics(self):
-        for channel, channel_stats in self.statistics.items():
-            print(f"Channel: {channel}")
-            print(f"  Mean: {channel_stats['mean']}")
-            print(f"  Std: {channel_stats['std']}")
-            print(f"  Min: {channel_stats['min']}")
-            print(f"  Max: {channel_stats['max']}")
-
-    def open_zarr_store(self, path, layout="hcs", mode="r"):
-        # print(f"Opening Zarr store at {path} with layout '{layout}' and mode '{mode}'")
-        return open_ome_zarr(path, layout=layout, mode=mode)
-
-    def __len__(self):
-        return len(self.positions)
-
-    def __getitem__(self, idx):
-        anchor_position_path = self.positions[idx][0]
-        anchor_data_load = self.load_data(anchor_position_path)
-        anchor_data = self.normalize_data(anchor_data_load)
-        #self.print_statistics(anchor_data, "Anchor Data")
-
-        positive_data = self.apply_channel_transforms(anchor_data_load)
-        positive_data = self.normalize_data(positive_data)
-        #self.print_statistics(positive_data, "Positive Data")
-
-        # if self.transform:
-        #     print("Positive transformation applied")
-
-        negative_idx = idx
-        while negative_idx == idx:
-            negative_idx = random.randint(0, self.__len__() - 1)
-        negative_position_path = self.positions[negative_idx][0]
-        negative_data = self.load_data(negative_position_path)
-    
-        negative_data = self.apply_channel_transforms(negative_data)
-        negative_data = self.normalize_data(negative_data)
-
-        # if self.transform:
-        #     print("Negative transformation applied")
-
-        # print("shapes of tensors")
-        # print(torch.tensor(anchor_data).shape)
-        # print(torch.tensor(positive_data).shape)
-        # print(torch.tensor(negative_data).shape)
-
-        #self.print_statistics(negative_data, "Negative Data")
-
-        return (
-            torch.tensor(anchor_data, dtype=torch.float32),
-            torch.tensor(positive_data, dtype=torch.float32),
-            torch.tensor(negative_data, dtype=torch.float32),
-        )
-
-    def load_data(self, position_path):
-        position = self.ds[position_path]
-        # print(f"Loading data from position: {position_path}")
-
-        zarr_array = position["0"][:]
-        # print("Shape before:", zarr_array.shape)
-        data = self.restructure_data(zarr_array, position_path)
-        data = data[self.channel_indices, self.z_range[0] : self.z_range[1], :, :]
-
-        # print("shape after!")
-        # print(data.shape)
-        return data
-
-    def restructure_data(self, data, position_path):
-        # Extract row, column, fov, and cell_id from position_path
-        parts = position_path.split("/")
-        row = parts[0]
-        column = parts[1]
-        fov_cell = parts[2]
-
-        fov = int(fov_cell.split("fov")[1].split("cell")[0])
-        cell_id = int(fov_cell.split("cell")[1])
-
-        extracted_combined = f"{row}/{column}/fov{fov}cell{cell_id}"
-
-        matched_rows = self.timesteps_df[
-            self.timesteps_df.apply(
-                lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
-                axis=1,
-            )
-            == extracted_combined
-        ]
-
-        if matched_rows.empty:
-            raise ValueError(
-                f"No matching entry found for position path: {position_path}"
-            )
-
-        start_time = matched_rows["Start Time"].values[0]
-        end_time = matched_rows["End Time"].values[0]
-
-        random_timestep = np.random.randint(start_time, end_time)
-
-        reshaped_data = data[random_timestep]
-        return reshaped_data
-
-    def normalize_data(self, data):
-        normalized_data = np.empty_like(data)
-        for i in range(data.shape[0]):  # iterate over each channel
-            channel_data = data[i]
-            mean = np.mean(channel_data)
-            std = np.std(channel_data)
-            normalized_data[i] = (channel_data - mean) / (std + 1e-6)
-        return normalized_data
-
-    def apply_channel_transforms(self, data):
-        transformed_data = np.empty_like(data)
-        for i, channel_name in enumerate(self.channel_names):
-            channel_data = data[i]
-            transform = self.transform[channel_name]
-            transformed_data[i] = transform({"image": channel_data})["image"]
-            # print(f"transformed {channel_name}")
-        return transformed_data
-
-
-def get_transforms():
-    # phase_transforms = Compose(
-    #     [
-    #         RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.95, 1.05)),
-    #         RandAffined(
-    #             keys=["image"],
-    #             prob=0.5,
-    #             rotate_range=(0.05, 0.05),  # Reduced rotation range
-    #             shear_range=(0.05, 0.05),   # Reduced shear range
-    #             scale_range=(0.05, 0.05),   # Reduced scale range
-    #         ),
-    #         RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.01),  # Appropriate std
-    #         RandGaussianSmoothd(
-    #             keys=["image"],
-    #             prob=0.5,
-    #             sigma_x=(0.02, 0.05),  # Adjusted sigma values
-    #             sigma_y=(0.02, 0.05),
-    #             sigma_z=(0.02, 0.05),
-    #         ),
-    #         RandScaleIntensityd(keys=["image"], factors=(0.98, 1.02), prob=0.5),  # Subtle scaling factors
-    #     ]
-    # )
-
-    rfp_transforms = Compose(
-        [
-            RandAdjustContrastd(keys=["image"], prob=0.5, gamma=(0.8, 1.2)),
-            RandAffined(
-                keys=["image"],
-                prob=0.5,
-                rotate_range=(0.05, 0.05),  
-                shear_range=(0.05, 0.05),   
-                scale_range=(0.05, 0.05),   
-            ),
-            RandGaussianNoised(keys=["image"], prob=0.5, mean=0.0, std=0.5),  
-            RandGaussianSmoothd(
-                keys=["image"],
-                prob=0.5,
-                sigma_x=(0.1, 0.2),  
-                sigma_y=(0.1, 0.2),
-                sigma_z=(0.1, 0.2),
-            ),
-            RandScaleIntensityd(keys=["image"], factors=(0.9, 1.1), prob=0.5),  
-        ]
-    )
-
-    return {
-        "RFP": rfp_transforms
-    }
-    
-    # return {
-    #     "Phase3D": phase_transforms
-    # }
-
-
-class ContrastiveDataModule(LightningDataModule):
-    def __init__(
-        self,
-        base_path: str,
-        channels: int,
-        x: int,
-        y: int,
-        timesteps_csv_path: str,
-        channel_names: list,
-        transform=None,
-        predict_base_path: str = None,
-        train_split_ratio: float = 0.70,
-        val_split_ratio: float = 0.20,
-        batch_size: int = 4,
-        num_workers: int = 15,  # for analysis purposes reduced to 1
-        z_range: tuple[int, int] = None,
-        analysis: bool = False,
-    ):
-        super().__init__()
-        self.base_path = Path(base_path)
-        self.channels = channels
-        self.x = x
-        self.y = y
-        self.timesteps_csv_path = timesteps_csv_path
-        self.channel_names = channel_names
-        self.transform = transform
-        self.predict_base_path = Path(predict_base_path) if predict_base_path else None
-        self.train_split_ratio = train_split_ratio
-        self.val_split_ratio = val_split_ratio
-        self.batch_size = batch_size
-        self.num_workers = num_workers
-        self.z_range = z_range
-        self.train_dataset = None
-        self.val_dataset = None
-        self.test_dataset = None
-        self.predict_dataset = None
-        self.analysis = analysis
-        self.position_to_timesteps = None
-
-    def setup(self, stage: str = None):
-        if stage == "fit":
-            dataset = ContrastiveDataset(
-                self.base_path,
-                self.channels,
-                self.x,
-                self.y,
-                self.timesteps_csv_path,
-                channel_names=self.channel_names,
-                transform=self.transform,
-                z_range=self.z_range,
-            )
-
-            train_size = int(len(dataset) * self.train_split_ratio)
-            val_size = int(len(dataset) * self.val_split_ratio)
-            test_size = len(dataset) - train_size - val_size
-
-            self.train_dataset, self.val_dataset, self.test_dataset = (
-                torch.utils.data.random_split(
-                    dataset, [train_size, val_size, test_size]
-                )
-            )
-
-        # # setup prediction dataset 
-        # if stage == "predict" and self.predict_base_path and not self.analysis:
-        #     print("setting up!")
-        #     self.predict_dataset = PredictDataset(
-        #         self.predict_base_path,
-        #         self.channels,
-        #         self.x,
-        #         self.y,
-        #         timesteps_csv_path=self.timesteps_csv_path,
-        #         channel_names=self.channel_names,
-        #         z_range=self.z_range,
-        #     )
-
-        # both should be on for extracting embeddings  
-        if stage == "predict" and self.analysis == True:
-            print("doing analysis set up!")
-            self.predict_dataset = PredictDataset(
-                self.predict_base_path,
-                self.channels,
-                self.x,
-                self.y,
-                timesteps_csv_path=self.timesteps_csv_path,
-                channel_names=self.channel_names,
-                z_range=self.z_range,
-                analysis=True,
-            )
-            self.position_to_timesteps = self.predict_dataset.position_to_timesteps
-        
-    def train_dataloader(self):
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=True,
-            num_workers=self.num_workers,
-            prefetch_factor=2,
-            persistent_workers=True,
-        )
-
-    def val_dataloader(self):
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            prefetch_factor=2,
-            persistent_workers=True,
-        )
-
-    def test_dataloader(self):
-        return DataLoader(
-            self.test_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            num_workers=self.num_workers,
-            prefetch_factor=2,
-            persistent_workers=True,
-        )
-
-    def predict_dataloader(self):
-        print("running predict DataLoader!")
-        if self.predict_dataset is None:
-            raise ValueError(
-                "Predict dataset not set up. Call setup(stage='predict') first."
-            )
-        
-        # Check if distributed training is initialized
-        if dist.is_available() and dist.is_initialized():
-            rank = dist.get_rank()
-            num_replicas = dist.get_world_size()
-        else:
-            rank = 0
-            num_replicas = 1
-
-        sampler = DistributedSampler(
-            self.predict_dataset,
-            num_replicas=num_replicas,
-            rank=rank,
-            shuffle=False
-        )
-
-        return DataLoader(
-            self.predict_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            sampler=sampler,  # Use DistributedSampler
-            num_workers=self.num_workers,
-            collate_fn=ContrastiveDataModule.custom_collate_fn,  # Use custom collate function
-            prefetch_factor=2,
-            persistent_workers=True
-        )
-    
-    @staticmethod
-    def custom_collate_fn(batch):
-        # Sort the batch by position_path and timestep
-        batch.sort(key=lambda x: (x[1], x[2]))
-        data, positions, timesteps = zip(*batch)
-        return torch.stack(data), positions, timesteps
-
-class PredictDataset(Dataset):
-    def __init__(
-        self,
-        base_path,
-        channels,
-        x,
-        y,
-        timesteps_csv_path,
-        channel_names,
-        z_range=None,
-        analysis=False,
-        embeddings_dict=None,  # Shared dict to store embeddings
-        order_dict=None,  # Shared dict to store order
-    ):
-        self.base_path = base_path
-        self.channels = channels
-        self.x = x
-        self.y = y
-        self.z_range = z_range
-        self.channel_names = channel_names
-        self.ds = self.open_zarr_store(self.base_path)
-        self.timesteps_csv_path = timesteps_csv_path
-        self.timesteps_df = pd.read_csv(timesteps_csv_path)
-        self.positions = list(self.ds.positions()) if not analysis else self.filter_positions_from_csv()
-        self.channel_indices = [self.ds.channel_names.index(channel) for channel in self.channel_names]
-        self.analysis = analysis
-        self.embeddings_dict = embeddings_dict if embeddings_dict is not None else Manager().dict()
-        self.order_dict = order_dict if order_dict is not None else Manager().dict()
-        print("channel indices!")
-        print(self.channel_indices)
-        print(f"Initialized predict dataset with {len(self.positions)} positions.")
-
-        # Vectorized creation of position_to_timesteps and position_timestep_pairs
-        self.timesteps_df["Position"] = self.timesteps_df.apply(
-            lambda x: f"{x['Row']}/{x['Column']}/fov{x['FOV']}cell{x['Cell ID']}",
-            axis=1,
-        )
-
-        # Filter timesteps_df to only include positions that are in self.positions
-        filtered_timesteps_df = self.timesteps_df[
-            self.timesteps_df["Position"].isin(self.positions)
-        ]
-
-        # Group by position and collect timesteps
-        position_groups = filtered_timesteps_df.groupby("Position")
-
-        self.position_to_timesteps = {
-            position: group["Timestep"].tolist()
-            for position, group in position_groups
-        }
-
-        print("done position_to_timesteps!")
-
-        self.position_timestep_pairs = [
-            (position, timestep)
-            for position, timesteps in self.position_to_timesteps.items()
-            for timestep in timesteps
-        ]
-
-        print("done position_timestep_pairs!")
-
-    def open_zarr_store(self, path, layout="hcs", mode="r"):
-        return open_ome_zarr(path, layout=layout, mode=mode)
-
-    def filter_positions_from_csv(self):
-        unique_positions = self.timesteps_df[['Row', 'Column', 'FOV', 'Cell ID']].drop_duplicates()
-        valid_positions = [
-            f"{row['Row']}/{row['Column']}/fov{row['FOV']}cell{row['Cell ID']}"
-            for _, row in unique_positions.iterrows()
-        ]
-        return valid_positions
-
-    def __len__(self):
-        return len(self.position_timestep_pairs)
-
-    def __getitem__(self, idx):
-        position_path, timestep = self.position_timestep_pairs[idx]
-        data = self.load_data(position_path, timestep)
-        data = self.normalize_data(data)
-        # Combine position path and timestep into a single identifier
-        combined_pos_info = f"{position_path}/t{timestep}"
-        return torch.tensor(data, dtype=torch.float32), combined_pos_info, timestep
-
-    # double check printing order
-    def load_data(self, position_path, timestep=None):
-        position = self.ds[position_path]
-        zarr_array = position["0"][:]
-        data = zarr_array[timestep, self.channel_indices, self.z_range[0]:self.z_range[1], :, :]
-        return data
-
-    def normalize_data(self, data):
-        normalized_data = np.empty_like(data)
-        for i in range(data.shape[0]):  # iterate over each channel
-            channel_data = data[i]
-            mean = np.mean(channel_data)
-            std = np.std(channel_data)
-            normalized_data[i] = (channel_data - mean) / (std + 1e-6)
-        return normalized_data
-    

@@ -1,7 +1,6 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
-from torch.multiprocessing import Manager
 
 import numpy as np
 import torch
@@ -14,7 +13,6 @@ from monai.transforms import DivisiblePad, Rotate90
 from pytorch_lightning.utilities import rank_zero_only
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
-import pandas as pd 
 
 # from lightning.pytorch import LightningModule
 # from lightning import LightningModule
@@ -32,7 +30,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.data.hcs import Sample
+from viscy.data.typing import Sample, TripletSample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -571,7 +569,6 @@ class ContrastiveModule(LightningModule):
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
         predict: bool = False,
-        position_to_timesteps: dict = None,
     ) -> None:
         super().__init__()
         if wandb is None:
@@ -603,10 +600,10 @@ class ContrastiveModule(LightningModule):
 
         # required to log the graph.
         self.example_input_array = torch.rand(
-            1,  # batch size
+            1,
             in_channels,
             in_stack_depth,
-            *example_input_yx_shape,
+            *example_input_yx_shape,  # batch size
         )
 
         self.images_to_log = []
@@ -682,30 +679,28 @@ class ContrastiveModule(LightningModule):
             f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
         )
 
-        # print(
-        #     f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
-        # )
-        # print(
-        #     f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
-        # )
-        # print(
-        #     f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
-        # )
+        print(
+            f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
+        )
+        print(
+            f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
+        )
+        print(
+            f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
+        )
 
-        #combine the images side by side
+        # combine the images side by side
         combined_img_rfp = np.concatenate(
             (anchor_img_rfp, positive_img_rfp, negative_img_rfp), axis=1
         )
-
-        # combined_img_phase = np.concatenate(
-        #     (anchor_img_phase, positive_img_phase, negative_img_phase), axis=1
-        # )
-        
-        #combined_img = np.concatenate((combined_img_rfp, combined_img_phase), axis=0)
+        combined_img_phase = np.concatenate(
+            (anchor_img_phase, positive_img_phase, negative_img_phase), axis=1
+        )
+        combined_img = np.concatenate((combined_img_rfp, combined_img_phase), axis=0)
 
         self.images_to_log.append(
             wandb.Image(
-                combined_img_rfp, caption=f"Anchor | Positive | Negative (Epoch {epoch})"
+                combined_img, caption=f"Anchor | Positive | Negative (Epoch {epoch})"
             )
         )
 
@@ -714,12 +709,14 @@ class ContrastiveModule(LightningModule):
 
     def training_step(
         self,
-        batch: tuple[Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Training step of the model."""
 
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         _, anchorProjection = self.model(anchor)
         _, negativeProjection = self.model(neg_img)
         _, positiveProjection = self.model(pos_img)
@@ -779,12 +776,14 @@ class ContrastiveModule(LightningModule):
 
     def validation_step(
         self,
-        batch: tuple[Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Validation step of the model."""
 
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         _, anchorProjection = self.model(anchor)
         _, positiveProjection = self.model(pos_img)
         _, negativeProjection = self.model(neg_img)
@@ -843,12 +842,14 @@ class ContrastiveModule(LightningModule):
 
     def test_step(
         self,
-        batch: tuple[Tensor],
+        batch: TripletSample,
         batch_idx: int,
     ) -> Tensor:
         """Test step of the model."""
 
-        anchor, pos_img, neg_img = batch
+        anchor = batch["anchor"]
+        pos_img = batch["positive"]
+        neg_img = batch["negative"]
         _, anchorProjection = self.model(anchor)
         _, positiveProjection = self.model(pos_img)
         _, negativeProjection = self.model(neg_img)
@@ -920,15 +921,13 @@ class ContrastiveModule(LightningModule):
             ) / len(metrics)
         return avg_metrics
 
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    # TO-DO: fix prediction
+    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
-        x, position_info, timestep = batch
-        features, projections = self.model(x)
-        for pos_info, feature, projection in zip(position_info, features, projections):
-            if pos_info not in self.processed_order:
-                self.processed_order.append(pos_info)
-            self.embeddings_dict[pos_info] = (feature.cpu().numpy(), projection.cpu().numpy())
+        features, projections = self.encoder(batch["anchor"])
+        # FIXME: fix in prediction writer
+        self.processed_order.extend(batch["index"])
         return features, projections
 
     def on_predict_epoch_end(self) -> None:

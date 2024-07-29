@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.unet.networks.unext2 import StemDepthtoChannels
 
+
 class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
