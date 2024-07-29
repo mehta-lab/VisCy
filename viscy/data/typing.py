@@ -5,7 +5,7 @@ from torch import Tensor
 # TODO: use typing.NotRequired when upgrading to Python 3.11
 from typing_extensions import NotRequired
 
-DictTransform = Callable[[dict[str, Tensor]], dict[str, Tensor]]
+DictTransform = Callable[[dict[str, Tensor | dict]], dict[str, Tensor]]
 
 
 T = TypeVar("T")

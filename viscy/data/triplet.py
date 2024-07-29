@@ -9,14 +9,19 @@ from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from viscy.data.hcs import HCSDataModule
+from viscy.data.hcs import HCSDataModule, _read_norm_meta
 from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def _scatter_channels(channel_names: list[str], patch: Tensor) -> dict[str, Tensor]:
-    return {name: data[None] for name, data in zip(channel_names, patch)}
+def _scatter_channels(
+    channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
+) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
+    channels = {name: data[None] for name, data in zip(channel_names, patch)}
+    if norm_meta is not None:
+        channels |= {"norm_meta": norm_meta}
+    return channels
 
 
 def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
@@ -28,9 +33,14 @@ def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
 
 
 def _transform_channel_wise(
-    transform: DictTransform, channel_names: list[str], patch: Tensor
+    transform: DictTransform,
+    channel_names: list[str],
+    patch: Tensor,
+    norm_meta: NormMeta | None,
 ) -> Tensor:
-    return _gather_channels(transform(_scatter_channels(channel_names, patch)))
+    return _gather_channels(
+        transform(_scatter_channels(channel_names, patch, norm_meta))
+    )
 
 
 class TripletDataset(Dataset):
@@ -97,8 +107,9 @@ class TripletDataset(Dataset):
         # reproducibility relies on setting a global seed for numpy
         return candidates.sample(n=1).iloc[0]
 
-    def _slice_patch(self, track_row: pd.Series) -> Tensor:
-        image: ImageArray = track_row["position"]["0"]
+    def _slice_patch(self, track_row: pd.Series) -> tuple[Tensor, NormMeta | None]:
+        position: Position = track_row["position"]
+        image = position["0"]
         time = track_row["t"]
         y_center = track_row["y"]
         x_center = track_row["x"]
@@ -110,11 +121,11 @@ class TripletDataset(Dataset):
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
         ]
-        return torch.from_numpy(patch)
+        return torch.from_numpy(patch), _read_norm_meta(position)
 
     def __getitem__(self, index: int) -> TripletSample:
         anchor_row = self.tracks.iloc[index]
-        anchor_patch = self._slice_patch(anchor_row)
+        anchor_patch, anchor_norm = self._slice_patch(anchor_row)
         if self.fit:
             positive_patch = anchor_patch.clone()
             if self.positive_transform:
@@ -122,20 +133,23 @@ class TripletDataset(Dataset):
                     transform=self.positive_transform,
                     channel_names=self.channel_names,
                     patch=positive_patch,
+                    norm_meta=anchor_norm,
                 )
             negative_row = self._sample_negative(anchor_row)
-            negative_patch = self._slice_patch(negative_row)
+            negative_patch, negetive_norm = self._slice_patch(negative_row)
             if self.negative_transform:
                 negative_patch = _transform_channel_wise(
                     transform=self.negative_transform,
                     channel_names=self.channel_names,
                     patch=negative_patch,
+                    norm_meta=negetive_norm,
                 )
         if self.anchor_transform:
             anchor_patch = _transform_channel_wise(
                 transform=self.anchor_transform,
                 channel_names=self.channel_names,
                 patch=anchor_patch,
+                norm_meta=anchor_norm,
             )
         sample = {
             "anchor": anchor_patch,
