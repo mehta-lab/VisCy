@@ -341,6 +341,10 @@ class HCSDataModule(LightningDataModule):
             self.data_path.name,
         )
 
+    @property
+    def maybe_cached_data_path(self):
+        return self.cache_path if self.caching else self.data_path
+
     def _data_log_path(self) -> Path:
         log_dir = Path.cwd()
         if self.trainer:
@@ -379,9 +383,15 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
+    @property
+    def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
+        return {
+            "channels": {"source": self.source_channel},
+            "z_window_size": self.z_window_size,
+        }
+
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
-        channels = {"source": self.source_channel}
-        dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
+        dataset_settings = self._base_dataset_settings
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
         elif stage == "test":
@@ -391,25 +401,22 @@ class HCSDataModule(LightningDataModule):
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _setup_fit(self, dataset_settings: dict):
-        """Set up the training and validation datasets."""
-        # Setup the transformations
-        # TODO: These have a fixed order for now... (normalization->augmentation->fit_transform)
-        fit_transform = self._fit_transform()
-        train_transform = Compose(
-            self.normalizations + self._train_transform() + fit_transform
-        )
-        val_transform = Compose(self.normalizations + fit_transform)
-
-        dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.cache_path if self.caching else self.data_path
-        plate = open_ome_zarr(data_path, mode="r")
-
+    def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
+        return torch.randperm(num_positions)
+
+    def _setup_fit(self, dataset_settings: dict):
+        """Set up the training and validation datasets."""
+        train_transform, val_transform = self._fit_transform()
+        dataset_settings["channels"]["target"] = self.target_channel
+        data_path = self.maybe_cached_data_path
+        plate = open_ome_zarr(data_path, mode="r")
+
+        # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
-        shuffled_indices = torch.randperm(len(positions))
+        shuffled_indices = self._set_fit_global_state(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
@@ -439,7 +446,7 @@ class HCSDataModule(LightningDataModule):
             _logger.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.cache_path if self.caching else self.data_path
+        data_path = self.maybe_cached_data_path
         plate = open_ome_zarr(data_path, mode="r")
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
@@ -456,15 +463,13 @@ class HCSDataModule(LightningDataModule):
                 **dataset_settings,
             )
 
-    def _setup_predict(
-        self,
-        dataset_settings: dict,
-    ):
-        """Set up the predict stage."""
+    def _set_predict_global_state(self) -> None:
         # track metadata for inverting transform
         set_track_meta(True)
         if self.caching:
             _logger.warning("Ignoring caching config in 'predict' stage.")
+
+    def _positions_maybe_single(self) -> list[Position]:
         dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
@@ -478,9 +483,17 @@ class HCSDataModule(LightningDataModule):
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):
             positions = [p for _, p in dataset.positions()]
+        return positions
+
+    def _setup_predict(
+        self,
+        dataset_settings: dict,
+    ):
+        """Set up the predict stage."""
+        self._set_predict_global_state()
         predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
-            positions=positions,
+            positions=self._positions_maybe_single(),
             transform=predict_transform,
             **dataset_settings,
         )
@@ -538,9 +551,11 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def _fit_transform(self):
-        """Deterministic center crop as the last step of training and validation."""
-        return [
+    def _fit_transform(self) -> tuple[Compose, Compose]:
+        """(normalization -> maybe augmentation -> center crop)
+        Deterministic center crop as the last step of training and validation."""
+        # TODO: These have a fixed order for now... ()
+        final_crop = [
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
                 roi_size=(
@@ -550,6 +565,11 @@ class HCSDataModule(LightningDataModule):
                 ),
             )
         ]
+        train_transform = Compose(
+            self.normalizations + self._train_transform() + final_crop
+        )
+        val_transform = Compose(self.normalizations + final_crop)
+        return train_transform, val_transform
 
     def _train_transform(self) -> list[Callable]:
         """Setup training augmentations: check input values,
