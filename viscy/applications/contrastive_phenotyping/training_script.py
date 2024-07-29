@@ -44,37 +44,37 @@ timesteps_csv_path = (
 
 # Data parameters
 base_path = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
-channels = 2
+channels = 1
 x = 200
 y = 200
-z = 15
-z_range = (28, 43)
+z = 12 # 15 for covnext backbone, 12 for resnet
+z_range = (26, 38) # (28, 43) for covnext backbone, (26, 38) for resnet
 batch_size = 32
-channel_names = ["RFP", "Phase3D"]  # training w/ both channels
+channel_names = ["RFP"]  # training w/ both channels
 
 torch.set_float32_matmul_precision("medium")
 
-contra_model = ContrastiveEncoder(backbone="resnet50")
-print(contra_model)
+# contra_model = ContrastiveEncoder(backbone="resnet50")
+# print(contra_model)
 
-model_graph = torchview.draw_graph(
-    contra_model,
-    torch.randn(1, 2, 15, 224, 224),
-    depth=3,
-    device="cpu",
-)
-model_graph.visual_graph
+# model_graph = torchview.draw_graph(
+#     contra_model,
+#     torch.randn(1, 1, 15, 200, 200),
+#     depth=3,
+#     device="cpu",
+# )
+# model_graph.visual_graph
 
-contrastive_module = ContrastiveModule()
-print(contrastive_module.encoder)
+# contrastive_module = ContrastiveModule()
+# print(contrastive_module.encoder)
 
-model_graph = torchview.draw_graph(
-    contrastive_module.encoder,
-    torch.randn(1, 2, 15, 200, 200),
-    depth=3,
-    device="cpu",
-)
-model_graph.visual_graph
+# model_graph = torchview.draw_graph(
+#     contrastive_module.encoder,
+#     torch.randn(1, 1, 15, 200, 200),
+#     depth=3,
+#     device="cpu",
+# )
+# model_graph.visual_graph
 
 
 # %% Define the main function for training
@@ -120,8 +120,8 @@ def main(hparams):
         log_steps_per_epoch=hparams.log_steps_per_epoch,
         in_channels=channels,
         example_input_yx_shape=(x, y),
-        in_stack_depth=z,
-        stem_kernel_size=(5, 3, 3),
+        in_stack_depth=z, # only thing to control 
+        stem_kernel_size=(5, 3, 3), # keep fixed for both 
         embedding_len=hparams.embedding_len,
     )
 
@@ -129,7 +129,7 @@ def main(hparams):
     wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
 
     # set for each run to avoid overwritting!
-    custom_folder_name = "test"
+    custom_folder_name = "rfp_resnet_stem"
     checkpoint_callback = ModelCheckpoint(
         dirpath=os.path.join(model_dir, custom_folder_name),
         filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
@@ -167,47 +167,21 @@ def main(hparams):
     # Test the model
     trainer.test(model, datamodule=data_module)
 
+# Argument parser for command-line options
+# to-do: need to clean up to always use the same args
+parser = ArgumentParser()
+parser.add_argument("--backbone", type=str, default="resnet50")
+parser.add_argument("--margin", type=float, default=0.5)
+parser.add_argument("--lr", type=float, default=1e-3)
+parser.add_argument("--schedule", type=str, default="Constant")
+parser.add_argument("--log_steps_per_epoch", type=int, default=10)
+parser.add_argument("--embedding_len", type=int, default=256)
+parser.add_argument("--max_epochs", type=int, default=200)
+parser.add_argument("--accelerator", type=str, default="gpu")
+parser.add_argument("--devices", type=int, default=1)  # 4 GPUs
+parser.add_argument("--num_nodes", type=int, default=1)
+parser.add_argument("--log_every_n_steps", type=int, default=1)
+args = parser.parse_args()
 
-if __name__ == "__main__":
-    import sys
+main(args)
 
-    if "ipykernel_launcher" in sys.argv[0]:
-        # Jupyter Notebook environment
-        args = {
-            "backbone": "resnet50",
-            "margin": 0.5,
-            "lr": 1e-3,
-            "schedule": "Constant",
-            "log_steps_per_epoch": 5,
-            "embedding_len": 256,
-            "max_epochs": 100,
-            "accelerator": "gpu",
-            "devices": 1,  # 1 GPU
-            "num_nodes": 1,  # 1 node
-            "log_every_n_steps": 1,
-        }
-
-        class HParams:
-            def __init__(self, **kwargs):
-                self.__dict__.update(kwargs)
-
-        hparams = HParams(**args)
-        main(hparams)
-    else:
-        parser = ArgumentParser()
-        parser.add_argument("--backbone", type=str, default="resnet50")
-        parser.add_argument("--margin", type=float, default=0.5)
-        parser.add_argument("--lr", type=float, default=1e-3)
-        parser.add_argument("--schedule", type=str, default="Constant")
-        parser.add_argument("--log_steps_per_epoch", type=int, default=10)
-        parser.add_argument("--embedding_len", type=int, default=256)
-        parser.add_argument("--max_epochs", type=int, default=100)
-        parser.add_argument("--accelerator", type=str, default="gpu")
-        parser.add_argument("--devices", type=int, default=1)  # 4 GPUs
-        parser.add_argument("--num_nodes", type=int, default=1)
-        parser.add_argument("--log_every_n_steps", type=int, default=1)
-        args = parser.parse_args()
-
-        main(args)
-
-# %%
