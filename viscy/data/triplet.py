@@ -1,10 +1,11 @@
 import logging
+from pathlib import Path
 from typing import Sequence
 
 import pandas as pd
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
-from monai.transforms import MapTransform
+from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -15,7 +16,7 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 def _scatter_channels(channel_names: list[str], patch: Tensor) -> dict[str, Tensor]:
-    return {name: data for name, data in zip(channel_names, patch)}
+    return {name: data[None] for name, data in zip(channel_names, patch)}
 
 
 def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
@@ -23,7 +24,7 @@ def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
     :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
     :return Tensor: Multi-channel tensor
     """
-    return torch.stack(list(patch_channels.values()), dim=1)
+    return torch.cat(list(patch_channels.values()), dim=0)
 
 
 def _transform_channel_wise(
@@ -38,7 +39,7 @@ class TripletDataset(Dataset):
         positions: list[Position],
         tracks_tables: list[pd.DataFrame],
         channel_names: list[str],
-        yx_patch_size: tuple[int, int],
+        initial_yx_patch_size: tuple[int, int],
         z_range: slice,
         anchor_transform: DictTransform | None = None,
         positive_transform: DictTransform | None = None,
@@ -55,7 +56,7 @@ class TripletDataset(Dataset):
         self.positive_transform = positive_transform
         self.negative_transform = negative_transform
         self.fit = fit
-        self.yx_patch_size = yx_patch_size
+        self.yx_patch_size = initial_yx_patch_size
         self.tracks = self._filter_tracks(tracks_tables)
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
@@ -98,12 +99,12 @@ class TripletDataset(Dataset):
 
     def _slice_patch(self, track_row: pd.Series) -> Tensor:
         image: ImageArray = track_row["position"]["0"]
-        t = track_row["t"]
+        time = track_row["t"]
         y_center = track_row["y"]
         x_center = track_row["x"]
         y_half, x_half = (d // 2 for d in self.yx_patch_size)
         patch = image.oindex[
-            slice(t, t + 1),
+            time,
             [int(i) for i in self.channel_indices],
             self.z_range,
             slice(y_center - y_half, y_center + y_half),
@@ -111,7 +112,7 @@ class TripletDataset(Dataset):
         ]
         return torch.from_numpy(patch)
 
-    def __getitem__(self, index: int) -> dict[str, Tensor]:
+    def __getitem__(self, index: int) -> dict[str, Tensor | dict[str, int | str]]:
         anchor_row = self.tracks.iloc[index]
         anchor_patch = self._slice_patch(anchor_row)
         if self.fit:
@@ -136,7 +137,10 @@ class TripletDataset(Dataset):
                 channel_names=self.channel_names,
                 patch=anchor_patch,
             )
-        sample = {"anchor": anchor_patch}
+        sample = {
+            "anchor": anchor_patch,
+            "index": anchor_row[["fov_name", "id"]].to_dict(),
+        }
         if self.fit:
             sample.update(
                 {
@@ -154,10 +158,11 @@ class TripletDataModule(HCSDataModule):
         tracks_path: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
+        initial_yx_patch_size: tuple[int, int] = (384, 384),
+        final_yx_patch_size: tuple[int, int] = (256, 256),
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
@@ -165,47 +170,70 @@ class TripletDataModule(HCSDataModule):
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
-            target_channel="",
+            target_channel=[],
             z_window_size=z_range[1] - z_range[0],
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
             architecture="UNeXt2",
-            yx_patch_size=yx_patch_size,
+            yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
             caching=caching,
         )
-        self.z_range = z_range
+        self.z_range = slice(*z_range)
+        self.tracks_path = Path(tracks_path)
+        self.initial_yx_patch_size = initial_yx_patch_size
 
-    def _setup_fit(self, dataset_settings: NormMeta):
-        dataset = ContrastiveDataset(
-            self.base_path,
-            self.channels,
-            self.x,
-            self.y,
-            self.timesteps_csv_path,
-            channel_names=self.channel_names,
-            transform=self.transform,
-            z_range=self.z_range,
+    def _align_tracks_tables_with_positions(
+        self,
+    ) -> tuple[list[Position], list[pd.DataFrame]]:
+        positions = []
+        tracks_tables = []
+        images_plate = open_ome_zarr(self.data_path)
+        for fov_name, _ in open_ome_zarr(self.tracks_path).positions():
+            positions.append(images_plate[fov_name])
+            tracks_df = pd.read_csv(
+                next((self.tracks_path / fov_name).glob("*.csv"))
+            ).astype(int)
+            tracks_tables.append(tracks_df)
+        return positions, tracks_tables
+
+    @property
+    def _base_dataset_settings(self) -> dict:
+        return {
+            "channel_names": self.source_channel,
+            "z_range": self.z_range,
+        }
+
+    def _setup_fit(self, dataset_settings: dict):
+        augment_transform, no_aug_transform = self._fit_transform()
+        positions, tracks_tables = self._align_tracks_tables_with_positions()
+        shuffled_indices = self._set_fit_global_state(len(positions))
+        positions = [positions[i] for i in shuffled_indices]
+        tracks_tables = [tracks_tables[i] for i in shuffled_indices]
+        self.train_dataset = TripletDataset(
+            positions=positions,
+            tracks_tables=tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
+            anchor_transform=no_aug_transform,
+            positive_transform=augment_transform,
+            negative_transform=augment_transform,
+            fit=True,
+            **dataset_settings,
         )
 
-        train_size = int(len(dataset) * self.train_split_ratio)
-        val_size = int(len(dataset) * self.val_split_ratio)
-        test_size = len(dataset) - train_size - val_size
-
-        self.train_dataset, self.val_dataset, self.test_dataset = (
-            torch.utils.data.random_split(dataset, [train_size, val_size, test_size])
+    def _setup_predict(self, dataset_settings: dict):
+        self._set_predict_global_state()
+        positions, tracks_tables = self._align_tracks_tables_with_positions()
+        self.predict_dataset = TripletDataset(
+            positions=positions,
+            tracks_tables=tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
+            anchor_transform=Compose(self.normalizations),
+            fit=False,
+            **dataset_settings,
         )
 
-    def _setup_predict(self, dataset_settings: NormMeta):
-        # setup prediction dataset
-        self.predict_dataset = PredictDataset(
-            self.predict_base_path,
-            self.channels,
-            self.x,
-            self.y,
-            timesteps_csv_path=self.timesteps_csv_path,
-            channel_names=self.channel_names,
-            z_range=self.z_range,
-        )
+    def _setup_test(self, *args, **kwargs):
+        raise NotImplementedError("Self-supervised model does not support testing")
