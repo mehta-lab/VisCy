@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import Any, Sequence
 
 import pandas as pd
 import torch
@@ -24,11 +24,12 @@ def _scatter_channels(
     return channels
 
 
-def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
+def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
     """
-    :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
+    :param dict[str, Tensor | NormMeta] patch_channels: dictionary of single-channel tensors
     :return Tensor: Multi-channel tensor
     """
+    patch_channels.pop("norm_meta", None)
     return torch.cat(list(patch_channels.values()), dim=0)
 
 
