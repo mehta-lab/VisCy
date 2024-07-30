@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Sequence
 
 import pandas as pd
 import torch
