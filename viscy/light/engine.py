@@ -714,11 +714,11 @@ class ContrastiveModule(LightningModule):
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        _, anchorProjection = self.model(anchor)
-        _, negativeProjection = self.model(neg_img)
-        _, positiveProjection = self.model(pos_img)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
         loss = self.loss_function(
-            anchorProjection, positiveProjection, negativeProjection
+            anchor_projection, positive_projection, negative_projection
         )
 
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
@@ -729,7 +729,7 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "training_images"
             )
 
-        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "train")
+        self.log_metrics(anchor_projection, positive_projection, negative_projection, "train")
 
         self.training_step_outputs.append(loss)
         return {"loss": loss}
@@ -780,11 +780,11 @@ class ContrastiveModule(LightningModule):
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        _, anchorProjection = self.model(anchor)
-        _, positiveProjection = self.model(pos_img)
-        _, negativeProjection = self.model(neg_img)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
         loss = self.loss_function(
-            anchorProjection, positiveProjection, negativeProjection
+            anchor_projection, positive_projection, negative_projection
         )
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
@@ -795,7 +795,7 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "validation_images"
             )
 
-        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "val")
+        self.log_metrics(anchor_projection, positive_projection, negative_projection, "val")
 
         self.validation_step_outputs.append(loss)
         return {"loss": loss}
@@ -846,16 +846,16 @@ class ContrastiveModule(LightningModule):
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        _, anchorProjection = self.model(anchor)
-        _, positiveProjection = self.model(pos_img)
-        _, negativeProjection = self.model(neg_img)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
         loss = self.loss_function(
-            anchorProjection, positiveProjection, negativeProjection
+            anchor_projection, positive_projection, negative_projection
         )
 
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "test")
+        self.log_metrics(anchor_projection, positive_projection, negative_projection, "test")
 
         self.test_step_outputs.append(loss)
         return {"loss": loss}
