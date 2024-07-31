@@ -61,7 +61,7 @@ data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/
 # updated tracking data
 tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
 source_channel = ["RFP", "Phase3D"]
-z_range = (28, 43)
+z_range = (26, 38)
 batch_size = 32
 
 # normalizations = [
@@ -80,7 +80,6 @@ batch_size = 32
 #                 divisor="iqr",
 #             ),
 # ]
-
 
 # Updated normalizations
 normalizations = [

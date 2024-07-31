@@ -55,9 +55,6 @@ class TripletDataset(Dataset):
         positive_transform: DictTransform | None = None,
         negative_transform: DictTransform | None = None,
         fit: bool = True,
-        save_histograms: bool = False,
-        num_histograms: int = 5,
-        histogram_save_path: str = "./histograms"
     ) -> None:
         self.positions = positions
         self.channel_names = channel_names
@@ -71,23 +68,7 @@ class TripletDataset(Dataset):
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
         self.tracks = self._filter_tracks(tracks_tables)
-        self.save_histograms = save_histograms
-        self.num_histograms = num_histograms
-        self.histogram_save_path = Path(histogram_save_path)
-        self.histogram_save_path.mkdir(parents=True, exist_ok=True)
-        self.histogram_count = 0
-
-    def plot_histogram(self, patch: Tensor, channel_names: list[str], index: int) -> None:
-        fig, axes = plt.subplots(1, len(channel_names), figsize=(15, 5))
-        for i, channel in enumerate(channel_names):
-            axes[i].hist(patch[i].cpu().numpy().flatten(), bins=256, range=(-5, 5), color='black', alpha=0.75)
-            axes[i].set_title(f"Histogram of {channel}")
-            axes[i].set_xlabel("Pixel Intensity")
-            axes[i].set_ylabel("Frequency")
-            axes[i].grid(True)
-        plt.tight_layout()
-        plt.savefig(self.histogram_save_path / f"histogram_{index}.png")
-        plt.close()
+ 
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         filtered_tracks = []
@@ -172,11 +153,6 @@ class TripletDataset(Dataset):
                 norm_meta=anchor_norm,
             )
         
-        # Plot and save histogram for anchor_patch if enabled
-        if self.save_histograms and self.histogram_count < self.num_histograms:
-            self.plot_histogram(anchor_patch[0], self.channel_names, self.histogram_count)
-            self.histogram_count += 1
-
         sample = {
             "anchor": anchor_patch,
             "index": anchor_row[["fov_name", "id"]].to_dict(),
@@ -205,7 +181,7 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [], # same as VS except for target_channel
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        num_fovs: int = None, # for quick testing
+        num_fovs: int = 4, # for quick testing
     ):
         super().__init__(
             data_path=data_path,
