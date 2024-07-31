@@ -207,6 +207,26 @@ class TripletDataModule(HCSDataModule):
         caching: bool = False,
         num_fovs: int = None, # for quick testing
     ):
+        """Lightning data module for triplet sampling of patches.
+
+        :param str data_path: Image dataset path
+        :param str tracks_path: Tracks labels dataset path
+        :param str | Sequence[str] source_channel: list of input channel names
+        :param tuple[int, int] z_range: range of valid z-slices
+        :param tuple[int, int] initial_yx_patch_size:
+            XY size of the initially sampled image patch,
+            defaults to (384, 384)
+        :param tuple[int, int] final_yx_patch_size: output patch size,
+            defaults to (256, 256)
+        :param float split_ratio: ratio of training samples, defaults to 0.8
+        :param int batch_size: batch size, defaults to 16
+        :param int num_workers: number of data-loading workers, defaults to 8
+        :param list[MapTransform] normalizations: list of normalization transforms,
+            defaults to []
+        :param list[MapTransform] augmentations: list of augmentation transforms,
+            defaults to []
+        :param bool caching: whether to cache the dataset, defaults to False
+        """
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
@@ -297,7 +317,7 @@ class TripletDataModule(HCSDataModule):
         self.predict_dataset = TripletDataset(
             positions=positions,
             tracks_tables=tracks_tables,
-            initial_yx_patch_size=self.yx_patch_size,
+            initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=Compose(self.normalizations),
             fit=False, #prediction dataset where fit is False
             **dataset_settings,
