@@ -6,7 +6,7 @@ from monai.networks.blocks import Convolution, ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from monai.networks.utils import normal_init
 from torch import Tensor, nn
-import numpy as np
+
 
 def icnr_init(
     conv: nn.Module,
@@ -63,6 +63,7 @@ def _get_convnext_stage(
         icnr_init(stage.blocks[-1].mlp.fc2, upsample_factor, upsample_dims=2)
     return stage
 
+
 class UNeXt2Stem(nn.Module):
     """Stem for UNeXt2 and ContrastiveEncoder networks."""
 
@@ -88,6 +89,7 @@ class UNeXt2Stem(nn.Module):
         # project Z/depth into channels
         # return a view when possible (contiguous)
         return x.reshape(b, c * d, h, w)
+
 
 class StemDepthtoChannels(nn.Module):
     """Stem with 3D convolution that maps depth to channels."""

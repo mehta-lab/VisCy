@@ -2,7 +2,6 @@ import timm
 import torch.nn as nn
 import torch.nn.functional as F
 
-from viscy.unet.networks.unext2 import UNeXt2Stem
 from viscy.unet.networks.unext2 import StemDepthtoChannels
 
 
@@ -20,7 +19,7 @@ class ContrastiveEncoder(nn.Module):
         super().__init__()
 
         self.predict = predict
-        self.backbone = backbone 
+        self.backbone = backbone
 
         """
         ContrastiveEncoder network that uses ConvNext and ResNet backbons from timm.
@@ -44,7 +43,6 @@ class ContrastiveEncoder(nn.Module):
         if "convnext" in backbone:
             print("Using ConvNext backbone.")
 
-
             in_channels_encoder = encoder.stem[0].out_channels
 
             # Remove the convolution layer of stem, but keep the layernorm.
@@ -58,8 +56,6 @@ class ContrastiveEncoder(nn.Module):
             )
 
             encoder.head.fc = nn.Identity()
-
-
 
         elif "resnet" in backbone:
             print("Using ResNet backbone.")
@@ -78,13 +74,14 @@ class ContrastiveEncoder(nn.Module):
 
         # Create a new stem that can handle 3D multi-channel input.
         print("using stem kernel size", stem_kernel_size)
-        self.stem = StemDepthtoChannels(in_channels, in_stack_depth, in_channels_encoder, stem_kernel_size) 
+        self.stem = StemDepthtoChannels(
+            in_channels, in_stack_depth, in_channels_encoder, stem_kernel_size
+        )
 
         # Append modified encoder.
         self.encoder = encoder
         # Append modified projection head.
         self.projection = projection
-
 
     def forward(self, x):
         x = self.stem(x)

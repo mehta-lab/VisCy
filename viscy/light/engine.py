@@ -1,8 +1,9 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
-import pandas as pd 
+
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from imageio import imwrite
@@ -662,8 +663,7 @@ class ContrastiveModule(LightningModule):
     @rank_zero_only
     # logs only one sample from the first batch per epoch
     def log_images(self, anchor, positive, negative, epoch, step_name):
-        z_idx = 7 # middle of z_slice
-
+        z_idx = 7  # middle of z_slice
 
         anchor_img_rfp = anchor[0, 0, z_idx, :, :].cpu().numpy()
         positive_img_rfp = positive[0, 0, z_idx, :, :].cpu().numpy()
@@ -729,7 +729,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "training_images"
             )
 
-        self.log_metrics(anchor_projection, positive_projection, negative_projection, "train")
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "train"
+        )
 
         self.training_step_outputs.append(loss)
         return {"loss": loss}
@@ -795,7 +797,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "validation_images"
             )
 
-        self.log_metrics(anchor_projection, positive_projection, negative_projection, "val")
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "val"
+        )
 
         self.validation_step_outputs.append(loss)
         return {"loss": loss}
@@ -855,7 +859,9 @@ class ContrastiveModule(LightningModule):
 
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(anchor_projection, positive_projection, negative_projection, "test")
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "test"
+        )
 
         self.test_step_outputs.append(loss)
         return {"loss": loss}
@@ -921,10 +927,12 @@ class ContrastiveModule(LightningModule):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
         features, projections = self.model(batch["anchor"])
-        index = batch["index"] 
-        self.predictions.append((features.cpu().numpy(), projections.cpu().numpy(), index))
+        index = batch["index"]
+        self.predictions.append(
+            (features.cpu().numpy(), projections.cpu().numpy(), index)
+        )
         return features, projections, index
-        
+
     def on_predict_epoch_end(self) -> None:
         combined_features = []
         combined_projections = []
@@ -934,24 +942,28 @@ class ContrastiveModule(LightningModule):
             combined_features.extend(features)
             combined_projections.extend(projections)
 
-            fov_names = index['fov_name']
-            cell_ids = index['id'].cpu().numpy()
+            fov_names = index["fov_name"]
+            cell_ids = index["id"].cpu().numpy()
 
             for fov_name, cell_id in zip(fov_names, cell_ids):
-                parts = fov_name.split('/')
+                parts = fov_name.split("/")
                 row = parts[1]
                 column = parts[2]
                 fov = parts[3]
 
-                csv_path = os.path.join(self.tracks_path, row, column, fov, f"tracks_{row}_{column}_{fov}.csv")
+                csv_path = os.path.join(
+                    self.tracks_path,
+                    row,
+                    column,
+                    fov,
+                    f"tracks_{row}_{column}_{fov}.csv",
+                )
 
                 df = pd.read_csv(csv_path)
 
+                track_id = df[df["id"] == cell_id]["track_id"].values[0]
+                timestep = df[df["id"] == cell_id]["t"].values[0]
 
-                track_id = df[df['id'] == cell_id]['track_id'].values[0]
-                timestep = df[df['id'] == cell_id]['t'].values[0]
-
-                
                 accumulated_data.append((row, column, fov, track_id, timestep))
 
         combined_features = np.array(combined_features)
@@ -959,16 +971,20 @@ class ContrastiveModule(LightningModule):
 
         np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
         print("Saved features with shape", combined_features.shape)
-        np.save("embeddings2/multi_resnet_predicted_projections.npy", combined_projections)
+        np.save(
+            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
+        )
         print("Saved projections with shape", combined_projections.shape)
 
         rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
-        df = pd.DataFrame({
-            "Row": rows,
-            "Column": columns,
-            "FOV": fovs,
-            "Cell ID": track_ids,
-            "Timestep": timesteps
-        })
+        df = pd.DataFrame(
+            {
+                "Row": rows,
+                "Column": columns,
+                "FOV": fovs,
+                "Cell ID": track_ids,
+                "Timestep": timesteps,
+            }
+        )
 
         df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)

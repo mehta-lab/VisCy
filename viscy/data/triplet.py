@@ -1,7 +1,6 @@
 import logging
 from pathlib import Path
 from typing import Sequence
-import matplotlib.pyplot as plt
 
 import pandas as pd
 import torch
@@ -15,6 +14,7 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
+
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
 ) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
@@ -22,6 +22,7 @@ def _scatter_channels(
     if norm_meta is not None:
         channels |= {"norm_meta": norm_meta}
     return channels
+
 
 def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
     """
@@ -68,7 +69,6 @@ class TripletDataset(Dataset):
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
         self.tracks = self._filter_tracks(tracks_tables)
- 
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         filtered_tracks = []
@@ -152,7 +152,7 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
-        
+
         sample = {
             "anchor": anchor_patch,
             "index": anchor_row[["fov_name", "id"]].to_dict(),
@@ -166,22 +166,23 @@ class TripletDataset(Dataset):
             )
         return sample
 
+
 class TripletDataModule(HCSDataModule):
     def __init__(
         self,
-        data_path: str, 
+        data_path: str,
         tracks_path: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
-        initial_yx_patch_size: tuple[int, int] = (512, 512), 
-        final_yx_patch_size: tuple[int, int] = (224, 224), 
-        split_ratio: float = 0.8, 
+        initial_yx_patch_size: tuple[int, int] = (512, 512),
+        final_yx_patch_size: tuple[int, int] = (224, 224),
+        split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        normalizations: list[MapTransform] = [], 
+        normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        num_fovs: int = 4, 
+        num_fovs: int = 4,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -234,13 +235,12 @@ class TripletDataModule(HCSDataModule):
                 next((self.tracks_path / fov_name).glob("*.csv"))
             ).astype(int)
             tracks_tables.append(tracks_df)
-            
+
         if self.num_fovs is not None:
-            positions = positions[:self.num_fovs]
-            tracks_tables = tracks_tables[:self.num_fovs]
+            positions = positions[: self.num_fovs]
+            tracks_tables = tracks_tables[: self.num_fovs]
 
         return positions, tracks_tables
-    
 
     @property
     def _base_dataset_settings(self) -> dict:
@@ -295,7 +295,7 @@ class TripletDataModule(HCSDataModule):
             tracks_tables=tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=Compose(self.normalizations),
-            fit=False, 
+            fit=False,
             **dataset_settings,
         )
 
