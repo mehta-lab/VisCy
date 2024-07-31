@@ -730,7 +730,6 @@ class ContrastiveModule(LightningModule):
             )
 
         self.log_metrics(anchorProjection, positiveProjection, negativeProjection, "train")
-        # self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
 
         self.training_step_outputs.append(loss)
         return {"loss": loss}
@@ -948,12 +947,10 @@ class ContrastiveModule(LightningModule):
 
                 df = pd.read_csv(csv_path)
 
-                #print(f"Processing ID {cell_id} in {csv_path}")
 
                 track_id = df[df['id'] == cell_id]['track_id'].values[0]
                 timestep = df[df['id'] == cell_id]['t'].values[0]
 
-                #print(f"Extracted track_id: {track_id}, timestep: {timestep}")
                 
                 accumulated_data.append((row, column, fov, track_id, timestep))
 

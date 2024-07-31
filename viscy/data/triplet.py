@@ -169,19 +169,19 @@ class TripletDataset(Dataset):
 class TripletDataModule(HCSDataModule):
     def __init__(
         self,
-        data_path: str, #registered ome_zarr
-        tracks_path: str, #tracking ome_zarr
+        data_path: str, 
+        tracks_path: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
-        initial_yx_patch_size: tuple[int, int] = (512, 512), # depends on affine transformations (roate and scaling), do full roation (sqrt(2)) and scaling (largest bounded box without padding).
-        final_yx_patch_size: tuple[int, int] = (224, 224), # 224, 224
-        split_ratio: float = 0.8, #training and prediction only 
+        initial_yx_patch_size: tuple[int, int] = (512, 512), 
+        final_yx_patch_size: tuple[int, int] = (224, 224), 
+        split_ratio: float = 0.8, 
         batch_size: int = 16,
         num_workers: int = 8,
-        normalizations: list[MapTransform] = [], # same as VS except for target_channel
+        normalizations: list[MapTransform] = [], 
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        num_fovs: int = 4, # for quick testing
+        num_fovs: int = 4, 
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -295,7 +295,7 @@ class TripletDataModule(HCSDataModule):
             tracks_tables=tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=Compose(self.normalizations),
-            fit=False, #prediction dataset where fit is False
+            fit=False, 
             **dataset_settings,
         )
 
