@@ -1,6 +1,7 @@
 import logging
 from pathlib import Path
 from typing import Sequence
+import matplotlib.pyplot as plt
 
 import pandas as pd
 import torch
@@ -14,7 +15,6 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
-
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
 ) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
@@ -23,12 +23,21 @@ def _scatter_channels(
         channels |= {"norm_meta": norm_meta}
     return channels
 
+# def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
+#     """
+#     :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
+#     :return Tensor: Multi-channel tensor
+#     """
+#     #return torch.cat(list(patch_channels.values()), dim=0)
+#     tensor_channels = [v for v in patch_channels.values() if isinstance(v, Tensor)]
+#     return torch.cat(tensor_channels, dim=0)
 
-def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
+def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
     """
-    :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
+    :param dict[str, Tensor | NormMeta] patch_channels: dictionary of single-channel tensors
     :return Tensor: Multi-channel tensor
     """
+    patch_channels.pop("norm_meta", None)
     return torch.cat(list(patch_channels.values()), dim=0)
 
 
@@ -55,6 +64,9 @@ class TripletDataset(Dataset):
         positive_transform: DictTransform | None = None,
         negative_transform: DictTransform | None = None,
         fit: bool = True,
+        save_histograms: bool = False,
+        num_histograms: int = 5,
+        histogram_save_path: str = "./histograms"
     ) -> None:
         self.positions = positions
         self.channel_names = channel_names
@@ -68,6 +80,23 @@ class TripletDataset(Dataset):
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
         self.tracks = self._filter_tracks(tracks_tables)
+        self.save_histograms = save_histograms
+        self.num_histograms = num_histograms
+        self.histogram_save_path = Path(histogram_save_path)
+        self.histogram_save_path.mkdir(parents=True, exist_ok=True)
+        self.histogram_count = 0
+
+    def plot_histogram(self, patch: Tensor, channel_names: list[str], index: int) -> None:
+        fig, axes = plt.subplots(1, len(channel_names), figsize=(15, 5))
+        for i, channel in enumerate(channel_names):
+            axes[i].hist(patch[i].cpu().numpy().flatten(), bins=256, range=(-5, 5), color='black', alpha=0.75)
+            axes[i].set_title(f"Histogram of {channel}")
+            axes[i].set_xlabel("Pixel Intensity")
+            axes[i].set_ylabel("Frequency")
+            axes[i].grid(True)
+        plt.tight_layout()
+        plt.savefig(self.histogram_save_path / f"histogram_{index}.png")
+        plt.close()
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         filtered_tracks = []
@@ -151,6 +180,12 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
+        
+        # Plot and save histogram for anchor_patch if enabled
+        if self.save_histograms and self.histogram_count < self.num_histograms:
+            self.plot_histogram(anchor_patch[0], self.channel_names, self.histogram_count)
+            self.histogram_count += 1
+
         sample = {
             "anchor": anchor_patch,
             "index": anchor_row[["fov_name", "id"]].to_dict(),
@@ -164,22 +199,22 @@ class TripletDataset(Dataset):
             )
         return sample
 
-
 class TripletDataModule(HCSDataModule):
     def __init__(
         self,
-        data_path: str,
-        tracks_path: str,
+        data_path: str, #registered ome_zarr
+        tracks_path: str, #tracking ome_zarr
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
-        initial_yx_patch_size: tuple[int, int] = (384, 384),
-        final_yx_patch_size: tuple[int, int] = (256, 256),
-        split_ratio: float = 0.8,
+        initial_yx_patch_size: tuple[int, int] = (512, 512), # depends on affine transformations (roate and scaling), do full roation (sqrt(2)) and scaling (largest bounded box without padding).
+        final_yx_patch_size: tuple[int, int] = (224, 224), # 224, 224
+        split_ratio: float = 0.8, #training and prediction only 
         batch_size: int = 16,
         num_workers: int = 8,
-        normalizations: list[MapTransform] = [],
+        normalizations: list[MapTransform] = [], # same as VS except for target_channel
         augmentations: list[MapTransform] = [],
         caching: bool = False,
+        num_fovs: int = None, # for quick testing
     ):
         super().__init__(
             data_path=data_path,
@@ -198,6 +233,7 @@ class TripletDataModule(HCSDataModule):
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
+        self.num_fovs = num_fovs
 
     def _align_tracks_tables_with_positions(
         self,
@@ -211,7 +247,13 @@ class TripletDataModule(HCSDataModule):
                 next((self.tracks_path / fov_name).glob("*.csv"))
             ).astype(int)
             tracks_tables.append(tracks_df)
+            
+        if self.num_fovs is not None:
+            positions = positions[:self.num_fovs]
+            tracks_tables = tracks_tables[:self.num_fovs]
+
         return positions, tracks_tables
+    
 
     @property
     def _base_dataset_settings(self) -> dict:
@@ -226,9 +268,30 @@ class TripletDataModule(HCSDataModule):
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
         tracks_tables = [tracks_tables[i] for i in shuffled_indices]
+
+        num_train_fovs = int(len(positions) * self.split_ratio)
+        train_positions = positions[:num_train_fovs]
+        val_positions = positions[num_train_fovs:]
+        train_tracks_tables = tracks_tables[:num_train_fovs]
+        val_tracks_tables = tracks_tables[num_train_fovs:]
+
+        print(f"Number of training FOVs: {len(train_positions)}")
+        print(f"Number of validation FOVs: {len(val_positions)}")
+
         self.train_dataset = TripletDataset(
-            positions=positions,
-            tracks_tables=tracks_tables,
+            positions=train_positions,
+            tracks_tables=train_tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
+            anchor_transform=no_aug_transform,
+            positive_transform=augment_transform,
+            negative_transform=augment_transform,
+            fit=True,
+            **dataset_settings,
+        )
+
+        self.val_dataset = TripletDataset(
+            positions=val_positions,
+            tracks_tables=val_tracks_tables,
             initial_yx_patch_size=self.yx_patch_size,
             anchor_transform=no_aug_transform,
             positive_transform=augment_transform,
@@ -245,7 +308,7 @@ class TripletDataModule(HCSDataModule):
             tracks_tables=tracks_tables,
             initial_yx_patch_size=self.yx_patch_size,
             anchor_transform=Compose(self.normalizations),
-            fit=False,
+            fit=False, #prediction dataset where fit is False
             **dataset_settings,
         )
 

@@ -1,7 +1,7 @@
 import logging
 import os
 from typing import Literal, Sequence, Union
-
+import pandas as pd 
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -569,6 +569,7 @@ class ContrastiveModule(LightningModule):
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
         predict: bool = False,
+        tracks_path: str = "data/tracks",
     ) -> None:
         super().__init__()
         if wandb is None:
@@ -587,7 +588,8 @@ class ContrastiveModule(LightningModule):
         self.validation_metrics = []
         self.test_metrics = []
         self.processed_order = []
-        self.position_to_timesteps = position_to_timesteps
+        self.predictions = []
+        self.tracks_path = tracks_path
 
         self.model = ContrastiveEncoder(
             backbone=backbone,
@@ -599,12 +601,12 @@ class ContrastiveModule(LightningModule):
         )
 
         # required to log the graph.
-        self.example_input_array = torch.rand(
-            1,
-            in_channels,
-            in_stack_depth,
-            *example_input_yx_shape,  # batch size
-        )
+        # self.example_input_array = torch.rand(
+        #     1,
+        #     in_channels,
+        #     in_stack_depth,
+        #     *example_input_yx_shape,  # batch size
+        # )
 
         self.images_to_log = []
         self.train_batch_counter = 0
@@ -660,34 +662,48 @@ class ContrastiveModule(LightningModule):
     @rank_zero_only
     # logs only one sample from the first batch per epoch
     def log_images(self, anchor, positive, negative, epoch, step_name):
-        z_idx = 7
+        z_idx = 7 # middle of z_slice
+
 
         anchor_img_rfp = anchor[0, 0, z_idx, :, :].cpu().numpy()
         positive_img_rfp = positive[0, 0, z_idx, :, :].cpu().numpy()
         negative_img_rfp = negative[0, 0, z_idx, :, :].cpu().numpy()
 
-        # anchor_img_phase = anchor[0, 0, z_idx, :, :].cpu().numpy()
-        # positive_img_phase = positive[0, 0, z_idx, :, :].cpu().numpy()
-        # negative_img_phase = negative[0, 0, z_idx, :, :].cpu().numpy()
+        anchor_img_phase = anchor[0, 1, z_idx, :, :].cpu().numpy()
+        positive_img_phase = positive[0, 1, z_idx, :, :].cpu().numpy()
+        negative_img_phase = negative[0, 1, z_idx, :, :].cpu().numpy()
 
-        # Debug prints to check the contents of the images
-        print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
-        print(
-            f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}"
-        )
-        print(
-            f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
-        )
+        def normalize(image):
+            min_val = image.min()
+            max_val = image.max()
+            return (image - min_val) / (max_val - min_val) * 255
 
-        print(
-            f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
-        )
-        print(
-            f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
-        )
-        print(
-            f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
-        )
+        anchor_img_rfp = normalize(anchor_img_rfp)
+        positive_img_rfp = normalize(positive_img_rfp)
+        negative_img_rfp = normalize(negative_img_rfp)
+
+        anchor_img_phase = normalize(anchor_img_phase)
+        positive_img_phase = normalize(positive_img_phase)
+        negative_img_phase = normalize(negative_img_phase)
+
+        # # Debug prints to check the contents of the images
+        # print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
+        # print(
+        #     f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}"
+        # )
+        # print(
+        #     f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
+        # )
+
+        # print(
+        #     f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
+        # )
+        # print(
+        #     f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
+        # )
+        # print(
+        #     f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
+        # )
 
         # combine the images side by side
         combined_img_rfp = np.concatenate(
@@ -921,63 +937,60 @@ class ContrastiveModule(LightningModule):
             ) / len(metrics)
         return avg_metrics
 
-    # TO-DO: fix prediction
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
-        features, projections = self.encoder(batch["anchor"])
-        # FIXME: fix in prediction writer
-        self.processed_order.extend(batch["index"])
-        return features, projections
-
+        features, projections = self.model(batch["anchor"])
+        index = batch["index"] 
+        self.predictions.append((features.cpu().numpy(), projections.cpu().numpy(), index))
+        return features, projections, index
+        
     def on_predict_epoch_end(self) -> None:
-        # Combine results from all workers
         combined_features = []
         combined_projections = []
         accumulated_data = []
 
-        for pos_info in self.processed_order:
-            feature, projection = self.embeddings_dict[pos_info]
-            combined_features.append(feature)
-            combined_projections.append(projection)
+        for features, projections, index in self.predictions:
+            combined_features.extend(features)
+            combined_projections.extend(projections)
 
-            # Extract row, column, FOV, cell ID, and timestep from pos_info
-            parts = pos_info.split('/')
-            if len(parts) < 4:  # Adjust to 4 to include timestep
-                raise ValueError(f"Invalid position path: {pos_info}")
+            fov_names = index['fov_name']
+            cell_ids = index['id'].cpu().numpy()
 
-            row = parts[0]
-            column = parts[1]
-            fov_cell = parts[2]
-            timestep = int(parts[3].replace('t', ''))  # Extract timestep
+            for fov_name, cell_id in zip(fov_names, cell_ids):
+                parts = fov_name.split('/')
+                row = parts[1]
+                column = parts[2]
+                fov = parts[3]
 
-            fov = int(fov_cell.split("fov")[1].split("cell")[0])
-            cell_id = int(fov_cell.split("cell")[1])
+                csv_path = os.path.join(self.tracks_path, row, column, fov, f"tracks_{row}_{column}_{fov}.csv")
 
-            accumulated_data.append((row, column, fov, cell_id, timestep))
+                df = pd.read_csv(csv_path)
+
+                #print(f"Processing ID {cell_id} in {csv_path}")
+
+                track_id = df[df['id'] == cell_id]['track_id'].values[0]
+                timestep = df[df['id'] == cell_id]['t'].values[0]
+
+                #print(f"Extracted track_id: {track_id}, timestep: {timestep}")
+                
+                accumulated_data.append((row, column, fov, track_id, timestep))
 
         combined_features = np.array(combined_features)
         combined_projections = np.array(combined_projections)
 
-        print(f"Combined features shape: {combined_features.shape}")
-        print(f"Combined projections shape: {combined_projections.shape}")
+        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
+        print("Saved features with shape", combined_features.shape)
+        np.save("embeddings2/multi_resnet_predicted_projections.npy", combined_projections)
+        print("Saved projections with shape", combined_projections.shape)
 
-        np.save("embeddings1/uninf_resnet_stem_phase_features.npy", combined_features)
-        np.save("embeddings1/uninf_resnet_stem_phase_projections.npy", combined_projections)
-
-        # Create separate lists for DataFrame
-        rows, columns, fovs, cell_ids, timesteps = zip(*accumulated_data)
-
-        # Debugging prints to check lengths
-        print(f"Lengths - Rows: {len(rows)}, Columns: {len(columns)}, FOVs: {len(fovs)}, Cell IDs: {len(cell_ids)}, Timesteps: {len(timesteps)}")
-
-        # Create a DataFrame and save to CSV
+        rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
         df = pd.DataFrame({
             "Row": rows,
             "Column": columns,
             "FOV": fovs,
-            "Cell ID": cell_ids,
+            "Cell ID": track_ids,
             "Timestep": timesteps
         })
 
-        df.to_csv("embeddings1/uninf_resnet_stem_phase_order.csv", index=False)
+        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)

@@ -25,6 +25,8 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
+import warnings
+warnings.filterwarnings("ignore", message="To copy construct from a tensor")
 
 _logger = logging.getLogger("lightning.pytorch")
 
