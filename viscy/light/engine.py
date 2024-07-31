@@ -3,6 +3,7 @@ import os
 from typing import Literal, Sequence, Union
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 from imageio import imwrite
@@ -563,12 +564,13 @@ class ContrastiveModule(LightningModule):
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_steps_per_epoch: int = 8,
-        in_channels: int = 2,
+        in_channels: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 15,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
         predict: bool = False,
+        tracks_path: str = "data/tracks",
     ) -> None:
         super().__init__()
         if wandb is None:
@@ -587,8 +589,10 @@ class ContrastiveModule(LightningModule):
         self.validation_metrics = []
         self.test_metrics = []
         self.processed_order = []
+        self.predictions = []
+        self.tracks_path = tracks_path
 
-        self.encoder = ContrastiveEncoder(
+        self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
@@ -597,13 +601,13 @@ class ContrastiveModule(LightningModule):
             predict=predict,
         )
 
-        # required to log the graph.
-        self.example_input_array = torch.rand(
-            1,
-            in_channels,
-            in_stack_depth,
-            *example_input_yx_shape,  # batch size
-        )
+        # commented because not logging the graph.
+        # self.example_input_array = torch.rand(
+        #     1,
+        #     in_channels,
+        #     in_stack_depth,
+        #     *example_input_yx_shape,  # batch size
+        # )
 
         self.images_to_log = []
         self.train_batch_counter = 0
@@ -611,7 +615,7 @@ class ContrastiveModule(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward pass of the model."""
-        projections = self.encoder(x)
+        _, projections = self.model(x)
         return projections
         # features is without projection head and projects is with projection head
 
@@ -659,7 +663,7 @@ class ContrastiveModule(LightningModule):
     @rank_zero_only
     # logs only one sample from the first batch per epoch
     def log_images(self, anchor, positive, negative, epoch, step_name):
-        z_idx = 7
+        z_idx = 7  # middle of z_slice
 
         anchor_img_rfp = anchor[0, 0, z_idx, :, :].cpu().numpy()
         positive_img_rfp = positive[0, 0, z_idx, :, :].cpu().numpy()
@@ -669,24 +673,18 @@ class ContrastiveModule(LightningModule):
         positive_img_phase = positive[0, 1, z_idx, :, :].cpu().numpy()
         negative_img_phase = negative[0, 1, z_idx, :, :].cpu().numpy()
 
-        # Debug prints to check the contents of the images
-        print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
-        print(
-            f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}"
-        )
-        print(
-            f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
-        )
+        def normalize(image):
+            min_val = image.min()
+            max_val = image.max()
+            return (image - min_val) / (max_val - min_val) * 255
 
-        print(
-            f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
-        )
-        print(
-            f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
-        )
-        print(
-            f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
-        )
+        anchor_img_rfp = normalize(anchor_img_rfp)
+        positive_img_rfp = normalize(positive_img_rfp)
+        negative_img_rfp = normalize(negative_img_rfp)
+
+        anchor_img_phase = normalize(anchor_img_phase)
+        positive_img_phase = normalize(positive_img_phase)
+        negative_img_phase = normalize(negative_img_phase)
 
         # combine the images side by side
         combined_img_rfp = np.concatenate(
@@ -712,13 +710,16 @@ class ContrastiveModule(LightningModule):
         batch_idx: int,
     ) -> Tensor:
         """Training step of the model."""
+
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
+        loss = self.loss_function(
+            anchor_projection, positive_projection, negative_projection
+        )
 
         self.log("train/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -728,8 +729,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "training_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "train")
-        # self.print_embedding_norms(emb_anchor, emb_pos, emb_neg, 'train')
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "train"
+        )
 
         self.training_step_outputs.append(loss)
         return {"loss": loss}
@@ -776,13 +778,16 @@ class ContrastiveModule(LightningModule):
         batch_idx: int,
     ) -> Tensor:
         """Validation step of the model."""
+
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
+        loss = self.loss_function(
+            anchor_projection, positive_projection, negative_projection
+        )
 
         self.log("val/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
@@ -792,7 +797,9 @@ class ContrastiveModule(LightningModule):
                 anchor, pos_img, neg_img, self.current_epoch, "validation_images"
             )
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "val")
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "val"
+        )
 
         self.validation_step_outputs.append(loss)
         return {"loss": loss}
@@ -839,17 +846,22 @@ class ContrastiveModule(LightningModule):
         batch_idx: int,
     ) -> Tensor:
         """Test step of the model."""
+
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        emb_anchor = self.encoder(anchor)
-        emb_pos = self.encoder(pos_img)
-        emb_neg = self.encoder(neg_img)
-        loss = self.loss_function(emb_anchor, emb_pos, emb_neg)
+        _, anchor_projection = self.model(anchor)
+        _, negative_projection = self.model(neg_img)
+        _, positive_projection = self.model(pos_img)
+        loss = self.loss_function(
+            anchor_projection, positive_projection, negative_projection
+        )
 
         self.log("test/loss_step", loss, on_step=True, prog_bar=True, logger=True)
 
-        self.log_metrics(emb_anchor, emb_pos, emb_neg, "test")
+        self.log_metrics(
+            anchor_projection, positive_projection, negative_projection, "test"
+        )
 
         self.test_step_outputs.append(loss)
         return {"loss": loss}
@@ -914,46 +926,65 @@ class ContrastiveModule(LightningModule):
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         print("running predict step!")
         """Prediction step for extracting embeddings."""
-        features, projections = self.encoder(batch["anchor"])
-        # FIXME: fix in prediction writer
-        self.processed_order.extend(batch["index"])
-        return features, projections
+        features, projections = self.model(batch["anchor"])
+        index = batch["index"]
+        self.predictions.append(
+            (features.cpu().numpy(), projections.cpu().numpy(), index)
+        )
+        return features, projections, index
 
-    # already saved, not needed again
-    # def on_predict_epoch_end(self) -> None:
-    #         print(f"Processed order: {self.processed_order}")
-    #         rows, columns, fovs, cell_ids = [], [], [], []
+    def on_predict_epoch_end(self) -> None:
+        combined_features = []
+        combined_projections = []
+        accumulated_data = []
 
-    #         for position_path in self.processed_order:
-    #             try:
-    #                 parts = position_path.split("/")
-    #                 if len(parts) < 3:
-    #                     raise ValueError(f"Invalid position path: {position_path}")
+        for features, projections, index in self.predictions:
+            combined_features.extend(features)
+            combined_projections.extend(projections)
 
-    #                 row = parts[0]
-    #                 column = parts[1]
-    #                 fov_cell = parts[2]
+            fov_names = index["fov_name"]
+            cell_ids = index["id"].cpu().numpy()
 
-    #                 fov = int(fov_cell.split("fov")[1].split("cell")[0])
-    #                 cell_id = int(fov_cell.split("cell")[1])
+            for fov_name, cell_id in zip(fov_names, cell_ids):
+                parts = fov_name.split("/")
+                row = parts[1]
+                column = parts[2]
+                fov = parts[3]
 
-    #                 rows.append(row)
-    #                 columns.append(column)
-    #                 fovs.append(fov)
-    #                 cell_ids.append(cell_id)
+                csv_path = os.path.join(
+                    self.tracks_path,
+                    row,
+                    column,
+                    fov,
+                    f"tracks_{row}_{column}_{fov}.csv",
+                )
 
-    #             except (IndexError, ValueError) as e:
-    #                 print(f"Skipping invalid position path: {position_path} with error: {e}")
+                df = pd.read_csv(csv_path)
 
-    #         # Save processed order
-    #         if rows and columns and fovs and cell_ids:
-    #             processed_order_df = pd.DataFrame({
-    #                 "Row": rows,
-    #                 "Column": columns,
-    #                 "FOV": fovs,
-    #                 "Cell ID": cell_ids
-    #             })
-    #             print(f"Saving processed order DataFrame: {processed_order_df}")
-    #             processed_order_df.to_csv("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/epoch66_processed_order.csv", index=False)
-    #         else:
-    #             print("No valid processed orders found to save.")
+                track_id = df[df["id"] == cell_id]["track_id"].values[0]
+                timestep = df[df["id"] == cell_id]["t"].values[0]
+
+                accumulated_data.append((row, column, fov, track_id, timestep))
+
+        combined_features = np.array(combined_features)
+        combined_projections = np.array(combined_projections)
+
+        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
+        print("Saved features with shape", combined_features.shape)
+        np.save(
+            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
+        )
+        print("Saved projections with shape", combined_projections.shape)
+
+        rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
+        df = pd.DataFrame(
+            {
+                "Row": rows,
+                "Column": columns,
+                "FOV": fovs,
+                "Cell ID": track_ids,
+                "Timestep": timesteps,
+            }
+        )
+
+        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)

@@ -152,6 +152,7 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
+
         sample = {
             "anchor": anchor_patch,
             "index": anchor_row[["fov_name", "id"]].to_dict(),
@@ -173,8 +174,8 @@ class TripletDataModule(HCSDataModule):
         tracks_path: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
-        initial_yx_patch_size: tuple[int, int] = (384, 384),
-        final_yx_patch_size: tuple[int, int] = (256, 256),
+        initial_yx_patch_size: tuple[int, int] = (512, 512),
+        final_yx_patch_size: tuple[int, int] = (224, 224),
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
@@ -232,6 +233,7 @@ class TripletDataModule(HCSDataModule):
                 next((self.tracks_path / fov_name).glob("*.csv"))
             ).astype(int)
             tracks_tables.append(tracks_df)
+
         return positions, tracks_tables
 
     @property
@@ -247,10 +249,31 @@ class TripletDataModule(HCSDataModule):
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
         tracks_tables = [tracks_tables[i] for i in shuffled_indices]
+
+        num_train_fovs = int(len(positions) * self.split_ratio)
+        train_positions = positions[:num_train_fovs]
+        val_positions = positions[num_train_fovs:]
+        train_tracks_tables = tracks_tables[:num_train_fovs]
+        val_tracks_tables = tracks_tables[num_train_fovs:]
+
+        print(f"Number of training FOVs: {len(train_positions)}")
+        print(f"Number of validation FOVs: {len(val_positions)}")
+
         self.train_dataset = TripletDataset(
-            positions=positions,
-            tracks_tables=tracks_tables,
-            initial_yx_patch_size=self.initial_yx_patch_size,
+            positions=train_positions,
+            tracks_tables=train_tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
+            anchor_transform=no_aug_transform,
+            positive_transform=augment_transform,
+            negative_transform=augment_transform,
+            fit=True,
+            **dataset_settings,
+        )
+
+        self.val_dataset = TripletDataset(
+            positions=val_positions,
+            tracks_tables=val_tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
             anchor_transform=no_aug_transform,
             positive_transform=augment_transform,
             negative_transform=augment_transform,
