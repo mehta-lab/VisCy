@@ -182,7 +182,6 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        num_fovs: int = 4,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -221,7 +220,6 @@ class TripletDataModule(HCSDataModule):
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
-        self.num_fovs = num_fovs
 
     def _align_tracks_tables_with_positions(
         self,
@@ -235,10 +233,6 @@ class TripletDataModule(HCSDataModule):
                 next((self.tracks_path / fov_name).glob("*.csv"))
             ).astype(int)
             tracks_tables.append(tracks_df)
-
-        if self.num_fovs is not None:
-            positions = positions[: self.num_fovs]
-            tracks_tables = tracks_tables[: self.num_fovs]
 
         return positions, tracks_tables
 
