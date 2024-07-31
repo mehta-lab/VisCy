@@ -600,7 +600,7 @@ class ContrastiveModule(LightningModule):
             predict=predict,
         )
 
-        # required to log the graph.
+        # commented because not logging the graph.
         # self.example_input_array = torch.rand(
         #     1,
         #     in_channels,
@@ -685,25 +685,6 @@ class ContrastiveModule(LightningModule):
         anchor_img_phase = normalize(anchor_img_phase)
         positive_img_phase = normalize(positive_img_phase)
         negative_img_phase = normalize(negative_img_phase)
-
-        # # Debug prints to check the contents of the images
-        # print(f"Anchor RFP min: {anchor_img_rfp.min()}, max: {anchor_img_rfp.max()}")
-        # print(
-        #     f"Positive RFP min: {positive_img_rfp.min()}, max: {positive_img_rfp.max()}"
-        # )
-        # print(
-        #     f"Negative RFP min: {negative_img_rfp.min()}, max: {negative_img_rfp.max()}"
-        # )
-
-        # print(
-        #     f"Anchor Phase min: {anchor_img_phase.min()}, max: {anchor_img_phase.max()}"
-        # )
-        # print(
-        #     f"Positive Phase min: {positive_img_phase.min()}, max: {positive_img_phase.max()}"
-        # )
-        # print(
-        #     f"Negative Phase min: {negative_img_phase.min()}, max: {negative_img_phase.max()}"
-        # )
 
         # combine the images side by side
         combined_img_rfp = np.concatenate(

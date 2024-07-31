@@ -23,15 +23,6 @@ def _scatter_channels(
         channels |= {"norm_meta": norm_meta}
     return channels
 
-# def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
-#     """
-#     :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
-#     :return Tensor: Multi-channel tensor
-#     """
-#     #return torch.cat(list(patch_channels.values()), dim=0)
-#     tensor_channels = [v for v in patch_channels.values() if isinstance(v, Tensor)]
-#     return torch.cat(tensor_channels, dim=0)
-
 def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
     """
     :param dict[str, Tensor | NormMeta] patch_channels: dictionary of single-channel tensors
