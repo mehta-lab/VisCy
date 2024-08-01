@@ -42,11 +42,11 @@ def main(hparams):
     # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/expanded_transitioning_cells_metadata.csv
     checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/contrastive_model-test-epoch=09-val_loss=0.00.ckpt"
     
-    # non-rechunked data 
-    data_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr"
+    # rechunked data 
+    data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
 
     # updated tracking data
-    tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr"
+    tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
     
     source_channel = ["RFP", "Phase3D"]
     z_range = (26, 38)
@@ -64,6 +64,7 @@ def main(hparams):
         batch_size=batch_size,
         num_workers=hparams.num_workers,
         normalizations=normalizations,
+        predict_cells = True, 
     )
 
     data_module.setup(stage="predict")

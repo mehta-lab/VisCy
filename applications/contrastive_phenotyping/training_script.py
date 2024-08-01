@@ -212,7 +212,7 @@ def main(hparams):
     wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
 
     # set for each run to avoid overwritting!
-    custom_folder_name = "test"
+    custom_folder_name = "multi-resnet1"
     checkpoint_callback = ModelCheckpoint(
         dirpath=os.path.join(model_dir, custom_folder_name),
         filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
@@ -253,11 +253,11 @@ def main(hparams):
 # Argument parser for command-line options
 # to-do: need to clean up to always use the same args
 parser = ArgumentParser()
-parser.add_argument("--backbone", type=str, default="convnext_tiny")
+parser.add_argument("--backbone", type=str, default="resnet50")
 parser.add_argument("--margin", type=float, default=0.5)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--schedule", type=str, default="Constant")
-parser.add_argument("--log_steps_per_epoch", type=int, default=10)
+parser.add_argument("--log_steps_per_epoch", type=int, default=150)
 parser.add_argument("--embedding_len", type=int, default=256)
 parser.add_argument("--max_epochs", type=int, default=100)
 parser.add_argument("--accelerator", type=str, default="gpu")

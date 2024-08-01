@@ -663,7 +663,7 @@ class ContrastiveModule(LightningModule):
     @rank_zero_only
     # logs only one sample from the first batch per epoch
     def log_images(self, anchor, positive, negative, epoch, step_name):
-        z_idx = 7  # middle of z_slice
+        z_idx = 6  # middle of z_slice
 
         anchor_img_rfp = anchor[0, 0, z_idx, :, :].cpu().numpy()
         positive_img_rfp = positive[0, 0, z_idx, :, :].cpu().numpy()
