@@ -629,13 +629,13 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{phase}/positive_norm: {positive_norm}")
         _logger.debug(f"{phase}/negative_norm: {negative_norm}")
 
-    def log_metrics(
+    def _log_metrics(
         self, loss, anchor, positive, negative, stage: Literal["train", "val"]
     ):
-        cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1)
-        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1)
-        euclidean_dist_pos = F.pairwise_distance(anchor, positive)
-        euclidean_dist_neg = F.pairwise_distance(anchor, negative)
+        cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
+        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
+        euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
+        euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
         self.log_dict(
             {
                 f"loss/{stage}": loss.to(self.device),
@@ -649,6 +649,12 @@ class ContrastiveModule(LightningModule):
             prog_bar=True,
             logger=True,
             sync_dist=True,
+        )
+
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+        grid = _render_images(imgs)
+        self.logger.experiment.add_image(
+            key, grid, self.current_epoch, dataformats="HWC"
         )
 
     def training_step(
@@ -667,7 +673,7 @@ class ContrastiveModule(LightningModule):
         loss = self.loss_function(
             anchor_projection, positive_projection, negative_projection
         )
-        self.log_metrics(
+        self._log_metrics(
             loss, anchor_projection, positive_projection, negative_projection, stage
         )
         if batch_idx < self.log_batches_per_epoch:
@@ -698,7 +704,7 @@ class ContrastiveModule(LightningModule):
         loss = self.loss_function(
             anchor_projection, positive_projection, negative_projection
         )
-        self.log_metrics(
+        self._log_metrics(
             loss, anchor_projection, positive_projection, negative_projection, "val"
         )
         if batch_idx < self.log_batches_per_epoch:
