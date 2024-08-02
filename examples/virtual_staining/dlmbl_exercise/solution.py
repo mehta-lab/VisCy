@@ -91,7 +91,9 @@ Learning goals:
 
 # %% Imports
 import os
+from glob import glob
 from pathlib import Path
+from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -99,45 +101,31 @@ import pandas as pd
 import torch
 import torchview
 import torchvision
+from cellpose import models
 from iohub import open_ome_zarr
 from iohub.reader import print_info
 from lightning.pytorch import seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
+from natsort import natsorted
+from numpy.typing import ArrayLike
 from skimage import metrics  # for metrics.
-from cellpose import models
-
 # pytorch lightning wrapper for Tensorboard.
 from skimage.color import label2rgb
-
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
-
+from torchmetrics.functional import accuracy, dice, jaccard_index
+from tqdm import tqdm
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
-
+from viscy.evaluation.evaluation_metrics import mean_average_precision
 # Trainer class and UNet.
 from viscy.light.engine import MixedLoss, VSUNet
 from viscy.light.trainer import VSTrainer
-
 # training augmentations
-from viscy.transforms import (
-    NormalizeSampled,
-    RandAdjustContrastd,
-    RandAffined,
-    RandGaussianNoised,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-    RandWeightedCropd,
-)
+from viscy.transforms import (NormalizeSampled, RandAdjustContrastd,
+                              RandAffined, RandGaussianNoised,
+                              RandGaussianSmoothd, RandScaleIntensityd,
+                              RandWeightedCropd)
 
-from typing import Tuple
-from numpy.typing import ArrayLike
-from viscy.evaluation.evaluation_metrics import mean_average_precision
-from torchmetrics.functional import (
-    accuracy,
-    dice,
-    jaccard_index,
-)
-from tqdm import tqdm
 # %%
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
@@ -251,7 +239,7 @@ col = 0
 field = 9  # TODO: Change this to explore data.
 
 
-# NOTE: this dataset only has
+# NOTE: this dataset only has one level
 pyaramid_level = 0
 
 # `channel_names` is the metadata that is stored with data according to the OME-NGFF spec.
@@ -889,11 +877,11 @@ for i, sample in enumerate(test_data.test_dataloader()):
 """
 <div class="alert alert-info">
 
-<h3> Task 2.2 Compute the metrics to compare your trained model with the pretrained model </h3>
+<h3> Task 2.2 Compute the metrics with respect to the pretrained model VSCyto2D </h3>
 Here we will compare your model with the VSCyto2D pretrained model by computing the pixel-based metrics and segmentation-based metrics.
  
 <ul>
-<li>Download the pretrained model from the  <a href="https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip">link</a>.
+<li>When you ran the `setup.sh` you also downloaded the models in `/06_image_translation/pretrained_models/VSCyto2D/*.ckpt`</li>
 <li>Load the <b>VSCyto2 model</b> model checkpoint and the configuration file</li>
 <li>Compute the pixel-based metrics and segmentation-based metrics between the model you trained and the pretrained model</li>
 </ul>
@@ -912,12 +900,13 @@ segmantation based metrics including (mAP@0.5, dice, accuracy and jaccard index)
 # Let's load the pretrained model checkpoint  
 pretrained_model_ckpt = top_dir/...## Add the path to the "VSCyto2D/epoch=399-step=23200.ckpt"
 
-# Load the phase2fluor_config just like the model you trained
+# TODO: Load the phase2fluor_config just like the model you trained
 phase2fluor_config = dict() ##
 
+# TODO: Load the checkpoint. Write the architecture name. HINT: look at the previous config.
 pretrained_phase2fluor = VSUNet.load_from_checkpoint(
     pretrained_model_ckpt,
-    architecture=  # TODO: write the architecture name
+    architecture=....,
     module_config=phase2fluor_config,
 )
 
@@ -927,7 +916,7 @@ pretrained_phase2fluor = VSUNet.load_from_checkpoint(
 # #######################
 
 pretrained_model_ckpt = (
-    top_dir / "06_image_translation/pretrained_model/epoch=399-step=23200.ckpt"
+    top_dir / "06_image_translation/pretrained_models/VSCyto2D/epoch=399-step=23200.ckpt"
 )
 
 phase2fluor_config = dict(
@@ -948,6 +937,30 @@ pretrained_phase2fluor = VSUNet.load_from_checkpoint(
 )
 pretrained_phase2fluor.eval()
 
+### Re-load your trained model 
+#NOTE: assuming the latest checkpoint it your latest training and model
+#TODO: modify above is not the case
+phase2fluor_model_ckpt = natsorted(glob(
+    str(top_dir / "06_image_translation/logs/phase2fluor/version*/checkpoints/*.ckpt")
+))[-1]
+
+phase2fluor_config = dict(
+    in_channels=1,
+    out_channels=2,
+    encoder_blocks=[3, 3, 9, 3],
+    dims=[96, 192, 384, 768],
+    decoder_conv_blocks=2,
+    stem_kernel_size=(1, 2, 2),
+    in_stack_depth=1,
+    pretraining=False,
+)
+# Load the model checkpoint
+phase2fluor_model = VSUNet.load_from_checkpoint(
+    phase2fluor_model_ckpt,
+    architecture="UNeXt2_2D",
+    model_config = phase2fluor_config,
+)
+phase2fluor_model.eval()
 
 #%%[markdown]
 """
@@ -989,7 +1002,7 @@ def cellpose_segmentation(prediction:ArrayLike,target:ArrayLike)->Tuple[torch.Sh
     target_label = torch.ShortTensor(target_label)
 
     return (pred_label,target_label)
-#%%
+
 #%% 
 # Setting the paths for the test data and the output segmentation
 test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
@@ -1000,7 +1013,7 @@ test_pixel_metrics = pd.DataFrame(
     columns=["model", "fov","pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"]
 )
 test_segmentation_metrics= pd.DataFrame(
-    columns=["model", "fov","masks_per_fov","accuracy","dice","jaccard","mAP_50"]
+    columns=["model", "fov","masks_per_fov","accuracy","dice","jaccard","mAP","mAP_50","mAP_75","mAR_100"]
 )
 # Opening the test dataset
 test_dataset = open_ome_zarr(test_data_path)
@@ -1024,6 +1037,7 @@ nuc_label_cidx =  channel_names.index("nuclei_segmentation")
 # Iterating through the test dataset positions to:
 positions = list(test_dataset.positions())
 total_positions = len(positions)
+
 # Initializing the progress bar with the total number of positions
 with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
     # Iterating through the test dataset positions
@@ -1133,7 +1147,10 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
             "accuracy": accuracy(pred_label_binary, target_label_binary, task="binary").item(),
             "dice":  dice(pred_label_binary, target_label_binary).item(),
             "jaccard": jaccard_index(pred_label_binary, target_label_binary, task="binary").item(),
-            "mAP_50":coco_metrics["map_50"].item()
+            "mAP":coco_metrics["map"].item(),
+            "mAP_50":coco_metrics["map_50"].item(),
+            "mAP_75":coco_metrics["map_75"].item(),
+            "mAR_100":coco_metrics["mar_100"].item()
         }
 
         pred_label,target_label= cellpose_segmentation(predicted_nuc_pretrained,target_nucleus)
@@ -1153,7 +1170,10 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
             "accuracy": accuracy(pred_label_binary, target_label_binary, task="binary").item(),
             "dice":  dice(pred_label_binary, target_label_binary).item(),
             "jaccard": jaccard_index(pred_label_binary, target_label_binary, task="binary").item(),
-            "mAP_50":coco_metrics["map_50"].item()
+            "mAP":coco_metrics["map"].item(),
+            "mAP_50":coco_metrics["map_50"].item(),
+            "mAP_75":coco_metrics["map_75"].item(),
+            "mAR_100":coco_metrics["mar_100"].item()
         }
         
         #Save the predictions and segmentations
@@ -1209,7 +1229,7 @@ plt.show()
 # Boxplot of the metrics
 test_segmentation_metrics.boxplot(
     by="model",
-    column=["accuracy", "dice", "mAP_50"],
+    column=["jaccard", "accuracy", "mAP_75","mAP_50"],
     rot=30,
     figsize=(8, 8),
 )
