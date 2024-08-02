@@ -1,22 +1,17 @@
 # VisCy usage examples
 
-Examples scripts showcasing the usage of VisCy.
+Examples scripts showcasing the usage of VisCy for different computer vision tasks.
 
 ## Virtual staining
 
-### Training
-
-- WIP: DL@MBL notebooks
-
-# Image-to-Image translation using VisCy
-- [Image translation Exercise](../demo_dlmbl/solution.py):
+### Image-to-Image translation using VisCy
+- [Image translation Exercise](./dlmbl_exercise/solution.py):
 Example showing how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course.
 
-- [Virtual staining exercise](./virtual_staining_exercise/solution.py):
-Phase to nuclei and plasma mebrane training, prediction and evaluation.
-Fluorescence nuclei or membrane to label-free training, prediction and evaluation.
+- [Virtual staining exercise](./img2img_translation/solution.py): exploring the label-free to fluorescence virtual staining and florescence to label-free image translation task using VisCy UneXt2.
 
-### Inference
+### Running inference using models from the VisCy library
+The library of models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models).
 
 - [Inference with VSCyto2D](./VS_model_inference/demo_vscyto2d.py):
 2D inference example on 20x A549 cell data. (Phase to nuclei and plasma membrane).
@@ -33,5 +28,4 @@ To run the examples, execute each individual script, for example:
 python demo_vscyto2d.py
 ```
 
-These scripts can also be ran interactively in many IDEs as notebooks,
-for example in VS Code, PyCharm, and Spyder.
+These scripts can also be ran interactively in many IDEs as notebooks,for example in VS Code, PyCharm, and Spyder.
