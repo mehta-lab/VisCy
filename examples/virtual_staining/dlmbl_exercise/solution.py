@@ -92,7 +92,6 @@ Learning goals:
 # %% Imports
 import os
 from pathlib import Path
-from typing import Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -100,29 +99,45 @@ import pandas as pd
 import torch
 import torchview
 import torchvision
-from cellpose import models
 from iohub import open_ome_zarr
 from iohub.reader import print_info
 from lightning.pytorch import seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
-from numpy.typing import ArrayLike
 from skimage import metrics  # for metrics.
+from cellpose import models
+
 # pytorch lightning wrapper for Tensorboard.
+from skimage.color import label2rgb
+
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
-from torchmetrics.functional import accuracy, dice, jaccard_index
-from tqdm import tqdm
+
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
-from viscy.evaluation.evaluation_metrics import mean_average_precision
+
 # Trainer class and UNet.
 from viscy.light.engine import MixedLoss, VSUNet
 from viscy.light.trainer import VSTrainer
-# training augmentations
-from viscy.transforms import (NormalizeSampled, RandAdjustContrastd,
-                              RandAffined, RandGaussianNoised,
-                              RandGaussianSmoothd, RandScaleIntensityd,
-                              RandWeightedCropd)
 
+# training augmentations
+from viscy.transforms import (
+    NormalizeSampled,
+    RandAdjustContrastd,
+    RandAffined,
+    RandGaussianNoised,
+    RandGaussianSmoothd,
+    RandScaleIntensityd,
+    RandWeightedCropd,
+)
+
+from typing import Tuple
+from numpy.typing import ArrayLike
+from viscy.evaluation.evaluation_metrics import mean_average_precision
+from torchmetrics.functional import (
+    accuracy,
+    dice,
+    jaccard_index,
+)
+from tqdm import tqdm
 # %%
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
@@ -131,6 +146,7 @@ seed_everything(42, workers=True)
 top_dir = Path(
     f"/hpc/mydata/{os.environ['USER']}/data/"
 )  # TODO: Change this to point to your data directory.
+
 data_path = (
     top_dir / "06_image_translation/training/a549_hoechst_cellmask_train_val.zarr"
 )
@@ -782,8 +798,6 @@ test_metrics = pd.DataFrame(
 )
 
 # %% Compute metrics directly and plot here.
-
-
 def min_max_scale(input):
     return (input - np.min(input)) / (np.max(input) - np.min(input))
 
@@ -875,23 +889,46 @@ for i, sample in enumerate(test_data.test_dataloader()):
 """
 <div class="alert alert-info">
 
-<h3> Task 2.2 Compare your trained model with the pretrained model </h3>
-Here we will compare your model with the VSCyto2D pretrained model.
-
-You can download the file and place it in the data folder:
-<a href="https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip">Download pretrained model</a> and load the <b>VSCyto2 model</b>
-</div>
+<h3> Task 2.2 Compute the metrics to compare your trained model with the pretrained model </h3>
+Here we will compare your model with the VSCyto2D pretrained model by computing the pixel-based metrics and segmentation-based metrics.
+ 
+<ul>
+<li>Download the pretrained model from the  <a href="https://github.com/mehta-lab/VisCy/releases/download/v0.1.0/VisCy-0.1.0-VS-models.zip">link</a>.
+<li>Load the <b>VSCyto2 model</b> model checkpoint and the configuration file</li>
+<li>Compute the pixel-based metrics and segmentation-based metrics between the model you trained and the pretrained model</li>
+</ul>
+<br>
 
 We will evaluate the performance of your trained model with a pre-trained model using pixel based metrics as above and
-segmantation based metrics including (mAP@0.5, dice, accuracy and jaccard index)
+segmantation based metrics including (mAP@0.5, dice, accuracy and jaccard index).
+</div>
+
 """
-# %%
-##### TODO: Load the pretrained model and open the images side by side ##############
-# Load the "VSCyto2D/epoch=399-step=23200.ckpt" model from the pretrained model.
-pretrained_model_ckpt = (
-    top_dir / "06_image_translation/pretrained_model/VSCyto2D_model.ckpt"
+
+# %% tags=[]
+#################
+##### TODO ######
+#################
+# Let's load the pretrained model checkpoint  
+pretrained_model_ckpt = top_dir/...## Add the path to the "VSCyto2D/epoch=399-step=23200.ckpt"
+
+# Load the phase2fluor_config just like the model you trained
+phase2fluor_config = dict() ##
+
+pretrained_phase2fluor = VSUNet.load_from_checkpoint(
+    pretrained_model_ckpt,
+    architecture=  # TODO: write the architecture name
+    module_config=phase2fluor_config,
 )
-pretrained_model_ckpt = "/hpc/projects/comp.micro/virtual_staining/models/viscy-0.1.0/VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+
+# %% tags=["solution"]
+# #######################
+# ##### SOLUTION ########
+# #######################
+
+pretrained_model_ckpt = (
+    top_dir / "06_image_translation/pretrained_model/epoch=399-step=23200.ckpt"
+)
 
 phase2fluor_config = dict(
     in_channels=1,
@@ -907,43 +944,33 @@ phase2fluor_config = dict(
 pretrained_phase2fluor = VSUNet.load_from_checkpoint(
     pretrained_model_ckpt,
     architecture="UNeXt2_2D",
-    model_config=phase2fluor_config,
+    model_config = phase2fluor_config,
 )
 pretrained_phase2fluor.eval()
 
-# %%
-# TODO: delete this bc we assume they will have their previous model loaded
-trained_model_ckpt = (
-    top_dir
-    / "06_image_translation/logs/phase2fluor/version_6/checkpoints/epoch=49-step=1400.ckpt"
-)
-phase2fluor_model = VSUNet.load_from_checkpoint(
-    trained_model_ckpt,
-    architecture="UNeXt2_2D",
-    model_config=phase2fluor_config,
-)
-phase2fluor_model.eval()
-# %%
-# Setup dataloader
-test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
 
-output_segmentation_path = (
-    top_dir / "06_image_translation/pretrained_model_segmentations.zarr"
-)
+#%%[markdown]
+"""
+### Let's compute the metrics for the test dataset
+Before you run the following code, make sure you have the pretrained model loaded and the test data is ready.
 
+The following code will compute the following:
+- the pixel-based metrics  (pearson correlation, SSIM)
+- segmentation-based metrics (mAP@0.5, dice, accuracy, jaccard index)
 
-# %%
-# TODO: add the pretrained model to the tensorboard and compare the results.
-
-
+#### Note:
+- The segmentation-based metrics are computed using the cellpose stock `nuclei` model
+- The metrics will be store in the `test_pixel_metrics` and `test_segmentation_metrics` dataframes
+- The segmentations will be stored in the `segmentation_store` zarr file
+- Analyze the code while it runs.
+"""
+#%%
+# Define the function to compute the cellpose segmentation and the normalization
 def min_max_scale(input):
     return (input - np.min(input)) / (np.max(input) - np.min(input))
 
-
-def cellpose_segmentation(
-    prediction: ArrayLike, target: ArrayLike
-) -> Tuple[torch.ShortTensor]:
-    # NOTE these are hardcoded for this notebook and A549 dataset
+def cellpose_segmentation(prediction:ArrayLike,target:ArrayLike)->Tuple[torch.ShortTensor]:
+    #NOTE these are hardcoded for this notebook and A549 dataset
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     cp_nuc_kwargs = {
         "diameter": 65,
@@ -951,7 +978,7 @@ def cellpose_segmentation(
         "cellprob_threshold": 0.0,
     }
     cellpose_model = models.CellposeModel(
-        gpu=True, model_type="nuclei", device=torch.device(device)
+            gpu=True, model_type='nuclei', device=torch.device(device)
     )
     pred_label, _, _ = cellpose_model.eval(prediction, **cp_nuc_kwargs)
     target_label, _, _ = cellpose_model.eval(target, **cp_nuc_kwargs)
@@ -961,71 +988,70 @@ def cellpose_segmentation(
     pred_label = torch.ShortTensor(pred_label)
     target_label = torch.ShortTensor(target_label)
 
-    return (pred_label, target_label)
+    return (pred_label,target_label)
+#%%
+#%% 
+# Setting the paths for the test data and the output segmentation
+test_data_path = top_dir / "06_image_translation/test/a549_hoechst_cellmask_test.zarr"
+output_segmentation_path=top_dir /"06_image_translation/pretrained_model_segmentations.zarr"
 
-
-# %%
-# Create the dataframes to store the pixel and segmentation metrics
+# Creating the dataframes to store the pixel and segmentation metrics
 test_pixel_metrics = pd.DataFrame(
-    columns=["model", "fov", "pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"]
+    columns=["model", "fov","pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"]
 )
-test_segmentation_metrics = pd.DataFrame(
-    columns=["model", "fov", "masks_per_fov", "accuracy", "dice", "jaccard", "mAP_50"]
+test_segmentation_metrics= pd.DataFrame(
+    columns=["model", "fov","masks_per_fov","accuracy","dice","jaccard","mAP_50"]
 )
-# Open the test dataset
+# Opening the test dataset
 test_dataset = open_ome_zarr(test_data_path)
-# Create an output store for the predictions and segmentations
-segmentation_store = open_ome_zarr(
-    output_segmentation_path,
-    channel_names=["nuc_pred", "mem_pred", "nuc_labels"],
-    mode="w",
-    layout="hcs",
-)
-# Look at the test dataset
-print("Test dataset:")
+
+# Creating an output store for the predictions and segmentations
+segmentation_store = open_ome_zarr(output_segmentation_path,channel_names=['nuc_pred','mem_pred','nuc_labels'],mode='w',layout='hcs')
+
+# Looking at the test dataset
+print('Test dataset:')
 test_dataset.print_tree()
 channel_names = test_dataset.channel_names
-print(f"Channel names: {channel_names}")
-# Find the channel indeces for the corresponding channel names
+print(f'Channel names: {channel_names}')
+
+# Finding the channel indeces for the corresponding channel names
 phase_cidx = channel_names.index("Phase3D")
 nuc_cidx = channel_names.index("Nucl")
-mem_cidx = channel_names.index("Mem")
-nuc_label_cidx = channel_names.index("nuclei_segmentation")
+mem_cidx =  channel_names.index("Mem")
+nuc_label_cidx =  channel_names.index("nuclei_segmentation")
 
-# %%
-# Iterate through the test dataset positions to:
-i = 0
+#%%
+# Iterating through the test dataset positions to:
 positions = list(test_dataset.positions())
 total_positions = len(positions)
-# Initialize the progress bar with the total number of positions
+# Initializing the progress bar with the total number of positions
 with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
-    # Iterate through the test dataset positions
+    # Iterating through the test dataset positions
     for fov, pos in positions:
-        T, C, Z, Y, X = pos.data.shape
-        Z_slice = slice(Z // 2, Z // 2 + 1)
-        # Get the arrays and the center slices
-        phase_image = pos.data[:, phase_cidx : phase_cidx + 1, Z_slice]
-        target_nucleus = pos.data[0, nuc_cidx : nuc_cidx + 1, Z_slice]
-        target_membrane = pos.data[0, mem_cidx : mem_cidx + 1, Z_slice]
-        target_nuc_label = pos.data[0, nuc_label_cidx : nuc_label_cidx + 1, Z_slice]
-
-        # Run the prediction for both models
+        T,C,Z,Y,X = pos.data.shape
+        Z_slice = slice(Z//2,Z//2+1)
+        # Getting the arrays and the center slices
+        phase_image = pos.data[:,phase_cidx:phase_cidx+1,Z_slice]
+        target_nucleus =  pos.data[0,nuc_cidx:nuc_cidx+1,Z_slice]
+        target_membrane =  pos.data[0,mem_cidx:mem_cidx+1,Z_slice]
+        target_nuc_label = pos.data[0,nuc_label_cidx:nuc_label_cidx+1,Z_slice]
+        
+        # Running the prediction for both models
         phase_image = torch.from_numpy(phase_image).type(torch.float32)
         phase_image = phase_image.to(phase2fluor_model.device)
         with torch.inference_mode():  # turn off gradient computation.
             predicted_image_phase2fluor = phase2fluor_model(phase_image)
             predicted_image_pretrained = pretrained_phase2fluor(phase_image)
 
-        # Load and Normalize the target and predictions for both models
-        predicted_image_phase2fluor = (
-            predicted_image_phase2fluor.cpu().numpy().squeeze(0)
-        )
+        # Loading and Normalizing the target and predictions for both models 
+        predicted_image_phase2fluor = predicted_image_phase2fluor.cpu().numpy().squeeze(0)
         predicted_image_pretrained = predicted_image_pretrained.cpu().numpy().squeeze(0)
         phase_image = phase_image.cpu().numpy().squeeze(0)
 
-        target_mem = min_max_scale(target_membrane[0, 0])
-        target_nuc = min_max_scale(target_nucleus[0, 0])
+        target_mem = min_max_scale(target_membrane[0,0])
+        target_nuc = min_max_scale(target_nucleus[0,0])
 
+        # Noramalize the dataset using min-max scaling
         predicted_mem_phase2fluor = min_max_scale(
             predicted_image_phase2fluor[1, :, :, :].squeeze(0)
         )
@@ -1042,7 +1068,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         #######  Pixel-based Metrics ############
         # Compute SSIM and Pearson correlation for phase2fluor_model
-        print("Computing Pixel Metrics")
+        print('Computing Pixel Metrics')
         ssim_nuc_phase2fluor = metrics.structural_similarity(
             target_nuc, predicted_nuc_phase2fluor, data_range=1
         )
@@ -1058,7 +1084,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         test_pixel_metrics.loc[len(test_pixel_metrics)] = {
             "model": "phase2fluor",
-            "fov": fov,
+            "fov":fov,
             "pearson_nuc": pearson_nuc_phase2fluor,
             "SSIM_nuc": ssim_nuc_phase2fluor,
             "pearson_mem": pearson_mem_phase2fluor,
@@ -1080,7 +1106,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         test_pixel_metrics.loc[len(test_pixel_metrics)] = {
             "model": "pretrained_phase2fluor",
-            "fov": fov,
+            "fov":fov,
             "pearson_nuc": pearson_nuc_pretrained,
             "SSIM_nuc": ssim_nuc_pretrained,
             "pearson_mem": pearson_mem_pretrained,
@@ -1089,10 +1115,8 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         ###### Segmentation based metrics #########
         # Load the manually curated nuclei target label
-        print("Computing Segmentation Metrics")
-        pred_label, target_label = cellpose_segmentation(
-            predicted_nuc_phase2fluor, target_nucleus
-        )
+        print('Computing Segmentation Metrics')
+        pred_label,target_label= cellpose_segmentation(predicted_nuc_phase2fluor,target_nucleus)
         # Binary labels
         pred_label_binary = pred_label > 0
         target_label_binary = target_label > 0
@@ -1104,21 +1128,15 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         test_segmentation_metrics.loc[len(test_segmentation_metrics)] = {
             "model": "phase2fluor",
-            "fov": fov,
+            "fov":fov,
             "masks_per_fov": num_masks_fov,
-            "accuracy": accuracy(
-                pred_label_binary, target_label_binary, task="binary"
-            ).item(),
-            "dice": dice(pred_label_binary, target_label_binary).item(),
-            "jaccard": jaccard_index(
-                pred_label_binary, target_label_binary, task="binary"
-            ).item(),
-            "mAP_50": coco_metrics["map_50"].item(),
+            "accuracy": accuracy(pred_label_binary, target_label_binary, task="binary").item(),
+            "dice":  dice(pred_label_binary, target_label_binary).item(),
+            "jaccard": jaccard_index(pred_label_binary, target_label_binary, task="binary").item(),
+            "mAP_50":coco_metrics["map_50"].item()
         }
 
-        pred_label, target_label = cellpose_segmentation(
-            predicted_nuc_pretrained, target_nucleus
-        )
+        pred_label,target_label= cellpose_segmentation(predicted_nuc_pretrained,target_nucleus)
         # Binary labels
         pred_label_binary = pred_label > 0
         target_label_binary = target_label > 0
@@ -1130,54 +1148,60 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
 
         test_segmentation_metrics.loc[len(test_segmentation_metrics)] = {
             "model": "phase2fluor_pretrained",
-            "fov": fov,
+            "fov":fov,
             "masks_per_fov": num_masks_fov,
-            "accuracy": accuracy(
-                pred_label_binary, target_label_binary, task="binary"
-            ).item(),
-            "dice": dice(pred_label_binary, target_label_binary).item(),
-            "jaccard": jaccard_index(
-                pred_label_binary, target_label_binary, task="binary"
-            ).item(),
-            "mAP_50": coco_metrics["map_50"].item(),
+            "accuracy": accuracy(pred_label_binary, target_label_binary, task="binary").item(),
+            "dice":  dice(pred_label_binary, target_label_binary).item(),
+            "jaccard": jaccard_index(pred_label_binary, target_label_binary, task="binary").item(),
+            "mAP_50":coco_metrics["map_50"].item()
         }
-
-        # Save the predictions and segmentations
+        
+        #Save the predictions and segmentations
         position = segmentation_store.create_position(*Path(fov).parts[-3:])
-        output_array = np.zeros((T, 3, 1, Y, X), dtype=np.float32)
-        output_array[0, 0, 0] = predicted_nuc_pretrained
-        output_array[0, 1, 0] = predicted_mem_pretrained
-        output_array[0, 2, 0] = np.array(pred_label)
-        position.create_image("0", output_array)
-
+        output_array = np.zeros((T,3,1,Y,X),dtype=np.float32)
+        output_array[0,0,0]=predicted_nuc_pretrained
+        output_array[0,1,0]=predicted_mem_pretrained
+        output_array[0,2,0]=np.array(pred_label)
+        position.create_image("0",output_array)
+        
         # Update the progress bar
         pbar.update(1)
-
-        if i == 4:
-            break
-        i += 1
 
 # Close the OME-Zarr files
 test_dataset.close()
 segmentation_store.close()
-# %%
-
-# Save the test metrics into a dataframe
-pixel_metrics_path = top_dir / "06_image_translation/VS_metrics_pixel_part_1.csv"
-segmentation_metrics_path = (
-    top_dir / "06_image_translation/VS_metrics_segments_part_1.csv"
-)
+#%%
+#Save the test metrics into a dataframe
+pixel_metrics_path = top_dir/"06_image_translation/VS_metrics_pixel_part_1.csv"
+segmentation_metrics_path = top_dir/"06_image_translation/VS_metrics_segments_part_1.csv"
 test_pixel_metrics.to_csv(pixel_metrics_path)
 test_segmentation_metrics.to_csv(segmentation_metrics_path)
 
-# %%
+# %% [markdown] tags=[]
+"""
+<div class="alert alert-info">
+
+<h3> Task 2.3 Compare the model's metrics </h3>
+In the previous section, we computed the pixel-based metrics and segmentation-based metrics.
+Now we will compare the performance of the model you trained with the pretrained model by plotting the boxplots.
+
+After you plot the metrics answer the following:
+<ul>
+<li>What do these metrics tells us about the performance of the model?</li>
+<li>How do you interpret the differences in the metrics between the models?</li>
+<li>How is your model compared to the pretrained model? How can you improve it?</li>
+</ul>
+</div>
+
+"""
+#%%
 # Show boxplot of the metrics
 # Boxplot of the metrics
 test_pixel_metrics.boxplot(
     by="model",
     column=["pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"],
     rot=30,
-    figsize=(12, 8),
+    figsize=(8, 8),
 )
 plt.suptitle("Model Pixel Metrics")
 plt.show()
@@ -1187,48 +1211,68 @@ test_segmentation_metrics.boxplot(
     by="model",
     column=["accuracy", "dice", "mAP_50"],
     rot=30,
-    figsize=(12, 8),
+    figsize=(8, 8),
 )
 plt.suptitle("Model Segmentation Metrics")
 plt.show()
 
-# %%
-from skimage.color import label2rgb
+#%%[markdown]
+"""
+########## TODO ##############
+- What do these metrics tells us about the performance of the model?
+- How do you interpret the differences in the metrics between the models?
+- How is your model compared to the pretrained model? How can you improve it?
 
+"""
+
+#%%[markdown]
+"""
+## Plotting the predictions and segmentations
+Here we will plot the predictions and segmentations side by side for the pretrained and trained models.
+
+Please modify the crop size and Y,X slicing to view different areas of the FOV.
+"""
+#%%
+######## TODO ##########
+# Modify the crop size and Y,X slicing to view different areas of the FOV
+crop = 256
+y_slice=slice(Y//2-crop//2,Y//2+crop//2)
+x_slice=slice(X//2-crop//2,X//2+crop//2)
+#######################
 # Plotting side by side comparisons
 fig, axs = plt.subplots(4, 3, figsize=(15, 20))
 
 # First row: phase_image, target_nuc, target_mem
-axs[0, 0].imshow(phase_image[0, 0], cmap="gray")
+axs[0, 0].imshow(phase_image[0,0,y_slice,x_slice], cmap='gray')
 axs[0, 0].set_title("Phase Image")
-axs[0, 1].imshow(target_nuc, cmap="gray")
+axs[0, 1].imshow(target_nuc[y_slice,x_slice], cmap='gray')
 axs[0, 1].set_title("Target Nucleus")
-axs[0, 2].imshow(target_mem, cmap="gray")
+axs[0, 2].imshow(target_mem[y_slice,x_slice], cmap='gray')
 axs[0, 2].set_title("Target Membrane")
 
 # Second row: target_nuc, pred_nuc_phase2fluor, pred_nuc_pretrained
-axs[1, 0].imshow(target_nuc, cmap="gray")
+axs[1, 0].imshow(target_nuc[y_slice,x_slice], cmap='gray')
 axs[1, 0].set_title("Target Nucleus")
-axs[1, 1].imshow(predicted_nuc_phase2fluor, cmap="gray")
+axs[1, 1].imshow(predicted_nuc_phase2fluor[y_slice,x_slice], cmap='gray')
 axs[1, 1].set_title("Pred Nucleus Phase2Fluor")
-axs[1, 2].imshow(predicted_nuc_pretrained, cmap="gray")
+axs[1, 2].imshow(predicted_nuc_pretrained[y_slice,x_slice], cmap='gray')
 axs[1, 2].set_title("Pred Nucleus Pretrained")
 
 # Third row: target_mem, pred_mem_phase2fluor, pred_mem_pretrained
-axs[2, 0].imshow(target_mem, cmap="gray")
+axs[2, 0].imshow(target_mem[y_slice,x_slice], cmap='gray')
 axs[2, 0].set_title("Target Membrane")
-axs[2, 1].imshow(predicted_mem_phase2fluor, cmap="gray")
+axs[2, 1].imshow(predicted_mem_phase2fluor[y_slice,x_slice], cmap='gray')
 axs[2, 1].set_title("Pred Membrane Phase2Fluor")
-axs[2, 2].imshow(predicted_mem_pretrained, cmap="gray")
+axs[2, 2].imshow(predicted_mem_pretrained[y_slice,x_slice], cmap='gray')
 axs[2, 2].set_title("Pred Membrane Pretrained")
 
 # Fourth row: target_nuc, segment_nuc, segment_nuc2
-axs[3, 0].imshow(target_nuc, cmap="gray")
+axs[3, 0].imshow(target_nuc[y_slice,x_slice], cmap='gray')
 axs[3, 0].set_title("Target Nucleus")
-axs[3, 1].imshow(label2rgb(np.array(pred_label, dtype="int")), cmap="gray")
-axs[3, 1].set_title("Segmented Nucleus")
-axs[3, 2].imshow(label2rgb(np.array(target_label, dtype="int")), cmap="gray")
-axs[3, 2].set_title("Segmented Nucleus (Target)")
+axs[3, 1].imshow(label2rgb(np.array(target_label[y_slice,x_slice],dtype='int')), cmap='gray')
+axs[3, 1].set_title("Segmented Nucleus (Target)")
+axs[3, 2].imshow(label2rgb(np.array(pred_label[y_slice,x_slice],dtype='int')), cmap='gray')
+axs[3, 2].set_title("Segmented Nucleus")
 
 # Hide axes ticks
 for ax in axs.flat:
@@ -1237,9 +1281,6 @@ for ax in axs.flat:
 
 plt.tight_layout()
 plt.show()
-
-# Boxplot of the metr
-
 
 # %% [markdown] tags=[]
 """
