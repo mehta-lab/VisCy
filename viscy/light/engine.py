@@ -54,10 +54,15 @@ _logger = logging.getLogger("lightning.pytorch")
 
 def _detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int):
     num_samples = min(imgs[0].shape[0], log_samples_per_batch)
-    return [
-        [np.squeeze(img[i].detach().cpu().numpy().max(axis=1)) for img in imgs]
-        for i in range(num_samples)
-    ]
+    samples = []
+    for i in range(num_samples):
+        patches = []
+        for img in imgs:
+            patch = img[i].detach().cpu().numpy()
+            patch = np.squeeze(patch[:, patch.shape[1] // 2])
+            patches.append(patch)
+        samples.append(patches)
+    return samples
 
 
 def _render_images(imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []):
@@ -652,7 +657,7 @@ class ContrastiveModule(LightningModule):
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs)
+        grid = _render_images(imgs, cmaps=["gray"] * 3)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
