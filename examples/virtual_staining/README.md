@@ -18,11 +18,11 @@ Fluorescence nuclei or membrane to label-free training, prediction and evaluatio
 
 ### Inference
 
-- [Inference with VSCyto2D](./demo_vscyto2d.py):
+- [Inference with VSCyto2D](./VS_model_inference/demo_vscyto2d.py):
 2D inference example on 20x A549 cell data. (Phase to nuclei and plasma membrane).
-- [Inference with VSCyto3D](./demos/demo_vscyto3d.py):
+- [Inference with VSCyto3D](./VS_model_inference/demo_vscyto3d.py):
 3D inference example on 63x HEK293T cell data. (Phase to nuclei and plasma membrane).
-- [Inference VSNeuromast](./demo_vsneuromast.py):
+- [Inference VSNeuromast](./VS_model_inference/demo_vsneuromast.py):
 3D inference example of 63x zebrafish neuromast data (Phase to nuclei and plasma membrane)
 
 ## Notes
