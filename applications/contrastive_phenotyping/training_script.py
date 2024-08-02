@@ -55,7 +55,7 @@ model_dir = top_dir / "infection_classification/models/infection_score"
 # 15 for covnext backbone, 12 for resnet (z slices)
 # (28, 43) for covnext backbone, (26, 38) for resnet
 
-# rechunked data 
+# rechunked data
 data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
 
 # updated tracking data
@@ -87,53 +87,63 @@ normalizations = [
         keys=["Phase3D"],
         subtrahend=None,
         divisor=None,
-        nonzero=False,  
-        channel_wise=False,  
-        dtype=None,  
-        allow_missing_keys=False  
+        nonzero=False,
+        channel_wise=False,
+        dtype=None,
+        allow_missing_keys=False,
     ),
     ScaleIntensityRangePercentilesd(
         keys=["RFP"],
-        lower=50,  
-        upper=99,  
+        lower=50,
+        upper=99,
         b_min=0.0,
         b_max=1.0,
-        clip=False,  
-        relative=False, 
-        channel_wise=False,  
-        dtype=None, 
-        allow_missing_keys=False  
+        clip=False,
+        relative=False,
+        channel_wise=False,
+        dtype=None,
+        allow_missing_keys=False,
     ),
 ]
 
 augmentations = [
-            # Apply rotations and scaling together to both channels
-            RandAffined(
-                keys=source_channel,
-                rotate_range=[3.14, 0.0, 0.0], 
-                scale_range=[0.0, 0.2, 0.2],  
-                prob=0.8,
-                padding_mode="zeros",
-                shear_range=[0.0, 0.01, 0.01],
-            ),
-            # Apply contrast adjustment separately for each channel
-            RandAdjustContrastd(keys=["RFP"], prob=0.5, gamma=(0.7, 1.3)),  # Broader range for RFP
-            RandAdjustContrastd(keys=["Phase3D"], prob=0.5, gamma=(0.8, 1.2)),  # Moderate range for Phase
-            # Apply intensity scaling separately for each channel
-            RandScaleIntensityd(keys=["RFP"], factors=0.7, prob=0.5),  # Broader scaling for RFP
-            RandScaleIntensityd(keys=["Phase3D"], factors=0.5, prob=0.5),  # Moderate scaling for Phase
-            # Apply Gaussian smoothing to both channels together
-            RandGaussianSmoothd(
-                keys=source_channel,
-                sigma_x=(0.25, 0.75),
-                sigma_y=(0.25, 0.75),
-                sigma_z=(0.0, 0.0),
-                prob=0.5,
-            ),
-            # Apply Gaussian noise separately for each channel
-            RandGaussianNoised(keys=["RFP"], prob=0.5, mean=0.0, std=0.5),  # Higher noise for RFP
-            RandGaussianNoised(keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2),  # Moderate noise for Phase
-        ]
+    # Apply rotations and scaling together to both channels
+    RandAffined(
+        keys=source_channel,
+        rotate_range=[3.14, 0.0, 0.0],
+        scale_range=[0.0, 0.2, 0.2],
+        prob=0.8,
+        padding_mode="zeros",
+        shear_range=[0.0, 0.01, 0.01],
+    ),
+    # Apply contrast adjustment separately for each channel
+    RandAdjustContrastd(
+        keys=["RFP"], prob=0.5, gamma=(0.7, 1.3)
+    ),  # Broader range for RFP
+    RandAdjustContrastd(
+        keys=["Phase3D"], prob=0.5, gamma=(0.8, 1.2)
+    ),  # Moderate range for Phase
+    # Apply intensity scaling separately for each channel
+    RandScaleIntensityd(keys=["RFP"], factors=0.7, prob=0.5),  # Broader scaling for RFP
+    RandScaleIntensityd(
+        keys=["Phase3D"], factors=0.5, prob=0.5
+    ),  # Moderate scaling for Phase
+    # Apply Gaussian smoothing to both channels together
+    RandGaussianSmoothd(
+        keys=source_channel,
+        sigma_x=(0.25, 0.75),
+        sigma_y=(0.25, 0.75),
+        sigma_z=(0.0, 0.0),
+        prob=0.5,
+    ),
+    # Apply Gaussian noise separately for each channel
+    RandGaussianNoised(
+        keys=["RFP"], prob=0.5, mean=0.0, std=0.5
+    ),  # Higher noise for RFP
+    RandGaussianNoised(
+        keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2
+    ),  # Moderate noise for Phase
+]
 
 torch.set_float32_matmul_precision("medium")
 
@@ -250,6 +260,7 @@ def main(hparams):
     # # Test the model
     # trainer.test(model, datamodule=data_module)
 
+
 # Argument parser for command-line options
 # to-do: need to clean up to always use the same args
 parser = ArgumentParser()
@@ -268,4 +279,3 @@ parser.add_argument("--num_workers", type=int, default=15)
 args = parser.parse_args()
 
 main(args)
-

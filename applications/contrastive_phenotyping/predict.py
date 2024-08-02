@@ -6,7 +6,7 @@ from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.strategies import DDPStrategy
 from viscy.data.triplet import TripletDataModule, TripletDataset
 from viscy.light.engine import ContrastiveModule
-import os 
+import os
 from torch.multiprocessing import Manager
 from viscy.transforms import (
     NormalizeSampled,
@@ -19,21 +19,22 @@ from viscy.transforms import (
 )
 
 normalizations = [
-            # Normalization for Phase3D using mean and std
-            NormalizeSampled(
-                keys=["Phase3D"],
-                level="fov_statistics",
-                subtrahend="mean",
-                divisor="std",
-            ),
-            # Normalization for RFP using median and IQR
-            NormalizeSampled(
-                keys=["RFP"],
-                level="fov_statistics",
-                subtrahend="median",
-                divisor="iqr",
-            ),
+    # Normalization for Phase3D using mean and std
+    NormalizeSampled(
+        keys=["Phase3D"],
+        level="fov_statistics",
+        subtrahend="mean",
+        divisor="std",
+    ),
+    # Normalization for RFP using median and IQR
+    NormalizeSampled(
+        keys=["RFP"],
+        level="fov_statistics",
+        subtrahend="median",
+        divisor="iqr",
+    ),
 ]
+
 
 def main(hparams):
     # Set paths
@@ -41,16 +42,18 @@ def main(hparams):
     # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/uninfected_cells.csv
     # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/expanded_transitioning_cells_metadata.csv
     checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/contrastive_model-test-epoch=09-val_loss=0.00.ckpt"
-    
-    # rechunked data 
+
+    # rechunked data
     data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
 
     # updated tracking data
     tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
-    
+
     source_channel = ["RFP", "Phase3D"]
     z_range = (26, 38)
-    batch_size = 15 # match the number of fovs being processed such that no data is left
+    batch_size = (
+        15  # match the number of fovs being processed such that no data is left
+    )
     # set to 15 for full, 12 for infected, and 8 for uninfected
 
     # Initialize the data module for prediction
@@ -64,27 +67,27 @@ def main(hparams):
         batch_size=batch_size,
         num_workers=hparams.num_workers,
         normalizations=normalizations,
-        predict_cells = True, 
+        predict_cells=True,
     )
 
     data_module.setup(stage="predict")
 
     print(f"Total prediction dataset size: {len(data_module.predict_dataset)}")
-    
+
     # Load the model from checkpoint
     backbone = "resnet50"
     in_stack_depth = 12
     stem_kernel_size = (5, 3, 3)
     model = ContrastiveModule.load_from_checkpoint(
-    str(checkpoint_path), 
-    predict=True, 
-    backbone=backbone,
-    in_channels=len(source_channel),
-    in_stack_depth=in_stack_depth,
-    stem_kernel_size=stem_kernel_size,
-    tracks_path = tracks_path,
+        str(checkpoint_path),
+        predict=True,
+        backbone=backbone,
+        in_channels=len(source_channel),
+        in_stack_depth=in_stack_depth,
+        stem_kernel_size=stem_kernel_size,
+        tracks_path=tracks_path,
     )
-    
+
     model.eval()
 
     # Initialize the trainer
@@ -98,7 +101,7 @@ def main(hparams):
 
     # Run prediction
     trainer.predict(model, datamodule=data_module)
-    
+
     # # Collect features and projections
     # features_list = []
     # projections_list = []
@@ -110,13 +113,14 @@ def main(hparams):
     # all_features = np.concatenate(features_list, axis=0)
     # all_projections = np.concatenate(projections_list, axis=0)
 
-    # # for saving visualizations embeddings 
+    # # for saving visualizations embeddings
     # base_dir = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/test_visualizations"
     # features_path = os.path.join(base_dir, 'B', '4', '2', 'before_projected_embeddings', 'test_epoch88_predicted_features.npy')
     # projections_path = os.path.join(base_dir, 'B', '4', '2', 'projected_embeddings', 'test_epoch88_predicted_projections.npy')
 
     # np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/embeddings/resnet_uninf_rfp_epoch99_predicted_features.npy", all_features)
     # np.save("/hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/embeddings/resnet_uninf_rfp_epoch99_predicted_projections.npy", all_projections)
+
 
 if __name__ == "__main__":
     parser = ArgumentParser()

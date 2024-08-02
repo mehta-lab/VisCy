@@ -4,9 +4,7 @@ from typing import Literal, Sequence, Union
 
 import numpy as np
 import pandas as pd
-import pandas as pd
 import torch
-import torch.nn.functional as F
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
@@ -14,14 +12,11 @@ from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from pytorch_lightning.utilities import rank_zero_only
-from pytorch_lightning.utilities import rank_zero_only
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 
 # from lightning.pytorch import LightningModule
 # from lightning import LightningModule
-from torch.optim import Adam
-
 # from lightning.pytorch import LightningModule
 # from lightning import LightningModule
 from torch.optim import Adam
@@ -39,9 +34,7 @@ from torchmetrics.functional import (
 )
 
 from viscy.data.typing import Sample, TripletSample
-from viscy.data.typing import Sample, TripletSample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
-from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d

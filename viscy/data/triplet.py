@@ -75,7 +75,9 @@ class TripletDataset(Dataset):
         self.include_fov_names = include_fov_names or []
         self.include_track_ids = include_track_ids or []
         self.tracks = self._filter_tracks(tracks_tables)
-        self.tracks = self._specific_cells(self.tracks) if self.predict_cells else self.tracks
+        self.tracks = (
+            self._specific_cells(self.tracks) if self.predict_cells else self.tracks
+        )
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         filtered_tracks = []
@@ -100,7 +102,7 @@ class TripletDataset(Dataset):
                 ]
             )
         return pd.concat(filtered_tracks).reset_index(drop=True)
-    
+
     def _specific_cells(self, tracks: pd.DataFrame) -> pd.DataFrame:
         specific_tracks = pd.DataFrame()
         print(self.include_fov_names)
@@ -200,7 +202,7 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        predict_cells: bool = False, 
+        predict_cells: bool = False,
         include_fov_names: list[str] = None,
         include_track_ids: list[int] = None,
     ):
@@ -316,8 +318,8 @@ class TripletDataModule(HCSDataModule):
             anchor_transform=Compose(self.normalizations),
             fit=False,
             predict_cells=self.predict_cells,
-            include_fov_names = self.include_fov_names,
-            include_track_ids = self.include_track_ids,
+            include_fov_names=self.include_fov_names,
+            include_track_ids=self.include_track_ids,
             **dataset_settings,
         )
 
