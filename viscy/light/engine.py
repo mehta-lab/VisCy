@@ -637,21 +637,28 @@ class ContrastiveModule(LightningModule):
     def _log_metrics(
         self, loss, anchor, positive, negative, stage: Literal["train", "val"]
     ):
+        self.log(
+            f"loss/{stage}",
+            loss.to(self.device),
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
         cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
         euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
         self.log_dict(
             {
-                f"loss/{stage}": loss.to(self.device),
                 f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
                 f"metrics/cosine_similarity_negative/{stage}": cosine_sim_neg,
                 f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
                 f"metrics/euclidean_distance_negative/{stage}": euclidean_dist_neg,
             },
-            on_step=True,
+            on_step=False,
             on_epoch=True,
-            prog_bar=True,
             logger=True,
             sync_dist=True,
         )
