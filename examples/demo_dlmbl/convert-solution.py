@@ -1,7 +1,8 @@
 import argparse
 
 from nbconvert.exporters import NotebookExporter
-from nbconvert.preprocessors import ClearOutputPreprocessor, TagRemovePreprocessor
+from nbconvert.preprocessors import (ClearOutputPreprocessor,
+                                     TagRemovePreprocessor)
 from traitlets.config import Config
 
 

@@ -8,6 +8,14 @@ Examples scripts showcasing the usage of VisCy.
 
 - WIP: DL@MBL notebooks
 
+# Image-to-Image translation using VisCy
+- [Image translation Exercise](../demo_dlmbl/solution.py):
+Example showing how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course.
+
+- [Virtual staining exercise](./virtual_staining_exercise/solution.py):
+Phase to nuclei and plasma mebrane training, prediction and evaluation.
+Fluorescence nuclei or membrane to label-free training, prediction and evaluation.
+
 ### Inference
 
 - [Inference with VSCyto2D](./demo_vscyto2d.py):
