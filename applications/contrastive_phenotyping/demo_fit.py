@@ -36,7 +36,7 @@ def main():
         ),
         log_every_n_steps=1,
         callbacks=[ModelCheckpoint()],
-        profiler="pytorch",  # "simple" or "advanced"
+        profiler="simple",  # other options: "advanced" uses cprofiler, "pytorch" uses pytorch profiler.
     )
     trainer.fit(model, dm)
 
