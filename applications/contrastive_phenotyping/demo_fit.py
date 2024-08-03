@@ -1,6 +1,8 @@
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import DeviceStatsMonitor
+
 
 from viscy.data.triplet import TripletDataModule
 from viscy.light.engine import ContrastiveModule
@@ -24,14 +26,17 @@ def main():
         log_samples_per_batch=3,
     )
     trainer = Trainer(
-        max_epochs=2,
+        max_epochs=5,
         limit_train_batches=10,
         limit_val_batches=5,
         logger=TensorBoardLogger(
-            "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb"
+            "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb",
+            log_graph=True,
+            default_hp_metric=True,
         ),
         log_every_n_steps=1,
         callbacks=[ModelCheckpoint()],
+        profiler="pytorch",  # "simple" or "advanced"
     )
     trainer.fit(model, dm)
 
