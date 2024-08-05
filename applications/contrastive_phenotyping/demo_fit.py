@@ -20,7 +20,7 @@ def main():
         final_yx_patch_size=(224, 224),
     )
     model = ContrastiveModule(
-        backbone="convnext_tiny",
+        backbone="resnet50",
         in_channels=2,
         log_batches_per_epoch=2,
         log_samples_per_batch=3,

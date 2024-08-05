@@ -620,6 +620,7 @@ class ContrastiveModule(LightningModule):
         )
         self.training_step_outputs = []
         self.validataion_step_outputs = []
+        self.validation_losses = []
 
     def forward(self, x: Tensor) -> Tensor:
         """Projected embeddings."""
@@ -728,12 +729,16 @@ class ContrastiveModule(LightningModule):
             self.validation_step_outputs.extend(
                 _detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
             )
+        self.validation_losses.append(loss)
         return loss
 
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
+        val_loss_epoch = torch.stack(self.validation_losses).mean()
+        self.log('val/loss_epoch', val_loss_epoch, prog_bar=True, logger=True, sync_dist=True)
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+        self.validation_losses = []
 
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.lr)
@@ -785,10 +790,10 @@ class ContrastiveModule(LightningModule):
         combined_features = np.array(combined_features)
         combined_projections = np.array(combined_projections)
 
-        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
+        np.save("embeddings4/1_multi_resnet_predicted_features.npy", combined_features)
         print("Saved features with shape", combined_features.shape)
         np.save(
-            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
+            "embeddings4/1_multi_resnet_predicted_projections.npy", combined_projections
         )
         print("Saved projections with shape", combined_projections.shape)
 
@@ -803,4 +808,4 @@ class ContrastiveModule(LightningModule):
             }
         )
 
-        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)
+        df.to_csv("embeddings4/1_multi_resnet_predicted_metadata.csv", index=False)

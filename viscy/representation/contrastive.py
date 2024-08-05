@@ -3,6 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
+import warnings
+
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 
 class ContrastiveEncoder(nn.Module):
@@ -57,6 +60,8 @@ class ContrastiveEncoder(nn.Module):
 
             encoder.head.fc = nn.Identity()
 
+            intermediate_projection = None
+
         elif "resnet" in backbone:
             print("Using ResNet backbone.")
             # Adapt stem and projection head of resnet here.
@@ -65,8 +70,10 @@ class ContrastiveEncoder(nn.Module):
             in_channels_encoder = encoder.conv1.out_channels
             encoder.conv1 = nn.Identity()
 
+            intermediate_projection = nn.Linear(encoder.fc.in_features, 768)
+
             projection = nn.Sequential(
-                nn.Linear(encoder.fc.in_features, 3 * embedding_len),
+                nn.Linear(768, 3 * embedding_len),
                 nn.ReLU(inplace=True),
                 nn.Linear(3 * embedding_len, embedding_len),
             )
@@ -80,15 +87,18 @@ class ContrastiveEncoder(nn.Module):
 
         # Append modified encoder.
         self.encoder = encoder
+        self.intermediate_projection = intermediate_projection
         # Append modified projection head.
         self.projection = projection
 
     def forward(self, x):
         x = self.stem(x)
         embedding = self.encoder(x)
-        projections = self.projection(embedding)
+        embedding_reduced = self.intermediate_projection(embedding)
+        embedding_norm = F.normalize(embedding_reduced, p=2, dim=1)
+        projections = self.projection(embedding_reduced)
         projections = F.normalize(projections, p=2, dim=1)
         return (
-            embedding,
+            embedding_norm,
             projections,
         )  # Compute the loss on projections, analyze the embeddings.

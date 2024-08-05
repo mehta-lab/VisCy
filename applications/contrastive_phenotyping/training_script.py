@@ -8,7 +8,6 @@ import torch
 from torch.utils.data import DataLoader
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 from viscy.transforms import (
     NormalizeSampled,
@@ -25,13 +24,11 @@ from viscy.representation.contrastive import ContrastiveEncoder
 import pandas as pd
 from pathlib import Path
 from monai.transforms import NormalizeIntensityd, ScaleIntensityRangePercentilesd
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import DeviceStatsMonitor
 
-
-# Set W&B logging level to suppress warnings
-logging.getLogger("wandb").setLevel(logging.ERROR)
 
 # %% Paths and constants
-os.environ["WANDB_DIR"] = "/hpc/mydata/alishba.imran/wandb_logs/"
 
 # @rank_zero_only
 # def init_wandb():
@@ -201,20 +198,18 @@ def main(hparams):
         margin=hparams.margin,
         lr=hparams.lr,
         schedule=hparams.schedule,
-        log_steps_per_epoch=hparams.log_steps_per_epoch,
+        log_batches_per_epoch=2, # total 6 images per epoch are logged
+        log_samples_per_batch=3,
         in_channels=len(source_channel),
         in_stack_depth=z_range[1] - z_range[0],
         stem_kernel_size=(5, 3, 3),
         embedding_len=hparams.embedding_len,
     )
 
-    # Initialize logger
-    wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
-
     # set for each run to avoid overwritting!
-    custom_folder_name = "test"
+    #custom_folder_name = "test"
     checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(model_dir, custom_folder_name),
+        #dirpath=os.path.join(model_dir, custom_folder_name),
         filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
         save_top_k=3,
         mode="min",
@@ -223,8 +218,14 @@ def main(hparams):
 
     trainer = Trainer(
         max_epochs=hparams.max_epochs,
+        # limit_train_batches=2,
+        # limit_val_batches=2,
         callbacks=[checkpoint_callback],
-        logger=wandb_logger,
+        logger=TensorBoardLogger(
+            "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb",
+            log_graph=True,
+            default_hp_metric=True,
+        ),
         accelerator=hparams.accelerator,
         devices=hparams.devices,
         num_nodes=hparams.num_nodes,
@@ -253,7 +254,7 @@ def main(hparams):
 # Argument parser for command-line options
 # to-do: need to clean up to always use the same args
 parser = ArgumentParser()
-parser.add_argument("--backbone", type=str, default="convnext_tiny")
+parser.add_argument("--backbone", type=str, default="resnet50")
 parser.add_argument("--margin", type=float, default=0.5)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--schedule", type=str, default="Constant")
