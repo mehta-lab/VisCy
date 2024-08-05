@@ -3,6 +3,7 @@ import math
 import os
 import re
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Callable, Literal, Sequence
 
@@ -25,8 +26,12 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
-import warnings
-warnings.filterwarnings("ignore", category=UserWarning, message="To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).")
+
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message="To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).",
+)
 _logger = logging.getLogger("lightning.pytorch")
 
 
@@ -551,7 +556,7 @@ class HCSDataModule(LightningDataModule):
             self.predict_dataset,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
-            shuffle=False, 
+            shuffle=False,
         )
 
     def _fit_transform(self) -> tuple[Compose, Compose]:

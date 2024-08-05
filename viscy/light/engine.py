@@ -11,7 +11,6 @@ from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
-from pytorch_lightning.utilities import rank_zero_only
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.optim import Adam
@@ -735,7 +734,9 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         val_loss_epoch = torch.stack(self.validation_losses).mean()
-        self.log('val/loss_epoch', val_loss_epoch, prog_bar=True, logger=True, sync_dist=True)
+        self.log(
+            "val/loss_epoch", val_loss_epoch, prog_bar=True, logger=True, sync_dist=True
+        )
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
         self.validation_losses = []
