@@ -24,11 +24,12 @@ def _scatter_channels(
     return channels
 
 
-def _gather_channels(patch_channels: dict[str, Tensor]) -> Tensor:
+def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
     """
-    :param dict[str, Tensor] patch_channels: dictionary of single-channel tensors
+    :param dict[str, Tensor | NormMeta] patch_channels: dictionary of single-channel tensors
     :return Tensor: Multi-channel tensor
     """
+    patch_channels.pop("norm_meta", None)
     return torch.cat(list(patch_channels.values()), dim=0)
 
 
@@ -172,8 +173,8 @@ class TripletDataModule(HCSDataModule):
         tracks_path: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
-        initial_yx_patch_size: tuple[int, int] = (384, 384),
-        final_yx_patch_size: tuple[int, int] = (256, 256),
+        initial_yx_patch_size: tuple[int, int] = (512, 512),
+        final_yx_patch_size: tuple[int, int] = (224, 224),
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
@@ -181,6 +182,26 @@ class TripletDataModule(HCSDataModule):
         augmentations: list[MapTransform] = [],
         caching: bool = False,
     ):
+        """Lightning data module for triplet sampling of patches.
+
+        :param str data_path: Image dataset path
+        :param str tracks_path: Tracks labels dataset path
+        :param str | Sequence[str] source_channel: list of input channel names
+        :param tuple[int, int] z_range: range of valid z-slices
+        :param tuple[int, int] initial_yx_patch_size:
+            XY size of the initially sampled image patch,
+            defaults to (384, 384)
+        :param tuple[int, int] final_yx_patch_size: output patch size,
+            defaults to (256, 256)
+        :param float split_ratio: ratio of training samples, defaults to 0.8
+        :param int batch_size: batch size, defaults to 16
+        :param int num_workers: number of data-loading workers, defaults to 8
+        :param list[MapTransform] normalizations: list of normalization transforms,
+            defaults to []
+        :param list[MapTransform] augmentations: list of augmentation transforms,
+            defaults to []
+        :param bool caching: whether to cache the dataset, defaults to False
+        """
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
@@ -226,9 +247,30 @@ class TripletDataModule(HCSDataModule):
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
         tracks_tables = [tracks_tables[i] for i in shuffled_indices]
+
+        num_train_fovs = int(len(positions) * self.split_ratio)
+        train_positions = positions[:num_train_fovs]
+        val_positions = positions[num_train_fovs:]
+        train_tracks_tables = tracks_tables[:num_train_fovs]
+        val_tracks_tables = tracks_tables[num_train_fovs:]
+
+        print(f"Number of training FOVs: {len(train_positions)}")
+        print(f"Number of validation FOVs: {len(val_positions)}")
+
         self.train_dataset = TripletDataset(
-            positions=positions,
-            tracks_tables=tracks_tables,
+            positions=train_positions,
+            tracks_tables=train_tracks_tables,
+            initial_yx_patch_size=self.yx_patch_size,
+            anchor_transform=no_aug_transform,
+            positive_transform=augment_transform,
+            negative_transform=augment_transform,
+            fit=True,
+            **dataset_settings,
+        )
+
+        self.val_dataset = TripletDataset(
+            positions=val_positions,
+            tracks_tables=val_tracks_tables,
             initial_yx_patch_size=self.yx_patch_size,
             anchor_transform=no_aug_transform,
             positive_transform=augment_transform,
@@ -243,7 +285,7 @@ class TripletDataModule(HCSDataModule):
         self.predict_dataset = TripletDataset(
             positions=positions,
             tracks_tables=tracks_tables,
-            initial_yx_patch_size=self.yx_patch_size,
+            initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=Compose(self.normalizations),
             fit=False,
             **dataset_settings,

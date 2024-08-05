@@ -2,9 +2,7 @@ import timm
 import torch.nn as nn
 import torch.nn.functional as F
 
-# from viscy.unet.networks.resnet import resnetStem
-# Currently identical to resnetStem, but could be different in the future.
-from viscy.unet.networks.unext2 import UNeXt2Stem
+from viscy.unet.networks.unext2 import StemDepthtoChannels
 
 
 class ContrastiveEncoder(nn.Module):
@@ -12,14 +10,16 @@ class ContrastiveEncoder(nn.Module):
         self,
         backbone: str = "convnext_tiny",
         in_channels: int = 2,
-        in_stack_depth: int = 15,
+        in_stack_depth: int = 12,
         stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
         embedding_len: int = 256,
+        stem_stride: int = 2,
         predict: bool = False,
     ):
         super().__init__()
 
         self.predict = predict
+        self.backbone = backbone
 
         """
         ContrastiveEncoder network that uses ConvNext and ResNet backbons from timm.
@@ -32,124 +32,63 @@ class ContrastiveEncoder(nn.Module):
         - embedding_len (int): Length of the embedding. Default is 1000.
         """
 
-        if in_stack_depth % stem_kernel_size[0] != 0:
-            raise ValueError(
-                f"Input stack depth {in_stack_depth} is not divisible "
-                f"by stem kernel depth {stem_kernel_size[0]}."
-            )
-
-        # encoder
-        self.model = timm.create_model(
+        encoder = timm.create_model(
             backbone,
             pretrained=True,
             features_only=False,
             drop_path_rate=0.2,
-            num_classes=4 * embedding_len,
+            num_classes=3 * embedding_len,
         )
 
-        if "convnext_tiny" in backbone:
+        if "convnext" in backbone:
             print("Using ConvNext backbone.")
-            # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
-            in_channels_encoder = self.model.stem[0].out_channels
-            stem = UNeXt2Stem(
-                in_channels=in_channels,
-                out_channels=in_channels_encoder,
-                kernel_size=stem_kernel_size,
-                in_stack_depth=in_stack_depth,
-            )
-            self.model.stem = stem
 
-            self.model.head.fc = nn.Sequential(
-                self.model.head.fc,
+            in_channels_encoder = encoder.stem[0].out_channels
+
+            # Remove the convolution layer of stem, but keep the layernorm.
+            encoder.stem[0] = nn.Identity()
+
+            # Save projection head separately and erase the projection head contained within the encoder.
+            projection = nn.Sequential(
+                nn.Linear(encoder.head.fc.in_features, 3 * embedding_len),
                 nn.ReLU(inplace=True),
-                nn.Linear(4 * embedding_len, embedding_len),
+                nn.Linear(3 * embedding_len, embedding_len),
             )
 
-            """ 
-            head of convnext
-            -------------------
-            (head): NormMlpClassifierHead(
-            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
-            (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
-            (flatten): Flatten(start_dim=1, end_dim=-1)
-            (pre_logits): Identity()
-            (drop): Dropout(p=0.0, inplace=False)
-            (fc): Linear(in_features=768, out_features=1024, bias=True)
+            encoder.head.fc = nn.Identity()
 
-
-            head of convnext for contrastive learning
-            ----------------------------
-            (head): NormMlpClassifierHead(
-            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Identity())
-            (norm): LayerNorm2d((768,), eps=1e-06, elementwise_affine=True)
-            (flatten): Flatten(start_dim=1, end_dim=-1)
-            (pre_logits): Identity()
-            (drop): Dropout(p=0.0, inplace=False)
-            (fc): Sequential(
-            (0): Linear(in_features=768, out_features=1024, bias=True)
-            (1): ReLU(inplace=True)
-            (2): Linear(in_features=1024, out_features=256, bias=True)
-            )
-            """
-
-        # TO-DO: need to debug further
         elif "resnet" in backbone:
             print("Using ResNet backbone.")
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
-            in_channels_encoder = self.model.conv1.out_channels
-            stem = UNeXt2Stem(
-                in_channels=in_channels,
-                out_channels=in_channels_encoder,
-                kernel_size=stem_kernel_size,
-                in_stack_depth=in_stack_depth,
-            )
-            self.model.conv1 = stem
 
-            self.model.head.fc = nn.Sequential(
-                self.model.head.fc,
+            in_channels_encoder = encoder.conv1.out_channels
+            encoder.conv1 = nn.Identity()
+
+            projection = nn.Sequential(
+                nn.Linear(encoder.fc.in_features, 3 * embedding_len),
                 nn.ReLU(inplace=True),
-                nn.Linear(4 * embedding_len, embedding_len),
+                nn.Linear(3 * embedding_len, embedding_len),
             )
+            encoder.fc = nn.Identity()
 
-            """ 
-            head of resnet
-            -------------------
-            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Flatten(start_dim=1, end_dim=-1))
-            (fc): Linear(in_features=2048, out_features=1024, bias=True)
+        # Create a new stem that can handle 3D multi-channel input.
+        print("using stem kernel size", stem_kernel_size)
+        self.stem = StemDepthtoChannels(
+            in_channels, in_stack_depth, in_channels_encoder, stem_kernel_size
+        )
 
-
-            head of resnet for contrastive learning
-            ----------------------------
-            (global_pool): SelectAdaptivePool2d(pool_type=avg, flatten=Flatten(start_dim=1, end_dim=-1))
-            (fc): Sequential(
-            (0): Linear(in_features=2048, out_features=1024, bias=True)
-            (1): ReLU(inplace=True)
-            (2): Linear(in_features=1024, out_features=256, bias=True)
-            """
+        # Append modified encoder.
+        self.encoder = encoder
+        # Append modified projection head.
+        self.projection = projection
 
     def forward(self, x):
-        if self.predict:
-            print("running predict forward!")
-            x = self.model.stem(x)
-            x = self.model.stages[0](x)
-            x = self.model.stages[1](x)
-            x = self.model.stages[2](x)
-            x = self.model.stages[3](x)
-            x = self.model.head.global_pool(x)
-            x = self.model.head.norm(x)
-            x = self.model.head.flatten(x)
-            features_before_projection = self.model.head.drop(x)
-            projections = self.model.head.fc(features_before_projection)
-            features_before_projection = F.normalize(
-                features_before_projection, p=2, dim=1
-            )
-            projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
-            print(features_before_projection.shape, projections.shape)
-            return features_before_projection, projections
-        # feature is without projection head
-        else:
-            print("running forward without predict!")
-            projections = self.model(x)
-            projections = F.normalize(projections, p=2, dim=1)  # L2 normalization
-            return projections
+        x = self.stem(x)
+        embedding = self.encoder(x)
+        projections = self.projection(embedding)
+        projections = F.normalize(projections, p=2, dim=1)
+        return (
+            embedding,
+            projections,
+        )  # Compute the loss on projections, analyze the embeddings.
