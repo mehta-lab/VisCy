@@ -58,7 +58,7 @@ data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/
 # updated tracking data
 tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
 source_channel = ["RFP", "Phase3D"]
-z_range = (26, 38)
+z_range = (28, 43)
 batch_size = 32
 
 # normalizations = [
@@ -128,8 +128,8 @@ augmentations = [
                 prob=0.5,
             ),
             # Apply Gaussian noise separately for each channel
-            RandGaussianNoised(keys=["RFP"], prob=0.5, mean=0.0, std=0.5),  # Higher noise for RFP
-            RandGaussianNoised(keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2),  # Moderate noise for Phase
+            RandGaussianNoised(keys=["RFP"], prob=0.5, mean=0.0, std=0.2),  
+            RandGaussianNoised(keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2),  
         ]
 
 torch.set_float32_matmul_precision("medium")
@@ -198,8 +198,8 @@ def main(hparams):
         margin=hparams.margin,
         lr=hparams.lr,
         schedule=hparams.schedule,
-        log_batches_per_epoch=2, # total 6 images per epoch are logged
-        log_samples_per_batch=3,
+        log_batches_per_epoch=1, # total 2 images per epoch are logged
+        log_samples_per_batch=2,
         in_channels=len(source_channel),
         in_stack_depth=z_range[1] - z_range[0],
         stem_kernel_size=(5, 3, 3),
@@ -254,7 +254,7 @@ def main(hparams):
 # Argument parser for command-line options
 # to-do: need to clean up to always use the same args
 parser = ArgumentParser()
-parser.add_argument("--backbone", type=str, default="resnet50")
+parser.add_argument("--backbone", type=str, default="convnext_tiny")
 parser.add_argument("--margin", type=float, default=0.5)
 parser.add_argument("--lr", type=float, default=1e-3)
 parser.add_argument("--schedule", type=str, default="Constant")
