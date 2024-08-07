@@ -262,7 +262,7 @@ class TripletDataModule(HCSDataModule):
         self.train_dataset = TripletDataset(
             positions=train_positions,
             tracks_tables=train_tracks_tables,
-            initial_yx_patch_size=self.yx_patch_size,
+            initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=no_aug_transform,
             positive_transform=augment_transform,
             negative_transform=augment_transform,
@@ -273,7 +273,7 @@ class TripletDataModule(HCSDataModule):
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,
-            initial_yx_patch_size=self.yx_patch_size,
+            initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=no_aug_transform,
             positive_transform=augment_transform,
             negative_transform=augment_transform,
