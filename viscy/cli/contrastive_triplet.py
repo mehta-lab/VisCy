@@ -12,7 +12,7 @@ from viscy.light.engine import ContrastiveModule
 
 
 class ContrastiveLightningCLI(LightningCLI):
-    """Lightning CLI with default for VS."""
+    """Lightning CLI with default logger."""
 
     def add_arguments_to_parser(self, parser):
         parser.set_defaults(
