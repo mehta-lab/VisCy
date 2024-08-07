@@ -109,3 +109,10 @@ for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s4159
 The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
+
+### Demos
+Check out our demos for:
+- [Virtual staining](https://github.com/mehta-lab/VisCy/tree/main/examples/demos) - training, inference and evaluation
+
+### Library of virtual staining (VS) models
+The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
