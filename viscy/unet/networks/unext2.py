@@ -99,8 +99,8 @@ class StemDepthtoChannels(nn.Module):
         in_channels: int,
         in_stack_depth: int,
         in_channels_encoder: int,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
-        stem_stride: int = 2,  # stride for the kernel
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
+        stem_stride: int = (5, 4, 4),  # stride for the kernel
     ) -> None:
         super().__init__()
         stem3d_out_channels = self.compute_stem_channels(

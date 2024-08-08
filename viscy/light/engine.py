@@ -10,6 +10,7 @@ from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
+from torch.optim.lr_scheduler import StepLR, ReduceLROnPlateau, CosineAnnealingLR, CosineAnnealingWarmRestarts, OneCycleLR
 from monai.transforms import DivisiblePad, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
@@ -624,6 +625,7 @@ class ContrastiveModule(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         """Projected embeddings."""
         return self.model(x)[1]
+        #return self.model(x)
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
         mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
@@ -740,10 +742,46 @@ class ContrastiveModule(LightningModule):
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
         self.validation_losses = []
-
+    
     def configure_optimizers(self):
         optimizer = Adam(self.parameters(), lr=self.lr)
-        return optimizer
+
+        if self.schedule == "Constant":
+            lr_scheduler = None
+        elif self.schedule == "StepLR":
+            lr_scheduler = {
+                'scheduler': StepLR(optimizer, step_size=10, gamma=0.1),
+                'name': 'stepLR'
+            }
+        elif self.schedule == "ReduceLROnPlateau":
+            lr_scheduler = {
+                'scheduler': ReduceLROnPlateau(optimizer, mode='min', factor=0.1, patience=10),
+                'monitor': 'val/loss_epoch',
+                'name': 'reduceLROnPlateau'
+            }
+        elif self.schedule == "CosineAnnealingLR":
+            lr_scheduler = {
+                'scheduler': CosineAnnealingLR(optimizer, T_max=50),
+                'name': 'cosineAnnealingLR'
+            }
+        elif self.schedule == "CosineAnnealingWarmRestarts":
+            lr_scheduler = {
+                'scheduler': CosineAnnealingWarmRestarts(optimizer, T_0=5),
+                'name': 'cosineAnnealingWarmRestarts'
+            }
+        elif self.schedule == "OneCycleLR":
+            lr_scheduler = {
+                'scheduler': OneCycleLR(optimizer, max_lr=1e-3, steps_per_epoch=len(self.train_dataloader()), epochs=self.trainer.max_epochs),
+                'name': 'oneCycleLR'
+            }
+        else:
+            raise ValueError(f"Unsupported scheduler: {self.schedule}")
+
+        if lr_scheduler:
+            return [optimizer], [lr_scheduler]
+        else:
+            return optimizer
+
 
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         print("running predict step!")
@@ -791,10 +829,10 @@ class ContrastiveModule(LightningModule):
         combined_features = np.array(combined_features)
         combined_projections = np.array(combined_projections)
 
-        np.save("embeddings4/1_multi_resnet_predicted_features.npy", combined_features)
+        np.save("embeddings5/div_multi_june_resnet_predicted_features.npy", combined_features)
         print("Saved features with shape", combined_features.shape)
         np.save(
-            "embeddings4/1_multi_resnet_predicted_projections.npy", combined_projections
+            "embeddings5/div_multi_june_resnet_predicted_projections.npy", combined_projections
         )
         print("Saved projections with shape", combined_projections.shape)
 
@@ -809,4 +847,4 @@ class ContrastiveModule(LightningModule):
             }
         )
 
-        df.to_csv("embeddings4/1_multi_resnet_predicted_metadata.csv", index=False)
+        df.to_csv("embeddings5/div_multi_june_resnet_predicted_metadata.csv", index=False)

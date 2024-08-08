@@ -18,6 +18,7 @@ from viscy.transforms import (
     RandScaleIntensityd,
     RandWeightedCropd,
 )
+
 from viscy.data.triplet import TripletDataModule, TripletDataset
 from viscy.light.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
@@ -26,7 +27,7 @@ from pathlib import Path
 from monai.transforms import NormalizeIntensityd, ScaleIntensityRangePercentilesd
 from lightning.pytorch.loggers import TensorBoardLogger
 from lightning.pytorch.callbacks import DeviceStatsMonitor
-
+from lightning.pytorch.callbacks import LearningRateMonitor
 
 # %% Paths and constants
 
@@ -59,7 +60,7 @@ data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/
 tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
 source_channel = ["RFP", "Phase3D"]
 z_range = (28, 43)
-batch_size = 32
+batch_size = 64
 
 # normalizations = [
 #             # Normalization for Phase3D using mean and std
@@ -128,8 +129,8 @@ augmentations = [
                 prob=0.5,
             ),
             # Apply Gaussian noise separately for each channel
-            RandGaussianNoised(keys=["RFP"], prob=0.5, mean=0.0, std=0.2),  
-            RandGaussianNoised(keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2),  
+            RandGaussianNoised(keys=["RFP"], prob=0.5, mean=0.0, std=0.5),  # Higher noise for RFP
+            RandGaussianNoised(keys=["Phase3D"], prob=0.5, mean=0.0, std=0.2),  # Moderate noise for Phase
         ]
 
 torch.set_float32_matmul_precision("medium")
@@ -205,6 +206,7 @@ def main(hparams):
         stem_kernel_size=(5, 3, 3),
         embedding_len=hparams.embedding_len,
     )
+    print("Model initialized!")
 
     # set for each run to avoid overwritting!
     #custom_folder_name = "test"
@@ -216,11 +218,13 @@ def main(hparams):
         monitor="val/loss_epoch",
     )
 
+    lr_monitor = LearningRateMonitor(logging_interval='step')
+
     trainer = Trainer(
         max_epochs=hparams.max_epochs,
         # limit_train_batches=2,
         # limit_val_batches=2,
-        callbacks=[checkpoint_callback],
+        callbacks=[checkpoint_callback, lr_monitor],
         logger=TensorBoardLogger(
             "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb",
             log_graph=True,
@@ -243,6 +247,9 @@ def main(hparams):
     # Fetches batches from the training dataloader,
     # Calls the training_step method on the model for each batch
     # Aggregates the losses and performs optimization steps
+
+    print("Trainer initialized!")
+
     trainer.fit(model, datamodule=data_module)
 
     # # Validate the model
@@ -256,8 +263,8 @@ def main(hparams):
 parser = ArgumentParser()
 parser.add_argument("--backbone", type=str, default="convnext_tiny")
 parser.add_argument("--margin", type=float, default=0.5)
-parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--schedule", type=str, default="Constant")
+parser.add_argument("--lr", type=float, default=0.00001)
+parser.add_argument("--schedule", type=str, default="CosineAnnealingWarmRestarts")
 parser.add_argument("--log_steps_per_epoch", type=int, default=10)
 parser.add_argument("--embedding_len", type=int, default=256)
 parser.add_argument("--max_epochs", type=int, default=100)

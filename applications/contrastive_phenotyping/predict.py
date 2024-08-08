@@ -31,7 +31,7 @@ normalizations = [
         allow_missing_keys=False  
     ),
     ScaleIntensityRangePercentilesd(
-        keys=["RFP"],
+        keys=["MultiCam_GFP_mCherry_BF-Prime BSI Express"],
         lower=50,  
         upper=99,  
         b_min=0.0,
@@ -44,21 +44,28 @@ normalizations = [
     ),
 ]
 
+# MultiCam_GFP_mCherry_BF-Prime BSI Express
 def main(hparams):
     # Set paths
     # /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/expanded_final_track_timesteps.csv
     # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/uninfected_cells.csv
     # /hpc/mydata/alishba.imran/VisCy/viscy/applications/contrastive_phenotyping/expanded_transitioning_cells_metadata.csv
-    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/multi-resnet2/contrastive_model-test-epoch=21-val_loss=0.00.ckpt"
+    checkpoint_path = "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb/lightning_logs/copy/contrastive_model-test-epoch=24-val_loss=0.00.ckpt"
     
     # non-rechunked data 
-    data_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr"
+    # /hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/5-infection_pred/infection_score.zarr
+    # /hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr
+    # /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr
+    data_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/5-infection_pred/infection_score.zarr"
 
     # updated tracking data
-    tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr"
+    # /hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking/test_tracking_4.zarr 
+    # /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr
+    tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking/test_tracking_4.zarr"
     
-    source_channel = ["RFP", "Phase3D"]
-    z_range = (26, 38)
+    # MultiCam_GFP_mCherry_BF-Prime BSI Express
+    source_channel = ["MultiCam_GFP_mCherry_BF-Prime BSI Express", "Phase3D"]
+    z_range = (28, 43)
     batch_size = 1 # match the number of fovs being processed such that no data is left
     # set to 15 for full, 12 for infected, and 8 for uninfected
 
@@ -71,8 +78,8 @@ def main(hparams):
     # include_track_ids = [25, 36, 37, 48, 16, 17]
 
     # # dividing cells - JUNE
-    # include_fov_names = ['/0/1/000000', '/0/1/000000', '/0/1/000000']
-    # include_track_ids = [18, 21, 50]
+    include_fov_names = ['/0/1/000000', '/0/1/000000', '/0/1/000000']
+    include_track_ids = [18, 21, 50]
 
     # uninfected cells - FEB
     # include_fov_names = ['/A/3/0', 'B/3/5', 'B/3/5', 'B/3/5', 'B/3/5', '/A/4/14', '/A/4/14']
@@ -97,9 +104,9 @@ def main(hparams):
         batch_size=batch_size,
         num_workers=hparams.num_workers,
         normalizations=normalizations,
-        # predict_cells = True,
-        # include_fov_names=include_fov_names,
-        # include_track_ids=include_track_ids,
+        predict_cells = True,
+        include_fov_names=include_fov_names,
+        include_track_ids=include_track_ids,
     )
 
     data_module.setup(stage="predict")
@@ -107,8 +114,8 @@ def main(hparams):
     print(f"Total prediction dataset size: {len(data_module.predict_dataset)}")
     
     # Load the model from checkpoint
-    backbone = "resnet50"
-    in_stack_depth = 12
+    backbone = "convnext_tiny"
+    in_stack_depth = 15
     stem_kernel_size = (5, 3, 3)
     model = ContrastiveModule.load_from_checkpoint(
     str(checkpoint_path), 
@@ -155,7 +162,7 @@ def main(hparams):
 
 if __name__ == "__main__":
     parser = ArgumentParser()
-    parser.add_argument("--backbone", type=str, default="resnet50")
+    parser.add_argument("--backbone", type=str, default="convnext_tiny")
     parser.add_argument("--margin", type=float, default=0.5)
     parser.add_argument("--lr", type=float, default=1e-3)
     parser.add_argument("--schedule", type=str, default="Constant")

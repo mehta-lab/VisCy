@@ -1,7 +1,7 @@
 # %% Imports and paths.
 import os
 import torch
-from viscy.representation.contrastive import ContrastiveEncoder
+from viscy.representation.contrastive_copy1 import ContrastiveEncoder
 import torchview
 import timm
 
@@ -16,7 +16,7 @@ convnextv1 = timm.create_model(
 )
 print(convnextv1)
 
-example_input = torch.randn(1, 3, 256, 256)
+example_input = torch.randn(2, 3, 256, 256)
 output = convnextv1(example_input)
 print(output.shape)
 # %% Initialize the model and log the graph: convnext.
@@ -28,9 +28,9 @@ contrastive_convnext1 = ContrastiveEncoder(
 )
 print(contrastive_convnext1)
 example_input = torch.randn(1, in_channels, in_stack_depth, 256, 256)
-projections, embedding = contrastive_convnext1(example_input)
+projections = contrastive_convnext1(example_input)
 print(
-    f"shape of projections:{projections.shape}, shape of embedding: {embedding.shape}"
+    f"shape of embedding: {projections.shape}"
 )
 
 model_graph = torchview.draw_graph(
