@@ -741,8 +741,14 @@ class ContrastiveModule(LightningModule):
         return optimizer
 
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
-        print("running predict step!")
         """Prediction step for extracting embeddings."""
+
+        if (not self.features_output_path or not self.projections_output_path or not self.metadata_output_path):
+            raise ValueError(
+                "Output paths for features, projections, and metadata must be provided."
+            )
+        print("running predict step!")
+
         features, projections = self.model(batch["anchor"])
         index = batch["index"]
         self.predictions.append(
@@ -751,15 +757,6 @@ class ContrastiveModule(LightningModule):
         return features, projections, index
 
     def on_predict_epoch_end(self) -> None:
-        if (
-            not self.features_output_path
-            or not self.projections_output_path
-            or not self.metadata_output_path
-        ):
-            raise ValueError(
-                "Output paths for features, projections, and metadata must be provided."
-            )
-
         combined_features = []
         combined_projections = []
         accumulated_data = []
