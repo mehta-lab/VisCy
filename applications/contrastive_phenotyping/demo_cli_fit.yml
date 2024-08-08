@@ -1,3 +1,4 @@
+# See help here on how to configure hyper-parameters with config files: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
 seed_everything: 42
 trainer:
   accelerator: gpu
@@ -9,8 +10,14 @@ trainer:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations
-      version: vanilla
+      version: vanilla # this is the name of the experiment. The logs will be saved in save_dir/lightning_logs/version
       log_graph: True
+  # Nesting the logger config like this is equivalent to supplying the following argument to lightning.pytorch.Trainer
+  #  logger=TensorBoardLogger(
+  #           "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
+  #           log_graph=True,
+  #           version="vanilla",
+  #       )
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:

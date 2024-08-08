@@ -14,18 +14,24 @@
 export NCCL_DEBUG=INFO
 export PYTHONFAULTHANDLER=1
 
+
+# Cleanup function to remove the temporary files
 function cleanup() {
   rm -rf /tmp/$SLURM_JOB_ID/*.zarr
   echo "Cleanup Completed."
 }
 
 trap cleanup EXIT
+# trap the EXIT signal sent to the process and invoke the cleanup.
 
+# Activate the conda environment
 module load anaconda/2022.05
 conda activate viscy
-
-scontrol show job $SLURM_JOB_ID
-
 config=./demo_cli_fit.yml
+
+# Printing this to the stdout lets us connect the job id to config.
+scontrol show job $SLURM_JOB_ID
 cat $config
+
+# Run the training CLI
 srun python -m viscy.cli.contrastive_triplet fit -c $config
