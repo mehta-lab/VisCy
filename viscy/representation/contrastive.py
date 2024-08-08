@@ -34,7 +34,7 @@ class ContrastiveEncoder(nn.Module):
         :param int embedding_len: Length of the embedding vector, defaults to 256
         :param int stem_stride: stride of the stem, defaults to 2
         :param bool predict: prediction mode, defaults to False
-        :param float drop_path_rate: probability that residual connections in ConvNeXt
+        :param float drop_path_rate: probability that residual connections
             are dropped during training, defaults to 0.2
         """
         super().__init__()
