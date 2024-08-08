@@ -751,9 +751,15 @@ class ContrastiveModule(LightningModule):
         return features, projections, index
 
     def on_predict_epoch_end(self) -> None:
-        if not self.features_output_path or not self.projections_output_path or not self.metadata_output_path:
-            raise ValueError("Output paths for features, projections, and metadata must be provided.")
-        
+        if (
+            not self.features_output_path
+            or not self.projections_output_path
+            or not self.metadata_output_path
+        ):
+            raise ValueError(
+                "Output paths for features, projections, and metadata must be provided."
+            )
+
         combined_features = []
         combined_projections = []
         accumulated_data = []
