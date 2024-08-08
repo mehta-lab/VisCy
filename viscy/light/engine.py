@@ -752,7 +752,6 @@ class ContrastiveModule(LightningModule):
 
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         """Prediction step for extracting embeddings."""
-
         features, projections = self.model(batch["anchor"])
         index = batch["index"]
         self.predictions.append(

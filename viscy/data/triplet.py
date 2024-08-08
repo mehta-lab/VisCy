@@ -57,8 +57,8 @@ class TripletDataset(Dataset):
         negative_transform: DictTransform | None = None,
         fit: bool = True,
         predict_cells: bool = False,
-        include_fov_names: list[str] = None,
-        include_track_ids: list[int] = None,
+        include_fov_names: list[str] | None = None,
+        include_track_ids: list[int] | None = None,
     ) -> None:
         self.positions = positions
         self.channel_names = channel_names
@@ -203,8 +203,8 @@ class TripletDataModule(HCSDataModule):
         augmentations: list[MapTransform] = [],
         caching: bool = False,
         predict_cells: bool = False,
-        include_fov_names: list[str] = None,
-        include_track_ids: list[int] = None,
+        include_fov_names: list[str] | None = None,
+        include_track_ids: list[int] | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
