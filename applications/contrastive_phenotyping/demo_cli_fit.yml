@@ -10,7 +10,7 @@ trainer:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
     init_args:
       save_dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations
-      version: vanilla # this is the name of the experiment. The logs will be saved in save_dir/lightning_logs/version
+      version: chocolate # this is the name of the experiment. The logs will be saved in save_dir/lightning_logs/version
       log_graph: True
   # Nesting the logger config like this is equivalent to supplying the following argument to lightning.pytorch.Trainer
   #  logger=TensorBoardLogger(
