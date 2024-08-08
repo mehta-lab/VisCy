@@ -1,8 +1,12 @@
+import logging
+
 import timm
 import torch.nn as nn
 import torch.nn.functional as F
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class ContrastiveEncoder(nn.Module):
@@ -41,7 +45,7 @@ class ContrastiveEncoder(nn.Module):
         )
 
         if "convnext" in backbone:
-            print("Using ConvNext backbone.")
+            _logger.debug(f"Using ConvNeXt backbone for {type(self).__name__}.")
 
             in_channels_encoder = encoder.stem[0].out_channels
 
@@ -58,7 +62,7 @@ class ContrastiveEncoder(nn.Module):
             encoder.head.fc = nn.Identity()
 
         elif "resnet" in backbone:
-            print("Using ResNet backbone.")
+            _logger.debug(f"Using ResNet backbone for {type(self).__name__}")
             # Adapt stem and projection head of resnet here.
             # replace the stem designed for RGB images with a stem designed to handle 3D multi-channel input.
 
@@ -73,7 +77,7 @@ class ContrastiveEncoder(nn.Module):
             encoder.fc = nn.Identity()
 
         # Create a new stem that can handle 3D multi-channel input.
-        print("using stem kernel size", stem_kernel_size)
+        _logger.debug(f"Stem kernel size: {stem_kernel_size}")
         self.stem = StemDepthtoChannels(
             in_channels, in_stack_depth, in_channels_encoder, stem_kernel_size
         )
