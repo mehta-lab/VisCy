@@ -11,7 +11,6 @@ from pathlib import Path
 
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
-
 # Viscy classes for the trainer and model
 from viscy.data.hcs import HCSDataModule
 from viscy.light.engine import FcmaeUNet
@@ -31,13 +30,9 @@ The dataset and model checkpoint files need to be downloaded before running this
 root_dir = Path("")
 # Download from
 # https://public.czbiohub.org/comp.micro/viscy/VSCyto2D/test/a549_hoechst_cellmask_test.zarr/
-input_data_path = (
-    root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
-)
+input_data_path = root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
 # Download from GitHub release page of v0.1.0
-model_ckpt_path = (
-    root_dir / "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
-)
+model_ckpt_path = root_dir / "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
 # Zarr store to save the predictions
 output_path = root_dir / "./a549_prediction.zarr"
 # FOV of interest
