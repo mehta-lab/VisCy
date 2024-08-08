@@ -740,14 +740,12 @@ class ContrastiveModule(LightningModule):
         optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
 
+    def on_predict_start(self) -> None:
+        if not (self.features_output_path and self.projections_output_path and self.metadata_output_path):
+            raise ValueError("Output paths for features, projections, and metadata must be provided.")
+
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
         """Prediction step for extracting embeddings."""
-
-        if (not self.features_output_path or not self.projections_output_path or not self.metadata_output_path):
-            raise ValueError(
-                "Output paths for features, projections, and metadata must be provided."
-            )
-        print("running predict step!")
 
         features, projections = self.model(batch["anchor"])
         index = batch["index"]
