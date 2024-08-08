@@ -11,12 +11,30 @@ The following methods are being developed:
 - Image representation learning
   - Self-supervised learning of the cell state and organelle phenotypes
 
-VisCy is currently considered alpha software and is under active development.
-Frequent breaking changes are expected.
+<div style="border: 2px solid orange; padding: 10px; border-radius: 5px; background-color: #fff8e1;">
+  <strong>Note:</strong><br>
+  VisCy is currently considered alpha software and is under active development. Frequent breaking changes are expected.
+</div>
 
 ## Virtual staining
-
+### Pipeline
 A full illustration of the virtual staining pipeline can be found [here](docs/virtual_staining.md).
+
+### Library of virtual staining (VS) models
+The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
+
+### Demos 
+#### Image-to-Image translation using VisCy
+- [Guide for Virtual Staining Models](https://github.com/mehta-lab/VisCy/wiki/virtual-staining-instructions):
+Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*) 
+
+- [Image translation Exercise](./dlmbl_exercise/solution.py):
+Example showing how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course.
+
+- [Virtual staining exercise](./img2img_translation/solution.py): exploring the label-free to fluorescence virtual staining and florescence to label-free image translation task using VisCy UneXt2.
+More usage examples and demos can be found [here](https://github.com/mehta-lab/VisCy/blob/b7af9687c6409c738731ea47f66b74db2434443c/examples/virtual_staining/README.md)
+
+### Gallery
 Below are some examples of virtually stained images (click to play videos).
 See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
@@ -100,8 +118,10 @@ publisher = {eLife Sciences Publications, Ltd},
     viscy --help
     ```
 
+## Contributing
 For development installation, see [the contributing guide](CONTRIBUTING.md).
 
+## Additional Notes
 The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning.ai/index.html) framework.
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
@@ -109,10 +129,3 @@ for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s4159
 The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
-
-### Demos
-Check out our demos for:
-- [Virtual staining](https://github.com/mehta-lab/VisCy/tree/main/examples/demos) - training, inference and evaluation
-
-### Library of virtual staining (VS) models
-The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
