@@ -1,12 +1,9 @@
-from typing import Callable, NamedTuple, Sequence, TypedDict, TypeVar
+from __future__ import annotations
 
-from torch import Tensor
+from typing import TYPE_CHECKING, NamedTuple, Sequence, TypedDict, TypeVar
 
-# TODO: use typing.NotRequired when upgrading to Python 3.11
-from typing_extensions import NotRequired
-
-DictTransform = Callable[[dict[str, Tensor | dict]], dict[str, Tensor]]
-
+if TYPE_CHECKING:
+    from torch import Tensor
 
 T = TypeVar("T")
 OneOrSeq = T | Sequence[T]
@@ -53,27 +50,14 @@ class Sample(TypedDict, total=False):
     norm_meta: NormMeta
 
 
-class ChannelMap(TypedDict):
+class _ChannelMap(TypedDict):
     """Source channel names."""
 
     source: OneOrSeq[str]
-    target: NotRequired[OneOrSeq[str]]
 
 
-class TrackingIndex(TypedDict):
-    """Tracking index extracted from ultrack result
-    Potentially collated by the dataloader"""
+class ChannelMap(_ChannelMap, total=False):
+    """Source and target channel names."""
 
-    fov_name: OneOrSeq[str]
-    id: OneOrSeq[int]
-
-
-class TripletSample(TypedDict):
-    """
-    Triplet sample type for mini-batches.
-    """
-
-    index: TrackingIndex
-    anchor: Tensor
-    positive: NotRequired[Tensor]
-    negative: NotRequired[Tensor]
+    # TODO: use typing.NotRequired when upgrading to Python 3.11
+    target: OneOrSeq[str]

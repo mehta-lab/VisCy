@@ -3,9 +3,7 @@ import os
 from typing import Literal, Sequence, Union
 
 import numpy as np
-import pandas as pd
 import torch
-import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
 from matplotlib.pyplot import get_cmap
@@ -13,7 +11,7 @@ from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
-from torch.optim import Adam
+from torch.nn import functional as F
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
@@ -27,9 +25,8 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.data.typing import Sample, TripletSample
+from viscy.data.hcs import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
-from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
@@ -161,18 +158,18 @@ class VSUNet(LightningModule):
         self,
         architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
-        loss_function: Union[nn.Module, MixedLoss] | None = None,
+        loss_function: Union[nn.Module, MixedLoss] = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         freeze_encoder: bool = False,
-        ckpt_path: str | None = None,
+        ckpt_path: str = None,
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
-        test_cellpose_model_path: str | None = None,
-        test_cellpose_diameter: float | None = None,
-        test_evaluate_cellpose: bool | None = False,
-        test_time_augmentations: bool | None = False,
+        test_cellpose_model_path: str = None,
+        test_cellpose_diameter: float = None,
+        test_evaluate_cellpose: bool = False,
+        test_time_augmentations: bool = False,
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
@@ -562,240 +559,3 @@ class FcmaeUNet(VSUNet):
                     self.log_samples_per_batch,
                 )
             )
-
-
-class ContrastiveModule(LightningModule):
-    """Contrastive Learning Model for self-supervised learning."""
-
-    def __init__(
-        self,
-        backbone: str = "convnext_tiny",
-        loss_function: Union[
-            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
-        ] = nn.TripletMarginLoss(),
-        margin: float = 0.5,
-        lr: float = 1e-3,
-        schedule: Literal["WarmupCosine", "Constant"] = "Constant",
-        log_batches_per_epoch: int = 8,
-        log_samples_per_batch: int = 1,
-        in_channels: int = 1,
-        example_input_yx_shape: Sequence[int] = (256, 256),
-        in_stack_depth: int = 15,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
-        embedding_len: int = 256,
-        predict: bool = False,
-        tracks_path: str = "data/tracks",
-    ) -> None:
-        super().__init__()
-        self.loss_function = loss_function
-        self.margin = margin
-        self.lr = lr
-        self.schedule = schedule
-        self.log_batches_per_epoch = log_batches_per_epoch
-        self.log_samples_per_batch = log_samples_per_batch
-        self.training_step_outputs = []
-        self.validation_step_outputs = []
-        self.test_step_outputs = []
-        self.training_metrics = []
-        self.validation_metrics = []
-        self.test_metrics = []
-        self.processed_order = []
-        self.predictions = []
-        self.tracks_path = tracks_path
-        self.model = ContrastiveEncoder(
-            backbone=backbone,
-            in_channels=in_channels,
-            in_stack_depth=in_stack_depth,
-            stem_kernel_size=stem_kernel_size,
-            embedding_len=embedding_len,
-            predict=predict,
-        )
-        self.example_input_array = torch.rand(
-            1, in_channels, in_stack_depth, *example_input_yx_shape
-        )
-        self.training_step_outputs = []
-        self.validataion_step_outputs = []
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Projected embeddings."""
-        return self.model(x)[1]
-
-    def log_feature_statistics(self, embeddings: Tensor, prefix: str):
-        mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
-        std = torch.std(embeddings, dim=0).detach().cpu().numpy()
-        _logger.debug(f"{prefix}_mean: {mean}")
-        _logger.debug(f"{prefix}_std: {std}")
-
-    def print_embedding_norms(self, anchor, positive, negative, phase):
-        anchor_norm = torch.norm(anchor, dim=1).mean().item()
-        positive_norm = torch.norm(positive, dim=1).mean().item()
-        negative_norm = torch.norm(negative, dim=1).mean().item()
-        _logger.debug(f"{phase}/anchor_norm: {anchor_norm}")
-        _logger.debug(f"{phase}/positive_norm: {positive_norm}")
-        _logger.debug(f"{phase}/negative_norm: {negative_norm}")
-
-    def _log_metrics(
-        self, loss, anchor, positive, negative, stage: Literal["train", "val"]
-    ):
-        self.log(
-            f"loss/{stage}",
-            loss.to(self.device),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
-        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
-        euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
-        euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
-        self.log_dict(
-            {
-                f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
-                f"metrics/cosine_similarity_negative/{stage}": cosine_sim_neg,
-                f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
-                f"metrics/euclidean_distance_negative/{stage}": euclidean_dist_neg,
-            },
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            sync_dist=True,
-        )
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs, cmaps=["gray"] * 3)
-        self.logger.experiment.add_image(
-            key, grid, self.current_epoch, dataformats="HWC"
-        )
-
-    def training_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
-        """Training step of the model."""
-        stage = "train"
-        anchor_img = batch["anchor"]
-        pos_img = batch["positive"]
-        neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor_img)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, stage
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                _detach_sample(
-                    (anchor_img, pos_img, neg_img), self.log_samples_per_batch
-                )
-            )
-        return loss
-
-    def on_train_epoch_end(self) -> None:
-        super().on_train_epoch_end()
-        self._log_samples("train_samples", self.training_step_outputs)
-        self.training_step_outputs = []
-
-    def validation_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
-        """Validation step of the model."""
-        anchor = batch["anchor"]
-        pos_img = batch["positive"]
-        neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, "val"
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.validation_step_outputs.extend(
-                _detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
-            )
-        return loss
-
-    def on_validation_epoch_end(self) -> None:
-        super().on_validation_epoch_end()
-        self._log_samples("val_samples", self.validation_step_outputs)
-        self.validation_step_outputs = []
-
-    def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.lr)
-        return optimizer
-
-    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
-        print("running predict step!")
-        """Prediction step for extracting embeddings."""
-        features, projections = self.model(batch["anchor"])
-        index = batch["index"]
-        self.predictions.append(
-            (features.cpu().numpy(), projections.cpu().numpy(), index)
-        )
-        return features, projections, index
-
-    def on_predict_epoch_end(self) -> None:
-        combined_features = []
-        combined_projections = []
-        accumulated_data = []
-
-        for features, projections, index in self.predictions:
-            combined_features.extend(features)
-            combined_projections.extend(projections)
-
-            fov_names = index["fov_name"]
-            cell_ids = index["id"].cpu().numpy()
-
-            for fov_name, cell_id in zip(fov_names, cell_ids):
-                parts = fov_name.split("/")
-                row = parts[1]
-                column = parts[2]
-                fov = parts[3]
-
-                csv_path = os.path.join(
-                    self.tracks_path,
-                    row,
-                    column,
-                    fov,
-                    f"tracks_{row}_{column}_{fov}.csv",
-                )
-
-                df = pd.read_csv(csv_path)
-
-                track_id = df[df["id"] == cell_id]["track_id"].values[0]
-                timestep = df[df["id"] == cell_id]["t"].values[0]
-
-                accumulated_data.append((row, column, fov, track_id, timestep))
-
-        combined_features = np.array(combined_features)
-        combined_projections = np.array(combined_projections)
-
-        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
-        print("Saved features with shape", combined_features.shape)
-        np.save(
-            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
-        )
-        print("Saved projections with shape", combined_projections.shape)
-
-        rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
-        df = pd.DataFrame(
-            {
-                "Row": rows,
-                "Column": columns,
-                "FOV": fovs,
-                "Cell ID": track_ids,
-                "Timestep": timesteps,
-            }
-        )
-
-        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)

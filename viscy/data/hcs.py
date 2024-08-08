@@ -3,8 +3,9 @@ import math
 import os
 import re
 import tempfile
+from glob import glob
 from pathlib import Path
-from typing import Callable, Literal, Sequence
+from typing import Callable, Literal, Optional, Sequence, Union
 
 import numpy as np
 import torch
@@ -24,9 +25,7 @@ from monai.transforms import (
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
-
-_logger = logging.getLogger("lightning.pytorch")
+from viscy.data.typing import ChannelMap, HCSStackIndex, NormMeta, Sample
 
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
@@ -104,7 +103,7 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param DictTransform | None transform:
+    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] | None transform:
         a callable that transforms data, defaults to None
     """
 
@@ -113,7 +112,7 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: DictTransform | None = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -181,7 +180,6 @@ class SlidingWindowDataset(Dataset):
     def __len__(self) -> int:
         return self._max_window
 
-    # TODO: refactor to a top level function
     def _stack_channels(
         self,
         sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
@@ -237,9 +235,8 @@ class MaskTestDataset(SlidingWindowDataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param DictTransform transform:
+    :param Callable[[dict[str, Tensor]], dict[str, Tensor]] transform:
         a callable that transforms data, defaults to None
-    :param str | None ground_truth_masks: path to the ground truth masks
     """
 
     def __init__(
@@ -247,13 +244,13 @@ class MaskTestDataset(SlidingWindowDataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
-        transform: DictTransform | None = None,
-        ground_truth_masks: str | None = None,
+        transform: Callable[[dict[str, Tensor]], dict[str, Tensor]] | None = None,
+        ground_truth_masks: str = None,
     ) -> None:
         super().__init__(positions, channels, z_window_size, transform)
         self.masks = {}
-        for img_path in Path(ground_truth_masks).glob("*cp_masks.png"):
-            img_name = img_path.name
+        for img_path in glob(os.path.join(ground_truth_masks, "*cp_masks.png")):
+            img_name = os.path.basename(img_path)
             position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
             # TODO: specify time index in the file name
             t_idx = 0
@@ -261,7 +258,7 @@ class MaskTestDataset(SlidingWindowDataset):
             # channel_name = re.search(r"^.+(?=_p\d{3})", img_name).group()
             z_idx = _search_int_in_str(r"(?<=_z)\d+", img_name)
             self.masks[(int(position_name), int(t_idx), int(z_idx))] = img_path
-        _logger.info(str(self.masks))
+        logging.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
         sample = super().__getitem__(index)
@@ -277,9 +274,9 @@ class HCSDataModule(LightningDataModule):
     """Lightning data module for a preprocessed HCS NGFF Store.
 
     :param str data_path: path to the data store
-    :param str | Sequence[str] source_channel: name(s) of the source channel,
+    :param Union[str, Sequence[str]] source_channel: name(s) of the source channel,
         e.g. ``'Phase'``
-    :param str | Sequence[str] target_channel: name(s) of the target channel,
+    :param Union[str, Sequence[str]] target_channel: name(s) of the target channel,
         e.g. ``['Nuclei', 'Membrane']``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param float split_ratio: split ratio of the training subset in the fit stage,
@@ -298,7 +295,7 @@ class HCSDataModule(LightningDataModule):
     :param bool caching: whether to decompress all the images and cache the result,
         will store in ``/tmp/$SLURM_JOB_ID/`` if available,
         defaults to False
-    :param Path | None ground_truth_masks: path to the ground truth masks,
+    :param Optional[Path] ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
     """
@@ -306,8 +303,8 @@ class HCSDataModule(LightningDataModule):
     def __init__(
         self,
         data_path: str,
-        source_channel: str | Sequence[str],
-        target_channel: str | Sequence[str],
+        source_channel: Union[str, Sequence[str]],
+        target_channel: Union[str, Sequence[str]],
         z_window_size: int,
         split_ratio: float = 0.8,
         batch_size: int = 16,
@@ -317,7 +314,7 @@ class HCSDataModule(LightningDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
-        ground_truth_masks: Path | None = None,
+        ground_truth_masks: Optional[Path] = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -342,10 +339,6 @@ class HCSDataModule(LightningDataModule):
             os.getenv("SLURM_JOB_ID", "viscy_cache"),
             self.data_path.name,
         )
-
-    @property
-    def maybe_cached_data_path(self):
-        return self.cache_path if self.caching else self.data_path
 
     def _data_log_path(self) -> Path:
         log_dir = Path.cwd()
@@ -385,15 +378,9 @@ class HCSDataModule(LightningDataModule):
                 f"Skipped {skipped} items when caching. Check debug log for details."
             )
 
-    @property
-    def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
-        return {
-            "channels": {"source": self.source_channel},
-            "z_window_size": self.z_window_size,
-        }
-
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
-        dataset_settings = self._base_dataset_settings
+        channels = {"source": self.source_channel}
+        dataset_settings = dict(channels=channels, z_window_size=self.z_window_size)
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
         elif stage == "test":
@@ -403,22 +390,25 @@ class HCSDataModule(LightningDataModule):
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
+    def _setup_fit(self, dataset_settings: dict):
+        """Set up the training and validation datasets."""
+        # Setup the transformations
+        # TODO: These have a fixed order for now... (normalization->augmentation->fit_transform)
+        fit_transform = self._fit_transform()
+        train_transform = Compose(
+            self.normalizations + self._train_transform() + fit_transform
+        )
+        val_transform = Compose(self.normalizations + fit_transform)
+
+        dataset_settings["channels"]["target"] = self.target_channel
+        data_path = self.cache_path if self.caching else self.data_path
+        plate = open_ome_zarr(data_path, mode="r")
+
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
-        return torch.randperm(num_positions)
-
-    def _setup_fit(self, dataset_settings: dict):
-        """Set up the training and validation datasets."""
-        train_transform, val_transform = self._fit_transform()
-        dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.maybe_cached_data_path
-        plate = open_ome_zarr(data_path, mode="r")
-
-        # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
-        shuffled_indices = self._set_fit_global_state(len(positions))
+        shuffled_indices = torch.randperm(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
@@ -445,10 +435,10 @@ class HCSDataModule(LightningDataModule):
     def _setup_test(self, dataset_settings: dict):
         """Set up the test stage."""
         if self.batch_size != 1:
-            _logger.warning(f"Ignoring batch size {self.batch_size} in test stage.")
+            logging.warning(f"Ignoring batch size {self.batch_size} in test stage.")
 
         dataset_settings["channels"]["target"] = self.target_channel
-        data_path = self.maybe_cached_data_path
+        data_path = self.cache_path if self.caching else self.data_path
         plate = open_ome_zarr(data_path, mode="r")
         test_transform = Compose(self.normalizations)
         if self.ground_truth_masks:
@@ -465,14 +455,16 @@ class HCSDataModule(LightningDataModule):
                 **dataset_settings,
             )
 
-    def _set_predict_global_state(self) -> None:
+    def _setup_predict(
+        self,
+        dataset_settings: dict,
+    ):
+        """Set up the predict stage."""
         # track metadata for inverting transform
         set_track_meta(True)
         if self.caching:
-            _logger.warning("Ignoring caching config in 'predict' stage.")
-
-    def _positions_maybe_single(self) -> list[Position]:
-        dataset: Plate | Position = open_ome_zarr(self.data_path, mode="r")
+            logging.warning("Ignoring caching config in 'predict' stage.")
+        dataset: Union[Plate, Position] = open_ome_zarr(self.data_path, mode="r")
         if isinstance(dataset, Position):
             try:
                 plate_path = self.data_path.parent.parent.parent
@@ -485,17 +477,9 @@ class HCSDataModule(LightningDataModule):
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):
             positions = [p for _, p in dataset.positions()]
-        return positions
-
-    def _setup_predict(
-        self,
-        dataset_settings: dict,
-    ):
-        """Set up the predict stage."""
-        self._set_predict_global_state()
         predict_transform = Compose(self.normalizations)
         self.predict_dataset = SlidingWindowDataset(
-            positions=self._positions_maybe_single(),
+            positions=positions,
             transform=predict_transform,
             **dataset_settings,
         )
@@ -553,11 +537,9 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def _fit_transform(self) -> tuple[Compose, Compose]:
-        """(normalization -> maybe augmentation -> center crop)
-        Deterministic center crop as the last step of training and validation."""
-        # TODO: These have a fixed order for now... ()
-        final_crop = [
+    def _fit_transform(self):
+        """Deterministic center crop as the last step of training and validation."""
+        return [
             CenterSpatialCropd(
                 keys=self.source_channel + self.target_channel,
                 roi_size=(
@@ -567,11 +549,6 @@ class HCSDataModule(LightningDataModule):
                 ),
             )
         ]
-        train_transform = Compose(
-            self.normalizations + self._train_transform() + final_crop
-        )
-        val_transform = Compose(self.normalizations + final_crop)
-        return train_transform, val_transform
 
     def _train_transform(self) -> list[Callable]:
         """Setup training augmentations: check input values,
@@ -609,5 +586,5 @@ class HCSDataModule(LightningDataModule):
             self.train_z_scale_range = z_scale_range
         else:
             self.train_z_scale_range = (0.0, 0.0)
-        _logger.debug(f"Training augmentations: {self.augmentations}")
+        logging.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
