@@ -11,7 +11,7 @@ class ContrastiveEncoder(nn.Module):
         backbone: str = "convnext_tiny",
         in_channels: int = 2,
         in_stack_depth: int = 12,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         embedding_len: int = 256,
         stem_stride: int = 2,
         predict: bool = False,

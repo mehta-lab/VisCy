@@ -90,7 +90,7 @@ class UNeXt2Stem(nn.Module):
         # return a view when possible (contiguous)
         return x.reshape(b, c * d, h, w)
 
-
+# TO-DO: need to fix this 
 class StemDepthtoChannels(nn.Module):
     """Stem with 3D convolution that maps depth to channels."""
 
@@ -99,12 +99,12 @@ class StemDepthtoChannels(nn.Module):
         in_channels: int,
         in_stack_depth: int,
         in_channels_encoder: int,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
-        stem_stride: int = 2,  # stride for the kernel
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
+        stem_stride: tuple[int, int, int] = (5, 4, 4),  # stride for the kernel
     ) -> None:
         super().__init__()
         stem3d_out_channels = self.compute_stem_channels(
-            in_stack_depth, stem_kernel_size, stem_stride, in_channels_encoder
+            in_stack_depth, stem_kernel_size, stem_stride[0], in_channels_encoder
         )
 
         self.conv = nn.Conv3d(
