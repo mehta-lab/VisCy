@@ -4,7 +4,6 @@ import torch.nn.functional as F
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
 
-
 class ContrastiveEncoder(nn.Module):
     def __init__(
         self,
@@ -86,9 +85,11 @@ class ContrastiveEncoder(nn.Module):
     def forward(self, x):
         x = self.stem(x)
         embedding = self.encoder(x)
+        embedding_norm = F.normalize(embedding, p=2, dim=1)
+        print("embedding shape", embedding_norm.shape)
         projections = self.projection(embedding)
         projections = F.normalize(projections, p=2, dim=1)
         return (
-            embedding,
+            embedding_norm,
             projections,
         )  # Compute the loss on projections, analyze the embeddings.

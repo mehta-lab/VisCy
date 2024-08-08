@@ -3,6 +3,7 @@ import math
 import os
 import re
 import tempfile
+import warnings
 from pathlib import Path
 from typing import Callable, Literal, Sequence
 
@@ -26,6 +27,11 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 
+warnings.filterwarnings(
+    "ignore",
+    category=UserWarning,
+    message="To copy construct from a tensor, it is recommended to use sourceTensor.clone().detach() or sourceTensor.clone().detach().requires_grad_(True), rather than torch.tensor(sourceTensor).",
+)
 _logger = logging.getLogger("lightning.pytorch")
 
 
