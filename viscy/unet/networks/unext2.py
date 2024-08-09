@@ -99,12 +99,12 @@ class StemDepthtoChannels(nn.Module):
         in_channels: int,
         in_stack_depth: int,
         in_channels_encoder: int,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
-        stem_stride: int = 2,  # stride for the kernel
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
+        stem_stride: tuple[int, int, int] = (5, 4, 4),  # stride for the kernel
     ) -> None:
         super().__init__()
         stem3d_out_channels = self.compute_stem_channels(
-            in_stack_depth, stem_kernel_size, stem_stride, in_channels_encoder
+            in_stack_depth, stem_kernel_size, stem_stride[0], in_channels_encoder
         )
 
         self.conv = nn.Conv3d(
@@ -115,9 +115,11 @@ class StemDepthtoChannels(nn.Module):
         )
 
     def compute_stem_channels(
-        self, in_stack_depth, stem_kernel_size, stem_stride, in_channels_encoder
+        self, in_stack_depth, stem_kernel_size, stem_stride_depth, in_channels_encoder
     ):
-        stem3d_out_depth = (in_stack_depth - stem_kernel_size[0]) // stem_stride + 1
+        stem3d_out_depth = (
+            in_stack_depth - stem_kernel_size[0]
+        ) // stem_stride_depth + 1
         stem3d_out_channels = in_channels_encoder // stem3d_out_depth
         channel_mismatch = in_channels_encoder - stem3d_out_depth * stem3d_out_channels
         if channel_mismatch != 0:

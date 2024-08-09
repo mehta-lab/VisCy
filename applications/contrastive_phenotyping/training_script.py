@@ -8,7 +8,6 @@ import torch
 from torch.utils.data import DataLoader
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
-from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.strategies import DDPStrategy
 from viscy.transforms import (
     NormalizeSampled,
@@ -19,37 +18,20 @@ from viscy.transforms import (
     RandScaleIntensityd,
     RandWeightedCropd,
 )
+
 from viscy.data.triplet import TripletDataModule, TripletDataset
 from viscy.light.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
 import pandas as pd
 from pathlib import Path
 from monai.transforms import NormalizeIntensityd, ScaleIntensityRangePercentilesd
+from lightning.pytorch.loggers import TensorBoardLogger
+from lightning.pytorch.callbacks import DeviceStatsMonitor
+from lightning.pytorch.callbacks import LearningRateMonitor
 
 
-# Set W&B logging level to suppress warnings
-logging.getLogger("wandb").setLevel(logging.ERROR)
-
-# %% Paths and constants
-os.environ["WANDB_DIR"] = "/hpc/mydata/alishba.imran/wandb_logs/"
-
-# @rank_zero_only
-# def init_wandb():
-#     wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
-
-# init_wandb()
-
-# wandb.init(project="contrastive_model", dir="/hpc/mydata/alishba.imran/wandb_logs/")
-
-# input_zarr = top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
-# input_zarr = "/hpc/projects/virtual_staining/viral_sensor_test_dataio/2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/full_patch.zarr"
 top_dir = Path("/hpc/projects/intracellular_dashboard/viral-sensor/")
 model_dir = top_dir / "infection_classification/models/infection_score"
-
-# checkpoint dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/infection_score/updated_multiple_channels
-# timesteps_csv_path = (
-#     top_dir / "2024_02_04_A549_DENV_ZIKV_timelapse/6-patches/final_track_timesteps.csv"
-# )
 
 # Data parameters
 # 15 for covnext backbone, 12 for resnet (z slices)
@@ -61,8 +43,8 @@ data_path = "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/
 # updated tracking data
 tracks_path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
 source_channel = ["RFP", "Phase3D"]
-z_range = (26, 38)
-batch_size = 32
+z_range = (28, 43)
+batch_size = 64
 
 # normalizations = [
 #             # Normalization for Phase3D using mean and std
@@ -137,34 +119,9 @@ augmentations = [
 
 torch.set_float32_matmul_precision("medium")
 
-# contra_model = ContrastiveEncoder(backbone="resnet50")
-# print(contra_model)
-
-# model_graph = torchview.draw_graph(
-#     contra_model,
-#     torch.randn(1, 1, 15, 200, 200),
-#     depth=3,
-#     device="cpu",
-# )
-# model_graph.visual_graph
-
-# contrastive_module = ContrastiveModule()
-# print(contrastive_module.encoder)
-
-# model_graph = torchview.draw_graph(
-#     contrastive_module.encoder,
-#     torch.randn(1, 1, 15, 200, 200),
-#     depth=3,
-#     device="cpu",
-# )
-# model_graph.visual_graph
-
 
 # %% Define the main function for training
 def main(hparams):
-    # Seed for reproducibility
-    # seed_everything(42, workers=True)
-
     num_gpus = torch.cuda.device_count()
     print(f"Number of GPUs available: {num_gpus}")
 
@@ -201,30 +158,27 @@ def main(hparams):
         margin=hparams.margin,
         lr=hparams.lr,
         schedule=hparams.schedule,
-        log_steps_per_epoch=hparams.log_steps_per_epoch,
+        log_batches_per_epoch=1, # total 2 images per epoch are logged
+        log_samples_per_batch=2,
         in_channels=len(source_channel),
         in_stack_depth=z_range[1] - z_range[0],
-        stem_kernel_size=(5, 3, 3),
+        stem_kernel_size=(5, 4, 4),
         embedding_len=hparams.embedding_len,
     )
+    print("Model initialized!")
 
-    # Initialize logger
-    wandb_logger = WandbLogger(project="contrastive_model", log_model="all")
-
-    # set for each run to avoid overwritting!
-    custom_folder_name = "test"
-    checkpoint_callback = ModelCheckpoint(
-        dirpath=os.path.join(model_dir, custom_folder_name),
-        filename="contrastive_model-test-{epoch:02d}-{val_loss:.2f}",
-        save_top_k=3,
-        mode="min",
-        monitor="val/loss_epoch",
-    )
+    lr_monitor = LearningRateMonitor(logging_interval='step')
 
     trainer = Trainer(
         max_epochs=hparams.max_epochs,
-        callbacks=[checkpoint_callback],
-        logger=wandb_logger,
+        # limit_train_batches=2,
+        # limit_val_batches=2,
+        callbacks=[ModelCheckpoint(), lr_monitor],
+        logger=TensorBoardLogger(
+            "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/test_tb",
+            log_graph=True,
+            default_hp_metric=True,
+        ),
         accelerator=hparams.accelerator,
         devices=hparams.devices,
         num_nodes=hparams.num_nodes,
@@ -233,30 +187,21 @@ def main(hparams):
         num_sanity_val_steps=0,
     )
 
-    # train_loader = data_module.train_dataloader()
-    # example_batch = next(iter(train_loader))
-    # example_input = example_batch[0]
 
-    # wandb_logger.watch(model, log="all", log_graph=(example_input,))
+    print("Trainer initialized!")
 
-    # Fetches batches from the training dataloader,
-    # Calls the training_step method on the model for each batch
-    # Aggregates the losses and performs optimization steps
     trainer.fit(model, datamodule=data_module)
 
     # # Validate the model
     trainer.validate(model, datamodule=data_module)
-
-    # # Test the model
-    # trainer.test(model, datamodule=data_module)
 
 # Argument parser for command-line options
 # to-do: need to clean up to always use the same args
 parser = ArgumentParser()
 parser.add_argument("--backbone", type=str, default="convnext_tiny")
 parser.add_argument("--margin", type=float, default=0.5)
-parser.add_argument("--lr", type=float, default=1e-3)
-parser.add_argument("--schedule", type=str, default="Constant")
+parser.add_argument("--lr", type=float, default=0.00001)
+parser.add_argument("--schedule", type=str, default="CosineAnnealingWarmRestarts")
 parser.add_argument("--log_steps_per_epoch", type=int, default=10)
 parser.add_argument("--embedding_len", type=int, default=256)
 parser.add_argument("--max_epochs", type=int, default=100)

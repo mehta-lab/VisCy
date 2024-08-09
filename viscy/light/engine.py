@@ -581,10 +581,13 @@ class ContrastiveModule(LightningModule):
         in_channels: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 15,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         embedding_len: int = 256,
         predict: bool = False,
         tracks_path: str = "data/tracks",
+        features_output_path: str = "",
+        projections_output_path: str = "",
+        metadata_output_path: str = "",
     ) -> None:
         super().__init__()
         self.loss_function = loss_function
@@ -602,6 +605,9 @@ class ContrastiveModule(LightningModule):
         self.processed_order = []
         self.predictions = []
         self.tracks_path = tracks_path
+        self.features_output_path = features_output_path
+        self.projections_output_path = projections_output_path
+        self.metadata_output_path = metadata_output_path
         self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
@@ -734,8 +740,17 @@ class ContrastiveModule(LightningModule):
         optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
 
+    def on_predict_start(self) -> None:
+        if not (
+            self.features_output_path
+            and self.projections_output_path
+            and self.metadata_output_path
+        ):
+            raise ValueError(
+                "Output paths for features, projections, and metadata must be provided."
+            )
+
     def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
-        print("running predict step!")
         """Prediction step for extracting embeddings."""
         features, projections = self.model(batch["anchor"])
         index = batch["index"]
@@ -780,12 +795,8 @@ class ContrastiveModule(LightningModule):
         combined_features = np.array(combined_features)
         combined_projections = np.array(combined_projections)
 
-        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
-        print("Saved features with shape", combined_features.shape)
-        np.save(
-            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
-        )
-        print("Saved projections with shape", combined_projections.shape)
+        np.save(self.features_output_path, combined_features)
+        np.save(self.projections_output_path, combined_projections)
 
         rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
         df = pd.DataFrame(
@@ -798,4 +809,4 @@ class ContrastiveModule(LightningModule):
             }
         )
 
-        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)
+        df.to_csv(self.metadata_output_path, index=False)
