@@ -80,6 +80,19 @@ class TripletDataset(Dataset):
         )
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
+        """_filter_tracks Select tracks within positions that belong to this dataset and remove tracks that are too close to the border.
+
+        Parameters
+        ----------
+        tracks_tables : list[pd.DataFrame]
+            List of tracks_tables returned by TripletDataModule._align_tracks_tables_with_positions
+
+        Returns
+        -------
+        pd.DataFrame
+            Filtered tracks table
+
+        """
         filtered_tracks = []
         y_exclude, x_exclude = (self.yx_patch_size[0] // 2, self.yx_patch_size[1] // 2)
         for pos, tracks in zip(self.positions, tracks_tables, strict=True):
@@ -250,6 +263,14 @@ class TripletDataModule(HCSDataModule):
     def _align_tracks_tables_with_positions(
         self,
     ) -> tuple[list[Position], list[pd.DataFrame]]:
+        """Parse positions in ome-zarr store containing tracking information
+        and assemble tracks tables for each position.
+
+        Returns
+        -------
+        tuple[list[Position], list[pd.DataFrame]]
+            List of positions and list of tracks tables for each position
+        """
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
