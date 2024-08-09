@@ -62,5 +62,6 @@ data:
   - 256
   caching: false
   ground_truth_masks: null
+  pyramid_resolution: 0
 ckpt_path: null
 verbose: true

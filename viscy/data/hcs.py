@@ -104,6 +104,8 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
+    :param int pyramid_resolution: pyramid level.
+        defaults to 0 (full resolution)
     :param DictTransform | None transform:
         a callable that transforms data, defaults to None
     """
@@ -113,16 +115,21 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
+        pyramid_resolution: int = 0,
         transform: DictTransform | None = None,
     ) -> None:
         super().__init__()
         self.positions = positions
         self.channels = {k: _ensure_channel_list(v) for k, v in channels.items()}
         self.source_ch_idx = [
-            positions[0].get_channel_index(c) for c in channels["source"]
+            positions[pyramid_resolution].get_channel_index(c)
+            for c in channels["source"]
         ]
         self.target_ch_idx = (
-            [positions[0].get_channel_index(c) for c in channels["target"]]
+            [
+                positions[pyramid_resolution].get_channel_index(c)
+                for c in channels["target"]
+            ]
             if "target" in channels
             else None
         )
@@ -301,6 +308,8 @@ class HCSDataModule(LightningDataModule):
     :param Path | None ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
         defaults to None
+    :param int pyramid_resolution: pyramid resolution level.
+        defaults to 0 (full resolution)
     """
 
     def __init__(
@@ -318,6 +327,7 @@ class HCSDataModule(LightningDataModule):
         augmentations: list[MapTransform] = [],
         caching: bool = False,
         ground_truth_masks: Path | None = None,
+        pyramid_resolution: int = 0,
     ):
         super().__init__()
         self.data_path = Path(data_path)

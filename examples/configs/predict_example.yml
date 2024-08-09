@@ -63,5 +63,6 @@ predict:
       - 256
     caching: false
     predict_scale_source: null
+    pyramid_resolution: 0
   return_predictions: false
   ckpt_path: null
