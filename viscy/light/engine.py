@@ -584,6 +584,7 @@ class ContrastiveModule(LightningModule):
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         embedding_len: int = 256,
         predict: bool = False,
+        drop_path_rate: float = 0.2,
         tracks_path: str = "data/tracks",
         features_output_path: str = "",
         projections_output_path: str = "",
@@ -615,6 +616,7 @@ class ContrastiveModule(LightningModule):
             stem_kernel_size=stem_kernel_size,
             embedding_len=embedding_len,
             predict=predict,
+            drop_path_rate=drop_path_rate,
         )
         self.example_input_array = torch.rand(
             1, in_channels, in_stack_depth, *example_input_yx_shape
