@@ -1,0 +1,44 @@
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy.light.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: 2024_06_13-tokenized-drop_path_0_0.zarr
+  inference_mode: true
+model:
+  backbone: convnext_tiny
+  in_channels: 2
+  in_stack_depth: 15
+  stem_kernel_size: [5, 4, 4]
+data:
+  data_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/5-infection_pred/infection_score.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking/test_tracking_4.zarr
+  source_channel:
+    - Phase3D
+    - MultiCam_GFP_mCherry_BF-Prime BSI Express
+  z_range: [28, 43]
+  batch_size: 32
+  num_workers: 60
+  initial_yx_patch_size: [192, 192]
+  final_yx_patch_size: [192, 192]
+  normalizations:
+    - class_path: viscy.transforms.NormalizeSampled
+      init_args:
+        keys: [Phase3D]
+        level: fov_statistics
+        subtrahend: mean
+        divisor: std
+    - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+      init_args:
+        keys: [RFP]
+        lower: 50
+        upper: 99
+        b_min: 0.0
+        b_max: 1.0
+return_predictions: false
+ckpt_path: 
