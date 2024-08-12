@@ -20,6 +20,9 @@ dependencies = [
     "scikit-image",
     "matplotlib>=3.9.0",
     "numpy<2",
+    "seaborn",
+    "xarray",
+    "umap-learn",
 ]
 dynamic = ["version"]
 
