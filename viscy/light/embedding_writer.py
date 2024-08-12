@@ -10,7 +10,7 @@ from xarray import Dataset, open_zarr
 
 from viscy.data.triplet import INDEX_COLUMNS
 
-__all__ = ["EmbeddingWriter"]
+__all__ = ["read_embedding_dataset", "EmbeddingWriter"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
