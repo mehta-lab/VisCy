@@ -15,10 +15,22 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 def read_embedding_dataset(path: Path) -> Dataset:
+    """Read the embedding dataset written by the EmbeddingWriter callback.
+
+    :param Path path: Path to the zarr store.
+    :return Dataset: Xarray dataset with features and projections.
+    """
     return open_zarr(path).set_index(sample=INDEX_COLUMNS)
 
 
 class EmbeddingWriter(BasePredictionWriter):
+    """Callback to write embeddings to a zarr store in an Xarray-compatible format.
+
+    :param Path output_path: Path to the zarr store.
+    :param Literal["batch", "epoch", "batch_and_epoch"] write_interval:
+        When to write the embeddings, defaults to "epoch".
+    """
+
     def __init__(
         self,
         output_path: Path,
