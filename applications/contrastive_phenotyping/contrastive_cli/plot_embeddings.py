@@ -78,7 +78,7 @@ ax = sns.histplot(x=embedding[:, 0], y=embedding[:, 1], hue=infection, bins=64)
 sns.move_legend(ax, loc="lower left")
 
 # %%
-ax = sns.displot(
+sns.displot(
     x=embedding[:, 0],
     y=embedding[:, 1],
     kind="hist",
