@@ -14,6 +14,7 @@ conda activate viscy
 
 scontrol show job $SLURM_JOB_ID
 
-config=/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/predict.yml
+# use absolute path in production
+config=./predict.yml
 cat $config
 srun python -m viscy.cli.contrastive_triplet predict -c $config
