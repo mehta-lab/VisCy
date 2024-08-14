@@ -19,7 +19,7 @@ dataset
 # load all unprojected features:
 features = dataset["features"]
 # or select a well:
-# features - features[features["fov_name"].str.contains("B/4")]
+# features = features[features["fov_name"].str.contains("B/4")]
 features
 
 # %%
