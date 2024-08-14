@@ -2,8 +2,8 @@
 from pathlib import Path
 
 import pandas as pd
+import plotly.express as px
 import seaborn as sns
-from plotly.express import scatter
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
@@ -28,10 +28,17 @@ scaled_features = StandardScaler().fit_transform(features.values)
 umap = UMAP()
 
 embedding = umap.fit_transform(scaled_features)
-embedding.shape
+features = (
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
+)
+features
 
 # %%
-sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=features["t"], s=7, alpha=0.8)
+sns.scatterplot(
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+)
 
 
 # %%
@@ -68,19 +75,19 @@ division = load_annotation(
 
 
 # %%
-sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=division, s=7, alpha=0.8)
+sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=division, s=7, alpha=0.8)
 
 # %%
-sns.scatterplot(x=embedding[:, 0], y=embedding[:, 1], hue=infection, s=7, alpha=0.8)
+sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=infection, s=7, alpha=0.8)
 
 # %%
-ax = sns.histplot(x=embedding[:, 0], y=embedding[:, 1], hue=infection, bins=64)
+ax = sns.histplot(x=features["UMAP1"], y=features["UMAP2"], hue=infection, bins=64)
 sns.move_legend(ax, loc="lower left")
 
 # %%
 sns.displot(
-    x=embedding[:, 0],
-    y=embedding[:, 1],
+    x=features["UMAP1"],
+    y=features["UMAP2"],
     kind="hist",
     col=infection,
     bins=64,
@@ -89,11 +96,16 @@ sns.displot(
 
 # %%
 # interactive scatter plot to associate clusters with specific cells
-scatter(
-    x=embedding[:, 0],
-    y=embedding[:, 1],
-    color=(infection.astype(str) + " " + division.astype(str)),
-    hover_name=features["fov_name"] + "/" + features["id"].astype(str),
+
+px.scatter(
+    data_frame=pd.DataFrame(
+        {k: v for k, v in features.coords.items() if k != "features"}
+    ),
+    x="UMAP1",
+    y="UMAP2",
+    color=(infection.astype(str) + " " + division.astype(str)).rename("annotation"),
+    hover_name="fov_name",
+    hover_data=["id", "t"],
 )
 
 # %%
