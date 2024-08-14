@@ -20,6 +20,7 @@ dependencies = [
     "scikit-image",
     "matplotlib>=3.9.0",
     "numpy<2",
+    "xarray",
 ]
 dynamic = ["version"]
 
@@ -29,8 +30,9 @@ metrics = [
     "scikit-learn>=1.1.3",
     "torchmetrics[detection]>=1.3.1",
     "ptflops>=0.7",
+    "umap-learn",
 ]
-visual = ["ipykernel", "graphviz", "torchview"]
+visual = ["ipykernel", "graphviz", "torchview", "seaborn", "plotly", "nbformat"]
 dev = [
     "pytest",
     "pytest-cov",

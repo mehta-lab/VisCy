@@ -41,3 +41,6 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+
+#lightning_logs directory
+lightning_logs/

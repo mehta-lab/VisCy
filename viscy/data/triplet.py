@@ -14,6 +14,8 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
+INDEX_COLUMNS = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+
 
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
@@ -185,11 +187,7 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
-
-        sample = {
-            "anchor": anchor_patch,
-            "index": anchor_row[["fov_name", "id"]].to_dict(),
-        }
+        sample = {"anchor": anchor_patch, "index": anchor_row[INDEX_COLUMNS].to_dict()}
         if self.fit:
             sample.update(
                 {
