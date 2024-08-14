@@ -32,7 +32,7 @@ metrics = [
     "ptflops>=0.7",
     "umap-learn",
 ]
-visual = ["ipykernel", "graphviz", "torchview", "seaborn"]
+visual = ["ipykernel", "graphviz", "torchview", "seaborn", "plotly", "nbformat"]
 dev = [
     "pytest",
     "pytest-cov",
