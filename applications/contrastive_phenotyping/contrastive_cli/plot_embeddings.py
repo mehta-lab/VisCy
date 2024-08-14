@@ -6,7 +6,7 @@ import plotly.express as px
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-
+import numpy as np
 from viscy.light.embedding_writer import read_embedding_dataset
 
 # %%
@@ -21,6 +21,29 @@ features = dataset["features"]
 # or select a well:
 # features = features[features["fov_name"].str.contains("B/4")]
 features
+
+# %%
+# examine raw features
+random_samples = np.random.randint(0, dataset.sizes["sample"], 700)
+# concatenate fov_name, track_id, and t to create a unique sample identifier
+sample_id = [
+    str(dataset["fov_name"][idx].values)
+    + "/"
+    + str(dataset["track_id"][idx].values)
+    + "_"
+    + str(dataset["t"][idx].values)
+    for idx in random_samples
+]
+px.imshow(
+    features.values[random_samples],
+    labels={
+        "x": "feature",
+        "y": "sample",
+        "color": "value",
+    },  # change labels to match our metadata
+    y=sample_id,
+    # show fov_name as y-axis
+)
 
 # %%
 scaled_features = StandardScaler().fit_transform(features.values)
