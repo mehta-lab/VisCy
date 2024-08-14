@@ -1,12 +1,13 @@
 # %%
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-import numpy as np
+
 from viscy.light.embedding_writer import read_embedding_dataset
 
 # %%
@@ -26,14 +27,13 @@ features
 # examine raw features
 random_samples = np.random.randint(0, dataset.sizes["sample"], 700)
 # concatenate fov_name, track_id, and t to create a unique sample identifier
-sample_id = [
-    str(dataset["fov_name"][idx].values)
-    + "/"
-    + str(dataset["track_id"][idx].values)
-    + "_"
-    + str(dataset["t"][idx].values)
-    for idx in random_samples
-]
+sample_id = (
+    features["fov_name"][random_samples]
+    + "-"
+    + features["track_id"][random_samples].astype(str)
+    + "-"
+    + features["t"][random_samples].astype(str)
+)
 px.imshow(
     features.values[random_samples],
     labels={
