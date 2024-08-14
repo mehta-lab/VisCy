@@ -133,6 +133,7 @@ px.scatter(
 
 # %%
 # cluster features in heatmap directly
+# this is very slow for large datasets even with fastcluster installed
 inf_codes = pd.Series(infection.values.codes, name="infection")
 lut = dict(zip(inf_codes.unique(), "brw"))
 row_colors = inf_codes.map(lut)
