@@ -8,7 +8,8 @@ trainer:
   callbacks:
     - class_path: viscy.light.embedding_writer.EmbeddingWriter
       init_args:
-        output_path: 2024_02_04-tokenized-drop_path_0_0.zarr
+        output_path: "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/test_prediction_code.zarr"
+
   inference_mode: true
 model:
   backbone: convnext_tiny
@@ -23,7 +24,7 @@ data:
     - RFP
   z_range: [28, 43]
   batch_size: 32
-  num_workers: 60
+  num_workers: 16
   initial_yx_patch_size: [192, 192]
   final_yx_patch_size: [192, 192]
   normalizations:

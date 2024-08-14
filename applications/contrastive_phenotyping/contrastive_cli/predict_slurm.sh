@@ -10,7 +10,7 @@
 #SBATCH --time=0-01:00:00
 
 module load anaconda/2022.05
-conda activate viscy
+conda activate /hpc/mydata/$USER/envs/viscy
 
 scontrol show job $SLURM_JOB_ID
 
