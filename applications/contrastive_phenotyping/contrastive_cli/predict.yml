@@ -9,7 +9,12 @@ trainer:
     - class_path: viscy.light.embedding_writer.EmbeddingWriter
       init_args:
         output_path: "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/test_prediction_code.zarr"
-
+    # edit the following lines to specify logging path
+    # - class_path: lightning.pytorch.loggers.TensorBoardLogger
+    #   init_args:
+    #     save_dir: /path/to/save_dir
+    #     version: name-of-experiment
+    #     log_graph: True
   inference_mode: true
 model:
   backbone: convnext_tiny
