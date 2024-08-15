@@ -7,19 +7,33 @@ import plotly.express as px
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-
+import matplotlib.pyplot as plt
 from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.data.triplet import TripletDataset
 
-# %%
-dataset = read_embedding_dataset(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04-tokenized-drop_path_0_0.zarr"
+# %% Paths
+
+features_path = Path(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0.zarr"
 )
-dataset
+data_path = Path(
+    "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
+)
+tracks_path = Path(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
+)
 
 # %%
-# Extract a track from the dataset
-all_tracks_FOV = dataset.sel(fov_name="/A/4/0")
-a_track_in_FOV = all_tracks_FOV.sel(track_id=23)
+embedding_dataset = read_embedding_dataset(features_path)
+embedding_dataset
+
+# %%
+# Extract a track from the dataset and visualize its features.
+
+fov_name = "/B/4/4"
+track_id = 71
+all_tracks_FOV = embedding_dataset.sel(fov_name=fov_name)
+a_track_in_FOV = all_tracks_FOV.sel(track_id=track_id)
 # Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
 indices = np.arange(a_track_in_FOV.sizes["sample"])
 features_track = a_track_in_FOV["features"]
@@ -35,12 +49,11 @@ px.imshow(
     y=time_stamp,
     # show fov_name as y-axis
 )
-# %%
 # normalize individual features.
 
-scaled_features = StandardScaler().fit_transform(features_track.values)
+scaled_features_track = StandardScaler().fit_transform(features_track.values)
 px.imshow(
-    scaled_features,
+    scaled_features_track,
     labels={
         "x": "feature",
         "y": "t",
@@ -52,17 +65,27 @@ px.imshow(
 # Scaled features are centered around 0 with a standard deviation of 1.
 # Each feature is individually normalized along the time dimension.
 
+plt.plot(np.mean(scaled_features_track, axis=1), label="scaled_mean")
+plt.plot(np.std(scaled_features_track, axis=1), label="scaled_std")
+plt.plot(np.mean(features_track.values, axis=1), label="mean")
+plt.plot(np.std(features_track.values, axis=1), label="std")
+plt.legend()
+plt.xlabel("t")
+plt.show()
+
+# %%
+# Create the montage of the images of the cells in the track.
 
 # %%
 # load all unprojected features:
-features = dataset["features"]
+features = embedding_dataset["features"]
 # or select a well:
 # features = features[features["fov_name"].str.contains("B/4")]
 features
 
 # %%
 # examine raw features
-random_samples = np.random.randint(0, dataset.sizes["sample"], 700)
+random_samples = np.random.randint(0, embedding_dataset.sizes["sample"], 700)
 # concatenate fov_name, track_id, and t to create a unique sample identifier
 sample_id = (
     features["fov_name"][random_samples]
