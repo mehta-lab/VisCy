@@ -30,9 +30,9 @@ embedding_dataset
 # %%
 # Extract a track from the dataset and visualize its features.
 
-fov_name = "/B/4/4"
+fov_name = "B/4/4"
 track_id = 71
-all_tracks_FOV = embedding_dataset.sel(fov_name=fov_name)
+all_tracks_FOV = embedding_dataset.sel(fov_name="/" + fov_name)
 a_track_in_FOV = all_tracks_FOV.sel(track_id=track_id)
 # Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
 indices = np.arange(a_track_in_FOV.sizes["sample"])
@@ -75,6 +75,16 @@ plt.show()
 
 # %%
 # Create the montage of the images of the cells in the track.
+tracks_csv = next((tracks_path / fov_name).glob("*.csv"))
+image_dataset = TripletDataset(
+    positions=(data_path / fov_name),
+    tracks_tables=pd.read_csv(tracks_csv),
+    channel_names=["Phase3D", "RFP", "GFP"],
+    z_range=(25, 40),
+    fit=False,
+    initial_yx_patch_size=(256, 256),
+    include_track_ids=[track_id],
+)
 
 # %%
 # load all unprojected features:
