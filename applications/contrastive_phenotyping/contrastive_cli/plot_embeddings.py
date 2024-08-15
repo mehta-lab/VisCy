@@ -18,10 +18,8 @@ dataset
 
 # %%
 # Extract a track from the dataset
-all_tracks_FOV = dataset.sel(fov_name=slice("A/4/0"))
-a_track_in_FOV = all_tracks_FOV.sel(track_id=slice(23))
-print(a_track_in_FOV.sizes())
-# Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
+all_tracks_FOV = dataset.sel(fov_name="/A/4/0")
+a_track_in_FOV = all_tracks_FOV.sel(track_id=23)
 
 # %%
 # load all unprojected features:
