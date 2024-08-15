@@ -20,6 +20,38 @@ dataset
 # Extract a track from the dataset
 all_tracks_FOV = dataset.sel(fov_name="/A/4/0")
 a_track_in_FOV = all_tracks_FOV.sel(track_id=23)
+# Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
+indices = np.arange(a_track_in_FOV.sizes["sample"])
+features_track = a_track_in_FOV["features"]
+time_stamp = features_track["t"][indices].astype(str)
+
+px.imshow(
+    features_track.values[indices],
+    labels={
+        "x": "feature",
+        "y": "t",
+        "color": "value",
+    },  # change labels to match our metadata
+    y=time_stamp,
+    # show fov_name as y-axis
+)
+# %%
+# normalize individual features.
+
+scaled_features = StandardScaler().fit_transform(features_track.values)
+px.imshow(
+    scaled_features,
+    labels={
+        "x": "feature",
+        "y": "t",
+        "color": "value",
+    },  # change labels to match our metadata
+    y=time_stamp,
+    # show fov_name as y-axis
+)
+# Scaled features are centered around 0 with a standard deviation of 1.
+# Each feature is individually normalized along the time dimension.
+
 
 # %%
 # load all unprojected features:
