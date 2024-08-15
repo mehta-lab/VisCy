@@ -9,9 +9,11 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 import matplotlib.pyplot as plt
 from viscy.light.embedding_writer import read_embedding_dataset
-from viscy.data.triplet import TripletDataset
+from viscy.data.triplet import TripletDataset, TripletDataModule
+from iohub import open_ome_zarr
+import monai.transforms as transforms
 
-# %% Paths
+# %% Paths and parameters.
 
 features_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0.zarr"
@@ -30,9 +32,9 @@ embedding_dataset
 # %%
 # Extract a track from the dataset and visualize its features.
 
-fov_name = "B/4/4"
+fov_name = "/B/4/4"
 track_id = 71
-all_tracks_FOV = embedding_dataset.sel(fov_name="/" + fov_name)
+all_tracks_FOV = embedding_dataset.sel(fov_name=fov_name)
 a_track_in_FOV = all_tracks_FOV.sel(track_id=track_id)
 # Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
 indices = np.arange(a_track_in_FOV.sizes["sample"])
@@ -75,16 +77,77 @@ plt.show()
 
 # %%
 # Create the montage of the images of the cells in the track.
-tracks_csv = next((tracks_path / fov_name).glob("*.csv"))
-image_dataset = TripletDataset(
-    positions=(data_path / fov_name),
-    tracks_tables=pd.read_csv(tracks_csv),
-    channel_names=["Phase3D", "RFP", "GFP"],
-    z_range=(25, 40),
-    fit=False,
+
+# normalizations = [
+#     transforms.NormalizeIntensityd(
+#         keys=["Phase3D"],
+#         subtrahend=None,
+#         divisor=None,
+#         nonzero=False,
+#         channel_wise=False,
+#         dtype=None,
+#         allow_missing_keys=False,
+#     ),
+#     transforms.ScaleIntensityRangePercentilesd(
+#         keys=["RFP"],
+#         lower=50,
+#         upper=99,
+#         b_min=0.0,
+#         b_max=1.0,
+#         clip=False,
+#         relative=False,
+#         channel_wise=False,
+#         dtype=None,
+#         allow_missing_keys=False,
+#     ),
+# ]
+
+normalizations = None
+source_channel = ["Phase3D", "RFP"]
+z_range = (28, 43)
+
+data_module = TripletDataModule(
+    data_path=data_path,
+    tracks_path=tracks_path,
+    source_channel=source_channel,
+    z_range=z_range,
     initial_yx_patch_size=(256, 256),
+    final_yx_patch_size=(256, 256),
+    batch_size=1,
+    num_workers=16,
+    normalizations=normalizations,
+    predict_cells=True,
+    include_fov_names=[fov_name],
     include_track_ids=[track_id],
 )
+# for train and val
+data_module.setup("predict")
+predict_dataset = data_module.predict_dataset
+
+phase = np.stack([p["anchor"][0, 7].numpy() for p in predict_dataset])
+fluor = np.stack([np.max(p["anchor"][1].numpy(), axis=0) for p in predict_dataset])
+
+# %% Naive loop to iterate over the images and display
+
+for t in range(len(predict_dataset)):
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    axes[0].imshow(phase[t].squeeze(), cmap="gray")
+    axes[0].set_title("Phase")
+    axes[0].axis("off")
+    axes[1].imshow(fluor[t].squeeze(), cmap="gray")
+    axes[1].set_title("Fluor")
+    axes[1].axis("off")
+    plt.title(f"t={t}")
+    plt.show()
+
+# %% display the track in napari
+import napari
+import os
+
+os.environ["DISPLAY"] = ":1"
+viewer = napari.Viewer()
+viewer.add_image(phase, name="Phase", colormap="gray")
+viewer.add_image(fluor, name="Fluor", colormap="magenta")
 
 # %%
 # load all unprojected features:
