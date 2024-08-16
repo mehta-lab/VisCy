@@ -150,6 +150,29 @@ viewer.add_image(phase, name="Phase", colormap="gray")
 viewer.add_image(fluor, name="Fluor", colormap="magenta")
 
 # %%
+# Compute UMAP over all features
+features = embedding_dataset["features"]
+scaled_features = StandardScaler().fit_transform(features.values)
+umap = UMAP()
+# Fit UMAP on all features
+embedding = umap.fit_transform(scaled_features)
+# %%
+# Transform the track features
+scaled_features_track_umap = umap.transform(scaled_features_track)
+plt.plot(scaled_features_track_umap[:, 0], scaled_features_track_umap[:, 1])
+plt.plot(scaled_features_track_umap[0, 0], scaled_features_track_umap[0, 1], marker="o")
+plt.plot(
+    scaled_features_track_umap[-1, 0], scaled_features_track_umap[-1, 1], marker="x"
+)
+for i in range(1, len(scaled_features_track_umap) - 1):
+    plt.plot(
+        scaled_features_track_umap[i, 0],
+        scaled_features_track_umap[i, 1],
+        marker=".",
+        color="blue",
+    )
+plt.show()
+# %%
 # load all unprojected features:
 features = embedding_dataset["features"]
 # or select a well:
