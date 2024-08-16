@@ -1,13 +1,14 @@
 # %%
 from pathlib import Path
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import plotly.express as px
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-import matplotlib.pyplot as plt
+
 from viscy.light.embedding_writer import read_embedding_dataset
 from viscy.data.triplet import TripletDataset, TripletDataModule
 from iohub import open_ome_zarr
@@ -16,7 +17,7 @@ import monai.transforms as transforms
 # %% Paths and parameters.
 
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0-2024-06-13.zarr"
 )
 data_path = Path(
     "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
@@ -275,17 +276,28 @@ sns.displot(
 
 # %%
 # interactive scatter plot to associate clusters with specific cells
+df = pd.DataFrame({k: v for k, v in features.coords.items() if k != "features"})
+df["infection"] = infection.values
+df["division"] = division.values
+df["well"] = df["fov_name"].str.rsplit("/", n=1).str[0]
+df["fov_track_id"] = df["fov_name"] + "-" + df["track_id"].astype(str)
+# select row B (DENV)
+df = df[df["fov_name"].str.contains("B")]
+df.sort_values("t", inplace=True)
 
-px.scatter(
-    data_frame=pd.DataFrame(
-        {k: v for k, v in features.coords.items() if k != "features"}
-    ),
+g = px.scatter(
+    data_frame=df,
     x="UMAP1",
     y="UMAP2",
-    color=(infection.astype(str) + " " + division.astype(str)).rename("annotation"),
+    symbol="infection",
+    color="well",
     hover_name="fov_name",
-    hover_data=["id", "t"],
+    hover_data=["id", "t", "track_id"],
+    animation_frame="t",
+    animation_group="fov_track_id",
 )
+g.update_layout(width=800, height=600)
+
 
 # %%
 # cluster features in heatmap directly
