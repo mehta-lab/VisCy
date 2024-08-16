@@ -153,10 +153,29 @@ viewer.add_image(fluor, name="Fluor", colormap="magenta")
 # %%
 # Compute UMAP over all features
 features = embedding_dataset["features"]
+# or select a well:
+# features = features[features["fov_name"].str.contains("B/4")]
+
 scaled_features = StandardScaler().fit_transform(features.values)
 umap = UMAP()
 # Fit UMAP on all features
 embedding = umap.fit_transform(scaled_features)
+
+# %%
+# Add UMAP coordinates to the dataset
+
+features = (
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
+)
+features
+
+
+sns.scatterplot(
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+)
+
 # %%
 # Transform the track features
 scaled_features_track_umap = umap.transform(scaled_features_track)
@@ -173,15 +192,9 @@ for i in range(1, len(scaled_features_track_umap) - 1):
         color="blue",
     )
 plt.show()
-# %%
-# load all unprojected features:
-features = embedding_dataset["features"]
-# or select a well:
-# features = features[features["fov_name"].str.contains("B/4")]
-features
 
 # %%
-# examine raw features
+# examine random features
 random_samples = np.random.randint(0, embedding_dataset.sizes["sample"], 700)
 # concatenate fov_name, track_id, and t to create a unique sample identifier
 sample_id = (
@@ -192,7 +205,7 @@ sample_id = (
     + features["t"][random_samples].astype(str)
 )
 px.imshow(
-    features.values[random_samples],
+    scaled_features[random_samples],
     labels={
         "x": "feature",
         "y": "sample",
@@ -200,24 +213,6 @@ px.imshow(
     },  # change labels to match our metadata
     y=sample_id,
     # show fov_name as y-axis
-)
-
-# %%
-scaled_features = StandardScaler().fit_transform(features.values)
-
-umap = UMAP()
-
-embedding = umap.fit_transform(scaled_features)
-features = (
-    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-    .assign_coords(UMAP2=("sample", embedding[:, 1]))
-    .set_index(sample=["UMAP1", "UMAP2"], append=True)
-)
-features
-
-# %%
-sns.scatterplot(
-    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
 
