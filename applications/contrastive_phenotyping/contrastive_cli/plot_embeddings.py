@@ -7,7 +7,9 @@ import pandas as pd
 import plotly.express as px
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 from umap import UMAP
+
 
 from viscy.light.embedding_writer import read_embedding_dataset
 from viscy.data.triplet import TripletDataset, TripletDataModule
@@ -29,6 +31,17 @@ tracks_path = Path(
 # %%
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
+
+# %%
+# Compute PCA of the features and projections to estimate the number of components to keep.
+PCA_features = PCA().fit(embedding_dataset["features"].values)
+PCA_projection = PCA().fit(embedding_dataset["projections"].values)
+
+plt.plot(PCA_features.explained_variance_ratio_, label="features")
+plt.plot(PCA_projection.explained_variance_ratio_, label="projections")
+plt.legend()
+plt.xlabel("n_components")
+plt.show()
 
 # %%
 # Extract a track from the dataset and visualize its features.
@@ -160,6 +173,7 @@ scaled_features = StandardScaler().fit_transform(features.values)
 umap = UMAP()
 # Fit UMAP on all features
 embedding = umap.fit_transform(scaled_features)
+
 
 # %%
 # Add UMAP coordinates to the dataset
