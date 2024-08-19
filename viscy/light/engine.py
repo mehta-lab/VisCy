@@ -568,52 +568,26 @@ class ContrastiveModule(LightningModule):
 
     def __init__(
         self,
-        backbone: str = "convnext_tiny",
-        loss_function: Union[
-            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
-        ] = nn.TripletMarginLoss(),
-        margin: float = 0.5,
+        encoder: nn.Module | ContrastiveEncoder,
+        loss_function: (
+            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss
+        ) = nn.TripletMarginLoss(margin=0.5),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
-        in_channels: int = 1,
-        example_input_yx_shape: Sequence[int] = (256, 256),
-        in_stack_depth: int = 15,
-        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
-        embedding_len: int = 256,
-        predict: bool = False,
-        drop_path_rate: float = 0.2,
+        example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
+        self.model = encoder
         self.loss_function = loss_function
-        self.margin = margin
         self.lr = lr
         self.schedule = schedule
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
+        self.example_input_array = torch.rand(*example_input_array_shape)
         self.training_step_outputs = []
         self.validation_step_outputs = []
-        self.test_step_outputs = []
-        self.training_metrics = []
-        self.validation_metrics = []
-        self.test_metrics = []
-        self.processed_order = []
-        self.predictions = []
-        self.model = ContrastiveEncoder(
-            backbone=backbone,
-            in_channels=in_channels,
-            in_stack_depth=in_stack_depth,
-            stem_kernel_size=stem_kernel_size,
-            embedding_len=embedding_len,
-            predict=predict,
-            drop_path_rate=drop_path_rate,
-        )
-        self.example_input_array = torch.rand(
-            1, in_channels, in_stack_depth, *example_input_yx_shape
-        )
-        self.training_step_outputs = []
-        self.validataion_step_outputs = []
 
     def forward(self, x: Tensor) -> Tensor:
         """Projected embeddings."""
