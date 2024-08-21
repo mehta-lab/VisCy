@@ -27,7 +27,8 @@ class ContrastiveEncoder(nn.Module):
     stem_stride : tuple[int, int, int], optional
         Stem stride, by default (5, 4, 4)
     embedding_dim : int, optional
-        Embedded feature dimension, by default 768 (convnext_tiny)
+        Embedded feature dimension that matches backbone output channels,
+        by default 768 (convnext_tiny)
     projection_dim : int, optional
         Projection dimension for computing loss, by default 128
     drop_path_rate : float, optional
