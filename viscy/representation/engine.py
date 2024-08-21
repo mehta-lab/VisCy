@@ -6,7 +6,6 @@ import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch import Tensor, nn
-from torch.optim import Adam
 
 from viscy._log_images import detach_sample, render_images
 from viscy.data.typing import TripletSample
@@ -94,11 +93,7 @@ class ContrastiveModule(LightningModule):
             key, grid, self.current_epoch, dataformats="HWC"
         )
 
-    def training_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
+    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Training step of the model."""
         stage = "train"
         anchor_img = batch["anchor"]
@@ -126,11 +121,7 @@ class ContrastiveModule(LightningModule):
         self._log_samples("train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
-    def validation_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
+    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Validation step of the model."""
         anchor = batch["anchor"]
         pos_img = batch["positive"]
@@ -156,7 +147,7 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs = []
 
     def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.lr)
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
     def predict_step(
