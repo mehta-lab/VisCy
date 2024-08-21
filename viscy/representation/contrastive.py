@@ -3,7 +3,7 @@ from typing import Literal
 
 import timm
 import torch.nn as nn
-import torch.nn.functional as F
+from torch import Tensor
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
 
@@ -46,7 +46,7 @@ class ContrastiveEncoder(nn.Module):
         embedding_dim: int = 768,
         projection_dim: int = 128,
         drop_path_rate: float = 0.0,
-    ):
+    ) -> None:
         super().__init__()
         self.backbone = backbone
         encoder = timm.create_model(
@@ -87,9 +87,8 @@ class ContrastiveEncoder(nn.Module):
         # Append modified projection head.
         self.projection = projection
 
-    def forward(self, x):
+    def forward(self, x) -> tuple[Tensor, Tensor]:
         x = self.stem(x)
         embedding = self.encoder(x)
         projections = self.projection(embedding)
-        projections = F.normalize(projections, p=2, dim=1)
         return (embedding, projections)

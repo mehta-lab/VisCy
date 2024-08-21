@@ -590,8 +590,8 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs = []
 
     def forward(self, x: Tensor) -> Tensor:
-        """Projected embeddings."""
-        return self.model(x)[1]
+        """L2-normalize projected embeddings for fitting."""
+        return self.model(x)[1].norm(dim=1)
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
         mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
