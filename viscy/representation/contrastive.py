@@ -1,4 +1,5 @@
 import logging
+from typing import Literal
 
 import timm
 import torch.nn as nn
@@ -10,36 +11,42 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class ContrastiveEncoder(nn.Module):
+    """
+    Contrastive encoder network that uses ConvNeXt and ResNet backbones from timm.
+
+    Parameters
+    ----------
+    backbone : Literal["convnext_tiny", "resnet50"]
+        Name of the timm backbone architecture
+    in_channels : int, optional
+        Number of input channels
+    in_stack_depth : int, optional
+        Number of input Z slices
+    stem_kernel_size : tuple[int, int, int], optional
+        Stem kernel size, by default (5, 4, 4)
+    stem_stride : tuple[int, int, int], optional
+        Stem stride, by default (5, 4, 4)
+    embedding_dim : int, optional
+        Embedded feature dimension, by default 768 (convnext_tiny)
+    projection_dim : int, optional
+        Projection dimension for computing loss, by default 128
+    drop_path_rate : float, optional
+        probability that residual connections are dropped during training,
+        by default 0.0
+    """
+
     def __init__(
         self,
-        backbone: str = "convnext_tiny",
-        in_channels: int = 2,
-        in_stack_depth: int = 12,
+        backbone: Literal["convnext_tiny", "resnet50"],
+        in_channels: int,
+        in_stack_depth: int,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         stem_stride: tuple[int, int, int] = (5, 4, 4),
         embedding_dim: int = 768,
         projection_dim: int = 128,
-        drop_path_rate: float = 0.2,
-        predict: bool = False,
+        drop_path_rate: float = 0.0,
     ):
-        """ContrastiveEncoder network that uses
-        ConvNext and ResNet backbons from timm.
-
-        :param str backbone: Backbone architecture for the encoder,
-            defaults to "convnext_tiny"
-        :param int in_channels: Number of input channels, defaults to 2
-        :param int in_stack_depth: Number of input slices in z-stack, defaults to 12
-        :param tuple[int, int, int] stem_kernel_size: 3D kernel size for the stem.
-            Input stack depth must be divisible by the kernel depth,
-            defaults to (5, 3, 3)
-        :param int embedding_len: Length of the embedding vector, defaults to 1024
-        :param int stem_stride: stride of the stem, defaults to 2
-        :param bool predict: prediction mode, defaults to False
-        :param float drop_path_rate: probability that residual connections
-            are dropped during training, defaults to 0.2
-        """
         super().__init__()
-        self.predict = predict
         self.backbone = backbone
         encoder = timm.create_model(
             backbone,
@@ -67,7 +74,6 @@ class ContrastiveEncoder(nn.Module):
         )
         encoder.head.fc = nn.Identity()
         # Create a new stem that can handle 3D multi-channel input.
-        _logger.debug(f"Stem kernel size: {stem_kernel_size}")
         self.stem = StemDepthtoChannels(
             in_channels=in_channels,
             in_stack_depth=in_stack_depth,
