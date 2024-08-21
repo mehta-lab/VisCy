@@ -94,8 +94,6 @@ class ContrastiveModule(LightningModule):
         )
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
-        """Training step of the model."""
-        stage = "train"
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
@@ -106,7 +104,11 @@ class ContrastiveModule(LightningModule):
             anchor_projection, positive_projection, negative_projection
         )
         self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, stage
+            loss,
+            anchor_projection,
+            positive_projection,
+            negative_projection,
+            stage="train",
         )
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
