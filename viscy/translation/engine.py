@@ -7,10 +7,8 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
-from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
@@ -25,6 +23,7 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
+from viscy._log_images import detach_sample, render_images
 from viscy.data.typing import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -47,38 +46,6 @@ _UNET_ARCHITECTURE = {
 }
 
 _logger = logging.getLogger("lightning.pytorch")
-
-
-def _detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int):
-    num_samples = min(imgs[0].shape[0], log_samples_per_batch)
-    samples = []
-    for i in range(num_samples):
-        patches = []
-        for img in imgs:
-            patch = img[i].detach().cpu().numpy()
-            patch = np.squeeze(patch[:, patch.shape[1] // 2])
-            patches.append(patch)
-        samples.append(patches)
-    return samples
-
-
-def _render_images(imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []):
-    images_grid = []
-    for sample_images in imgs:
-        images_row = []
-        for i, image in enumerate(sample_images):
-            if cmaps:
-                cm_name = cmaps[i]
-            else:
-                cm_name = "gray" if i == 0 else "inferno"
-            if image.ndim == 2:
-                image = image[np.newaxis]
-            for channel in image:
-                channel = rescale_intensity(channel, out_range=(0, 1))
-                render = get_cmap(cm_name)(channel, bytes=True)[..., :3]
-                images_row.append(render)
-        images_grid.append(np.concatenate(images_row, axis=1))
-    return np.concatenate(images_grid, axis=0)
 
 
 class MixedLoss(nn.Module):
@@ -229,7 +196,7 @@ class VSUNet(LightningModule):
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
                 self.training_step_outputs.extend(
-                    _detach_sample((source, target, pred), self.log_samples_per_batch)
+                    detach_sample((source, target, pred), self.log_samples_per_batch)
                 )
         loss_step = torch.stack(losses).mean()
         self.log(
@@ -260,7 +227,7 @@ class VSUNet(LightningModule):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                _detach_sample((source, target, pred), self.log_samples_per_batch)
+                detach_sample((source, target, pred), self.log_samples_per_batch)
             )
 
     def test_step(self, batch: Sample, batch_idx: int):
@@ -465,7 +432,7 @@ class VSUNet(LightningModule):
         return [optimizer], [scheduler]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs)
+        grid = render_images(imgs)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
@@ -523,7 +490,7 @@ class FcmaeUNet(VSUNet):
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
                 self.training_step_outputs.extend(
-                    _detach_sample(
+                    detach_sample(
                         (source, target * mask.unsqueeze(2), pred),
                         self.log_samples_per_batch,
                     )
@@ -554,7 +521,7 @@ class FcmaeUNet(VSUNet):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                _detach_sample(
+                detach_sample(
                     (source, target * mask.unsqueeze(2), pred),
                     self.log_samples_per_batch,
                 )

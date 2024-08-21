@@ -8,6 +8,7 @@ from lightning.pytorch import LightningModule
 from torch import Tensor, nn
 from torch.optim import Adam
 
+from viscy._log_images import detach_sample, render_images
 from viscy.data.typing import TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 
@@ -88,7 +89,7 @@ class ContrastiveModule(LightningModule):
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs, cmaps=["gray"] * 3)
+        grid = render_images(imgs, cmaps=["gray"] * 3)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
@@ -114,7 +115,7 @@ class ContrastiveModule(LightningModule):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
-                _detach_sample(
+                detach_sample(
                     (anchor_img, pos_img, neg_img), self.log_samples_per_batch
                 )
             )
@@ -145,7 +146,7 @@ class ContrastiveModule(LightningModule):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                _detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
+                detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
             )
         return loss
 
