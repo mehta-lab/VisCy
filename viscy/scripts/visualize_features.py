@@ -17,7 +17,7 @@ from skimage.transform import downscale_local_mean
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 
-from viscy.light.engine import VSUNet
+from viscy.translation.engine import VSUNet
 
 # %%
 # prepare sample images
