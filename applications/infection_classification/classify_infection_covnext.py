@@ -15,7 +15,7 @@ from skimage.measure import label, regionprops
 from torch import Tensor
 
 from viscy.data.hcs import Sample
-from viscy.light.engine import VSUNet
+from viscy.translation.engine import VSUNet
 
 #
 # %% Methods to compute confusion matrix per cell using torchmetrics

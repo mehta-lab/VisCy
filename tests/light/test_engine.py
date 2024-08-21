@@ -1,4 +1,4 @@
-from viscy.light.engine import FcmaeUNet
+from viscy.translation.engine import FcmaeUNet
 
 
 def test_fcmae_vsunet() -> None:

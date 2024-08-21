@@ -5,7 +5,7 @@ from lightning.pytorch.callbacks import DeviceStatsMonitor
 
 
 from viscy.data.triplet import TripletDataModule
-from viscy.light.engine import ContrastiveModule
+from viscy.representation.engine import ContrastiveModule
 
 
 def main():

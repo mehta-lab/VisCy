@@ -3,7 +3,7 @@ import timm
 import torch
 import torchview
 
-from viscy.light.engine import ContrastiveModule
+from viscy.representation.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder, UNeXt2Stem
 
 # %load_ext autoreload

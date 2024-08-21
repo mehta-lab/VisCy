@@ -5,7 +5,7 @@ from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.strategies import DDPStrategy
 from viscy.data.triplet import TripletDataModule, TripletDataset
-from viscy.light.engine import ContrastiveModule
+from viscy.representation.engine import ContrastiveModule
 import os 
 from torch.multiprocessing import Manager
 from viscy.transforms import (

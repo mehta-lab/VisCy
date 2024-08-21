@@ -20,7 +20,7 @@ from viscy.transforms import (
 )
 
 from viscy.data.triplet import TripletDataModule, TripletDataset
-from viscy.light.engine import ContrastiveModule
+from viscy.representation.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder
 import pandas as pd
 from pathlib import Path

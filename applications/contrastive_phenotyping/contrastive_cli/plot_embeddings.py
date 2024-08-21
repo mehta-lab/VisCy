@@ -11,7 +11,7 @@ from sklearn.decomposition import PCA
 from umap import UMAP
 
 
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.data.triplet import TripletDataset, TripletDataModule
 from iohub import open_ome_zarr
 import monai.transforms as transforms

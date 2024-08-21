@@ -11,11 +11,12 @@ from pathlib import Path
 
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
+
 # Viscy classes for the trainer and model
 from viscy.data.hcs import HCSDataModule
-from viscy.light.engine import FcmaeUNet
-from viscy.light.predict_writer import HCSPredictionWriter
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import FcmaeUNet
+from viscy.translation.predict_writer import HCSPredictionWriter
+from viscy.translation.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
 
 # %% [markdown]
