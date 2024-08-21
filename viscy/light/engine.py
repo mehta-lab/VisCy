@@ -652,9 +652,9 @@ class ContrastiveModule(LightningModule):
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor_img)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
+        anchor_projection = self(anchor_img)
+        negative_projection = self(neg_img)
+        positive_projection = self(pos_img)
         loss = self.loss_function(
             anchor_projection, positive_projection, negative_projection
         )
@@ -683,9 +683,9 @@ class ContrastiveModule(LightningModule):
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
+        anchor_projection = self(anchor)
+        negative_projection = self(neg_img)
+        positive_projection = self(pos_img)
         loss = self.loss_function(
             anchor_projection, positive_projection, negative_projection
         )
