@@ -67,8 +67,8 @@ class ContrastiveEncoder(nn.Module):
             nn.Linear(encoder.head.fc.in_features, embedding_dim),
             nn.BatchNorm1d(embedding_dim),
             nn.ReLU(inplace=True),
-            nn.BatchNorm1d(embedding_dim),
             nn.Linear(embedding_dim, projection_dim),
+            nn.BatchNorm1d(embedding_dim),
         )
         encoder.head.fc = nn.Identity()
         # Create a new stem that can handle 3D multi-channel input.
