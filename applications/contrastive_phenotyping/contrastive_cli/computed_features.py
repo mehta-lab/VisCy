@@ -97,12 +97,12 @@ class FeatureExtractor:
 
         return contrast, dissimilarity, homogeneity
 
-    def detect_edges(image):
+    # def detect_edges(image):
 
-        # Apply Canny edge detection
-        edges = cv2.Canny(image, 100, 200)
+    #     # Apply Canny edge detection
+    #     edges = cv2.Canny(image, 100, 200)
 
-        return edges
+    #     return edges
 
     def compute_iqr(image):
 

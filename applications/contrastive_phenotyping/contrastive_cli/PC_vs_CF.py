@@ -95,8 +95,8 @@ data = {
     "Contrast Fluor": [],
     "Dissimilarity Fluor": [],
     "Homogeneity Fluor": [],
-    "Edge Density Phase": [],
-    "Edge Density Fluor": [],
+    # "Edge Density Phase": [],
+    # "Edge Density Fluor": [],
     "IQR": [],
     "Mean Intensity": [],
     "Standard Deviation": [],
@@ -124,9 +124,9 @@ for t in range(phase.shape[0]):
     contrast_phase, dissimilarity_phase, homogeneity_phase = FE.compute_glcm_features(phase[t])
     contrast_fluor, dissimilarity_fluor, homogeneity_fluor = FE.compute_glcm_features(fluor[t])
 
-    # Compute edge detection using Canny
-    edges_phase = FE.detect_edges(phase[t])
-    edges_fluor = FE.detect_edges(fluor[t])
+    # # Compute edge detection using Canny
+    # edges_phase = FE.detect_edges(phase[t])
+    # edges_fluor = FE.detect_edges(fluor[t])
 
     # Quantify the amount of edge feature in the phase image
     edge_density_phase = np.sum(edges_phase) / (edges_phase.shape[0] * edges_phase.shape[1])
@@ -155,8 +155,8 @@ for t in range(phase.shape[0]):
     data["Contrast Fluor"].append(contrast_fluor)
     data["Dissimilarity Fluor"].append(dissimilarity_fluor)
     data["Homogeneity Fluor"].append(homogeneity_fluor)
-    data["Edge Density Phase"].append(edge_density_phase)
-    data["Edge Density Fluor"].append(edge_density_fluor)
+    # data["Edge Density Phase"].append(edge_density_phase)
+    # data["Edge Density Fluor"].append(edge_density_fluor)
     data["IQR"].append(iqr)
     data["Mean Intensity"].append(mean_intensity)
     data["Standard Deviation"].append(std_dev)
