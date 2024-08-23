@@ -114,7 +114,7 @@ for t in range(phase.shape[0]):
     fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
 
     # Compute area of sensor
-    thresholded_image, area = FE.otsu_threshold_and_compute_area(fluor[t])
+    thresh_img, area = FE.compute_area(fluor[t])
 
     # Compute higher frequency features using spectral entropy
     entropy_phase = FE.compute_spectral_entropy(phase[t])

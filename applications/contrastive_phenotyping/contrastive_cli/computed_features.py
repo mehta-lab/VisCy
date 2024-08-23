@@ -1,60 +1,62 @@
 import cv2
-import cv2
 import numpy as np
 from skimage import color
-from scipy.fftpack import fft
+from numpy import fft
 from skimage.feature import graycomatrix, graycoprops
+from skimage.filters import threshold_otsu, gaussian
 
 class FeatureExtractor:
 
     def __init__(self):
         pass
 
-    def compute_fourier_descriptors(self, image):
+    def compute_fourier_descriptors(image):
         
-        # Threshold the image to get binary image
-        _, binary = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY_INV)
+        # # Threshold the image to get binary image
+        # _, binary = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY_INV)
         
-        # Find contours
-        contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        )
+        # # Find contours
+        # contours, _ = cv2.findContours(
+        #     binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
+        # )
         
-        # Check if any contours are found
-        if len(contours) == 0:
-            return None
+        # # Check if any contours are found
+        # if len(contours) == 0:
+        #     return None
         
-        # Select the largest contour
-        contour = max(contours, key=cv2.contourArea)
+        # # Select the largest contour
+        # contour = max(contours, key=cv2.contourArea)
         
-        # Convert contour to numpy array
-        contour = np.squeeze(contour)
+        # # Convert contour to numpy array
+        # contour = np.squeeze(contour)
         
         # Convert contour to complex numbers
-        contour_complex = contour[:, 0] + 1j * contour[:, 1]
+        contour_complex = image[:, 0] + 1j * image[:, 1]
         
         # Compute Fourier descriptors
         descriptors = np.fft.fft(contour_complex)
         
         return descriptors
 
-    def analyze_symmetry(self, descriptors):
+    def analyze_symmetry(descriptors):
         # Normalize descriptors
         descriptors = np.abs(descriptors) / np.max(np.abs(descriptors))
         # Check symmetry (for a perfect circle, descriptors should be quite uniform)
         return np.std(descriptors)  # Lower standard deviation indicates higher symmetry
 
-    def otsu_threshold_and_compute_area(image):
+    def compute_area(input_image, sigma=0.6):
+        """Create a binary mask using morphological operations
+        :param np.array input_image: generate masks from this 3D image
+        :param float sigma: Gaussian blur standard deviation, increase in value increases blur
+        :return: volume mask of input_image, 3D np.array
+        """
 
-        # Apply Otsu's thresholding
-        _, thresh_image = cv2.threshold(
-            image, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU
-        )
+        input_image_blur = gaussian(input_image, sigma=sigma)
 
-        # Compute the area of the foreground (non-zero pixels)
-        foreground_area = np.sum(thresh_image > 0)
+        thresh = threshold_otsu(input_image_blur)
+        mask = input_image >= thresh
 
-        return thresh_image, foreground_area
+        return mask, np.sum(mask)
 
     def compute_spectral_entropy(image):
         # Convert image to grayscale if it's not already
@@ -78,9 +80,14 @@ class FeatureExtractor:
 
     def compute_glcm_features(image):
 
+        # Normalize the input image from 0 to 255
+        image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
+        image = image.astype(np.uint8)
+
         # Compute the GLCM
         distances = [1]  # Distance between pixels
         angles = [0]  # Angle in radians
+        
         glcm = graycomatrix(image, distances, angles, symmetric=True, normed=True)
 
         # Compute GLCM properties
