@@ -165,3 +165,18 @@ for t in range(phase.shape[0]):
 comp_features = pd.DataFrame(data)
 comp_features = comp_features.to_xarray()
 comp_features = comp_features.assign_coords(sample=time_stamp)
+
+
+# %% compute correlation between PCA features and computed features
+
+features = features_track.merge(comp_features, join="inner")
+
+# Compute correlation between PCA features and computed features
+correlation = features.corr()
+correlation
+
+# %% find the best correlated computed features with PCA features
+
+# Find the best correlated computed features with PCA features
+best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
+best_correlated_features
