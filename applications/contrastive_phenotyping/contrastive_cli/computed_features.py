@@ -3,8 +3,7 @@ import cv2
 import numpy as np
 from skimage import color
 from scipy.fftpack import fft
-from skimage.feature import greycomatrix, greycoprops
-
+from skimage.feature import graycomatrix, graycoprops
 
 class FeatureExtractor:
 
@@ -82,12 +81,12 @@ class FeatureExtractor:
         # Compute the GLCM
         distances = [1]  # Distance between pixels
         angles = [0]  # Angle in radians
-        glcm = greycomatrix(image, distances, angles, symmetric=True, normed=True)
+        glcm = graycomatrix(image, distances, angles, symmetric=True, normed=True)
 
         # Compute GLCM properties
-        contrast = greycoprops(glcm, "contrast")[0, 0]
-        dissimilarity = greycoprops(glcm, "dissimilarity")[0, 0]
-        homogeneity = greycoprops(glcm, "homogeneity")[0, 0]
+        contrast = graycoprops(glcm, "contrast")[0, 0]
+        dissimilarity = graycoprops(glcm, "dissimilarity")[0, 0]
+        homogeneity = graycoprops(glcm, "homogeneity")[0, 0]
 
         return contrast, dissimilarity, homogeneity
 

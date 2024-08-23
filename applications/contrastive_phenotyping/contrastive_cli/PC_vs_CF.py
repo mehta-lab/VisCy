@@ -1,10 +1,14 @@
-from viscy.data.triplet import TripletDataModule
+
+
+# %%
+# from viscy.data.triplet import TripletDataModule
 from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.data.triplet import TripletDataModule
 
 from pathlib import Path
 import numpy as np
 from skimage import io
-from applications.contrastive_phenotyping.contrastive_cli.computed_features import FeatureExtractor as FE
+from computed_features import FeatureExtractor as FE
 from sklearn.decomposition import PCA
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -79,69 +83,85 @@ fluor = np.stack([np.max(p["anchor"][1].numpy(), axis=0) for p in predict_datase
 # %% first feature: symmetry of cell
 
 # Compute Fourier descriptors for phase image
-phase_descriptors = FE.compute_fourier_descriptors(phase)
-# Analyze symmetry of phase image
-phase_symmetry_score = FE.analyze_symmetry(phase_descriptors)
-
-# Compute Fourier descriptors for fluor image
-fluor_descriptors = FE.compute_fourier_descriptors(fluor)
-# Analyze symmetry of fluor image
-fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
-
-# %% second feature: area of sensor
-
-thresholded_image, area = FE.otsu_threshold_and_compute_area(fluor)
-
-# %% third feature: higher fequency features using spectral entropy
-
-entropy_phase = FE.compute_spectral_entropy(phase)
-entropy_fluor = FE.compute_spectral_entropy(fluor)
-
-# %% fourth feature: texture analysis using GLCM
-
-contrast_phase, dissimilarity_phase, homogeneity_phase = FE.compute_glcm_features(phase)
-contrast_fluor, dissimilarity_fluor, homogeneity_fluor = FE.compute_glcm_features(fluor)
-
-# %% fifth feature: edge detection using Canny
-edges_phase = FE.detect_edges(phase)
-edges_fluor = FE.detect_edges(fluor)
-
-# quantify the amount of edge feature in the phase image
-edge_density_phase = np.sum(edges_phase) / (edges_phase.shape[0] * edges_phase.shape[1])
-
-# quantify the amount of edge feature in the fluor image
-edge_density_fluor = np.sum(edges_fluor) / (edges_fluor.shape[0] * edges_fluor.shape[1])
-
-# %% sixth feature: interqualtile range of pixel intensities
-
-iqr = FE.compute_iqr(phase)
-
-# %% seventh feature: mean pixel intensity
-
-mean_intensity = FE.compute_mean_intensity(fluor)
-
-# %% eighth feature: standard deviation of pixel intensities
-
-std_dev = FE.compute_std_dev(phase)
-
-# Create a dataframe to store the computed features
 data = {
-    "Phase Symmetry Score": phase_symmetry_score,
-    "Fluor Symmetry Score": fluor_symmetry_score,
-    "Area": area,
-    "Entropy Phase": entropy_phase,
-    "Entropy Fluor": entropy_fluor,
-    "Contrast Phase": contrast_phase,
-    "Dissimilarity Phase": dissimilarity_phase,
-    "Homogeneity Phase": homogeneity_phase,
-    "Contrast Fluor": contrast_fluor,
-    "Dissimilarity Fluor": dissimilarity_fluor,
-    "Homogeneity Fluor": homogeneity_fluor,
-    "Edge Density Phase": edge_density_phase,
-    "Edge Density Fluor": edge_density_fluor,
-    "IQR": iqr,
-    "Mean Intensity": mean_intensity,
-    "Standard Deviation": std_dev,
+    "Phase Symmetry Score": [],
+    "Fluor Symmetry Score": [],
+    "Area": [],
+    "Entropy Phase": [],
+    "Entropy Fluor": [],
+    "Contrast Phase": [],
+    "Dissimilarity Phase": [],
+    "Homogeneity Phase": [],
+    "Contrast Fluor": [],
+    "Dissimilarity Fluor": [],
+    "Homogeneity Fluor": [],
+    "Edge Density Phase": [],
+    "Edge Density Fluor": [],
+    "IQR": [],
+    "Mean Intensity": [],
+    "Standard Deviation": [],
 }
 
-df = pd.DataFrame(data)
+for t in range(phase.shape[0]):
+    # Compute Fourier descriptors for phase image
+    phase_descriptors = FE.compute_fourier_descriptors(phase[t])
+    # Analyze symmetry of phase image
+    phase_symmetry_score = FE.analyze_symmetry(phase_descriptors)
+
+    # Compute Fourier descriptors for fluor image
+    fluor_descriptors = FE.compute_fourier_descriptors(fluor[t])
+    # Analyze symmetry of fluor image
+    fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
+
+    # Compute area of sensor
+    thresholded_image, area = FE.otsu_threshold_and_compute_area(fluor[t])
+
+    # Compute higher frequency features using spectral entropy
+    entropy_phase = FE.compute_spectral_entropy(phase[t])
+    entropy_fluor = FE.compute_spectral_entropy(fluor[t])
+
+    # Compute texture analysis using GLCM
+    contrast_phase, dissimilarity_phase, homogeneity_phase = FE.compute_glcm_features(phase[t])
+    contrast_fluor, dissimilarity_fluor, homogeneity_fluor = FE.compute_glcm_features(fluor[t])
+
+    # Compute edge detection using Canny
+    edges_phase = FE.detect_edges(phase[t])
+    edges_fluor = FE.detect_edges(fluor[t])
+
+    # Quantify the amount of edge feature in the phase image
+    edge_density_phase = np.sum(edges_phase) / (edges_phase.shape[0] * edges_phase.shape[1])
+
+    # Quantify the amount of edge feature in the fluor image
+    edge_density_fluor = np.sum(edges_fluor) / (edges_fluor.shape[0] * edges_fluor.shape[1])
+
+    # Compute interqualtile range of pixel intensities
+    iqr = FE.compute_iqr(phase[t])
+
+    # Compute mean pixel intensity
+    mean_intensity = FE.compute_mean_intensity(fluor[t])
+
+    # Compute standard deviation of pixel intensities
+    std_dev = FE.compute_std_dev(phase[t])
+
+    # Append the computed features to the data dictionary
+    data["Phase Symmetry Score"].append(phase_symmetry_score)
+    data["Fluor Symmetry Score"].append(fluor_symmetry_score)
+    data["Area"].append(area)
+    data["Entropy Phase"].append(entropy_phase)
+    data["Entropy Fluor"].append(entropy_fluor)
+    data["Contrast Phase"].append(contrast_phase)
+    data["Dissimilarity Phase"].append(dissimilarity_phase)
+    data["Homogeneity Phase"].append(homogeneity_phase)
+    data["Contrast Fluor"].append(contrast_fluor)
+    data["Dissimilarity Fluor"].append(dissimilarity_fluor)
+    data["Homogeneity Fluor"].append(homogeneity_fluor)
+    data["Edge Density Phase"].append(edge_density_phase)
+    data["Edge Density Fluor"].append(edge_density_fluor)
+    data["IQR"].append(iqr)
+    data["Mean Intensity"].append(mean_intensity)
+    data["Standard Deviation"].append(std_dev)
+
+# Create a dataframe to store the computed features
+comp_features = pd.DataFrame(data)
+comp_features = comp_features.to_xarray()
+comp_features = comp_features.assign_coords(sample=time_stamp)
