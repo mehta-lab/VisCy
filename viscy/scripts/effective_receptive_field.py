@@ -11,33 +11,11 @@ from typing import Literal
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from dlmbl_unet.unet import UNet
+# from dlmbl_unet.unet import UNet
 
 from viscy.light.engine import VSUNet
 
 device = "cuda"
-
-# %%
-model_kwargs = dict(
-    architecture="fcmae",
-    model_config=dict(
-        in_channels=1,
-        out_channels=2,
-        encoder_blocks=[3, 3, 9, 3],
-        dims=[96, 192, 384, 768],
-        decoder_conv_blocks=2,
-        stem_kernel_size=(1, 2, 2),
-        in_stack_depth=1,
-        pretraining=False,
-    ),
-)
-
-initial_model = VSUNet(**model_kwargs).to(device)
-
-trained_model = VSUNet.load_from_checkpoint(
-    "/hpc/websites/public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt",
-    **model_kwargs,
-).to(device)
 
 
 # %%
@@ -60,7 +38,7 @@ def plot_response(model: torch.nn.Module, title: str, ndim: Literal[2, 3] = 3) -
 
     f, ax = plt.subplots(1, 2, figsize=(10, 5))
     spectrum = np.log1p(np.abs(scaled_response))
-    im = ax[0].imshow(spectrum, cmap="inferno")
+    im = ax[0].imshow(spectrum, cmap="nipy_spectral")
     _ = plt.colorbar(im, label="log power", shrink=0.5, location="bottom")
     ax[1].plot(np.log1p(scaled_response.std(axis=(0))), label="rows", alpha=0.5)
     ax[1].plot(np.log1p(scaled_response.std(axis=(1))), label="columns", alpha=0.5)
@@ -71,14 +49,32 @@ def plot_response(model: torch.nn.Module, title: str, ndim: Literal[2, 3] = 3) -
 
 
 # %%
-unet = UNet(depth=4, in_channels=1).to(device)
+# unet = UNet(depth=4, in_channels=1).to(device)
 
-plot_response(unet, "DLMBL U-Net (initialization)", ndim=2)
+# plot_response(unet, "DLMBL U-Net (initialization)", ndim=2)
 
 # %%
+model_kwargs = dict(
+    architecture="fcmae",
+    model_config=dict(
+        in_channels=1,
+        out_channels=2,
+        encoder_blocks=[3, 3, 9, 3],
+        dims=[96, 192, 384, 768],
+        decoder_conv_blocks=2,
+        stem_kernel_size=(1, 2, 2),
+        in_stack_depth=1,
+        pretraining=False,
+    ),
+)
+
+initial_model = VSUNet(**model_kwargs).to(device)
+trained_model = VSUNet.load_from_checkpoint(
+    "/hpc/websites/public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt",
+    **model_kwargs,
+).to(device)
+
 plot_response(initial_model, "UNeXt2 (initialization)")
-
-# %%
 plot_response(trained_model, "UNeXt2 (trained)")
 
 # %%
