@@ -129,10 +129,10 @@ for t in range(phase.shape[0]):
     # edges_fluor = FE.detect_edges(fluor[t])
 
     # Quantify the amount of edge feature in the phase image
-    edge_density_phase = np.sum(edges_phase) / (edges_phase.shape[0] * edges_phase.shape[1])
+    # edge_density_phase = np.sum(edges_phase) / (edges_phase.shape[0] * edges_phase.shape[1])
 
     # Quantify the amount of edge feature in the fluor image
-    edge_density_fluor = np.sum(edges_fluor) / (edges_fluor.shape[0] * edges_fluor.shape[1])
+    # edge_density_fluor = np.sum(edges_fluor) / (edges_fluor.shape[0] * edges_fluor.shape[1])
 
     # Compute interqualtile range of pixel intensities
     iqr = FE.compute_iqr(phase[t])
@@ -162,17 +162,15 @@ for t in range(phase.shape[0]):
     data["Standard Deviation"].append(std_dev)
 
 # Create a dataframe to store the computed features
-comp_features = pd.DataFrame(data)
-comp_features = comp_features.to_xarray()
-comp_features = comp_features.assign_coords(sample=time_stamp)
-
+features = pd.DataFrame(data)
 
 # %% compute correlation between PCA features and computed features
 
-features = features_track.merge(comp_features, join="inner")
+# Create a dataframe with PCA results
+pca_results = pd.DataFrame(pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"])
 
 # Compute correlation between PCA features and computed features
-correlation = features.corr()
+correlation = pd.concat([pca_results, features], axis=1).corr()
 correlation
 
 # %% find the best correlated computed features with PCA features
@@ -180,3 +178,14 @@ correlation
 # Find the best correlated computed features with PCA features
 best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
 best_correlated_features
+
+# display as a heatmap
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+plt.figure(figsize=(10, 10))
+sns.heatmap(correlation, annot=True, cmap="coolwarm", fmt=".2f")
+plt.title("Correlation between PCA features and computed features")
+plt.show()
+
+# %%
