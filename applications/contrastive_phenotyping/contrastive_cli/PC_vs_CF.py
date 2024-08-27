@@ -39,6 +39,8 @@ fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.
 unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
 ii = 0
+features = pd.DataFrame()
+computed_pca = pd.DataFrame()
 
 for fov_name in unique_fov_names:
 
@@ -81,7 +83,7 @@ for fov_name in unique_fov_names:
             source_channel=source_channel,
             z_range=z_range,
             initial_yx_patch_size=(256, 256),
-            final_yx_patch_size=(256, 256),
+            final_yx_patch_size=(140, 140),
             batch_size=1,
             num_workers=16,
             normalizations=normalizations,
@@ -93,8 +95,11 @@ for fov_name in unique_fov_names:
         data_module.setup("predict")
         predict_dataset = data_module.predict_dataset
 
-        phase = np.stack([p["anchor"][0, 7].numpy() for p in predict_dataset])
-        fluor = np.stack([np.max(p["anchor"][1].numpy(), axis=0) for p in predict_dataset])
+        whole = np.stack([p["anchor"] for p in predict_dataset])
+        phase = whole[:, 0, 3]
+        fluor = np.max(whole[:, 1], axis=1)
+        # phase = np.stack([p["anchor"][0, 3].numpy() for p in predict_dataset])
+        # fluor = np.stack([np.max(p["anchor"][1].numpy(), axis=0) for p in predict_dataset])
 
         # Compute Fourier descriptors for phase image
         data = {
@@ -179,31 +184,33 @@ for fov_name in unique_fov_names:
             data["Fluor Standard Deviation"].append(fluor_std_dev)
 
         # Create a dataframe to store the computed features
-        features = pd.DataFrame(data)
+        features = pd.concat([features, pd.DataFrame(data)])
 
         # compute correlation between PCA features and computed features
 
         # Create a dataframe with PCA results
         pca_results = pd.DataFrame(pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"])
+        computed_pca = pd.concat([computed_pca, pca_results])
 
-        # Compute correlation between PCA features and computed features
-        correlation = pd.concat([pca_results, features], axis=1).corr()
-        correlation_sum = correlation_sum.add(correlation, fill_value=0)
+# %%
 
-correlation_avg = correlation_sum / ii
+# Compute correlation between PCA features and computed features
+correlation = pd.concat([computed_pca, features], axis=1).corr()
+# correlation_sum = correlation_sum.add(correlation, fill_value=0)
+# correlation_avg = correlation_sum / ii
 
 # %% find the best correlated computed features with PCA features
 
 # Find the best correlated computed features with PCA features
-best_correlated_features = correlation_avg.loc["PCA1":"PCA5", :].idxmax()
+best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
 best_correlated_features
 
-# display as a heatmap
+# %% display as a heatmap
 import seaborn as sns
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(20, 5))
-sns.heatmap(correlation_avg.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc["PCA1":"PCA5", :], annot=True, cmap="coolwarm", fmt=".2f")
+sns.heatmap(correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc["PCA1":"PCA5", :], annot=True, cmap="coolwarm", fmt=".2f")
 plt.title("Correlation between PCA features and computed features")
 plt.xlabel("Computed Features")
 plt.ylabel("PCA Features")
