@@ -19,13 +19,13 @@ import monai.transforms as transforms
 # %% Paths and parameters.
 
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0-2024-06-13.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_06_13/l2_projection_batchnorm-128p.zarr"
 )
 data_path = Path(
-    "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/2-register/registered_chunked.zarr"
 )
 tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking/test_tracking_4.zarr"
 )
 
 # %%
@@ -34,8 +34,8 @@ embedding_dataset
 
 # %%
 # Compute PCA of the features and projections to estimate the number of components to keep.
-PCA_features = PCA().fit(embedding_dataset["features"].values)
-PCA_projection = PCA().fit(embedding_dataset["projections"].values)
+PCA_features = PCA(n_components=100).fit(embedding_dataset["features"].values)
+PCA_projection = PCA(n_components=100).fit(embedding_dataset["projections"].values)
 
 plt.plot(PCA_features.explained_variance_ratio_, label="features")
 plt.plot(PCA_projection.explained_variance_ratio_, label="projections")
@@ -49,6 +49,10 @@ plt.show()
 # * 2D image of the embeddings of features and projections of test tracks (e.g., infected, uninfected, dividing, non-dividing).
 # * Heatmaps of annotations over UMAPs.
 
+
+# %%
+print(np.linalg.matrix_rank(embedding_dataset["features"].values))
+print(np.linalg.matrix_rank(embedding_dataset["projections"].values))
 
 # %%
 # Extract a track from the dataset and visualize its features.
@@ -253,7 +257,7 @@ def load_annotation(da, path, name, categories: dict | None = None):
 
 # %%
 ann_root = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking"
 )
 
 infection = load_annotation(
