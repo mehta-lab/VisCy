@@ -12,24 +12,6 @@ class FeatureExtractor:
 
     def compute_fourier_descriptors(image):
         
-        # # Threshold the image to get binary image
-        # _, binary = cv2.threshold(image, 128, 255, cv2.THRESH_BINARY_INV)
-        
-        # # Find contours
-        # contours, _ = cv2.findContours(
-        #     binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE
-        # )
-        
-        # # Check if any contours are found
-        # if len(contours) == 0:
-        #     return None
-        
-        # # Select the largest contour
-        # contour = max(contours, key=cv2.contourArea)
-        
-        # # Convert contour to numpy array
-        # contour = np.squeeze(contour)
-        
         # Convert contour to complex numbers
         contour_complex = image[:, 0] + 1j * image[:, 1]
         
@@ -56,7 +38,13 @@ class FeatureExtractor:
         thresh = threshold_otsu(input_image_blur)
         mask = input_image >= thresh
 
-        return mask, np.sum(mask)
+        # Apply sensor mask to the image
+        masked_image = input_image * mask
+        
+        # Compute the mean intensity inside the sensor area
+        masked_intensity = np.mean(masked_image)
+
+        return masked_intensity, np.sum(mask)
 
     def compute_spectral_entropy(image):
         # Convert image to grayscale if it's not already
@@ -124,3 +112,4 @@ class FeatureExtractor:
         std_dev = np.std(image)
         
         return std_dev
+    

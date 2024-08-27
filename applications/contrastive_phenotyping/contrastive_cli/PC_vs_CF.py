@@ -35,7 +35,8 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-unique_fov_names = [name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")]
+fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")]
+unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
 ii = 0
 
@@ -100,6 +101,7 @@ for fov_name in unique_fov_names:
             "Phase Symmetry Score": [],
             "Fluor Symmetry Score": [],
             "Sensor Area": [],
+            "Masked Sensor Intensity": [],
             "Entropy Phase": [],
             "Entropy Fluor": [],
             "Contrast Phase": [],
@@ -108,11 +110,10 @@ for fov_name in unique_fov_names:
             "Contrast Fluor": [],
             "Dissimilarity Fluor": [],
             "Homogeneity Fluor": [],
-            # "Edge Density Phase": [],
-            # "Edge Density Fluor": [],
             "Phase IQR": [],
             "Fluor Mean Intensity": [],
-            "Standard Deviation": [],
+            "Phase Standard Deviation": [],
+            "Fluor Standard Deviation": [],
         }
 
         for t in range(phase.shape[0]):
@@ -127,7 +128,7 @@ for fov_name in unique_fov_names:
             fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
 
             # Compute area of sensor
-            thresh_img, area = FE.compute_area(fluor[t])
+            masked_intensity, area = FE.compute_area(fluor[t])
 
             # Compute higher frequency features using spectral entropy
             entropy_phase = FE.compute_spectral_entropy(phase[t])
@@ -154,12 +155,14 @@ for fov_name in unique_fov_names:
             fluor_mean_intensity = FE.compute_mean_intensity(fluor[t])
 
             # Compute standard deviation of pixel intensities
-            std_dev = FE.compute_std_dev(phase[t])
+            phase_std_dev = FE.compute_std_dev(phase[t])
+            fluor_std_dev = FE.compute_std_dev(fluor[t])
 
             # Append the computed features to the data dictionary
             data["Phase Symmetry Score"].append(phase_symmetry_score)
             data["Fluor Symmetry Score"].append(fluor_symmetry_score)
             data["Sensor Area"].append(area)
+            data["Masked Sensor Intensity"].append(masked_intensity)
             data["Entropy Phase"].append(entropy_phase)
             data["Entropy Fluor"].append(entropy_fluor)
             data["Contrast Phase"].append(contrast_phase)
@@ -172,7 +175,8 @@ for fov_name in unique_fov_names:
             # data["Edge Density Fluor"].append(edge_density_fluor)
             data["Phase IQR"].append(iqr)
             data["Fluor Mean Intensity"].append(fluor_mean_intensity)
-            data["Standard Deviation"].append(std_dev)
+            data["Phase Standard Deviation"].append(phase_std_dev)
+            data["Fluor Standard Deviation"].append(fluor_std_dev)
 
         # Create a dataframe to store the computed features
         features = pd.DataFrame(data)
