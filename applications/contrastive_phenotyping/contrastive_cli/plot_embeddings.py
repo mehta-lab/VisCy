@@ -57,8 +57,8 @@ print(np.linalg.matrix_rank(embedding_dataset["projections"].values))
 # %%
 # Extract a track from the dataset and visualize its features.
 
-fov_name = "/B/4/4"
-track_id = 71
+fov_name = "/0/1/000000"  # "/B/4/4" FOV names can change between datasets.
+track_id = 21
 all_tracks_FOV = embedding_dataset.sel(fov_name=fov_name)
 a_track_in_FOV = all_tracks_FOV.sel(track_id=track_id)
 # Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?

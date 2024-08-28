@@ -38,7 +38,8 @@ trainer:
   enable_checkpointing: true
   inference_mode: true
   use_distributed_sampler: true
-  # important for contrastive learning to prevent local information leakage
+  # synchronize batchnorm parameters across multiple GPUs.
+  # important for contrastive learning to normalize the tensors across the whole batch.
   sync_batchnorm: true
 model:
   encoder:
