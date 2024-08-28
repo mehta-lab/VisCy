@@ -43,6 +43,13 @@ plt.legend()
 plt.xlabel("n_components")
 plt.show()
 
+# TODO: Include the followiing in the standard report.
+# * Explained variance of the features and projections.
+# * The UMAPs of the features and projections.
+# * 2D image of the embeddings of features and projections of test tracks (e.g., infected, uninfected, dividing, non-dividing).
+# * Heatmaps of annotations over UMAPs.
+
+
 # %%
 # Extract a track from the dataset and visualize its features.
 
