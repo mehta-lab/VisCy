@@ -38,7 +38,6 @@ embedding_dataset
 fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/B/3/")]
 unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
-ii = 0
 
 feature_df = pd.DataFrame()
 
@@ -62,7 +61,6 @@ for fov_name in unique_fov_names:
         pca = PCA(n_components=5)
         if scaled_features_track.shape[0] > 5:
             pca_features = pca.fit_transform(scaled_features_track)
-            ii += 1
         else:
             continue
 
@@ -192,10 +190,10 @@ for fov_name in unique_fov_names:
 # %%
 
 # find rank of the computed features and principal components
-feature_df = feature_df.rank(axis=0)
-
-# Compute the correlation of rank between PCA features and computed features
+feature_df_rank = feature_df.rank(axis=0)
 correlation = feature_df.corr(method="spearman")
+# Compute the correlation of rank between PCA features and computed features
+rank_correlation = feature_df_rank.corr(method="spearman")
 
 # correlation_sum = correlation_sum.add(correlation, fill_value=0)
 # correlation_avg = correlation_sum / ii
