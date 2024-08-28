@@ -35,12 +35,12 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")]
+fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/B/3/")]
 unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
 ii = 0
-features = pd.DataFrame()
-computed_pca = pd.DataFrame()
+
+feature_df = pd.DataFrame()
 
 for fov_name in unique_fov_names:
 
@@ -183,19 +183,20 @@ for fov_name in unique_fov_names:
             data["Phase Standard Deviation"].append(phase_std_dev)
             data["Fluor Standard Deviation"].append(fluor_std_dev)
 
-        # Create a dataframe to store the computed features
-        features = pd.concat([features, pd.DataFrame(data)])
-
-        # compute correlation between PCA features and computed features
-
-        # Create a dataframe with PCA results
+        data_df = pd.DataFrame(data)
         pca_results = pd.DataFrame(pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"])
-        computed_pca = pd.concat([computed_pca, pca_results])
+        combined_df = pd.concat([data_df, pca_results], axis=1)
+        
+        feature_df = pd.concat([feature_df, combined_df], ignore_index=True)
 
 # %%
 
-# Compute correlation between PCA features and computed features
-correlation = pd.concat([computed_pca, features], axis=1).corr()
+# find rank of the computed features and principal components
+feature_df = feature_df.rank(axis=0)
+
+# Compute the correlation of rank between PCA features and computed features
+correlation = feature_df.corr(method="spearman")
+
 # correlation_sum = correlation_sum.add(correlation, fill_value=0)
 # correlation_avg = correlation_sum / ii
 
