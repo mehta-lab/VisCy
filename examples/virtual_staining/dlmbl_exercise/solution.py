@@ -107,6 +107,7 @@ from skimage.color import label2rgb
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
 from torchmetrics.functional import accuracy, dice, jaccard_index
 from tqdm import tqdm
+
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
 from viscy.evaluation.evaluation_metrics import mean_average_precision
@@ -125,7 +126,7 @@ seed_everything(42, workers=True)
 
 # Paths to data and log directory
 top_dir = Path(
-    "~/data/06_image_translation/"
+    "~/data"
 ).expanduser()  # If this fails, make sure this to point to your data directory in the shared mounting point inside /dlmbl/data
 
 # Path to the training data
