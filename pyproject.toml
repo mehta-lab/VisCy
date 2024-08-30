@@ -31,6 +31,7 @@ metrics = [
     "ptflops>=0.7",
 ]
 visual = ["ipykernel", "graphviz", "torchview"]
+examples = ["napari","jupyterlab","jupyter"]
 dev = [
     "pytest",
     "pytest-cov",
