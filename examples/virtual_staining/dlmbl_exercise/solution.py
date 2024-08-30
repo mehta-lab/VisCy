@@ -562,6 +562,8 @@ normalizations = [
 ]
 
 data_module.augmentations = augmentations
+data_module.normalizations = normalizations
+
 data_module.setup("fit")
 
 # get the new data loader with augmentation turned on
@@ -1080,6 +1082,8 @@ for i, sample in enumerate(test_data.test_dataloader()):
     axes[3].imshow(predicted_nuclei, cmap="gray")
     axes[4].imshow(predicted_membrane, cmap="gray")
 
+    for ax in axes:
+        ax.axis("off")
     plt.tight_layout()
     plt.show()
     break

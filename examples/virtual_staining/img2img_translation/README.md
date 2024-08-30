@@ -1,29 +1,24 @@
-# Exercise 6: Image translation - Part 1
+# Demo: Image to Image translation (Phase to fluorescence and fluorescence to phase)
 
-This demo script was developed for the DL@MBL 2024 course by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).  
+# Overview
 
-
+In this exercise, you will:
+- Train a phase to fluorescence model to virtually stain cell nuclei and membrane
+- Train a model with the opposite task going from fluorescence to phase
 
 
 ## Setup
-
-Make sure that you are inside of the `image_translation` folder by using the `cd` command to change directories if needed.
-
-Make sure that you can use conda to switch environments.
-
-```bash
-conda init
-```
 
 **Close your shell, and login again.** 
 
 Run the setup script to create the environment for this exercise and download the dataset.
 ```bash
-sh setup.sh
+source setup.sh
 ```
+
 Activate your environment
 ```bash
-conda activate 06_image_translation
+conda activate img2img
 ```
 
 ## Use vscode
@@ -42,8 +37,8 @@ jupyter notebook
 
 ...and continue with the instructions in the notebook.
 
-If `06_image_translation` is not available as a kernel in jupyter, run:
+If `img2img` is not available as a kernel in jupyter, run:
 
 ```
-python -m ipykernel install --user --name=06_image_translation
+python -m ipykernel install --user --name=img2img
 ```

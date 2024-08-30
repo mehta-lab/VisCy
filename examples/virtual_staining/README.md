@@ -10,7 +10,7 @@ Instructions for how to train and run inference on ViSCy's virtual staining mode
 - [Image translation Exercise](./dlmbl_exercise/solution.py):
 Example showing how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course.
 
-- [Virtual staining exercise](./img2img_translation/solution.py): exploring the label-free to fluorescence virtual staining and florescence to label-free image translation task using VisCy UneXt2.
+- [Image to image translation demo](./img2img_translation/solution.py): exploring the label-free to fluorescence virtual staining and florescence to label-free image translation task using VisCy `UneXt2_2D`.
 
 ## Notes
 To run the examples, make sure to activate the `viscy` environment. Follow the instructions for each demo.
