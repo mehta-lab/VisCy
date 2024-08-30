@@ -103,7 +103,7 @@ class MixedLoss(nn.Module):
         self.l2_alpha = l2_alpha
         self.ms_dssim_alpha = ms_dssim_alpha
 
-    @torch.amp.custom_fwd(cast_inputs=torch.float32)
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, preds, target):
         loss = 0
         if self.l1_alpha:
