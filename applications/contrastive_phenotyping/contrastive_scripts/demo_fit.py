@@ -1,8 +1,6 @@
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import ModelCheckpoint
 from lightning.pytorch.loggers import TensorBoardLogger
-from lightning.pytorch.callbacks import DeviceStatsMonitor
-
 
 from viscy.data.triplet import TripletDataModule
 from viscy.light.engine import ContrastiveModule
