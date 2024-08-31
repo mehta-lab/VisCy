@@ -131,7 +131,6 @@ class TripletDataset(Dataset):
         -------
         pd.DataFrame
             Filtered tracks table
-
         """
         filtered_tracks = []
         y_exclude, x_exclude = (self.yx_patch_size[0] // 2, self.yx_patch_size[1] // 2)
@@ -159,7 +158,7 @@ class TripletDataset(Dataset):
 
     def _filter_anchors(self, tracks: pd.DataFrame) -> pd.DataFrame:
         """Ensure that anchors have the next time point after a time interval."""
-        if self.time_interval == "any":
+        if self.time_interval == "any" or not self.fit:
             return tracks
         return tracks[
             tracks.apply(
@@ -289,26 +288,46 @@ class TripletDataModule(HCSDataModule):
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
+        time_interval: Literal["any"] | int = "any",
     ):
         """Lightning data module for triplet sampling of patches.
 
-        :param str data_path: Image dataset path
-        :param str tracks_path: Tracks labels dataset path
-        :param str | Sequence[str] source_channel: list of input channel names
-        :param tuple[int, int] z_range: range of valid z-slices
-        :param tuple[int, int] initial_yx_patch_size:
-            XY size of the initially sampled image patch,
-            defaults to (384, 384)
-        :param tuple[int, int] final_yx_patch_size: output patch size,
-            defaults to (256, 256)
-        :param float split_ratio: ratio of training samples, defaults to 0.8
-        :param int batch_size: batch size, defaults to 16
-        :param int num_workers: number of data-loading workers, defaults to 8
-        :param list[MapTransform] normalizations: list of normalization transforms,
-            defaults to []
-        :param list[MapTransform] augmentations: list of augmentation transforms,
-            defaults to []
-        :param bool caching: whether to cache the dataset, defaults to False
+        Parameters
+        ----------
+        data_path : str
+            Image dataset path
+        tracks_path : str
+            Tracks labels dataset path
+        source_channel : str | Sequence[str]
+            List of input channel names
+        z_range : tuple[int, int]
+            Range of valid z-slices
+        initial_yx_patch_size : tuple[int, int], optional
+            XY size of the initially sampled image patch, by default (512, 512)
+        final_yx_patch_size : tuple[int, int], optional
+            Output patch size, by default (224, 224)
+        split_ratio : float, optional
+            Ratio of training samples, by default 0.8
+        batch_size : int, optional
+            Batch size, by default 16
+        num_workers : int, optional
+            Number of data-loading workers, by default 8
+        normalizations : list[MapTransform], optional
+            Normalization transforms, by default []
+        augmentations : list[MapTransform], optional
+            Augmentation transforms, by default []
+        caching : bool, optional
+            Whether to cache the dataset, by default False
+        predict_cells : bool, optional
+            Only predict for selected cells, by default False
+        include_fov_names : list[str] | None, optional
+            Only predict for selected FOVs, by default None
+        include_track_ids : list[int] | None, optional
+            Only predict for selected tracks, by default None
+        time_interval : Literal["any"] | int, optional
+            Future time interval to sample positive and anchor from,
+            "any" means sampling negative from another track any time point
+            and using the augmented anchor patch as positive), by default "any"
         """
         super().__init__(
             data_path=data_path,
@@ -330,6 +349,7 @@ class TripletDataModule(HCSDataModule):
         self.predict_cells = predict_cells
         self.include_fov_names = include_fov_names
         self.include_track_ids = include_track_ids
+        self.time_interval = time_interval
 
     def _align_tracks_tables_with_positions(
         self,
@@ -359,6 +379,7 @@ class TripletDataModule(HCSDataModule):
         return {
             "channel_names": self.source_channel,
             "z_range": self.z_range,
+            "time_interval": self.time_interval,
         }
 
     def _setup_fit(self, dataset_settings: dict):
