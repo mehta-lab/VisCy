@@ -1,5 +1,5 @@
 # %% [markdown]
-# Image translation (Virtual Staining)
+# # Image translation (Virtual Staining)
 #
 # Written by Eduardo Hirata-Miyasaki, Ziwen Liu, and Shalin Mehta, CZ Biohub San Francisco.
 #
@@ -137,30 +137,30 @@ def launch_tensorboard(log_dir):
 tensorboard_process = launch_tensorboard(log_dir)
 
 # %% [markdown]
-"""
-## Load OME-Zarr Dataset
-
-There should be 34 FOVs in the dataset.
-
-Each FOV consists of 3 channels of 2048x2048 images,
-saved in the [High-Content Screening (HCS) layout](https://ngff.openmicroscopy.org/latest/#hcs-layout)
-specified by the Open Microscopy Environment Next Generation File Format
-(OME-NGFF).
-
-- The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
-"""
+#
+# ### Load OME-Zarr Dataset
+#
+# There should be 34 FOVs in the dataset.
+# 
+# Each FOV consists of 3 channels of 2048x2048 images,
+# saved in the [High-Content Screening (HCS) layout](https://ngff.openmicroscopy.org/latest/#hcs-layout)
+# specified by the Open Microscopy Environment Next Generation File Format
+# (OME-NGFF).
+# 
+# - The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
+#
 
 # %% [markdown]
-"""
-<div class="alert alert-warning">
-You can inspect the tree structure by using your terminal:
-<code> iohub info -v "path-to-ome-zarr" </code>
-
-<br>
-More info on the CLI:
-<code>iohub info --help </code> to see the help menu.
-</div>
-"""
+#
+# <div class="alert alert-warning">
+# You can inspect the tree structure by using your terminal:
+# <code> iohub info -v "path-to-ome-zarr" </code>
+#
+# <br>
+# More info on the CLI:
+# <code>iohub info --help </code> to see the help menu.
+# </div>
+#
 # %%
 # This is the python function called by `iohub info` CLI command
 print_info(data_path, verbose=True)
@@ -445,7 +445,7 @@ trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], fast_dev_run=True)
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
 
 # %% [markdown]
-# ## View model graph.
+# ### View model graph.
 # visualize graph of phase2fluor model as image.
 model_graph_phase2fluor = torchview.draw_graph(
     phase2fluor_model,
@@ -633,7 +633,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 #
 # #<div class="alert alert-success">
 #
-# <h2> Checkpoint 1 </h2>
+# <h3> Checkpoint 1 </h3>
 #
 # You have now trained and evaluated a phase to fluorescence model
 # </div>
