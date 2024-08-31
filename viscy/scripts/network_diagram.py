@@ -1,7 +1,7 @@
 # %%
 from torchview import draw_graph
 
-from viscy.light.engine import FcmaeUNet, VSUNet
+from viscy.translation.engine import FcmaeUNet, VSUNet
 
 # %% 2D UNet
 model = VSUNet(

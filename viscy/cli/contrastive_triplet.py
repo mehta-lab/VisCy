@@ -8,7 +8,7 @@ from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy.data.triplet import TripletDataModule
-from viscy.light.engine import ContrastiveModule
+from viscy.representation.engine import ContrastiveModule
 
 
 class ContrastiveLightningCLI(LightningCLI):

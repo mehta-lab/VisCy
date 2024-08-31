@@ -7,12 +7,9 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
-from matplotlib.pyplot import get_cmap
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
-from skimage.exposure import rescale_intensity
 from torch import Tensor, nn
-from torch.optim import Adam
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
@@ -26,9 +23,9 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
-from viscy.data.typing import Sample, TripletSample
+from viscy._log_images import detach_sample, render_images
+from viscy.data.typing import Sample
 from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
-from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
@@ -49,38 +46,6 @@ _UNET_ARCHITECTURE = {
 }
 
 _logger = logging.getLogger("lightning.pytorch")
-
-
-def _detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int):
-    num_samples = min(imgs[0].shape[0], log_samples_per_batch)
-    samples = []
-    for i in range(num_samples):
-        patches = []
-        for img in imgs:
-            patch = img[i].detach().cpu().numpy()
-            patch = np.squeeze(patch[:, patch.shape[1] // 2])
-            patches.append(patch)
-        samples.append(patches)
-    return samples
-
-
-def _render_images(imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []):
-    images_grid = []
-    for sample_images in imgs:
-        images_row = []
-        for i, image in enumerate(sample_images):
-            if cmaps:
-                cm_name = cmaps[i]
-            else:
-                cm_name = "gray" if i == 0 else "inferno"
-            if image.ndim == 2:
-                image = image[np.newaxis]
-            for channel in image:
-                channel = rescale_intensity(channel, out_range=(0, 1))
-                render = get_cmap(cm_name)(channel, bytes=True)[..., :3]
-                images_row.append(render)
-        images_grid.append(np.concatenate(images_row, axis=1))
-    return np.concatenate(images_grid, axis=0)
 
 
 class MixedLoss(nn.Module):
@@ -231,7 +196,7 @@ class VSUNet(LightningModule):
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
                 self.training_step_outputs.extend(
-                    _detach_sample((source, target, pred), self.log_samples_per_batch)
+                    detach_sample((source, target, pred), self.log_samples_per_batch)
                 )
         loss_step = torch.stack(losses).mean()
         self.log(
@@ -262,7 +227,7 @@ class VSUNet(LightningModule):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                _detach_sample((source, target, pred), self.log_samples_per_batch)
+                detach_sample((source, target, pred), self.log_samples_per_batch)
             )
 
     def test_step(self, batch: Sample, batch_idx: int):
@@ -467,7 +432,7 @@ class VSUNet(LightningModule):
         return [optimizer], [scheduler]
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs)
+        grid = render_images(imgs)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
         )
@@ -525,7 +490,7 @@ class FcmaeUNet(VSUNet):
             batch_size += source.shape[0]
             if batch_idx < self.log_batches_per_epoch:
                 self.training_step_outputs.extend(
-                    _detach_sample(
+                    detach_sample(
                         (source, target * mask.unsqueeze(2), pred),
                         self.log_samples_per_batch,
                     )
@@ -556,190 +521,8 @@ class FcmaeUNet(VSUNet):
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
-                _detach_sample(
+                detach_sample(
                     (source, target * mask.unsqueeze(2), pred),
                     self.log_samples_per_batch,
                 )
             )
-
-
-class ContrastiveModule(LightningModule):
-    """Contrastive Learning Model for self-supervised learning."""
-
-    def __init__(
-        self,
-        backbone: str = "convnext_tiny",
-        loss_function: Union[
-            nn.Module, nn.CosineEmbeddingLoss, nn.TripletMarginLoss
-        ] = nn.TripletMarginLoss(),
-        margin: float = 0.5,
-        lr: float = 1e-3,
-        schedule: Literal["WarmupCosine", "Constant"] = "Constant",
-        log_batches_per_epoch: int = 8,
-        log_samples_per_batch: int = 1,
-        in_channels: int = 1,
-        example_input_yx_shape: Sequence[int] = (256, 256),
-        in_stack_depth: int = 15,
-        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
-        embedding_len: int = 256,
-        predict: bool = False,
-        drop_path_rate: float = 0.2,
-    ) -> None:
-        super().__init__()
-        self.loss_function = loss_function
-        self.margin = margin
-        self.lr = lr
-        self.schedule = schedule
-        self.log_batches_per_epoch = log_batches_per_epoch
-        self.log_samples_per_batch = log_samples_per_batch
-        self.training_step_outputs = []
-        self.validation_step_outputs = []
-        self.test_step_outputs = []
-        self.training_metrics = []
-        self.validation_metrics = []
-        self.test_metrics = []
-        self.processed_order = []
-        self.predictions = []
-        self.model = ContrastiveEncoder(
-            backbone=backbone,
-            in_channels=in_channels,
-            in_stack_depth=in_stack_depth,
-            stem_kernel_size=stem_kernel_size,
-            embedding_len=embedding_len,
-            predict=predict,
-            drop_path_rate=drop_path_rate,
-        )
-        self.example_input_array = torch.rand(
-            1, in_channels, in_stack_depth, *example_input_yx_shape
-        )
-        self.training_step_outputs = []
-        self.validataion_step_outputs = []
-
-    def forward(self, x: Tensor) -> Tensor:
-        """Projected embeddings."""
-        return self.model(x)[1]
-
-    def log_feature_statistics(self, embeddings: Tensor, prefix: str):
-        mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
-        std = torch.std(embeddings, dim=0).detach().cpu().numpy()
-        _logger.debug(f"{prefix}_mean: {mean}")
-        _logger.debug(f"{prefix}_std: {std}")
-
-    def print_embedding_norms(self, anchor, positive, negative, phase):
-        anchor_norm = torch.norm(anchor, dim=1).mean().item()
-        positive_norm = torch.norm(positive, dim=1).mean().item()
-        negative_norm = torch.norm(negative, dim=1).mean().item()
-        _logger.debug(f"{phase}/anchor_norm: {anchor_norm}")
-        _logger.debug(f"{phase}/positive_norm: {positive_norm}")
-        _logger.debug(f"{phase}/negative_norm: {negative_norm}")
-
-    def _log_metrics(
-        self, loss, anchor, positive, negative, stage: Literal["train", "val"]
-    ):
-        self.log(
-            f"loss/{stage}",
-            loss.to(self.device),
-            on_step=True,
-            on_epoch=True,
-            prog_bar=True,
-            logger=True,
-            sync_dist=True,
-        )
-        cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
-        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
-        euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
-        euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
-        self.log_dict(
-            {
-                f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
-                f"metrics/cosine_similarity_negative/{stage}": cosine_sim_neg,
-                f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
-                f"metrics/euclidean_distance_negative/{stage}": euclidean_dist_neg,
-            },
-            on_step=False,
-            on_epoch=True,
-            logger=True,
-            sync_dist=True,
-        )
-
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = _render_images(imgs, cmaps=["gray"] * 3)
-        self.logger.experiment.add_image(
-            key, grid, self.current_epoch, dataformats="HWC"
-        )
-
-    def training_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
-        """Training step of the model."""
-        stage = "train"
-        anchor_img = batch["anchor"]
-        pos_img = batch["positive"]
-        neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor_img)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, stage
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                _detach_sample(
-                    (anchor_img, pos_img, neg_img), self.log_samples_per_batch
-                )
-            )
-        return loss
-
-    def on_train_epoch_end(self) -> None:
-        super().on_train_epoch_end()
-        self._log_samples("train_samples", self.training_step_outputs)
-        self.training_step_outputs = []
-
-    def validation_step(
-        self,
-        batch: TripletSample,
-        batch_idx: int,
-    ) -> Tensor:
-        """Validation step of the model."""
-        anchor = batch["anchor"]
-        pos_img = batch["positive"]
-        neg_img = batch["negative"]
-        _, anchor_projection = self.model(anchor)
-        _, negative_projection = self.model(neg_img)
-        _, positive_projection = self.model(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, "val"
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.validation_step_outputs.extend(
-                _detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
-            )
-        return loss
-
-    def on_validation_epoch_end(self) -> None:
-        super().on_validation_epoch_end()
-        self._log_samples("val_samples", self.validation_step_outputs)
-        self.validation_step_outputs = []
-
-    def configure_optimizers(self):
-        optimizer = Adam(self.parameters(), lr=self.lr)
-        return optimizer
-
-    def predict_step(
-        self, batch: TripletSample, batch_idx, dataloader_idx=0
-    ) -> dict[str, Tensor | dict]:
-        """Prediction step for extracting embeddings."""
-        features, projections = self.model(batch["anchor"])
-        return {
-            "features": features,
-            "projections": projections,
-            "index": batch["index"],
-        }

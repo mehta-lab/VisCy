@@ -1,4 +1,5 @@
-# See help here on how to configure hyper-parameters with config files: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+# See help here on how to configure hyper-parameters with config files:
+# https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
 seed_everything: 42
 trainer:
   accelerator: gpu
@@ -8,16 +9,19 @@ trainer:
   precision: 32-true
   logger:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
+    # Nesting the logger config like this is equivalent to
+    # supplying the following argument to `lightning.pytorch.Trainer`:
+    # logger=TensorBoardLogger(
+    #     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
+    #     log_graph=True,
+    #     version="vanilla",
+    # )
     init_args:
       save_dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations
-      version: chocolate # this is the name of the experiment. The logs will be saved in save_dir/lightning_logs/version
+      # this is the name of the experiment.
+      # The logs will be saved in `save_dir/lightning_logs/version`
+      version: l2_projection_batchnorm
       log_graph: True
-  # Nesting the logger config like this is equivalent to supplying the following argument to lightning.pytorch.Trainer
-  #  logger=TensorBoardLogger(
-  #           "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
-  #           log_graph=True,
-  #           version="vanilla",
-  #       )
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -34,12 +38,29 @@ trainer:
   enable_checkpointing: true
   inference_mode: true
   use_distributed_sampler: true
+  # synchronize batchnorm parameters across multiple GPUs.
+  # important for contrastive learning to normalize the tensors across the whole batch.
+  sync_batchnorm: true
 model:
-  backbone: convnext_tiny
-  in_channels: 2
+  encoder:
+    class_path: viscy.representation.contrastive.ContrastiveEncoder
+    init_args:
+      backbone: convnext_tiny
+      in_channels: 2
+      in_stack_depth: 15
+      stem_kernel_size: [5, 4, 4]
+      stem_stride: [5, 4, 4]
+      embedding_dim: 768
+      projection_dim: 128
+      drop_path_rate: 0.0
+  loss_function:
+    class_path: torch.nn.TripletMarginLoss
+    init_args:
+      margin: 0.5
+  lr: 0.0002
   log_batches_per_epoch: 3
   log_samples_per_batch: 3
-  lr: 0.0002
+  example_input_array_shape: [1, 2, 15, 256, 256]
 data:
   data_path: /hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr
   tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr
