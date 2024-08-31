@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Sequence
+from typing import Literal, Sequence
 
 import pandas as pd
 import torch
@@ -61,7 +61,43 @@ class TripletDataset(Dataset):
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
+        time_interval: Literal["any"] | int = "any",
     ) -> None:
+        """Dataset for triplet sampling of cells based on tracking.
+
+        Parameters
+        ----------
+        positions : list[Position]
+            OME-Zarr images with consistent channel order
+        tracks_tables : list[pd.DataFrame]
+            Data frames containing ultrack results
+        channel_names : list[str]
+            Input channel names
+        initial_yx_patch_size : tuple[int, int]
+            YX size of the initially sampled image patch before augmentation
+        z_range : slice
+            Range of Z-slices
+        anchor_transform : DictTransform | None, optional
+            Transforms applied to the anchor sample, by default None
+        positive_transform : DictTransform | None, optional
+            Transforms applied to the positve sample, by default None
+        negative_transform : DictTransform | None, optional
+            Transforms applied to the negative sample, by default None
+        fit : bool, optional
+            Fitting mode in which the full triplet will be sampled,
+            only sample anchor if ``False``, by default True
+        predict_cells : bool, optional
+            Only predict on selected cells, by default False
+        include_fov_names : list[str] | None, optional
+            Only predict on selected FOVs, by default None
+        include_track_ids : list[int] | None, optional
+            Only predict on selected track IDs, by default None
+        time_interval : Literal["any"] | int, optional
+            Future time interval to sample positive and anchor from,
+            by default "any"
+            (sample negative from another track any time point
+            and use the augmented anchor patch as positive)
+        """
         self.positions = positions
         self.channel_names = channel_names
         self.channel_indices = [
@@ -76,13 +112,15 @@ class TripletDataset(Dataset):
         self.predict_cells = predict_cells
         self.include_fov_names = include_fov_names or []
         self.include_track_ids = include_track_ids or []
+        self.time_interval = time_interval
         self.tracks = self._filter_tracks(tracks_tables)
+        self.valid_anchors = self._filter_anchors(self.tracks)
         self.tracks = (
             self._specific_cells(self.tracks) if self.predict_cells else self.tracks
         )
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
-        """_filter_tracks Select tracks within positions that belong to this dataset and remove tracks that are too close to the border.
+        """Exclude tracks that are too close to the border or do not have the next time point.
 
         Parameters
         ----------
@@ -110,6 +148,7 @@ class TripletDataset(Dataset):
                 )
             y_range = (y_exclude, image.height - y_exclude)
             x_range = (x_exclude, image.width - x_exclude)
+            # FIXME: Check if future time points are available after interval
             filtered_tracks.append(
                 tracks[
                     tracks["y"].between(*y_range, inclusive="neither")
@@ -117,6 +156,20 @@ class TripletDataset(Dataset):
                 ]
             )
         return pd.concat(filtered_tracks).reset_index(drop=True)
+
+    def _filter_anchors(self, tracks: pd.DataFrame) -> pd.DataFrame:
+        """Ensure that anchors have the next time point after a time interval."""
+        if self.time_interval == "any":
+            return tracks
+        return tracks[
+            tracks.apply(
+                lambda x: (
+                    (x["fov_name"], x["t"] + self.time_interval, x["track_id"])
+                    in tracks[["fov_name", "t", "track_id"]].apply(tuple, axis=1)
+                ),
+                axis=1,
+            )
+        ]
 
     def _specific_cells(self, tracks: pd.DataFrame) -> pd.DataFrame:
         specific_tracks = pd.DataFrame()
@@ -129,12 +182,27 @@ class TripletDataset(Dataset):
             specific_tracks = pd.concat([specific_tracks, filtered_tracks])
         return specific_tracks.reset_index(drop=True)
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self.tracks)
 
+    def _sample_positive(self, anchor_row: pd.Series) -> pd.Series:
+        """Select a positive sample from the same track in the next time point."""
+        return self.tracks[
+            (self.tracks["t"] == anchor_row["t"] + self.time_interval)
+            & (self.tracks["global_track_id"] == anchor_row["global_track_id"])
+        ].iloc[0]
+
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
-        candidates: pd.DataFrame = self.tracks[
-            (self.tracks["global_track_id"] != anchor_row["global_track_id"])
+        """Select a negative sample from a different track in the next time point
+        if an interval is specified, otherwise from any random time point."""
+        if self.time_interval == "any":
+            tracks = self.tracks
+        else:
+            tracks = self.tracks[
+                self.tracks["t"] == anchor_row["t"] + self.time_interval
+            ]
+        candidates: pd.DataFrame = tracks[
+            (tracks["global_track_id"] != anchor_row["global_track_id"])
         ]
         # NOTE: Random sampling
         # this is to avoid combinatorial length growth at fitting time
@@ -163,22 +231,27 @@ class TripletDataset(Dataset):
         anchor_row = self.tracks.iloc[index]
         anchor_patch, anchor_norm = self._slice_patch(anchor_row)
         if self.fit:
-            positive_patch = anchor_patch.clone()
+            if self.time_interval == "any":
+                positive_patch = anchor_patch.clone()
+                positive_norm = anchor_norm
+            else:
+                positive_row = self._sample_positive(anchor_row)
+                positive_patch, positive_norm = self._slice_patch(positive_row)
             if self.positive_transform:
                 positive_patch = _transform_channel_wise(
                     transform=self.positive_transform,
                     channel_names=self.channel_names,
                     patch=positive_patch,
-                    norm_meta=anchor_norm,
+                    norm_meta=positive_norm,
                 )
             negative_row = self._sample_negative(anchor_row)
-            negative_patch, negetive_norm = self._slice_patch(negative_row)
+            negative_patch, negative_norm = self._slice_patch(negative_row)
             if self.negative_transform:
                 negative_patch = _transform_channel_wise(
                     transform=self.negative_transform,
                     channel_names=self.channel_names,
                     patch=negative_patch,
-                    norm_meta=negetive_norm,
+                    norm_meta=negative_norm,
                 )
         if self.anchor_transform:
             anchor_patch = _transform_channel_wise(
