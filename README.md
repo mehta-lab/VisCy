@@ -1,9 +1,8 @@
 # VisCy
 
-VisCy is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
+VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
-The following methods are being developed:
-
+This repository provides a pipeline for the following.
 - Image translation
   - Robust virtual staining of landmark organelles
 - Image classification
@@ -11,28 +10,21 @@ The following methods are being developed:
 - Image representation learning
   - Self-supervised learning of the cell state and organelle phenotypes
 
-<div style="border: 2px solid orange; padding: 10px; border-radius: 5px; background-color: #fff8e1;">
+<div style="border: 2px solid orange; padding: 10px; border-radius: 5px">
   <strong>Note:</strong><br>
-  VisCy is currently considered alpha software and is under active development. Frequent breaking changes are expected.
+  VisCy has been extensively tested for image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release 0.2.1 from PyPI.
 </div>
 
 ## Virtual staining
-### Pipeline
-A full illustration of the virtual staining pipeline can be found [here](docs/virtual_staining.md).
-
-### Library of virtual staining (VS) models
-The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
 ### Demos 
-#### Image-to-Image translation using VisCy
-- [Guide for Virtual Staining Models](https://github.com/mehta-lab/VisCy/wiki/virtual-staining-instructions):
-Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*) 
+- [Virtual staining exercise](./examples/virtual_staining/dlmbl_exercise/solution.ipynb):
+Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course and uses UNeXt2 architecture.
 
-- [Image translation Exercise](./dlmbl_exercise/solution.py):
-Example showing how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course.
+- [Image translation demo](./examples/virtual_staining/img2img_translation/solution.ipynb): Fluorescence images can be predicted from label-free images. Can we predict label-free image from fluorescence? Find out using this notebook.
 
-- [Virtual staining exercise](./img2img_translation/solution.py): exploring the label-free to fluorescence virtual staining and florescence to label-free image translation task using VisCy UneXt2.
-More usage examples and demos can be found [here](https://github.com/mehta-lab/VisCy/blob/b7af9687c6409c738731ea47f66b74db2434443c/examples/virtual_staining/README.md)
+- [Training Virtual Staining Models via CLI](https://github.com/mehta-lab/VisCy/wiki/virtual-staining-instructions):
+Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
 
 ### Gallery
 Below are some examples of virtually stained images (click to play videos).
@@ -82,6 +74,13 @@ issn = {2050-084X},
 publisher = {eLife Sciences Publications, Ltd},
 }
 ```
+
+### Library of virtual staining (VS) models
+The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
+
+### Pipeline
+A full illustration of the virtual staining pipeline can be found [here](docs/virtual_staining.md).
+
 
 ## Installation
 
