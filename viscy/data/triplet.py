@@ -160,15 +160,12 @@ class TripletDataset(Dataset):
         """Ensure that anchors have the next time point after a time interval."""
         if self.time_interval == "any" or not self.fit:
             return tracks
-        return tracks[
-            tracks.apply(
-                lambda x: (
-                    (x["fov_name"], x["t"] + self.time_interval, x["track_id"])
-                    in tracks[["fov_name", "t", "track_id"]].apply(tuple, axis=1)
-                ),
-                axis=1,
-            )
-        ]
+        return pd.concat(
+            [
+                track[(track["t"] + self.time_interval).isin(track["t"])]
+                for (_, track) in tracks.groupby("global_track_id")
+            ]
+        )
 
     def _specific_cells(self, tracks: pd.DataFrame) -> pd.DataFrame:
         specific_tracks = pd.DataFrame()
@@ -182,13 +179,15 @@ class TripletDataset(Dataset):
         return specific_tracks.reset_index(drop=True)
 
     def __len__(self) -> int:
-        return len(self.tracks)
+        return len(self.valid_anchors)
 
     def _sample_positive(self, anchor_row: pd.Series) -> pd.Series:
         """Select a positive sample from the same track in the next time point."""
-        return self.tracks[
-            (self.tracks["t"] == anchor_row["t"] + self.time_interval)
-            & (self.tracks["global_track_id"] == anchor_row["global_track_id"])
+        same_track = self.tracks[
+            (self.tracks["global_track_id"] == anchor_row["global_track_id"])
+        ]
+        return same_track[
+            same_track["t"] == (anchor_row["t"] + self.time_interval)
         ].iloc[0]
 
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
@@ -227,7 +226,7 @@ class TripletDataset(Dataset):
         return torch.from_numpy(patch), _read_norm_meta(position)
 
     def __getitem__(self, index: int) -> TripletSample:
-        anchor_row = self.tracks.iloc[index]
+        anchor_row = self.valid_anchors.iloc[index]
         anchor_patch, anchor_norm = self._slice_patch(anchor_row)
         if self.fit:
             if self.time_interval == "any":
@@ -259,14 +258,11 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
-        sample = {"anchor": anchor_patch, "index": anchor_row[INDEX_COLUMNS].to_dict()}
+        sample = {"anchor": anchor_patch}
         if self.fit:
-            sample.update(
-                {
-                    "positive": positive_patch,
-                    "negative": negative_patch,
-                }
-            )
+            sample.update({"positive": positive_patch, "negative": negative_patch})
+        else:
+            sample.update({"index": anchor_row[INDEX_COLUMNS].to_dict()})
         return sample
 
 
