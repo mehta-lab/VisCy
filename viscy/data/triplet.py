@@ -390,15 +390,18 @@ class TripletDataModule(HCSDataModule):
         val_positions = positions[num_train_fovs:]
         train_tracks_tables = tracks_tables[:num_train_fovs]
         val_tracks_tables = tracks_tables[num_train_fovs:]
-
-        print(f"Number of training FOVs: {len(train_positions)}")
-        print(f"Number of validation FOVs: {len(val_positions)}")
-
+        _logger.debug(f"Number of training FOVs: {len(train_positions)}")
+        _logger.debug(f"Number of validation FOVs: {len(val_positions)}")
+        anchor_transform = (
+            no_aug_transform
+            if (self.time_interval == "any" or self.time_interval == 0)
+            else augment_transform
+        )
         self.train_dataset = TripletDataset(
             positions=train_positions,
             tracks_tables=train_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=no_aug_transform,
+            anchor_transform=anchor_transform,
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
@@ -409,7 +412,7 @@ class TripletDataModule(HCSDataModule):
             positions=val_positions,
             tracks_tables=val_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=no_aug_transform,
+            anchor_transform=anchor_transform,
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
