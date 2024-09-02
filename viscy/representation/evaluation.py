@@ -14,6 +14,19 @@ from sklearn.metrics import (
 import torch.nn as nn
 import torch.optim as optim
 
+"""
+This module enables evaluation of learned representations using annotations, such as 
+* cell division labels, 
+* infection state labels, 
+* labels predicted using supervised classifiers,
+* computed image features.
+
+Following evaluation methods are implemented:
+* Linear classifier accuracy when labels are provided.
+* Clustering evaluation using normalized mutual information (NMI) and adjusted rand index (ARI).
+* Correlation between embeddings and computed features using rank correlation.  
+"""
+
 
 class RepresentationEvaluator:
     def __init__(self, embeddings: np.ndarray, annotations: np.ndarray):
@@ -153,7 +166,10 @@ class RepresentationEvaluator:
         input_dim = self.embeddings.shape[1]
         output_dim = len(np.unique(self.annotations))
         model = SingleLayerNN(input_dim, output_dim)
-        criterion = nn.CrossEntropyLoss()
+        criterion = (
+            nn.CrossEntropyLoss()
+        )  # Works with logits, so no softmax in the last layer
+
         optimizer = optim.SGD(model.parameters(), lr=learning_rate)
 
         # Training loop
