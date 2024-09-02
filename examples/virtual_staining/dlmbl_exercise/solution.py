@@ -116,7 +116,7 @@ from torchmetrics.functional import accuracy, dice, jaccard_index
 from tqdm import tqdm
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
-from viscy.evaluation.evaluation_metrics import mean_average_precision
+from viscy.translation.evaluation_metrics import mean_average_precision
 # Trainer class and UNet.
 from viscy.translation.engine import MixedLoss, VSUNet
 from viscy.translation.trainer import VSTrainer

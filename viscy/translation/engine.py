@@ -25,7 +25,7 @@ from torchmetrics.functional import (
 
 from viscy._log_images import detach_sample, render_images
 from viscy.data.typing import Sample
-from viscy.evaluation.evaluation_metrics import mean_average_precision, ms_ssim_25d
+from viscy.translation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
