@@ -1,5 +1,3 @@
-
-
 # %%
 # from viscy.data.triplet import TripletDataModule
 from viscy.light.embedding_writer import read_embedding_dataset
@@ -8,7 +6,9 @@ from viscy.data.triplet import TripletDataModule
 from pathlib import Path
 import numpy as np
 from skimage import io
-from computed_features import FeatureExtractor as FE
+from applications.contrastive_phenotyping.evaluation.computed_features import (
+    FeatureExtractor as FE,
+)
 from sklearn.decomposition import PCA
 import pandas as pd
 from sklearn.preprocessing import StandardScaler
@@ -35,7 +35,9 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")]
+fov_names_list = [
+    name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")
+]
 unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
 ii = 0
@@ -140,8 +142,12 @@ for fov_name in unique_fov_names:
             entropy_fluor = FE.compute_spectral_entropy(fluor[t])
 
             # Compute texture analysis using GLCM
-            contrast_phase, dissimilarity_phase, homogeneity_phase = FE.compute_glcm_features(phase[t])
-            contrast_fluor, dissimilarity_fluor, homogeneity_fluor = FE.compute_glcm_features(fluor[t])
+            contrast_phase, dissimilarity_phase, homogeneity_phase = (
+                FE.compute_glcm_features(phase[t])
+            )
+            contrast_fluor, dissimilarity_fluor, homogeneity_fluor = (
+                FE.compute_glcm_features(fluor[t])
+            )
 
             # # Compute edge detection using Canny
             # edges_phase = FE.detect_edges(phase[t])
@@ -189,7 +195,9 @@ for fov_name in unique_fov_names:
         # compute correlation between PCA features and computed features
 
         # Create a dataframe with PCA results
-        pca_results = pd.DataFrame(pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"])
+        pca_results = pd.DataFrame(
+            pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]
+        )
         computed_pca = pd.concat([computed_pca, pca_results])
 
 # %%
@@ -210,7 +218,14 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 
 plt.figure(figsize=(20, 5))
-sns.heatmap(correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc["PCA1":"PCA5", :], annot=True, cmap="coolwarm", fmt=".2f")
+sns.heatmap(
+    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc[
+        "PCA1":"PCA5", :
+    ],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+)
 plt.title("Correlation between PCA features and computed features")
 plt.xlabel("Computed Features")
 plt.ylabel("PCA Features")
