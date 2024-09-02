@@ -1,25 +1,31 @@
 import numpy as np
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.cluster import KMeans, DBSCAN
+import torch
+from torch.utils.data import DataLoader, TensorDataset
+
 from sklearn.metrics import (
     accuracy_score,
     normalized_mutual_information_score,
     adjusted_rand_score,
     silhouette_score,
 )
-from sklearn.cluster import KMeans, DBSCAN
-import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
 
 
 class RepresentationEvaluator:
     def __init__(self, embeddings: np.ndarray, annotations: np.ndarray):
         """
         Initialize the evaluator with embeddings and annotations.
-        :param embeddings: numpy array of shape (n_samples, n_features) - the learned representations.
-        :param annotations: numpy array of shape (n_samples, p_class) - the ground truth labels in one-hot encoding.
+
+        Parameters
+        ----------
+        embeddings : np.ndarray
+            The learned representations. Shape: (n_samples, n_features).
+        annotations : np.ndarray
+            The ground truth labels in one-hot encoding. Shape: (n_samples, p_class).
         """
         self.embeddings = embeddings
         self.annotations = np.argmax(
@@ -29,8 +35,16 @@ class RepresentationEvaluator:
     def knn_accuracy(self, k=5):
         """
         Evaluate the k-NN classification accuracy.
-        :param k: Number of neighbors to use for k-NN.
-        :return: Accuracy of the k-NN classifier.
+
+        Parameters
+        ----------
+        k : int, optional
+            Number of neighbors to use for k-NN. Default is 5.
+
+        Returns
+        -------
+        float
+            Accuracy of the k-NN classifier.
         """
         knn = KNeighborsClassifier(n_neighbors=k)
         knn.fit(self.embeddings, self.annotations)
@@ -41,9 +55,18 @@ class RepresentationEvaluator:
     def dbscan_clustering(self, eps=0.5, min_samples=5):
         """
         Apply DBSCAN clustering to the embeddings.
-        :param eps: The maximum distance between two samples for them to be considered as in the same neighborhood.
-        :param min_samples: The number of samples in a neighborhood for a point to be considered as a core point.
-        :return: Clustering labels assigned by DBSCAN.
+
+        Parameters
+        ----------
+        eps : float, optional
+            The maximum distance between two samples for them to be considered as in the same neighborhood. Default is 0.5.
+        min_samples : int, optional
+            The number of samples in a neighborhood for a point to be considered as a core point. Default is 5.
+
+        Returns
+        -------
+        np.ndarray
+            Clustering labels assigned by DBSCAN.
         """
         dbscan = DBSCAN(eps=eps, min_samples=min_samples)
         clusters = dbscan.fit_predict(self.embeddings)
@@ -52,8 +75,16 @@ class RepresentationEvaluator:
     def silhouette_score(self, clusters):
         """
         Compute the silhouette score for the DBSCAN clustering results.
-        :param clusters: Clustering labels assigned by DBSCAN.
-        :return: Silhouette score for the clustering.
+
+        Parameters
+        ----------
+        clusters : np.ndarray
+            Clustering labels assigned by DBSCAN.
+
+        Returns
+        -------
+        float
+            Silhouette score for the clustering.
         """
         score = silhouette_score(self.embeddings, clusters)
         return score
@@ -61,8 +92,16 @@ class RepresentationEvaluator:
     def clustering_evaluation(self, method="nmi"):
         """
         Evaluate the clustering of the embeddings compared to the ground truth labels.
-        :param method: Metric to use for evaluation ('nmi' or 'ari').
-        :return: NMI or ARI score depending on the method chosen.
+
+        Parameters
+        ----------
+        method : str, optional
+            Metric to use for evaluation ('nmi' or 'ari'). Default is 'nmi'.
+
+        Returns
+        -------
+        float
+            NMI or ARI score depending on the method chosen.
         """
         clusters = self.dbscan_clustering()
 
@@ -78,10 +117,20 @@ class RepresentationEvaluator:
     def linear_classifier_accuracy(self, batch_size=32, learning_rate=0.01, epochs=10):
         """
         Evaluate the accuracy of a single-layer neural network trained on the embeddings.
-        :param batch_size: Batch size for training.
-        :param learning_rate: Learning rate for the optimizer.
-        :param epochs: Number of training epochs.
-        :return: Accuracy of the neural network classifier.
+
+        Parameters
+        ----------
+        batch_size : int, optional
+            Batch size for training. Default is 32.
+        learning_rate : float, optional
+            Learning rate for the optimizer. Default is 0.01.
+        epochs : int, optional
+            Number of training epochs. Default is 10.
+
+        Returns
+        -------
+        float
+            Accuracy of the neural network classifier.
         """
 
         class SingleLayerNN(nn.Module):
