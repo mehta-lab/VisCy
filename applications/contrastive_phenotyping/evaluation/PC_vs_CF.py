@@ -6,7 +6,7 @@ from viscy.data.triplet import TripletDataModule
 from pathlib import Path
 import numpy as np
 from skimage import io
-from applications.contrastive_phenotyping.evaluation.computed_features import (
+from viscy.representation.evaluation import (
     FeatureExtractor as FE,
 )
 from sklearn.decomposition import PCA
