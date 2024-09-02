@@ -1,22 +1,20 @@
 import numpy as np
+import torch
+import torch.nn as nn
+import torch.optim as optim
 from numpy import fft
 from skimage import color
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
-from sklearn.neighbors import KNeighborsClassifier
-from sklearn.linear_model import LogisticRegression
-from sklearn.cluster import KMeans, DBSCAN
-import torch
-from torch.utils.data import DataLoader, TensorDataset
-
+from sklearn.cluster import DBSCAN
 from sklearn.metrics import (
     accuracy_score,
-    normalized_mutual_information_score,
     adjusted_rand_score,
+    normalized_mutual_information_score,
     silhouette_score,
 )
-import torch.nn as nn
-import torch.optim as optim
+from sklearn.neighbors import KNeighborsClassifier
+from torch.utils.data import DataLoader, TensorDataset
 
 """
 This module enables evaluation of learned representations using annotations, such as 
