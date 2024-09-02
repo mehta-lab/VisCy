@@ -11,9 +11,17 @@ class ContrastiveEncoder(nn.Module):
     """
     Contrastive encoder network that uses ConvNeXt and ResNet backbones from timm.
 
+    Returns
+    -------
+    tuple[Tensor, Tensor]
+    A tuple containing the embedding tensor and the projection tensor.
+
+    - embedding (Tensor): The embedded feature tensor.
+    - projections (Tensor): The projected feature tensor.
+
     Parameters
     ----------
-    backbone : Literal["convnext_tiny", "resnet50"]
+    backbone : Literal["convnext_tiny", "convnextv2_tiny", "resnet50"]
         Name of the timm backbone architecture
     in_channels : int, optional
         Number of input channels
@@ -35,7 +43,7 @@ class ContrastiveEncoder(nn.Module):
 
     def __init__(
         self,
-        backbone: Literal["convnext_tiny", "resnet50"],
+        backbone: Literal["convnext_tiny", "convnextv2_tiny", "resnet50"],
         in_channels: int,
         in_stack_depth: int,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
