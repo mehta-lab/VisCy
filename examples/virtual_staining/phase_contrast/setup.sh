@@ -14,18 +14,22 @@ conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name v
 # install viscy and its dependencies`s in the environment using pip.
 # Find path to the environment - conda activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep vs_Phc | awk '{print $NF}')
-$ENV_PATH/bin/pip install "viscy[metrics,visual]==0.2.1"
+$ENV_PATH/bin/pip install "viscy[metrics,visual,examples]==0.2.0"
 
 # Create the directory structure
-mkdir -p ~/data/vs_PhC/training
 mkdir -p ~/data/vs_PhC/test
+mkdir -p ~/data/vs_PhC/models
 
 # Change to the target directory
-cd ~/data/vs_PhC/training
 # Download the OME-Zarr dataset recursively
-wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VSCyto2D/training/a549_hoechst_cellmask_train_val.zarr/"
 cd ~/data/vs_PhC/test
-wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VSCyto2D/test/a549_hoechst_cellmask_test.zarr/"
+wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto3D/test/HEK_H2B_CAAX_PhC_40x_registered.zarr/"
+
+# Get the models
+cd ~/data/vs_PhC/models
+wget -m -np -nH --cut-dirs=4 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto3D/no_augmentations/best_epoch=30-step=6076.ckpt"
+wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto3D/epoch=48-step=18130.ckpt"
+
 
 # Change back to the starting directory
 cd $START_DIR
