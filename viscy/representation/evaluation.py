@@ -10,7 +10,7 @@ from sklearn.cluster import DBSCAN
 from sklearn.metrics import (
     accuracy_score,
     adjusted_rand_score,
-    normalized_mutual_information_score,
+    normalized_mutual_info_score,
     silhouette_score,
 )
 from sklearn.neighbors import KNeighborsClassifier
@@ -124,7 +124,7 @@ class RepresentationEvaluator:
         clusters = self.dbscan_clustering()
 
         if method == "nmi":
-            score = normalized_mutual_information_score(self.annotations, clusters)
+            score = normalized_mutual_info_score(self.annotations, clusters)
         elif method == "ari":
             score = adjusted_rand_score(self.annotations, clusters)
         else:
