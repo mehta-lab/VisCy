@@ -7,7 +7,7 @@
 #
 # In this exercise, we will _virtually stain_ the nuclei and plasma membrane from the quantitative phase image (QPI), i.e., translate QPI images into fluoresence images of nuclei and plasma membranes.
 # QPI encodes multiple cellular structures and virtual staining decomposes these structures. After the model is trained, one only needs to acquire label-free QPI data.
-# This strategy solves the problem as "multi-spectral imaging", but is more compatible with live cell imaging and high-throughput screening.
+# This strategy solves the same problem as "multi-spectral imaging", but is more compatible with live cell imaging and high-throughput screening.
 # Virtual staining is often a step towards multiple downstream analyses: segmentation, tracking, and cell state phenotyping.
 # 
 # In this exercise, you will:

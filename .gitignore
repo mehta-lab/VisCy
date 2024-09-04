@@ -40,5 +40,4 @@ coverage.xml
 .pytest_cache/
 
 # SLURM
-slurm*
-*.out
+slurm*.out

@@ -2,11 +2,9 @@
 
 # Overview:
 
-# TODO
+Generalization to Zernike phase contrast images. This demo showcases the use of VSCyto3D model with and without augmentations on Zernike phase contrast data.
 
 ## Setup
-
-**Close your shell, and login again.** 
 
 Run the setup script to create the environment for this exercise and download the dataset.
 ```bash
