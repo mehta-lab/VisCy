@@ -141,12 +141,12 @@ tensorboard_process = launch_tensorboard(log_dir)
 # ### Load OME-Zarr Dataset
 #
 # There should be 34 FOVs in the dataset.
-# 
+#
 # Each FOV consists of 3 channels of 2048x2048 images,
 # saved in the [High-Content Screening (HCS) layout](https://ngff.openmicroscopy.org/latest/#hcs-layout)
 # specified by the Open Microscopy Environment Next Generation File Format
 # (OME-NGFF).
-# 
+#
 # - The layout on the disk is: `row/col/field/pyramid_level/timepoint/channel/z/y/x.`
 #
 
@@ -504,12 +504,11 @@ test_data = HCSDataModule(
 )
 test_data.setup("test")
 
+# %%
+# Compute metrics directly and plot here.
 test_metrics = pd.DataFrame(
     columns=["pearson_nuc", "SSIM_nuc", "pearson_mem", "SSIM_mem"]
 )
-
-# %%
-# Compute metrics directly and plot here.
 
 
 def min_max_scale(input):
@@ -631,7 +630,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 
 # %% [markdown]
 #
-# #<div class="alert alert-success">
+# <div class="alert alert-success">
 #
 # <h3> Checkpoint 1 </h3>
 #
@@ -646,7 +645,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 
 # </div>
 
-# %%
+# %% tags=["solution"]
 # The entire training loop is contained in this cell.
 source_channel = ["Mem"]  # or 'Nuc' depending on choice
 target_channel = ["Phase3D"]
@@ -743,6 +742,7 @@ model_graph_fluor2phase = torchview.draw_graph(
 model_graph_fluor2phase.visual_graph
 
 # %%  tags=["solution"]
+# Setup the trainer and dataloader for testing
 trainer = VSTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
@@ -756,6 +756,7 @@ trainer = VSTrainer(
     ),
 )
 trainer.fit(fluor2phase_model, datamodule=fluor2phase_data)
+
 test_data_path = Path(
     "~/data/img2img/test/a549_hoechst_cellmask_test.zarr"
 ).expanduser()
@@ -771,10 +772,10 @@ test_data = HCSDataModule(
 )
 test_data.setup("test")
 
+# %% tags=["solution"]
+# Instensity based metrics on the test data.
+
 test_metrics = pd.DataFrame(columns=["pearson_phase", "SSIM_phase"])
-
-
-# %%
 for i, sample in enumerate(test_data.test_dataloader()):
     source_image = sample["source"]
     with torch.inference_mode():  # turn off gradient computation.
@@ -804,7 +805,7 @@ test_metrics.boxplot(
     column=["pearson_phase", "SSIM_phase"],
     rot=30,
 )
-# %%
+# %% tags=["solution"]
 # Plot the predicted image
 channel_titles = [
     "Membrane",
@@ -850,44 +851,6 @@ for i, sample in enumerate(test_data.test_dataloader()):
     plt.tight_layout()
     plt.show()
     break
-
-phase2fluor_config = dict(
-    in_channels=1,
-    out_channels=2,
-    encoder_blocks=[3, 3, 9, 3],
-    dims=[96, 192, 384, 768],
-    decoder_conv_blocks=2,
-    stem_kernel_size=(1, 2, 2),
-    in_stack_depth=1,
-    pretraining=False,
-)
-
-phase2fluor_model_low_lr = VSUNet(
-    architecture="UNeXt2_2D",
-    model_config=phase2fluor_config.copy(),
-    loss_function=MixedLoss(
-        l1_alpha=0.5, l2_alpha=0.0, ms_dssim_alpha=0.5
-    ),  # Changed the loss function to MixedLoss L1 and MS-SSIM
-    schedule="WarmupCosine",
-    lr=2e-5,  # lower learning rate by factor of 10
-    log_batches_per_epoch=5,  # Number of samples from each batch to log to tensorboard.
-)
-
-trainer = VSTrainer(
-    accelerator="gpu",
-    devices=[GPU_ID],
-    max_epochs=n_epochs,
-    log_every_n_steps=steps_per_epoch,
-    logger=TensorBoardLogger(
-        save_dir=log_dir,
-        name="phase2fluor",
-        version="phase2fluor_low_lr",
-        log_graph=True,
-    ),
-    fast_dev_run=True,
-)  # Set fast_dev_run to False to train the model.
-trainer.fit(phase2fluor_model_low_lr, datamodule=phase2fluor_2D_data)
-
 
 # %% [markdown] tags=[]
 """
