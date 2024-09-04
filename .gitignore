@@ -38,3 +38,7 @@ coverage.xml
 *.cover
 .hypothesis/
 .pytest_cache/
+
+# SLURM
+slurm*
+*.out

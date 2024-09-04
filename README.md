@@ -38,6 +38,8 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
 The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
 
+<details>
+  <summary>bibtex citation</summary>
 ```bibtex
 @article {Liu2024.05.31.596901,
     author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
@@ -51,9 +53,12 @@ The virtual staining models and training protocols are reported in our recent [p
     journal = {bioRxiv}
 }
 ```
+</details>
 
 This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502):
 
+<details>
+  <summary>bibtex citation</summary>
 ```bibtex
 @article {10.7554/eLife.55502,
 article_type = {journal},
@@ -74,6 +79,7 @@ issn = {2050-084X},
 publisher = {eLife Sciences Publications, Ltd},
 }
 ```
+</details>
 
 ### Library of virtual staining (VS) models
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
