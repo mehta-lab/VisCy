@@ -36,50 +36,48 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
 ### Reference
 
-The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901):
+The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
+
+
+This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502).
+
 
 <details>
-  <summary>bibtex citation</summary>
-```bibtex
-@article {Liu2024.05.31.596901,
-    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
-    title = {Robust virtual staining of landmark organelles},
-    elocation-id = {2024.05.31.596901},
-    year = {2024},
-    doi = {10.1101/2024.05.31.596901},
-    publisher = {Cold Spring Harbor Laboratory},
-    URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
-    eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
-    journal = {bioRxiv}
-}
-```
+  <summary>Liu, Hirata-Miyasaki et al., 2024</summary>
+  @article {Liu2024.05.31.596901,
+          author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+          title = {Robust virtual staining of landmark organelles},
+          elocation-id = {2024.05.31.596901},
+          year = {2024},
+          doi = {10.1101/2024.05.31.596901},
+          publisher = {Cold Spring Harbor Laboratory},
+          URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
+          eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
+          journal = {bioRxiv}
+      } 
 </details>
-
-This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502):
 
 <details>
-  <summary>bibtex citation</summary>
-```bibtex
-@article {10.7554/eLife.55502,
-article_type = {journal},
-title = {Revealing architectural order with quantitative label-free imaging and deep learning},
-author = {Guo, Syuan-Ming and Yeh, Li-Hao and Folkesson, Jenny and Ivanov, Ivan E and Krishnan, Anitha P and Keefe, Matthew G and Hashemi, Ezzat and Shin, David and Chhun, Bryant B and Cho, Nathan H and Leonetti, Manuel D and Han, May H and Nowakowski, Tomasz J and Mehta, Shalin B},
-editor = {Forstmann, Birte and Malhotra, Vivek and Van Valen, David},
-volume = 9,
-year = 2020,
-month = {jul},
-pub_date = {2020-07-27},
-pages = {e55502},
-citation = {eLife 2020;9:e55502},
-doi = {10.7554/eLife.55502},
-url = {https://doi.org/10.7554/eLife.55502},
-keywords = {label-free imaging, inverse algorithms, deep learning, human tissue, polarization, phase},
-journal = {eLife},
-issn = {2050-084X},
-publisher = {eLife Sciences Publications, Ltd},
-}
-```
-</details>
+ <summary>Guo, Yeh, Folkesson et al., 2020</summary>
+  @article {10.7554/eLife.55502,
+      article_type = {journal},
+      title = {Revealing architectural order with quantitative label-free imaging and deep learning},
+      author = {Guo, Syuan-Ming and Yeh, Li-Hao and Folkesson, Jenny and Ivanov, Ivan E and Krishnan, Anitha P and Keefe, Matthew G and Hashemi, Ezzat and Shin, David and Chhun, Bryant B and Cho, Nathan H and Leonetti, Manuel D and Han, May H and Nowakowski, Tomasz J and Mehta, Shalin B},
+      editor = {Forstmann, Birte and Malhotra, Vivek and Van Valen, David},
+      volume = 9,
+      year = 2020,
+      month = {jul},
+      pub_date = {2020-07-27},
+      pages = {e55502},
+      citation = {eLife 2020;9:e55502},
+      doi = {10.7554/eLife.55502},
+      url = {https://doi.org/10.7554/eLife.55502},
+      keywords = {label-free imaging, inverse algorithms, deep learning, human tissue, polarization, phase},
+      journal = {eLife},
+      issn = {2050-084X},
+      publisher = {eLife Sciences Publications, Ltd},
+      } 
+  </details>
 
 ### Library of virtual staining (VS) models
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
