@@ -7,6 +7,9 @@ __pycache__/
 # written by setuptools_scm
 */_version.py
 
+# slurm output files
+slurm-*
+
 # Distribution / packaging
 .Python
 build/
@@ -41,3 +44,6 @@ coverage.xml
 
 # SLURM
 slurm*.out
+
+#lightning_logs directory
+lightning_logs/

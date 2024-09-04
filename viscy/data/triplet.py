@@ -14,6 +14,8 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
+INDEX_COLUMNS = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+
 
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
@@ -56,6 +58,9 @@ class TripletDataset(Dataset):
         positive_transform: DictTransform | None = None,
         negative_transform: DictTransform | None = None,
         fit: bool = True,
+        predict_cells: bool = False,
+        include_fov_names: list[str] | None = None,
+        include_track_ids: list[int] | None = None,
     ) -> None:
         self.positions = positions
         self.channel_names = channel_names
@@ -68,9 +73,28 @@ class TripletDataset(Dataset):
         self.negative_transform = negative_transform
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
+        self.predict_cells = predict_cells
+        self.include_fov_names = include_fov_names or []
+        self.include_track_ids = include_track_ids or []
         self.tracks = self._filter_tracks(tracks_tables)
+        self.tracks = (
+            self._specific_cells(self.tracks) if self.predict_cells else self.tracks
+        )
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
+        """_filter_tracks Select tracks within positions that belong to this dataset and remove tracks that are too close to the border.
+
+        Parameters
+        ----------
+        tracks_tables : list[pd.DataFrame]
+            List of tracks_tables returned by TripletDataModule._align_tracks_tables_with_positions
+
+        Returns
+        -------
+        pd.DataFrame
+            Filtered tracks table
+
+        """
         filtered_tracks = []
         y_exclude, x_exclude = (self.yx_patch_size[0] // 2, self.yx_patch_size[1] // 2)
         for pos, tracks in zip(self.positions, tracks_tables, strict=True):
@@ -93,6 +117,17 @@ class TripletDataset(Dataset):
                 ]
             )
         return pd.concat(filtered_tracks).reset_index(drop=True)
+
+    def _specific_cells(self, tracks: pd.DataFrame) -> pd.DataFrame:
+        specific_tracks = pd.DataFrame()
+        print(self.include_fov_names)
+        print(self.include_track_ids)
+        for fov_name, track_id in zip(self.include_fov_names, self.include_track_ids):
+            filtered_tracks = tracks[
+                (tracks["fov_name"] == fov_name) & (tracks["track_id"] == track_id)
+            ]
+            specific_tracks = pd.concat([specific_tracks, filtered_tracks])
+        return specific_tracks.reset_index(drop=True)
 
     def __len__(self):
         return len(self.tracks)
@@ -152,11 +187,7 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
-
-        sample = {
-            "anchor": anchor_patch,
-            "index": anchor_row[["fov_name", "id"]].to_dict(),
-        }
+        sample = {"anchor": anchor_patch, "index": anchor_row[INDEX_COLUMNS].to_dict()}
         if self.fit:
             sample.update(
                 {
@@ -182,6 +213,9 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
+        predict_cells: bool = False,
+        include_fov_names: list[str] | None = None,
+        include_track_ids: list[int] | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -220,10 +254,21 @@ class TripletDataModule(HCSDataModule):
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
+        self.predict_cells = predict_cells
+        self.include_fov_names = include_fov_names
+        self.include_track_ids = include_track_ids
 
     def _align_tracks_tables_with_positions(
         self,
     ) -> tuple[list[Position], list[pd.DataFrame]]:
+        """Parse positions in ome-zarr store containing tracking information
+        and assemble tracks tables for each position.
+
+        Returns
+        -------
+        tuple[list[Position], list[pd.DataFrame]]
+            List of positions and list of tracks tables for each position
+        """
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
@@ -290,6 +335,9 @@ class TripletDataModule(HCSDataModule):
             initial_yx_patch_size=self.initial_yx_patch_size,
             anchor_transform=Compose(self.normalizations),
             fit=False,
+            predict_cells=self.predict_cells,
+            include_fov_names=self.include_fov_names,
+            include_track_ids=self.include_track_ids,
             **dataset_settings,
         )
 

@@ -3,7 +3,6 @@ import os
 from typing import Literal, Sequence, Union
 
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn.functional as F
 from imageio import imwrite
@@ -104,7 +103,7 @@ class MixedLoss(nn.Module):
         self.l2_alpha = l2_alpha
         self.ms_dssim_alpha = ms_dssim_alpha
 
-    @torch.cuda.amp.custom_fwd(cast_inputs=torch.float32)
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, preds, target):
         loss = 0
         if self.l1_alpha:
@@ -581,10 +580,10 @@ class ContrastiveModule(LightningModule):
         in_channels: int = 1,
         example_input_yx_shape: Sequence[int] = (256, 256),
         in_stack_depth: int = 15,
-        stem_kernel_size: tuple[int, int, int] = (5, 3, 3),
+        stem_kernel_size: tuple[int, int, int] = (5, 4, 4),
         embedding_len: int = 256,
         predict: bool = False,
-        tracks_path: str = "data/tracks",
+        drop_path_rate: float = 0.2,
     ) -> None:
         super().__init__()
         self.loss_function = loss_function
@@ -601,7 +600,6 @@ class ContrastiveModule(LightningModule):
         self.test_metrics = []
         self.processed_order = []
         self.predictions = []
-        self.tracks_path = tracks_path
         self.model = ContrastiveEncoder(
             backbone=backbone,
             in_channels=in_channels,
@@ -609,6 +607,7 @@ class ContrastiveModule(LightningModule):
             stem_kernel_size=stem_kernel_size,
             embedding_len=embedding_len,
             predict=predict,
+            drop_path_rate=drop_path_rate,
         )
         self.example_input_array = torch.rand(
             1, in_channels, in_stack_depth, *example_input_yx_shape
@@ -734,68 +733,13 @@ class ContrastiveModule(LightningModule):
         optimizer = Adam(self.parameters(), lr=self.lr)
         return optimizer
 
-    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0):
-        print("running predict step!")
+    def predict_step(
+        self, batch: TripletSample, batch_idx, dataloader_idx=0
+    ) -> dict[str, Tensor | dict]:
         """Prediction step for extracting embeddings."""
         features, projections = self.model(batch["anchor"])
-        index = batch["index"]
-        self.predictions.append(
-            (features.cpu().numpy(), projections.cpu().numpy(), index)
-        )
-        return features, projections, index
-
-    def on_predict_epoch_end(self) -> None:
-        combined_features = []
-        combined_projections = []
-        accumulated_data = []
-
-        for features, projections, index in self.predictions:
-            combined_features.extend(features)
-            combined_projections.extend(projections)
-
-            fov_names = index["fov_name"]
-            cell_ids = index["id"].cpu().numpy()
-
-            for fov_name, cell_id in zip(fov_names, cell_ids):
-                parts = fov_name.split("/")
-                row = parts[1]
-                column = parts[2]
-                fov = parts[3]
-
-                csv_path = os.path.join(
-                    self.tracks_path,
-                    row,
-                    column,
-                    fov,
-                    f"tracks_{row}_{column}_{fov}.csv",
-                )
-
-                df = pd.read_csv(csv_path)
-
-                track_id = df[df["id"] == cell_id]["track_id"].values[0]
-                timestep = df[df["id"] == cell_id]["t"].values[0]
-
-                accumulated_data.append((row, column, fov, track_id, timestep))
-
-        combined_features = np.array(combined_features)
-        combined_projections = np.array(combined_projections)
-
-        np.save("embeddings2/multi_resnet_predicted_features.npy", combined_features)
-        print("Saved features with shape", combined_features.shape)
-        np.save(
-            "embeddings2/multi_resnet_predicted_projections.npy", combined_projections
-        )
-        print("Saved projections with shape", combined_projections.shape)
-
-        rows, columns, fovs, track_ids, timesteps = zip(*accumulated_data)
-        df = pd.DataFrame(
-            {
-                "Row": rows,
-                "Column": columns,
-                "FOV": fovs,
-                "Cell ID": track_ids,
-                "Timestep": timesteps,
-            }
-        )
-
-        df.to_csv("embeddings2/multi_resnet_predicted_metadata.csv", index=False)
+        return {
+            "features": features,
+            "projections": projections,
+            "index": batch["index"],
+        }
