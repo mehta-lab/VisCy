@@ -38,7 +38,7 @@ from viscy.transforms import NormalizeSampled
 root_dir = Path("")
 # TODO: modify the path to the downloaded dataset
 input_data_path = root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
-# TODO: modify the path to the downloaded dataset
+# TODO: modify the path to the downloaded checkpoint
 model_ckpt_path = "/epoch=399-step=23200.ckpt"
 # TODO: modify the path
 # Zarr store to save the predictions

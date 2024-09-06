@@ -43,8 +43,7 @@ The dataset and model checkpoint files need to be downloaded before running this
 # TODO: modify the path to the downloaded dataset
 input_data_path = "/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
 
-# TODO: modify the path to the downloaded dataset
-# Download from GitHub release page of v0.1.0
+# TODO: modify the path to the downloaded checkpoint
 model_ckpt_path = "/epoch=48-step=18130.ckpt"
 
 # TODO: modify the path

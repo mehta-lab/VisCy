@@ -43,7 +43,7 @@ The dataset and model checkpoint files need to be downloaded before running this
 # TODO: modify the path to the downloaded dataset
 input_data_path = "/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
 
-# TODO: modify the path to the downloaded dataset
+# TODO: modify the path to the downloaded checkpoint
 model_ckpt_path = "/epoch=44-step=1215.ckpt"
 
 # TODO: modify the path
