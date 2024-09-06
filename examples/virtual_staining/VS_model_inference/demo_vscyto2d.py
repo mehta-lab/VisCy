@@ -11,6 +11,7 @@ from pathlib import Path
 
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
+
 # Viscy classes for the trainer and model
 from viscy.data.hcs import HCSDataModule
 from viscy.light.engine import FcmaeUNet
@@ -18,24 +19,31 @@ from viscy.light.predict_writer import HCSPredictionWriter
 from viscy.light.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
 
-# %% [markdown]
-"""
-## Data and Model Paths
-
-The dataset and model checkpoint files need to be downloaded before running this example.
-"""
+# %% [markdown] tags=[]
+#
+# <div class="alert alert-block alert-info">
+#
+# # Download the dataset and checkpoints for the VSCyto2D model
+#
+# - Download the VSCyto2D test dataset and model checkpoint from here: <br>
+# https://public.czbiohub.org/comp.micro/viscy
+# - Update the `input_data_path` and `model_ckpt_path` variables with the path to the downloaded files.
+# - Select a FOV (i.e 0/0/0).
+# - Set an output path for the predictions.
+#
+# </div>
 
 # %%
-# Set download paths
+# TODO: Set download paths
 root_dir = Path("")
-# Download from
-# https://public.czbiohub.org/comp.micro/viscy/VSCyto2D/test/a549_hoechst_cellmask_test.zarr/
+# TODO: modify the path to the downloaded dataset
 input_data_path = root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
-# Download from GitHub release page of v0.1.0
-model_ckpt_path = root_dir / "VisCy-0.1.0-VS-models/VSCyto2D/epoch=399-step=23200.ckpt"
+# TODO: modify the path to the downloaded checkpoint
+model_ckpt_path = "/epoch=399-step=23200.ckpt"
+# TODO: modify the path
 # Zarr store to save the predictions
 output_path = root_dir / "./a549_prediction.zarr"
-# FOV of interest
+# TODO: Choose an FOV
 fov = "0/0/0"
 
 input_data_path = input_data_path / fov

@@ -12,6 +12,7 @@ from pathlib import Path
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
 from viscy.data.hcs import HCSDataModule
+
 # Viscy classes for the trainer and model
 from viscy.light.engine import VSUNet
 from viscy.light.predict_writer import HCSPredictionWriter
@@ -25,16 +26,31 @@ from viscy.transforms import NormalizeSampled
 The dataset and model checkpoint files need to be downloaded before running this example.
 """
 
+# %% [markdown] tags=[]
+#
+# <div class="alert alert-block alert-info">
+#
+# # Download the dataset and checkpoints VSCyto3D
+#
+# - Download the VSCyto3D test dataset and model checkpoint from here: <br>
+# https://public.czbiohub.org/comp.micro/viscy
+# - Update the `input_data_path` and `model_ckpt_path` variables with the path to the downloaded files.
+# - Select a FOV (i.e plate/0/0).
+# - Set an output path for the predictions.
+#
+# </div>
 # %%
-# Download from
-# https://public.czbiohub.org/comp.micro/viscy/VSCyto3D/test/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr/
-input_data_path = (
-    "VSCyto3D/test/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
-)
-# Download from GitHub release page of v0.1.0
-model_ckpt_path = "VisCy-0.1.0-VS-models/VSCyto3D/epoch=48-step=18130.ckpt"
+# TODO: modify the path to the downloaded dataset
+input_data_path = "/no_pertubation_Phase1e-3_Denconv_Nuc8e-4_Mem8e-4_pad15_bg50.zarr"
+
+# TODO: modify the path to the downloaded checkpoint
+model_ckpt_path = "/epoch=48-step=18130.ckpt"
+
+# TODO: modify the path
 # Zarr store to save the predictions
 output_path = "./hek_prediction_3d.zarr"
+
+# TODO: Choose an FOV
 # FOV of interest
 fov = "plate/0/0"
 

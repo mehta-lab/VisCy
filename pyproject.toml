@@ -32,7 +32,10 @@ metrics = [
     "ptflops>=0.7",
     "umap-learn",
 ]
+examples = ["napari", "jupyter", "jupytext"]
+
 visual = ["ipykernel", "graphviz", "torchview", "seaborn", "plotly", "nbformat"]
+
 dev = [
     "pytest",
     "pytest-cov",

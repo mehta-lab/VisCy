@@ -42,5 +42,8 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
+# SLURM
+slurm*.out
+
 #lightning_logs directory
 lightning_logs/
