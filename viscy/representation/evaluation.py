@@ -1,4 +1,7 @@
 import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -15,6 +18,8 @@ from sklearn.metrics import (
 )
 from sklearn.neighbors import KNeighborsClassifier
 from torch.utils.data import DataLoader, TensorDataset
+
+from viscy.data.triplet import TripletDataModule
 
 """
 This module enables evaluation of learned representations using annotations, such as 
@@ -304,6 +309,76 @@ class FeatureExtractor:
         std_dev = np.std(image)
 
         return std_dev
+
+
+# %% Function to Load Annotations
+def load_annotation(da, path, name, categories: dict | None = None):
+    annotation = pd.read_csv(path)
+    annotation["fov_name"] = "/" + annotation["fov ID"]
+    annotation = annotation.set_index(["fov_name", "id"])
+    mi = pd.MultiIndex.from_arrays(
+        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+    )
+    selected = annotation.loc[mi][name]
+    if categories:
+        selected = selected.astype("category").cat.rename_categories(categories)
+    return selected
+
+
+# %% Function to Compute PCA
+def compute_pca(embedding_dataset, n_components=6):
+    features = embedding_dataset["features"]
+    scaled_features = StandardScaler().fit_transform(features.values)
+
+    # Compute PCA with specified number of components
+    pca = PCA(n_components=n_components, random_state=42)
+    pca_embedding = pca.fit_transform(scaled_features)
+
+    # Prepare DataFrame with id and PCA coordinates
+    pca_df = pd.DataFrame(
+        {
+            "id": embedding_dataset["id"].values,
+            "fov_name": embedding_dataset["fov_name"].values,
+            "PCA1": pca_embedding[:, 0],
+            "PCA2": pca_embedding[:, 1],
+            "PCA3": pca_embedding[:, 2],
+            "PCA4": pca_embedding[:, 3],
+            "PCA5": pca_embedding[:, 4],
+            "PCA6": pca_embedding[:, 5],
+        }
+    )
+
+    return pca_df
+
+
+def dataset_of_tracks(
+    data_path,
+    tracks_path,
+    fov_list,
+    track_id_list,
+    source_channel=["Phase3D", "RFP"],
+    z_range=(28, 43),
+    initial_yx_patch_size=(256, 256),
+    final_yx_patch_size=(128, 128),
+):
+    data_module = TripletDataModule(
+        data_path=data_path,
+        tracks_path=tracks_path,
+        include_fov_names=fov_list,
+        include_track_ids=track_id_list,
+        source_channel=source_channel,
+        z_range=z_range,
+        initial_yx_patch_size=initial_yx_patch_size,
+        final_yx_patch_size=final_yx_patch_size,
+        batch_size=1,
+        num_workers=16,
+        normalizations=None,
+        predict_cells=True,
+    )
+    # for train and val
+    data_module.setup("predict")
+    prediction_dataset = data_module.predict_dataset
+    return prediction_dataset
 
 
 # Example usage:
