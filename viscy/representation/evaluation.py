@@ -38,6 +38,81 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 
 
+## utilities for loading datasets and annotations.
+def load_annotation(da, path, name, categories: dict | None = None):
+    """
+    Load annotations from a CSV file and map them to the dataset.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The dataset array containing 'fov_name' and 'id' coordinates.
+    path : str
+        Path to the CSV file containing annotations.
+    name : str
+        The column name in the CSV file to be used as annotations.
+    categories : dict, optional
+        A dictionary to rename categories in the annotation column. Default is None.
+
+    Returns
+    -------
+    pd.Series
+        A pandas Series containing the selected annotations mapped to the dataset.
+    """
+    # Read the annotation CSV file
+    annotation = pd.read_csv(path)
+
+    # Add a leading slash to 'fov name' column and set it as 'fov_name'
+    annotation["fov_name"] = "/" + annotation["fov_name"]
+
+    # Set the index of the annotation DataFrame to ['fov_name', 'id']
+    annotation = annotation.set_index(["fov_name", "id"])
+
+    # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
+    mi = pd.MultiIndex.from_arrays(
+        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+    )
+
+    # Select the annotations corresponding to the MultiIndex
+    selected = annotation.loc[mi][name]
+
+    # If categories are provided, rename the categories in the selected annotations
+    if categories:
+        selected = selected.astype("category").cat.rename_categories(categories)
+
+    return selected
+
+
+def dataset_of_tracks(
+    data_path,
+    tracks_path,
+    fov_list,
+    track_id_list,
+    source_channel=["Phase3D", "RFP"],
+    z_range=(28, 43),
+    initial_yx_patch_size=(256, 256),
+    final_yx_patch_size=(128, 128),
+):
+    data_module = TripletDataModule(
+        data_path=data_path,
+        tracks_path=tracks_path,
+        include_fov_names=fov_list,
+        include_track_ids=track_id_list,
+        source_channel=source_channel,
+        z_range=z_range,
+        initial_yx_patch_size=initial_yx_patch_size,
+        final_yx_patch_size=final_yx_patch_size,
+        batch_size=1,
+        num_workers=16,
+        normalizations=None,
+        predict_cells=True,
+    )
+    # for train and val
+    data_module.setup("predict")
+    prediction_dataset = data_module.predict_dataset
+    return prediction_dataset
+
+
 class RepresentationEvaluator:
     def __init__(self, embeddings: np.ndarray, annotations: np.ndarray):
         """
@@ -201,6 +276,30 @@ class RepresentationEvaluator:
 
         return accuracy
 
+    def compute_pca(embedding_dataset, n_components=6):
+        features = embedding_dataset["features"]
+        scaled_features = StandardScaler().fit_transform(features.values)
+
+        # Compute PCA with specified number of components
+        pca = PCA(n_components=n_components, random_state=42)
+        pca_embedding = pca.fit_transform(scaled_features)
+
+        # Prepare DataFrame with id and PCA coordinates
+        pca_df = pd.DataFrame(
+            {
+                "id": embedding_dataset["id"].values,
+                "fov_name": embedding_dataset["fov_name"].values,
+                "PCA1": pca_embedding[:, 0],
+                "PCA2": pca_embedding[:, 1],
+                "PCA3": pca_embedding[:, 2],
+                "PCA4": pca_embedding[:, 3],
+                "PCA5": pca_embedding[:, 4],
+                "PCA6": pca_embedding[:, 5],
+            }
+        )
+
+        return pca_df
+
 
 class FeatureExtractor:
 
@@ -309,116 +408,3 @@ class FeatureExtractor:
         std_dev = np.std(image)
 
         return std_dev
-
-
-# %% Function to Load Annotations
-def load_annotation(da, path, name, categories: dict | None = None):
-    """
-    Load annotations from a CSV file and map them to the dataset.
-
-    Parameters
-    ----------
-    da : xarray.DataArray
-        The dataset array containing 'fov_name' and 'id' coordinates.
-    path : str
-        Path to the CSV file containing annotations.
-    name : str
-        The column name in the CSV file to be used as annotations.
-    categories : dict, optional
-        A dictionary to rename categories in the annotation column. Default is None.
-
-    Returns
-    -------
-    pd.Series
-        A pandas Series containing the selected annotations mapped to the dataset.
-    """
-    # Read the annotation CSV file
-    annotation = pd.read_csv(path)
-
-    # Add a leading slash to 'fov name' column and set it as 'fov_name'
-    annotation["fov_name"] = "/" + annotation["fov_name"]
-
-    # Set the index of the annotation DataFrame to ['fov_name', 'id']
-    annotation = annotation.set_index(["fov_name", "id"])
-
-    # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
-    mi = pd.MultiIndex.from_arrays(
-        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
-    )
-
-    # Select the annotations corresponding to the MultiIndex
-    selected = annotation.loc[mi][name]
-
-    # If categories are provided, rename the categories in the selected annotations
-    if categories:
-        selected = selected.astype("category").cat.rename_categories(categories)
-
-    return selected
-
-
-# %% Function to Compute PCA
-def compute_pca(embedding_dataset, n_components=6):
-    features = embedding_dataset["features"]
-    scaled_features = StandardScaler().fit_transform(features.values)
-
-    # Compute PCA with specified number of components
-    pca = PCA(n_components=n_components, random_state=42)
-    pca_embedding = pca.fit_transform(scaled_features)
-
-    # Prepare DataFrame with id and PCA coordinates
-    pca_df = pd.DataFrame(
-        {
-            "id": embedding_dataset["id"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "PCA1": pca_embedding[:, 0],
-            "PCA2": pca_embedding[:, 1],
-            "PCA3": pca_embedding[:, 2],
-            "PCA4": pca_embedding[:, 3],
-            "PCA5": pca_embedding[:, 4],
-            "PCA6": pca_embedding[:, 5],
-        }
-    )
-
-    return pca_df
-
-
-def dataset_of_tracks(
-    data_path,
-    tracks_path,
-    fov_list,
-    track_id_list,
-    source_channel=["Phase3D", "RFP"],
-    z_range=(28, 43),
-    initial_yx_patch_size=(256, 256),
-    final_yx_patch_size=(128, 128),
-):
-    data_module = TripletDataModule(
-        data_path=data_path,
-        tracks_path=tracks_path,
-        include_fov_names=fov_list,
-        include_track_ids=track_id_list,
-        source_channel=source_channel,
-        z_range=z_range,
-        initial_yx_patch_size=initial_yx_patch_size,
-        final_yx_patch_size=final_yx_patch_size,
-        batch_size=1,
-        num_workers=16,
-        normalizations=None,
-        predict_cells=True,
-    )
-    # for train and val
-    data_module.setup("predict")
-    prediction_dataset = data_module.predict_dataset
-    return prediction_dataset
-
-
-# Example usage:
-# embeddings = np.random.rand(100, 128)  # Example embeddings
-# annotations = np.eye(10)[np.random.choice(10, 100)]  # Example one-hot encoded labels
-# evaluator = ContrastiveLearningEvaluator(embeddings, annotations)
-# print("k-NN Accuracy:", evaluator.knn_accuracy(k=5))
-# dbscan_clusters = evaluator.dbscan_clustering(eps=0.3, min_samples=10)
-# print("Silhouette Score:", evaluator.silhouette_score(dbscan_clusters))
-# print("NMI Score:", evaluator.clustering_evaluation(method='nmi'))
-# print("ARI Score:", evaluator.clustering_evaluation(method='ari'))
-# print("Linear Classifier Accuracy:", evaluator.linear_classifier_accuracy(batch_size=32, learning_rate=0.01, epochs=10))
