@@ -1,10 +1,12 @@
 # %% Importing Necessary Libraries
 from pathlib import Path
+
 import pandas as pd
+from imblearn.over_sampling import SMOTE
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
+
 from viscy.representation.embedding_writer import read_embedding_dataset
-from imblearn.over_sampling import SMOTE
 from viscy.representation.evaluation import load_annotation
 
 # %% Defining Paths for February Dataset

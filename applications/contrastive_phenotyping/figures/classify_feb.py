@@ -1,15 +1,16 @@
 # %% Importing Necessary Libraries
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from tqdm import tqdm
-from viscy.light.embedding_writer import read_embedding_dataset
 from imblearn.over_sampling import SMOTE
-from viscy.representation.evaluation import load_annotation
-from viscy.representation.evaluation import compute_pca
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+from tqdm import tqdm
+
+from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.evaluation import compute_pca, load_annotation
 
 # %% Defining Paths for February Dataset
 feb_features_path = Path(

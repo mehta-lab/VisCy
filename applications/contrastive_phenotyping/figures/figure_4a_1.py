@@ -1,11 +1,12 @@
 # %% Importing Necessary Libraries
 from pathlib import Path
+
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
+
 from viscy.light.embedding_writer import read_embedding_dataset
 
 # %% Defining Paths for February and June Datasets
@@ -63,7 +64,6 @@ print(feb_infection)
 print(feb_features)
 # %%
 
-import matplotlib.pyplot as plt
 
 # %% Identify cells by infection type using fov_name
 mock_cells = feb_features.sel(sample=feb_features['fov_name'].str.contains('/A/3') | feb_features['fov_name'].str.contains('/B/3'))

@@ -1,9 +1,11 @@
 # %% Importing Necessary Libraries
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
-from pathlib import Path
-from sklearn.preprocessing import StandardScaler
+
 from viscy.light.embedding_writer import read_embedding_dataset
+
 
 # %% Function to Load Annotations from CSV
 def load_annotation(csv_path):

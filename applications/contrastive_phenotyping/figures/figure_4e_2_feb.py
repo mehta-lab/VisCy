@@ -1,10 +1,11 @@
 # %% Importing Necessary Libraries
+from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
-from pathlib import Path
-from sklearn.preprocessing import StandardScaler
+
 from viscy.light.embedding_writer import read_embedding_dataset
-from umap import UMAP  # Add import for UMAP
+
 
 # %% Function to Load Annotations from GMM CSV
 def load_gmm_annotation(gmm_csv_path):

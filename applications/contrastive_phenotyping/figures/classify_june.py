@@ -1,15 +1,17 @@
 # %% Importing Necessary Libraries
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
-from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score
-from sklearn.decomposition import PCA
-from tqdm import tqdm
-from viscy.light.embedding_writer import read_embedding_dataset
 from imblearn.over_sampling import SMOTE
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
+
+from viscy.light.embedding_writer import read_embedding_dataset
 
 # %% Defining Paths for June Dataset
 june_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/code_testing_soorya/output/Phase_RFP_smallPatch_June/phaseRFP_36patch_June.zarr")

@@ -6,17 +6,12 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
-
 from viscy.representation.embedding_writer import read_embedding_dataset
-from iohub import open_ome_zarr
-import monai.transforms as transforms
-from viscy.representation.evaluation import load_annotation
-from viscy.representation.evaluation import dataset_of_tracks
-
+from viscy.representation.evaluation import dataset_of_tracks, load_annotation
 
 # %% Paths and parameters.
 
@@ -133,8 +128,9 @@ for t in range(len(predict_dataset)):
     plt.show()
 
 # %% display the track in napari
-import napari
 import os
+
+import napari
 
 os.environ["DISPLAY"] = ":1"
 viewer = napari.Viewer()

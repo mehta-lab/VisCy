@@ -1,16 +1,15 @@
 # %%
-from viscy.light.embedding_writer import read_embedding_dataset
-
 from pathlib import Path
+
 import numpy as np
-from skimage import io
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
+
+from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import (
     FeatureExtractor as FE,
 )
-from sklearn.decomposition import PCA
-import pandas as pd
-from sklearn.preprocessing import StandardScaler
-
 from viscy.representation.evaluation import dataset_of_tracks
 
 # %%
@@ -205,8 +204,8 @@ best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
 best_correlated_features
 
 # %% display as a heatmap
-import seaborn as sns
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 plt.figure(figsize=(20, 5))
 sns.heatmap(
