@@ -313,15 +313,46 @@ class FeatureExtractor:
 
 # %% Function to Load Annotations
 def load_annotation(da, path, name, categories: dict | None = None):
+    """
+    Load annotations from a CSV file and map them to the dataset.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The dataset array containing 'fov_name' and 'id' coordinates.
+    path : str
+        Path to the CSV file containing annotations.
+    name : str
+        The column name in the CSV file to be used as annotations.
+    categories : dict, optional
+        A dictionary to rename categories in the annotation column. Default is None.
+
+    Returns
+    -------
+    pd.Series
+        A pandas Series containing the selected annotations mapped to the dataset.
+    """
+    # Read the annotation CSV file
     annotation = pd.read_csv(path)
-    annotation["fov_name"] = "/" + annotation["fov ID"]
+
+    # Add a leading slash to 'fov name' column and set it as 'fov_name'
+    annotation["fov_name"] = "/" + annotation["fov_name"]
+
+    # Set the index of the annotation DataFrame to ['fov_name', 'id']
     annotation = annotation.set_index(["fov_name", "id"])
+
+    # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
     mi = pd.MultiIndex.from_arrays(
         [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
     )
+
+    # Select the annotations corresponding to the MultiIndex
     selected = annotation.loc[mi][name]
+
+    # If categories are provided, rename the categories in the selected annotations
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
+
     return selected
 
 
