@@ -4,7 +4,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 
 
 # %% Function to Load Annotations from CSV

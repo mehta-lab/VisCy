@@ -9,7 +9,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import compute_pca, load_annotation
 
 # %% Defining Paths for February Dataset

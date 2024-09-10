@@ -1,12 +1,14 @@
 # %%
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 import pandas as pd
-import seaborn as sns
 import plotly.express as px
+import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-from viscy.light.embedding_writer import read_embedding_dataset
-import matplotlib.pyplot as plt
+
+from viscy.representation.embedding_writer import read_embedding_dataset
 
 # %%
 dataset = read_embedding_dataset(
@@ -177,9 +179,9 @@ fig.update_traces(marker=dict(size=3))
 
 # %% cluster cells in PCA1 vs PCA2 space using Gaussian Mixture Model
 
-from sklearn.mixture import GaussianMixture
 import numpy as np
 import seaborn as sns
+from sklearn.mixture import GaussianMixture
 
 gmm = GaussianMixture(n_components=2)
 PCA1_array = features["PCA1"].values.reshape(-1, 1)
@@ -430,8 +432,8 @@ plt.show()
 # %% use linear classifier to predict infection state from UMAP coordinates
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
 from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
 
 X = features[["UMAP1", "UMAP2"]].values.astype(int)
 y = infection.values.codes
@@ -458,8 +460,8 @@ y_pred = clf.predict(X_test)
 print(classification_report(y_test, y_pred))
 
 # %% use gaussian mixture model to cluster cells in PCA space
-from sklearn.mixture import GaussianMixture
 from sklearn.metrics import f1_score
+from sklearn.mixture import GaussianMixture
 
 gmm = GaussianMixture(n_components=2)
 PCA1_array = features["PCA1"].values.reshape(-1, 1)
