@@ -1,5 +1,13 @@
+
+''' Script to compute the correlation between PCA and UMAP features and computed features
+* finds the computed features best representing the PCA and UMAP components
+* outputs a heatmap of the correlation between PCA and UMAP features and computed features
+'''
+
 # %%
 from pathlib import Path
+import sys
+sys.path.append('$MYDATA/viscy_infection_phenotyping/VisCy')
 
 import numpy as np
 import pandas as pd
@@ -14,13 +22,13 @@ from viscy.representation.evaluation import dataset_of_tracks
 
 # %%
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/code_testing_soorya/output/June_140Patch_2chan/phaseRFP_140patch_99ckpt_Feb.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_51.zarr"
 )
 data_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
 )
 tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
 # %%
@@ -87,7 +95,7 @@ for fov_name in unique_fov_names:
             source_channel=source_channel,
         )
 
-        whole = np.stack([p["anchor"] for p in predict_dataset])
+        whole = np.stack([p["anchor"] for p in prediction_dataset])
         phase = whole[:, 0, 3]
         fluor = np.max(whole[:, 1], axis=1)
         # phase = np.stack([p["anchor"][0, 3].numpy() for p in predict_dataset])

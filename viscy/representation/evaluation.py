@@ -95,7 +95,7 @@ def dataset_of_tracks(
     track_id_list,
     source_channel=["Phase3D", "RFP"],
     z_range=(28, 43),
-    initial_yx_patch_size=(256, 256),
+    initial_yx_patch_size=(128, 128),
     final_yx_patch_size=(128, 128),
 ):
     data_module = TripletDataModule(
