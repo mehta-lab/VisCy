@@ -221,7 +221,7 @@ def compute_pca(embedding_dataset, n_components=32, normalize_features=True):
     # Compute PCA with specified number of components
     pca = PCA(n_components=n_components, random_state=42)
     pca_embedding = pca.fit_transform(scaled_features)
-    pca_projections = pca.fit_transform(scaled_projections)
+    pca_projection = pca.fit_transform(scaled_projections)
 
     # Prepare DataFrame with id and PCA coordinates
     pca_df = pd.DataFrame(
@@ -234,6 +234,12 @@ def compute_pca(embedding_dataset, n_components=32, normalize_features=True):
             "PCA4": pca_embedding[:, 3],
             "PCA5": pca_embedding[:, 4],
             "PCA6": pca_embedding[:, 5],
+            "PCA1_proj": pca_projection[:, 0],
+            "PCA2_proj": pca_projection[:, 1],
+            "PCA3_proj": pca_projection[:, 2],
+            "PCA4_proj": pca_projection[:, 3],
+            "PCA5_proj": pca_projection[:, 4],
+            "PCA6_proj": pca_projection[:, 5],
         }
     )
 
