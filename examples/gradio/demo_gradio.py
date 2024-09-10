@@ -54,7 +54,7 @@ class VSGradio:
 
 # %%
 if __name__ == "__main__":
-    model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
+    model_ckpt_path = "./VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
     model_config = {
         "in_channels": 1,
         "out_channels": 2,
@@ -76,7 +76,7 @@ if __name__ == "__main__":
             gr.Image(type="numpy", format="png"),
         ],
         examples=[
-            "/home/eduardo.hirata/repos/viscy/examples/gradio/hek.png",
-            "/home/eduardo.hirata/repos/viscy/examples/gradio/a549.png",
+            "./hek.png",
+            "./a549.png",
         ],
-    ).launch()
+    ).launch(share=False)
