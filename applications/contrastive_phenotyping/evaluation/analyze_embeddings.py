@@ -8,13 +8,18 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-from umap import UMAP
 
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import load_annotation
+from viscy.representation.evaluation import load_annotation, compute_pca, compute_umap
 
-
+# %% Jupyter magic command for autoreloading modules
+# ruff: noqa
+# fmt: off
+%load_ext autoreload
+%autoreload 2
+# fmt: on
+# ruff: noqa
 # %% Paths and parameters
 
 path_embedding = Path(
@@ -54,24 +59,46 @@ feb_infection = load_annotation(
 # %% interactive quality control: principal components
 # Compute principal components and ranks of embeddings and projections.
 
+# compute rank
 rank_features = np.linalg.matrix_rank(dataset["features"].values)
 rank_projections = np.linalg.matrix_rank(dataset["projections"].values)
 
-PCA_features = PCA().fit(dataset["features"].values)
-PCA_projection = PCA().fit(dataset["projections"].values)
+pca_features, pca_projections, pca_df = compute_pca(dataset)
 
+# Plot explained variance and rank
 plt.plot(
-    PCA_features.explained_variance_ratio_, label=f"features, rank={rank_features}"
+    pca_features.explained_variance_ratio_, label=f"features, rank={rank_features}"
 )
 plt.plot(
-    PCA_projection.explained_variance_ratio_,
+    pca_projections.explained_variance_ratio_,
     label=f"projections, rank={rank_projections}",
 )
 plt.legend()
 plt.xlabel("n_components")
+plt.ylabel("explained variance ratio")
+plt.xlim([0, 50])
+plt.show()
+
+# Density plot of first two principal components of features and projections.
+fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+sns.kdeplot(data=pca_df, x="PCA1", y="PCA2", ax=ax[0], fill=True, cmap="Blues")
+sns.kdeplot(data=pca_df, x="PCA1_proj", y="PCA2_proj", ax=ax[1], fill=True, cmap="Reds")
+ax[0].set_title("Density plot of PCA1 vs PCA2 (features)")
+ax[1].set_title("Density plot of PCA1 vs PCA2 (projections)")
 plt.show()
 
 # %% interactive quality control: UMAP
+# Compute UMAP embeddings
+umap_features, umap_projections, umap_df = compute_umap(dataset)
+
+# %%
+# Plot UMAP embeddings as density plots
+fig, ax = plt.subplots(1, 2, figsize=(10, 5))
+sns.kdeplot(data=umap_df, x="UMAP1", y="UMAP2", ax=ax[0], fill=True, cmap="Blues")
+sns.kdeplot(data=umap_df, x="UMAP1_proj", y="UMAP2_proj", ax=ax[1], fill=True, cmap="Reds")
+ax[0].set_title("Density plot of UMAP1 vs UMAP2 (features)")
+ax[1].set_title("Density plot of UMAP1 vs UMAP2 (projections)")
+plt.show()
 
 # %% interactive quality control: pairwise distances
 
