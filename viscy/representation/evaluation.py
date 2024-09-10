@@ -38,7 +38,11 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 
 
-## utilities for loading datasets and annotations.
+"""
+Utilities for loading datasets.
+"""
+
+
 def load_annotation(da, path, name, categories: dict | None = None):
     """
     Load annotations from a CSV file and map them to the dataset.
@@ -113,192 +117,131 @@ def dataset_of_tracks(
     return prediction_dataset
 
 
-class RepresentationEvaluator:
-    def __init__(self, embeddings: np.ndarray, annotations: np.ndarray):
-        """
-        Initialize the evaluator with embeddings and annotations.
+""" Methods for evaluating clustering performance.
+"""
 
-        Parameters
-        ----------
-        embeddings : np.ndarray
-            The learned representations. Shape: (n_samples, n_features).
-        annotations : np.ndarray
-            The ground truth labels in one-hot encoding. Shape: (n_samples, p_class).
-        """
-        self.embeddings = embeddings
-        self.annotations = np.argmax(
-            annotations, axis=1
-        )  # Convert one-hot encoding to class labels
 
-    def knn_accuracy(self, k=5):
-        """
-        Evaluate the k-NN classification accuracy.
+def knn_accuracy(embeddings, annotations, k=5):
+    """
+    Evaluate the k-NN classification accuracy.
 
-        Parameters
-        ----------
-        k : int, optional
-            Number of neighbors to use for k-NN. Default is 5.
+    Parameters
+    ----------
+    k : int, optional
+        Number of neighbors to use for k-NN. Default is 5.
 
-        Returns
-        -------
-        float
-            Accuracy of the k-NN classifier.
-        """
-        knn = KNeighborsClassifier(n_neighbors=k)
-        knn.fit(self.embeddings, self.annotations)
-        predictions = knn.predict(self.embeddings)
-        accuracy = accuracy_score(self.annotations, predictions)
-        return accuracy
+    Returns
+    -------
+    float
+        Accuracy of the k-NN classifier.
+    """
+    knn = KNeighborsClassifier(n_neighbors=k)
+    knn.fit(embeddings, annotations)
+    predictions = knn.predict(embeddings)
+    accuracy = accuracy_score(annotations, predictions)
+    return accuracy
 
-    def dbscan_clustering(self, eps=0.5, min_samples=5):
-        """
-        Apply DBSCAN clustering to the embeddings.
 
-        Parameters
-        ----------
-        eps : float, optional
-            The maximum distance between two samples for them to be considered as in the same neighborhood. Default is 0.5.
-        min_samples : int, optional
-            The number of samples in a neighborhood for a point to be considered as a core point. Default is 5.
+def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
+    """
+    Apply DBSCAN clustering to the embeddings.
 
-        Returns
-        -------
-        np.ndarray
-            Clustering labels assigned by DBSCAN.
-        """
-        dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-        clusters = dbscan.fit_predict(self.embeddings)
-        return clusters
+    Parameters
+    ----------
+    eps : float, optional
+        The maximum distance between two samples for them to be considered as in the same neighborhood. Default is 0.5.
+    min_samples : int, optional
+        The number of samples in a neighborhood for a point to be considered as a core point. Default is 5.
 
-    def silhouette_score(self, clusters):
-        """
-        Compute the silhouette score for the DBSCAN clustering results.
+    Returns
+    -------
+    np.ndarray
+        Clustering labels assigned by DBSCAN.
+    """
+    dbscan = DBSCAN(eps=eps, min_samples=min_samples)
+    clusters = dbscan.fit_predict(embeddings)
+    return clusters
 
-        Parameters
-        ----------
-        clusters : np.ndarray
-            Clustering labels assigned by DBSCAN.
 
-        Returns
-        -------
-        float
-            Silhouette score for the clustering.
-        """
-        score = silhouette_score(self.embeddings, clusters)
-        return score
+def silhouette_score(embeddings, clusters):
+    """
+    Compute the silhouette score for the DBSCAN clustering results.
 
-    def clustering_evaluation(self, method="nmi"):
-        """
-        Evaluate the clustering of the embeddings compared to the ground truth labels.
+    Parameters
+    ----------
+    clusters : np.ndarray
+        Clustering labels assigned by DBSCAN.
 
-        Parameters
-        ----------
-        method : str, optional
-            Metric to use for evaluation ('nmi' or 'ari'). Default is 'nmi'.
+    Returns
+    -------
+    float
+        Silhouette score for the clustering.
+    """
+    score = silhouette_score(embeddings, clusters)
+    return score
 
-        Returns
-        -------
-        float
-            NMI or ARI score depending on the method chosen.
-        """
-        clusters = self.dbscan_clustering()
 
-        if method == "nmi":
-            score = normalized_mutual_info_score(self.annotations, clusters)
-        elif method == "ari":
-            score = adjusted_rand_score(self.annotations, clusters)
-        else:
-            raise ValueError("Invalid method. Choose 'nmi' or 'ari'.")
+def clustering_evaluation(embeddings, annotations, method="nmi"):
+    """
+    Evaluate the clustering of the embeddings compared to the ground truth labels.
 
-        return score
+    Parameters
+    ----------
+    method : str, optional
+        Metric to use for evaluation ('nmi' or 'ari'). Default is 'nmi'.
 
-    def linear_classifier_accuracy(self, batch_size=32, learning_rate=0.01, epochs=10):
-        """
-        Evaluate the accuracy of a single-layer neural network trained on the embeddings.
+    Returns
+    -------
+    float
+        NMI or ARI score depending on the method chosen.
+    """
+    clusters = dbscan_clustering(embeddings)
 
-        Parameters
-        ----------
-        batch_size : int, optional
-            Batch size for training. Default is 32.
-        learning_rate : float, optional
-            Learning rate for the optimizer. Default is 0.01.
-        epochs : int, optional
-            Number of training epochs. Default is 10.
+    if method == "nmi":
+        score = normalized_mutual_info_score(annotations, clusters)
+    elif method == "ari":
+        score = adjusted_rand_score(annotations, clusters)
+    else:
+        raise ValueError("Invalid method. Choose 'nmi' or 'ari'.")
 
-        Returns
-        -------
-        float
-            Accuracy of the neural network classifier.
-        """
+    return score
 
-        class SingleLayerNN(nn.Module):
-            def __init__(self, input_dim, output_dim):
-                super(SingleLayerNN, self).__init__()
-                self.fc = nn.Linear(input_dim, output_dim)
 
-            def forward(self, x):
-                return self.fc(x)
+def compute_pca(embedding_dataset, n_components=32, normalize_features=True):
+    features = embedding_dataset["features"]
+    projections = embedding_dataset["projections"]
 
-        # Convert numpy arrays to PyTorch tensors
-        inputs = torch.tensor(self.embeddings, dtype=torch.float32)
-        labels = torch.tensor(self.annotations, dtype=torch.long)
-
-        # Create a dataset and data loader
-        dataset = TensorDataset(inputs, labels)
-        dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
-        # Initialize the neural network, loss function, and optimizer
-        input_dim = self.embeddings.shape[1]
-        output_dim = len(np.unique(self.annotations))
-        model = SingleLayerNN(input_dim, output_dim)
-        criterion = (
-            nn.CrossEntropyLoss()
-        )  # Works with logits, so no softmax in the last layer
-
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate)
-
-        # Training loop
-        model.train()
-        for epoch in range(epochs):
-            for batch_inputs, batch_labels in dataloader:
-                optimizer.zero_grad()
-                outputs = model(batch_inputs)
-                loss = criterion(outputs, batch_labels)
-                loss.backward()
-                optimizer.step()
-
-        # Evaluate the model
-        model.eval()
-        with torch.no_grad():
-            outputs = model(inputs)
-            _, predictions = torch.max(outputs, 1)
-            accuracy = accuracy_score(labels.numpy(), predictions.numpy())
-
-        return accuracy
-
-    def compute_pca(embedding_dataset, n_components=6):
-        features = embedding_dataset["features"]
+    if normalize_features:
+        scaled_projections = StandardScaler().fit_transform(projections.values)
         scaled_features = StandardScaler().fit_transform(features.values)
+    else:
+        scaled_projections = projections.values
+        scaled_features = features.values
 
-        # Compute PCA with specified number of components
-        pca = PCA(n_components=n_components, random_state=42)
-        pca_embedding = pca.fit_transform(scaled_features)
+    # Compute PCA with specified number of components
+    pca = PCA(n_components=n_components, random_state=42)
+    pca_embedding = pca.fit_transform(scaled_features)
+    pca_projections = pca.fit_transform(scaled_projections)
 
-        # Prepare DataFrame with id and PCA coordinates
-        pca_df = pd.DataFrame(
-            {
-                "id": embedding_dataset["id"].values,
-                "fov_name": embedding_dataset["fov_name"].values,
-                "PCA1": pca_embedding[:, 0],
-                "PCA2": pca_embedding[:, 1],
-                "PCA3": pca_embedding[:, 2],
-                "PCA4": pca_embedding[:, 3],
-                "PCA5": pca_embedding[:, 4],
-                "PCA6": pca_embedding[:, 5],
-            }
-        )
+    # Prepare DataFrame with id and PCA coordinates
+    pca_df = pd.DataFrame(
+        {
+            "id": embedding_dataset["id"].values,
+            "fov_name": embedding_dataset["fov_name"].values,
+            "PCA1": pca_embedding[:, 0],
+            "PCA2": pca_embedding[:, 1],
+            "PCA3": pca_embedding[:, 2],
+            "PCA4": pca_embedding[:, 3],
+            "PCA5": pca_embedding[:, 4],
+            "PCA6": pca_embedding[:, 5],
+        }
+    )
 
-        return pca_df
+    return pca_df
+
+
+def compute_umaps(embedding_dataset, normalize_features=True):
+    pass
 
 
 class FeatureExtractor:
