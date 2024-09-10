@@ -1,18 +1,9 @@
-# %%
-from PIL import Image
-from torchvision import transforms
-
-from viscy.data.hcs import HCSDataModule
-from viscy.light.engine import FcmaeUNet
-from viscy.light.predict_writer import HCSPredictionWriter
-from viscy.light.trainer import VSTrainer
 from viscy.light.engine import VSUNet
-from viscy.transforms import NormalizeSampled
 import torch
 import gradio as gr
 import numpy as np
 from numpy.typing import ArrayLike
-from skimage import io, transform, exposure
+from skimage import transform, exposure
 
 
 class VSGradio:
@@ -31,6 +22,7 @@ class VSGradio:
             accelerator="gpu",
         )
         self.model.eval()
+        self.model
 
     def normalize_fov(self, input: ArrayLike):
         "Normalizing the fov with zero mean and unit variance"
@@ -38,51 +30,19 @@ class VSGradio:
         std = np.std(input)
         return (input - mean) / std
 
-    def resize_to_divisible_by_32(self, img):
-        # Load the image using skimage
-
-        # Get the current height and width of the image
-        height, width = img.shape[-2:]
-
-        # Calculate the new width and height to be divisible by 32
-        new_width = (width // 32) * 32
-        new_height = (height // 32) * 32
-
-        # Resize the image if needed
-        if width != new_width or height != new_height:
-            img_resized = transform.resize(
-                img, (new_height, new_width), anti_aliasing=True
-            )
-        else:
-            img_resized = img
-
-        return img_resized
-
     def predict(self, inp):
-        # normalize the input
-        inp = self.resize_to_divisible_by_32(inp)
+        # Setup the Trainer
+        # inp = torch.from_numpy(np.array(inp).astype(np.float32))
+        # ensure inp is tensor has to be a (B,C,D,H,W) tensor
         inp = self.normalize_fov(inp)
         inp = torch.from_numpy(np.array(inp).astype(np.float32))
-        # ensure inp is tensor has to be a (B,C,D,H,W) tensor
-        if len(inp.shape) == 2:
-            inp = inp.unsqueeze(0)
-            inp = inp.unsqueeze(0)
-            inp = inp.unsqueeze(0)
-
-        elif len(inp.shape) == 3:
-            inp = inp.unsqueeze(0)
-            inp = inp.unsqueeze(0)
-
-        elif len(inp.shape) == 4:
-            inp = inp.unsqueeze(0)
-
-        elif len(inp.shape) == 5:
-            pass
-
+        test_dict = dict(
+            index=None,
+            source=inp.unsqueeze(0).unsqueeze(0).unsqueeze(0).to(self.model.device),
+        )
         with torch.inference_mode():
-            inp = inp.to(self.model.device)
-            pred = self.model(inp).cpu().numpy()
-
+            self.model.on_predict_start()
+            pred = self.model.predict_step(test_dict, 0, 0).cpu().numpy()
         # Return a 2D image
         nuc_pred = pred[0, 0, 0]
         mem_pred = pred[0, 1, 0]
@@ -94,9 +54,7 @@ class VSGradio:
 
 # %%
 if __name__ == "__main__":
-    input_data_path = ""
     model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
-
     model_config = {
         "in_channels": 1,
         "out_channels": 2,
@@ -119,6 +77,6 @@ if __name__ == "__main__":
         ],
         examples=[
             "/home/eduardo.hirata/repos/viscy/examples/gradio/hek.png",
-            "/home/eduardo.hirata/repos/viscy/examples/gradio/dog.jpeg",
+            "/home/eduardo.hirata/repos/viscy/examples/gradio/a549.png",
         ],
     ).launch()
