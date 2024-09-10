@@ -12,6 +12,7 @@ from pathlib import Path
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
 from viscy.data.hcs import HCSDataModule
+
 # Viscy classes for the trainer and model
 from viscy.translation.engine import VSUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
@@ -25,16 +26,31 @@ from viscy.transforms import NormalizeSampled
 The dataset and model checkpoint files need to be downloaded before running this example.
 """
 
+# %% [markdown] tags=[]
+#
+# <div class="alert alert-block alert-info">
+#
+# # Download the dataset and checkpoints
+#
+# - Download the neuromast test dataset and model checkpoint from here: <br>
+# https://public.czbiohub.org/comp.micro/viscy
+# - Update the `input_data_path` and `model_ckpt_path` variables with the path to the downloaded files.
+# - Select a FOV (i.e 0/3/0).
+# - Set an output path for the predictions.
+#
+# </div>
 # %%
-# Download from
-# https://public.czbiohub.org/comp.micro/viscy/VSNeuromast/test/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr/
-input_data_path = (
-    "VSNeuromast/test/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
-)
-# Download from GitHub release page of v0.1.0
-model_ckpt_path = "VisCy-0.1.0-VS-models/VSNeuromast/timelapse_finetine_1hr_dT_downsample_lr1e-4_45epoch_clahe_v5/epoch=44-step=1215.ckpt"
+# TODO: modify the path to the downloaded dataset
+input_data_path = "/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
+
+# TODO: modify the path to the downloaded checkpoint
+model_ckpt_path = "/epoch=44-step=1215.ckpt"
+
+# TODO: modify the path
 # Zarr store to save the predictions
 output_path = "./test_neuromast_demo.zarr"
+
+# TODO: Choose an FOV
 # FOV of interest
 fov = "0/3/0"
 
