@@ -6,8 +6,8 @@ from applications.infection_classification.classify_infection_2D import (
 )
 
 from viscy.data.hcs import HCSDataModule
-from viscy.translation.predict_writer import HCSPredictionWriter
 from viscy.transforms import NormalizeSampled
+from viscy.translation.predict_writer import HCSPredictionWriter
 
 # %% # %% write the predictions to a zarr file
 

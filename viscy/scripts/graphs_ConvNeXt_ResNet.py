@@ -4,15 +4,18 @@ import torch
 import torchview
 
 from viscy.representation.engine import ContrastiveModule
-from viscy.representation.contrastive import ContrastiveEncoder, UNeXt2Stem
+from viscy.representation.contrastive import ContrastiveEncoder, StemDepthtoChannels
 
 # %load_ext autoreload
 # %autoreload 2
 # %% Initialize the model and log the graph.
 contra_model = ContrastiveEncoder(
-    backbone="convnext_tiny"
+    backbone="convnextv2_tiny",
+    in_stack_depth=15,
+    in_channels=2,
 )  # other options: convnext_tiny resnet50
 print(contra_model)
+
 model_graph = torchview.draw_graph(
     contra_model,
     torch.randn(1, 2, 15, 224, 224),
@@ -28,6 +31,7 @@ contra_model = ContrastiveEncoder(
     backbone="resnet50", in_stack_depth=16, stem_kernel_size=(4, 3, 3)
 )  # note that the resnet first layer takes 64 channels (so we can't have multiples of 3)
 print(contra_model)
+contra_model(torch.randn(1, 2, 16, 224, 224))
 model_graph = torchview.draw_graph(
     contra_model,
     torch.randn(1, 2, 16, 224, 224),
@@ -57,7 +61,7 @@ model_graph.visual_graph
 
 available_models = timm.list_models(pretrained=True)
 
-stem = UNeXt2Stem(
+stem = StemDepthtoChannels(
     in_channels=2, out_channels=96, kernel_size=(5, 2, 2), in_stack_depth=15
 )
 print(stem)

@@ -1,17 +1,16 @@
-
-
 # %%
-# from viscy.data.triplet import TripletDataModule
-from viscy.light.embedding_writer import read_embedding_dataset
-from viscy.data.triplet import TripletDataModule
-
 from pathlib import Path
+
 import numpy as np
-from skimage import io
-from computed_features import FeatureExtractor as FE
-from sklearn.decomposition import PCA
 import pandas as pd
+from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+
+from viscy.representation.embedding_writer import read_embedding_dataset
+from viscy.representation.evaluation import (
+    FeatureExtractor as FE,
+)
+from viscy.representation.evaluation import dataset_of_tracks
 
 # %%
 features_path = Path(
@@ -35,12 +34,15 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-fov_names_list = [name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")]
+fov_names_list = [
+    name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")
+]
 unique_fov_names = sorted(list(set(fov_names_list)))
 correlation_sum = pd.DataFrame()
 ii = 0
 features = pd.DataFrame()
 computed_pca = pd.DataFrame()
+
 
 for fov_name in unique_fov_names:
 
@@ -77,23 +79,13 @@ for fov_name in unique_fov_names:
 
         # load the image patches
 
-        data_module = TripletDataModule(
-            data_path=data_path,
-            tracks_path=tracks_path,
+        prediction_dataset = dataset_of_tracks(
+            data_path,
+            tracks_path,
+            [fov_name],
+            [track_id],
             source_channel=source_channel,
-            z_range=z_range,
-            initial_yx_patch_size=(256, 256),
-            final_yx_patch_size=(140, 140),
-            batch_size=1,
-            num_workers=16,
-            normalizations=normalizations,
-            predict_cells=True,
-            include_fov_names=[fov_name],
-            include_track_ids=[track_id],
         )
-        # for train and val
-        data_module.setup("predict")
-        predict_dataset = data_module.predict_dataset
 
         whole = np.stack([p["anchor"] for p in predict_dataset])
         phase = whole[:, 0, 3]
@@ -140,8 +132,12 @@ for fov_name in unique_fov_names:
             entropy_fluor = FE.compute_spectral_entropy(fluor[t])
 
             # Compute texture analysis using GLCM
-            contrast_phase, dissimilarity_phase, homogeneity_phase = FE.compute_glcm_features(phase[t])
-            contrast_fluor, dissimilarity_fluor, homogeneity_fluor = FE.compute_glcm_features(fluor[t])
+            contrast_phase, dissimilarity_phase, homogeneity_phase = (
+                FE.compute_glcm_features(phase[t])
+            )
+            contrast_fluor, dissimilarity_fluor, homogeneity_fluor = (
+                FE.compute_glcm_features(fluor[t])
+            )
 
             # # Compute edge detection using Canny
             # edges_phase = FE.detect_edges(phase[t])
@@ -189,7 +185,9 @@ for fov_name in unique_fov_names:
         # compute correlation between PCA features and computed features
 
         # Create a dataframe with PCA results
-        pca_results = pd.DataFrame(pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"])
+        pca_results = pd.DataFrame(
+            pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]
+        )
         computed_pca = pd.concat([computed_pca, pca_results])
 
 # %%
@@ -206,11 +204,18 @@ best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
 best_correlated_features
 
 # %% display as a heatmap
-import seaborn as sns
 import matplotlib.pyplot as plt
+import seaborn as sns
 
 plt.figure(figsize=(20, 5))
-sns.heatmap(correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc["PCA1":"PCA5", :], annot=True, cmap="coolwarm", fmt=".2f")
+sns.heatmap(
+    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc[
+        "PCA1":"PCA5", :
+    ],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+)
 plt.title("Correlation between PCA features and computed features")
 plt.xlabel("Computed Features")
 plt.ylabel("PCA Features")
