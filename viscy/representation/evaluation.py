@@ -1,15 +1,12 @@
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-import torch
-import torch.nn as nn
-import torch.optim as optim
+import umap
 from numpy import fft
 from skimage import color
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
 from sklearn.metrics import (
     accuracy_score,
     adjusted_rand_score,
@@ -17,8 +14,7 @@ from sklearn.metrics import (
     silhouette_score,
 )
 from sklearn.neighbors import KNeighborsClassifier
-import umap
-from torch.utils.data import DataLoader, TensorDataset
+from sklearn.preprocessing import StandardScaler
 
 from viscy.data.triplet import TripletDataModule
 
@@ -42,6 +38,18 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 Utilities for loading datasets.
 """
+
+__all__ = [
+    # re-exporting from sklearn
+    "silhouette_score",
+    "load_annotation",
+    "dataset_of_tracks",
+    "knn_accuracy",
+    "clustering_evaluation",
+    "compute_pca",
+    "compute_umap",
+    "FeatureExtractor",
+]
 
 
 def load_annotation(da, path, name, categories: dict | None = None):
@@ -118,8 +126,7 @@ def dataset_of_tracks(
     return prediction_dataset
 
 
-""" Methods for evaluating clustering performance.
-"""
+"""Methods for evaluating clustering performance."""
 
 
 def knn_accuracy(embeddings, annotations, k=5):
@@ -162,24 +169,6 @@ def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
     clusters = dbscan.fit_predict(embeddings)
     return clusters
-
-
-def silhouette_score(embeddings, clusters):
-    """
-    Compute the silhouette score for the DBSCAN clustering results.
-
-    Parameters
-    ----------
-    clusters : np.ndarray
-        Clustering labels assigned by DBSCAN.
-
-    Returns
-    -------
-    float
-        Silhouette score for the clustering.
-    """
-    score = silhouette_score(embeddings, clusters)
-    return score
 
 
 def clustering_evaluation(embeddings, annotations, method="nmi"):

@@ -1,12 +1,12 @@
 # FIXME: this is a method from previous version at (viscy.representatin.evaluation)
 # and needs to be turned into lightning module.
 
+import numpy as np
 import torch
 import torch.nn as nn
 import torch.optim as optim
-from torch.utils.data import DataLoader, TensorDataset
-import numpy as np
 from sklearn.metrics import accuracy_score
+from torch.utils.data import DataLoader, TensorDataset
 
 
 def linear_classifier_accuracy(self, batch_size=32, learning_rate=0.01, epochs=10):
