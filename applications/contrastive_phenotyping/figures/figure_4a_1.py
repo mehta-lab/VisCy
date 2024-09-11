@@ -6,13 +6,8 @@ import pandas as pd
 import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-<<<<<<< Updated upstream:applications/contrastive_phenotyping/figures/figure_4a_1.py
-
-from viscy.representation.embedding_writer import read_embedding_dataset
-=======
 from viscy.representation.embedding_writer import read_embedding_dataset
 from sklearn.decomposition import PCA
->>>>>>> Stashed changes:applications/contrastive_phenotyping/contrastive_cli/figures/figure4/figure_a_1.py
 
 # %% Defining Paths for February and June Datasets
 feb_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/febtest_predict.zarr")
@@ -148,32 +143,7 @@ plot_umap_histogram(feb_umap_data, feb_infection, "February Dataset")
 # %%
 print(feb_umap_data)
 print(feb_infection)
-<<<<<<< Updated upstream:applications/contrastive_phenotyping/figures/figure_4a_1.py
-print(feb_features)
-# %%
-
-
-# %% Identify cells by infection type using fov_name
-mock_cells = feb_features.sel(sample=feb_features['fov_name'].str.contains('/A/3') | feb_features['fov_name'].str.contains('/B/3'))
-zika_cells = feb_features.sel(sample=feb_features['fov_name'].str.contains('/A/4'))
-dengue_cells = feb_features.sel(sample=feb_features['fov_name'].str.contains('/B/4'))
-
-# %% Plot UMAP with Infection Status
-plt.figure(figsize=(10, 8))
-sns.scatterplot(x=feb_features["UMAP1"], y=feb_features["UMAP2"], hue=feb_infection, s=7, alpha=0.8)
-
-# Overlay with circled cells
-plt.scatter(mock_cells["UMAP1"], mock_cells["UMAP2"], facecolors='none', edgecolors='blue', s=20, label='Mock Cells')
-plt.scatter(zika_cells["UMAP1"], zika_cells["UMAP2"], facecolors='none', edgecolors='green', s=20, label='Zika MOI 5')
-plt.scatter(dengue_cells["UMAP1"], dengue_cells["UMAP2"], facecolors='none', edgecolors='red', s=20, label='Dengue MOI 5')
-
-# Add legend and show plot
-plt.legend(loc='best')
-plt.title("UMAP Plot - February Dataset with Mock, Zika, and Dengue Highlighted")
-plt.show()
-=======
 plot_umap_histogram(feb_umap_data, feb_infection, "February Dataset")
->>>>>>> Stashed changes:applications/contrastive_phenotyping/contrastive_cli/figures/figure4/figure_a_1.py
 
 # %%
 print(feb_umap_data.coords["fov_name"])

@@ -3,14 +3,8 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import pandas as pd
-<<<<<<< Updated upstream:applications/contrastive_phenotyping/figures/figure_4e_2_feb.py
-
-from viscy.representation.embedding_writer import read_embedding_dataset
-
-=======
 from pathlib import Path
 from viscy.representation.embedding_writer import read_embedding_dataset
->>>>>>> Stashed changes:applications/contrastive_phenotyping/contrastive_cli/figures/figure4/figure_e_2_feb.py
 
 # %% Function to Load Annotations from GMM CSV
 def load_gmm_annotation(gmm_csv_path):
