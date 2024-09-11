@@ -7,11 +7,12 @@
 # %%
 from pathlib import Path
 import sys
-sys.path.append('$MYDATA/viscy_infection_phenotyping/VisCy')
+sys.path.append('/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy')
 
 import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
+from umap import UMAP
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -19,6 +20,9 @@ from viscy.representation.evaluation import (
     FeatureExtractor as FE,
 )
 from viscy.representation.evaluation import dataset_of_tracks
+
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 # %%
 features_path = Path(
@@ -43,14 +47,11 @@ embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
 fov_names_list = [
-    name for name in embedding_dataset["fov_name"].values if name.startswith("/A/3/")
+    name for name in embedding_dataset["fov_name"].values if name.startswith("/B/")
 ]
 unique_fov_names = sorted(list(set(fov_names_list)))
-correlation_sum = pd.DataFrame()
-ii = 0
-features = pd.DataFrame()
-computed_pca = pd.DataFrame()
 
+features = pd.DataFrame()
 
 for fov_name in unique_fov_names:
 
@@ -65,14 +66,13 @@ for fov_name in unique_fov_names:
         features_track = a_track_in_FOV["features"]
         time_stamp = features_track["t"][indices].astype(str)
 
-        scaled_features_track = StandardScaler().fit_transform(features_track.values)
+        feature_track_values = features_track.values
 
         # perform PCA analysis of features
 
-        pca = PCA(n_components=5)
-        if scaled_features_track.shape[0] > 5:
-            pca_features = pca.fit_transform(scaled_features_track)
-            ii += 1
+        pca = PCA(n_components=4)
+        if feature_track_values.shape[0] > 5:
+            pca_features = pca.fit_transform(feature_track_values)
         else:
             continue
 
@@ -81,8 +81,21 @@ for fov_name in unique_fov_names:
             .assign_coords(PCA2=("sample", pca_features[:, 1]))
             .assign_coords(PCA3=("sample", pca_features[:, 2]))
             .assign_coords(PCA4=("sample", pca_features[:, 3]))
-            .assign_coords(PCA5=("sample", pca_features[:, 4]))
-            .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"], append=True)
+            .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4"], append=True)
+        )
+
+        umap = UMAP(n_components=4)
+        if feature_track_values.shape[0] > 6:
+            umap_features = umap.fit_transform(features_track.values)
+        else:
+            continue
+
+        features_track = (
+            features_track.assign_coords(UMAP1=("sample", umap_features[:, 0]))
+            .assign_coords(UMAP2=("sample", umap_features[:, 1]))
+            .assign_coords(UMAP3=("sample", umap_features[:, 2]))
+            .assign_coords(UMAP4=("sample", umap_features[:, 3]))
+            .set_index(sample=["UMAP1", "UMAP2", "UMAP3", "UMAP4"], append=True)
         )
 
         # load the image patches
@@ -119,6 +132,9 @@ for fov_name in unique_fov_names:
             "Fluor Mean Intensity": [],
             "Phase Standard Deviation": [],
             "Fluor Standard Deviation": [],
+            "Phase radial profile": [],
+            "Fluor radial profile": [],
+            "Time": [],
         }
 
         for t in range(phase.shape[0]):
@@ -167,6 +183,10 @@ for fov_name in unique_fov_names:
             phase_std_dev = FE.compute_std_dev(phase[t])
             fluor_std_dev = FE.compute_std_dev(fluor[t])
 
+            # Compute radial intensity gradient
+            phase_radial_profile = FE.compute_radial_intensity_gradient(phase[t])
+            fluor_radial_profile = FE.compute_radial_intensity_gradient(fluor[t])
+
             # Append the computed features to the data dictionary
             data["Phase Symmetry Score"].append(phase_symmetry_score)
             data["Fluor Symmetry Score"].append(fluor_symmetry_score)
@@ -186,39 +206,47 @@ for fov_name in unique_fov_names:
             data["Fluor Mean Intensity"].append(fluor_mean_intensity)
             data["Phase Standard Deviation"].append(phase_std_dev)
             data["Fluor Standard Deviation"].append(fluor_std_dev)
+            data["Phase radial profile"].append(phase_radial_profile)
+            data["Fluor radial profile"].append(fluor_radial_profile)
+            data["Time"].append(t)
 
         # Create a dataframe to store the computed features
-        features = pd.concat([features, pd.DataFrame(data)])
+        data_df = pd.DataFrame(data)
 
         # compute correlation between PCA features and computed features
 
         # Create a dataframe with PCA results
         pca_results = pd.DataFrame(
-            pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]
+            pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4"]
         )
-        computed_pca = pd.concat([computed_pca, pca_results])
+        umap_results = pd.DataFrame(
+            umap_features, columns=["UMAP1", "UMAP2", "UMAP3", "UMAP4"]
+        )
+        combined_df = pd.concat([data_df, pca_results, umap_results], axis=1)
+        combined_df["fov_name"] = fov_name
+        combined_df["track_id"] = track_id
+
+        features = pd.concat([features, combined_df], ignore_index=True)
 
 # %%
 
+feature_df_removed = features.drop(columns=["fov_name", "track_id", "Time"])
+
 # Compute correlation between PCA features and computed features
-correlation = pd.concat([computed_pca, features], axis=1).corr()
-# correlation_sum = correlation_sum.add(correlation, fill_value=0)
-# correlation_avg = correlation_sum / ii
+correlation = feature_df_removed.corr(method="spearman")
 
 # %% find the best correlated computed features with PCA features
 
 # Find the best correlated computed features with PCA features
-best_correlated_features = correlation.loc["PCA1":"PCA5", :].idxmax()
+best_correlated_features = correlation.loc["PCA1":"PCA4", :].idxmax()
 best_correlated_features
 
-# %% display as a heatmap
-import matplotlib.pyplot as plt
-import seaborn as sns
+# %% display PCA correlation as a heatmap
 
 plt.figure(figsize=(20, 5))
 sns.heatmap(
-    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc[
-        "PCA1":"PCA5", :
+    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc[
+        "PCA1":"PCA4", :
     ],
     annot=True,
     cmap="coolwarm",
@@ -227,6 +255,22 @@ sns.heatmap(
 plt.title("Correlation between PCA features and computed features")
 plt.xlabel("Computed Features")
 plt.ylabel("PCA Features")
+plt.show()
+
+# %% display UMAP correlation as a heatmap
+
+plt.figure(figsize=(20, 5))
+sns.heatmap(
+    correlation.drop(columns=["UMAP1", "UMAP2", "UMAP3", "UMAP4"]).loc[
+        "UMAP1":"UMAP4", :
+    ],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+)
+plt.title("Correlation between UMAP features and computed features")
+plt.xlabel("Computed Features")
+plt.ylabel("UMAP Features")
 plt.show()
 
 # %%
