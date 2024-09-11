@@ -2,11 +2,7 @@ import numpy as np
 import pandas as pd
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-import torch
-import torch.nn as nn
-import torch.optim as optim
 from numpy import fft
-from skimage import color
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from sklearn.cluster import DBSCAN
@@ -18,7 +14,6 @@ from sklearn.metrics import (
 )
 from sklearn.neighbors import KNeighborsClassifier
 import umap
-from torch.utils.data import DataLoader, TensorDataset
 
 from viscy.data.triplet import TripletDataModule
 
@@ -290,6 +285,12 @@ class FeatureExtractor:
 
     def compute_fourier_descriptors(image):
 
+        '''
+        Compute the Fourier descriptors of the image
+        The sensor or nuclear shape changes when infected, which can be captured by analyzing Fourier descriptors
+        :param np.array image: input image
+        :return: Fourier descriptors
+        '''
         # Convert contour to complex numbers
         contour_complex = image[:, 0] + 1j * image[:, 1]
 
@@ -299,16 +300,24 @@ class FeatureExtractor:
         return descriptors
 
     def analyze_symmetry(descriptors):
+        
+        '''
+        Analyze the symmetry of the Fourier descriptors
+        Symmetry of the sensor or nuclear shape changes when infected
+        :param np.array descriptors: Fourier descriptors
+        :return: standard deviation of the descriptors
+        '''
         # Normalize descriptors
         descriptors = np.abs(descriptors) / np.max(np.abs(descriptors))
-        # Check symmetry (for a perfect circle, descriptors should be quite uniform)
+
         return np.std(descriptors)  # Lower standard deviation indicates higher symmetry
 
     def compute_area(input_image, sigma=0.6):
         """Create a binary mask using morphological operations
+        Sensor area will increase when infected due to expression in nucleus
         :param np.array input_image: generate masks from this 3D image
         :param float sigma: Gaussian blur standard deviation, increase in value increases blur
-        :return: volume mask of input_image, 3D np.array
+        :return: area of the sensor mask & mean intensity inside the sensor area
         """
 
         input_image_blur = gaussian(input_image, sigma=sigma)
@@ -325,6 +334,13 @@ class FeatureExtractor:
         return masked_intensity, np.sum(mask)
 
     def compute_spectral_entropy(image):
+        
+        '''
+        Compute the spectral entropy of the image
+        High frequency components are observed to increase in phase and reduce in sensor when cell is infected
+        :param np.array image: input image
+        :return: spectral entropy
+        '''
 
         # Compute the 2D Fourier Transform
         f_transform = fft.fft2(image)
@@ -342,6 +358,13 @@ class FeatureExtractor:
         return entropy
 
     def compute_glcm_features(image):
+        
+        '''
+        Compute the contrast, dissimilarity and homogeneity of the image
+        Both sensor and phase texture changes when infected, smooth in sensor, and rough in phase
+        :param np.array image: input image
+        :return: contrast, dissimilarity, homogeneity
+        '''
 
         # Normalize the input image from 0 to 255
         image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
@@ -360,14 +383,14 @@ class FeatureExtractor:
 
         return contrast, dissimilarity, homogeneity
 
-    # def detect_edges(image):
-
-    #     # Apply Canny edge detection
-    #     edges = cv2.Canny(image, 100, 200)
-
-    #     return edges
-
     def compute_iqr(image):
+
+        '''
+        Compute the interquartile range of pixel intensities
+        Observed to increase when cell is infected
+        :param np.array image: input image
+        :return: interquartile range of pixel intensities
+        '''
 
         # Compute the interquartile range of pixel intensities
         iqr = np.percentile(image, 75) - np.percentile(image, 25)
@@ -376,6 +399,13 @@ class FeatureExtractor:
 
     def compute_mean_intensity(image):
 
+        '''
+        Compute the mean pixel intensity
+        Expected to vary when cell morphology changes due to infection, divison or death
+        :param np.array image: input image
+        :return: mean pixel intensity
+        '''
+
         # Compute the mean pixel intensity
         mean_intensity = np.mean(image)
 
@@ -383,6 +413,12 @@ class FeatureExtractor:
 
     def compute_std_dev(image):
 
+        '''
+        Compute the standard deviation of pixel intensities
+        Expected to vary when cell morphology changes due to infection, divison or death
+        :param np.array image: input image
+        :return: standard deviation of pixel intensities
+        '''
         # Compute the standard deviation of pixel intensities
         std_dev = np.std(image)
 
@@ -390,6 +426,13 @@ class FeatureExtractor:
 
     def compute_radial_intensity_gradient(image):
 
+        '''
+        Compute the radial intensity gradient of the image
+        The sensor relocalizes inside the nucleus, which is center of the image when cells are infected
+        Expected negative gradient when infected and zero to positive gradient when not infected
+        :param np.array image: input image
+        :return: radial intensity gradient
+        '''
         #normalize the image
         image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
         
