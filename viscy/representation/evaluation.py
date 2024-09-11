@@ -325,9 +325,6 @@ class FeatureExtractor:
         return masked_intensity, np.sum(mask)
 
     def compute_spectral_entropy(image):
-        # Convert image to grayscale if it's not already
-        if len(image.shape) == 3:
-            image = color.rgb2gray(image)
 
         # Compute the 2D Fourier Transform
         f_transform = fft.fft2(image)
@@ -390,3 +387,23 @@ class FeatureExtractor:
         std_dev = np.std(image)
 
         return std_dev
+
+    def compute_radial_intensity_gradient(image):
+
+        #normalize the image
+        image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
+        
+        # compute the intensity gradient from center to periphery
+        y, x = np.indices(image.shape)
+        center = np.array(image.shape) / 2
+        r = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
+        r = r.astype(int)
+        tbin = np.bincount(r.ravel(), image.ravel())
+        nr = np.bincount(r.ravel())
+        radial_intensity_values = tbin / nr
+
+        # get the slope radial_intensity_values
+        from scipy.stats import linregress
+        radial_intensity_gradient = linregress(range(len(radial_intensity_values)), radial_intensity_values)
+
+        return radial_intensity_gradient[0]
