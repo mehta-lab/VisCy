@@ -1,13 +1,13 @@
-
-''' Script to compute the correlation between PCA and UMAP features and computed features
+""" Script to compute the correlation between PCA and UMAP features and computed features
 * finds the computed features best representing the PCA and UMAP components
 * outputs a heatmap of the correlation between PCA and UMAP features and computed features
-'''
+"""
 
 # %%
 from pathlib import Path
 import sys
-sys.path.append('/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy')
+
+sys.path.append("$MYDATA/viscy_infection_phenotyping/VisCy")
 
 import numpy as np
 import pandas as pd
@@ -26,7 +26,7 @@ import seaborn as sns
 
 # %%
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_51.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
 )
 data_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
@@ -84,8 +84,8 @@ for fov_name in unique_fov_names:
             .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4"], append=True)
         )
 
-        umap = UMAP(n_components=4)
-        if feature_track_values.shape[0] > 6:
+        umap = UMAP()
+        if feature_track_values.shape[0] > 5:
             umap_features = umap.fit_transform(features_track.values)
         else:
             continue
@@ -93,9 +93,7 @@ for fov_name in unique_fov_names:
         features_track = (
             features_track.assign_coords(UMAP1=("sample", umap_features[:, 0]))
             .assign_coords(UMAP2=("sample", umap_features[:, 1]))
-            .assign_coords(UMAP3=("sample", umap_features[:, 2]))
-            .assign_coords(UMAP4=("sample", umap_features[:, 3]))
-            .set_index(sample=["UMAP1", "UMAP2", "UMAP3", "UMAP4"], append=True)
+            .set_index(sample=["UMAP1", "UMAP2"], append=True)
         )
 
         # load the image patches
@@ -219,9 +217,7 @@ for fov_name in unique_fov_names:
         pca_results = pd.DataFrame(
             pca_features, columns=["PCA1", "PCA2", "PCA3", "PCA4"]
         )
-        umap_results = pd.DataFrame(
-            umap_features, columns=["UMAP1", "UMAP2", "UMAP3", "UMAP4"]
-        )
+        umap_results = pd.DataFrame(umap_features, columns=["UMAP1", "UMAP2"])
         combined_df = pd.concat([data_df, pca_results, umap_results], axis=1)
         combined_df["fov_name"] = fov_name
         combined_df["track_id"] = track_id
@@ -245,9 +241,7 @@ best_correlated_features
 
 plt.figure(figsize=(20, 5))
 sns.heatmap(
-    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc[
-        "PCA1":"PCA4", :
-    ],
+    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc["PCA1":"PCA4", :],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
@@ -261,9 +255,7 @@ plt.show()
 
 plt.figure(figsize=(20, 5))
 sns.heatmap(
-    correlation.drop(columns=["UMAP1", "UMAP2", "UMAP3", "UMAP4"]).loc[
-        "UMAP1":"UMAP4", :
-    ],
+    correlation.drop(columns=["UMAP1", "UMAP2"]).loc["UMAP1":"UMAP2", :],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
