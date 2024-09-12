@@ -120,21 +120,19 @@ class LinearClassifier(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.fc(x)
 
-    def _fit_step(self, batch) -> Tensor:
+    def _fit_step(self, batch, stage: str) -> Tensor:
         x, y = batch
         preds = self(x)
         target = nn.functional.one_hot(y, num_classes=preds.shape[1]).float()
         loss = self.loss(preds, target)
+        self.log(f"loss/{stage}", loss, on_epoch=True, on_step=False)
         return loss
 
     def training_step(self, batch, batch_idx: int) -> Tensor:
-        loss = self._fit_step(batch)
-        self.log("loss/train", loss)
-        return loss
+        return self._fit_step(batch, stage="train")
 
     def validation_step(self, batch, batch_idx: int) -> None:
-        loss = self._fit_step(batch)
-        self.log("loss/val", loss)
+        _ = self._fit_step(batch, stage="val")
 
     def configure_optimizers(
         self,
