@@ -19,36 +19,32 @@ from torchmetrics.functional.classification import (
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def _test_metrics(pred: Tensor, y: Tensor, num_classes: int) -> dict[str, float]:
+def _test_metrics(preds: Tensor, target: Tensor, num_classes: int) -> dict[str, float]:
     """Test metrics for the linear classifier.
 
     Parameters
     ----------
-    pred : Tensor
-        Predicted logits
-    y : Tensor
-        Labels
+    preds : Tensor
+        Predicted logits, shape (n_samples, n_classes)
+    target : Tensor
+        Labels, shape (n_samples,)
     num_classes : int
         Number of classes
 
     Returns
     -------
     dict[str, float]
-        Metrics
+        Test metrics
     """
     # TODO: add more metrics
     metrics = {}
-    metrics.update(
-        {
-            f"accuracy_{average}": multiclass_accuracy(
-                pred, y, num_classes, average=average
-            ).item(),
-            f"f1_{average}": multiclass_f1_score(
-                pred, y, num_classes, average=average
-            ).item(),
-        }
-        for average in ["macro", "weighted"]
-    )
+    for average in ["macro", "weighted"]:
+        metrics[f"accuracy_{average}"] = multiclass_accuracy(
+            preds, target, num_classes, average=average
+        ).item()
+        metrics[f"f1_{average}"] = multiclass_f1_score(
+            preds, target, num_classes, average=average
+        ).item()
     return metrics
 
 
@@ -78,9 +74,7 @@ class LinearProbingDataModule(LightningDataModule):
             raise ValueError("Number of samples in embeddings and labels must match.")
         if sum(split_ratio) != 1.0:
             raise ValueError("Split ratio must sum to 1.")
-        embeddings = embeddings.float()
-        labels = labels.float()
-        self.dataset = TensorDataset(embeddings, labels)
+        self.dataset = TensorDataset(embeddings.float(), labels.long())
         self.split_ratio = split_ratio
         self.batch_size = batch_size
 
@@ -126,17 +120,21 @@ class LinearClassifier(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.fc(x)
 
-    def training_step(self, batch, batch_idx: int) -> Tensor:
+    def _fit_step(self, batch) -> Tensor:
         x, y = batch
-        pred = self(x)
-        loss = self.loss(pred, y)
+        preds = self(x)
+        target = nn.functional.one_hot(y, num_classes=preds.shape[1]).float()
+        loss = self.loss(preds, target)
+        return loss
+
+    def training_step(self, batch, batch_idx: int) -> Tensor:
+        loss = self._fit_step(batch)
         self.log("loss/train", loss)
         return loss
 
     def validation_step(self, batch, batch_idx: int) -> None:
-        x, y = batch
-        pred = self(x)
-        self.log("loss/val", self.loss(pred, y))
+        loss = self._fit_step(batch)
+        self.log("loss/val", loss)
 
     def configure_optimizers(
         self,
@@ -149,15 +147,15 @@ class LinearClassifier(LightningModule):
 
     def test_step(self, batch, batch_idx: int) -> None:
         x, y = batch
-        pred = self(x)
+        preds = self(x)
         self.test_labels.append(y)
-        self.test_predictions.append(pred)
+        self.test_predictions.append(preds)
 
     def on_test_epoch_end(self) -> None:
         y = torch.cat(self.test_labels)
-        pred = torch.cat(self.test_predictions)
+        preds = torch.cat(self.test_predictions)
         num_classes = self.fc.out_features
-        _logger.info("Test metrics:\n" + pformat(_test_metrics(pred, y, num_classes)))
+        _logger.info("Test metrics:\n" + pformat(_test_metrics(preds, y, num_classes)))
 
     def predict_step(self, x: Tensor) -> Tensor:
         logits = self(x)
@@ -167,10 +165,12 @@ class LinearClassifier(LightningModule):
 def train_and_test_linear_classifier(
     embeddings: NDArray,
     labels: NDArray,
+    num_classes: int,
     split_ratio: tuple[int, int, int] = (0.4, 0.2, 0.4),
     batch_size: int = 1024,
     lr: float = 1e-3,
-    train_max_epochs: int = 10,
+    max_epochs: int = 10,
+    log_every_n_steps: int = 1,
     **trainer_kwargs,
 ) -> None:
     """Train and test a linear classifier.
@@ -181,14 +181,18 @@ def train_and_test_linear_classifier(
         Input embeddings, shape (n_samples, n_features).
     labels : NDArray
         Annotation labels, shape (n_samples,).
+    num_classes : int
+        Number of classes.
     split_ratio : tuple[int, int, int], optional
         Train/validate/test split ratio, by default (0.4, 0.2, 0.4)
     batch_size : int, optional
         Batch size, by default 1024
     lr : float, optional
         Learning rate, by default 1e-3
-    train_max_epochs : int, optional
+    max_epochs : int, optional
         Maximum number of training epochs, by default 10
+    log_every_n_steps : int, optional
+        Log metrics every N steps, by default 1
     **trainer_kwargs
         Additional keyword arguments for the Lightning Trainer class.
     """
@@ -199,9 +203,12 @@ def train_and_test_linear_classifier(
     if not labels.ndim == 1:
         raise ValueError("Labels must have 1 dimension.")
     embeddings = torch.from_numpy(embeddings)
-    labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels).long())
-    data = LinearProbingDataModule(embeddings, labels_onehot, split_ratio, batch_size)
-    model = LinearClassifier(embeddings.shape[1], labels_onehot.shape[1], lr)
-    trainer = Trainer(max_epochs=train_max_epochs, **trainer_kwargs)
+    data = LinearProbingDataModule(
+        embeddings, torch.from_numpy(labels), split_ratio, batch_size
+    )
+    model = LinearClassifier(embeddings.shape[1], num_classes, lr)
+    trainer = Trainer(
+        max_epochs=max_epochs, log_every_n_steps=log_every_n_steps, **trainer_kwargs
+    )
     trainer.fit(model, data)
     trainer.test(model, data)

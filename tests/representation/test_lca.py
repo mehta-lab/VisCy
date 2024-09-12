@@ -9,7 +9,7 @@ def test_train_and_test_linear_classifier(caplog):
     labels = np.random.randint(0, 2, 10)
     with caplog.at_level("INFO"):
         train_and_test_linear_classifier(
-            embeddings, labels, batch_size=4, train_max_epochs=2
+            embeddings, labels, num_classes=3, batch_size=4, train_max_epochs=2
         )
     assert "accuracy_macro" in caplog.text
     assert "f1_weighted" in caplog.text
