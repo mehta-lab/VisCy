@@ -199,7 +199,7 @@ def train_and_test_linear_classifier(
     if not labels.ndim == 1:
         raise ValueError("Labels must have 1 dimension.")
     embeddings = torch.from_numpy(embeddings)
-    labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels))
+    labels_onehot = torch.nn.functional.one_hot(torch.from_numpy(labels).long())
     data = LinearProbingDataModule(embeddings, labels_onehot, split_ratio, batch_size)
     model = LinearClassifier(embeddings.shape[1], labels_onehot.shape[1], lr)
     trainer = Trainer(max_epochs=train_max_epochs, **trainer_kwargs)
