@@ -166,12 +166,10 @@ def train_and_test_linear_classifier(
     embeddings: NDArray,
     labels: NDArray,
     num_classes: int,
+    trainer: Trainer,
     split_ratio: tuple[int, int, int] = (0.4, 0.2, 0.4),
     batch_size: int = 1024,
     lr: float = 1e-3,
-    max_epochs: int = 10,
-    log_every_n_steps: int = 1,
-    **trainer_kwargs,
 ) -> None:
     """Train and test a linear classifier.
 
@@ -183,18 +181,15 @@ def train_and_test_linear_classifier(
         Annotation labels, shape (n_samples,).
     num_classes : int
         Number of classes.
+    trainer : Trainer
+        Lightning Trainer object for training and testing.
+        Define the number of epochs, logging, etc.
     split_ratio : tuple[int, int, int], optional
         Train/validate/test split ratio, by default (0.4, 0.2, 0.4)
     batch_size : int, optional
         Batch size, by default 1024
     lr : float, optional
         Learning rate, by default 1e-3
-    max_epochs : int, optional
-        Maximum number of training epochs, by default 10
-    log_every_n_steps : int, optional
-        Log metrics every N steps, by default 1
-    **trainer_kwargs
-        Additional keyword arguments for the Lightning Trainer class.
     """
     if not isinstance(embeddings, np.ndarray) or not isinstance(labels, np.ndarray):
         raise TypeError("Input embeddings and labels must be NumPy arrays.")
@@ -207,8 +202,5 @@ def train_and_test_linear_classifier(
         embeddings, torch.from_numpy(labels), split_ratio, batch_size
     )
     model = LinearClassifier(embeddings.shape[1], num_classes, lr)
-    trainer = Trainer(
-        max_epochs=max_epochs, log_every_n_steps=log_every_n_steps, **trainer_kwargs
-    )
     trainer.fit(model, data)
     trainer.test(model, data)
