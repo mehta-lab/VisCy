@@ -17,9 +17,6 @@ path_embedding = Path(
 path_annotations_infection = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv"
 )
-path_annotations_division = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/"
-)
 
 # %%
 dataset = read_embedding_dataset(path_embedding)
@@ -49,7 +46,8 @@ train_and_test_linear_classifier(
     lr=0.001,
 )
 
-# %%
+# plot loss curves to check if training converged/overfitted
+# adjust number of epochs if necessary
 losses = pd.read_csv(
     log_path / "lightning_logs" / "version_0" / "metrics.csv", index_col="epoch"
 )
@@ -57,7 +55,5 @@ losses = pd.merge(
     losses["loss/train"].dropna(), losses["loss/val"].dropna(), on="epoch"
 )
 losses.plot()
-
-# %%
 temp_dir.cleanup()
 # %%
