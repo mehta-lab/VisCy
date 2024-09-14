@@ -102,7 +102,10 @@ def extract_features(img: torch.Tensor) -> list[np.ndarray]:
 
 # %%
 def plot_feature_maps(
-    img: torch.Tensor, rgb_features: list[np.ndarray], save_path: Path
+    img: torch.Tensor,
+    rgb_features: list[np.ndarray],
+    save_path: Path,
+    rescale_per_color: bool = True,
 ) -> None:
     input_ = img.cpu().numpy()
 
@@ -118,15 +121,15 @@ def plot_feature_maps(
         ["Stem", *[f"Encoder stage {i}" for i in range(4)], "Pooled features"],
     ):
         rescaled = rescale_intensity(rgb, out_range=(0, 1))
-        a.imshow(
-            np.stack(
+        if rescale_per_color:
+            rescaled = np.stack(
                 [
                     rescale_intensity(rescaled[..., c], out_range=(0, 1))
                     for c in range(3)
                 ],
                 axis=-1,
             )
-        )
+        a.imshow(rescaled)
         a.set_title(name)
 
     legend_table = {"PC1": (1, 0, 0), "PC2": (0, 1, 0), "PC3": (0, 0, 1)}
@@ -152,7 +155,7 @@ save_dir = (
     Path(
         "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/test"
     )
-    / (fov.strip("/s").replace("/", "_") + "norm_per_ch")
+    / (fov.strip("/s").replace("/", "_") + "norm_3ch")
     / str(track)
 )
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -175,5 +178,5 @@ rgbs = [feature_map_to_pca_rgb(f) for f in feat]
 for i in tqdm(range(feat[0].shape[0])):
     im = img[i : i + 1]
     rgb = [rgbs[j][i] for j in range(len(feat))]
-    plot_feature_maps(im, rgb, save_dir / f"{i}.png")
+    plot_feature_maps(im, rgb, save_dir / f"{i}.png", rescale_per_color=False)
 # %%
