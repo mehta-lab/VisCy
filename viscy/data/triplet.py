@@ -114,10 +114,10 @@ class TripletDataset(Dataset):
         self.include_track_ids = include_track_ids or []
         self.time_interval = time_interval
         self.tracks = self._filter_tracks(tracks_tables)
-        self.valid_anchors = self._filter_anchors(self.tracks)
         self.tracks = (
             self._specific_cells(self.tracks) if self.predict_cells else self.tracks
         )
+        self.valid_anchors = self._filter_anchors(self.tracks)
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         """Exclude tracks that are too close to the border or do not have the next time point.
