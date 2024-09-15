@@ -56,6 +56,89 @@ sns.scatterplot(
     x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
+# Add the title to the plot
+plt.title("Cell & Time Aware (30 min interval)")
+plt.savefig('umap_cell_time_aware_time.svg', format='svg')
+plt.savefig('umap_cell_time_aware_time.pdf', format='pdf')
+# Show the plot
+plt.show()
+
+# %%
+
+any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr")
+embedding_dataset = read_embedding_dataset(any_features_path)
+embedding_dataset
+
+# %%
+# Compute UMAP over all features
+features = embedding_dataset["features"]
+# or select a well:
+# features = features[features["fov_name"].str.contains("B/4")]
+
+scaled_features = StandardScaler().fit_transform(features.values)
+umap = UMAP()
+# Fit UMAP on all features
+embedding = umap.fit_transform(scaled_features)
+
+# %% Any time sampling plot 
+
+features = (
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
+)
+features
+
+
+sns.scatterplot(
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+)
+
+# Add the title to the plot
+plt.title("Cell Aware Any Time")
+plt.savefig('umap_cell_aware_time.png', format='png')
+#plt.savefig('umap_cell_aware_time.pdf', format='pdf')
+# Show the plot
+plt.show()
+
+# %%
+
+contrastive_learning_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/feb_fixed_test_predict.zarr")
+embedding_dataset = read_embedding_dataset(contrastive_learning_path)
+embedding_dataset
+
+# %%
+# Compute UMAP over all features
+features = embedding_dataset["features"]
+# or select a well:
+# features = features[features["fov_name"].str.contains("B/4")]
+
+scaled_features = StandardScaler().fit_transform(features.values)
+umap = UMAP()
+# Fit UMAP on all features
+embedding = umap.fit_transform(scaled_features)
+
+# %% Any time sampling plot 
+
+features = (
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
+)
+features
+
+
+sns.scatterplot(
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+)
+
+# Add the title to the plot
+plt.title("Classical Contrastive Learning")
+plt.savefig('classical_time.svg', format='svg')
+plt.savefig('classical_time.pdf', format='pdf')
+
+# Show the plot
+plt.show()
 
 # %% PCA
 
