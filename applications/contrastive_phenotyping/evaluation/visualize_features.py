@@ -89,17 +89,6 @@ def feature_map_to_pca_rgb(feature_map: np.ndarray) -> np.ndarray:
     return pc_first_3
 
 
-def extract_features(img: torch.Tensor) -> list[np.ndarray]:
-    with torch.inference_mode():
-        features = model.model.stem(img.to(model.device))
-        feature_maps = [features.clone()]
-        for stage in model.model.encoder.stages:
-            features = stage(features)
-            feature_maps.append(features)
-        feature_maps.append(model.model.encoder.head(features)[..., None, None])
-        return [f.detach().cpu().numpy() for f in feature_maps]
-
-
 # %%
 def plot_feature_maps(
     img: torch.Tensor,
@@ -167,7 +156,7 @@ for i, sample in enumerate(dm.predict_dataloader()):
     img = sample["anchor"]
 
 # %%
-feat = extract_features(img)
+feat = model.extract_features(img)
 for f in feat:
     print(f.shape)
 
