@@ -5,8 +5,10 @@ from pprint import pformat
 from typing import Literal
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
+from imblearn.over_sampling import SMOTE
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from numpy.typing import NDArray
 from torch import Tensor, optim
@@ -15,8 +17,7 @@ from torchmetrics.functional.classification import (
     multiclass_accuracy,
     multiclass_f1_score,
 )
-import pandas as pd
-from imblearn.over_sampling import SMOTE
+
 _logger = logging.getLogger("lightning.pytorch")
 
 
@@ -90,17 +91,15 @@ class LinearProbingDataModule(LightningDataModule):
         train_size = int(n * self.split_ratio[0])
         val_size = int(n * self.split_ratio[1])
         test_size = n - train_size - val_size
-        train_dataset, val_dataset, test_dataset = (
-            torch.utils.data.random_split(
-                self.dataset, [train_size, val_size, test_size]
-            )
+        train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+            self.dataset, [train_size, val_size, test_size]
         )
 
         self.test_indices = [self.dataset[i][2].item() for i in test_dataset.indices]
         self.train_dataset = [(x, y) for (x, y, _) in train_dataset]
         self.val_dataset = [(x, y) for (x, y, _) in val_dataset]
         self.test_dataset = [(x, y) for (x, y, _) in test_dataset]
-        
+
         if self.use_smote and stage == "fit":
             train_embeddings, train_labels = zip(*self.train_dataset)
             train_embeddings = torch.stack(train_embeddings)
@@ -112,7 +111,8 @@ class LinearProbingDataModule(LightningDataModule):
             )
 
             self.train_dataset = TensorDataset(
-                torch.from_numpy(resampled_embeddings).float(), torch.from_numpy(resampled_labels).long()
+                torch.from_numpy(resampled_embeddings).float(),
+                torch.from_numpy(resampled_labels).long(),
             )
 
     def train_dataloader(self) -> DataLoader:
@@ -188,6 +188,7 @@ class LinearClassifier(LightningModule):
         logits = self(x)
         return torch.argmax(logits, dim=1)
 
+
 def train_and_test_linear_classifier(
     embeddings: NDArray,
     labels: NDArray,
@@ -199,7 +200,7 @@ def train_and_test_linear_classifier(
     use_smote: bool = False,
     save_predictions: bool = False,
     csv_path: str = None,
-    merged_df: pd.DataFrame = None
+    merged_df: pd.DataFrame = None,
 ) -> None:
     """Train and test a linear classifier.
 
@@ -236,7 +237,11 @@ def train_and_test_linear_classifier(
         raise ValueError("Labels must have 1 dimension.")
     embeddings = torch.from_numpy(embeddings)
     data = LinearProbingDataModule(
-        embeddings, torch.from_numpy(labels), split_ratio, batch_size, use_smote=use_smote
+        embeddings,
+        torch.from_numpy(labels),
+        split_ratio,
+        batch_size,
+        use_smote=use_smote,
     )
     model = LinearClassifier(embeddings.shape[1], num_classes, lr)
     trainer.fit(model, data)
@@ -248,14 +253,16 @@ def train_and_test_linear_classifier(
         test_indices = data.test_indices
 
         label_mapping = {0: "background", 1: "uninfected", 2: "infected"}
-        y_test_pred_mapped = [label_mapping[label] for label in test_preds.cpu().numpy()]
+        y_test_pred_mapped = [
+            label_mapping[label] for label in test_preds.cpu().numpy()
+        ]
 
         predicted_labels_df = pd.DataFrame(
             {
-                "id": merged_df.loc[test_indices, "id"].values, 
-                "track_id": merged_df.loc[test_indices, "track_id"].values,  
-                "fov_name": merged_df.loc[test_indices, "fov_name"].values,  
-                "Predicted_Label": y_test_pred_mapped, 
+                "id": merged_df.loc[test_indices, "id"].values,
+                "track_id": merged_df.loc[test_indices, "track_id"].values,
+                "fov_name": merged_df.loc[test_indices, "fov_name"].values,
+                "Predicted_Label": y_test_pred_mapped,
             }
         )
 
