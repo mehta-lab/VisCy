@@ -22,6 +22,15 @@ from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 fov = "/B/4/6"
 track = 4
 
+save_dir = (
+    Path(
+        "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/test"
+    )
+    / (fov.strip("/s").replace("/", "_") + "norm_3ch")
+    / str(track)
+)
+save_dir.mkdir(parents=True, exist_ok=True)
+
 # %%
 dm = TripletDataModule(
     data_path="/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr",
@@ -62,11 +71,6 @@ model = ContrastiveModule.load_from_checkpoint(
     ),
 )
 model = model.eval()
-
-
-# %%
-# extract features
-
 
 
 # %%
@@ -118,16 +122,6 @@ def plot_feature_maps(
     f.savefig(save_path, dpi=300)
     plt.close()
 
-
-# %%
-save_dir = (
-    Path(
-        "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/test"
-    )
-    / (fov.strip("/s").replace("/", "_") + "norm_3ch")
-    / str(track)
-)
-save_dir.mkdir(parents=True, exist_ok=True)
 
 # %%
 # load the entire track in one batch
