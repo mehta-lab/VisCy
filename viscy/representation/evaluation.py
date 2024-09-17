@@ -272,6 +272,31 @@ def compute_umap(embedding_dataset, normalize_features=True):
     return umap_features, umap_projection, umap_df
 
 
+def feature_map_to_pca_rgb(feature_map: np.ndarray) -> np.ndarray:
+    """Compute first 3 principal components of feature map over (N, D, H, W).
+    Or in other words, linearly reduce the channel dimension to 3
+    while preserving the most variance.
+
+    Parameters
+    ----------
+    feature_map : np.ndarray
+        Feature map of shape (N, C, H, W).
+        Include all time points in the batch dimension to compute PCA over time.
+
+    Returns
+    -------
+    np.ndarray
+        (N, H, W, 3)
+    """
+    out_shape = (feature_map.shape[0], 3, *feature_map.shape[-2:])
+    feature_map = feature_map.reshape(feature_map.shape[1], -1)
+    pca = PCA(n_components=3)
+    pca.fit(feature_map)
+    pc_first_3 = pca.components_.reshape(out_shape)
+    pc_first_3 = np.stack([pc_first_3[:, i] for i in range(3)], axis=-1)
+    return pc_first_3
+
+
 class FeatureExtractor:
 
     def __init__(self):
