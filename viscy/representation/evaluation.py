@@ -17,6 +17,8 @@ from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
 
 from viscy.data.triplet import TripletDataModule
+from sklearn.metrics.pairwise import cosine_similarity
+from collections import defaultdict
 
 """
 This module enables evaluation of learned representations using annotations, such as 
@@ -379,3 +381,131 @@ class FeatureExtractor:
         std_dev = np.std(image)
 
         return std_dev
+
+# Function to extract embeddings and calculate cosine similarities for a specific cell
+def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
+   # Filter the dataset for the specific infected cell
+   filtered_data = embedding_dataset.where(
+       (embedding_dataset['fov_name'] == fov_name) &
+       (embedding_dataset['track_id'] == track_id),
+       drop=True
+   )
+  
+   # Extract the feature embeddings and time points
+   features = filtered_data['features'].values  # (sample, features)
+   time_points = filtered_data['t'].values      # (sample,)
+  
+   # Get the first time point's embedding
+   first_time_point_embedding = features[0].reshape(1, -1)
+  
+   # Calculate cosine similarity between each time point and the first time point
+   cosine_similarities = []
+   for i in range(len(time_points)):
+       similarity = cosine_similarity(
+           first_time_point_embedding, features[i].reshape(1, -1)
+       )
+       cosine_similarities.append(similarity[0][0])
+  
+   return time_points, cosine_similarities
+
+
+# Function to compute the norm of differences between embeddings at t and t + tau
+def compute_displacement_mean_std(embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False):
+   # Get the arrays of (fov_name, track_id, t, and embeddings)
+   fov_names = embedding_dataset['fov_name'].values
+   track_ids = embedding_dataset['track_id'].values
+   timepoints = embedding_dataset['t'].values
+   embeddings = embedding_dataset['features'].values
+  
+   # Dictionary to store displacements for each tau
+   displacement_per_tau = defaultdict(list)
+  
+   # Iterate over all entries in the dataset
+   for i in range(len(fov_names)):
+       fov_name = fov_names[i]
+       track_id = track_ids[i]
+       current_time = timepoints[i]
+       current_embedding = embeddings[i]
+      
+       # For each time point t, compute displacements for t + tau
+       for tau in range(1, max_tau + 1):
+           future_time = current_time + tau
+          
+           # Find if future_time exists for the same (fov_name, track_id)
+           matching_indices = np.where(
+               (fov_names == fov_name) & (track_ids == track_id) & (timepoints == future_time)
+           )[0]
+          
+           if len(matching_indices) == 1:
+               # Get the embedding at t + tau
+               future_embedding = embeddings[matching_indices[0]]
+              
+               if use_cosine:
+                   # Compute cosine similarity
+                   similarity = cosine_similarity(current_embedding.reshape(1, -1), future_embedding.reshape(1, -1))[0][0]
+                   # Choose whether to use similarity or dissimilarity
+                   if use_dissimilarity:
+                       displacement = 1 - similarity  # Cosine dissimilarity
+                   else:
+                       displacement = similarity  # Cosine similarity
+               else:
+                   # Compute the Euclidean distance, elementwise square on difference
+                   displacement = np.sum((current_embedding - future_embedding) ** 2)
+              
+               # Store the displacement for the given tau
+               displacement_per_tau[tau].append(displacement)
+  
+   # Compute mean and std displacement for each tau by averaging the displacements
+   mean_displacement_per_tau = {tau: np.mean(displacements) for tau, displacements in displacement_per_tau.items()}
+   std_displacement_per_tau = {tau: np.std(displacements) for tau, displacements in displacement_per_tau.items()}
+  
+   return mean_displacement_per_tau, std_displacement_per_tau
+
+
+# Function to compute the norm of differences between embeddings at t and t + tau
+def compute_displacement(embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False):
+   # Get the arrays of (fov_name, track_id, t, and embeddings)
+   fov_names = embedding_dataset['fov_name'].values
+   track_ids = embedding_dataset['track_id'].values
+   timepoints = embedding_dataset['t'].values
+   embeddings = embedding_dataset['features'].values
+  
+   # Dictionary to store displacements for each tau
+   displacement_per_tau = defaultdict(list)
+  
+   # Iterate over all entries in the dataset
+   for i in range(len(fov_names)):
+       fov_name = fov_names[i]
+       track_id = track_ids[i]
+       current_time = timepoints[i]
+       current_embedding = embeddings[i]
+      
+       # For each time point t, compute displacements for t + tau
+       for tau in range(1, max_tau + 1):
+           future_time = current_time + tau
+          
+           # Find if future_time exists for the same (fov_name, track_id)
+           matching_indices = np.where(
+               (fov_names == fov_name) & (track_ids == track_id) & (timepoints == future_time)
+           )[0]
+          
+           if len(matching_indices) == 1:
+               # Get the embedding at t + tau
+               future_embedding = embeddings[matching_indices[0]]
+              
+               if use_cosine:
+                   # Compute cosine similarity
+                   similarity = cosine_similarity(current_embedding.reshape(1, -1), future_embedding.reshape(1, -1))[0][0]
+                   # Choose whether to use similarity or dissimilarity
+                   if use_dissimilarity:
+                       displacement = 1 - similarity  # Cosine dissimilarity
+                   else:
+                       displacement = similarity  # Cosine similarity
+               else:
+                   # Compute the Euclidean distance, elementwise square on difference
+                   displacement = np.sum((current_embedding - future_embedding) ** 2)
+              
+               # Store the displacement for the given tau
+               displacement_per_tau[tau].append(displacement)
+  
+   return displacement_per_tau
