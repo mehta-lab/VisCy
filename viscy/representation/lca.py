@@ -99,22 +99,24 @@ class LinearProbingDataModule(LightningDataModule):
         self.test_indices = self.test_dataset.indices
 
         if self.use_smote and stage == "fit":
-           train_embeddings, train_labels = zip(*[(x, y) for x, y in self.train_dataset])
-           train_embeddings = torch.stack(train_embeddings)
-           train_labels = torch.tensor(train_labels)
+            train_embeddings, train_labels = zip(
+                *[(x, y) for x, y in self.train_dataset]
+            )
+            train_embeddings = torch.stack(train_embeddings)
+            train_labels = torch.tensor(train_labels)
 
-           smote = SMOTE()
-           resampled_embeddings, resampled_labels = smote.fit_resample(
-               train_embeddings.numpy(), train_labels.numpy()
-           )
+            smote = SMOTE()
+            resampled_embeddings, resampled_labels = smote.fit_resample(
+                train_embeddings.numpy(), train_labels.numpy()
+            )
 
-           self.train_dataset = TensorDataset(
-               torch.from_numpy(resampled_embeddings).float(),
-               torch.from_numpy(resampled_labels).long(),
-           )
-          
+            self.train_dataset = TensorDataset(
+                torch.from_numpy(resampled_embeddings).float(),
+                torch.from_numpy(resampled_labels).long(),
+            )
+
         elif not self.use_smote and stage == "fit":
-           _logger.warning("SMOTE is disabled. Proceeding without oversampling.")
+            _logger.warning("SMOTE is disabled. Proceeding without oversampling.")
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -249,23 +251,24 @@ def train_and_test_linear_classifier(
 
     if save_predictions:
         if csv_path is None or merged_df is None:
-           raise ValueError("csv_path and merged_df must be provided if save_predictions is True.")
+            raise ValueError(
+                "csv_path and merged_df must be provided if save_predictions is True."
+            )
         else:
-           test_indices = data.test_indices
+            test_indices = data.test_indices
 
-           label_mapping = {0: "background", 1: "uninfected", 2: "infected"}
-           y_test_pred_mapped = [
-               label_mapping[label] for label in test_preds.cpu().numpy()
-           ]
+            label_mapping = {0: "background", 1: "uninfected", 2: "infected"}
+            y_test_pred_mapped = [
+                label_mapping[label] for label in test_preds.cpu().numpy()
+            ]
 
+            predicted_labels_df = pd.DataFrame(
+                {
+                    "id": merged_df.loc[test_indices, "id"].values,
+                    "track_id": merged_df.loc[test_indices, "track_id"].values,
+                    "fov_name": merged_df.loc[test_indices, "fov_name"].values,
+                    "Predicted_Label": y_test_pred_mapped,
+                }
+            )
 
-           predicted_labels_df = pd.DataFrame(
-               {
-                   "id": merged_df.loc[test_indices, "id"].values,
-                   "track_id": merged_df.loc[test_indices, "track_id"].values,
-                   "fov_name": merged_df.loc[test_indices, "fov_name"].values,
-                   "Predicted_Label": y_test_pred_mapped,
-               }
-           )
-
-           predicted_labels_df.to_csv(csv_path, index=False)
+            predicted_labels_df.to_csv(csv_path, index=False)
