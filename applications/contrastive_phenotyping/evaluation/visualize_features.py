@@ -26,7 +26,7 @@ save_dir = (
     Path(
         "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/test"
     )
-    / (fov.strip("/s").replace("/", "_") + "norm_3ch")
+    / (fov.strip("/s").replace("/", "_") + "norm_per_ch")
     / str(track)
 )
 save_dir.mkdir(parents=True, exist_ok=True)
@@ -69,17 +69,29 @@ model = ContrastiveModule.load_from_checkpoint(
         embedding_dim=768,
         projection_dim=32,
     ),
-)
-model = model.eval()
+).eval()
 
 
 # %%
-def plot_feature_maps(
+def plot_feature_maps_video(
     img: torch.Tensor,
     rgb_features: list[np.ndarray],
     save_path: Path,
     rescale_per_color: bool = True,
 ) -> None:
+    """Render one frame showing the input image and the feature maps.
+
+    Parameters
+    ----------
+    img : torch.Tensor
+        2-channel input image
+    rgb_features : list[np.ndarray]
+        RGB feature maps
+    save_path : Path
+        save path for matplotlib figure
+    rescale_per_color : bool, optional
+        Rescale intensity per channel for feature maps, by default True
+    """
     input_ = img.cpu().numpy()
 
     f, ax = plt.subplots(2, 4, figsize=(8, 4))
@@ -141,5 +153,4 @@ rgbs = [feature_map_to_pca_rgb(f) for f in feat]
 for i in tqdm(range(feat[0].shape[0])):
     im = img[i : i + 1]
     rgb = [rgbs[j][i] for j in range(len(feat))]
-    plot_feature_maps(im, rgb, save_dir / f"{i}.png", rescale_per_color=False)
-# %%
+    plot_feature_maps_video(im, rgb, save_dir / f"{i}.pdf", rescale_per_color=False)
