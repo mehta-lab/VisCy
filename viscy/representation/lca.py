@@ -79,8 +79,7 @@ class LinearProbingDataModule(LightningDataModule):
             raise ValueError("Number of samples in embeddings and labels must match.")
         if sum(split_ratio) != 1.0:
             raise ValueError("Split ratio must sum to 1.")
-        indices = torch.arange(embeddings.shape[0])
-        self.dataset = TensorDataset(embeddings.float(), labels.long(), indices)
+        self.dataset = TensorDataset(embeddings.float(), labels.long())
         self.split_ratio = split_ratio
         self.batch_size = batch_size
         self.use_smote = use_smote
@@ -91,21 +90,18 @@ class LinearProbingDataModule(LightningDataModule):
         train_size = int(n * self.split_ratio[0])
         val_size = int(n * self.split_ratio[1])
         test_size = n - train_size - val_size
-        train_dataset, val_dataset, test_dataset = torch.utils.data.random_split(
+        self.train_dataset, self.val_dataset, self.test_dataset = torch.utils.data.random_split(
             self.dataset, [train_size, val_size, test_size]
         )
 
-        self.test_indices = [self.dataset[i][2].item() for i in test_dataset.indices]
-        self.train_dataset = [(x, y) for (x, y, _) in train_dataset]
-        self.val_dataset = [(x, y) for (x, y, _) in val_dataset]
-        self.test_dataset = [(x, y) for (x, y, _) in test_dataset]
+        self.test_indices = self.test_dataset.indices
 
         if self.use_smote and stage == "fit":
-            train_embeddings, train_labels = zip(*self.train_dataset)
+            train_embeddings, train_labels = zip(*[(x, y) for x, y in self.train_dataset])
             train_embeddings = torch.stack(train_embeddings)
             train_labels = torch.tensor(train_labels)
 
-            smote = SMOTE(random_state=42)
+            smote = SMOTE()
             resampled_embeddings, resampled_labels = smote.fit_resample(
                 train_embeddings.numpy(), train_labels.numpy()
             )
@@ -114,6 +110,9 @@ class LinearProbingDataModule(LightningDataModule):
                 torch.from_numpy(resampled_embeddings).float(),
                 torch.from_numpy(resampled_labels).long(),
             )
+            
+        elif not self.use_smote and stage == "fit":
+            _logger.warning("SMOTE is disabled. Proceeding without oversampling.")
 
     def train_dataloader(self) -> DataLoader:
         return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
@@ -226,8 +225,9 @@ def train_and_test_linear_classifier(
     save_predictions : bool, optional
         Whether to save predictions to CSV, by default False
     csv_path : str, optional
-        Path to save predictions CSV, by default None
+        Path to save predictions CSV, by default None.
     merged_df : pd.DataFrame, optional
+        DataFrame containing the initial input data, used for outputting correct predictions
     """
     if not isinstance(embeddings, np.ndarray) or not isinstance(labels, np.ndarray):
         raise TypeError("Input embeddings and labels must be NumPy arrays.")
@@ -249,21 +249,24 @@ def train_and_test_linear_classifier(
 
     test_preds = model.test_predictions_cache
 
-    if save_predictions and csv_path is not None and merged_df is not None:
-        test_indices = data.test_indices
+    if save_predictions:
+        if csv_path is None or merged_df is None:
+            raise ValueError("csv_path and merged_df must be provided if save_predictions is True.")
+        else:
+            test_indices = data.test_indices
 
-        label_mapping = {0: "background", 1: "uninfected", 2: "infected"}
-        y_test_pred_mapped = [
-            label_mapping[label] for label in test_preds.cpu().numpy()
-        ]
+            label_mapping = {0: "background", 1: "uninfected", 2: "infected"}
+            y_test_pred_mapped = [
+                label_mapping[label] for label in test_preds.cpu().numpy()
+            ]
 
-        predicted_labels_df = pd.DataFrame(
-            {
-                "id": merged_df.loc[test_indices, "id"].values,
-                "track_id": merged_df.loc[test_indices, "track_id"].values,
-                "fov_name": merged_df.loc[test_indices, "fov_name"].values,
-                "Predicted_Label": y_test_pred_mapped,
-            }
-        )
+            predicted_labels_df = pd.DataFrame(
+                {
+                    "id": merged_df.loc[test_indices, "id"].values,
+                    "track_id": merged_df.loc[test_indices, "track_id"].values,
+                    "fov_name": merged_df.loc[test_indices, "fov_name"].values,
+                    "Predicted_Label": y_test_pred_mapped,
+                }
+            )
 
-        predicted_labels_df.to_csv(csv_path, index=False)
+            predicted_labels_df.to_csv(csv_path, index=False)

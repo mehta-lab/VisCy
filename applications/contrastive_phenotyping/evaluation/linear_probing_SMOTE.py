@@ -11,6 +11,9 @@ from sklearn.metrics import classification_report
 import numpy as np
 import matplotlib.pyplot as plt
 
+# %% Set random seed for reproducibility
+seed_everything(42, workers=True)
+
 # %% Paths for embedding and annotation data
 path_embedding = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
@@ -61,7 +64,7 @@ train_and_test_linear_classifier(
     lr=0.001,
     use_smote=True,
     save_predictions=True,
-    csv_path=Path("/hpc/mydata/alishba.imran/VisCy/applications/contrastive_phenotyping/evaluation/predicted_labels.csv"),
+    csv_path=Path("/hpc/mydata/alishba.imran/VisCy/applications/contrastive_phenotyping/evaluation/test_predicted_labels.csv"),
     merged_df=merged_df
 )
 
