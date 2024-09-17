@@ -69,9 +69,11 @@ sns.scatterplot(
 
 
 # Add the title to the plot
-plt.title("Cell & Time Aware (30 min interval)")
-plt.savefig('umap_cell_time_aware_time.svg', format='svg')
-plt.savefig('umap_cell_time_aware_time.pdf', format='pdf')
+plt.title("Cell & Time Aware Sampling (30 min interval)")
+plt.xlim(-10, 20)
+plt.ylim(-10, 20)
+#plt.savefig('umap_cell_time_aware_time.svg', format='svg')
+plt.savefig('updated_cell_time_aware_time.png', format='png')
 # Show the plot
 plt.show()
 
@@ -79,7 +81,7 @@ plt.show()
 # %%
 
 
-any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr")
+any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_1chan_128patch_32projDim/1chan_128patch_63ckpt_FebTest.zarr")
 embedding_dataset = read_embedding_dataset(any_features_path)
 embedding_dataset
 
@@ -108,16 +110,18 @@ features = (
 features
 
 
-
-
 sns.scatterplot(
    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
 
 # Add the title to the plot
-plt.title("Cell Aware Any Time")
-plt.savefig('umap_cell_aware_time.png', format='png')
+plt.title("Cell Aware Sampling")
+
+plt.xlim(-10, 20)
+plt.ylim(-10, 20)
+
+plt.savefig('updated_cell_aware_time.png', format='png')
 #plt.savefig('umap_cell_aware_time.pdf', format='pdf')
 # Show the plot
 plt.show()
@@ -154,19 +158,16 @@ features = (
 )
 features
 
-
-
-
 sns.scatterplot(
    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
-
 # Add the title to the plot
-plt.title("Classical Contrastive Learning")
-plt.savefig('classical_time.svg', format='svg')
-plt.savefig('classical_time.pdf', format='pdf')
-
+plt.title("Classical Contrastive Learning Sampling")
+plt.xlim(-10, 20)
+plt.ylim(-10, 20)
+plt.savefig('updated_classical_time.png', format='png')
+#plt.savefig('classical_time.pdf', format='pdf')
 
 # Show the plot
 plt.show()
