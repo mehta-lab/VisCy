@@ -64,6 +64,17 @@ features = (
     .set_index(sample=["UMAP1", "UMAP2"], append=True)
 )
 
+# %% PCA analysis of the features
+
+pca = PCA(n_components=3)
+embedding = pca.fit_transform(features.values)
+features = (
+    features.assign_coords(PCA1=("sample", embedding[:, 0]))
+    .assign_coords(PCA2=("sample", embedding[:, 1]))
+    .assign_coords(PCA3=("sample", embedding[:, 2]))
+    .set_index(sample=["PCA1", "PCA2", "PCA3"], append=True)
+)
+
 # %% convert the xarray to dataframe structure and add columns for computed features
 features_df = features.to_dataframe()
 features_df = features_df.drop(columns=["features"])
@@ -205,17 +216,20 @@ correlation = feature_df_removed.corr(method="spearman")
 
 # %% display PCA correlation as a heatmap
 
-# plt.figure(figsize=(20, 5))
-# sns.heatmap(
-#     correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc["PCA1":"PCA4", :],
-#     annot=True,
-#     cmap="coolwarm",
-#     fmt=".2f",
-# )
-# plt.title("Correlation between PCA features and computed features")
-# plt.xlabel("Computed Features")
-# plt.ylabel("PCA Features")
-# plt.show()
+# remove UMAP compnents from the correlation matrix before plotting
+correlation_pca = correlation.drop(columns=["UMAP1", "UMAP2"])
+
+plt.figure(figsize=(20, 5))
+sns.heatmap(
+    correlation_pca.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc["PCA1":"PCA4", :],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+)
+plt.title("Correlation between PCA features and computed features")
+plt.xlabel("Computed Features")
+plt.ylabel("PCA Features")
+plt.show()
 
 # %% display UMAP correlation as a heatmap
 
