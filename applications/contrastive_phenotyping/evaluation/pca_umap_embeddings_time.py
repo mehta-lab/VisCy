@@ -1,33 +1,26 @@
 # %%
 from pathlib import Path
 
-
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
-import plotly.express as px
 import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-from sklearn.decomposition import PCA
-
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks, load_annotation
-
+from viscy.representation.evaluation import load_annotation
 
 # %% Paths and parameters.
 
 
 features_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
 )
 data_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
 )
 tracks_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
 
@@ -54,17 +47,15 @@ embedding = umap.fit_transform(scaled_features)
 
 
 features = (
-   features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-   .assign_coords(UMAP2=("sample", embedding[:, 1]))
-   .set_index(sample=["UMAP1", "UMAP2"], append=True)
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
 )
 features
 
 
-
-
 sns.scatterplot(
-   x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
 
@@ -72,8 +63,8 @@ sns.scatterplot(
 plt.title("Cell & Time Aware Sampling (30 min interval)")
 plt.xlim(-10, 20)
 plt.ylim(-10, 20)
-#plt.savefig('umap_cell_time_aware_time.svg', format='svg')
-plt.savefig('updated_cell_time_aware_time.png', format='png')
+# plt.savefig('umap_cell_time_aware_time.svg', format='svg')
+plt.savefig("updated_cell_time_aware_time.png", format="png")
 # Show the plot
 plt.show()
 
@@ -81,7 +72,9 @@ plt.show()
 # %%
 
 
-any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr")
+any_features_path = Path(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr"
+)
 embedding_dataset = read_embedding_dataset(any_features_path)
 embedding_dataset
 
@@ -103,15 +96,15 @@ embedding = umap.fit_transform(scaled_features)
 
 
 features = (
-   features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-   .assign_coords(UMAP2=("sample", embedding[:, 1]))
-   .set_index(sample=["UMAP1", "UMAP2"], append=True)
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
 )
 features
 
 
 sns.scatterplot(
-   x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
 
@@ -121,8 +114,8 @@ plt.title("Cell Aware Sampling")
 plt.xlim(-10, 20)
 plt.ylim(-10, 20)
 
-plt.savefig('1_updated_cell_aware_time.png', format='png')
-#plt.savefig('umap_cell_aware_time.pdf', format='pdf')
+plt.savefig("1_updated_cell_aware_time.png", format="png")
+# plt.savefig('umap_cell_aware_time.pdf', format='pdf')
 # Show the plot
 plt.show()
 
@@ -130,7 +123,9 @@ plt.show()
 # %%
 
 
-contrastive_learning_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/feb_fixed_test_predict.zarr")
+contrastive_learning_path = Path(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/feb_fixed_test_predict.zarr"
+)
 embedding_dataset = read_embedding_dataset(contrastive_learning_path)
 embedding_dataset
 
@@ -152,22 +147,22 @@ embedding = umap.fit_transform(scaled_features)
 
 
 features = (
-   features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-   .assign_coords(UMAP2=("sample", embedding[:, 1]))
-   .set_index(sample=["UMAP1", "UMAP2"], append=True)
+    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
+    .assign_coords(UMAP2=("sample", embedding[:, 1]))
+    .set_index(sample=["UMAP1", "UMAP2"], append=True)
 )
 features
 
 sns.scatterplot(
-   x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
+    x=features["UMAP1"], y=features["UMAP2"], hue=features["t"], s=7, alpha=0.8
 )
 
 # Add the title to the plot
 plt.title("Classical Contrastive Learning Sampling")
 plt.xlim(-10, 20)
 plt.ylim(-10, 20)
-plt.savefig('updated_classical_time.png', format='png')
-#plt.savefig('classical_time.pdf', format='pdf')
+plt.savefig("updated_classical_time.png", format="png")
+# plt.savefig('classical_time.pdf', format='pdf')
 
 # Show the plot
 plt.show()
@@ -183,11 +178,11 @@ pca_features = pca.fit_transform(features.values)
 
 
 features = (
-   features.assign_coords(PCA1=("sample", pca_features[:, 0]))
-   .assign_coords(PCA2=("sample", pca_features[:, 1]))
-   .assign_coords(PCA3=("sample", pca_features[:, 2]))
-   .assign_coords(PCA4=("sample", pca_features[:, 3]))
-   .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4"], append=True)
+    features.assign_coords(PCA1=("sample", pca_features[:, 0]))
+    .assign_coords(PCA2=("sample", pca_features[:, 1]))
+    .assign_coords(PCA3=("sample", pca_features[:, 2]))
+    .assign_coords(PCA4=("sample", pca_features[:, 3]))
+    .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4"], append=True)
 )
 
 
@@ -195,20 +190,22 @@ features = (
 
 
 plt.figure(figsize=(10, 10))
-sns.scatterplot(x=features["PCA1"], y=features["PCA2"], hue=features["t"], s=7, alpha=0.8)
+sns.scatterplot(
+    x=features["PCA1"], y=features["PCA2"], hue=features["t"], s=7, alpha=0.8
+)
 
 
 # %% OVERLAY INFECTION ANNOTATION
 ann_root = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
 )
 
 
 infection = load_annotation(
-   features,
-   ann_root / "extracted_inf_state.csv",
-   "infection_state",
-   {0.0: "background", 1.0: "uninfected", 2.0: "infected"},
+    features,
+    ann_root / "extracted_inf_state.csv",
+    "infection_state",
+    {0.0: "background", 1.0: "uninfected", 2.0: "infected"},
 )
 
 
