@@ -81,7 +81,7 @@ plt.show()
 # %%
 
 
-any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_1chan_128patch_32projDim/1chan_128patch_63ckpt_FebTest.zarr")
+any_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr")
 embedding_dataset = read_embedding_dataset(any_features_path)
 embedding_dataset
 
@@ -121,7 +121,7 @@ plt.title("Cell Aware Sampling")
 plt.xlim(-10, 20)
 plt.ylim(-10, 20)
 
-plt.savefig('updated_cell_aware_time.png', format='png')
+plt.savefig('1_updated_cell_aware_time.png', format='png')
 #plt.savefig('umap_cell_aware_time.pdf', format='pdf')
 # Show the plot
 plt.show()

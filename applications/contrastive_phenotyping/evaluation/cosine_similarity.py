@@ -1,7 +1,6 @@
 # %%
 from pathlib import Path
 
-
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -12,7 +11,6 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 from sklearn.decomposition import PCA
 
-
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks, load_annotation
 from sklearn.metrics.pairwise import cosine_similarity
@@ -20,7 +18,6 @@ from collections import defaultdict
 from viscy.representation.evaluation import calculate_cosine_similarity_cell
 from viscy.representation.evaluation import compute_displacement_mean_std
 from viscy.representation.evaluation import compute_displacement
-
 
 # %% Paths and parameters.
 
@@ -33,7 +30,7 @@ features_path_30_min = Path(
 feature_path_no_track = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/feb_fixed_test_predict.zarr")
 
 
-features_path_any_time = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_1chan_128patch_32projDim/1chan_128patch_63ckpt_FebTest.zarr")
+features_path_any_time = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr")
 
 
 data_path = Path(
@@ -48,46 +45,37 @@ tracks_path = Path(
 
 # %% Load embedding datasets for all three sampling
 fov_name = '/B/4/6'
-track_id = 38
-
+track_id = 52
 
 embedding_dataset_30_min = read_embedding_dataset(features_path_30_min)
 embedding_dataset_no_track = read_embedding_dataset(feature_path_no_track)
 embedding_dataset_any_time = read_embedding_dataset(features_path_any_time)
-
 
 # Calculate cosine similarities for each sampling
 time_points_30_min, cosine_similarities_30_min = calculate_cosine_similarity_cell(embedding_dataset_30_min, fov_name, track_id)
 time_points_no_track, cosine_similarities_no_track = calculate_cosine_similarity_cell(embedding_dataset_no_track, fov_name, track_id)
 time_points_any_time, cosine_similarities_any_time = calculate_cosine_similarity_cell(embedding_dataset_any_time, fov_name, track_id)
 
-
 # %% Plot cosine similarities over time for all three conditions
 
-
 plt.figure(figsize=(10, 6))
-
 
 plt.plot(time_points_no_track, cosine_similarities_no_track, marker='o', label='classical contrastive (no tracking)')
 plt.plot(time_points_any_time, cosine_similarities_any_time, marker='o', label='cell aware')
 plt.plot(time_points_30_min, cosine_similarities_30_min, marker='o', label='cell & time aware (interval 30 min)')
 
-
-
-
 plt.xlabel("Time Delay (t)")
 plt.ylabel("Cosine Similarity with First Time Point")
-plt.title("Cosine Similarity Over Time for Infected Cell (FOV: /B/4/6, Track ID: 38)")
+plt.title("Cosine Similarity Over Time for Infected Cell")
 
-
-plt.savefig('example_cell_inf.svg', format='svg')
 #plt.savefig('infected_cell_example.pdf', format='pdf')
 
 
 plt.grid(True)
+
 plt.legend()
 
-
+plt.savefig('new_example_cell.svg', format='svg')
 
 
 plt.show()
@@ -203,12 +191,12 @@ plt.xlabel('Time Shift (τ)')
 plt.ylabel('Cosine Similarity')
 plt.title('Embedding Displacement Over Time')
 
-plt.savefig('std_cosine_plot.svg', format='svg')
+
 
 
 plt.grid(True)
 plt.legend()
-
+plt.savefig('1_std_cosine_plot.svg', format='svg')
 
 # Show the Cosine plot
 plt.show()
@@ -240,15 +228,14 @@ max_tau = 10  # Maximum time shift (tau) to compute displacements
 
 
 # Compute displacements for Cell & Time Aware (30 min interval) using Cosine similarity
-displacement_per_tau_aware_cosine = compute_displacement(embedding_dataset_30_min, max_tau, use_cosine=True, use_dissimilarity=False)
+displacement_per_tau_aware_cosine = compute_displacement(embedding_dataset_30_min, max_tau, use_cosine=True, use_dissimilarity=False, use_umap=False)
 
 
 # Compute displacements for Classical Contrastive (No Tracking) using Cosine similarity
-displacement_per_tau_contrastive_cosine = compute_displacement(embedding_dataset_no_track, max_tau, use_cosine=True, use_dissimilarity=False)
+displacement_per_tau_contrastive_cosine = compute_displacement(embedding_dataset_no_track, max_tau, use_cosine=True, use_dissimilarity=False, use_umap=False)
 
 
 # %% Prepare data for violin plot
-# Prepare the data in a long-form DataFrame for the violin plot
 def prepare_violin_data(taus, displacement_aware, displacement_contrastive):
    # Create a list to hold the data
    data = []
@@ -304,19 +291,19 @@ plt.grid(True, linestyle='--', alpha=0.6)  # Lighter grid lines for less distrac
 plt.legend(title='Sampling', fontsize=12, title_fontsize=14)
 
 
-plt.ylim(0.5, 1.0) 
+#plt.ylim(0.5, 1.0) 
 
 
 # Save the violin plot as SVG and PDF
-plt.savefig('updated_violin_plot_cosine_similarity.svg', format='svg')
-plt.savefig('violin_plot_cosine_similarity.pdf', format='pdf')
+plt.savefig('1fixed_violin_plot_cosine_similarity.svg', format='svg')
+# plt.savefig('violin_plot_cosine_similarity.pdf', format='pdf')
 
 
 # Show the plot
 plt.show()
 # %% using umap violin plot
 
-# Import necessary libraries
+# Import necessary libraries, try euclidean distance for both features and 
 import seaborn as sns
 import pandas as pd
 import numpy as np
@@ -338,7 +325,6 @@ embedding_dataset_30_min = read_embedding_dataset(features_path_30_min)
 embedding_dataset_no_track = read_embedding_dataset(feature_path_no_track)
 
 # %% Compute UMAP on features
-# %% Compute UMAP on features
 def compute_umap(dataset):
     features = dataset["features"]
     scaled_features = StandardScaler().fit_transform(features.values)
@@ -353,14 +339,34 @@ def compute_umap(dataset):
 umap_features_30_min = compute_umap(embedding_dataset_30_min)
 umap_features_no_track = compute_umap(embedding_dataset_no_track)
 
+# %%
+print(umap_features_30_min)
+# %% Visualize UMAP embeddings 
+# # Visualize UMAP embeddings for the 30 min interval
+# plt.figure(figsize=(8, 6))
+# plt.scatter(umap_features_30_min[:, 0], umap_features_30_min[:, 1], c=embedding_dataset_30_min["t"].values, cmap='viridis')
+# plt.colorbar(label='Timepoints')
+# plt.title('UMAP Projection of Features (30 min Interval)')
+# plt.xlabel('UMAP1')
+# plt.ylabel('UMAP2')
+# plt.show()
+
+# # Visualize UMAP embeddings for the No Tracking dataset
+# plt.figure(figsize=(8, 6))
+# plt.scatter(umap_features_no_track[:, 0], umap_features_no_track[:, 1], c=embedding_dataset_no_track["t"].values, cmap='viridis')
+# plt.colorbar(label='Timepoints')
+# plt.title('UMAP Projection of Features (No Tracking)')
+# plt.xlabel('UMAP1')
+# plt.ylabel('UMAP2')
+# plt.show()
 # %% Compute displacements using UMAP coordinates (using Cosine similarity)
 max_tau = 10  # Maximum time shift (tau) to compute displacements
 
 # Compute displacements for UMAP-processed Cell & Time Aware (30 min interval)
-displacement_per_tau_aware_umap_cosine = compute_displacement(umap_features_30_min, max_tau, use_cosine=True, use_dissimilarity=False)
+displacement_per_tau_aware_umap_cosine = compute_displacement(umap_features_30_min, max_tau, use_cosine=True, use_dissimilarity=False, use_umap=True)
 
 # Compute displacements for UMAP-processed Classical Contrastive (No Tracking)
-displacement_per_tau_contrastive_umap_cosine = compute_displacement(umap_features_no_track, max_tau, use_cosine=True, use_dissimilarity=False)
+displacement_per_tau_contrastive_umap_cosine = compute_displacement(umap_features_no_track, max_tau, use_cosine=True, use_dissimilarity=False, use_umap=True)
 
 # %% Prepare data for violin plot
 def prepare_violin_data(taus, displacement_aware, displacement_contrastive):
@@ -410,13 +416,34 @@ plt.title('Cosine Similarity Distribution using UMAP Features', fontsize=16)
 plt.grid(True, linestyle='--', alpha=0.6)  # Lighter grid lines for less distraction
 plt.legend(title='Sampling', fontsize=12, title_fontsize=14)
 
-plt.ylim(0.5, 1.0)
+#plt.ylim(0, 1)
 
 # Save the violin plot as SVG and PDF
-plt.savefig('umap_violin_plot_cosine_similarity.svg', format='svg')
+plt.savefig('fixed_plot_cosine_similarity.svg', format='svg')
 # plt.savefig('violin_plot_cosine_similarity_umap.pdf', format='pdf')
 
 # Show the plot
 plt.show()
 
+
+
 # %%
+# %% Visualize Displacement Distributions (Example Code)
+# Compare displacement distributions for τ = 1
+# plt.figure(figsize=(10, 6))
+# sns.histplot(displacement_per_tau_aware_umap_cosine[1], kde=True, label='UMAP - 30 min Interval', color='blue')
+# sns.histplot(displacement_per_tau_contrastive_umap_cosine[1], kde=True, label='UMAP - No Tracking', color='green')
+# plt.legend()
+# plt.title('Comparison of Displacement Distributions for τ = 1 (UMAP)')
+# plt.xlabel('Displacement')
+# plt.show()
+
+# # Compare displacement distributions for the full feature set (same τ = 1)
+# plt.figure(figsize=(10, 6))
+# sns.histplot(displacement_per_tau_aware_cosine[1], kde=True, label='Full Features - 30 min Interval', color='red')
+# sns.histplot(displacement_per_tau_contrastive_cosine[1], kde=True, label='Full Features - No Tracking', color='orange')
+# plt.legend()
+# plt.title('Comparison of Displacement Distributions for τ = 1 (Full Features)')
+# plt.xlabel('Displacement')
+# plt.show()
+# # %%

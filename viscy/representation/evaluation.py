@@ -479,13 +479,18 @@ def compute_displacement_mean_std(
 
 # Function to compute the norm of differences between embeddings at t and t + tau
 def compute_displacement(
-    embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False
-):
+    embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False, use_umap=False):
     # Get the arrays of (fov_name, track_id, t, and embeddings)
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
-    embeddings = embedding_dataset["features"].values
+
+    if use_umap:
+        umap1 = embedding_dataset["UMAP1"].values
+        umap2 = embedding_dataset["UMAP2"].values
+        embeddings = np.vstack((umap1, umap2)).T  
+    else:
+        embeddings = embedding_dataset["features"].values
 
     # Dictionary to store displacements for each tau
     displacement_per_tau = defaultdict(list)
