@@ -145,22 +145,26 @@ plt.legend([],[], frameon=False)
 
 # single channel, with temporal regularizations
 # plt.savefig(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel.png"
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel.png",
+    dpi=300
 # )
 
 # single channel, without temporal regularizations
 # plt.savefig(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel_woT.png"
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel_woT.png",
+    dpi=300
 # )
 
 # two channel, with temporal regularizations
 plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png",
+    dpi=300
 )
 
 # two channel, without temporal regularizations
 # plt.savefig(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png"
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png",
+    dpi=300
 # )
 
 # %% 
