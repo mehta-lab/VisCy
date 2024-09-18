@@ -5,6 +5,7 @@ import napari
 import numpy as np
 from pathlib import Path
 import sys
+import os
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 # from viscy.data.triplet import TripletDataModule
@@ -20,8 +21,8 @@ tracks_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
-fov_name = '/B/4/8'
-track_id = 12
+fov_name = '/B/4/6'
+track_id = 52
 source_channel = ["Phase3D", "RFP"]
 
 # %% load dataset
@@ -42,12 +43,21 @@ fluor = whole[:, 1]
 # fluor = np.max(whole[:, 1], axis=1)
 
 # load image
-v = napari.Viewer()
-v.add_image(phase)
-v.add_image(fluor)
+# v = napari.Viewer()
+# v.add_image(phase)
+# v.add_image(fluor)
 
 # %% save patches as png images
 
 # use sliders on napari to get the deisred contrast and make other adjustments
 # then use save screenshot if saving the image patch manually
 # you can add code to automate the process if desired
+
+# %% save as numpy files
+
+out_dir = '/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/data/'
+fov_name_out = fov_name.replace('/', '_')
+np.save((os.path.join(out_dir,"phase"+fov_name_out+"_"+str(track_id)+".npy")), phase)
+np.save((os.path.join(out_dir,"fluor"+fov_name_out+"_"+str(track_id)+".npy")), fluor)
+
+# %%

@@ -25,16 +25,16 @@ import matplotlib.pyplot as plt
 # dataset
 
 # two channel, with temporal regularizations
-# dataset = read_embedding_dataset(
-#     ""
-# )
-# dataset
-
-# two channel, without temporal regularizations
 dataset = read_embedding_dataset(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest_divGT.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178_gt_tracks.zarr"
 )
 dataset
+
+# two channel, without temporal regularizations
+# dataset = read_embedding_dataset(
+#     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest_divGT.zarr"
+# )
+# dataset
 
 # %%
 # load all unprojected features:
@@ -138,8 +138,8 @@ plt.xlabel('UMAP1')
 plt.ylabel('UMAP2')
 # plt.title('UMAP with Trajectory Direction')
 # plt.legend(title='Division Phase')
-plt.xlim(-3, 13)
-plt.ylim(1, 11)
+plt.xlim(-7, 11)
+plt.ylim(5, 17)
 plt.legend([],[], frameon=False)
 # plt.show()
 
@@ -154,13 +154,13 @@ plt.legend([],[], frameon=False)
 # )
 
 # two channel, with temporal regularizations
-# plt.savefig(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png"
-# )
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png"
+)
 
 # two channel, without temporal regularizations
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png"
-)
+# plt.savefig(
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png"
+# )
 
 # %% 
