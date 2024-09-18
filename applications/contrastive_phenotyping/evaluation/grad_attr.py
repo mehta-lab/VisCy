@@ -47,8 +47,7 @@ dm = TripletDataModule(
     include_track_ids=[track],
 )
 dm.setup("predict")
-ds = dm.predict_dataset
-len(ds)
+len(dm.predict_dataset)
 
 # %%
 # load model
@@ -144,37 +143,37 @@ track_classes = infection[infection["fov_name"] == fov[1:]]
 track_classes = track_classes[track_classes["track_id"] == track]["infection_state"]
 track_classes
 
-# %%
-ig = IntegratedGradients(assembled_classifier, multiply_by_inputs=True)
 
 # %%
-sample_idx = 7
+def attribute_sample(img, target, assembled_classifier):
+    ig = IntegratedGradients(assembled_classifier, multiply_by_inputs=True)
+    assembled_classifier.zero_grad()
+    attribution = ig.attribute(torch.from_numpy(img), target=target).numpy()
+    return img, attribution
 
-sample = dm.predict_dataset[sample_idx]
-img = sample["anchor"].numpy()[None]
-target = int(track_classes.values[sample_idx])
-sample["index"], target
+
+def color_and_clim(heatmap, cmap):
+    lo, hi = np.percentile(heatmap, (1, 99))
+    rescaled = rescale_intensity(heatmap.clip(lo, hi), out_range=(0, 1))
+    return Colormap(cmap)(rescaled)
+
 
 # %%
-assembled_classifier.zero_grad()
-attribution = ig.attribute(torch.from_numpy(img), target=target).numpy()
+for sample in dm.predict_dataloader():
+    img = sample["anchor"].numpy()
 
 # %%
+target = torch.from_numpy(track_classes.values).long()
 with torch.inference_mode():
     probs = assembled_classifier(torch.from_numpy(img)).softmax(dim=1)
-
-
-# %%
-def clim(heatmap):
-    lo, hi = np.percentile(heatmap, (1, 99))
-    return rescale_intensity(heatmap.clip(lo, hi), out_range=(0, 1))
-
+img, attribution = attribute_sample(img, target, assembled_classifier)
 
 # %%
-phase = Colormap("gray")(clim(img[0, 0]))
-rfp = Colormap("gray")(clim(img[0, 1]))
-phase_heatmap = Colormap("icefire")(clim(attribution[0, 0]))
-rfp_heatmap = Colormap("icefire")(clim(attribution[0, 1]))
+z_slice = 5
+phase = color_and_clim(img[:, 0, z_slice], cmap="gray")
+rfp = color_and_clim(img[:, 1, z_slice], cmap="gray")
+phase_heatmap = color_and_clim(attribution[:, 0, z_slice], cmap="icefire")
+rfp_heatmap = color_and_clim(attribution[:, 1, z_slice], cmap="icefire")
 grid = np.concatenate(
     [
         np.concatenate([phase, phase_heatmap], axis=1),
@@ -182,13 +181,14 @@ grid = np.concatenate(
     ],
     axis=2,
 )
+print(grid.shape)
 
-f, ax = plt.subplots(3, 5, figsize=(10, 6))
+# %%
+f, ax = plt.subplots(6, 8, figsize=(16, 12))
 for i, (z_slice, a) in enumerate(zip(grid, ax.flatten())):
     a.imshow(z_slice)
-    a.set_title(f"z={i}")
+    a.set_title(f"t={i}")
     a.axis("off")
-f.suptitle(f"t={sample_idx}, prediction={probs.numpy().tolist()}")
 f.tight_layout()
 
 # %%
