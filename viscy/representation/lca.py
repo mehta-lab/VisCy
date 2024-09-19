@@ -1,25 +1,73 @@
 """Linear probing of trained encoder based on cell state labels."""
 
 import logging
-from pprint import pformat
-from typing import Literal
+from typing import Mapping
 
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
-from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
-from torch import Tensor, optim
-from torch.utils.data import DataLoader, TensorDataset
-from torchmetrics.functional.classification import (
-    multiclass_accuracy,
-    multiclass_f1_score,
-)
+from sklearn.metrics import classification_report
+from sklearn.preprocessing import StandardScaler
+from torch import Tensor
+from xarray import DataArray
 
 from viscy.representation.contrastive import ContrastiveEncoder
 
-_logger = logging.getLogger("lightning.pytorch")
+
+def fit_logistic_regression(
+    features: DataArray,
+    annotations: pd.Series,
+    train_fovs: list[str],
+    remove_background_class: bool = True,
+    scale_features: bool = False,
+    class_weight: Mapping | str | None = "balanced",
+    random_state: int | None = None,
+    solver="liblinear",
+) -> tuple[
+    LogisticRegression,
+    tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+]:
+    fov_selection = features["fov_name"].isin(train_fovs)
+    train_selection = fov_selection
+    test_selection = ~fov_selection
+    annotations = annotations.cat.codes.values.copy()
+    if remove_background_class:
+        label_selection = annotations != 0
+        train_selection &= label_selection
+        test_selection &= label_selection
+        annotations -= 1
+    train_features = features.values[train_selection]
+    test_features = features.values[test_selection]
+    if scale_features:
+        scaler = StandardScaler()
+        train_features = scaler.fit_transform(train_features)
+        test_features = scaler.fit_transform(test_features)
+    train_annotations = annotations[train_selection]
+    test_annotations = annotations[test_selection]
+    logistic_regression = LogisticRegression(
+        class_weight=class_weight,
+        random_state=random_state,
+        solver=solver,
+    )
+    logistic_regression.fit(train_features, train_annotations)
+    prediction = logistic_regression.predict(test_features)
+    print("Trained logistic regression classifier.")
+    print(
+        "Training set accuracy:\n"
+        + classification_report(
+            logistic_regression.predict(train_features), train_annotations, digits=3
+        )
+    )
+    print(
+        "Test set accuracy:\n"
+        + classification_report(prediction, test_annotations, digits=3)
+    )
+    return logistic_regression, (
+        (train_features, train_annotations),
+        (test_features, test_annotations),
+    )
 
 
 def linear_from_binary_logistic_regression(
@@ -40,193 +88,16 @@ class AssembledClassifier(torch.nn.Module):
         self.backbone = backbone
         self.classifier = classifier
 
-    def forward(self, x: Tensor) -> Tensor:
+    @staticmethod
+    def scale_features(x: Tensor) -> Tensor:
+        m = x.mean(-2, keepdim=True)
+        s = x.std(-2, unbiased=False, keepdim=True)
+        return (x - m) / s
+
+    def forward(self, x: Tensor, scale_features: bool = False) -> Tensor:
         x = self.backbone.stem(x)
         x = self.backbone.encoder(x)
+        if scale_features:
+            x = self.scale_features(x)
         x = self.classifier(x)
         return x
-
-
-def _test_metrics(preds: Tensor, target: Tensor, num_classes: int) -> dict[str, float]:
-    """Test metrics for the linear classifier.
-
-    Parameters
-    ----------
-    preds : Tensor
-        Predicted logits, shape (n_samples, n_classes)
-    target : Tensor
-        Labels, shape (n_samples,)
-    num_classes : int
-        Number of classes
-
-    Returns
-    -------
-    dict[str, float]
-        Test metrics
-    """
-    # TODO: add more metrics
-    metrics = {}
-    for average in ["macro", "weighted"]:
-        metrics[f"accuracy_{average}"] = multiclass_accuracy(
-            preds, target, num_classes, average=average
-        ).item()
-        metrics[f"f1_{average}"] = multiclass_f1_score(
-            preds, target, num_classes, average=average
-        ).item()
-    return metrics
-
-
-class LinearProbingDataModule(LightningDataModule):
-    def __init__(
-        self,
-        embeddings: Tensor,
-        labels: Tensor,
-        split_ratio: tuple[int, int, int],
-        batch_size: int,
-    ) -> None:
-        """Data module for linear probing.
-
-        Parameters
-        ----------
-        embeddings : Tensor
-            Input embeddings
-        labels : Tensor
-            Annotation labels
-        split_ratio : tuple[int, int, int]
-            Train/validate/test split ratio, must sum to 1.
-        batch_size : int
-            Batch sizes
-        """
-        super().__init__()
-        if not embeddings.shape[0] == labels.shape[0]:
-            raise ValueError("Number of samples in embeddings and labels must match.")
-        if sum(split_ratio) != 1.0:
-            raise ValueError("Split ratio must sum to 1.")
-        self.dataset = TensorDataset(embeddings.float(), labels.long())
-        self.split_ratio = split_ratio
-        self.batch_size = batch_size
-
-    def setup(self, stage: Literal["fit", "validate", "test", "predict"]) -> None:
-        n = len(self.dataset)
-        train_size = int(n * self.split_ratio[0])
-        val_size = int(n * self.split_ratio[1])
-        test_size = n - train_size - val_size
-        self.train_dataset, self.val_dataset, self.test_dataset = (
-            torch.utils.data.random_split(
-                self.dataset, [train_size, val_size, test_size]
-            )
-        )
-
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(self.train_dataset, batch_size=self.batch_size, shuffle=True)
-
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(self.val_dataset, batch_size=self.batch_size)
-
-    def test_dataloader(self) -> DataLoader:
-        return DataLoader(self.test_dataset, batch_size=self.batch_size)
-
-
-class LinearClassifier(LightningModule):
-    def __init__(self, in_features: int, out_features: int, lr: float) -> None:
-        """Linear classifier.
-
-        Parameters
-        ----------
-        in_features : int
-            Number of input feature channels
-        out_features : int
-            Number of output feature channels (number of classes)
-        lr : float
-            Learning rate
-        """
-        super().__init__()
-        self.fc = nn.Linear(in_features, out_features)
-        self.lr = lr
-        self.loss = nn.BCEWithLogitsLoss()
-
-    def forward(self, x: Tensor) -> Tensor:
-        return self.fc(x)
-
-    def _fit_step(self, batch, stage: str) -> Tensor:
-        x, y = batch
-        preds = self(x)
-        target = nn.functional.one_hot(y, num_classes=preds.shape[1]).float()
-        loss = self.loss(preds, target)
-        self.log(f"loss/{stage}", loss, on_epoch=True, on_step=False)
-        return loss
-
-    def training_step(self, batch, batch_idx: int) -> Tensor:
-        return self._fit_step(batch, stage="train")
-
-    def validation_step(self, batch, batch_idx: int) -> None:
-        _ = self._fit_step(batch, stage="val")
-
-    def configure_optimizers(
-        self,
-    ) -> tuple[list[optim.Optimizer], list[optim.lr_scheduler.LRScheduler]]:
-        return optim.AdamW(self.parameters())
-
-    def on_test_start(self) -> None:
-        self.test_labels: list[Tensor] = []
-        self.test_predictions: list[Tensor] = []
-
-    def test_step(self, batch, batch_idx: int) -> None:
-        x, y = batch
-        preds = self(x)
-        self.test_labels.append(y)
-        self.test_predictions.append(preds)
-
-    def on_test_epoch_end(self) -> None:
-        y = torch.cat(self.test_labels)
-        preds = torch.cat(self.test_predictions)
-        num_classes = self.fc.out_features
-        _logger.info("Test metrics:\n" + pformat(_test_metrics(preds, y, num_classes)))
-
-    def predict_step(self, x: Tensor) -> Tensor:
-        logits = self(x)
-        return torch.argmax(logits, dim=1)
-
-
-def train_and_test_linear_classifier(
-    embeddings: NDArray,
-    labels: NDArray,
-    num_classes: int,
-    trainer: Trainer,
-    split_ratio: tuple[int, int, int] = (0.4, 0.2, 0.4),
-    batch_size: int = 1024,
-    lr: float = 1e-3,
-) -> None:
-    """Train and test a linear classifier.
-
-    Parameters
-    ----------
-    embeddings : NDArray
-        Input embeddings, shape (n_samples, n_features).
-    labels : NDArray
-        Annotation labels, shape (n_samples,).
-    num_classes : int
-        Number of classes.
-    trainer : Trainer
-        Lightning Trainer object for training and testing.
-        Define the number of epochs, logging, etc.
-    split_ratio : tuple[int, int, int], optional
-        Train/validate/test split ratio, by default (0.4, 0.2, 0.4)
-    batch_size : int, optional
-        Batch size, by default 1024
-    lr : float, optional
-        Learning rate, by default 1e-3
-    """
-    if not isinstance(embeddings, np.ndarray) or not isinstance(labels, np.ndarray):
-        raise TypeError("Input embeddings and labels must be NumPy arrays.")
-    if not embeddings.ndim == 2:
-        raise ValueError("Input embeddings must have 2 dimensions.")
-    if not labels.ndim == 1:
-        raise ValueError("Labels must have 1 dimension.")
-    embeddings = torch.from_numpy(embeddings)
-    data = LinearProbingDataModule(
-        embeddings, torch.from_numpy(labels), split_ratio, batch_size
-    )
-    model = LinearClassifier(embeddings.shape[1], num_classes, lr)
-    trainer.fit(model, data)
-    trainer.test(model, data)
