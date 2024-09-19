@@ -10,13 +10,15 @@ from cmap import Colormap
 from lightning.pytorch import seed_everything
 from skimage.exposure import rescale_intensity
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.representation.evaluation import load_annotation
-from viscy.representation.lca import linear_from_binary_logistic_regression
+from viscy.representation.lca import (
+    AssembledClassifier,
+    linear_from_binary_logistic_regression,
+)
 from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 
 # %%
@@ -99,22 +101,6 @@ logistic_regression.fit(embeddings, infection_binary)
 
 # %%
 linear_classifier = linear_from_binary_logistic_regression(logistic_regression)
-
-
-# %%
-class AssembledClassifier(torch.nn.Module):
-    def __init__(self, model, classifier):
-        super().__init__()
-        self.model = model
-        self.classifier = classifier
-
-    def forward(self, x):
-        x = self.model.stem(x)
-        x = self.model.encoder(x)
-        x = self.classifier(x)
-        return x
-
-
 assembled_classifier = AssembledClassifier(model.model, linear_classifier).eval().cpu()
 
 # %%

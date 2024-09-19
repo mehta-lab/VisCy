@@ -17,6 +17,8 @@ from torchmetrics.functional.classification import (
     multiclass_f1_score,
 )
 
+from viscy.representation.contrastive import ContrastiveEncoder
+
 _logger = logging.getLogger("lightning.pytorch")
 
 
@@ -30,6 +32,19 @@ def linear_from_binary_logistic_regression(
     model.bias.data = bias
     model.eval()
     return model
+
+
+class AssembledClassifier(torch.nn.Module):
+    def __init__(self, model: ContrastiveEncoder, classifier: nn.Linear) -> None:
+        super().__init__()
+        self.model = model
+        self.classifier = classifier
+
+    def forward(self, x: Tensor) -> Tensor:
+        x = self.model.stem(x)
+        x = self.model.encoder(x)
+        x = self.classifier(x)
+        return x
 
 
 def _test_metrics(preds: Tensor, target: Tensor, num_classes: int) -> dict[str, float]:
