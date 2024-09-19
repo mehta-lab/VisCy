@@ -7,15 +7,18 @@ import pandas as pd
 import torch
 from captum.attr import IntegratedGradients
 from cmap import Colormap
-from lightning.pytorch import Trainer, seed_everything
-from lightning.pytorch.loggers import CSVLogger
+from lightning.pytorch import seed_everything
 from skimage.exposure import rescale_intensity
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.representation.evaluation import load_annotation
-from viscy.representation.lca import LinearClassifier, LinearProbingDataModule
+from viscy.representation.lca import (
+    AssembledClassifier,
+    fit_logistic_regression,
+    linear_from_binary_logistic_regression,
+)
 from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 
 # %%
@@ -83,55 +86,21 @@ infection = load_annotation(
 )
 
 # %%
-linear_data = LinearProbingDataModule(
-    embeddings=torch.from_numpy(features.values).float(),
-    labels=torch.from_numpy(infection.cat.codes.values).long(),
-    split_ratio=(0.4, 0.2, 0.4),
-    batch_size=2**14,
-)
-linear_data.setup("fit")
-
-linear_classifier = LinearClassifier(
-    in_features=features.shape[1], out_features=3, lr=0.001
-)
-
-log_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/test"
-)
-
-trainer = Trainer(
-    max_epochs=60,
-    logger=CSVLogger(log_path),
-    log_every_n_steps=1,
-)
-
-trainer.fit(linear_classifier, linear_data)
-losses = pd.read_csv(
-    log_path / "lightning_logs" / "version_0" / "metrics.csv", index_col="epoch"
-)
-losses = pd.merge(
-    losses["loss/train"].dropna(), losses["loss/val"].dropna(), on="epoch"
-)
-losses.plot()
+train_fovs = ["/A/3/7", "/A/3/8", "/A/3/9", "/B/4/7", "/B/4/8"]
 
 # %%
-linear_classifier = linear_classifier.eval()
-
+logistic_regression, data_split = fit_logistic_regression(
+    features.copy(),
+    infection.copy(),
+    train_fovs,
+    remove_background_class=True,
+    scale_features=False,
+    class_weight="balanced",
+    solver="liblinear",
+)
 
 # %%
-class AssembledClassifier(torch.nn.Module):
-    def __init__(self, model, classifier):
-        super().__init__()
-        self.model = model
-        self.classifier = classifier
-
-    def forward(self, x):
-        x = self.model.stem(x)
-        x = self.model.encoder(x)
-        x = self.classifier(x)
-        return x
-
-
+linear_classifier = linear_from_binary_logistic_regression(logistic_regression)
 assembled_classifier = AssembledClassifier(model.model, linear_classifier).eval().cpu()
 
 # %%
@@ -141,19 +110,18 @@ infection = pd.read_csv(
 )
 track_classes = infection[infection["fov_name"] == fov[1:]]
 track_classes = track_classes[track_classes["track_id"] == track]["infection_state"]
-track_classes
 
 
 # %%
-def attribute_sample(img, target, assembled_classifier):
+def attribute_sample(img, assembled_classifier):
     ig = IntegratedGradients(assembled_classifier, multiply_by_inputs=True)
     assembled_classifier.zero_grad()
-    attribution = ig.attribute(torch.from_numpy(img), target=target).numpy()
+    attribution = ig.attribute(torch.from_numpy(img)).numpy()
     return img, attribution
 
 
-def color_and_clim(heatmap, cmap):
-    lo, hi = np.percentile(heatmap, (1, 99))
+def color_and_clim(heatmap, cmap, low=1, high=99):
+    lo, hi = np.percentile(heatmap, (low, high))
     rescaled = rescale_intensity(heatmap.clip(lo, hi), out_range=(0, 1))
     return Colormap(cmap)(rescaled)
 
@@ -163,10 +131,9 @@ for sample in dm.predict_dataloader():
     img = sample["anchor"].numpy()
 
 # %%
-target = torch.from_numpy(track_classes.values).long()
 with torch.inference_mode():
-    probs = assembled_classifier(torch.from_numpy(img)).softmax(dim=1)
-img, attribution = attribute_sample(img, target, assembled_classifier)
+    probs = assembled_classifier(torch.from_numpy(img)).sigmoid()
+img, attribution = attribute_sample(img, assembled_classifier)
 
 # %%
 z_slice = 5
@@ -184,10 +151,20 @@ grid = np.concatenate(
 print(grid.shape)
 
 # %%
-f, ax = plt.subplots(6, 8, figsize=(16, 12))
-for i, (z_slice, a) in enumerate(zip(grid, ax.flatten())):
-    a.imshow(z_slice)
-    a.set_title(f"t={i}")
+selected_time_points = [0, 4, 8, 34]
+class_text = {0: "none", 1: "uninfected", 2: "infected"}
+
+sps = len(selected_time_points)
+f, ax = plt.subplots(1, sps, figsize=(4 * sps, 4))
+for time, a in zip(selected_time_points, ax.flatten()):
+    rendered = grid[time]
+    prob = probs[time].item()
+    a.imshow(rendered)
+    hpi = 3 + 0.5 * time
+    text_label = class_text[track_classes.iloc[time]]
+    a.set_title(
+        f"{hpi} HPI,\npredicted infection probability: {prob:.2f},\nannotation: {text_label}"
+    )
     a.axis("off")
 f.tight_layout()
 
