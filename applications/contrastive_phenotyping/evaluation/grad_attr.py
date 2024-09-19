@@ -9,7 +9,6 @@ from captum.attr import IntegratedGradients
 from cmap import Colormap
 from lightning.pytorch import seed_everything
 from skimage.exposure import rescale_intensity
-from sklearn.linear_model import LogisticRegression
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -17,6 +16,7 @@ from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.representation.evaluation import load_annotation
 from viscy.representation.lca import (
     AssembledClassifier,
+    fit_logistic_regression,
     linear_from_binary_logistic_regression,
 )
 from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
@@ -86,18 +86,18 @@ infection = load_annotation(
 )
 
 # %%
-selection = infection != "background"
-
-# scaler = StandardScaler()
-embeddings = features.values[selection]
-# embeddings = scaler.fit_transform(embeddings)
-
-infection_binary = infection.cat.codes.values[selection]
-embeddings.shape, infection_binary.shape
+train_fovs = ["/A/3/7", "/A/3/8", "/A/3/9", "/B/4/7", "/B/4/8"]
 
 # %%
-logistic_regression = LogisticRegression()
-logistic_regression.fit(embeddings, infection_binary)
+logistic_regression, data_split = fit_logistic_regression(
+    features.copy(),
+    infection.copy(),
+    train_fovs,
+    remove_background_class=True,
+    scale_features=False,
+    class_weight="balanced",
+    solver="liblinear",
+)
 
 # %%
 linear_classifier = linear_from_binary_logistic_regression(logistic_regression)
@@ -110,7 +110,6 @@ infection = pd.read_csv(
 )
 track_classes = infection[infection["fov_name"] == fov[1:]]
 track_classes = track_classes[track_classes["track_id"] == track]["infection_state"]
-track_classes
 
 
 # %%
