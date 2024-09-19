@@ -1,12 +1,11 @@
 """Linear probing of trained encoder based on cell state labels."""
 
-import logging
 from typing import Mapping
 
-import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
@@ -27,8 +26,35 @@ def fit_logistic_regression(
     solver="liblinear",
 ) -> tuple[
     LogisticRegression,
-    tuple[tuple[np.ndarray, np.ndarray], tuple[np.ndarray, np.ndarray]],
+    tuple[tuple[NDArray, NDArray], tuple[NDArray, NDArray]],
 ]:
+    """Fit a binary logistic regression classifier.
+
+    Parameters
+    ----------
+    features : DataArray
+        Xarray of features.
+    annotations : pd.Series
+        Categorical class annotations with label values starting from 0.
+        Must have 3 classes (when remove background is True) or 2 classes.
+    train_fovs : list[str]
+        List of FOVs to use for training. The rest will be used for testing.
+    remove_background_class : bool, optional
+        Remove background class (0), by default True
+    scale_features : bool, optional
+        Scale features, by default False
+    class_weight : Mapping | str | None, optional
+        Class weight for balancing, by default "balanced"
+    random_state : int | None, optional
+        Random state or seed, by default None
+    solver : str, optional
+        Solver for the regression problem, by default "liblinear"
+
+    Returns
+    -------
+    tuple[LogisticRegression, tuple[tuple[NDArray, NDArray], tuple[NDArray, NDArray]]]
+        Trained classifier and data split [[X_train, y_train], [X_test, y_test]].
+    """
     fov_selection = features["fov_name"].isin(train_fovs)
     train_selection = fov_selection
     test_selection = ~fov_selection
@@ -73,6 +99,18 @@ def fit_logistic_regression(
 def linear_from_binary_logistic_regression(
     logistic_regression: LogisticRegression,
 ) -> nn.Linear:
+    """Convert a binary logistic regression model to a ``torch.nn.Linear`` layer.
+
+    Parameters
+    ----------
+    logistic_regression : LogisticRegression
+        Trained logistic regression model.
+
+    Returns
+    -------
+    nn.Linear
+        Converted linear model.
+    """
     weights = torch.from_numpy(logistic_regression.coef_).float()
     bias = torch.from_numpy(logistic_regression.intercept_).float()
     model = nn.Linear(in_features=weights.shape[1], out_features=1)
@@ -83,6 +121,16 @@ def linear_from_binary_logistic_regression(
 
 
 class AssembledClassifier(torch.nn.Module):
+    """Assemble a contrastive encoder with a linear classifier.
+
+    Parameters
+    ----------
+    backbone : ContrastiveEncoder
+        Encoder backbone.
+    classifier : nn.Linear
+        Classifier head.
+    """
+
     def __init__(self, backbone: ContrastiveEncoder, classifier: nn.Linear) -> None:
         super().__init__()
         self.backbone = backbone
