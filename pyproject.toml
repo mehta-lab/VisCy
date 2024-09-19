@@ -35,7 +35,15 @@ metrics = [
 ]
 examples = ["napari", "jupyter", "jupytext"]
 
-visual = ["ipykernel", "graphviz", "torchview", "seaborn", "plotly", "nbformat"]
+visual = [
+    "ipykernel",
+    "graphviz",
+    "torchview",
+    "seaborn",
+    "plotly",
+    "nbformat",
+    "cmap",
+]
 
 dev = [
     "pytest",
