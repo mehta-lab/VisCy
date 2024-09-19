@@ -9,6 +9,7 @@ import torch
 import torch.nn as nn
 from lightning.pytorch import LightningDataModule, LightningModule, Trainer
 from numpy.typing import NDArray
+from sklearn.linear_model import LogisticRegression
 from torch import Tensor, optim
 from torch.utils.data import DataLoader, TensorDataset
 from torchmetrics.functional.classification import (
@@ -17,6 +18,18 @@ from torchmetrics.functional.classification import (
 )
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def linear_from_binary_logistic_regression(
+    logistic_regression: LogisticRegression,
+) -> nn.Linear:
+    weights = torch.from_numpy(logistic_regression.coef_).float()
+    bias = torch.from_numpy(logistic_regression.intercept_).float()
+    model = nn.Linear(in_features=weights.shape[1], out_features=1)
+    model.weight.data = weights
+    model.bias.data = bias
+    model.eval()
+    return model
 
 
 def _test_metrics(preds: Tensor, target: Tensor, num_classes: int) -> dict[str, float]:
