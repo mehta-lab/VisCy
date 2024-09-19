@@ -35,14 +35,14 @@ def linear_from_binary_logistic_regression(
 
 
 class AssembledClassifier(torch.nn.Module):
-    def __init__(self, model: ContrastiveEncoder, classifier: nn.Linear) -> None:
+    def __init__(self, backbone: ContrastiveEncoder, classifier: nn.Linear) -> None:
         super().__init__()
-        self.model = model
+        self.backbone = backbone
         self.classifier = classifier
 
     def forward(self, x: Tensor) -> Tensor:
-        x = self.model.stem(x)
-        x = self.model.encoder(x)
+        x = self.backbone.stem(x)
+        x = self.backbone.encoder(x)
         x = self.classifier(x)
         return x
 
