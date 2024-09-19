@@ -6,7 +6,7 @@ from viscy.representation.evaluation import load_annotation
 from viscy.representation.lca import fit_logistic_regression
 
 # %%
-TRAIN_FOVS = ["/A/3/7", "/A/3/8", "/A/3/9", "/B/4/7", "/B/4/8"]
+TRAIN_FOVS = ["/A/3/7", "/A/3/8", "/A/3/9", "/B/4/6", "/B/4/7"]
 
 path_embedding = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
