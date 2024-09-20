@@ -5,6 +5,7 @@ from typing import Mapping
 import pandas as pd
 import torch
 import torch.nn as nn
+from captum.attr import IntegratedGradients
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
@@ -118,6 +119,13 @@ def linear_from_binary_logistic_regression(
     model.bias.data = bias
     model.eval()
     return model
+
+
+def attribute_sample_binary(img, assembled_classifier, **kwargs):
+    ig = IntegratedGradients(assembled_classifier, **kwargs)
+    assembled_classifier.zero_grad()
+    attribution = ig.attribute(torch.from_numpy(img)).numpy()
+    return img, attribution
 
 
 class AssembledClassifier(torch.nn.Module):
