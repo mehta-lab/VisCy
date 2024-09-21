@@ -16,7 +16,6 @@ from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.representation.evaluation import load_annotation
 from viscy.representation.lca import (
     AssembledClassifier,
-    attribute_sample_binary,
     fit_logistic_regression,
     linear_from_binary_logistic_regression,
 )
@@ -167,27 +166,22 @@ for sample in dm.predict_dataloader():
     img = sample["anchor"].numpy()
 
 # %%
+img_tensor = torch.from_numpy(img)
+
 with torch.inference_mode():
-    infection_probs = assembled_classifier_infection(torch.from_numpy(img)).sigmoid()
-    division_probs = assembled_classifier_division(torch.from_numpy(img)).sigmoid()
+    infection_probs = assembled_classifier_infection(img_tensor).sigmoid()
+    division_probs = assembled_classifier_division(img_tensor).sigmoid()
 
 # %%
-img, infection_attribution = attribute_sample_binary(
-    img,
-    assembled_classifier_infection,
-    # multiply_by_inputs=False,
-)
-_, division_attribution = attribute_sample_binary(
-    img,
-    assembled_classifier_division,
-    # multiply_by_inputs=False,
-)
+infection_attribution = assembled_classifier_infection.attribute_sample_binary(
+    img_tensor  # , multiply_by_inputs=False
+).numpy()
+division_attribution = assembled_classifier_division.attribute_sample_binary(
+    img_tensor  # , multiply_by_inputs=False
+).numpy()
 
 
 # %%
-g_lim = 2e-3
-
-
 def clip_rescale(img, low, high):
     return rescale_intensity(img.clip(low, high), out_range=(0, 1))
 
@@ -197,6 +191,7 @@ def clim_percentile(heatmap, low=1, high=99):
     return clip_rescale(heatmap, lo, hi)
 
 
+g_lim = 4e-3
 z_slice = 5
 phase = clim_percentile(img[:, 0, z_slice])
 rfp = clim_percentile(img[:, 1, z_slice])
@@ -231,11 +226,11 @@ for i, time in enumerate(selected_time_points):
     div_binary = str(selected_div_states[i]).lower()
     ax[0, i].imshow(img_render[time], cmap="gray")
     ax[0, i].set_title(f"{hpi} HPI")
-    ax[1, i].imshow(inf_render[time], cmap=icefire)
+    ax[1, i].imshow(inf_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[1, i].set_title(
         f"infected: {prob:.3f}\n" f"label: {inf_binary}",
     )
-    ax[2, i].imshow(div_render[time], cmap=icefire)
+    ax[2, i].imshow(div_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[2, i].set_title(
         f"dividing: {division_probs[time].item():.3f}\n" f"label: {div_binary}",
     )
@@ -246,7 +241,7 @@ cbar = f.colorbar(
     mpl.cm.ScalarMappable(norm=norm, cmap=icefire),
     orientation="vertical",
     ax=ax[1:].ravel().tolist(),
-    format=mpl.ticker.StrMethodFormatter("{x}")
+    format=mpl.ticker.StrMethodFormatter("{x:.3f}"),
 )
 cbar.set_label("integrated gradients")
 

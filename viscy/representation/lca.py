@@ -121,13 +121,6 @@ def linear_from_binary_logistic_regression(
     return model
 
 
-def attribute_sample_binary(img, assembled_classifier, **kwargs):
-    ig = IntegratedGradients(assembled_classifier, **kwargs)
-    assembled_classifier.zero_grad()
-    attribution = ig.attribute(torch.from_numpy(img)).numpy()
-    return img, attribution
-
-
 class AssembledClassifier(torch.nn.Module):
     """Assemble a contrastive encoder with a linear classifier.
 
@@ -157,3 +150,23 @@ class AssembledClassifier(torch.nn.Module):
             x = self.scale_features(x)
         x = self.classifier(x)
         return x
+
+    def attribute_sample_binary(self, img: Tensor, **kwargs) -> Tensor:
+        """Compute integrated gradients for a binary classification task.
+
+        Parameters
+        ----------
+        img : Tensor
+            input image
+        **kwargs : Any
+            Keyword arguments for the integrated gradients algorithm.
+
+        Returns
+        -------
+        attribution : Tensor
+            Integrated gradients attribution map.
+        """
+        self.zero_grad()
+        ig = IntegratedGradients(self, **kwargs)
+        attribution = ig.attribute(img)
+        return attribution
