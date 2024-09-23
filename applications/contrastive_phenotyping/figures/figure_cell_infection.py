@@ -16,7 +16,7 @@ from sklearn.decomposition import PCA
 
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks, load_annotation
+from viscy.representation.evaluation import load_annotation
 
 
 # %% Paths and parameters.
