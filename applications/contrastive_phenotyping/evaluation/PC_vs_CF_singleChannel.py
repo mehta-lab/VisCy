@@ -221,7 +221,7 @@ correlation_pca = correlation.drop(columns=["UMAP1", "UMAP2"])
 
 plt.figure(figsize=(20, 5))
 sns.heatmap(
-    correlation_pca.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4"]).loc["PCA1":"PCA4", :],
+    correlation_pca.drop(columns=["PCA1", "PCA2", "PCA3"]).loc["PCA1":"PCA3", :],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
@@ -229,7 +229,9 @@ sns.heatmap(
 plt.title("Correlation between PCA features and computed features")
 plt.xlabel("Computed Features")
 plt.ylabel("PCA Features")
-plt.show()
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_umap_phaseonly.svg"
+)
 
 # %% display UMAP correlation as a heatmap
 
@@ -254,7 +256,9 @@ p_values = pd.DataFrame(index=correlation.index, columns=correlation.columns)
 for i in correlation.index:
     for j in correlation.columns:
         if i != j:
-            p_values.loc[i, j] = spearmanr(feature_df_removed[i], feature_df_removed[j])[1]
+            p_values.loc[i, j] = spearmanr(
+                feature_df_removed[i], feature_df_removed[j]
+            )[1]
 
 p_values = p_values.astype(float)
 
@@ -266,11 +270,13 @@ p_values_flat = p_values.values.flatten()
 # Create a list of feature names for the flattened correlation and p-values
 feature_names = [f"{i}_{j}" for i in correlation.index for j in correlation.columns]
 
-data = pd.DataFrame({
-    "Correlation": correlation_flat,
-    "-log10(p-value)": -np.log10(p_values_flat),
-    "feature_names": feature_names
-})
+data = pd.DataFrame(
+    {
+        "Correlation": correlation_flat,
+        "-log10(p-value)": -np.log10(p_values_flat),
+        "feature_names": feature_names,
+    }
+)
 
 # Create an interactive scatter plot using Plotly
 fig = px.scatter(
@@ -280,10 +286,13 @@ fig = px.scatter(
     title="Volcano plot showing significance of correlation",
     labels={"Correlation": "Correlation", "-log10(p-value)": "-log10(p-value)"},
     opacity=0.5,
-    hover_data=["feature_names"]
+    hover_data=["feature_names"],
 )
 
 fig.show()
-
+# Save the interactive volcano plot as an HTML file
+fig.write_html(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/volcano_plot_1chan.html"
+)
 
 # %%
