@@ -150,11 +150,11 @@ selected_renders = [renders[i] for i in track_df.index]
 
 
 # %%
-fig = plt.figure(layout="constrained", figsize=(5.5, 2.5))
-subfigs = fig.subfigures(1, 2, wspace=0.05, width_ratios=[3, 5])
+fig = plt.figure(layout="constrained", figsize=(5.5, 2.7))
+subfigs = fig.subfigures(1, 2, wspace=0.02, width_ratios=[4, 7])
 
 umap_fig = subfigs[0]
-umap_fig.suptitle("A", horizontalalignment="left", x=0, y=1.01)
+umap_fig.suptitle("A", horizontalalignment="left", x=0, y=1)
 umap_ax = umap_fig.subplots(1, 1)
 umap_ax.invert_xaxis()
 
@@ -201,14 +201,14 @@ umap_ax.legend(
     labels=labels[1:5] + labels[6:],
     loc="upper center",
     ncol=2,
-    bbox_to_anchor=(0.5, -0.3),
+    bbox_to_anchor=(0.5, -0.2),
     labelspacing=0.2,
     handletextpad=0,
     fontsize=8,
 )
 
 img_fig = subfigs[1]
-img_fig.suptitle("B", horizontalalignment="left", x=-0.0, y=1.01)
+img_fig.suptitle("B", horizontalalignment="left", x=-0, y=1)
 img_axes = img_fig.subplots(3, 4, sharex=True, sharey=True)
 
 for i, (ax, rend, time, track_name) in enumerate(
