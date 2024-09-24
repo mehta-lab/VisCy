@@ -257,7 +257,8 @@ cbar.set_label("occlusion attribution")
 
 # %%
 f.savefig(
-    "/home/ziwen.liu/gdrive/publications/learning_impacts_of_infection/fig_manuscript/fig_explanation/fig_explanation_patch12_stride4.pdf",
+    Path.home()
+    / "gdrive/publications/learning_impacts_of_infection/fig_manuscript/fig_explanation/fig_explanation_patch12_stride4.pdf",
     dpi=300,
 )
 
