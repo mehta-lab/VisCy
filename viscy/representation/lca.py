@@ -5,7 +5,7 @@ from typing import Mapping
 import pandas as pd
 import torch
 import torch.nn as nn
-from captum.attr import IntegratedGradients
+from captum.attr import IntegratedGradients, Occlusion
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
@@ -151,7 +151,7 @@ class AssembledClassifier(torch.nn.Module):
         x = self.classifier(x)
         return x
 
-    def attribute_sample_binary(self, img: Tensor, **kwargs) -> Tensor:
+    def attribute_integrated_gradients(self, img: Tensor, **kwargs) -> Tensor:
         """Compute integrated gradients for a binary classification task.
 
         Parameters
@@ -159,7 +159,7 @@ class AssembledClassifier(torch.nn.Module):
         img : Tensor
             input image
         **kwargs : Any
-            Keyword arguments for the integrated gradients algorithm.
+            Keyword arguments for ``IntegratedGradients()``.
 
         Returns
         -------
@@ -170,3 +170,21 @@ class AssembledClassifier(torch.nn.Module):
         ig = IntegratedGradients(self, **kwargs)
         attribution = ig.attribute(img)
         return attribution
+
+    def attribute_occlusion(self, img: Tensor, **kwargs) -> Tensor:
+        """Compute occlusion-based attribution for a binary classification task.
+
+        Parameters
+        ----------
+        img : Tensor
+            input image
+        **kwargs : Any
+            Keyword arguments for the ``Occlusion.attribute()``.
+
+        Returns
+        -------
+        attribution : Tensor
+            Occlusion attribution map.
+        """
+        oc = Occlusion(self)
+        return oc.attribute(img, **kwargs)

@@ -129,7 +129,9 @@ linear_classifier_infection = linear_from_binary_logistic_regression(
     logistic_regression_infection
 )
 assembled_classifier_infection = (
-    AssembledClassifier(model.model, linear_classifier_infection).eval().cpu()
+    AssembledClassifier(model.model, linear_classifier_infection)
+    .eval()
+    .to(model.device)
 )
 
 # %%
@@ -137,7 +139,7 @@ linear_classifier_division = linear_from_binary_logistic_regression(
     logistic_regression_division
 )
 assembled_classifier_division = (
-    AssembledClassifier(model.model, linear_classifier_division).eval().cpu()
+    AssembledClassifier(model.model, linear_classifier_division).eval().to(model.device)
 )
 
 # %%
@@ -166,19 +168,27 @@ for sample in dm.predict_dataloader():
     img = sample["anchor"].numpy()
 
 # %%
-img_tensor = torch.from_numpy(img)
+img_tensor = torch.from_numpy(img).to(model.device)
 
 with torch.inference_mode():
     infection_probs = assembled_classifier_infection(img_tensor).sigmoid()
     division_probs = assembled_classifier_division(img_tensor).sigmoid()
 
 # %%
-infection_attribution = assembled_classifier_infection.attribute_sample_binary(
-    img_tensor  # , multiply_by_inputs=False
-).numpy()
-division_attribution = assembled_classifier_division.attribute_sample_binary(
-    img_tensor  # , multiply_by_inputs=False
-).numpy()
+attr_kwargs = dict(
+    img=img_tensor,
+    sliding_window_shapes=(1, 15, 12, 12),
+    strides=(1, 15, 4, 4),
+    show_progress=True,
+)
+
+
+infection_attribution = (
+    assembled_classifier_infection.attribute_occlusion(**attr_kwargs).cpu().numpy()
+)
+division_attribution = (
+    assembled_classifier_division.attribute_occlusion(**attr_kwargs).cpu().numpy()
+)
 
 
 # %%
@@ -191,7 +201,7 @@ def clim_percentile(heatmap, low=1, high=99):
     return clip_rescale(heatmap, lo, hi)
 
 
-g_lim = 4e-3
+g_lim = 1
 z_slice = 5
 phase = clim_percentile(img[:, 0, z_slice])
 rfp = clim_percentile(img[:, 1, z_slice])
@@ -241,13 +251,13 @@ cbar = f.colorbar(
     mpl.cm.ScalarMappable(norm=norm, cmap=icefire),
     orientation="vertical",
     ax=ax[1:].ravel().tolist(),
-    format=mpl.ticker.StrMethodFormatter("{x:.3f}"),
+    format=mpl.ticker.StrMethodFormatter("{x:.1f}"),
 )
-cbar.set_label("integrated gradients")
+cbar.set_label("occlusion attribution")
 
 # %%
 f.savefig(
-    "/home/ziwen.liu/gdrive/publications/learning_impacts_of_infection/fig_manuscript/fig_explanation/fig_explanation.pdf",
+    "/home/ziwen.liu/gdrive/publications/learning_impacts_of_infection/fig_manuscript/fig_explanation/fig_explanation_patch12_stride4.pdf",
     dpi=300,
 )
 
