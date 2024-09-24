@@ -69,8 +69,8 @@ ax.xaxis.set_major_formatter(fmt)
 ax.yaxis.set_major_formatter(fmt)
 
 # %%
-fovs = ["/0/6/000000", "/0/6/000002", "/0/6/001000"]
-tracks = [14, 34, 38]
+fovs = ["/0/3/002000", "/0/6/000000", "/0/6/000002", "/0/6/001000"]
+tracks = [24, 14, 34, 38]
 
 
 track_features = xr.concat(
@@ -130,7 +130,7 @@ def render(img, cmaps: list[str]):
 
 renders = []
 
-f, ax = plt.subplots(3, 12, figsize=(12, 4))
+f, ax = plt.subplots(4, 12, figsize=(12, 4))
 for sample, a in zip(ds, ax.flatten()):
     img = sample["anchor"][1:].numpy().max(1)
     rend = render(img, ["magenta", "green"])
@@ -151,10 +151,10 @@ selected_renders = [renders[i] for i in track_df.index]
 
 # %%
 fig = plt.figure(layout="constrained", figsize=(5.5, 2.5))
-subfigs = fig.subfigures(1, 2, wspace=0.1)
+subfigs = fig.subfigures(1, 2, wspace=0.05, width_ratios=[3, 5])
 
 umap_fig = subfigs[0]
-umap_fig.suptitle("A", horizontalalignment="left", x=0, y=1)
+umap_fig.suptitle("A", horizontalalignment="left", x=0, y=1.01)
 umap_ax = umap_fig.subplots(1, 1)
 umap_ax.invert_xaxis()
 
@@ -167,7 +167,7 @@ sns.scatterplot(
     y=track_features["UMAP2"],
     ax=umap_ax,
     hue=track_features["fov_name"],
-    size=20,
+    s=5,
     legend=False,
 )
 
@@ -177,11 +177,13 @@ sns.lineplot(
     ax=umap_ax,
     hue=track_features["fov_name"],
     legend=False,
+    size=0.5,
 )
 
 hpi = (track_df["t"].reset_index(0, drop=True) * 2 + 2.5).astype(str) + " HPI"
 track_names = pd.Series(
-    np.concatenate([[t] * 3 for t in ["Track 1", "Track 2", "Track 3"]]), name="track"
+    np.concatenate([[t] * 3 for t in ["Track 1", "Track 2", "Track 3", "Track 4"]]),
+    name="track",
 )
 sns.scatterplot(
     x=selected_features["UMAP1"],
@@ -189,34 +191,34 @@ sns.scatterplot(
     ax=umap_ax,
     style=hpi,
     markers=["P", "s", "D"],
-    s=50,
+    s=20,
     hue=track_names,
     # legend=False,
 )
 handles, labels = umap_ax.get_legend_handles_labels()
 umap_ax.legend(
-    handles=handles[1:4] + handles[5:],
-    labels=labels[1:4] + labels[5:],
-    loc="lower center",
+    handles=handles[1:5] + handles[6:],
+    labels=labels[1:5] + labels[6:],
+    loc="upper center",
     ncol=2,
-    # bbox_to_anchor=(0.5, -0.3),
-    labelspacing=0.1,
+    bbox_to_anchor=(0.5, -0.3),
+    labelspacing=0.2,
     handletextpad=0,
     fontsize=8,
 )
 
 img_fig = subfigs[1]
-img_fig.suptitle("B", horizontalalignment="left", x=-0.05, y=1)
-img_axes = img_fig.subplots(3, 3, sharex=True, sharey=True)
+img_fig.suptitle("B", horizontalalignment="left", x=-0.0, y=1.01)
+img_axes = img_fig.subplots(3, 4, sharex=True, sharey=True)
 
 for i, (ax, rend, time, track_name) in enumerate(
-    zip(img_axes.flatten(), selected_renders, hpi.to_list(), track_names)
+    zip(img_axes.T.flatten(), selected_renders, hpi.to_list(), track_names)
 ):
     ax.imshow(rend)
     if i % 3 == 0:
-        ax.set_ylabel(track_name)
+        ax.set_title(track_name)
     if i < 3:
-        ax.set_title(f"{time}")
+        ax.set_ylabel(f"{time}")
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -225,7 +227,6 @@ for sf in subfigs:
         fmt = mpl.ticker.StrMethodFormatter("{x:.0f}")
         a.xaxis.set_major_formatter(fmt)
         a.yaxis.set_major_formatter(fmt)
-
 
 # %%
 fig.savefig(
