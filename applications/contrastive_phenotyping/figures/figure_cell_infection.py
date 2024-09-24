@@ -427,15 +427,6 @@ Feb_split = combined_data[
 June_split = combined_data[combined_data["fov_name"].str.contains("/0")]
 
 sns.scatterplot(
-    x=Feb_split["UMAP1"],
-    y=Feb_split["UMAP2"],
-    hue=Feb_split["infection"],
-    palette={1: "steelblue", 2: "orangered"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-sns.scatterplot(
     x=June_split["UMAP1"],
     y=June_split["UMAP2"],
     hue=June_split["predicted_infection"],
@@ -444,21 +435,34 @@ sns.scatterplot(
     s=7,
     alpha=0.8,
 )
+sns.scatterplot(
+    x=Feb_split["UMAP1"],
+    y=Feb_split["UMAP2"],
+    hue=Feb_split["infection"],
+    palette={1: "steelblue", 2: "orange"},
+    hue_order=[1, 2],
+    s=7,
+    alpha=0.8,
+)
 plt.legend([], [], frameon=False)
 # plt.savefig('/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_infection.png', format='png', dpi=300)
 
 # plot the scatterplot hue well name '/A' and '/B' are blue and '/0' are red
+combined_data["color"] = combined_data["fov_name"].apply(
+    lambda x: "brown" if x.startswith("/0") else "green"
+)
+
 sns.scatterplot(
     x=combined_data["UMAP1"],
     y=combined_data["UMAP2"],
-    hue=combined_data["fov_name"].apply(
-        lambda x: "blue" if x.startswith("/0") else "red"
-    ),
+    hue="color",
+    palette={"green": "green", "brown": "brown"},
+    data=combined_data,
     s=7,
-    alpha=0.8,
+    alpha=0.2,  # Increased transparency
 )
-plt.xlim(5, 15)
-plt.ylim(-10, 10)
+plt.xlim(-5, 5)
+plt.ylim(-2, 20)
 plt.legend([], [], frameon=False)
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_well.png",
@@ -476,8 +480,8 @@ sns.scatterplot(
     s=7,
     alpha=0.8,
 )
-plt.xlim(5, 15)
-plt.ylim(-10, 10)
+plt.xlim(-5, 5)
+plt.ylim(-2, 20)
 plt.legend([], [], frameon=False)
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_predicted_infection.png",
@@ -519,38 +523,44 @@ plt.plot(
     infected_true_cntrl,
     label="mock true",
     color="steelblue",
+    linestyle="--",
 )
 plt.plot(
     time_points_test * 0.5 + 3,
     infected_test_cntrl,
     label="mock predicted",
     color="blue",
+    marker="+",
 )
 plt.plot(
     time_points_test * 0.5 + 3,
     infected_true_infected,
     label="MOI true",
-    color="orangered",
+    color="orange",
+    linestyle="--",
 )
 plt.plot(
     time_points_test * 0.5 + 3,
     infected_test_infected,
     label="MOI predicted",
     color="red",
+    marker="+",
 )
 plt.plot(
     time_points_june * 2 + 3,
     infected_june_cntrl,
     label="mock new predicted",
-    color="green",
+    color="blue",
+    marker="o",
 )
 plt.plot(
     time_points_june * 2 + 3,
     infected_june_infected,
     label="MOI new predicted",
-    color="brown",
+    color="red",
+    marker="o",
 )
-plt.xlabel("Time (hours)")
+plt.xlabel("HPI")
 plt.ylabel("Infected percentage")
 plt.legend()
 plt.savefig(
