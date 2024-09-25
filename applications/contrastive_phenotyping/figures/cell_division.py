@@ -8,15 +8,15 @@ import seaborn as sns
 import plotly.express as px
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 import matplotlib.pyplot as plt
 
 # %%
 # single channel. with temporal regularizations
-# dataset = read_embedding_dataset(
-#     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval_phase/predictions/epoch_186/1chan_128patch_186ckpt_Febtest.zarr"
-# )
-# dataset
+dataset = read_embedding_dataset(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval_phase/predictions/epoch_186/1chan_128patch_186ckpt_Febtest.zarr"
+)
+dataset
 
 # single cahnnel, without temporal regularizations
 # dataset = read_embedding_dataset(
@@ -25,10 +25,10 @@ import matplotlib.pyplot as plt
 # dataset
 
 # two channel, with temporal regularizations
-dataset = read_embedding_dataset(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178_gt_tracks.zarr"
-)
-dataset
+# dataset = read_embedding_dataset(
+#     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178_gt_tracks.zarr"
+# )
+# dataset
 
 # two channel, without temporal regularizations
 # dataset = read_embedding_dataset(
@@ -104,16 +104,16 @@ cell_daughter2 = features[(features["fov_name"].str.contains("A/3/7")) & (featur
 
 # Adding arrows to indicate trajectory direction
 def add_arrows(df, color):
-    for i in range(len(df) - 1):
+    for i in range((df.shape[0]) - 1):
         start = df.iloc[i]
         end = df.iloc[i + 1]
         arrow = FancyArrowPatch(
             (start['UMAP1'], start['UMAP2']),
             (end['UMAP1'], end['UMAP2']),
             color=color,
-            arrowstyle='-|>',
-            mutation_scale=8,  # reduce the size of arrowhead by half
-            lw=1,
+            arrowstyle='->',
+            mutation_scale=20,  # reduce the size of arrowhead by half
+            lw=2,
             shrinkA=0,
             shrinkB=0,
         )  
@@ -124,7 +124,7 @@ def add_arrows(df, color):
 # tried A/3/7, 18 to 19 & 20
 # tried A/3/8, 23 to 24 & 25
 
-sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=division, palette={'interphase': "steelblue", 1: "green", 'mitosis': "orangered"}, s=7, alpha=0.8)
+sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=division, palette={'interphase': "steelblue", 1: "green", 'mitosis': "orangered"}, s=7, alpha=0.5)
 # sns.lineplot(x=cell_parent["UMAP1"], y=cell_parent["UMAP2"], color='black', linewidth=1)
 # sns.lineplot(x=cell_daughter1["UMAP1"], y=cell_daughter1["UMAP2"], color='red', linewidth=1)
 # sns.lineplot(x=cell_daughter2["UMAP1"], y=cell_daughter2["UMAP2"], color='blue', linewidth=1)
@@ -138,33 +138,33 @@ plt.xlabel('UMAP1')
 plt.ylabel('UMAP2')
 # plt.title('UMAP with Trajectory Direction')
 # plt.legend(title='Division Phase')
-plt.xlim(-7, 11)
-plt.ylim(5, 17)
+plt.xlim(2, 18)
+plt.ylim(-2, 18)
 plt.legend([],[], frameon=False)
 # plt.show()
 
 # single channel, with temporal regularizations
-# plt.savefig(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel.png",
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel.png",
     dpi=300
-# )
+)
 
 # single channel, without temporal regularizations
 # plt.savefig(
 #     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel_woT.png",
-    dpi=300
+#     dpi=300
 # )
 
 # two channel, with temporal regularizations
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png",
-    dpi=300
-)
+# plt.savefig(
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel.png",
+#     dpi=300
+# )
 
 # two channel, without temporal regularizations
 # plt.savefig(
 #     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png",
-    dpi=300
+#     dpi=300
 # )
 
 # %% 
