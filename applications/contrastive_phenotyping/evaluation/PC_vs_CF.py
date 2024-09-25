@@ -6,6 +6,7 @@
 # %%
 from pathlib import Path
 import sys
+import os
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
@@ -50,19 +51,8 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-# %% umap analsis of the features
-
 # load all unprojected features:
 features = embedding_dataset["features"]
-scaled_features = StandardScaler().fit_transform(features.values)
-
-umap = UMAP()
-embedding = umap.fit_transform(features.values)
-features = (
-    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-    .assign_coords(UMAP2=("sample", embedding[:, 1]))
-    .set_index(sample=["UMAP1", "UMAP2"], append=True)
-)
 
 # %% PCA analysis of the features
 
@@ -325,14 +315,14 @@ plt.savefig(
 # %% plot PCA vs set of computed features
 
 set_features = [
-    "Sensor Area",
     "Fluor radial profile",
+    "Homogeneity Phase",
+    "Phase IQR",
+    "Phase Standard Deviation",
+    "Sensor Area",
+    "Homogeneity Fluor",
     "Contrast Fluor",
     "Phase radial profile",
-    "Phase Standard Deviation",
-    "Phase IQR",
-    "Homogeneity Phase",
-    "Homogeneity Fluor",
 ]
 
 plt.figure(figsize=(8, 10))
@@ -349,26 +339,7 @@ plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures.svg"
 )
 
-# %% display UMAP correlation as a heatmap
-
-plt.figure(figsize=(20, 5))
-sns.heatmap(
-    correlation.drop(columns=["UMAP1", "UMAP2"]).loc["UMAP1":"UMAP2", :],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-)
-plt.title("Correlation between UMAP features and computed features")
-plt.xlabel("Computed Features")
-plt.ylabel("UMAP Features")
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan.svg"
-)
-
 # %% find the cell patches with the highest and lowest value in each feature
-
-import os
-
 
 def save_patches(fov_name, track_id):
     data_path = Path(

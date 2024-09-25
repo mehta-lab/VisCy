@@ -50,19 +50,8 @@ normalizations = None
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-# %% umap analsis of the features
-
 # load all unprojected features:
 features = embedding_dataset["features"]
-scaled_features = StandardScaler().fit_transform(features.values)
-
-umap = UMAP()
-embedding = umap.fit_transform(features.values)
-features = (
-    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-    .assign_coords(UMAP2=("sample", embedding[:, 1]))
-    .set_index(sample=["UMAP1", "UMAP2"], append=True)
-)
 
 # %% PCA analysis of the features
 
@@ -213,41 +202,6 @@ feature_df_removed = features.drop(
 
 # Compute correlation between PCA features and computed features
 correlation = feature_df_removed.corr(method="spearman")
-
-# %% display PCA correlation as a heatmap
-
-# remove UMAP compnents from the correlation matrix before plotting
-correlation_pca = correlation.drop(columns=["UMAP1", "UMAP2"])
-
-plt.figure(figsize=(20, 5))
-sns.heatmap(
-    correlation_pca.drop(columns=["PCA1", "PCA2", "PCA3"]).loc["PCA1":"PCA3", :],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-)
-plt.title("Correlation between PCA features and computed features")
-plt.xlabel("Computed Features")
-plt.ylabel("PCA Features")
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_umap_phaseonly.svg"
-)
-
-# %% display UMAP correlation as a heatmap
-
-plt.figure(figsize=(20, 5))
-sns.heatmap(
-    correlation.drop(columns=["UMAP1", "UMAP2"]).loc["UMAP1":"UMAP2", :],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-)
-plt.title("Correlation between UMAP features and computed features")
-plt.xlabel("Computed Features")
-plt.ylabel("UMAP Features")
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_phaseonly.svg"
-)
 
 # %% calculate the p-value and draw volcano plot to show the significance of the correlation
 
