@@ -1,5 +1,3 @@
-
-
 # %% figures for visualizing the results of cell division
 
 from pathlib import Path
@@ -58,6 +56,7 @@ features
 
 # %%
 
+
 def load_annotation(da, path, name, categories: dict | None = None):
     annotation = pd.read_csv(path)
     # annotation_columns = annotation.columns.tolist()
@@ -72,9 +71,12 @@ def load_annotation(da, path, name, categories: dict | None = None):
         selected = selected.astype("category").cat.rename_categories(categories)
     return selected
 
+
 # %%
 
-ann_root = Path("/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt")
+ann_root = Path(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt"
+)
 
 division = load_annotation(
     features,
@@ -84,23 +86,37 @@ division = load_annotation(
 )
 
 # %%
-sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=division, palette={'interphase': "steelblue", 1: "green", 'mitosis': "orangered"}, s=7, alpha=0.8)
+sns.scatterplot(
+    x=features["UMAP1"],
+    y=features["UMAP2"],
+    hue=division,
+    palette={"interphase": "steelblue", 1: "green", "mitosis": "orangered"},
+    s=7,
+    alpha=0.8,
+)
 plt.show()
 # plt.savefig(
 #     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/UMAP_cellDiv_GTtracking_sc_woT.svg"
 # )
 
 # %%
-no_inter = division[division == 'interphase'].count()
-no_div = division[division == 'mitosis'].count()
+no_inter = division[division == "interphase"].count()
+no_div = division[division == "mitosis"].count()
 
 # %% plot the trajectory quiver of one cell on top of the UMAP
 
 from matplotlib.patches import FancyArrowPatch
 
-cell_parent = features[(features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([13]))]   
-cell_daughter1 = features[(features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([14]))]
-cell_daughter2 = features[(features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([15]))]
+cell_parent = features[
+    (features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([13]))
+]
+cell_daughter1 = features[
+    (features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([14]))
+]
+cell_daughter2 = features[
+    (features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([15]))
+]
+
 
 # Adding arrows to indicate trajectory direction
 def add_arrows(df, color):
@@ -108,45 +124,53 @@ def add_arrows(df, color):
         start = df.iloc[i]
         end = df.iloc[i + 1]
         arrow = FancyArrowPatch(
-            (start['UMAP1'], start['UMAP2']),
-            (end['UMAP1'], end['UMAP2']),
+            (start["UMAP1"], start["UMAP2"]),
+            (end["UMAP1"], end["UMAP2"]),
             color=color,
-            arrowstyle='->',
+            arrowstyle="->",
             mutation_scale=20,  # reduce the size of arrowhead by half
             lw=2,
             shrinkA=0,
             shrinkB=0,
-        )  
+        )
         plt.gca().add_patch(arrow)
+
 
 # tried A/3/7, 8 to 9 & 10
 # tried A/3/7, 13 to 14 & 15
 # tried A/3/7, 18 to 19 & 20
 # tried A/3/8, 23 to 24 & 25
 
-sns.scatterplot(x=features["UMAP1"], y=features["UMAP2"], hue=division, palette={'interphase': "steelblue", 1: "green", 'mitosis': "orangered"}, s=7, alpha=0.5)
+sns.scatterplot(
+    x=features["UMAP1"],
+    y=features["UMAP2"],
+    hue=division,
+    palette={"interphase": "steelblue", 1: "green", "mitosis": "orangered"},
+    s=7,
+    alpha=0.5,
+)
 # sns.lineplot(x=cell_parent["UMAP1"], y=cell_parent["UMAP2"], color='black', linewidth=1)
 # sns.lineplot(x=cell_daughter1["UMAP1"], y=cell_daughter1["UMAP2"], color='red', linewidth=1)
 # sns.lineplot(x=cell_daughter2["UMAP1"], y=cell_daughter2["UMAP2"], color='blue', linewidth=1)
 
 # Apply arrows to the trajectories
-add_arrows(cell_parent.to_dataframe(), color='black')
-add_arrows(cell_daughter1.to_dataframe(), color='red')
-add_arrows(cell_daughter2.to_dataframe(), color='blue')
+add_arrows(cell_parent.to_dataframe(), color="black")
+add_arrows(cell_daughter1.to_dataframe(), color="red")
+add_arrows(cell_daughter2.to_dataframe(), color="blue")
 
-plt.xlabel('UMAP1')
-plt.ylabel('UMAP2')
+plt.xlabel("UMAP1")
+plt.ylabel("UMAP2")
 # plt.title('UMAP with Trajectory Direction')
 # plt.legend(title='Division Phase')
 plt.xlim(2, 18)
 plt.ylim(-2, 18)
-plt.legend([],[], frameon=False)
+plt.legend([], [], frameon=False)
 # plt.show()
 
 # single channel, with temporal regularizations
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel.png",
-    dpi=300
+    dpi=300,
 )
 
 # single channel, without temporal regularizations
@@ -167,4 +191,4 @@ plt.savefig(
 #     dpi=300
 # )
 
-# %% 
+# %%

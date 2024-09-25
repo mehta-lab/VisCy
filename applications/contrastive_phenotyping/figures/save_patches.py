@@ -1,4 +1,3 @@
-
 # %% script to save 128 by 128 image patches from napari viewer
 
 import napari
@@ -21,7 +20,7 @@ tracks_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
-fov_name = '/B/4/6'
+fov_name = "/B/4/6"
 track_id = 52
 source_channel = ["Phase3D", "RFP"]
 
@@ -55,9 +54,15 @@ fluor = whole[:, 1]
 
 # %% save as numpy files
 
-out_dir = '/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/data/'
-fov_name_out = fov_name.replace('/', '_')
-np.save((os.path.join(out_dir,"phase"+fov_name_out+"_"+str(track_id)+".npy")), phase)
-np.save((os.path.join(out_dir,"fluor"+fov_name_out+"_"+str(track_id)+".npy")), fluor)
+out_dir = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/data/"
+fov_name_out = fov_name.replace("/", "_")
+np.save(
+    (os.path.join(out_dir, "phase" + fov_name_out + "_" + str(track_id) + ".npy")),
+    phase,
+)
+np.save(
+    (os.path.join(out_dir, "fluor" + fov_name_out + "_" + str(track_id) + ".npy")),
+    fluor,
+)
 
 # %%
