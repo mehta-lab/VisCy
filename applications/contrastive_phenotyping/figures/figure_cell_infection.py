@@ -567,3 +567,80 @@ plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/infected_percentage_withJune.svg",
     format="svg",
 )
+
+# %% appendix video for infection dynamics umap, Feb test data, colored by human revised annotation
+
+for time in range(48):
+    plt.clf()
+    sns.scatterplot(
+        data=data_test[(data_test["time"] == time)],
+        x="UMAP1",
+        y="UMAP2",
+        hue="infection",
+        palette={1: "steelblue", 2: "orangered"},
+        hue_order=[1, 2],
+        s=20,  
+        alpha=0.8,
+    )
+    handles, _ = plt.gca().get_legend_handles_labels()
+    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.suptitle(f"Time: {time*0.5+3} HPI")
+    plt.ylim(-10, 20)
+    plt.xlim(2, 18)
+    plt.savefig(
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_" + str(time).zfill(3) + ".png",
+        format="png",
+        dpi=300,
+    )
+
+# %% appendix video for infection dynamics umap, Feb test data, colored by predicted infection
+
+for time in range(48):
+    plt.clf()
+    sns.scatterplot(
+        data=data_test[(data_test["time"] == time)],
+        x="UMAP1",
+        y="UMAP2",
+        hue="predicted_infection",
+        palette={1: "blue", 2: "red"},
+        hue_order=[1, 2],
+        s=20,
+        alpha=0.8,
+    )
+    handles, _ = plt.gca().get_legend_handles_labels()
+    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.suptitle(f"Time: {time*0.5+3} HPI")
+    plt.ylim(-10, 18)
+    plt.xlim(2, 18)
+    plt.savefig(
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_" + str(time).zfill(3) + ".png",
+        format="png",
+        dpi=300,
+    )
+
+# %% appendix video for infection dynamics umap, June data, colored by predicted infection
+
+for time in range(12):
+    plt.clf()
+    sns.scatterplot(
+        data=June_split[(June_split["time"] == time)],
+        x="UMAP1",
+        y="UMAP2",
+        hue="predicted_infection",
+        palette={1: "blue", 2: "red"},
+        hue_order=[1, 2],
+        s=20,
+        alpha=0.8,
+    )
+    handles, _ = plt.gca().get_legend_handles_labels()
+    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.suptitle(f"Time: {time*2+3} HPI")
+    plt.ylim(-8, 10)
+    plt.xlim(-5, 5)
+    plt.savefig(
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_" + str(time).zfill(3) + ".png",
+        format="png",
+        dpi=300,
+    )   
+
+# %%
