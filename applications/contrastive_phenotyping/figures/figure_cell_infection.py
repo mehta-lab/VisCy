@@ -579,16 +579,18 @@ for time in range(48):
         hue="infection",
         palette={1: "steelblue", 2: "orangered"},
         hue_order=[1, 2],
-        s=20,  
+        s=20,
         alpha=0.8,
     )
     handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.legend(handles=handles, labels=["uninfected", "infected"])
     plt.suptitle(f"Time: {time*0.5+3} HPI")
     plt.ylim(-10, 20)
     plt.xlim(2, 18)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_" + str(time).zfill(3) + ".png",
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_"
+        + str(time).zfill(3)
+        + ".png",
         format="png",
         dpi=300,
     )
@@ -608,12 +610,14 @@ for time in range(48):
         alpha=0.8,
     )
     handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.legend(handles=handles, labels=["uninfected", "infected"])
     plt.suptitle(f"Time: {time*0.5+3} HPI")
     plt.ylim(-10, 18)
     plt.xlim(2, 18)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_" + str(time).zfill(3) + ".png",
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_"
+        + str(time).zfill(3)
+        + ".png",
         format="png",
         dpi=300,
     )
@@ -633,14 +637,16 @@ for time in range(12):
         alpha=0.8,
     )
     handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=['uninfected', 'infected'])
+    plt.legend(handles=handles, labels=["uninfected", "infected"])
     plt.suptitle(f"Time: {time*2+3} HPI")
     plt.ylim(-8, 10)
     plt.xlim(-5, 5)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_" + str(time).zfill(3) + ".png",
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_"
+        + str(time).zfill(3)
+        + ".png",
         format="png",
         dpi=300,
-    )   
+    )
 
 # %%
