@@ -98,7 +98,6 @@ class CachedDataset(Dataset):
         return len(self.positions)
 
     def __getitem__(self, index: int) -> Sample:
-
         ch_names = self.channels["source"].copy()
         ch_idx = self.source_ch_idx.copy()
         if self.target_ch_idx is not None:
@@ -109,7 +108,7 @@ class CachedDataset(Dataset):
         # Split the tensor into the channels
         sample_id = self.position_keys[index]
         if sample_id not in self.cache_dict:
-            logging.debug(f"Adding {sample_id} to cache")
+            logging.info(f"Adding {sample_id} to cache")
             self._cache_dataset(index, channel_index=ch_idx)
 
         # Get the sample from the cache
@@ -146,7 +145,7 @@ class CachedDataset(Dataset):
         return sample
 
 
-class CachedDataloader(LightningDataModule):
+class CachedDataModule(LightningDataModule):
     def __init__(
         self,
         data_path: str,
@@ -159,6 +158,7 @@ class CachedDataloader(LightningDataModule):
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
+        z_window_size: int = 1,
     ):
         super().__init__()
         self.data_path = data_path
@@ -171,6 +171,7 @@ class CachedDataloader(LightningDataModule):
         self.yx_patch_size = yx_patch_size
         self.normalizations = normalizations
         self.augmentations = augmentations
+        self.z_window_size = z_window_size
 
     @property
     def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
@@ -183,11 +184,52 @@ class CachedDataloader(LightningDataModule):
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
         elif stage == "test":
-            self._setup_test(dataset_settings)
+            raise NotImplementedError("Test stage is not supported")
         elif stage == "predict":
-            self._setup_predict(dataset_settings)
+            raise NotImplementedError("Predict stage is not supported")
         else:
             raise NotImplementedError(f"Stage {stage} is not supported")
+
+    def _train_transform(self) -> list[Callable]:
+        if self.augmentations:
+            for aug in self.augmentations:
+                if isinstance(aug, MultiSampleTrait):
+                    num_samples = aug.cropper.num_samples
+                    if self.batch_size % num_samples != 0:
+                        raise ValueError(
+                            "Batch size must be divisible by `num_samples` per stack. "
+                            f"Got batch size {self.batch_size} and "
+                            f"number of samples {num_samples} for "
+                            f"transform type {type(aug)}."
+                        )
+                    self.train_patches_per_stack = num_samples
+        return list(self.augmentations)
+
+    def _fit_transform(self) -> tuple[Compose, Compose]:
+        """(normalization -> maybe augmentation -> center crop)
+        Deterministic center crop as the last step of training and validation."""
+        # TODO: These have a fixed order for now... ()
+        final_crop = [
+            CenterSpatialCropd(
+                keys=self.source_channel + self.target_channel,
+                roi_size=(
+                    self.z_window_size,
+                    self.yx_patch_size[0],
+                    self.yx_patch_size[1],
+                ),
+            )
+        ]
+        train_transform = Compose(
+            self.normalizations + self._train_transform() + final_crop
+        )
+        val_transform = Compose(self.normalizations + final_crop)
+        return train_transform, val_transform
+    
+    def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
+        # disable metadata tracking in MONAI for performance
+        set_track_meta(False)
+        # shuffle positions, randomness is handled globally
+        return torch.randperm(num_positions)
 
     def _setup_fit(self, dataset_settings: dict) -> None:
         """
@@ -197,11 +239,37 @@ class CachedDataloader(LightningDataModule):
         dataset_settings["channels"]["target"] = self.target_channel
         # Load the plate
         plate = open_ome_zarr(self.data_path)
+        # shuffle positions, randomness is handled globally
+        positions = [pos for _, pos in plate.positions()]
+        shuffled_indices = self._set_fit_global_state(len(positions))
+        positions = list(positions[i] for i in shuffled_indices)
+        num_train_fovs = int(len(positions) * self.split_ratio)
 
-        pass
+        self.train_dataset = CachedDataset(
+            positions[:num_train_fovs],
+            transform=train_transform,
+            **dataset_settings,
+        )
+        self.val_dataset = CachedDataset(
+            positions[num_train_fovs:],
+            transform=val_transform,
+            **dataset_settings,
+        )
 
-    def _setup_test(self) -> None:
-        pass
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size // self.train_patches_per_stack,
+            num_workers=self.num_workers,
+            persistent_workers=bool(self.num_workers),
+            shuffle=True,
+        )
 
-    def _setup_val(self) -> None:
-        pass
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=bool(self.num_workers),
+            shuffle=False,
+        )
