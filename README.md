@@ -18,12 +18,11 @@ This repository provides a pipeline for the following.
 
 ### Demos 
 - [Interactive 2D virtual staining demo of cell nuclei and membrane from labelfree data 🤗 ](https://compmicro-czb-virtualstaining.hf.space)[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
-<div>
-<center>
+
+<div style="text-align: center;">
 <a href="https://compmicro-czb-virtualstaining.hf.space" target="_blank" rel="noopener noreferrer"><br>
   <img src="docs/figures/vs_hf_demo.gif" alt="Virtual Staining App Demo" height="300px" />
 </a>
-</center>
 </div>
 
 - [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/46beba4ecc8c4f312fda0b04d5229631a41b6cb5/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
