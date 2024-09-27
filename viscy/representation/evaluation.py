@@ -31,9 +31,6 @@ Following evaluation methods are implemented:
 * Linear classifier accuracy when labels are provided.
 * Clustering evaluation using normalized mutual information (NMI) and adjusted rand index (ARI).
 * Correlation between embeddings and computed features using rank correlation.
-
-TODO: consider time- and condition-dependent clustering and UMAP visualization of patches developed earlier:
-https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py 
 """
 
 
