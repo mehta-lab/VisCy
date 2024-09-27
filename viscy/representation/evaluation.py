@@ -444,8 +444,8 @@ class FeatureExtractor:
         return radial_intensity_gradient[0]
 
 
-# Function to extract embeddings and calculate cosine similarities for a specific cell
 def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
+    """Extract embeddings and calculate cosine similarities for a specific cell"""
     # Filter the dataset for the specific infected cell
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
@@ -471,10 +471,10 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     return time_points, cosine_similarities
 
 
-# Function to compute the norm of differences between embeddings at t and t + tau
 def compute_displacement_mean_std(
     embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False
 ):
+    """Compute the norm of differences between embeddings at t and t + tau"""
     # Get the arrays of (fov_name, track_id, t, and embeddings)
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
@@ -537,7 +537,6 @@ def compute_displacement_mean_std(
     return mean_displacement_per_tau, std_displacement_per_tau
 
 
-# Function to compute the norm of differences between embeddings at t and t + tau
 def compute_displacement(
     embedding_dataset,
     max_tau=10,
@@ -545,6 +544,7 @@ def compute_displacement(
     use_dissimilarity=False,
     use_umap=False,
 ):
+    """Compute the norm of differences between embeddings at t and t + tau"""
     # Get the arrays of (fov_name, track_id, t, and embeddings)
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
