@@ -3,6 +3,7 @@
 VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
 This repository provides a pipeline for the following.
+
 - Image translation
   - Robust virtual staining of landmark organelles
 - Image classification
@@ -13,19 +14,19 @@ This repository provides a pipeline for the following.
 > **Note:**  
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
 
-
 ## Virtual staining
 
-### Demos 
-- [Interactive 2D virtual staining demo of cell nuclei and membrane from labelfree data 🤗 ](https://compmicro-czb-virtualstaining.hf.space)
+### Demos
+
+- [Interactive 2D virtual staining demo of cell nuclei and membrane from labelfree data 🤗](https://compmicro-czb-virtualstaining.hf.space)
 
 [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
 
-<div style="text-align: center;">
+<p align="center">
 <a href="https://compmicro-czb-virtualstaining.hf.space" target="_blank" rel="noopener noreferrer">
 <img src="https://github.com/mehta-lab/VisCy/blob/7d3bed92e91fb44611a45be5350320d65ffcc111/docs/figures/vs_hf_demo.gif?raw=true" alt="Virtual Staining App Demo" height="300px" />
 </a>
-</div>
+</p>
 
 - [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/46beba4ecc8c4f312fda0b04d5229631a41b6cb5/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
 Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course and uses UNeXt2 architecture.
@@ -36,6 +37,7 @@ Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto
 Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
 
 ### Gallery
+
 Below are some examples of virtually stained images (click to play videos).
 See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
@@ -46,7 +48,6 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 ### Reference
 
 The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
-
 
 This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502).
 
@@ -64,9 +65,9 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
           URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
           eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
           journal = {bioRxiv}
-      } 
+      }
 </code></pre>
-</details> 
+</details>
 
 <details>
  <summary>Guo, Yeh, Folkesson et al., 2020</summary>
@@ -89,16 +90,17 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
       journal = {eLife},
       issn = {2050-084X},
       publisher = {eLife Sciences Publications, Ltd},
-      } 
+      }
     </code></pre>
   </details>
 
 ### Library of virtual staining (VS) models
+
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
 ### Pipeline
-A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
+A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
 ## Installation
 
@@ -138,6 +140,7 @@ A full illustration of the virtual staining pipeline can be found [here](https:/
 For development installation, see [the contributing guide](https://github.com/mehta-lab/VisCy/blob/main/CONTRIBUTING.md).
 
 ## Additional Notes
+
 The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning.ai/index.html) framework.
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
@@ -145,3 +148,4 @@ for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s4159
 The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
+
