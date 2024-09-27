@@ -154,7 +154,7 @@ fig = plt.figure(layout="constrained", figsize=(5.5, 2.7))
 subfigs = fig.subfigures(1, 2, wspace=0.02, width_ratios=[4, 7])
 
 umap_fig = subfigs[0]
-umap_fig.suptitle("A", horizontalalignment="left", x=0, y=1)
+umap_fig.suptitle("a", horizontalalignment="left", x=0, y=1)
 umap_ax = umap_fig.subplots(1, 1)
 umap_ax.invert_xaxis()
 
@@ -208,7 +208,7 @@ umap_ax.legend(
 )
 
 img_fig = subfigs[1]
-img_fig.suptitle("B", horizontalalignment="left", x=-0, y=1)
+img_fig.suptitle("b", horizontalalignment="left", x=-0, y=1)
 img_axes = img_fig.subplots(3, 4, sharex=True, sharey=True)
 
 for i, (ax, rend, time, track_name) in enumerate(
