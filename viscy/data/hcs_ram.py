@@ -1,32 +1,22 @@
 import logging
-import math
-import os
-import re
-import tempfile
-from pathlib import Path
 from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
-import zarr
-from imageio import imread
-from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
+from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
-from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
     CenterSpatialCropd,
     Compose,
     MapTransform,
     MultiSampleTrait,
-    RandAffined,
 )
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
 from viscy.data.hcs import _read_norm_meta
-from tqdm import tqdm
+from viscy.data.typing import ChannelMap, DictTransform, Sample
 
 _logger = logging.getLogger("lightning.pytorch")
 
