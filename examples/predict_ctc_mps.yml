@@ -8,7 +8,8 @@ trainer:
   callbacks:
     - class_path: viscy.representation.embedding_writer.EmbeddingWriter
       init_args:
-        output_path: /Users/ziwen.liu/Projects/test-time/predict/time_interval_1.zarr
+        # FIXME: Change this to the desired output path
+        output_path: dynaclr/predict/time_interval_1.zarr
   inference_mode: true
 model:
   encoder:
@@ -24,10 +25,14 @@ model:
       drop_path_rate: 0.0
   example_input_array_shape: [1, 1, 1, 128, 128]
 data:
-  data_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
-  tracks_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
-  source_channel: DIC
+  # FIXME: Change the path to downloaded data
+  data_path: ../../Hela_CTC.zarr
+  # NOTE: same as above for this example
+  tracks_path: ../../Hela_CTC.zarr
+  source_channel:
+    - DIC
   z_range: [0, 1]
+  # NOTE: reduce this if running out of memory
   batch_size: 16
   num_workers: 4
   initial_yx_patch_size: [128, 128]
@@ -41,4 +46,5 @@ data:
         subtrahend: mean
         divisor: std
 return_predictions: false
-ckpt_path: /Users/ziwen.liu/Projects/test-time/lightning_logs/time_interval_1/checkpoints/last.ckpt
+# FIXME: Change this to the trained checkpoint path
+ckpt_path: dynaclr/lightning_logs/time_interval_1/checkpoints/last.ckpt

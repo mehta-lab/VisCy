@@ -9,17 +9,9 @@ trainer:
   precision: 32-true
   logger:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
-    # Nesting the logger config like this is equivalent to
-    # supplying the following argument to `lightning.pytorch.Trainer`:
-    # logger=TensorBoardLogger(
-    #     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
-    #     log_graph=True,
-    #     version="vanilla",
-    # )
     init_args:
-      save_dir: /Users/ziwen.liu/Projects/test-time
-      # this is the name of the experiment.
-      # The logs will be saved in `save_dir/lightning_logs/version`
+      # NOTE: The logs will be saved in `save_dir/lightning_logs/version`
+      save_dir: dynaclr
       version: time_interval_1
       log_graph: True
   callbacks:
@@ -38,8 +30,6 @@ trainer:
   enable_checkpointing: true
   inference_mode: true
   use_distributed_sampler: true
-  # synchronize batchnorm parameters across multiple GPUs.
-  # important for contrastive learning to normalize the tensors across the whole batch.
   sync_batchnorm: true
 model:
   encoder:
@@ -62,11 +52,14 @@ model:
   log_samples_per_batch: 2
   example_input_array_shape: [1, 1, 1, 128, 128]
 data:
-  data_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
-  tracks_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
+  # FIXME: Change the path to downloaded data
+  data_path: ../../Hela_CTC.zarr
+  # NOTE: same as above for this example
+  tracks_path: ../../Hela_CTC.zarr
   source_channel:
     - DIC
   z_range: [0, 1]
+  # NOTE: reduce this if running out of memory
   batch_size: 16
   num_workers: 4
   initial_yx_patch_size: [256, 256]
