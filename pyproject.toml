@@ -8,7 +8,8 @@ description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { file = "LICENSE" }
-authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
+# placeholder
+authors = [{ name = "DynaCLR authors", email = "program-chairs@iclr.cc" }]
 dependencies = [
     "iohub==0.1.0",
     "torch>=2.1.2",
