@@ -3,8 +3,8 @@ import timm
 import torch
 import torchview
 
-from viscy.representation.engine import ContrastiveModule
 from viscy.representation.contrastive import ContrastiveEncoder, StemDepthtoChannels
+from viscy.representation.engine import ContrastiveModule
 
 # %load_ext autoreload
 # %autoreload 2

@@ -1,11 +1,11 @@
 import numpy as np
 import pandas as pd
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
+import umap
 from numpy import fft
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from sklearn.cluster import DBSCAN
+from sklearn.decomposition import PCA
 from sklearn.metrics import (
     accuracy_score,
     adjusted_rand_score,
@@ -13,7 +13,7 @@ from sklearn.metrics import (
     silhouette_score,
 )
 from sklearn.neighbors import KNeighborsClassifier
-import umap
+from sklearn.preprocessing import StandardScaler
 
 from viscy.data.triplet import TripletDataModule
 
@@ -37,6 +37,18 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 Utilities for loading datasets.
 """
+
+__all__ = [
+    # re-exporting from sklearn
+    "silhouette_score",
+    "load_annotation",
+    "dataset_of_tracks",
+    "knn_accuracy",
+    "clustering_evaluation",
+    "compute_pca",
+    "compute_umap",
+    "FeatureExtractor",
+]
 
 
 def load_annotation(da, path, name, categories: dict | None = None):
@@ -113,8 +125,7 @@ def dataset_of_tracks(
     return prediction_dataset
 
 
-""" Methods for evaluating clustering performance.
-"""
+"""Methods for evaluating clustering performance."""
 
 
 def knn_accuracy(embeddings, annotations, k=5):
@@ -157,24 +168,6 @@ def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
     clusters = dbscan.fit_predict(embeddings)
     return clusters
-
-
-def silhouette_score(embeddings, clusters):
-    """
-    Compute the silhouette score for the DBSCAN clustering results.
-
-    Parameters
-    ----------
-    clusters : np.ndarray
-        Clustering labels assigned by DBSCAN.
-
-    Returns
-    -------
-    float
-        Silhouette score for the clustering.
-    """
-    score = silhouette_score(embeddings, clusters)
-    return score
 
 
 def clustering_evaluation(embeddings, annotations, method="nmi"):
@@ -256,8 +249,8 @@ def compute_umap(embedding_dataset, normalize_features=True):
 
     # Compute UMAP for features and projections
     # Computing 3 components to enable 3D visualization.
-    umap_features = umap.UMAP(random_state=42, n_components=3)
-    umap_projection = umap.UMAP(random_state=42, n_components=3)
+    umap_features = umap.UMAP(random_state=42, n_components=2)
+    umap_projection = umap.UMAP(random_state=42, n_components=2)
     umap_features_embedding = umap_features.fit_transform(scaled_features)
     umap_projection_embedding = umap_projection.fit_transform(scaled_projections)
 
@@ -265,13 +258,13 @@ def compute_umap(embedding_dataset, normalize_features=True):
     umap_df = pd.DataFrame(
         {
             "id": embedding_dataset["id"].values,
+            "track_id": embedding_dataset["track_id"].values,
+            "t": embedding_dataset["t"].values,
             "fov_name": embedding_dataset["fov_name"].values,
             "UMAP1": umap_features_embedding[:, 0],
             "UMAP2": umap_features_embedding[:, 1],
-            "UMAP3": umap_features_embedding[:, 2],
             "UMAP1_proj": umap_projection_embedding[:, 0],
             "UMAP2_proj": umap_projection_embedding[:, 1],
-            "UMAP3_proj": umap_projection_embedding[:, 2],
         }
     )
 

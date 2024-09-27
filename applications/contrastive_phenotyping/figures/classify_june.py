@@ -11,7 +11,7 @@ from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 
 # %% Defining Paths for June Dataset
 june_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/code_testing_soorya/output/Phase_RFP_smallPatch_June/phaseRFP_36patch_June.zarr")

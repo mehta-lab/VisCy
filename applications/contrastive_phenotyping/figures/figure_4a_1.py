@@ -7,7 +7,7 @@ import seaborn as sns
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
-from viscy.light.embedding_writer import read_embedding_dataset
+from viscy.representation.embedding_writer import read_embedding_dataset
 
 # %% Defining Paths for February and June Datasets
 feb_features_path = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/code_testing_soorya/output/June_140Patch_2chan/phaseRFP_140patch_99ckpt_Feb.zarr")
