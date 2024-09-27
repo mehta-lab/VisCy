@@ -250,8 +250,8 @@ def compute_umap(embedding_dataset, normalize_features=True):
 
     # Compute UMAP for features and projections
     # Computing 3 components to enable 3D visualization.
-    umap_features = umap.UMAP(random_state=42, n_components=3)
-    umap_projection = umap.UMAP(random_state=42, n_components=3)
+    umap_features = umap.UMAP(random_state=42, n_components=2)
+    umap_projection = umap.UMAP(random_state=42, n_components=2)
     umap_features_embedding = umap_features.fit_transform(scaled_features)
     umap_projection_embedding = umap_projection.fit_transform(scaled_projections)
 
@@ -259,13 +259,13 @@ def compute_umap(embedding_dataset, normalize_features=True):
     umap_df = pd.DataFrame(
         {
             "id": embedding_dataset["id"].values,
+            "track_id": embedding_dataset["track_id"].values,
+            "t": embedding_dataset["t"].values,
             "fov_name": embedding_dataset["fov_name"].values,
             "UMAP1": umap_features_embedding[:, 0],
             "UMAP2": umap_features_embedding[:, 1],
-            "UMAP3": umap_features_embedding[:, 2],
             "UMAP1_proj": umap_projection_embedding[:, 0],
             "UMAP2_proj": umap_projection_embedding[:, 1],
-            "UMAP3_proj": umap_projection_embedding[:, 2],
         }
     )
 
