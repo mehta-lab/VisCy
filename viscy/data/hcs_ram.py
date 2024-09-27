@@ -224,7 +224,7 @@ class CachedDataModule(LightningDataModule):
         )
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
-    
+
     def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
