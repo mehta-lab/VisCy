@@ -1,5 +1,7 @@
 # %% figures for visualizing the results of cell division
+import sys
 
+sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 from pathlib import Path
 import pandas as pd
 import seaborn as sns
@@ -11,10 +13,10 @@ import matplotlib.pyplot as plt
 
 # %%
 # single channel. with temporal regularizations
-dataset = read_embedding_dataset(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval_phase/predictions/epoch_186/1chan_128patch_186ckpt_Febtest.zarr"
-)
-dataset
+# dataset = read_embedding_dataset(
+#     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval_phase/predictions/epoch_186/1chan_128patch_186ckpt_Febtest.zarr"
+# )
+# dataset
 
 # single cahnnel, without temporal regularizations
 # dataset = read_embedding_dataset(
@@ -29,10 +31,10 @@ dataset
 # dataset
 
 # two channel, without temporal regularizations
-# dataset = read_embedding_dataset(
-#     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest_divGT.zarr"
-# )
-# dataset
+dataset = read_embedding_dataset(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest_divGT.zarr"
+)
+dataset
 
 # %%
 # load all unprojected features:
@@ -118,9 +120,9 @@ cell_daughter2 = features[
 ]
 
 
-# Adding arrows to indicate trajectory direction
+# %% Plot: Adding arrows to indicate trajectory direction
 def add_arrows(df, color):
-    for i in range((df.shape[0]) - 1):
+    for i in range(df.shape[0] - 1):
         start = df.iloc[i]
         end = df.iloc[i + 1]
         arrow = FancyArrowPatch(
@@ -149,9 +151,6 @@ sns.scatterplot(
     s=7,
     alpha=0.5,
 )
-# sns.lineplot(x=cell_parent["UMAP1"], y=cell_parent["UMAP2"], color='black', linewidth=1)
-# sns.lineplot(x=cell_daughter1["UMAP1"], y=cell_daughter1["UMAP2"], color='red', linewidth=1)
-# sns.lineplot(x=cell_daughter2["UMAP1"], y=cell_daughter2["UMAP2"], color='blue', linewidth=1)
 
 # Apply arrows to the trajectories
 add_arrows(cell_parent.to_dataframe(), color="black")
@@ -162,8 +161,8 @@ plt.xlabel("UMAP1")
 plt.ylabel("UMAP2")
 # plt.title('UMAP with Trajectory Direction')
 # plt.legend(title='Division Phase')
-plt.xlim(2, 18)
-plt.ylim(-2, 18)
+plt.xlim(-5, 10)
+plt.ylim(-5, 10)
 plt.legend([], [], frameon=False)
 # plt.show()
 
@@ -190,5 +189,95 @@ plt.savefig(
 #     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT.png",
 #     dpi=300
 # )
+
+# %% Plot: display one arrow at end of trajectory of cell overlayed on UMAP
+
+sns.scatterplot(
+    x=features["UMAP1"],
+    y=features["UMAP2"],
+    hue=division,
+    palette={"interphase": "steelblue", 1: "green", "mitosis": "orangered"},
+    s=27,
+    alpha=0.5,
+)
+
+sns.lineplot(x=cell_parent["UMAP1"], y=cell_parent["UMAP2"], color="black", linewidth=2)
+sns.lineplot(
+    x=cell_daughter1["UMAP1"], y=cell_daughter1["UMAP2"], color="blue", linewidth=2
+)
+sns.lineplot(
+    x=cell_daughter2["UMAP1"], y=cell_daughter2["UMAP2"], color="red", linewidth=2
+)
+
+parent_arrow = FancyArrowPatch(
+    (cell_parent["UMAP1"].values[-2], cell_parent["UMAP2"].values[-2]),
+    (cell_parent["UMAP1"].values[-1], cell_parent["UMAP2"].values[-1]),
+    color="black",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(parent_arrow)
+daughter1_arrow = FancyArrowPatch(
+    (cell_daughter1["UMAP1"].values[0], cell_daughter1["UMAP2"].values[0]),
+    (cell_daughter1["UMAP1"].values[1], cell_daughter1["UMAP2"].values[1]),
+    color="blue",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter1_arrow)
+daughter2_arrow = FancyArrowPatch(
+    (cell_daughter2["UMAP1"].values[0], cell_daughter2["UMAP2"].values[0]),
+    (cell_daughter2["UMAP1"].values[1], cell_daughter2["UMAP2"].values[1]),
+    color="red",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter2_arrow)
+
+
+# single channel, with temporal regularizations
+# plt.xlim(-5, 8)
+# plt.ylim(-6, 8)
+# plt.legend([], [], frameon=False)
+# plt.savefig(
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel_arrow.png",
+#     dpi=300,
+# )
+
+# single channel, without temporal regularizations
+# plt.xlim(0, 13)
+# plt.ylim(-2, 6)
+# plt.legend([], [], frameon=False)
+# plt.savefig(
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_singelChannel_woT_arrow.png",
+#     dpi=300
+# )
+
+# two channel, with temporal regularizations
+# plt.xlim(-2, 15)
+# plt.ylim(-5, 5)
+# plt.legend([], [], frameon=False)
+# plt.savefig(
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_arrow.png",
+#     dpi=300
+# )
+
+# two channel, without temporal regularizations
+plt.xlim(-3, 12)
+plt.ylim(1, 10)
+plt.legend([], [], frameon=False)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/cellDiv_trajectory_2Channel_woT_arrow.png",
+    dpi=300,
+)
 
 # %%
