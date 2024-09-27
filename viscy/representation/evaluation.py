@@ -272,6 +272,7 @@ def compute_umap(embedding_dataset, normalize_features=True):
 
 
 class FeatureExtractor:
+    # FIXME: refactor into a separate module with standalone functions
 
     def __init__(self):
         pass
