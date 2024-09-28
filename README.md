@@ -69,7 +69,7 @@ Wells:    1
 Training can be performed with the following command:
 
 ```sh
-python -m viscy.cli.contrastive_triplet fit -c ./examples/fit_ctc.yaml
+python -m viscy.cli.contrastive_triplet fit -c ./examples/fit_ctc.yml
 ```
 
 The TensorBoard logs and model checkpoints will be saved the `./lightning_logs` directory.
@@ -77,5 +77,5 @@ The TensorBoard logs and model checkpoints will be saved the `./lightning_logs` 
 Prediction of features on the entire dataset using the trained model can be done with:
 
 ```sh
-python -m viscy.cli.contrastive_triplet predict -c ./examples/predict_ctc.yaml
+python -m viscy.cli.contrastive_triplet predict -c ./examples/predict_ctc.yml
 ```
