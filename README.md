@@ -24,7 +24,7 @@ Contrastive learning of cell state dynamics in response to perturbations.
     conda activate dynaclr
     # in the project root directory
     # i.e. where this README is located
-    pip install ".[visual,metrics]"
+    pip install -e ".[visual,metrics]"
     ```
 
 3. Verify installation by accessing the CLI help message:
