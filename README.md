@@ -10,6 +10,7 @@ Contrastive learning of cell state dynamics in response to perturbations.
 > The CTC example configs are also tested on macOS with Apple M1 Pro SoCs (macOS 14.7).
 > Apple Silicon users need to make sure that they use
 > the `arm64` build of Python to use MPS acceleration.
+> Tested to work on Linux on the High Performance cluster, and may not work in other environments.
 > The commands below assume a Unix-like system.
 
 1. We recommend using a new Conda/virtual environment.
