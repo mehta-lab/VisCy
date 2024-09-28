@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "setuptools-scm[toml]"]
+requires = ["setuptools"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -23,7 +23,7 @@ dependencies = [
     "numpy<2",
     "xarray",
 ]
-dynamic = ["version"]
+version = "0.3.0a1"
 
 [project.optional-dependencies]
 metrics = [
