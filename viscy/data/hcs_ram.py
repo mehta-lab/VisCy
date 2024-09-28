@@ -32,7 +32,9 @@ def _stack_channels(
     if not isinstance(sample_images, list):
         return torch.stack([sample_images[ch][0] for ch in channels[key]])
     # training time
+    # sample_images is a list['Phase3D'].shape = (1,3,256,256)
     return [torch.stack([im[ch][0] for ch in channels[key]]) for im in sample_images]
+
 
 
 class CachedDataset(Dataset):
@@ -149,6 +151,7 @@ class CachedDataModule(LightningDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         z_window_size: int = 1,
+        timeout: int = 600,
     ):
         super().__init__()
         self.data_path = data_path
@@ -162,6 +165,7 @@ class CachedDataModule(LightningDataModule):
         self.normalizations = normalizations
         self.augmentations = augmentations
         self.z_window_size = z_window_size
+        self.timeout = timeout
 
     @property
     def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
@@ -253,6 +257,7 @@ class CachedDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=bool(self.num_workers),
             shuffle=True,
+            timeout=self.timeout
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -262,4 +267,5 @@ class CachedDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=bool(self.num_workers),
             shuffle=False,
+            timeout=self.timeout
         )
