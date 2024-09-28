@@ -1,4 +1,0 @@
-data_path: /path/to/hcs.zarr
-channel_names: -1
-num_workers: 1
-block_size: 32
