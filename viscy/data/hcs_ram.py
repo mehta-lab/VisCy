@@ -117,7 +117,8 @@ class CachedDataset(Dataset):
         if norm_meta is not None:
             sample_images["norm_meta"] = norm_meta
         if self.transform:
-            sample_images = self.transform(sample_images)
+            # FIX ME: check why the transforms return a list?
+            sample_images = self.transform(sample_images)[0]
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
@@ -185,6 +186,11 @@ class CachedDataModule(LightningDataModule):
             raise NotImplementedError(f"Stage {stage} is not supported")
 
     def _train_transform(self) -> list[Callable]:
+        """ Set the train augmentations
+
+        
+        """
+
         if self.augmentations:
             for aug in self.augmentations:
                 if isinstance(aug, MultiSampleTrait):
@@ -197,6 +203,10 @@ class CachedDataModule(LightningDataModule):
                             f"transform type {type(aug)}."
                         )
                     self.train_patches_per_stack = num_samples
+        else:
+            self.augmentations=[]
+        
+        _logger.info(f'Training augmentations: {self.augmentations}')
         return list(self.augmentations)
 
     def _fit_transform(self) -> tuple[Compose, Compose]:
