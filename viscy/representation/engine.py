@@ -162,3 +162,26 @@ class ContrastiveModule(LightningModule):
             "projections": projections,
             "index": batch["index"],
         }
+
+    def extract_features(self, img: torch.Tensor) -> list[np.ndarray]:
+        """Extract multi-level feature maps for a given input image.
+        The final feature vector is also reshaped to 5D for visualization.
+
+        Parameters
+        ----------
+        img : torch.Tensor
+            Image tensor of shape (N, C, D, H, W)
+
+        Returns
+        -------
+        list[np.ndarray]
+            Feature maps after: [stem, stage1, stage2, stage3, stage4, avgpool]
+        """
+        with torch.inference_mode():
+            features = self.model.stem(img.to(self.device))
+            feature_maps = [features.clone()]
+            for stage in self.model.encoder.stages:
+                features = stage(features)
+                feature_maps.append(features)
+            feature_maps.append(self.model.encoder.head(features)[..., None, None])
+            return [f.detach().cpu().numpy() for f in feature_maps]
