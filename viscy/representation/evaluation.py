@@ -17,7 +17,7 @@ from sklearn.metrics import (
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
-
+from sklearn.mixture import GaussianMixture
 from viscy.data.triplet import TripletDataModule
 
 """
@@ -128,8 +128,71 @@ def dataset_of_tracks(
     return prediction_dataset
 
 
-"""Methods for evaluating clustering performance."""
+"""Clustering algortihms."""
 
+class GMMClustering:
+    def __init__(self, features_data, infection_data, n_clusters_range=np.arange(2, 10)):
+        self.features_data = features_data
+        self.infection_data = infection_data
+        self.n_clusters_range = n_clusters_range
+        self.best_n_clusters = None
+        self.best_gmm = None
+        self.aic_scores = None
+        self.bic_scores = None
+
+    def find_best_n_clusters(self):
+        """Find the best number of clusters using AIC/BIC scores."""
+        aic_scores = []
+        bic_scores = []
+        for n in self.n_clusters_range:
+            gmm = GaussianMixture(n_components=n, random_state=42)
+            gmm.fit(self.features_data)
+            aic_scores.append(gmm.aic(self.features_data))
+            bic_scores.append(gmm.bic(self.features_data))
+
+        self.aic_scores = aic_scores
+        self.bic_scores = bic_scores
+
+        return aic_scores, bic_scores
+
+    def fit_best_model(self, criterion='bic', n_clusters=None):
+        """
+        Fit the best GMM model based on AIC or BIC scores, or a user-specified number of clusters.
+        
+        Parameters:
+        - criterion: 'aic' or 'bic' to select the best model based on the chosen criterion.
+        - n_clusters: Specify a fixed number of clusters (overrides the 'best' search).
+        """
+        # Case 1: If the user provides n_clusters, use it directly
+        if n_clusters is not None:
+            self.best_n_clusters = n_clusters
+
+        # Case 2: If no n_clusters is provided but find_best_n_clusters was run, use stored AIC/BIC results
+        elif self.aic_scores is not None and self.bic_scores is not None:
+            if criterion == 'bic':
+                self.best_n_clusters = self.n_clusters_range[np.argmin(self.bic_scores)]
+            else:
+                self.best_n_clusters = self.n_clusters_range[np.argmin(self.aic_scores)]
+
+        # Case 3: If find_best_n_clusters hasn't been run, compute AIC/BIC scores now
+        else:
+            aic_scores, bic_scores = self.find_best_n_clusters()
+            if criterion == 'bic':
+                self.best_n_clusters = self.n_clusters_range[np.argmin(bic_scores)]
+            else:
+                self.best_n_clusters = self.n_clusters_range[np.argmin(aic_scores)]
+
+        self.best_gmm = GaussianMixture(n_components=self.best_n_clusters, random_state=42)
+        self.best_gmm.fit(self.features_data)
+
+        return self.best_gmm
+
+    def predict_clusters(self):
+        """Run prediction on the fitted best GMM model."""
+        if self.best_gmm is None:
+            raise Exception("No GMM model is fitted yet. Please run fit_best_model() first.")
+        cluster_labels = self.best_gmm.predict(self.features_data)
+        return cluster_labels
 
 def knn_accuracy(embeddings, annotations, k=5):
     """
@@ -199,7 +262,7 @@ def clustering_evaluation(embeddings, annotations, method="nmi"):
     return score
 
 
-def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
+def compute_pca(embedding_dataset, n_components=None, normalize_features=False):
     features = embedding_dataset["features"]
     projections = embedding_dataset["projections"]
 
@@ -210,33 +273,24 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
         scaled_projections = projections.values
         scaled_features = features.values
 
-    # Compute PCA with specified number of components
     PCA_features = PCA(n_components=n_components, random_state=42)
     PCA_projection = PCA(n_components=n_components, random_state=42)
     pc_features = PCA_features.fit_transform(scaled_features)
     pc_projection = PCA_projection.fit_transform(scaled_projections)
 
-    # Prepare DataFrame with id and PCA coordinates
-    pca_df = pd.DataFrame(
-        {
-            "id": embedding_dataset["id"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "PCA1": pc_features[:, 0],
-            "PCA2": pc_features[:, 1],
-            "PCA3": pc_features[:, 2],
-            "PCA4": pc_features[:, 3],
-            "PCA5": pc_features[:, 4],
-            "PCA6": pc_features[:, 5],
-            "PCA1_proj": pc_projection[:, 0],
-            "PCA2_proj": pc_projection[:, 1],
-            "PCA3_proj": pc_projection[:, 2],
-            "PCA4_proj": pc_projection[:, 3],
-            "PCA5_proj": pc_projection[:, 4],
-            "PCA6_proj": pc_projection[:, 5],
-        }
-    )
+    pca_df_dict = {
+        "id": embedding_dataset["id"].values,
+        "fov_name": embedding_dataset["fov_name"].values,
+    }
+
+    for i in range(n_components):
+        pca_df_dict[f"PCA{i + 1}"] = pc_features[:, i]
+        pca_df_dict[f"PCA{i + 1}_proj"] = pc_projection[:, i]
+
+    pca_df = pd.DataFrame(pca_df_dict)
 
     return PCA_features, PCA_projection, pca_df
+
 
 
 def compute_umap(embedding_dataset, normalize_features=True):
@@ -687,3 +741,4 @@ def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
     }
 
     return mean_displacement_per_tau, std_displacement_per_tau
+
