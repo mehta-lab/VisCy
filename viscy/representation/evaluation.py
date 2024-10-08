@@ -15,9 +15,10 @@ from sklearn.metrics import (
     silhouette_score,
 )
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.mixture import GaussianMixture
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.preprocessing import StandardScaler
-from sklearn.mixture import GaussianMixture
+
 from viscy.data.triplet import TripletDataModule
 
 """
@@ -130,8 +131,11 @@ def dataset_of_tracks(
 
 """Clustering algortihms."""
 
+
 class GMMClustering:
-    def __init__(self, features_data, infection_data, n_clusters_range=np.arange(2, 10)):
+    def __init__(
+        self, features_data, infection_data, n_clusters_range=np.arange(2, 10)
+    ):
         self.features_data = features_data
         self.infection_data = infection_data
         self.n_clusters_range = n_clusters_range
@@ -155,10 +159,10 @@ class GMMClustering:
 
         return aic_scores, bic_scores
 
-    def fit_best_model(self, criterion='bic', n_clusters=None):
+    def fit_best_model(self, criterion="bic", n_clusters=None):
         """
         Fit the best GMM model based on AIC or BIC scores, or a user-specified number of clusters.
-        
+
         Parameters:
         - criterion: 'aic' or 'bic' to select the best model based on the chosen criterion.
         - n_clusters: Specify a fixed number of clusters (overrides the 'best' search).
@@ -169,7 +173,7 @@ class GMMClustering:
 
         # Case 2: If no n_clusters is provided but find_best_n_clusters was run, use stored AIC/BIC results
         elif self.aic_scores is not None and self.bic_scores is not None:
-            if criterion == 'bic':
+            if criterion == "bic":
                 self.best_n_clusters = self.n_clusters_range[np.argmin(self.bic_scores)]
             else:
                 self.best_n_clusters = self.n_clusters_range[np.argmin(self.aic_scores)]
@@ -177,12 +181,14 @@ class GMMClustering:
         # Case 3: If find_best_n_clusters hasn't been run, compute AIC/BIC scores now
         else:
             aic_scores, bic_scores = self.find_best_n_clusters()
-            if criterion == 'bic':
+            if criterion == "bic":
                 self.best_n_clusters = self.n_clusters_range[np.argmin(bic_scores)]
             else:
                 self.best_n_clusters = self.n_clusters_range[np.argmin(aic_scores)]
 
-        self.best_gmm = GaussianMixture(n_components=self.best_n_clusters, random_state=42)
+        self.best_gmm = GaussianMixture(
+            n_components=self.best_n_clusters, random_state=42
+        )
         self.best_gmm.fit(self.features_data)
 
         return self.best_gmm
@@ -190,9 +196,12 @@ class GMMClustering:
     def predict_clusters(self):
         """Run prediction on the fitted best GMM model."""
         if self.best_gmm is None:
-            raise Exception("No GMM model is fitted yet. Please run fit_best_model() first.")
+            raise Exception(
+                "No GMM model is fitted yet. Please run fit_best_model() first."
+            )
         cluster_labels = self.best_gmm.predict(self.features_data)
         return cluster_labels
+
 
 def knn_accuracy(embeddings, annotations, k=5):
     """
@@ -290,7 +299,6 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=False):
     pca_df = pd.DataFrame(pca_df_dict)
 
     return PCA_features, PCA_projection, pca_df
-
 
 
 def compute_umap(embedding_dataset, normalize_features=True):
@@ -741,4 +749,3 @@ def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
     }
 
     return mean_displacement_per_tau, std_displacement_per_tau
-
