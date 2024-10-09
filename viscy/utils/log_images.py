@@ -1,3 +1,5 @@
+"""Logging example images during training."""
+
 from typing import Sequence
 
 import numpy as np
@@ -6,7 +8,24 @@ from skimage.exposure import rescale_intensity
 from torch import Tensor
 
 
-def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int):
+def detach_sample(
+    imgs: Sequence[Tensor], log_samples_per_batch: int
+) -> list[list[np.ndarray]]:
+    """Detach example images from the batch and convert them to numpy arrays.
+
+    Parameters
+    ----------
+    imgs : Sequence[Tensor]
+        Sequence of example images.
+    log_samples_per_batch : int
+        Number of first N samples in the sequence to detach.
+
+    Returns
+    -------
+    list[list[np.ndarray]]
+        Grid of example images.
+        Rows are samples, columns are channels.
+    """
     num_samples = min(imgs[0].shape[0], log_samples_per_batch)
     samples = []
     for i in range(num_samples):
@@ -19,7 +38,23 @@ def detach_sample(imgs: Sequence[Tensor], log_samples_per_batch: int):
     return samples
 
 
-def render_images(imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []):
+def render_images(
+    imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []
+) -> np.ndarray:
+    """Render images in a grid.
+
+    Parameters
+    ----------
+    imgs : Sequence[Sequence[np.ndarray]]
+        Grid of images to render, output of `detach_sample`.
+    cmaps : list[str], optional
+        Colormaps for each column, by default []
+
+    Returns
+    -------
+    np.ndarray
+        Rendered RGB images grid.
+    """
     images_grid = []
     for sample_images in imgs:
         images_row = []

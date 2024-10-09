@@ -7,9 +7,9 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch import Tensor, nn
 
-from viscy._log_images import detach_sample, render_images
 from viscy.data.typing import TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
+from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
 
