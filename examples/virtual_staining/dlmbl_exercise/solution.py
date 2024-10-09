@@ -110,10 +110,10 @@ from tqdm import tqdm
 
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
-from viscy.evaluation.evaluation_metrics import mean_average_precision
+from viscy.translation.evaluation_metrics import mean_average_precision
 # Trainer class and UNet.
-from viscy.light.engine import MixedLoss, VSUNet
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import MixedLoss, VSUNet
+from viscy.translation.trainer import VSTrainer
 # training augmentations
 from viscy.transforms import (NormalizeSampled, RandAdjustContrastd,
                               RandAffined, RandGaussianNoised,

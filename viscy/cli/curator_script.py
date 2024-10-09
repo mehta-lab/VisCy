@@ -11,7 +11,7 @@ import iohub.ngff as ngff
 import numpy as np
 from PIL import Image
 
-import viscy.evaluation.evaluation_metrics as metrics
+import viscy.translation.evaluation_metrics as metrics
 import viscy.utils.aux_utils as aux_utils
 
 # from waveorder.focus import focus_from_transverse_band

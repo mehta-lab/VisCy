@@ -10,7 +10,7 @@ import imageio as iio
 import iohub.ngff as ngff
 import pandas as pd
 
-import viscy.evaluation.evaluation_metrics as metrics
+import viscy.translation.evaluation_metrics as metrics
 import viscy.utils.aux_utils as aux_utils
 
 # %% read the below details from the config file

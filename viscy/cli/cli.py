@@ -10,8 +10,8 @@ from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy.data.hcs import HCSDataModule
-from viscy.light.engine import VSUNet
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import VSUNet
+from viscy.translation.trainer import VSTrainer
 
 
 class VSLightningCLI(LightningCLI):

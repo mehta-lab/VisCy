@@ -6,26 +6,26 @@ import numpy as np
 import pandas as pd
 import plotly.express as px
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
 from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
-
-from viscy.light.embedding_writer import read_embedding_dataset
-from viscy.data.triplet import TripletDataset, TripletDataModule
-from iohub import open_ome_zarr
-import monai.transforms as transforms
+from viscy.representation.embedding_writer import read_embedding_dataset
+from viscy.representation.evalutation import (
+    dataset_of_tracks,
+    load_annotation,
+)
 
 # %% Paths and parameters.
 
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_02_04/tokenized-drop_path_0_0-2024-06-13.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/2024_06_13/l2_projection_batchnorm-128p.zarr"
 )
 data_path = Path(
-    "/hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/2-register/registered_chunked.zarr"
 )
 tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking/test_tracking_4.zarr"
 )
 
 # %%
@@ -34,8 +34,8 @@ embedding_dataset
 
 # %%
 # Compute PCA of the features and projections to estimate the number of components to keep.
-PCA_features = PCA().fit(embedding_dataset["features"].values)
-PCA_projection = PCA().fit(embedding_dataset["projections"].values)
+PCA_features = PCA(n_components=100).fit(embedding_dataset["features"].values)
+PCA_projection = PCA(n_components=100).fit(embedding_dataset["projections"].values)
 
 plt.plot(PCA_features.explained_variance_ratio_, label="features")
 plt.plot(PCA_projection.explained_variance_ratio_, label="projections")
@@ -43,11 +43,22 @@ plt.legend()
 plt.xlabel("n_components")
 plt.show()
 
+# TODO: Include the followiing in the standard report.
+# * Explained variance of the features and projections.
+# * The UMAPs of the features and projections.
+# * 2D image of the embeddings of features and projections of test tracks (e.g., infected, uninfected, dividing, non-dividing).
+# * Heatmaps of annotations over UMAPs.
+
+
+# %%
+print(np.linalg.matrix_rank(embedding_dataset["features"].values))
+print(np.linalg.matrix_rank(embedding_dataset["projections"].values))
+
 # %%
 # Extract a track from the dataset and visualize its features.
 
-fov_name = "/B/4/4"
-track_id = 71
+fov_name = "/0/1/000000"  # "/B/4/4" FOV names can change between datasets.
+track_id = 21
 all_tracks_FOV = embedding_dataset.sel(fov_name=fov_name)
 a_track_in_FOV = all_tracks_FOV.sel(track_id=track_id)
 # Why is sample dimension ~22000 long after the dataset is sliced by FOV and by track_id?
@@ -92,51 +103,16 @@ plt.show()
 # %%
 # Create the montage of the images of the cells in the track.
 
-# normalizations = [
-#     transforms.NormalizeIntensityd(
-#         keys=["Phase3D"],
-#         subtrahend=None,
-#         divisor=None,
-#         nonzero=False,
-#         channel_wise=False,
-#         dtype=None,
-#         allow_missing_keys=False,
-#     ),
-#     transforms.ScaleIntensityRangePercentilesd(
-#         keys=["RFP"],
-#         lower=50,
-#         upper=99,
-#         b_min=0.0,
-#         b_max=1.0,
-#         clip=False,
-#         relative=False,
-#         channel_wise=False,
-#         dtype=None,
-#         allow_missing_keys=False,
-#     ),
-# ]
-
-normalizations = None
 source_channel = ["Phase3D", "RFP"]
 z_range = (28, 43)
-
-data_module = TripletDataModule(
-    data_path=data_path,
-    tracks_path=tracks_path,
-    source_channel=source_channel,
+predict_dataset = dataset_of_tracks(
+    data_path,
+    tracks_path,
+    [fov_name],
+    [track_id],
     z_range=z_range,
-    initial_yx_patch_size=(256, 256),
-    final_yx_patch_size=(256, 256),
-    batch_size=1,
-    num_workers=16,
-    normalizations=normalizations,
-    predict_cells=True,
-    include_fov_names=[fov_name],
-    include_track_ids=[track_id],
+    source_channel=source_channel,
 )
-# for train and val
-data_module.setup("predict")
-predict_dataset = data_module.predict_dataset
 
 phase = np.stack([p["anchor"][0, 7].numpy() for p in predict_dataset])
 fluor = np.stack([np.max(p["anchor"][1].numpy(), axis=0) for p in predict_dataset])
@@ -155,13 +131,14 @@ for t in range(len(predict_dataset)):
     plt.show()
 
 # %% display the track in napari
-import napari
-import os
+# import os
 
-os.environ["DISPLAY"] = ":1"
-viewer = napari.Viewer()
-viewer.add_image(phase, name="Phase", colormap="gray")
-viewer.add_image(fluor, name="Fluor", colormap="magenta")
+# import napari
+
+# os.environ["DISPLAY"] = ":1"
+# viewer = napari.Viewer()
+# viewer.add_image(phase, name="Phase", colormap="gray")
+# viewer.add_image(fluor, name="Fluor", colormap="magenta")
 
 # %%
 # Compute UMAP over all features
@@ -228,25 +205,9 @@ px.imshow(
     y=sample_id,
     # show fov_name as y-axis
 )
-
-
-# %%
-def load_annotation(da, path, name, categories: dict | None = None):
-    annotation = pd.read_csv(path)
-    annotation["fov_name"] = "/" + annotation["fov ID"]
-    annotation = annotation.set_index(["fov_name", "id"])
-    mi = pd.MultiIndex.from_arrays(
-        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
-    )
-    selected = annotation.loc[mi][name]
-    if categories:
-        selected = selected.astype("category").cat.rename_categories(categories)
-    return selected
-
-
 # %%
 ann_root = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.1-tracking"
 )
 
 infection = load_annotation(

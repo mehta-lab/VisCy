@@ -229,7 +229,7 @@ class SlidingWindowDataset(Dataset):
 class MaskTestDataset(SlidingWindowDataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
-    This a testing stage version of :py:class:`viscy.light.data.SlidingWindowDataset`,
+    This a testing stage version of :py:class:`viscy.data.hcs.SlidingWindowDataset`,
     and can only be used with batch size 1 for efficiency (no padding for collation),
     since the mask is not available for each stack.
 

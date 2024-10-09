@@ -5,7 +5,7 @@ from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
 
 from viscy.data.hcs import HCSDataModule
-from viscy.light.trainer import VSTrainer
+from viscy.translation.trainer import VSTrainer
 
 
 @mark.parametrize("default_channels", [True, False])

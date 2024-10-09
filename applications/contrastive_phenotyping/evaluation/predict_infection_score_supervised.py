@@ -1,13 +1,13 @@
-from argparse import ArgumentParser
-from pathlib import Path
-import numpy as np
 import os
-import torch
+import warnings
+from argparse import ArgumentParser
+
+import numpy as np
+import pandas as pd
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-from viscy.data.triplet import TripletDataModule, TripletDataset
-import pandas as pd
-import warnings
+
+from viscy.data.triplet import TripletDataModule
 
 warnings.filterwarnings(
     "ignore",

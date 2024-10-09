@@ -4,7 +4,7 @@ import torch
 from skimage import data, measure
 from skimage.util import img_as_float
 
-from viscy.evaluation.evaluation_metrics import (
+from viscy.translation.evaluation_metrics import (
     POD_metric,
     VOI_metric,
     labels_to_detection,

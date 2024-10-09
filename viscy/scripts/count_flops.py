@@ -2,7 +2,7 @@
 import torch
 from ptflops import get_model_complexity_info
 
-from viscy.light.engine import VSUNet
+from viscy.translation.engine import VSUNet
 
 # %%
 model = VSUNet(

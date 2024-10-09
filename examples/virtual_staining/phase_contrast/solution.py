@@ -18,8 +18,8 @@ from iohub import open_ome_zarr
 from viscy.data.hcs import HCSDataModule
 
 # Viscy classes for the trainer and model
-from viscy.light.engine import VSUNet
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import VSUNet
+from viscy.translation.trainer import VSTrainer
 from viscy.transforms import NormalizeSampled
 from lightning.pytorch import seed_everything
 

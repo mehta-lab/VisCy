@@ -53,9 +53,8 @@ from tqdm import tqdm
 from viscy.data.hcs import HCSDataModule
 
 # Trainer class and UNet.
-from viscy.light.engine import MixedLoss, VSUNet
-from viscy.light.trainer import VSTrainer
-
+from viscy.translation.engine import MixedLoss, VSUNet
+from viscy.translation.trainer import VSTrainer
 # training augmentations
 from viscy.transforms import (
     NormalizeSampled,
