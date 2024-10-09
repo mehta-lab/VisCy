@@ -13,8 +13,8 @@ from skimage.exposure import rescale_intensity
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
-from viscy.representation.evaluation import load_annotation
-from viscy.representation.lca import (
+from viscy.representation.evalutation import load_annotation
+from viscy.representation.evalutation.lca import (
     AssembledClassifier,
     fit_logistic_regression,
     linear_from_binary_logistic_regression,

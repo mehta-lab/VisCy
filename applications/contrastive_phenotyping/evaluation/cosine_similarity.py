@@ -10,7 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import (
+from viscy.representation.evalutation.distance import (
     calculate_cosine_similarity_cell,
     compute_displacement,
     compute_displacement_mean_std,

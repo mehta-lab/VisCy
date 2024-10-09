@@ -1,25 +1,17 @@
 # %% Imports
 from pathlib import Path
-import seaborn as sns
-import matplotlib.pyplot as plt
-import plotly.express as px
-import pandas as pd
-import numpy as np
-from sklearn.preprocessing import StandardScaler
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import load_annotation, compute_pca, compute_umap
+from viscy.representation.evalutation import load_annotation
+from viscy.representation.evalutation.dimensionality_reduction import (
+    compute_pca,
+    compute_umap,
+)
 
-# %% Jupyter magic command for autoreloading modules
-# ruff: noqa
-# fmt: off
-%load_ext autoreload
-%autoreload 2
-# fmt: on
-# ruff: noqa
 # %% Paths and parameters
 
 path_embedding = Path(
@@ -95,7 +87,9 @@ umap_features, umap_projections, umap_df = compute_umap(dataset)
 # Plot UMAP embeddings as density plots
 fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 sns.kdeplot(data=umap_df, x="UMAP1", y="UMAP2", ax=ax[0], fill=True, cmap="Blues")
-sns.kdeplot(data=umap_df, x="UMAP1_proj", y="UMAP2_proj", ax=ax[1], fill=True, cmap="Reds")
+sns.kdeplot(
+    data=umap_df, x="UMAP1_proj", y="UMAP2_proj", ax=ax[1], fill=True, cmap="Reds"
+)
 ax[0].set_title("Density plot of UMAP1 vs UMAP2 (features)")
 ax[1].set_title("Density plot of UMAP1 vs UMAP2 (projections)")
 plt.show()

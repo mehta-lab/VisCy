@@ -9,15 +9,7 @@ from viscy.unet.networks.unext2 import StemDepthtoChannels
 
 class ContrastiveEncoder(nn.Module):
     """
-    Contrastive encoder network that uses ConvNeXt and ResNet backbones from timm.
-
-    Returns
-    -------
-    tuple[Tensor, Tensor]
-    A tuple containing the embedding tensor and the projection tensor.
-
-    - embedding (Tensor): The embedded feature tensor.
-    - projections (Tensor): The projected feature tensor.
+    Contrastive encoder network that uses ConvNeXt v1 and ResNet backbones from timm.
 
     Parameters
     ----------
@@ -92,7 +84,20 @@ class ContrastiveEncoder(nn.Module):
         # Append modified projection head.
         self.projection = projection
 
-    def forward(self, x) -> tuple[Tensor, Tensor]:
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Forward pass.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input image
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            The embedding tensor and the projection tensor
+        """
         x = self.stem(x)
         embedding = self.encoder(x)
         projections = self.projection(embedding)
