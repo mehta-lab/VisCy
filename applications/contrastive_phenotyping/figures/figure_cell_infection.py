@@ -1,23 +1,19 @@
 # %%
-from pathlib import Path
 import sys
+from pathlib import Path
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import plotly.express as px
 import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
-from sklearn.decomposition import PCA
-
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import load_annotation
-
+from viscy.representation.evalutation import load_annotation
 
 # %% Paths and parameters.
 
@@ -179,8 +175,6 @@ data_test = data[
 # %% train a linear classifier to predict infection state from PCA components
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
 
 x_train = data_train_val.drop(
     columns=[
@@ -220,8 +214,8 @@ y_pred = clf.predict(x_test)
 
 # %% construct confusion matrix to compare the true and predicted infection state
 
-from sklearn.metrics import confusion_matrix
 import seaborn as sns
+from sklearn.metrics import confusion_matrix
 
 cm = confusion_matrix(y_test, y_pred)
 cm_percentage = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
@@ -588,7 +582,7 @@ for time in range(48):
     plt.ylim(-10, 20)
     plt.xlim(2, 18)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
@@ -615,7 +609,7 @@ for time in range(48):
     plt.ylim(-10, 18)
     plt.xlim(2, 18)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
@@ -642,7 +636,7 @@ for time in range(12):
     plt.ylim(-8, 10)
     plt.xlim(-5, 5)
     plt.savefig(
-        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",

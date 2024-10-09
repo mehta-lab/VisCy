@@ -3,22 +3,12 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
-import plotly.express as px
-import seaborn as sns
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from umap import UMAP
-from sklearn.decomposition import PCA
-from matplotlib.font_manager import FontProperties
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks, load_annotation
-from viscy.representation.evaluation import calculate_normalized_euclidean_distance_cell
-from viscy.representation.evaluation import compute_displacement_mean_std_full
-from sklearn.metrics.pairwise import cosine_similarity
-from collections import defaultdict
-from scipy.ndimage import gaussian_filter1d
+from viscy.representation.evalutation.distance import (
+   calculate_normalized_euclidean_distance_cell,
+   compute_displacement_mean_std_full,
+)
 
 # %% paths 
 

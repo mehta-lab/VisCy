@@ -2,21 +2,10 @@
 # %%
 from pathlib import Path
 
-
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import plotly.express as px
-import seaborn as sns
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
-from umap import UMAP
-from sklearn.decomposition import PCA
-
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks, load_annotation
-
+from viscy.representation.evalutation import load_annotation
 
 # %% Paths and parameters.
 
@@ -93,8 +82,6 @@ data_test = data[data["fov_name"].str.contains("/B/4/8") | data["fov_name"].str.
 # %% train a linear classifier to predict infection state from PCA components
 
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report
 
 x_train = data_train_val.drop(columns=["infection", "fov_name", "time"])
 y_train = data_train_val["infection"]
