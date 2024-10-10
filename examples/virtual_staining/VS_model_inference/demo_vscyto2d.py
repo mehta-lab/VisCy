@@ -16,7 +16,7 @@ from plot import plot_vs_n_fluor
 from viscy.data.hcs import HCSDataModule
 from viscy.translation.engine import FcmaeUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
-from viscy.translation.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 
 # %% [markdown] tags=[]
@@ -111,7 +111,7 @@ model_VSCyto2D.eval()
 
 # %%
 # Setup the Trainer
-trainer = VSTrainer(
+trainer = VisCyTrainer(
     accelerator="gpu",
     callbacks=[HCSPredictionWriter(output_path)],
 )

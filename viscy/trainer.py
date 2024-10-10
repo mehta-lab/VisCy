@@ -11,7 +11,7 @@ from torch.onnx import OperatorExportTypes
 from viscy.utils.meta_utils import generate_normalization_metadata
 
 
-class VSTrainer(Trainer):
+class VisCyTrainer(Trainer):
     def preprocess(
         self,
         data_path: Path,

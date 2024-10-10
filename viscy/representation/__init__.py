@@ -9,6 +9,7 @@ from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.engine import ContrastiveModule
+from viscy.trainer import VisCyTrainer
 
 
 class ContrastiveLightningCLI(LightningCLI):
@@ -33,7 +34,9 @@ def main():
     logging.getLogger("lightning.pytorch").setLevel(log_level)
     torch.set_float32_matmul_precision("high")
     _ = ContrastiveLightningCLI(
-        model_class=ContrastiveModule, datamodule_class=TripletDataModule
+        model_class=ContrastiveModule,
+        datamodule_class=TripletDataModule,
+        trainer_class=VisCyTrainer,
     )
 
 

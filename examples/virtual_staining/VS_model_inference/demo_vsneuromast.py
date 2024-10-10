@@ -16,7 +16,7 @@ from viscy.data.hcs import HCSDataModule
 # Viscy classes for the trainer and model
 from viscy.translation.engine import VSUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
-from viscy.translation.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 
 # %% [markdown]
@@ -116,7 +116,7 @@ model_VSNeuromast.eval()
 
 # %%
 # Setup the Trainer
-trainer = VSTrainer(
+trainer = VisCyTrainer(
     accelerator="gpu",
     callbacks=[HCSPredictionWriter(output_path)],
 )
