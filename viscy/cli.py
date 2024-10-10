@@ -49,7 +49,7 @@ def run_cli(
     model_class: type[LightningModule],
     datamodule_class: type[LightningDataModule],
     trainer_class: type[VisCyTrainer],
-    **cli_kwargs,
+    subclass_mode: bool,
 ) -> None:
     """
     Main Lightning CLI entry point.
@@ -60,11 +60,14 @@ def run_cli(
     cli_class : type[LightningCLI]
         Lightning CLI class
     model_class : type[LightningModule]
-        Lightning module class. Not used in preprocess mode.
+        Lightning module class. Ignored in preprocessing.
     datamodule_class : type[LightningDataModule]
         Lightning datamodule class
     trainer_class : type[VisCyTrainer]
         Lightning trainer class
+    subclass_mode : bool
+        Enable subclass mode for model and data in Lightning config parsing.
+        Ignored in preprocessing.
     """
     setup_environment()
     seed = True
@@ -72,12 +75,14 @@ def run_cli(
         seed = False
         model_class = LightningModule
         datamodule_class = None
+        subclass_mode = False
     _ = cli_class(
         model_class=model_class,
         datamodule_class=datamodule_class,
         trainer_class=trainer_class,
         seed_everything_default=seed,
-        **cli_kwargs,
+        subclass_mode_model=subclass_mode,
+        subclass_mode_data=subclass_mode,
     )
 
 
@@ -88,6 +93,5 @@ def main() -> None:
         model_class=LightningModule,
         datamodule_class=LightningDataModule,
         trainer_class=VisCyTrainer,
-        subclass_mode_data=True,
-        subclass_mode_model=True,
+        subclass_mode=True,
     )
