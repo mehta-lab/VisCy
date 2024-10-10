@@ -22,7 +22,7 @@ class VisCyCLI(LightningCLI):
         subcommands["export"] = {"model", "dataloaders", "datamodule"}
         return subcommands
 
-    def add_arguments_to_parser(self, parser):
+    def add_arguments_to_parser(self, parser) -> None:
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -40,16 +40,17 @@ def run_cli(
     model_class: type[LightningModule],
     datamodule_class: type[LightningDataModule],
     trainer_class: type[VisCyTrainer],
-):
+) -> None:
     """
     Main Lightning CLI entry point.
+    Parse log level and set TF32 precision.
 
     Parameters
     ----------
     cli_class : type[LightningCLI]
         Lightning CLI class
     model_class : type[LightningModule]
-        Lightning module class
+        Lightning module class. Not used in preprocess mode.
     datamodule_class : type[LightningDataModule]
         Lightning datamodule class
     trainer_class : type[VisCyTrainer]

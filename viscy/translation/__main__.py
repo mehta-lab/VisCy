@@ -9,7 +9,7 @@ from viscy.translation.engine import VSUNet
 class TranslationCLI(VisCyCLI):
     """Extending lightning CLI arguments and defualts."""
 
-    def add_arguments_to_parser(self, parser):
+    def add_arguments_to_parser(self, parser) -> None:
         super().add_arguments_to_parser(parser)
         if "preprocess" not in sys.argv:
             parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
