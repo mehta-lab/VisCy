@@ -5,7 +5,7 @@ from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
 
 from viscy.data.hcs import HCSDataModule
-from viscy.translation.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 
 
 @mark.parametrize("default_channels", [True, False])
@@ -16,7 +16,7 @@ def test_preprocess(small_hcs_dataset: Path, default_channels: bool):
     else:
         with open_ome_zarr(data_path) as dataset:
             channel_names = dataset.channel_names
-    trainer = VSTrainer(accelerator="cpu")
+    trainer = VisCyTrainer(accelerator="cpu")
     trainer.preprocess(data_path, channel_names=channel_names, num_workers=2)
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names

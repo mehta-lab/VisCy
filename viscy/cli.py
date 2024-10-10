@@ -5,16 +5,14 @@ from datetime import datetime
 
 import torch
 from jsonargparse import lazy_instance
-from lightning.pytorch import LightningModule
+from lightning.pytorch import LightningDataModule, LightningModule
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from viscy.data.hcs import HCSDataModule
-from viscy.translation.engine import VSUNet
-from viscy.translation.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 
 
-class VSLightningCLI(LightningCLI):
+class VisCyCLI(LightningCLI):
     """Extending lightning CLI arguments and defualts."""
 
     @staticmethod
@@ -24,10 +22,7 @@ class VSLightningCLI(LightningCLI):
         subcommands["export"] = {"model", "dataloaders", "datamodule"}
         return subcommands
 
-    def add_arguments_to_parser(self, parser):
-        if "preprocess" not in sys.argv:
-            parser.link_arguments("data.yx_patch_size", "model.example_input_yx_shape")
-            parser.link_arguments("model.architecture", "data.architecture")
+    def add_arguments_to_parser(self, parser) -> None:
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -40,25 +35,38 @@ class VSLightningCLI(LightningCLI):
         )
 
 
-def main():
-    """Main Lightning CLI entry point."""
+def run_cli(
+    cli_class: type[LightningCLI],
+    model_class: type[LightningModule],
+    datamodule_class: type[LightningDataModule],
+    trainer_class: type[VisCyTrainer],
+) -> None:
+    """
+    Main Lightning CLI entry point.
+    Parse log level and set TF32 precision.
+
+    Parameters
+    ----------
+    cli_class : type[LightningCLI]
+        Lightning CLI class
+    model_class : type[LightningModule]
+        Lightning module class. Not used in preprocess mode.
+    datamodule_class : type[LightningDataModule]
+        Lightning datamodule class
+    trainer_class : type[VisCyTrainer]
+        Lightning trainer class
+    """
     log_level = os.getenv("VISCY_LOG_LEVEL", logging.INFO)
     logging.getLogger("lightning.pytorch").setLevel(log_level)
     torch.set_float32_matmul_precision("high")
-    model_class = VSUNet
-    datamodule_class = HCSDataModule
     seed = True
     if "preprocess" in sys.argv:
         seed = False
         model_class = LightningModule
         datamodule_class = None
-    _ = VSLightningCLI(
+    _ = cli_class(
         model_class=model_class,
         datamodule_class=datamodule_class,
-        trainer_class=VSTrainer,
+        trainer_class=trainer_class,
         seed_everything_default=seed,
     )
-
-
-if __name__ == "__main__":
-    main()

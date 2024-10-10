@@ -56,9 +56,6 @@ dev = [
     "onnxruntime",
 ]
 
-[project.scripts]
-viscy = "viscy.cli.cli:main"
-
 [tool.setuptools]
 packages = ["viscy"]
 
