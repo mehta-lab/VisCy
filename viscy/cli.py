@@ -74,4 +74,7 @@ def main() -> None:
         seed_everything_default=42,
         subclass_mode_model=subclass_mode,
         subclass_mode_data=subclass_mode,
+        parser_kwargs={
+            "description": "Computer vision models for single-cell phenotyping."
+        },
     )
