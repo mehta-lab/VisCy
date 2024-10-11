@@ -37,9 +37,7 @@ class VisCyCLI(LightningCLI):
 
 
 def _setup_environment() -> None:
-    """
-    Set log level and TF32 precision.
-    """
+    """Set log level and TF32 precision."""
     log_level = os.getenv("VISCY_LOG_LEVEL", logging.INFO)
     logging.getLogger("lightning.pytorch").setLevel(log_level)
     torch.set_float32_matmul_precision("high")
