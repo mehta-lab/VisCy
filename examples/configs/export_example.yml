@@ -21,9 +21,9 @@ model:
       in_stack_depth: 1
       pretraining: False
 # TODO: output path for the exported model
-export_path: /hpc/mydata/ziwen.liu/ckpt.onnx
+export_path: /path/to/exported.onnx
 # TODO: path to the checkpoint file
 # Download from:
 # https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt
-ckpt_path: /hpc/websites/public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt
+ckpt_path: /path/to/trained.ckpt
 format: onnx
