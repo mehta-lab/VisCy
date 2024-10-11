@@ -15,10 +15,14 @@ and save them to Zarr metadata.
 viscy preprocess -c config.yaml
 ```
 
-Or to preprocess all channels with the default sampling rate and 1 worker:
+An example of the config file can be found [here](../examples/configs/preprocess_example.yml).
+
+The are only a few arguments for this command,
+so it may be desirable to run without having to edit a config file.
+To preprocess all channels with the default sampling rate and 8 workers:
 
 ```sh
-viscy preprocess --data_path /path/to/data.zarr
+viscy preprocess --data_path=/path/to/data.zarr --num_workers=8
 ```
 
 ## Training

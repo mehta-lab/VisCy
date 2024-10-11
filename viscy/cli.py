@@ -18,7 +18,7 @@ class VisCyCLI(LightningCLI):
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
         subcommands = LightningCLI.subcommands()
-        subcommand_base_args = {"model", "dataloaders", "datamodule"}
+        subcommand_base_args = {"model"}
         subcommands["preprocess"] = subcommand_base_args
         subcommands["export"] = subcommand_base_args
         return subcommands
@@ -52,14 +52,15 @@ def main() -> None:
     Set default random seed to 42.
     """
     _setup_environment()
-    subclass_mode = bool("preprocess" not in sys.argv)
+    require_model = "preprocess" not in sys.argv
+    require_data = {"preprocess", "export"}.isdisjoint(sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
-        datamodule_class=LightningDataModule if subclass_mode else None,
+        datamodule_class=LightningDataModule if require_data else None,
         trainer_class=VisCyTrainer,
         seed_everything_default=42,
-        subclass_mode_model=subclass_mode,
-        subclass_mode_data=subclass_mode,
+        subclass_mode_model=require_model,
+        subclass_mode_data=require_data,
         parser_kwargs={
             "description": "Computer vision models for single-cell phenotyping."
         },

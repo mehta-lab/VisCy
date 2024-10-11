@@ -1,21 +1,29 @@
-# lightning.pytorch==2.0.4
-seed_everything: true
+# Export the FCMAE-pretrained VSCyto2D weights to ONNX format
+seed_everything: 42
 trainer:
   accelerator: auto
   strategy: auto
   devices: auto
   num_nodes: 1
   precision: 32-true
+  callbacks: []
 model:
-  architecture: null
-  model_config: {}
-  loss_function: null
-  lr: 0.001
-  schedule: Constant
-  log_num_samples: 8
-  test_cellpose_model_path: null
-  test_cellpose_diameter: null
-  test_evaluate_cellpose: false
-export_path: null
-ckpt_path: null
+  class_path: viscy.translation.engine.VSUNet
+  init_args:
+    architecture: fcmae
+    model_config:
+      in_channels: 1
+      out_channels: 2
+      encoder_blocks: [3, 3, 9, 3]
+      dims: [96, 192, 384, 768]
+      decoder_conv_blocks: 2
+      stem_kernel_size: [1, 2, 2]
+      in_stack_depth: 1
+      pretraining: False
+# TODO: output path for the exported model
+export_path: /hpc/mydata/ziwen.liu/ckpt.onnx
+# TODO: path to the checkpoint file
+# Download from:
+# https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt
+ckpt_path: /hpc/websites/public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt
 format: onnx

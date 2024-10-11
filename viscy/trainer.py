@@ -1,40 +1,45 @@
 import logging
 from pathlib import Path
-from typing import Literal, Sequence, Union
+from typing import Literal
 
 import torch
 from iohub import open_ome_zarr
-from lightning.pytorch import LightningDataModule, LightningModule, Trainer
+from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
 from viscy.utils.meta_utils import generate_normalization_metadata
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class VisCyTrainer(Trainer):
     def preprocess(
         self,
         data_path: Path,
-        channel_names: Union[list[str], Literal[-1]] = -1,
+        channel_names: list[str] | Literal[-1] = -1,
         num_workers: int = 1,
         block_size: int = 32,
-        model: LightningModule = None,
-        datamodule: LightningDataModule = None,
-        dataloaders: Sequence = None,
+        model: LightningModule | None = None,
     ):
-        """Compute dataset statistics before training or testing for normalization.
-
-        :param Path data_path: Path to the HCS OME-Zarr dataset
-        :param Union[list[str], Literal[ channel_names: channel names,
-            defaults to -1 (all channels)
-        :param int num_workers: number of workers, defaults to 1
-        :param int block_size: sampling block size, defaults to 32
-        :param LightningModule model: place holder for model, ignored
-        :param LightningDataModule datamodule: place holder for datamodule, ignored
-        :param Sequence dataloaders: place holder for dataloaders, ignored
         """
-        if model or dataloaders or datamodule:
-            logging.debug("Ignoring model and data configs during preprocessing.")
+        Compute dataset statistics before training or testing for normalization.
+
+        Parameters
+        ----------
+        data_path : Path
+            Path to the HCS OME-Zarr dataset
+        channel_names : list[str] | Literal[-1], optional
+            Channel names to compute statistics for, by default -1
+        num_workers : int, optional
+            Number of CPU workers, by default 1
+        block_size : int, optional
+            Block size to subsample images, by default 32
+        model: LightningModule, optional
+            Ignored placeholder, by default None
+        """
+        if model is not None:
+            _logger.warning("Ignoring model configuration during preprocessing.")
         with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
             channel_indices = (
                 [dataset.channel_names.index(c) for c in channel_names]
@@ -51,29 +56,29 @@ class VisCyTrainer(Trainer):
     def export(
         self,
         model: LightningModule,
-        export_path: str,
-        ckpt_path: str,
-        format="onnx",
-        datamodule: LightningDataModule = None,
-        dataloaders: Sequence = None,
+        export_path: Path,
+        ckpt_path: Path,
+        format: str = "onnx",
     ):
-        """Export the model for deployment (currently only ONNX is supported).
-
-        :param LightningModule model: module to export
-        :param str export_path: output file name
-        :param str ckpt_path: model checkpoint
-        :param str format: format (currently only ONNX is supported), defaults to "onnx"
-        :param LightningDataModule datamodule: placeholder for datamodule,
-            defaults to None
-        :param Sequence dataloaders: placeholder for dataloaders, defaults to None
         """
-        if dataloaders or datamodule:
-            logging.debug("Ignoring datamodule and dataloaders during export.")
+        Export the model for deployment (currently only ONNX is supported).
+
+        Parameters
+        ----------
+        model : LightningModule
+            Module to export.
+        export_path : Path
+            Output file name.
+        ckpt_path : Path
+            Model checkpoint path.
+        format : str, optional
+            Format (currently only ONNX is supported), by default "onnx".
+        """
         if not format.lower() == "onnx":
             raise NotImplementedError(f"Export format '{format}'")
         model = _maybe_unwrap_optimized(model)
         self.strategy._lightning_module = model
-        model.load_state_dict(torch.load(ckpt_path)["state_dict"])
+        model.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])
         model.eval()
         model.to_onnx(
             export_path,
@@ -98,4 +103,4 @@ class VisCyTrainer(Trainer):
                 },
             },
         )
-        logging.info(f"ONNX exported at {export_path}")
+        _logger.info(f"ONNX exported at {export_path}")
