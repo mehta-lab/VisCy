@@ -36,7 +36,7 @@ class VisCyCLI(LightningCLI):
         )
 
 
-def setup_environment() -> None:
+def _setup_environment() -> None:
     """
     Set log level and TF32 precision.
     """
@@ -50,22 +50,8 @@ def main() -> None:
     Main Lightning CLI entry point.
     Parse log level and set TF32 precision.
     Set default random seed to 42.
-
-    Parameters
-    ----------
-    cli_class : type[LightningCLI]
-        Lightning CLI class
-    model_class : type[LightningModule]
-        Lightning module class. Ignored in preprocessing.
-    datamodule_class : type[LightningDataModule]
-        Lightning datamodule class
-    trainer_class : type[VisCyTrainer]
-        Lightning trainer class
-    subclass_mode : bool
-        Enable subclass mode for model and data in Lightning config parsing.
-        Ignored in preprocessing.
     """
-    setup_environment()
+    _setup_environment()
     subclass_mode = bool("preprocess" in sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
