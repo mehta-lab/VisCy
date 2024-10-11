@@ -52,7 +52,7 @@ def main() -> None:
     Set default random seed to 42.
     """
     _setup_environment()
-    subclass_mode = bool("preprocess" in sys.argv)
+    subclass_mode = bool("preprocess" not in sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
         datamodule_class=LightningDataModule if subclass_mode else None,
