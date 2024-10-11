@@ -18,8 +18,9 @@ class VisCyCLI(LightningCLI):
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
         subcommands = LightningCLI.subcommands()
-        subcommands["preprocess"] = {"model", "dataloaders", "datamodule"}
-        subcommands["export"] = {"model", "dataloaders", "datamodule"}
+        subcommand_base_args = {"model", "dataloaders", "datamodule"}
+        subcommands["preprocess"] = subcommand_base_args
+        subcommands["export"] = subcommand_base_args
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
@@ -44,16 +45,11 @@ def setup_environment() -> None:
     torch.set_float32_matmul_precision("high")
 
 
-def run_cli(
-    cli_class: type[LightningCLI],
-    model_class: type[LightningModule],
-    datamodule_class: type[LightningDataModule],
-    trainer_class: type[VisCyTrainer],
-    subclass_mode: bool,
-) -> None:
+def main() -> None:
     """
     Main Lightning CLI entry point.
     Parse log level and set TF32 precision.
+    Set default random seed to 42.
 
     Parameters
     ----------
@@ -70,28 +66,12 @@ def run_cli(
         Ignored in preprocessing.
     """
     setup_environment()
-    seed = True
-    if "preprocess" in sys.argv:
-        seed = False
-        model_class = LightningModule
-        datamodule_class = None
-        subclass_mode = False
-    _ = cli_class(
-        model_class=model_class,
-        datamodule_class=datamodule_class,
-        trainer_class=trainer_class,
-        seed_everything_default=seed,
+    subclass_mode = bool("preprocess" in sys.argv)
+    _ = VisCyCLI(
+        model_class=LightningModule,
+        datamodule_class=LightningDataModule if subclass_mode else None,
+        trainer_class=VisCyTrainer,
+        seed_everything_default=42,
         subclass_mode_model=subclass_mode,
         subclass_mode_data=subclass_mode,
-    )
-
-
-def main() -> None:
-    """Main CLI with subclass mode enabled."""
-    run_cli(
-        cli_class=VisCyCLI,
-        model_class=LightningModule,
-        datamodule_class=LightningDataModule,
-        trainer_class=VisCyTrainer,
-        subclass_mode=True,
     )
