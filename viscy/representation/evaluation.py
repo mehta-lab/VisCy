@@ -133,11 +133,8 @@ def dataset_of_tracks(
 
 
 class GMMClustering:
-    def __init__(
-        self, features_data, infection_data, n_clusters_range=np.arange(2, 10)
-    ):
+    def __init__(self, features_data, n_clusters_range=np.arange(2, 10)):
         self.features_data = features_data
-        self.infection_data = infection_data
         self.n_clusters_range = n_clusters_range
         self.best_n_clusters = None
         self.best_gmm = None
