@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Sequence
+from typing import Literal, Sequence, TypedDict
 
 import numpy as np
 import torch
@@ -7,11 +7,17 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from torch import Tensor, nn
 
-from viscy.data.typing import TripletSample
+from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+class ContrastivePrediction(TypedDict):
+    features: Tensor
+    projections: Tensor
+    index: TrackingIndex
 
 
 class ContrastiveModule(LightningModule):
@@ -154,7 +160,7 @@ class ContrastiveModule(LightningModule):
 
     def predict_step(
         self, batch: TripletSample, batch_idx, dataloader_idx=0
-    ) -> dict[str, Tensor | dict]:
+    ) -> ContrastivePrediction:
         """Prediction step for extracting embeddings."""
         features, projections = self.model(batch["anchor"])
         return {
