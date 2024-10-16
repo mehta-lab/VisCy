@@ -6,29 +6,53 @@ import pandas as pd
 import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
+from numpy.typing import NDArray
 from xarray import Dataset, open_zarr
 
 from viscy.data.triplet import INDEX_COLUMNS
+from viscy.representation.engine import ContrastivePrediction
+from viscy.representation.evalutation.dimensionality_reduction import (
+    _fit_transform_umap,
+)
 
 __all__ = ["read_embedding_dataset", "EmbeddingWriter"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
 def read_embedding_dataset(path: Path) -> Dataset:
-    """Read the embedding dataset written by the EmbeddingWriter callback.
+    """
+    Read the embedding dataset written by the EmbeddingWriter callback.
 
-    :param Path path: Path to the zarr store.
-    :return Dataset: Xarray dataset with features and projections.
+    Parameters
+    ----------
+    path : Path
+        Path to the zarr store.
+
+    Returns
+    -------
+    Dataset
+        Xarray dataset with features and projections.
     """
     return open_zarr(path).set_index(sample=INDEX_COLUMNS)
 
 
-class EmbeddingWriter(BasePredictionWriter):
-    """Callback to write embeddings to a zarr store in an Xarray-compatible format.
+def _move_and_stack_embeddings(
+    predictions: Sequence[ContrastivePrediction], key: str
+) -> NDArray:
+    """Move embeddings to CPU and stack them into a numpy array."""
+    return torch.cat([p["features"].cpu() for p in predictions], dim=0).numpy()
 
-    :param Path output_path: Path to the zarr store.
-    :param Literal["batch", "epoch", "batch_and_epoch"] write_interval:
-        When to write the embeddings, defaults to "epoch".
+
+class EmbeddingWriter(BasePredictionWriter):
+    """
+    Callback to write embeddings to a zarr store in an Xarray-compatible format.
+
+    Parameters
+    ----------
+    output_path : Path
+        Path to the zarr store.
+    write_interval : Literal["batch", "epoch", "batch_and_epoch"], optional
+        When to write the embeddings, by default 'epoch'.
     """
 
     def __init__(
@@ -48,21 +72,34 @@ class EmbeddingWriter(BasePredictionWriter):
         self,
         trainer: Trainer,
         pl_module: LightningModule,
-        predictions: Sequence[dict],
+        predictions: Sequence[ContrastivePrediction],
         batch_indices: Sequence[int],
     ) -> None:
-        features = torch.cat([p["features"] for p in predictions], dim=0)
-        projections = torch.cat([p["projections"] for p in predictions], dim=0)
-        index = pd.MultiIndex.from_frame(
-            pd.concat([pd.DataFrame(p["index"]) for p in predictions])
-        )
+        """Write predictions and the 2-component UMAP of features to a zarr store.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            Placeholder, ignored.
+        pl_module : LightningModule
+            Placeholder, ignored.
+        predictions : Sequence[ContrastivePrediction]
+            Sequence of output from the prediction steps.
+        batch_indices : Sequence[int]
+            Placeholder, ignored.
+        """
+        features = _move_and_stack_embeddings(predictions, "features")
+        projections = _move_and_stack_embeddings(predictions, "projections")
+        ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
+        _logger.debug("Computing UMAP embeddings")
+        _, umap = _fit_transform_umap(features, n_components=2, normalize=True)
+        ultrack_indices["UMAP1"] = umap[:, 0]
+        ultrack_indices["UMAP2"] = umap[:, 1]
+        index = pd.MultiIndex.from_frame(ultrack_indices)
         dataset = Dataset(
             {
-                "features": (("sample", "features"), features.cpu().numpy()),
-                "projections": (
-                    ("sample", "projections"),
-                    projections.cpu().numpy(),
-                ),
+                "features": (("sample", "features"), features),
+                "projections": (("sample", "projections"), projections),
             },
             coords={"sample": index},
         ).reset_index("sample")
