@@ -21,21 +21,6 @@ features_path_30_min = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
 )
 
-
-feature_path_no_track = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_random_sampling2/feb_fixed_test_predict.zarr"
-)
-
-
-features_path_any_time = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/negpair_difcell_randomtime_sampling/Ver2_updateTracking_refineModel/predictions/Feb_2chan_128patch_32projDim/2chan_128patch_56ckpt_FebTest.zarr"
-)
-
-features_path_june = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/jun_time_interval_1_epoch_178.zarr"
-)
-
-
 # %% visualize distribution of embeddings
 embedding_dataset = read_embedding_dataset(features_path_30_min)
 features_data = embedding_dataset["features"]
@@ -52,15 +37,9 @@ for i, dim in enumerate(random_dimensions, 1):
 plt.tight_layout()
 plt.show()
 
-# %% initialize GMM clustering and ground truth labels
-
-embedding_dataset = read_embedding_dataset(features_path_june)
-features_data = embedding_dataset["features"]
-
-cluster_evaluator = GMMClustering(features_data)
-
 # %% Find best n_clusters
 
+cluster_evaluator = GMMClustering(features_data)
 aic_scores, bic_scores = cluster_evaluator.find_best_n_clusters()
 
 plt.figure(figsize=(8, 6))
