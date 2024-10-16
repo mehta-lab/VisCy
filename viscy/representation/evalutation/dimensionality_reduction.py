@@ -58,7 +58,6 @@ def compute_umap(embedding_dataset, normalize_features=True):
         scaled_features = features.values
 
     # Compute UMAP for features and projections
-    # Computing 3 components to enable 3D visualization.
     umap_features = umap.UMAP(random_state=42, n_components=2)
     umap_projection = umap.UMAP(random_state=42, n_components=2)
     umap_features_embedding = umap_features.fit_transform(scaled_features)
