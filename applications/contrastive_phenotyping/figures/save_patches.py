@@ -1,15 +1,14 @@
 # %% script to save 128 by 128 image patches from napari viewer
 
-import napari
-import numpy as np
-from pathlib import Path
-import sys
 import os
+import sys
+from pathlib import Path
+
+import numpy as np
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 # from viscy.data.triplet import TripletDataModule
 from viscy.representation.evaluation import dataset_of_tracks
-
 
 # %% input parameters
 

@@ -16,8 +16,8 @@ from viscy.representation.evaluation import load_annotation, compute_pca, comput
 # %% Jupyter magic command for autoreloading modules
 # ruff: noqa
 # fmt: off
-%load_ext autoreload
-%autoreload 2
+# %load_ext autoreload
+# %autoreload 2
 # fmt: on
 # ruff: noqa
 # %% Paths and parameters
@@ -95,7 +95,9 @@ umap_features, umap_projections, umap_df = compute_umap(dataset)
 # Plot UMAP embeddings as density plots
 fig, ax = plt.subplots(1, 2, figsize=(10, 5))
 sns.kdeplot(data=umap_df, x="UMAP1", y="UMAP2", ax=ax[0], fill=True, cmap="Blues")
-sns.kdeplot(data=umap_df, x="UMAP1_proj", y="UMAP2_proj", ax=ax[1], fill=True, cmap="Reds")
+sns.kdeplot(
+    data=umap_df, x="UMAP1_proj", y="UMAP2_proj", ax=ax[1], fill=True, cmap="Reds"
+)
 ax[0].set_title("Density plot of UMAP1 vs UMAP2 (features)")
 ax[1].set_title("Density plot of UMAP1 vs UMAP2 (projections)")
 plt.show()

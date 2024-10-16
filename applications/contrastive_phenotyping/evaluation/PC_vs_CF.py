@@ -4,30 +4,22 @@
 """
 
 # %%
-from pathlib import Path
-import sys
 import os
+import sys
+from pathlib import Path
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
+import matplotlib.pyplot as plt
 import numpy as np
-import pandas as pd
+import seaborn as sns
 from sklearn.decomposition import PCA
-from umap import UMAP
-from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import (
     FeatureExtractor as FE,
 )
 from viscy.representation.evaluation import dataset_of_tracks
-
-import matplotlib.pyplot as plt
-import seaborn as sns
-
-from scipy.stats import spearmanr
-import pandas as pd
-import plotly.express as px
 
 # %%
 features_path = Path(
@@ -340,6 +332,7 @@ plt.savefig(
 )
 
 # %% find the cell patches with the highest and lowest value in each feature
+
 
 def save_patches(fov_name, track_id):
     data_path = Path(

@@ -3,13 +3,15 @@ import sys
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import plotly.express as px
+from matplotlib.patches import FancyArrowPatch
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
+
 from viscy.representation.embedding_writer import read_embedding_dataset
-import matplotlib.pyplot as plt
 
 # %%
 # single channel. with temporal regularizations
@@ -106,8 +108,6 @@ no_inter = division[division == "interphase"].count()
 no_div = division[division == "mitosis"].count()
 
 # %% plot the trajectory quiver of one cell on top of the UMAP
-
-from matplotlib.patches import FancyArrowPatch
 
 cell_parent = features[
     (features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([13]))
