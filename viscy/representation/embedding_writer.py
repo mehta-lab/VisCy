@@ -91,7 +91,7 @@ class EmbeddingWriter(BasePredictionWriter):
         features = _move_and_stack_embeddings(predictions, "features")
         projections = _move_and_stack_embeddings(predictions, "projections")
         ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
-        _logger.debug("Computing UMAP embeddings")
+        _logger.info(f"Computing UMAP embeddings for {len(features)} samples.")
         _, umap = _fit_transform_umap(features, n_components=2, normalize=True)
         ultrack_indices["UMAP1"] = umap[:, 0]
         ultrack_indices["UMAP2"] = umap[:, 1]
