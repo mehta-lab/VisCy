@@ -113,7 +113,7 @@ from viscy.data.hcs import HCSDataModule
 from viscy.translation.evaluation_metrics import mean_average_precision
 # Trainer class and UNet.
 from viscy.translation.engine import MixedLoss, VSUNet
-from viscy.translation.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 # training augmentations
 from viscy.transforms import (NormalizeSampled, RandAdjustContrastd,
                               RandAffined, RandGaussianNoised,
@@ -727,7 +727,7 @@ phase2fluor_2D_data = HCSDataModule(
 )
 phase2fluor_2D_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], precision='16-mixed' ,fast_dev_run=True)
+trainer = VisCyTrainer(accelerator="gpu", devices=[GPU_ID], precision='16-mixed' ,fast_dev_run=True)
 
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
@@ -792,7 +792,7 @@ phase2fluor_2D_data = HCSDataModule(
 # #######################
 phase2fluor_2D_data.setup("fit")
 # fast_dev_run runs a single batch of data through the model to check for errors.
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID],precision='16-mixed', fast_dev_run=True)
+trainer = VisCyTrainer(accelerator="gpu", devices=[GPU_ID],precision='16-mixed', fast_dev_run=True)
 
 # trainer class takes the model and the data module as inputs.
 trainer.fit(phase2fluor_model, datamodule=phase2fluor_2D_data)
@@ -853,7 +853,7 @@ n_samples = len(phase2fluor_2D_data.train_dataset)
 steps_per_epoch = n_samples // BATCH_SIZE  # steps per epoch.
 n_epochs = 80  # Set this to 80-100 or the number of epochs you want to train for.
 
-trainer = VSTrainer(
+trainer = VisCyTrainer(
     accelerator="gpu",
     devices=[GPU_ID],
     max_epochs=n_epochs,

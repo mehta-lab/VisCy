@@ -57,7 +57,7 @@ dev = [
 ]
 
 [project.scripts]
-viscy = "viscy.cli.cli:main"
+viscy = "viscy.cli:main"
 
 [tool.setuptools]
 packages = ["viscy"]
