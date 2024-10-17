@@ -15,10 +15,14 @@ and save them to Zarr metadata.
 viscy preprocess -c config.yaml
 ```
 
-Or to preprocess all channels with the default sampling rate and 1 worker:
+An example of the config file can be found [here](../examples/configs/preprocess_example.yml).
+
+The are only a few arguments for this command,
+so it may be desirable to run without having to edit a config file.
+To preprocess all channels with the default sampling rate and 8 workers:
 
 ```sh
-viscy preprocess --data_path /path/to/data.zarr
+viscy preprocess --data_path=/path/to/data.zarr --num_workers=8
 ```
 
 ## Training
@@ -65,3 +69,18 @@ viscy export -c config.yaml
 ```
 
 An example of the config file can be found [here](../examples/configs/export_example.yml).
+
+Use argument `export_path` to configure where the output is stored.
+
+### Notes
+
+* Current implementation will export a checkpoint to ONNX IR version 9
+and OP set version 18.
+
+* For CPU sharing reasons, running an ONNX model
+requires an exclusive node on HPC OR a non-distributed system (e.g. a PC).
+
+* Models must be located in a lightning training logs directory
+with a valid `config.yaml` in order to be initialized.
+This can be "hacked" by locating the config in a directory
+called `checkpoints` beneath a valid config's directory.

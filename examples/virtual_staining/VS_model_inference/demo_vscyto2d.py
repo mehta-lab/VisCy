@@ -14,9 +14,9 @@ from plot import plot_vs_n_fluor
 
 # Viscy classes for the trainer and model
 from viscy.data.hcs import HCSDataModule
-from viscy.light.engine import FcmaeUNet
-from viscy.light.predict_writer import HCSPredictionWriter
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import FcmaeUNet
+from viscy.translation.predict_writer import HCSPredictionWriter
+from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 
 # %% [markdown] tags=[]
@@ -65,7 +65,7 @@ phase_channel_name = "Phase3D"
 For this example we will use the following parameters:
 For more information on the VSCyto2D model,
 see ``viscy.unet.networks.fcmae``
-([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/fcmae.py#L398))
+([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/fcmae.py))
 for configuration details.
 """
 # %%
@@ -111,7 +111,7 @@ model_VSCyto2D.eval()
 
 # %%
 # Setup the Trainer
-trainer = VSTrainer(
+trainer = VisCyTrainer(
     accelerator="gpu",
     callbacks=[HCSPredictionWriter(output_path)],
 )

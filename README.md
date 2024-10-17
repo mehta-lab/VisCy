@@ -102,6 +102,36 @@ The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), 
 
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
+## Image representation learning
+
+We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations,
+with focus on cell and organelle remodeling due to viral infection.
+
+See our recent work on temporally regularized contrastive sampling method
+for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
+
+<details>
+ <summary> Pradeep, Imran, Liu et al., 2024 </summary>
+
+  <pre><code>
+@misc{pradeep_contrastive_2024,
+      title={Contrastive learning of cell state dynamics in response to perturbations},
+      author={Soorya Pradeep and Alishba Imran and Ziwen Liu and Taylla Milena Theodoro and Eduardo Hirata-Miyasaki and Ivan Ivanov and Madhura Bhave and Sudip Khadka and Hunter Woosley and Carolina Arias and Shalin B. Mehta},
+      year={2024},
+      eprint={2410.11281},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2410.11281},
+}
+    </code></pre>
+  </details>
+
+### Workflow demo
+
+[Exploration of learned embeddings with napari-iohub](https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link)
+
+![DynaCLR](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
+
 ## Installation
 
 1. We recommend using a new Conda/virtual environment.
@@ -148,4 +178,3 @@ for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s4159
 The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
-

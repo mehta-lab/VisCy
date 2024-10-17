@@ -14,9 +14,9 @@ from plot import plot_vs_n_fluor
 from viscy.data.hcs import HCSDataModule
 
 # Viscy classes for the trainer and model
-from viscy.light.engine import VSUNet
-from viscy.light.predict_writer import HCSPredictionWriter
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import VSUNet
+from viscy.translation.predict_writer import HCSPredictionWriter
+from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 
 # %% [markdown]
@@ -71,7 +71,7 @@ phase_channel_name = "Phase3D"
 """
 For this example we will use the following parameters:
 ### For more information on the VSNeuromast model:
-See ``viscy.unet.networks.fcmae`` ([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252)) for configuration details.
+See ``viscy.unet.networks.unext2`` ([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/unext2.py)) for configuration details.
 """
 # %%
 # Setup the data module.
@@ -116,7 +116,7 @@ model_VSNeuromast.eval()
 
 # %%
 # Setup the Trainer
-trainer = VSTrainer(
+trainer = VisCyTrainer(
     accelerator="gpu",
     callbacks=[HCSPredictionWriter(output_path)],
 )

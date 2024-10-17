@@ -18,8 +18,8 @@ from iohub import open_ome_zarr
 from viscy.data.hcs import HCSDataModule
 
 # Viscy classes for the trainer and model
-from viscy.light.engine import VSUNet
-from viscy.light.trainer import VSTrainer
+from viscy.translation.engine import VSUNet
+from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 from lightning.pytorch import seed_everything
 
@@ -170,7 +170,7 @@ model_VSCyto3D_w_augmentation = VSUNet.load_from_checkpoint(
 model_VSCyto3D_w_augmentation.eval()
 
 # Setup the Trainer
-trainer = VSTrainer(accelerator="gpu", devices=[GPU_ID], precision="16-mixed")
+trainer = VisCyTrainer(accelerator="gpu", devices=[GPU_ID], precision="16-mixed")
 
 n = 5
 patch_size = 256
