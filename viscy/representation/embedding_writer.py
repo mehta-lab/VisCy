@@ -40,7 +40,7 @@ def _move_and_stack_embeddings(
     predictions: Sequence[ContrastivePrediction], key: str
 ) -> NDArray:
     """Move embeddings to CPU and stack them into a numpy array."""
-    return torch.cat([p["features"].cpu() for p in predictions], dim=0).numpy()
+    return torch.cat([p[key].cpu() for p in predictions], dim=0).numpy()
 
 
 class EmbeddingWriter(BasePredictionWriter):
