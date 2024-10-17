@@ -110,7 +110,7 @@ See our recent work on temporally regularized contrastive sampling method for re
     </code></pre>
   </details>
 
-![DynaCLR](https://drive.google.com/file/d/1-MCUY9mRhzV2LqrB7lEUP0Kmv9yf43M8)
+![DynaCLR](https://drive.google.com/uc?export=view&id=1-MCUY9mRhzV2LqrB7lEUP0Kmv9yf43M8)
 
 ### Demo
 [Exploration of learned embeddings with napari-iohub](https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link)
