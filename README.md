@@ -89,6 +89,31 @@ The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), 
 ### Pipeline
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
+## Image representation learning
+
+We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations, with focus on cell and organelle remodeling due to viral infection.
+
+See our recent work on temporally regularized contrastive sampling method for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
+<details>
+ <summary> Pradeep, Imran, Liu et al., 2024 </summary>
+
+  <pre><code>
+@misc{pradeep_contrastive_2024,
+      title={Contrastive learning of cell state dynamics in response to perturbations}, 
+      author={Soorya Pradeep and Alishba Imran and Ziwen Liu and Taylla Milena Theodoro and Eduardo Hirata-Miyasaki and Ivan Ivanov and Madhura Bhave and Sudip Khadka and Hunter Woosley and Carolina Arias and Shalin B. Mehta},
+      year={2024},
+      eprint={2410.11281},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2410.11281}, 
+}
+    </code></pre>
+  </details>
+
+![DynaCLR](https://drive.google.com/file/d/1-MCUY9mRhzV2LqrB7lEUP0Kmv9yf43M8)
+
+### Demo
+[Exploration of learned embeddings with napari-iohub](https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link)
 
 ## Installation
 
