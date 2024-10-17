@@ -72,8 +72,8 @@ phase_channel_name = "Phase3D"
 """
 For this example we will use the following parameters:
 ### For more information on the VSCyto3D model:
-See ``viscy.unet.networks.fcmae``
-([source code](https://github.com/mehta-lab/VisCy/blob/6a3457ec8f43ecdc51b1760092f1a678ed73244d/viscy/unet/networks/unext2.py#L252))
+See ``viscy.unet.networks.unext2``
+([source code](https://github.com/mehta-lab/VisCy/blob/main/viscy/unet/networks/unext2.py))
 for configuration details.
 """
 # %%
