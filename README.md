@@ -3,6 +3,7 @@
 VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
 This repository provides a pipeline for the following.
+
 - Image translation
   - Robust virtual staining of landmark organelles
 - Image classification
@@ -13,10 +14,10 @@ This repository provides a pipeline for the following.
 > **Note:**  
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
 
-
 ## Virtual staining
 
-### Demos 
+### Demos
+
 - [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/46beba4ecc8c4f312fda0b04d5229631a41b6cb5/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
 Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course and uses UNeXt2 architecture.
 
@@ -26,6 +27,7 @@ Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto
 Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
 
 ### Gallery
+
 Below are some examples of virtually stained images (click to play videos).
 See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
@@ -36,7 +38,6 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 ### Reference
 
 The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
-
 
 This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502).
 
@@ -54,9 +55,9 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
           URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
           eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
           journal = {bioRxiv}
-      } 
+      }
 </code></pre>
-</details> 
+</details>
 
 <details>
  <summary>Guo, Yeh, Folkesson et al., 2020</summary>
@@ -79,16 +80,47 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
       journal = {eLife},
       issn = {2050-084X},
       publisher = {eLife Sciences Publications, Ltd},
-      } 
+      }
     </code></pre>
   </details>
 
 ### Library of virtual staining (VS) models
+
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
 ### Pipeline
+
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
+## Image representation learning
+
+We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations,
+with focus on cell and organelle remodeling due to viral infection.
+
+See our recent work on temporally regularized contrastive sampling method
+for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
+
+<details>
+ <summary> Pradeep, Imran, Liu et al., 2024 </summary>
+
+  <pre><code>
+@misc{pradeep_contrastive_2024,
+      title={Contrastive learning of cell state dynamics in response to perturbations},
+      author={Soorya Pradeep and Alishba Imran and Ziwen Liu and Taylla Milena Theodoro and Eduardo Hirata-Miyasaki and Ivan Ivanov and Madhura Bhave and Sudip Khadka and Hunter Woosley and Carolina Arias and Shalin B. Mehta},
+      year={2024},
+      eprint={2410.11281},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2410.11281},
+}
+    </code></pre>
+  </details>
+
+### Workflow demo
+
+[Exploration of learned embeddings with napari-iohub]((https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link))
+
+![DynaCLR](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
 
 ## Installation
 
@@ -128,6 +160,7 @@ A full illustration of the virtual staining pipeline can be found [here](https:/
 For development installation, see [the contributing guide](https://github.com/mehta-lab/VisCy/blob/main/CONTRIBUTING.md).
 
 ## Additional Notes
+
 The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning.ai/index.html) framework.
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
