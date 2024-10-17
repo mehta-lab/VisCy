@@ -83,24 +83,39 @@ class CachedDataset(Dataset):
             else None
         )
         self._position_mapping()
-        self.cache_dict = {}
+
+        self.cache_order = []
+        self.cache_record = torch.zeros(len(self.positions))
+        # Caching the dataset as two separate arrays
+        # self._init_cache_dataset()
 
     def _position_mapping(self) -> None:
         self.position_keys = []
+        self.position_shape_tczyx= (1,1,1,1,1)
         self.norm_meta_dict = {}
 
         for pos in self.positions:
             self.position_keys.append(pos.data.name)
             self.norm_meta_dict[str(pos.data.name)] = _read_norm_meta(pos)
+        # FIX: Use the position shape
+        self.position_shape_zyx = pos.data.shape[-3:]
 
-    def _cache_dataset(self, index: int, channel_index: list[int], t: int = 0) -> None:
-        # Add the position to the cached_dict
-        # TODO: hardcoding to t=0
-        self.cache_dict[str(self.position_keys[index])] = torch.from_numpy(
-            self.positions[index]
-            .data.oindex[slice(t, t + 1), channel_index, :]
-            .astype(np.float32)
-        )
+    def _init_cache_dataset(self, t_idx=1, ch_idx=1) -> None:
+        _logger.info('Initializing cache array')
+        # FIXME assumes t=1
+        self.cache = torch.zeros(((len(self.positions),t_idx,len(ch_idx),)+ self.position_shape_zyx))
+
+
+    # def _cache_dataset(self, index: int, channel_index: list[int], t: int = 0) -> None:
+    #     # Add the position to the cached_dict
+    #     # TODO: hardcoding to t=0
+    #     _logger.info(f'Adding {self.position_keys[index]} to cache')
+        
+    #     # self.cache_dict[str(self.position_keys[index])] = torch.from_numpy(
+    #     #     self.positions[index]
+    #     #     .data.oindex[slice(t, t + 1), channel_index, :]
+    #     #     .astype(np.float32)
+    #     # )
 
     def _get_weight_map(self, position: Position) -> Tensor:
         # Get the weight map from the position for the MONAI weightedcrop transform
@@ -117,14 +132,30 @@ class CachedDataset(Dataset):
             ch_idx.extend(self.target_ch_idx)
 
         # Check if the sample is in the cache else add it
-        # Split the tensor into the channels
-        sample_id = self.position_keys[index]
-        if sample_id not in self.cache_dict:
-            logging.info(f"Adding {sample_id} to cache")
-            self._cache_dataset(index, channel_index=ch_idx)
+        if self.cache_record[index]==0:
+            #if all entries of self.cache_record are zero
+            if self.cache_record.sum()==0:
+                #FIXME hardcoding t_idx=1
+                self._init_cache_dataset(ch_idx=ch_idx,t_idx=1)
+
+            # Flip the bit
+            self.cache_record[index]=1
+            self.cache_order.append(index)
+            # Stack the data
+            _logger.info(f'Adding {self.position_keys[index]} to cache')
+            _logger.info(f'Cache_order: {self.cache_order}')
+            _logger.info(f'caching index: {index}')
+            #FIX ME: hardcoding t=0 and make this part of function
+            t=0
+            # Insert the data into the cache
+            self.cache[index]=torch.from_numpy(self.positions[index]
+            .data.oindex[slice(t, t + 1), ch_idx, :]
+            .astype(np.float32))
 
         # Get the sample from the cache
-        images = self.cache_dict[sample_id].unbind(dim=1)
+        # images = self.cache_dict[sample_id].unbind(dim=1)
+        sample_id = self.position_keys[index]
+        images = self.cache[index].unbind(dim=1)
         norm_meta = self.norm_meta_dict[str(sample_id)]
 
         sample_images = {k: v for k, v in zip(ch_names, images)}
@@ -207,7 +238,6 @@ class CachedDataModule(LightningDataModule):
 
     def _train_transform(self) -> list[Callable]:
         """ Set the train augmentations
-
         
         """
 
