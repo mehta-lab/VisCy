@@ -128,7 +128,7 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 
 ### Workflow demo
 
-[Exploration of learned embeddings with napari-iohub]((https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link))
+[Exploration of learned embeddings with napari-iohub](https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link)
 
 ![DynaCLR](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
 
