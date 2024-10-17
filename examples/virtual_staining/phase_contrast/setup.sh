@@ -14,7 +14,7 @@ conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name v
 # install viscy and its dependencies`s in the environment using pip.
 # Find path to the environment - conda activate doesn't work from within shell scripts.
 ENV_PATH=$(conda info --envs | grep vs_Phc | awk '{print $NF}')
-$ENV_PATH/bin/pip install "viscy[metrics,visual,examples]>=0.2,<0.3"
+$ENV_PATH/bin/pip install "viscy[metrics,visual,examples]>=0.2"
 
 # Create the directory structure
 mkdir -p ~/data/vs_PhC/test
