@@ -6,8 +6,8 @@ import numpy as np
 import seaborn as sns
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
-from viscy.representation.evalutation.dimensionality_reduction import (
+from viscy.representation.evaluation import load_annotation
+from viscy.representation.evaluation.dimensionality_reduction import (
     compute_pca,
     compute_umap,
 )

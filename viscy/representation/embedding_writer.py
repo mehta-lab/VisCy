@@ -11,7 +11,7 @@ from xarray import Dataset, open_zarr
 
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
-from viscy.representation.evalutation.dimensionality_reduction import (
+from viscy.representation.evaluation.dimensionality_reduction import (
     _fit_transform_umap,
 )
 

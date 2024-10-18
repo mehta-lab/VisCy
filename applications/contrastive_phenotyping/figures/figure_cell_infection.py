@@ -13,7 +13,7 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
+from viscy.representation.evaluation import load_annotation
 
 # %% Paths and parameters.
 

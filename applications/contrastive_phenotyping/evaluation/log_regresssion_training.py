@@ -5,7 +5,7 @@ from pathlib import Path
 import pandas as pd
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
+from viscy.representation.evaluation import load_annotation
 
 # %% Paths and parameters.
 

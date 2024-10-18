@@ -7,7 +7,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report, confusion_matrix
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
+from viscy.representation.evaluation import load_annotation
 
 # %% Defining Paths for February Dataset
 feb_features_path = Path(

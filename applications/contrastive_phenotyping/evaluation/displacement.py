@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation.distance import (
+from viscy.representation.evaluation.distance import (
    calculate_normalized_euclidean_distance_cell,
    compute_displacement_mean_std_full,
 )

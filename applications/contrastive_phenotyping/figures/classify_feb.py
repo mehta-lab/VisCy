@@ -10,8 +10,8 @@ from sklearn.metrics import classification_report, confusion_matrix
 from tqdm import tqdm
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
-from viscy.representation.evalutation.dimensionality_reduction import compute_pca
+from viscy.representation.evaluation import load_annotation
+from viscy.representation.evaluation.dimensionality_reduction import compute_pca
 
 # %% Defining Paths for February Dataset
 feb_features_path = Path(

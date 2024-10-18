@@ -11,7 +11,7 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import (
+from viscy.representation.evaluation import (
     dataset_of_tracks,
     load_annotation,
 )
