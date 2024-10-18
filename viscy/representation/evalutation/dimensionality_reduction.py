@@ -8,7 +8,7 @@ from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
 
 
-def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
+def compute_pca(embedding_dataset, n_components=None, normalize_features=False):
     features = embedding_dataset["features"]
     projections = embedding_dataset["projections"]
 
@@ -19,34 +19,23 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
         scaled_projections = projections.values
         scaled_features = features.values
 
-    # Compute PCA with specified number of components
     PCA_features = PCA(n_components=n_components, random_state=42)
     PCA_projection = PCA(n_components=n_components, random_state=42)
     pc_features = PCA_features.fit_transform(scaled_features)
     pc_projection = PCA_projection.fit_transform(scaled_projections)
 
-    # Prepare DataFrame with id and PCA coordinates
-    pca_df = pd.DataFrame(
-        {
-            "id": embedding_dataset["id"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "PCA1": pc_features[:, 0],
-            "PCA2": pc_features[:, 1],
-            "PCA3": pc_features[:, 2],
-            "PCA4": pc_features[:, 3],
-            "PCA5": pc_features[:, 4],
-            "PCA6": pc_features[:, 5],
-            "PCA1_proj": pc_projection[:, 0],
-            "PCA2_proj": pc_projection[:, 1],
-            "PCA3_proj": pc_projection[:, 2],
-            "PCA4_proj": pc_projection[:, 3],
-            "PCA5_proj": pc_projection[:, 4],
-            "PCA6_proj": pc_projection[:, 5],
-        }
-    )
+    pca_df_dict = {
+        "id": embedding_dataset["id"].values,
+        "fov_name": embedding_dataset["fov_name"].values,
+    }
+
+    for i in range(n_components):
+        pca_df_dict[f"PCA{i + 1}"] = pc_features[:, i]
+        pca_df_dict[f"PCA{i + 1}_proj"] = pc_projection[:, i]
+
+    pca_df = pd.DataFrame(pca_df_dict)
 
     return PCA_features, PCA_projection, pca_df
-
 
 def _fit_transform_umap(
     embeddings: NDArray, n_components: int = 2, normalize: bool = True

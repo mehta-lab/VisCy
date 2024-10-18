@@ -5,13 +5,12 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
-from viscy.representation.evaluation import load_annotation
 from sklearn.mixture import GaussianMixture
 from sklearn.metrics import confusion_matrix
 from sklearn.decomposition import PCA
-from viscy.representation.evaluation import GMMClustering
-from viscy.representation.evaluation import compute_pca
-from viscy.representation.evaluation import compute_umap
+from viscy.representation.evalutation.clustering import GMMClustering
+from viscy.representation.evalutation.dimensionality_reduction import compute_pca
+from viscy.representation.evalutation.dimensionality_reduction import compute_umap
 # %% Paths and parameters.
 
 features_path_30_min = Path(
@@ -30,6 +29,41 @@ features_path_any_time = Path(
 
 features_path_june = Path("/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/jun_time_interval_1_epoch_178.zarr")
 
+# load annotation 
+def load_annotation(da, path, name, categories: dict | None = None):
+    """
+    Load annotations from a CSV file and map them to the dataset.
+    Parameters
+    ----------
+    da : xarray.DataArray
+        The dataset array containing 'fov_name' and 'id' coordinates.
+    path : str
+        Path to the CSV file containing annotations.
+    name : str
+        The column name in the CSV file to be used as annotations.
+    categories : dict, optional
+        A dictionary to rename categories in the annotation column. Default is None.
+    Returns
+    -------
+    pd.Series
+        A pandas Series containing the selected annotations mapped to the dataset.
+    """
+    # Read the annotation CSV file
+    annotation = pd.read_csv(path)
+    # Add a leading slash to 'fov name' column and set it as 'fov_name'
+    annotation["fov_name"] = "/" + annotation["fov_name"]
+    # Set the index of the annotation DataFrame to ['fov_name', 'id']
+    annotation = annotation.set_index(["fov_name", "id"])
+    # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
+    mi = pd.MultiIndex.from_arrays(
+        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+    )
+    # Select the annotations corresponding to the MultiIndex
+    selected = annotation.loc[mi][name]
+    # If categories are provided, rename the categories in the selected annotations
+    if categories:
+        selected = selected.astype("category").cat.rename_categories(categories)
+    return selected
 
 # %% visualize distribution of embeddings
 embedding_dataset = read_embedding_dataset(features_path_30_min)
@@ -49,12 +83,12 @@ plt.show()
 
 # %% initialize GMM clustering and ground truth labels
 
-embedding_dataset = read_embedding_dataset(features_path_june)
+embedding_dataset = read_embedding_dataset(features_path_30_min)
 features_data = embedding_dataset['features']
 
 cluster_evaluator = GMMClustering(features_data)
 
-# %% Find best n_clusters 
+# %% Find best n_clusters, can skip this if already known 
 
 aic_scores, bic_scores = cluster_evaluator.find_best_n_clusters()
 
@@ -69,10 +103,12 @@ plt.show()
 
 # %%
 # Choose the best model (with the lowest BIC score)
-best_gmm = cluster_evaluator.fit_best_model(criterion='bic')
+# set n_clusters to the best number of clusters
+best_gmm = cluster_evaluator.fit_best_model(criterion='bic', n_clusters=2)
 cluster_labels = cluster_evaluator.predict_clusters()
 
 # %% ground truth labels (if available!)
+# need to update path to this 
 ann_root = Path(
    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
 )
@@ -156,7 +192,7 @@ plt.legend()
 plt.show()
 
 
-# %% Visualize UMAP embeddings colored by GMM cluster weights 
+# %% Visualize UMAP embeddings colored by GMM cluster weights (without ground truth)
 umap_features, umap_projection, umap_df = compute_umap(embedding_dataset)
 
 gmm_weights = best_gmm.weights_
@@ -170,7 +206,7 @@ plt.ylabel('UMAP 2')
 plt.show()
 
 
-# %% Visualize UMAP embeddings colored by cluster labels
+# %% Visualize UMAP embeddings colored by cluster labels (without ground truth)
 umap_features, umap_projection, umap_df = compute_umap(embedding_dataset)
 
 plt.figure(figsize=(10, 8))
