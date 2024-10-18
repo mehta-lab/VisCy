@@ -5,7 +5,7 @@ from typing import Literal, Optional, Sequence
 
 import numpy as np
 import torch
-from iohub.ngff import ImageArray, Plate, Position, _pad_shape, open_ome_zarr
+from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from iohub.ngff_meta import TransformationMeta
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
@@ -15,6 +15,15 @@ from viscy.data.hcs import HCSDataModule, Sample
 
 __all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def _pad_shape(shape: tuple[int, ...], target: int = 5) -> tuple[int, ...]:
+    """
+    Pad shape tuple to a target length.
+    Vendored from ``iohub.ngff.nodes._pad_shape()``.
+    """
+    pad = target - len(shape)
+    return (1,) * pad + shape
 
 
 def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
