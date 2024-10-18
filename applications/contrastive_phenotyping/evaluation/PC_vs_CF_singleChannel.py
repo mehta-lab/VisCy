@@ -20,6 +20,7 @@ from viscy.representation.evalutation import dataset_of_tracks
 from viscy.representation.evalutation.feature import (
     FeatureExtractor as FE,
 )
+from viscy.representation.evaluation import dataset_of_tracks
 
 # %%
 features_path = Path(

@@ -20,6 +20,7 @@ from viscy.representation.evalutation import dataset_of_tracks
 from viscy.representation.evalutation.feature import (
     FeatureExtractor as FE,
 )
+from viscy.representation.evaluation import dataset_of_tracks
 
 # %%
 features_path = Path(
@@ -332,6 +333,7 @@ plt.savefig(
 )
 
 # %% find the cell patches with the highest and lowest value in each feature
+
 
 def save_patches(fov_name, track_id):
     data_path = Path(
