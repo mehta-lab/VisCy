@@ -37,6 +37,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=False):
 
     return PCA_features, PCA_projection, pca_df
 
+
 def _fit_transform_umap(
     embeddings: NDArray, n_components: int = 2, normalize: bool = True
 ) -> tuple[umap.UMAP, NDArray]:

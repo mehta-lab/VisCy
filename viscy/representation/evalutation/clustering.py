@@ -1,14 +1,15 @@
 """Methods for evaluating clustering performance."""
 
+import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.metrics import (
     accuracy_score,
     adjusted_rand_score,
     normalized_mutual_info_score,
 )
-from sklearn.neighbors import KNeighborsClassifier
 from sklearn.mixture import GaussianMixture
-import numpy as np
+from sklearn.neighbors import KNeighborsClassifier
+
 
 class GMMClustering:
     def __init__(self, features_data, n_clusters_range=np.arange(2, 10)):
@@ -76,7 +77,6 @@ class GMMClustering:
             )
         cluster_labels = self.best_gmm.predict(self.features_data)
         return cluster_labels
-
 
 
 def knn_accuracy(embeddings, annotations, k=5):
