@@ -1,0 +1,140 @@
+# See help here on how to configure hyper-parameters with config files:
+# https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  precision: 32-true
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    # Nesting the logger config like this is equivalent to
+    # supplying the following argument to `lightning.pytorch.Trainer`:
+    # logger=TensorBoardLogger(
+    #     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
+    #     log_graph=True,
+    #     version="vanilla",
+    # )
+    init_args:
+      save_dir: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations
+      # this is the name of the experiment.
+      # The logs will be saved in `save_dir/lightning_logs/version`
+      version: l2_projection_batchnorm
+      log_graph: True
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 100
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  use_distributed_sampler: true
+  # synchronize batchnorm parameters across multiple GPUs.
+  # important for contrastive learning to normalize the tensors across the whole batch.
+  sync_batchnorm: true
+model:
+  class_path:
+  init_args:
+    encoder:
+      class_path: viscy.representation.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 2
+        in_stack_depth: 15
+        stem_kernel_size: [5, 4, 4]
+        stem_stride: [5, 4, 4]
+        embedding_dim: 768
+        projection_dim: 128
+        drop_path_rate: 0.0
+    loss_function:
+      class_path: torch.nn.TripletMarginLoss
+      init_args:
+        margin: 0.5
+    lr: 0.0002
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    example_input_array_shape: [1, 2, 15, 256, 256]
+data:
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr
+    tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr
+    source_channel:
+      - Phase3D
+      - RFP
+    z_range: [25, 40]
+    batch_size: 32
+    num_workers: 12
+    initial_yx_patch_size: [384, 384]
+    final_yx_patch_size: [192, 192]
+    normalizations:
+      - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [RFP]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+    augmentations:
+      - class_path: viscy.transforms.RandAffined
+        init_args:
+          keys: [Phase3D, RFP]
+          prob: 0.8
+          scale_range: [0, 0.2, 0.2]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.0, 0.01, 0.01]
+          padding_mode: zeros
+      - class_path: viscy.transforms.RandAdjustContrastd
+        init_args:
+          keys: [RFP]
+          prob: 0.5
+          gamma: [0.7, 1.3]
+      - class_path: viscy.transforms.RandAdjustContrastd
+        init_args:
+          keys: [Phase3D]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy.transforms.RandScaleIntensityd
+        init_args:
+          keys: [RFP]
+          prob: 0.7
+          factors: 0.5
+      - class_path: viscy.transforms.RandScaleIntensityd
+        init_args:
+          keys: [Phase3D]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy.transforms.RandGaussianSmoothd
+        init_args:
+          keys: [Phase3D, RFP]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [RFP]
+          prob: 0.5
+          mean: 0.0
+          std: 0.5
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [Phase3D]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2

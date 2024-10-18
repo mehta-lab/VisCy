@@ -8,7 +8,7 @@ predict:
     num_nodes: 1
     precision: 32-true
     callbacks:
-      - class_path: viscy.light.predict_writer.HCSPredictionWriter
+      - class_path: viscy.translation.predict_writer.HCSPredictionWriter
         init_args:
           output_store: null
           write_input: false
@@ -46,22 +46,25 @@ predict:
     reload_dataloaders_every_n_epochs: 0
     default_root_dir: null
   model:
-    model_config: {}
-    loss_function: null
-    lr: 0.001
-    schedule: Constant
+    class_path: viscy.translation.engine.VSUNet
+    init_args:
+      model_config: {}
+      loss_function: null
+      lr: 0.001
+      schedule: Constant
   data:
-    data_path: null
-    source_channel: null
-    target_channel: null
-    z_window_size: null
-    split_ratio: null
-    batch_size: 16
-    num_workers: 8
-    yx_patch_size:
-      - 256
-      - 256
-    caching: false
-    predict_scale_source: null
+    class_path: viscy.data.hcs.HCSDataModule
+    init_args:
+      data_path: null
+      source_channel: null
+      target_channel: null
+      z_window_size: null
+      split_ratio: null
+      batch_size: 16
+      num_workers: 8
+      yx_patch_size:
+        - 256
+        - 256
+      caching: false
   return_predictions: false
   ckpt_path: null

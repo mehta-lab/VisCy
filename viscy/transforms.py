@@ -11,6 +11,7 @@ from monai.transforms import (
     RandomizableTransform,
     RandScaleIntensityd,
     RandWeightedCropd,
+    ScaleIntensityRangePercentilesd,
 )
 from monai.transforms.transform import Randomizable
 from numpy.random.mtrand import RandomState as RandomState
@@ -124,6 +125,34 @@ class RandGaussianSmoothd(RandGaussianSmoothd):
             sigma_y=sigma_y,
             sigma_z=sigma_z,
             **kwargs,
+        )
+
+
+class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
+    def __init__(
+        self,
+        keys: Union[Sequence[str], str],
+        lower: float,
+        upper: float,
+        b_min: float | None,
+        b_max: float | None,
+        clip: bool = False,
+        relative: bool = False,
+        channel_wise: bool = False,
+        dtype: Union[Sequence[str], str] = None,
+        allow_missing_keys: bool = False,
+    ):
+        super().__init__(
+            keys=keys,
+            lower=lower,
+            upper=upper,
+            b_min=b_min,
+            b_max=b_max,
+            clip=clip,
+            relative=relative,
+            channel_wise=channel_wise,
+            dtype=dtype,
+            allow_missing_keys=allow_missing_keys,
         )
 
 

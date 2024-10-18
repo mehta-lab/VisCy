@@ -1,0 +1,8 @@
+font.family: sans-serif
+font.sans-serif: Arial
+font.size: 10
+figure.titlesize: 12
+axes.titlesize: 10
+xtick.labelsize: 8
+ytick.labelsize: 8
+text.usetex: True
