@@ -11,7 +11,7 @@ from skimage.color import label2rgb
 from skimage.exposure import rescale_intensity
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import compute_umap
+from viscy.representation.evalutation.dimensionality_reduction import compute_umap
 
 # %%
 t_slice = slice(18, 33)

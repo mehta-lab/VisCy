@@ -11,7 +11,10 @@ from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks, load_annotation
+from viscy.representation.evalutation import (
+    dataset_of_tracks,
+    load_annotation,
+)
 
 # %% Paths and parameters.
 
@@ -128,14 +131,14 @@ for t in range(len(predict_dataset)):
     plt.show()
 
 # %% display the track in napari
-import os
+# import os
 
-import napari
+# import napari
 
-os.environ["DISPLAY"] = ":1"
-viewer = napari.Viewer()
-viewer.add_image(phase, name="Phase", colormap="gray")
-viewer.add_image(fluor, name="Fluor", colormap="magenta")
+# os.environ["DISPLAY"] = ":1"
+# viewer = napari.Viewer()
+# viewer.add_image(phase, name="Phase", colormap="gray")
+# viewer.add_image(fluor, name="Fluor", colormap="magenta")
 
 # %%
 # Compute UMAP over all features

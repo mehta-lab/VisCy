@@ -2,8 +2,8 @@
 from pathlib import Path
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import load_annotation
-from viscy.representation.lca import fit_logistic_regression
+from viscy.representation.evalutation import load_annotation
+from viscy.representation.evalutation.lca import fit_logistic_regression
 
 # %%
 TRAIN_FOVS = ["/A/3/7", "/A/3/8", "/A/3/9", "/B/4/6", "/B/4/7"]

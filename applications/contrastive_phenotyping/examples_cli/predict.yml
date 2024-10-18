@@ -17,34 +17,38 @@ trainer:
     #     log_graph: True
   inference_mode: true
 model:
-  backbone: convnext_tiny
-  in_channels: 2
-  in_stack_depth: 15
-  stem_kernel_size: [5, 4, 4]
+  class_path: viscy.representation.engine.ContrastiveModule
+  init_args:
+    backbone: convnext_tiny
+    in_channels: 2
+    in_stack_depth: 15
+    stem_kernel_size: [5, 4, 4]
 data:
-  data_path: /hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr
-  tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr
-  source_channel:
-    - Phase3D
-    - RFP
-  z_range: [28, 43]
-  batch_size: 32
-  num_workers: 16
-  initial_yx_patch_size: [192, 192]
-  final_yx_patch_size: [192, 192]
-  normalizations:
-    - class_path: viscy.transforms.NormalizeSampled
-      init_args:
-        keys: [Phase3D]
-        level: fov_statistics
-        subtrahend: mean
-        divisor: std
-    - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
-      init_args:
-        keys: [RFP]
-        lower: 50
-        upper: 99
-        b_min: 0.0
-        b_max: 1.0
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: /hpc/projects/virtual_staining/2024_02_04_A549_DENV_ZIKV_timelapse/registered_chunked.zarr
+    tracks_path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/7.1-seg_track/tracking_v1.zarr
+    source_channel:
+      - Phase3D
+      - RFP
+    z_range: [28, 43]
+    batch_size: 32
+    num_workers: 16
+    initial_yx_patch_size: [192, 192]
+    final_yx_patch_size: [192, 192]
+    normalizations:
+      - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [RFP]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
 return_predictions: false
 ckpt_path: /hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/lightning_logs/tokenized-drop-path-0.0/checkpoints/epoch=96-step=23377.ckpt

@@ -3,13 +3,14 @@ import sys
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 from pathlib import Path
+
+import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-import plotly.express as px
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
+
 from viscy.representation.embedding_writer import read_embedding_dataset
-import matplotlib.pyplot as plt
 
 # %%
 # single channel. with temporal regularizations

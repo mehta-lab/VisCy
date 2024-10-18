@@ -367,7 +367,6 @@ class TripletDataModule(HCSDataModule):
                 next((self.tracks_path / fov_name).glob("*.csv"))
             ).astype(int)
             tracks_tables.append(tracks_df)
-
         return positions, tracks_tables
 
     @property
