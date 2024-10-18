@@ -38,4 +38,6 @@ keywords:
   - machine-learning
   - computer-vision
   - bioimage-analysis
+  - image-translation
+  - representation-learning
 license: BSD-3-Clause
