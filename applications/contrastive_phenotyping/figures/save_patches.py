@@ -8,7 +8,7 @@ import numpy as np
 
 sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 # from viscy.data.triplet import TripletDataModule
-from viscy.representation.evalutation import dataset_of_tracks
+from viscy.representation.evaluation import dataset_of_tracks
 
 # %% input parameters
 

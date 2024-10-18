@@ -36,6 +36,10 @@ try:
 except ImportError:
     CellposeModel = None
 
+try:
+    import wandb
+except ImportError:
+    wandb = None
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,

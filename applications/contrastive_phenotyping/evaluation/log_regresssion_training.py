@@ -1,23 +1,22 @@
-
 # %%
 from pathlib import Path
 
 import pandas as pd
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
+from viscy.representation.evaluation import load_annotation
 
 # %% Paths and parameters.
 
 
 features_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
 )
 data_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
 )
 tracks_path = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
 
@@ -33,15 +32,15 @@ features = embedding_dataset["features"]
 
 # %% OVERLAY INFECTION ANNOTATION
 ann_root = Path(
-   "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
+    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
 )
 
 
 infection = load_annotation(
-   features,
-   ann_root / "extracted_inf_state.csv",
-   "infection_state",
-   {0.0: "background", 1.0: "uninfected", 2.0: "infected"},
+    features,
+    ann_root / "extracted_inf_state.csv",
+    "infection_state",
+    {0.0: "background", 1.0: "uninfected", 2.0: "infected"},
 )
 
 # %% plot the umap
@@ -74,10 +73,18 @@ for i in range(768):
 # %% manually split the dataset into training and testing set by well name
 
 # dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
-data_train_val = data[data["fov_name"].str.contains("/B/4/6") | data["fov_name"].str.contains("/B/4/7") | data["fov_name"].str.contains("/A/3/")]
+data_train_val = data[
+    data["fov_name"].str.contains("/B/4/6")
+    | data["fov_name"].str.contains("/B/4/7")
+    | data["fov_name"].str.contains("/A/3/")
+]
 
 # dataframe for testing set, fov names starts with "/B/4/8" or "/B/4/9" or "/A/4/"
-data_test = data[data["fov_name"].str.contains("/B/4/8") | data["fov_name"].str.contains("/B/4/9") | data["fov_name"].str.contains("/B/3/")]
+data_test = data[
+    data["fov_name"].str.contains("/B/4/8")
+    | data["fov_name"].str.contains("/B/4/9")
+    | data["fov_name"].str.contains("/B/3/")
+]
 
 # %% train a linear classifier to predict infection state from PCA components
 

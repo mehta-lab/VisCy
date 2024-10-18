@@ -7,6 +7,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
+from matplotlib.patches import FancyArrowPatch
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
@@ -107,8 +108,6 @@ no_inter = division[division == "interphase"].count()
 no_div = division[division == "mitosis"].count()
 
 # %% plot the trajectory quiver of one cell on top of the UMAP
-
-from matplotlib.patches import FancyArrowPatch
 
 cell_parent = features[
     (features["fov_name"].str.contains("A/3/7")) & (features["track_id"].isin([13]))

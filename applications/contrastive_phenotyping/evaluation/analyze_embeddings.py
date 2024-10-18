@@ -6,12 +6,15 @@ import numpy as np
 import seaborn as sns
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
-from viscy.representation.evalutation.dimensionality_reduction import (
-    compute_pca,
-    compute_umap,
-)
+from viscy.representation.evaluation import load_annotation, compute_pca, compute_umap
 
+# %% Jupyter magic command for autoreloading modules
+# ruff: noqa
+# fmt: off
+# %load_ext autoreload
+# %autoreload 2
+# fmt: on
+# ruff: noqa
 # %% Paths and parameters
 
 path_embedding = Path(

@@ -1,3 +1,4 @@
+import warnings
 from typing import Literal
 
 import timm
@@ -5,6 +6,8 @@ import torch.nn as nn
 from torch import Tensor
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
+
+warnings.filterwarnings("ignore", category=UserWarning, module="torch")
 
 
 class ContrastiveEncoder(nn.Module):

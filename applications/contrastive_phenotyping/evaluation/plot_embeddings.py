@@ -1,7 +1,9 @@
 # %%
+import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
+import napari
 import numpy as np
 import pandas as pd
 import plotly.express as px
@@ -131,9 +133,6 @@ for t in range(len(predict_dataset)):
     plt.show()
 
 # %% display the track in napari
-# import os
-
-# import napari
 
 # os.environ["DISPLAY"] = ":1"
 # viewer = napari.Viewer()

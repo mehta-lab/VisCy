@@ -9,14 +9,15 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import confusion_matrix
 from sklearn.preprocessing import StandardScaler
 from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import load_annotation
+from viscy.representation.evaluation import load_annotation
 
 # %% Paths and parameters.
-
 
 features_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
@@ -174,8 +175,6 @@ data_test = data[
 
 # %% train a linear classifier to predict infection state from PCA components
 
-from sklearn.linear_model import LogisticRegression
-
 x_train = data_train_val.drop(
     columns=[
         "infection",
@@ -213,9 +212,6 @@ y_test = data_test["infection"]
 y_pred = clf.predict(x_test)
 
 # %% construct confusion matrix to compare the true and predicted infection state
-
-import seaborn as sns
-from sklearn.metrics import confusion_matrix
 
 cm = confusion_matrix(y_test, y_pred)
 cm_percentage = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
