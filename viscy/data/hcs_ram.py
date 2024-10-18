@@ -23,6 +23,15 @@ _logger = logging.getLogger("lightning.pytorch")
 
 # TODO: cache the norm metadata when caching the dataset
 
+# Map the NumPy dtype to the corresponding PyTorch dtype
+numpy_to_torch_dtype = {
+    np.dtype('float32'): torch.float32,
+    np.dtype('float64'): torch.float64,
+    np.dtype('int32'): torch.int32,
+    np.dtype('int64'): torch.int64,
+    np.dtype('uint8'): torch.int8,
+    np.dtype('uint16'): torch.int16,
+}
 
 def _stack_channels(
     sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
@@ -54,9 +63,7 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
                 data.append(sample[key])
         collated[key] = collate_meta_tensor(data)
     return collated
-
-
-
+    
 class CachedDataset(Dataset):
     """
     A dataset that caches the data in RAM.
@@ -82,10 +89,18 @@ class CachedDataset(Dataset):
             if "target" in channels
             else None
         )
+        # Get total num channels
+        self.total_ch_names = self.channels["source"].copy()
+        self.total_ch_idx = self.source_ch_idx.copy()
+        if self.target_ch_idx is not None:
+            self.total_ch_names.extend(self.channels["target"])
+            self.total_ch_idx.extend(self.target_ch_idx)
         self._position_mapping()
 
         self.cache_order = []
         self.cache_record = torch.zeros(len(self.positions))
+        self._init_cache_dataset()
+
         # Caching the dataset as two separate arrays
         # self._init_cache_dataset()
 
@@ -97,25 +112,27 @@ class CachedDataset(Dataset):
         for pos in self.positions:
             self.position_keys.append(pos.data.name)
             self.norm_meta_dict[str(pos.data.name)] = _read_norm_meta(pos)
-        # FIX: Use the position shape
         self.position_shape_zyx = pos.data.shape[-3:]
+        self._cache_dtype  = numpy_to_torch_dtype.get(pos.data.dtype, torch.float32)  # Default to torch.float32 if not found     
 
-    def _init_cache_dataset(self, t_idx=1, ch_idx=1) -> None:
+    def _init_cache_dataset(self) -> None:
         _logger.info('Initializing cache array')
         # FIXME assumes t=1
-        self.cache = torch.zeros(((len(self.positions),t_idx,len(ch_idx),)+ self.position_shape_zyx))
+        t_idx = 1
+        self.cache = torch.zeros(((len(self.positions),t_idx,len(self.total_ch_idx))+ self.position_shape_zyx),dtype=self._cache_dtype)
+        _logger.info(f'Cache shape: {self.cache.shape}')
 
+        #TODO Caching here to see if multiprocessing is faster
+        t=0
 
-    # def _cache_dataset(self, index: int, channel_index: list[int], t: int = 0) -> None:
-    #     # Add the position to the cached_dict
-    #     # TODO: hardcoding to t=0
-    #     _logger.info(f'Adding {self.position_keys[index]} to cache')
-        
-    #     # self.cache_dict[str(self.position_keys[index])] = torch.from_numpy(
-    #     #     self.positions[index]
-    #     #     .data.oindex[slice(t, t + 1), channel_index, :]
-    #     #     .astype(np.float32)
-    #     # )
+        for i, pos in enumerate(self.positions):
+            _logger.info(f'Caching position {i}/{len(self.positions)}')
+            ## Insert the data into the cache
+            data = pos.data.oindex[slice(t, t + 1), self.total_ch_idx, :]
+            if data.dtype != np.float32:
+                data = data.astype(np.float32)
+            self.cache[i]= torch.from_numpy(data)
+            del data            
 
     def _get_weight_map(self, position: Position) -> Tensor:
         # Get the weight map from the position for the MONAI weightedcrop transform
@@ -125,35 +142,33 @@ class CachedDataset(Dataset):
         return len(self.positions)
 
     def __getitem__(self, index: int) -> Sample:
-        ch_names = self.channels["source"].copy()
-        ch_idx = self.source_ch_idx.copy()
-        if self.target_ch_idx is not None:
-            ch_names.extend(self.channels["target"])
-            ch_idx.extend(self.target_ch_idx)
-
+        #FIXME replace this after debugging
+        ch_idx = self.total_ch_idx
+        ch_names = self.total_ch_names
+        
         # Check if the sample is in the cache else add it
-        if self.cache_record[index]==0:
-            #if all entries of self.cache_record are zero
-            if self.cache_record.sum()==0:
-                #FIXME hardcoding t_idx=1
-                self._init_cache_dataset(ch_idx=ch_idx,t_idx=1)
+        # if self.cache_record[index]== 0:
+        #     # Flip the bit
+        #     self.cache_record[index]=1
+        #     self.cache_order.append(index)
+            
+        #     # Stack the data
+        #     _logger.info(f'Adding {self.position_keys[index]} to cache')
+        #     _logger.info(f'Cache_order: {self.cache_order}')
+        #     _logger.info(f'caching index: {index}')
 
-            # Flip the bit
-            self.cache_record[index]=1
-            self.cache_order.append(index)
-            # Stack the data
-            _logger.info(f'Adding {self.position_keys[index]} to cache')
-            _logger.info(f'Cache_order: {self.cache_order}')
-            _logger.info(f'caching index: {index}')
-            #FIX ME: hardcoding t=0 and make this part of function
-            t=0
-            # Insert the data into the cache
-            self.cache[index]=torch.from_numpy(self.positions[index]
-            .data.oindex[slice(t, t + 1), ch_idx, :]
-            .astype(np.float32))
+        #     #FIX ME: hardcoding t=0 and make this part of function
+        #     t=0
+
+        #     # Insert the data into the cache
+        #     data = self.positions[index].data.oindex[slice(t, t + 1), ch_idx, :]
+        #     if data.dtype != np.float32:
+        #         data = data.astype(np.float32)
+        #     self.cache[index]= torch.from_numpy(data)
+        #     del data
 
         # Get the sample from the cache
-        # images = self.cache_dict[sample_id].unbind(dim=1)
+        _logger.info(f'Getting sample {index} from cache')
         sample_id = self.position_keys[index]
         images = self.cache[index].unbind(dim=1)
         norm_meta = self.norm_meta_dict[str(sample_id)]
@@ -168,7 +183,6 @@ class CachedDataset(Dataset):
         if norm_meta is not None:
             sample_images["norm_meta"] = norm_meta
         if self.transform:
-            # FIX ME: check why the transforms return a list?
             sample_images = self.transform(sample_images)
         if "weight" in sample_images:
             del sample_images["weight"]
