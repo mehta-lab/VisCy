@@ -128,9 +128,13 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 
 ### Workflow demo
 
-[Exploration of learned embeddings with napari-iohub](https://drive.google.com/file/d/16WSoTvXJ-siLb7iyOueOag_cKn9Iwckc/view?usp=drive_link)
+- Example test dataset, model checkpoint, and predictions can be found
+[here](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_demo/).
 
-![DynaCLR](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
+- See tutorial on exploration of learned embeddings with napari-iohub
+[here](https://github.com/czbiohub-sf/napari-iohub/wiki/View-tracked-cells-and-their-associated-predictions/).
+
+![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
 
 ## Installation
 
