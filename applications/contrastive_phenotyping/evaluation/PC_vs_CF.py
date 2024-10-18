@@ -16,8 +16,8 @@ import seaborn as sns
 from sklearn.decomposition import PCA
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evalutation import dataset_of_tracks
-from viscy.representation.evalutation.feature import (
+from viscy.representation.evaluation import dataset_of_tracks
+from viscy.representation.evaluation.feature import (
     FeatureExtractor as FE,
 )
 

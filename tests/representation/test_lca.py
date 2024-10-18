@@ -2,7 +2,7 @@ import numpy as np
 import torch
 from sklearn.linear_model import LogisticRegression
 
-from viscy.representation.evalutation.lca import linear_from_binary_logistic_regression
+from viscy.representation.evaluation.lca import linear_from_binary_logistic_regression
 
 
 def test_linear_from_logistic_regression():
