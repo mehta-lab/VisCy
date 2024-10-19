@@ -11,9 +11,17 @@ from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
 from tempfile import TemporaryDirectory
 import numpy as np
+import os
+
 
 # %%
-def predict_neuromast(array_in:np.ndarray, model_ckpt_path, phase_channel_name='Phase3D', BATCH_SIZE=5, NUM_WORKERS=16)->np.ndarray:
+def predict_neuromast(
+    array_in: np.ndarray,
+    model_ckpt_path,
+    phase_channel_name="Phase3D",
+    BATCH_SIZE=5,
+    NUM_WORKERS=16,
+) -> np.ndarray:
     """
     Predict the membrane and nuclei channels from the input phase channel array.
     Parameters
@@ -22,20 +30,20 @@ def predict_neuromast(array_in:np.ndarray, model_ckpt_path, phase_channel_name='
         TCZYX input array with the phase channel
     model_ckpt_path : str
         Path to the model checkpoint
-    phase_channel_name : str, optional 
+    phase_channel_name : str, optional
         Name of the phase channel, by default 'Phase3D'
     BATCH_SIZE : int, optional
         Batch size for prediction, by default 5
-    NUM_WORKERS : int, optional 
+    NUM_WORKERS : int, optional
         Number of workers for data loading and calculating normalization, by default 16
-    
+
     Returns
     -------
     np.ndarray
         TCZYX array with the predicted membrane and nuclei channels
 
     """
-    
+
     # Create a temporary directory to store the input data
     tmp_input_dir = TemporaryDirectory()
     input_store = os.path.join(tmp_input_dir.name, ".zarr")
@@ -48,7 +56,7 @@ def predict_neuromast(array_in:np.ndarray, model_ckpt_path, phase_channel_name='
     with open_ome_zarr(
         input_store, layout="hcs", mode="a", channel_names=["Phase3D"]
     ) as dataset:
-        position = dataset.create_position("0","0","0")
+        position = dataset.create_position("0", "0", "0")
         position.create_image("0", array_in)
 
     # VisCy Traine instantation
@@ -57,17 +65,21 @@ def predict_neuromast(array_in:np.ndarray, model_ckpt_path, phase_channel_name='
         callbacks=[HCSPredictionWriter(output_store)],
     )
     # Preprocess the data to get the normalization values
-    trainer.preprocess(data_path=input_store, channel_names=[phase_channel_name],num_workers=NUM_WORKERS)
+    trainer.preprocess(
+        data_path=input_store,
+        channel_names=[phase_channel_name],
+        num_workers=NUM_WORKERS,
+    )
 
-    # Normalization transform 
+    # Normalization transform
     normalizations = [
-            NormalizeSampled(
-                [phase_channel_name],
-                level="fov_statistics",
-                subtrahend="median",
-                divisor="iqr",
-            )
-        ]
+        NormalizeSampled(
+            [phase_channel_name],
+            level="fov_statistics",
+            subtrahend="median",
+            divisor="iqr",
+        )
+    ]
 
     # Setup the data module.
     data_module = HCSDataModule(
@@ -110,24 +122,31 @@ def predict_neuromast(array_in:np.ndarray, model_ckpt_path, phase_channel_name='
     output_dataset = open_ome_zarr(output_store, mode="r")
     output_array = output_dataset["0/0/0/0"][:]
 
-    #Cleanup
+    # Cleanup
     tmp_input_dir.cleanup()
     tmp_output_dir.cleanup()
 
     return output_array
 
-#%%
+
+# %%
 if __name__ == "__main__":
 
     input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/tmp/20230803_fish2_60x_1_cropped_zyx_resampled_clipped_2.zarr"
     model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSNeuromast/epoch=44-step=1215.ckpt"
 
     # Reduce the batch size if encountering out-of-memory errors
-    BATCH_SIZE = 10
-    array_in = open_ome_zarr(input_data_path, mode="r")["0/0/0/0"][:,0:1]
+    BATCH_SIZE = 12
+    array_in = open_ome_zarr(input_data_path, mode="r")["0/0/0/0"][:, 0:1]
     phase_channel_name = "Phase3D"
     NUM_WORKERS = 16
 
-    output_array = predict_neuromast(array_in, model_ckpt_path, phase_channel_name, BATCH_SIZE, NUM_WORKERS)
-
-# %%
+    output_array = predict_neuromast(
+        array_in, model_ckpt_path, phase_channel_name, BATCH_SIZE, NUM_WORKERS
+    )
+    
+    import napari 
+    v = napari.Viewer()
+    v.add_image(array_in)
+    v.add_image(output_array)
+    import pdb; pdb.set_trace()
