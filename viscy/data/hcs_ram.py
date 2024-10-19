@@ -96,6 +96,7 @@ class CachedDataset(Dataset):
             self.total_ch_names.extend(self.channels["target"])
             self.total_ch_idx.extend(self.target_ch_idx)
         self._position_mapping()
+<<<<<<< HEAD
 
         self.cache_order = []
         self.cache_record = torch.zeros(len(self.positions))
@@ -103,15 +104,18 @@ class CachedDataset(Dataset):
 
         # Caching the dataset as two separate arrays
         # self._init_cache_dataset()
+=======
+        self.cache_dict = {}
+>>>>>>> parent of 8c13f49 (replacing dictionary with single array)
 
     def _position_mapping(self) -> None:
         self.position_keys = []
-        self.position_shape_tczyx= (1,1,1,1,1)
         self.norm_meta_dict = {}
 
         for pos in self.positions:
             self.position_keys.append(pos.data.name)
             self.norm_meta_dict[str(pos.data.name)] = _read_norm_meta(pos)
+<<<<<<< HEAD
         self.position_shape_zyx = pos.data.shape[-3:]
         self._cache_dtype  = numpy_to_torch_dtype.get(pos.data.dtype, torch.float32)  # Default to torch.float32 if not found     
 
@@ -133,6 +137,17 @@ class CachedDataset(Dataset):
                 data = data.astype(np.float32)
             self.cache[i]= torch.from_numpy(data)
             del data            
+=======
+
+    def _cache_dataset(self, index: int, channel_index: list[int], t: int = 0) -> None:
+        # Add the position to the cached_dict
+        # TODO: hardcoding to t=0
+        self.cache_dict[str(self.position_keys[index])] = torch.from_numpy(
+            self.positions[index]
+            .data.oindex[slice(t, t + 1), channel_index, :]
+            .astype(np.float32)
+        )
+>>>>>>> parent of 8c13f49 (replacing dictionary with single array)
 
     def _get_weight_map(self, position: Position) -> Tensor:
         # Get the weight map from the position for the MONAI weightedcrop transform
@@ -147,6 +162,7 @@ class CachedDataset(Dataset):
         ch_names = self.total_ch_names
         
         # Check if the sample is in the cache else add it
+<<<<<<< HEAD
         # if self.cache_record[index]== 0:
         #     # Flip the bit
         #     self.cache_record[index]=1
@@ -171,6 +187,16 @@ class CachedDataset(Dataset):
         _logger.info(f'Getting sample {index} from cache')
         sample_id = self.position_keys[index]
         images = self.cache[index].unbind(dim=1)
+=======
+        # Split the tensor into the channels
+        sample_id = self.position_keys[index]
+        if sample_id not in self.cache_dict:
+            logging.info(f"Adding {sample_id} to cache")
+            self._cache_dataset(index, channel_index=ch_idx)
+
+        # Get the sample from the cache
+        images = self.cache_dict[sample_id].unbind(dim=1)
+>>>>>>> parent of 8c13f49 (replacing dictionary with single array)
         norm_meta = self.norm_meta_dict[str(sample_id)]
 
         sample_images = {k: v for k, v in zip(ch_names, images)}
@@ -252,6 +278,7 @@ class CachedDataModule(LightningDataModule):
 
     def _train_transform(self) -> list[Callable]:
         """ Set the train augmentations
+
         
         """
 
