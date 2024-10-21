@@ -1,4 +1,6 @@
 import logging
+from datetime import datetime
+from multiprocessing import Manager
 from typing import Callable, Literal, Sequence
 
 import numpy as np
@@ -6,6 +8,7 @@ import torch
 from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
+from monai.data.utils import collate_meta_tensor
 from monai.transforms import (
     CenterSpatialCropd,
     Compose,
@@ -14,12 +17,9 @@ from monai.transforms import (
 )
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
-from monai.data.utils import collate_meta_tensor
 
 from viscy.data.hcs import _read_norm_meta
 from viscy.data.typing import ChannelMap, DictTransform, Sample
-from multiprocessing import Manager
-from datetime import datetime
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -27,13 +27,14 @@ _logger = logging.getLogger("lightning.pytorch")
 
 # Map the NumPy dtype to the corresponding PyTorch dtype
 numpy_to_torch_dtype = {
-    np.dtype('float32'): torch.float32,
-    np.dtype('float64'): torch.float64,
-    np.dtype('int32'): torch.int32,
-    np.dtype('int64'): torch.int64,
-    np.dtype('uint8'): torch.int8,
-    np.dtype('uint16'): torch.int16,
+    np.dtype("float32"): torch.float32,
+    np.dtype("float64"): torch.float64,
+    np.dtype("int32"): torch.int32,
+    np.dtype("int64"): torch.int64,
+    np.dtype("uint8"): torch.int8,
+    np.dtype("uint16"): torch.int16,
 }
+
 
 def _stack_channels(
     sample_images: list[dict[str, Tensor]] | dict[str, Tensor],
@@ -46,6 +47,7 @@ def _stack_channels(
     # training time
     # sample_images is a list['Phase3D'].shape = (1,3,256,256)
     return [torch.stack([im[ch][0] for ch in channels[key]]) for im in sample_images]
+
 
 def _collate_samples(batch: Sequence[Sample]) -> Sample:
     """Collate samples into a batch sample.
@@ -65,7 +67,8 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
                 data.append(sample[key])
         collated[key] = collate_meta_tensor(data)
     return collated
-    
+
+
 class CachedDataset(Dataset):
     """
     A dataset that caches the data in RAM.
@@ -98,12 +101,12 @@ class CachedDataset(Dataset):
             self.total_ch_names.extend(self.channels["target"])
             self.total_ch_idx.extend(self.target_ch_idx)
         self._position_mapping()
-        
+
         # Cached dictionary with tensors
         self.cache_dict = {}
         manager = Manager()
         self.cache_dict = manager.dict()
-        self._cached_pos=[]
+        self._cached_pos = []
 
     def _position_mapping(self) -> None:
         self.position_keys = []
@@ -116,11 +119,10 @@ class CachedDataset(Dataset):
     def _cache_dataset(self, index: int, channel_index: list[int], t: int = 0) -> None:
         # Add the position to the cached_dict
         # TODO: hardcoding to t=0
-        data =self.positions[index].data.oindex[slice(t, t + 1), channel_index, :]
+        data = self.positions[index].data.oindex[slice(t, t + 1), channel_index, :]
         if data.dtype != np.float32:
             data = data.astype(np.float32)
         self.cache_dict[str(self.position_keys[index])] = torch.from_numpy(data)
-
 
     def _get_weight_map(self, position: Position) -> Tensor:
         # Get the weight map from the position for the MONAI weightedcrop transform
@@ -130,10 +132,10 @@ class CachedDataset(Dataset):
         return len(self.positions)
 
     def __getitem__(self, index: int) -> Sample:
-        #FIXME replace this after debugging
+        # FIXME replace this after debugging
         ch_idx = self.total_ch_idx
         ch_names = self.total_ch_names
-        
+
         # Check if the sample is in the cache else add it
         # Split the tensor into the channels
         sample_id = self.position_keys[index]
@@ -144,7 +146,7 @@ class CachedDataset(Dataset):
             self._cache_dataset(index, channel_index=ch_idx)
 
         # Get the sample from the cache
-        _logger.info('Getting sample from cache')
+        _logger.info("Getting sample from cache")
         start_time = datetime.now()
         images = self.cache_dict[sample_id].unbind(dim=1)
         norm_meta = self.norm_meta_dict[str(sample_id)]
@@ -234,10 +236,7 @@ class CachedDataModule(LightningDataModule):
             raise NotImplementedError(f"Stage {stage} is not supported")
 
     def _train_transform(self) -> list[Callable]:
-        """ Set the train augmentations
-
-        
-        """
+        """Set the train augmentations"""
 
         if self.augmentations:
             for aug in self.augmentations:
@@ -252,9 +251,9 @@ class CachedDataModule(LightningDataModule):
                         )
                     self.train_patches_per_stack = num_samples
         else:
-            self.augmentations=[]
-        
-        _logger.debug(f'Training augmentations: {self.augmentations}')
+            self.augmentations = []
+
+        _logger.debug(f"Training augmentations: {self.augmentations}")
         return list(self.augmentations)
 
     def _fit_transform(self) -> tuple[Compose, Compose]:
@@ -318,7 +317,7 @@ class CachedDataModule(LightningDataModule):
             shuffle=True,
             timeout=self.timeout,
             collate_fn=_collate_samples,
-            drop_last=True
+            drop_last=True,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -330,5 +329,4 @@ class CachedDataModule(LightningDataModule):
             pin_memory=True,
             shuffle=False,
             timeout=self.timeout,
-
         )
