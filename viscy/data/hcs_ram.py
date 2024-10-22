@@ -1,6 +1,7 @@
 import logging
 from datetime import datetime
 from multiprocessing import Manager
+from multiprocessing.managers import DictProxy
 from typing import Callable, Literal, Sequence
 
 import numpy as np
@@ -20,6 +21,9 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.hcs import _read_norm_meta
 from viscy.data.typing import ChannelMap, DictTransform, Sample
+from viscy.data.distributed import ShardedDistributedSampler
+from torch.distributed import get_rank
+import torch.distributed as dist
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -68,7 +72,10 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
         collated[key] = collate_meta_tensor(data)
     return collated
 
-
+def is_ddp_enabled() -> bool:
+    """Check if distributed data parallel (DDP) is initialized."""
+    return dist.is_available() and dist.is_initialized()
+    
 class CachedDataset(Dataset):
     """
     A dataset that caches the data in RAM.
@@ -77,11 +84,17 @@ class CachedDataset(Dataset):
 
     def __init__(
         self,
+        shared_dict: DictProxy,
         positions: list[Position],
         channels: ChannelMap,
         transform: DictTransform | None = None,
     ):
         super().__init__()
+        if is_ddp_enabled():
+            self.rank = dist.get_rank()
+            _logger.info(f"=== Initializing cache pool for rank {self.rank} ===")
+
+        self.cache_dict = shared_dict
         self.positions = positions
         self.channels = channels
         self.transform = transform
@@ -103,9 +116,7 @@ class CachedDataset(Dataset):
         self._position_mapping()
 
         # Cached dictionary with tensors
-        self.cache_dict = {}
-        manager = Manager()
-        self.cache_dict = manager.dict()
+        # TODO: Delete after testing
         self._cached_pos = []
 
     def _position_mapping(self) -> None:
@@ -132,18 +143,13 @@ class CachedDataset(Dataset):
         return len(self.positions)
 
     def __getitem__(self, index: int) -> Sample:
-        # FIXME replace this after debugging
-        ch_idx = self.total_ch_idx
-        ch_names = self.total_ch_names
-
         # Check if the sample is in the cache else add it
-        # Split the tensor into the channels
         sample_id = self.position_keys[index]
         if sample_id not in self.cache_dict:
             _logger.info(f"Adding {sample_id} to cache")
             self._cached_pos.append(index)
             _logger.info(f"Cached positions: {self._cached_pos}")
-            self._cache_dataset(index, channel_index=ch_idx)
+            self._cache_dataset(index, channel_index=self.total_ch_idx)
 
         # Get the sample from the cache
         _logger.info("Getting sample from cache")
@@ -151,7 +157,7 @@ class CachedDataset(Dataset):
         images = self.cache_dict[sample_id].unbind(dim=1)
         norm_meta = self.norm_meta_dict[str(sample_id)]
         after_cache = datetime.now() - start_time
-        sample_images = {k: v for k, v in zip(ch_names, images)}
+        sample_images = {k: v for k, v in zip(self.total_ch_names, images)}
 
         if self.target_ch_idx is not None:
             # FIXME: this uses the first target channel as weight for performance
@@ -296,31 +302,36 @@ class CachedDataModule(LightningDataModule):
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
 
+        shared_dict = Manager().dict()
         self.train_dataset = CachedDataset(
+            shared_dict,
             positions[:num_train_fovs],
             transform=train_transform,
             **dataset_settings,
         )
         self.val_dataset = CachedDataset(
+            shared_dict,
             positions[num_train_fovs:],
             transform=val_transform,
             **dataset_settings,
         )
 
     def train_dataloader(self) -> DataLoader:
+        sampler = ShardedDistributedSampler(self.train_dataset, shuffle=True)
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size // self.train_patches_per_stack,
             num_workers=self.num_workers,
             persistent_workers=bool(self.num_workers),
             pin_memory=True,
-            shuffle=True,
+            shuffle=False,
             timeout=self.timeout,
             collate_fn=_collate_samples,
             drop_last=True,
         )
 
     def val_dataloader(self) -> DataLoader:
+        sampler = ShardedDistributedSampler(self.val_dataset, shuffle=False)
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
