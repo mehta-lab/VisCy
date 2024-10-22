@@ -75,7 +75,7 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
 def is_ddp_enabled() -> bool:
     """Check if distributed data parallel (DDP) is initialized."""
     return dist.is_available() and dist.is_initialized()
-    
+
 class CachedDataset(Dataset):
     """
     A dataset that caches the data in RAM.
@@ -328,6 +328,7 @@ class CachedDataModule(LightningDataModule):
             timeout=self.timeout,
             collate_fn=_collate_samples,
             drop_last=True,
+            sampler=sampler,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -340,4 +341,5 @@ class CachedDataModule(LightningDataModule):
             pin_memory=True,
             shuffle=False,
             timeout=self.timeout,
+            sampler=sampler
         )
