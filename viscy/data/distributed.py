@@ -1,35 +1,40 @@
 """Utilities for DDP training."""
 
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
 
 import torch
+import torch.distributed
 from torch.utils.data.distributed import DistributedSampler
+
+if TYPE_CHECKING:
+    from torch import Generator
 
 
 class ShardedDistributedSampler(DistributedSampler):
-    def _sharded_randperm(self, generator):
-        """Generate a sharded random permutation of indices."""
-        indices = torch.tensor(range(len(self.dataset)))
-        permuted = torch.stack(
-            [
-                torch.randperm(self.num_samples, generator=generator)
-                + i * self.num_samples
-                for i in range(self.num_replicas)
-            ],
-            dim=1,
-        ).reshape(-1)
-        return indices[permuted].tolist()
+    def _sharded_randperm(self, max_size: int, generator: Generator) -> list[int]:
+        """Generate a sharded random permutation of indices.
+        Overlap may occur in between the last two shards to maintain divisibility."""
+        sharded_randperm = [
+            torch.randperm(self.num_samples, generator=generator)
+            + min(i * self.num_samples, max_size - self.num_samples)
+            for i in range(self.num_replicas)
+        ]
+        indices = torch.stack(sharded_randperm, dim=1).reshape(-1)
+        return indices.tolist()
 
     def __iter__(self):
         """Modified __iter__ method to shard data across distributed ranks."""
+        max_size = len(self.dataset)  # type: ignore[arg-type]
         if self.shuffle:
             # deterministically shuffle based on epoch and seed
             g = torch.Generator()
             g.manual_seed(self.seed + self.epoch)
-            indices = self._sharded_randperm(g)
+            indices = self._sharded_randperm(max_size, g)
         else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
-
+            indices = list(range(max_size))
         if not self.drop_last:
             # add extra samples to make it evenly divisible
             padding_size = self.total_size - len(indices)
