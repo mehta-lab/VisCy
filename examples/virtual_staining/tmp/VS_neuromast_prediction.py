@@ -63,6 +63,7 @@ def predict_neuromast(
     trainer = VisCyTrainer(
         accelerator="gpu",
         callbacks=[HCSPredictionWriter(output_store)],
+        devices=1,
     )
     # Preprocess the data to get the normalization values
     trainer.preprocess(
