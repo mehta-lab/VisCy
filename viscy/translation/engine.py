@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
 from monai.optimizers import WarmupCosineSchedule
-from monai.transforms import DivisiblePad, Rotate90
+from monai.transforms import Compose, DivisiblePad, Rotate90
 from torch import Tensor, nn
 from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
@@ -466,63 +466,70 @@ class VSUNet(LightningModule):
 
 
 class FcmaeUNet(VSUNet):
-    def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
+    def __init__(
+        self,
+        fit_mask_ratio: float = 0.0,
+        train_transforms=[],
+        validation_transforms=[],
+        **kwargs,
+    ):
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
+        self.train_transforms = Compose(train_transforms)
+        self.validation_transforms = Compose(validation_transforms)
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def forward_fit(self, batch: Sample) -> tuple[Tensor]:
-        source = batch["source"]
-        target = batch["target"]
-        pred, mask = self.forward(source, mask_ratio=self.fit_mask_ratio)
-        loss = F.mse_loss(pred, target, reduction="none")
+    def forward_fit(self, batch: Tensor) -> tuple[Tensor]:
+        pred, mask = self.forward(batch, mask_ratio=self.fit_mask_ratio)
+        loss = F.mse_loss(pred, batch, reduction="none")
         loss = (loss.mean(2) * mask).sum() / mask.sum()
-        return source, target, pred, mask, loss
+        return pred, mask, loss
 
-    def training_step(self, batch: Sequence[Sample], batch_idx: int):
-        losses = []
-        batch_size = 0
-        for b in batch:
-            source, target, pred, mask, loss = self.forward_fit(b)
-            losses.append(loss)
-            batch_size += source.shape[0]
-            if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(
-                    detach_sample(
-                        (source, target * mask.unsqueeze(2), pred),
-                        self.log_samples_per_batch,
-                    )
+    def transform_and_collate(self, batch: list[Tensor], transforms: Compose) -> Tensor:
+        transformed = []
+        for sample in batch:
+            for element in sample:
+                transformed.append(transforms(element))
+        return torch.stack(transformed)
+
+    def training_step(self, batch: list[Tensor], batch_idx: int):
+        batch = self.transform_and_collate(batch, self.train_transforms)
+        pred, mask, loss = self.forward_fit(batch)
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(
+                detach_sample(
+                    (batch, batch * mask.unsqueeze(2), pred), self.log_samples_per_batch
                 )
-        loss_step = torch.stack(losses).mean()
+            )
         self.log(
             "loss/train",
-            loss_step.to(self.device),
+            loss.to(self.device),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
-            batch_size=batch_size,
+            batch_size=batch.shape[0],
         )
-        return loss_step
+        return loss
 
-    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source, target, pred, mask, loss = self.forward_fit(batch)
+    def validation_step(
+        self, batch: list[Tensor], batch_idx: int, dataloader_idx: int = 0
+    ):
+        batch = self.transform_and_collate(batch, self.validation_transforms)
+        pred, mask, loss = self.forward_fit(batch)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
-            f"loss/val/{dataloader_idx}",
-            loss.to(self.device),
-            sync_dist=True,
-            batch_size=source.shape[0],
+            "loss/val", loss.to(self.device), sync_dist=True, batch_size=batch.shape[0]
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 detach_sample(
-                    (source, target * mask.unsqueeze(2), pred),
+                    (batch, batch * mask.unsqueeze(2), pred),
                     self.log_samples_per_batch,
                 )
             )
