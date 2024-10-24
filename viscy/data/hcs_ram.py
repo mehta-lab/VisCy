@@ -6,7 +6,6 @@ from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
-import torch.distributed as dist
 from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data import set_track_meta
@@ -20,9 +19,11 @@ from monai.transforms import (
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _read_norm_meta
 from viscy.data.typing import ChannelMap, DictTransform, Sample
+from viscy.data.distributed import ShardedDistributedSampler
+from torch.distributed import get_rank
+import torch.distributed as dist
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -71,11 +72,9 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
         collated[key] = collate_meta_tensor(data)
     return collated
 
-
 def is_ddp_enabled() -> bool:
     """Check if distributed data parallel (DDP) is initialized."""
     return dist.is_available() and dist.is_initialized()
-
 
 class CachedDataset(Dataset):
     """
@@ -318,7 +317,11 @@ class CachedDataModule(LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
-        sampler = ShardedDistributedSampler(self.train_dataset, shuffle=True)
+        if is_ddp_enabled():
+            sampler = ShardedDistributedSampler(self.train_dataset, shuffle=True)
+        else:
+            sampler = None
+            _logger.info("Using standard sampler for non-distributed training")
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size // self.train_patches_per_stack,
@@ -333,7 +336,12 @@ class CachedDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
-        sampler = ShardedDistributedSampler(self.val_dataset, shuffle=False)
+        if is_ddp_enabled():
+            sampler = ShardedDistributedSampler(self.val_dataset, shuffle=False)
+        else:
+            sampler = None
+            _logger.info("Using standard sampler for non-distributed validation")
+    
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -342,5 +350,5 @@ class CachedDataModule(LightningDataModule):
             pin_memory=True,
             shuffle=False,
             timeout=self.timeout,
-            sampler=sampler,
+            sampler=sampler
         )
