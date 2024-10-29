@@ -183,6 +183,6 @@ The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
-The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
+The full functionality is tested on Linux `x86_64` with NVIDIA Ampere/Hopper GPUs (CUDA 12.6).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.
