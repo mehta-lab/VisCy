@@ -206,6 +206,8 @@ class RandInvertIntensityd(MapTransform, RandomizableTransform):
 
     def __call__(self, sample: Sample) -> Sample:
         self.randomize(None)
+        if not self._do_transform:
+            return sample
         for key in self.keys:
             if key in sample:
                 sample[key] = -sample[key]
