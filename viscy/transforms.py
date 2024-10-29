@@ -158,11 +158,20 @@ class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
 
 class NormalizeSampled(MapTransform):
     """
-    Normalize the sample
-    :param Union[str, Iterable[str]] keys: keys to normalize
-    :param str fov: fov path with respect to Plate
-    :param str subtrahend: subtrahend for normalization, defaults to "mean"
-    :param str divisor: divisor for normalization, defaults to "std"
+    Normalize the sample.
+
+    Parameters
+    ----------
+    keys : Union[str, Iterable[str]]
+        Keys to normalize.
+    level : {'fov_statistics', 'dataset_statistics'}
+        Level of normalization.
+    subtrahend : str, optional
+        Subtrahend for normalization, defaults to "mean".
+    divisor : str, optional
+        Divisor for normalization, defaults to "std".
+    remove_meta : bool, optional
+        Whether to remove metadata after normalization, defaults to False.
     """
 
     def __init__(
@@ -171,11 +180,13 @@ class NormalizeSampled(MapTransform):
         level: Literal["fov_statistics", "dataset_statistics"],
         subtrahend="mean",
         divisor="std",
+        remove_meta: bool = False,
     ) -> None:
         super().__init__(keys, allow_missing_keys=False)
         self.subtrahend = subtrahend
         self.divisor = divisor
         self.level = level
+        self.remove_meta = remove_meta
 
     # TODO: need to implement the case where the preprocessing already exists
     def __call__(self, sample: Sample) -> Sample:
@@ -184,6 +195,8 @@ class NormalizeSampled(MapTransform):
             subtrahend_val = level_meta[self.subtrahend]
             divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
+        if self.remove_meta:
+            sample.pop("norm_meta")
         return sample
 
     def _normalize():
