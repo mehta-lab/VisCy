@@ -33,6 +33,6 @@ jobs:
           python -m pip install --upgrade pip
           # Install cpu wheels only to speed up the build
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
-          pip install ".[metrics,dev]"
+          pip install ".[dev]"
       - name: Test with pytest
         run: pytest -v
