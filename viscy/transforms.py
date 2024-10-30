@@ -285,3 +285,20 @@ class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
                 result["norm_meta"] = sample["norm_meta"]
             results.append(result)
         return results
+
+
+class StackChannelsd(MapTransform):
+    """Stack source and target channels."""
+
+    def __init__(self, channel_map: ChannelMap) -> None:
+        channel_names = []
+        for channels in channel_map.values():
+            channel_names.extend(channels)
+        super().__init__(channel_names, allow_missing_keys=False)
+        self.channel_map = channel_map
+
+    def __call__(self, sample: Sample) -> Sample:
+        results = {}
+        for key, channels in self.channel_map.items():
+            results[key] = torch.cat([sample[ch] for ch in channels], dim=0)
+        return results
