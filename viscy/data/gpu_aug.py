@@ -10,6 +10,7 @@ import torch
 from iohub.ngff import Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data.meta_obj import set_track_meta
+from monai.data.utils import list_data_collate
 from monai.transforms.compose import Compose
 from torch import Tensor
 from torch.multiprocessing import Manager
@@ -49,6 +50,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             drop_last=True,
+            collate_fn=list_data_collate,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -63,6 +65,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             drop_last=False,
+            collate_fn=list_data_collate,
         )
 
     @property
