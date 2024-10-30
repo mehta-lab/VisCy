@@ -41,7 +41,6 @@ metrics = [
     "captum>=0.7.0",
 ]
 examples = ["napari", "jupyter", "jupytext"]
-
 visual = [
     "ipykernel",
     "graphviz",
@@ -51,8 +50,8 @@ visual = [
     "nbformat",
     "cmap",
 ]
-
 dev = [
+    "viscy[metrics,examples,visual]",
     "pytest",
     "pytest-cov",
     "hypothesis",
