@@ -7,6 +7,7 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
+from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import Compose, DivisiblePad, Rotate90
 from torch import Tensor, nn
@@ -23,6 +24,8 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
+from viscy.data.combined import CombinedDataModule
+from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.typing import Sample
 from viscy.translation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -477,30 +480,53 @@ class FcmaeUNet(VSUNet):
         self.fit_mask_ratio = fit_mask_ratio
         self.train_transforms = Compose(train_transforms)
         self.validation_transforms = Compose(validation_transforms)
+        self.save_hyperparameters()
+
+    def on_fit_start(self):
+        dm = self.trainer.datamodule
+        if not isinstance(dm, CombinedDataModule):
+            raise ValueError(
+                f"Container data module type {type(dm)} "
+                "is not supported for FCMAE training"
+            )
+        for subdm in dm.data_modules:
+            if not isinstance(subdm, GPUTransformDataModule):
+                raise ValueError(
+                    f"Member data module type {type(subdm)} "
+                    "is not supported for FCMAE training"
+                )
+        self.datamodules = dm.data_modules
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def forward_fit(self, batch: Tensor) -> tuple[Tensor]:
+    def forward_fit(self, batch: Tensor) -> tuple[Tensor, Tensor, Tensor]:
         pred, mask = self.forward(batch, mask_ratio=self.fit_mask_ratio)
         loss = F.mse_loss(pred, batch, reduction="none")
         loss = (loss.mean(2) * mask).sum() / mask.sum()
         return pred, mask, loss
 
-    def transform_and_collate(self, batch: list[Tensor], transforms: Compose) -> Tensor:
+    @torch.no_grad()
+    def train_transform_and_collate(self, batch: list[dict[Sample]]) -> Tensor:
         transformed = []
-        for sample in batch:
-            for element in sample:
-                transformed.append(transforms(element))
-        return torch.stack(transformed)
+        for dataset_batch, dm in zip(batch, self.datamodules):
+            dataset_batch = dm.train_gpu_transforms(dataset_batch)
+            transformed.extend(dataset_batch)
+        return collate_meta_tensor(transformed)["source"]
 
-    def training_step(self, batch: list[Tensor], batch_idx: int):
-        batch = self.transform_and_collate(batch, self.train_transforms)
-        pred, mask, loss = self.forward_fit(batch)
+    def val_transform_and_collate(
+        self, batch: list[Sample], dataloader_idx: int
+    ) -> Tensor:
+        batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
+        return collate_meta_tensor(batch)["source"]
+
+    def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+        x = self.train_transform_and_collate(batch)
+        pred, mask, loss = self.forward_fit(x)
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
                 detach_sample(
-                    (batch, batch * mask.unsqueeze(2), pred), self.log_samples_per_batch
+                    (x, x * mask.unsqueeze(2), pred), self.log_samples_per_batch
                 )
             )
         self.log(
@@ -511,25 +537,25 @@ class FcmaeUNet(VSUNet):
             prog_bar=True,
             logger=True,
             sync_dist=True,
-            batch_size=batch.shape[0],
+            batch_size=x.shape[0],
         )
         return loss
 
     def validation_step(
-        self, batch: list[Tensor], batch_idx: int, dataloader_idx: int = 0
-    ):
-        batch = self.transform_and_collate(batch, self.validation_transforms)
-        pred, mask, loss = self.forward_fit(batch)
+        self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        x = self.val_transform_and_collate(batch, dataloader_idx)
+        pred, mask, loss = self.forward_fit(x)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
-            "loss/val", loss.to(self.device), sync_dist=True, batch_size=batch.shape[0]
+            "loss/val", loss.to(self.device), sync_dist=True, batch_size=x.shape[0]
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 detach_sample(
-                    (batch, batch * mask.unsqueeze(2), pred),
+                    (x, x * mask.unsqueeze(2), pred),
                     self.log_samples_per_batch,
                 )
             )
