@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
 from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -9,19 +10,76 @@ import torch
 from iohub.ngff import Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from monai.data.meta_obj import set_track_meta
-from monai.transforms import Compose
+from monai.transforms.compose import Compose
 from torch import Tensor
 from torch.multiprocessing import Manager
-from torch.utils.data import DataLoader, Dataset, Subset
+from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
-from viscy.data.typing import DictTransform
+from viscy.data.typing import DictTransform, NormMeta
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
 
 _logger = getLogger("lightning.pytorch")
+
+_CacheMetadata = tuple[Position, int, NormMeta | None]
+
+
+class GPUTransformDataModule(ABC, LightningDataModule):
+    def _maybe_sampler(
+        self, dataset: Dataset, shuffle: bool
+    ) -> ShardedDistributedSampler | None:
+        return (
+            ShardedDistributedSampler(dataset, shuffle=shuffle)
+            if torch.distributed.is_initialized()
+            else None
+        )
+
+    def train_dataloader(self) -> DataLoader:
+        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
+        _logger.debug(f"Using training sampler {sampler}")
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=False if sampler else True,
+            sampler=sampler,
+            persistent_workers=True if self.num_workers > 0 else False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            drop_last=True,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
+        _logger.debug(f"Using validation sampler {sampler}")
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            sampler=sampler,
+            persistent_workers=True if self.num_workers > 0 else False,
+            num_workers=self.num_workers,
+            pin_memory=self.pin_memory,
+            drop_last=False,
+        )
+
+    @property
+    @abstractmethod
+    def train_cpu_transforms(self) -> Compose: ...
+
+    @property
+    @abstractmethod
+    def train_gpu_transforms(self) -> Compose: ...
+
+    @property
+    @abstractmethod
+    def val_cpu_transforms(self) -> Compose: ...
+
+    @property
+    @abstractmethod
+    def val_gpu_transforms(self) -> Compose: ...
 
 
 class CachedOmeZarrDataset(Dataset):
@@ -30,11 +88,11 @@ class CachedOmeZarrDataset(Dataset):
         positions: list[Position],
         channel_names: list[str],
         cache_map: DictProxy,
-        transform: DictTransform | None = None,
+        transform: Compose | None = None,
         array_key: str = "0",
     ):
         key = 0
-        self._metadata_map = {}
+        self._metadata_map: dict[int, _CacheMetadata] = {}
         for position in positions:
             img = position[array_key]
             norm_meta = _read_norm_meta(position)
@@ -50,7 +108,7 @@ class CachedOmeZarrDataset(Dataset):
     def __len__(self) -> int:
         return len(self._cache_map)
 
-    def __getitem__(self, idx: int) -> Tensor:
+    def __getitem__(self, idx: int) -> dict[str, Tensor]:
         position, time_idx, norm_meta = self._metadata_map[idx]
         cache = self._cache_map[idx]
         if cache is None:
@@ -70,15 +128,10 @@ class CachedOmeZarrDataset(Dataset):
             sample = self.transform(sample)
         if not isinstance(sample, list):
             sample = [sample]
-        out_tensors = []
-        for s in sample:
-            s.pop("norm_meta")
-            s_out = torch.cat(list(s.values()))
-            out_tensors.append(s_out)
-        return out_tensors
+        return sample
 
 
-class CachedOmeZarrDataModule(LightningDataModule):
+class CachedOmeZarrDataModule(GPUTransformDataModule):
     def __init__(
         self,
         data_path: Path,
@@ -86,7 +139,11 @@ class CachedOmeZarrDataModule(LightningDataModule):
         batch_size: int,
         num_workers: int,
         split_ratio: float,
-        transforms: list[DictTransform],
+        train_cpu_transforms: list[DictTransform],
+        val_cpu_transforms: list[DictTransform],
+        train_gpu_transforms: list[DictTransform],
+        val_gpu_transforms: list[DictTransform],
+        pin_memory: bool = True,
     ):
         super().__init__()
         self.data_path = data_path
@@ -94,7 +151,27 @@ class CachedOmeZarrDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.split_ratio = split_ratio
-        self.transforms = Compose(transforms)
+        self._train_cpu_transforms = Compose(train_cpu_transforms)
+        self._val_cpu_transforms = Compose(val_cpu_transforms)
+        self._train_gpu_transforms = Compose(train_gpu_transforms)
+        self._val_gpu_transforms = Compose(val_gpu_transforms)
+        self.pin_memory = pin_memory
+
+    @property
+    def train_cpu_transforms(self) -> Compose:
+        return self._train_cpu_transforms
+
+    @property
+    def train_gpu_transforms(self) -> Compose:
+        return self._train_gpu_transforms
+
+    @property
+    def val_cpu_transforms(self) -> Compose:
+        return self._val_cpu_transforms
+
+    @property
+    def val_gpu_transforms(self) -> Compose:
+        return self._val_gpu_transforms
 
     def _set_fit_global_state(self, num_positions: int) -> list[int]:
         # disable metadata tracking in MONAI for performance
@@ -103,46 +180,20 @@ class CachedOmeZarrDataModule(LightningDataModule):
         return torch.randperm(num_positions).tolist()
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
+        if stage not in ("fit", "validate"):
+            raise NotImplementedError("Only fit and validate stages are supported.")
         cache_map = Manager().dict()
         plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")
         positions = [p for _, p in plate.positions()]
         shuffled_indices = self._set_fit_global_state(len(positions))
         num_train_fovs = int(len(positions) * self.split_ratio)
-        dataset = CachedOmeZarrDataset(
-            positions, self.channels, cache_map, self.transforms
+        train_fovs = [positions[i] for i in shuffled_indices[:num_train_fovs]]
+        val_fovs = [positions[i] for i in shuffled_indices[num_train_fovs:]]
+        _logger.debug(f"Training FOVs: {[p.zgroup.name for p in train_fovs]}")
+        _logger.debug(f"Validation FOVs: {[p.zgroup.name for p in val_fovs]}")
+        self.train_dataset = CachedOmeZarrDataset(
+            train_fovs, self.channels, cache_map, transform=self.train_cpu_transforms
         )
-        self.train_dataset = Subset(dataset, shuffled_indices[:num_train_fovs])
-        self.val_dataset = Subset(dataset, shuffled_indices[num_train_fovs:])
-
-    def _maybe_sampler(
-        self, dataset: Dataset, shuffle: bool
-    ) -> ShardedDistributedSampler | None:
-        return (
-            ShardedDistributedSampler(dataset, shuffle=shuffle)
-            if torch.distributed.is_initialized()
-            else None
-        )
-
-    def train_dataloader(self) -> DataLoader:
-        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=False if sampler else True,
-            sampler=sampler,
-            persistent_workers=True if self.num_workers > 0 else False,
-            num_workers=self.num_workers,
-            drop_last=True,
-        )
-
-    def val_dataloader(self) -> DataLoader:
-        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            sampler=sampler,
-            persistent_workers=True if self.num_workers > 0 else False,
-            num_workers=self.num_workers,
-            drop_last=False,
+        self.val_dataset = CachedOmeZarrDataset(
+            val_fovs, self.channels, cache_map, transform=self.val_cpu_transforms
         )
