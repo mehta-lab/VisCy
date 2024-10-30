@@ -1,45 +1,81 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
-from lightning.pytorch import LightningDataModule
-from monai.transforms import Compose, MapTransform
+from monai.transforms import Compose, MapTransform, Transform
 from pycocotools.coco import COCO
 from tifffile import imread
 from torch.utils.data import DataLoader, Dataset
 from torchvision.ops import box_convert
 
+from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.typing import Sample
+
+if TYPE_CHECKING:
+    from multiprocessing.managers import DictProxy
 
 
 class LiveCellDataset(Dataset):
     """
     LiveCell dataset.
 
-    :param list[Path] images: List of paths to single-page, single-channel TIFF files.
-    :param MapTransform | Compose transform: Transform to apply to the dataset
+    Parameters
+    ----------
+    images : list of Path
+        List of paths to single-page, single-channel TIFF files.
+    transform : Transform or Compose
+        Transform to apply to the dataset.
+    cache_map : DictProxy
+        Shared dictionary for caching images.
     """
 
-    def __init__(self, images: list[Path], transform: MapTransform | Compose) -> None:
+    def __init__(
+        self,
+        images: list[Path],
+        transform: Transform | Compose,
+        cache_map: DictProxy,
+    ) -> None:
         self.images = images
         self.transform = transform
+        self._cache_map = cache_map
 
     def __len__(self) -> int:
         return len(self.images)
 
     def __getitem__(self, idx: int) -> Sample:
-        image = imread(self.images[idx])[None, None]
-        image = torch.from_numpy(image).to(torch.float32)
-        image = self.transform(image)
-        return {"source": image, "target": image}
+        name = self.images[idx]
+        if name not in self._cache_map:
+            image = imread(name)[None, None]
+            image = torch.from_numpy(image).to(torch.float32)
+            self._cache_map[name] = image
+        else:
+            image = self._cache_map[name]
+        sample = Sample(source=image)
+        sample = self.transform(sample)
+        if not isinstance(sample, list):
+            sample = [sample]
+        return sample
 
 
 class LiveCellTestDataset(Dataset):
     """
     LiveCell dataset.
 
-    :param list[Path] images: List of paths to single-page, single-channel TIFF files.
-    :param MapTransform | Compose transform: Transform to apply to the dataset
+    Parameters
+    ----------
+    image_dir : Path
+        Directory containing the images.
+    transform : MapTransform | Compose
+        Transform to apply to the dataset.
+    annotations : Path
+        Path to the COCO annotations file.
+    load_target : bool, optional
+        Whether to load the target images (default is False).
+    load_labels : bool, optional
+        Whether to load the labels (default is False).
     """
 
     def __init__(
@@ -87,7 +123,7 @@ class LiveCellTestDataset(Dataset):
         return sample
 
 
-class LiveCellDataModule(LightningDataModule):
+class LiveCellDataModule(GPUTransformDataModule):
     def __init__(
         self,
         train_val_images: Path | None = None,
@@ -95,33 +131,60 @@ class LiveCellDataModule(LightningDataModule):
         train_annotations: Path | None = None,
         val_annotations: Path | None = None,
         test_annotations: Path | None = None,
-        train_transforms: list[MapTransform] = [],
-        val_transforms: list[MapTransform] = [],
+        train_cpu_transforms: list[MapTransform] = [],
+        val_cpu_transforms: list[MapTransform] = [],
+        train_gpu_transforms: list[MapTransform] = [],
+        val_gpu_transforms: list[MapTransform] = [],
         test_transforms: list[MapTransform] = [],
         batch_size: int = 16,
         num_workers: int = 8,
+        pin_memory: bool = True,
     ) -> None:
         super().__init__()
-        self.train_val_images = Path(train_val_images)
-        if not self.train_val_images.is_dir():
-            raise NotADirectoryError(str(train_val_images))
-        self.test_images = Path(test_images)
-        if not self.test_images.is_dir():
-            raise NotADirectoryError(str(test_images))
-        self.train_annotations = Path(train_annotations)
-        if not self.train_annotations.is_file():
-            raise FileNotFoundError(str(train_annotations))
-        self.val_annotations = Path(val_annotations)
-        if not self.val_annotations.is_file():
-            raise FileNotFoundError(str(val_annotations))
-        self.test_annotations = Path(test_annotations)
-        if not self.test_annotations.is_file():
-            raise FileNotFoundError(str(test_annotations))
-        self.train_transforms = Compose(train_transforms)
-        self.val_transforms = Compose(val_transforms)
+        if train_val_images is not None:
+            self.train_val_images = Path(train_val_images)
+            if not self.train_val_images.is_dir():
+                raise NotADirectoryError(str(train_val_images))
+        if test_images is not None:
+            self.test_images = Path(test_images)
+            if not self.test_images.is_dir():
+                raise NotADirectoryError(str(test_images))
+        if train_annotations is not None:
+            self.train_annotations = Path(train_annotations)
+            if not self.train_annotations.is_file():
+                raise FileNotFoundError(str(train_annotations))
+        if val_annotations is not None:
+            self.val_annotations = Path(val_annotations)
+            if not self.val_annotations.is_file():
+                raise FileNotFoundError(str(val_annotations))
+        if test_annotations is not None:
+            self.test_annotations = Path(test_annotations)
+            if not self.test_annotations.is_file():
+                raise FileNotFoundError(str(test_annotations))
+        self._train_cpu_transforms = Compose(train_cpu_transforms)
+        self._val_cpu_transforms = Compose(val_cpu_transforms)
+        self._train_gpu_transforms = Compose(train_gpu_transforms)
+        self._val_gpu_transforms = Compose(val_gpu_transforms)
         self.test_transforms = Compose(test_transforms)
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.pin_memory = pin_memory
+
+    @property
+    def train_cpu_transforms(self) -> Compose:
+        return self._train_cpu_transforms
+
+    @property
+    def val_cpu_transforms(self) -> Compose:
+        return self._val_cpu_transforms
+
+    @property
+    def train_gpu_transforms(self) -> Compose:
+        return self._train_gpu_transforms
+
+    @property
+    def val_gpu_transforms(self) -> Compose:
+        return self._val_gpu_transforms
 
     def setup(self, stage: str) -> None:
         if stage == "fit":
@@ -135,15 +198,18 @@ class LiveCellDataModule(LightningDataModule):
         return sorted(images)
 
     def _setup_fit(self) -> None:
+        cache_map = torch.multiprocessing.Manager().dict()
         train_images = self._parse_image_names(self.train_annotations)
         val_images = self._parse_image_names(self.val_annotations)
         self.train_dataset = LiveCellDataset(
             [self.train_val_images / f for f in train_images],
-            transform=self.train_transforms,
+            transform=self.train_cpu_transforms,
+            cache_map=cache_map,
         )
         self.val_dataset = LiveCellDataset(
             [self.train_val_images / f for f in val_images],
-            transform=self.val_transforms,
+            transform=self.val_cpu_transforms,
+            cache_map=cache_map,
         )
 
     def _setup_test(self) -> None:
@@ -152,23 +218,6 @@ class LiveCellDataModule(LightningDataModule):
             transform=self.test_transforms,
             annotations=self.test_annotations,
             load_labels=True,
-        )
-
-    def train_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            persistent_workers=bool(self.num_workers),
-            shuffle=True,
-        )
-
-    def val_dataloader(self) -> DataLoader:
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
-            persistent_workers=bool(self.num_workers),
         )
 
     def test_dataloader(self) -> DataLoader:
