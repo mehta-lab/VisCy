@@ -29,6 +29,12 @@ _CacheMetadata = tuple[Position, int, NormMeta | None]
 
 
 class GPUTransformDataModule(ABC, LightningDataModule):
+    train_dataset: Dataset
+    val_dataset: Dataset
+    batch_size: int
+    num_workers: int
+    pin_memory: bool
+
     def _maybe_sampler(
         self, dataset: Dataset, shuffle: bool
     ) -> ShardedDistributedSampler | None:
