@@ -99,6 +99,7 @@ class CachedOmeZarrDataset(Dataset):
         cache_map: DictProxy,
         transform: Compose | None = None,
         array_key: str = "0",
+        load_normalization_metadata: bool = True,
     ):
         key = 0
         self._metadata_map: dict[int, _CacheMetadata] = {}
@@ -113,6 +114,7 @@ class CachedOmeZarrDataset(Dataset):
         self.array_key = array_key
         self._cache_map = cache_map
         self.transform = transform
+        self.load_normalization_metadata = load_normalization_metadata
 
     def __len__(self) -> int:
         return len(self._metadata_map)
@@ -132,7 +134,8 @@ class CachedOmeZarrDataset(Dataset):
             _logger.debug(f"Using cached volume for index {idx}")
             volume = cache
         sample = {name: img[None] for name, img in zip(self.channels.keys(), volume)}
-        sample["norm_meta"] = norm_meta
+        if self.load_normalization_metadata:
+            sample["norm_meta"] = norm_meta
         if self.transform:
             sample = self.transform(sample)
         if not isinstance(sample, list):
