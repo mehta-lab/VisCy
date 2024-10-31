@@ -21,11 +21,18 @@ class CombinedDataModule(LightningDataModule):
     """Wrapper for combining multiple data modules.
     For supported modes, see ``lightning.pytorch.utilities.combined_loader``.
 
-    :param Sequence[LightningDataModule] data_modules: data modules to combine
-    :param str train_mode: mode in training stage, defaults to "max_size_cycle"
-    :param str val_mode: mode in validation stage, defaults to "sequential"
-    :param str test_mode: mode in testing stage, defaults to "sequential"
-    :param str predict_mode: mode in prediction stage, defaults to "sequential"
+    Parameters
+    ----------
+    data_modules : Sequence[LightningDataModule]
+        data modules to combine
+    train_mode : CombineMode, optional
+        mode in training stage, by default CombineMode.MAX_SIZE_CYCLE
+    val_mode : CombineMode, optional
+        _description_, by default CombineMode.SEQUENTIAL
+    test_mode : CombineMode, optional
+        mode in testing stage, by default CombineMode.SEQUENTIAL
+    predict_mode : CombineMode, optional
+        mode in prediction stage, by default CombineMode.SEQUENTIAL
     """
 
     def __init__(
@@ -78,10 +85,15 @@ class CombinedDataModule(LightningDataModule):
 class ConcatDataModule(LightningDataModule):
     """
     Concatenate multiple data modules.
-    The concatenated data module will have the same
-    batch size and number of workers as the first data module.
-    Each element will be sampled uniformly regardless of their original data module.
-    :param Sequence[LightningDataModule] data_modules: data modules to concatenate
+
+    The concatenated data module will have the same batch size and number of workers 
+    as the first data module. Each element will be sampled uniformly regardless of 
+    their original data module.
+
+    Parameters
+    ----------
+    data_modules : Sequence[LightningDataModule]
+        Data modules to concatenate.
     """
 
     def __init__(self, data_modules: Sequence[LightningDataModule]):
