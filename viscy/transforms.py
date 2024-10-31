@@ -16,8 +16,6 @@ from monai.transforms import (
     RandWeightedCropd,
     ScaleIntensityRangePercentilesd,
 )
-from monai.transforms.transform import Randomizable
-from numpy.random.mtrand import RandomState as RandomState
 from torch import Tensor
 from typing_extensions import Iterable, Literal
 
@@ -229,12 +227,6 @@ class RandInvertIntensityd(MapTransform, RandomizableTransform):
             if key in sample:
                 sample[key] = -sample[key]
         return sample
-
-    def set_random_state(
-        self, seed: int | None = None, state: RandomState | None = None
-    ) -> Randomizable:
-        super().set_random_state(seed, state)
-        return self
 
 
 class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
