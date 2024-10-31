@@ -514,6 +514,7 @@ class FcmaeUNet(VSUNet):
             transformed.extend(dataset_batch)
         return collate_meta_tensor(transformed)["source"]
 
+    @torch.no_grad()
     def val_transform_and_collate(
         self, batch: list[Sample], dataloader_idx: int
     ) -> Tensor:
