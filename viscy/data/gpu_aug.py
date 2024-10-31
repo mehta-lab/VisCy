@@ -55,7 +55,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             persistent_workers=True if self.num_workers > 0 else False,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
-            drop_last=True,
+            drop_last=False,
             collate_fn=list_data_collate,
         )
 
@@ -115,7 +115,7 @@ class CachedOmeZarrDataset(Dataset):
         self.transform = transform
 
     def __len__(self) -> int:
-        return len(self._cache_map)
+        return len(self._metadata_map)
 
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         position, time_idx, norm_meta = self._metadata_map[idx]
