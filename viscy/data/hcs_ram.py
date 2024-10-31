@@ -318,7 +318,11 @@ class CachedDataModule(LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
-        sampler = ShardedDistributedSampler(self.train_dataset, shuffle=True)
+        if is_ddp_enabled():
+            sampler = ShardedDistributedSampler(self.train_dataset, shuffle=True)
+        else:
+            sampler = None
+            _logger.info("Using standard sampler for non-distributed training")
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size // self.train_patches_per_stack,
@@ -333,7 +337,12 @@ class CachedDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
-        sampler = ShardedDistributedSampler(self.val_dataset, shuffle=False)
+        if is_ddp_enabled():
+            sampler = ShardedDistributedSampler(self.val_dataset, shuffle=False)
+        else:
+            sampler = None
+            _logger.info("Using standard sampler for non-distributed validation")
+
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
