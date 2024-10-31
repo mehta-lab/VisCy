@@ -28,7 +28,7 @@ class CombinedDataModule(LightningDataModule):
     train_mode : CombineMode, optional
         mode in training stage, by default CombineMode.MAX_SIZE_CYCLE
     val_mode : CombineMode, optional
-        _description_, by default CombineMode.SEQUENTIAL
+        mode in validation stage, by default CombineMode.SEQUENTIAL
     test_mode : CombineMode, optional
         mode in testing stage, by default CombineMode.SEQUENTIAL
     predict_mode : CombineMode, optional
@@ -86,8 +86,8 @@ class ConcatDataModule(LightningDataModule):
     """
     Concatenate multiple data modules.
 
-    The concatenated data module will have the same batch size and number of workers 
-    as the first data module. Each element will be sampled uniformly regardless of 
+    The concatenated data module will have the same batch size and number of workers
+    as the first data module. Each element will be sampled uniformly regardless of
     their original data module.
 
     Parameters
