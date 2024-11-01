@@ -12,13 +12,31 @@ class CTMCv1DataModule(GPUTransformDataModule):
     Autoregression data module for the CTMCv1 dataset.
     Training and validation datasets are stored in separate HCS OME-Zarr stores.
 
-    :param str | Path train_data_path: Path to the training dataset
-    :param str | Path val_data_path: Path to the validation dataset
-    :param list[MapTransform] train_transforms: List of transforms for training
-    :param list[MapTransform] val_transforms: List of transforms for validation
-    :param int batch_size: Batch size, defaults to 16
-    :param int num_workers: Number of workers, defaults to 8
-    :param str channel_name: Name of the DIC channel, defaults to "DIC"
+    Parameters
+    ----------
+    train_data_path : str or Path
+        Path to the training dataset.
+    val_data_path : str or Path
+        Path to the validation dataset.
+    train_cpu_transforms : list of MapTransform
+        List of CPU transforms for training.
+    val_cpu_transforms : list of MapTransform
+        List of CPU transforms for validation.
+    train_gpu_transforms : list of MapTransform
+        List of GPU transforms for training.
+    val_gpu_transforms : list of MapTransform
+        List of GPU transforms for validation.
+    batch_size : int, optional
+        Batch size, by default 16.
+    num_workers : int, optional
+        Number of dataloading workers, by default 8.
+    val_subsample_ratio : int, optional
+        Skip evert N frames for validation to reduce redundancy in video,
+        by default 30.
+    channel_name : str, optional
+        Name of the DIC channel, by default "DIC".
+    pin_memory : bool, optional
+        Pin memory for dataloaders, by default True.
     """
 
     def __init__(
