@@ -1,5 +1,13 @@
 # VisCy
 
+[![Python package index](https://img.shields.io/pypi/v/viscy.svg)](https://pypi.org/project/viscy)
+[![PyPI monthly downloads](https://img.shields.io/pypi/dm/viscy.svg)](https://pypistats.org/packages/viscy)
+[![Total downloads](https://pepy.tech/badge/viscy)](https://pepy.tech/project/viscy)
+[![GitHub contributors](https://img.shields.io/github/contributors-anon/mehta-lab/VisCy)](https://github.com/mehta-lab/VisCy/graphs/contributors)
+![GitHub Repo stars](https://img.shields.io/github/stars/mehta-lab/VisCy)
+![GitHub forks](https://img.shields.io/github/forks/mehta-lab/VisCy)
+[![SPEC 0 — Minimum Supported Dependencies](https://img.shields.io/badge/SPEC-0-green?labelColor=%23004811&color=%235CA038)](https://scientific-python.org/specs/spec-0000/)
+
 VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
 This repository provides a pipeline for the following.
@@ -179,6 +187,6 @@ The pipeline is built using the [PyTorch Lightning](https://www.pytorchlightning
 The [iohub](https://github.com/czbiohub-sf/iohub) library is used
 for reading and writing data in [OME-Zarr](https://www.nature.com/articles/s41592-021-01326-w) format.
 
-The full functionality is tested on Linux `x86_64` with NVIDIA Ampere GPUs (CUDA 12.4).
+The full functionality is tested on Linux `x86_64` with NVIDIA Ampere/Hopper GPUs (CUDA 12.6).
 Some features (e.g. mixed precision and distributed training) may not be available with other setups,
 see [PyTorch documentation](https://pytorch.org) for details.

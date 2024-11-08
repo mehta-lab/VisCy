@@ -382,7 +382,6 @@ class VSUNet(LightningModule):
     def on_validation_epoch_end(self):
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        self.validation_step_outputs = []
         # average within each dataloader
         loss_means = [torch.tensor(losses).mean() for losses in self.validation_losses]
         self.log(
@@ -390,6 +389,8 @@ class VSUNet(LightningModule):
             torch.tensor(loss_means).mean().to(self.device),
             sync_dist=True,
         )
+        self.validation_step_outputs.clear()
+        self.validation_losses.clear()
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
