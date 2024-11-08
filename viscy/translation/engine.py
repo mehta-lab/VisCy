@@ -1,5 +1,6 @@
 import logging
 import os
+import random
 from typing import Literal, Sequence, Union
 
 import numpy as np
@@ -7,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
+from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
@@ -23,6 +25,8 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 
+from viscy.data.combined import CombinedDataModule
+from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.typing import Sample
 from viscy.translation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -466,63 +470,91 @@ class VSUNet(LightningModule):
 
 
 class FcmaeUNet(VSUNet):
-    def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
+    def __init__(
+        self,
+        fit_mask_ratio: float = 0.0,
+        **kwargs,
+    ):
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
+        self.save_hyperparameters()
+
+    def on_fit_start(self):
+        dm = self.trainer.datamodule
+        if not isinstance(dm, CombinedDataModule):
+            raise ValueError(
+                f"Container data module type {type(dm)} "
+                "is not supported for FCMAE training"
+            )
+        for subdm in dm.data_modules:
+            if not isinstance(subdm, GPUTransformDataModule):
+                raise ValueError(
+                    f"Member data module type {type(subdm)} "
+                    "is not supported for FCMAE training"
+                )
+        self.datamodules = dm.data_modules
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def forward_fit(self, batch: Sample) -> tuple[Tensor]:
-        source = batch["source"]
-        target = batch["target"]
-        pred, mask = self.forward(source, mask_ratio=self.fit_mask_ratio)
-        loss = F.mse_loss(pred, target, reduction="none")
+    def forward_fit(self, batch: Tensor) -> tuple[Tensor, Tensor, Tensor]:
+        pred, mask = self.forward(batch, mask_ratio=self.fit_mask_ratio)
+        loss = F.mse_loss(pred, batch, reduction="none")
         loss = (loss.mean(2) * mask).sum() / mask.sum()
-        return source, target, pred, mask, loss
+        return pred, mask, loss
 
-    def training_step(self, batch: Sequence[Sample], batch_idx: int):
-        losses = []
-        batch_size = 0
-        for b in batch:
-            source, target, pred, mask, loss = self.forward_fit(b)
-            losses.append(loss)
-            batch_size += source.shape[0]
-            if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(
-                    detach_sample(
-                        (source, target * mask.unsqueeze(2), pred),
-                        self.log_samples_per_batch,
-                    )
-                )
-        loss_step = torch.stack(losses).mean()
+    @torch.no_grad()
+    def train_transform_and_collate(self, batch: list[dict[Sample]]) -> Tensor:
+        transformed = []
+        for dataset_batch, dm in zip(batch, self.datamodules):
+            dataset_batch = dm.train_gpu_transforms(dataset_batch)
+            transformed.extend(dataset_batch)
+        # shuffle references in place for better logging
+        random.shuffle(transformed)
+        return collate_meta_tensor(transformed)["source"]
+
+    @torch.no_grad()
+    def val_transform_and_collate(
+        self, batch: list[Sample], dataloader_idx: int
+    ) -> Tensor:
+        batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
+        return collate_meta_tensor(batch)["source"]
+
+    def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+        x = self.train_transform_and_collate(batch)
+        pred, mask, loss = self.forward_fit(x)
+        if batch_idx < self.log_batches_per_epoch:
+            target = x * mask.unsqueeze(2)
+            self.training_step_outputs.extend(
+                detach_sample((x, target, pred), self.log_samples_per_batch)
+            )
         self.log(
             "loss/train",
-            loss_step.to(self.device),
+            loss.to(self.device),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
-            batch_size=batch_size,
+            batch_size=x.shape[0],
         )
-        return loss_step
+        return loss
 
-    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source, target, pred, mask, loss = self.forward_fit(batch)
+    def validation_step(
+        self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        x = self.val_transform_and_collate(batch, dataloader_idx)
+        pred, mask, loss = self.forward_fit(x)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
-            f"loss/val/{dataloader_idx}",
-            loss.to(self.device),
-            sync_dist=True,
-            batch_size=source.shape[0],
+            "loss/val", loss.to(self.device), sync_dist=True, batch_size=x.shape[0]
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 detach_sample(
-                    (source, target * mask.unsqueeze(2), pred),
+                    (x, x * mask.unsqueeze(2), pred),
                     self.log_samples_per_batch,
                 )
             )
