@@ -57,7 +57,7 @@ class NTXentLoss(torch.nn.Module):
         # Find the valid pairs of positive samples
         positive_samples = torch.cat(
             [torch.arange(self.batch_size), torch.arange(self.batch_size)], dim=0
-        )
+        ).to(similarity_matrix.device)
 
         # Mask out unwanted pairs
         similarity_matrix = similarity_matrix[self.mask].view(2 * self.batch_size, -1)
@@ -120,7 +120,7 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{phase}/negative_norm: {negative_norm}")
 
     def _log_metrics(
-        self, loss, anchor, positive, negative, stage: Literal["train", "val"]
+        self, loss, anchor, positive, stage: Literal["train", "val"], negative=None
     ):
         self.log(
             f"loss/{stage}",
@@ -131,17 +131,26 @@ class ContrastiveModule(LightningModule):
             logger=True,
             sync_dist=True,
         )
+
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
-        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
-        euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
+        log_metric_dict = {
+            f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
+            f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
+        }
+
+        if negative is not None:
+            euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
+            cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
+            log_metric_dict[f"metrics/cosine_similarity_negative/{stage}"] = (
+                cosine_sim_neg
+            )
+            log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = (
+                euclidean_dist_neg
+            )
+
         self.log_dict(
-            {
-                f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
-                f"metrics/cosine_similarity_negative/{stage}": cosine_sim_neg,
-                f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
-                f"metrics/euclidean_distance_negative/{stage}": euclidean_dist_neg,
-            },
+            log_metric_dict,
             on_step=False,
             on_epoch=True,
             logger=True,
@@ -157,24 +166,31 @@ class ContrastiveModule(LightningModule):
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
-        neg_img = batch["negative"]
         anchor_projection = self(anchor_img)
-        negative_projection = self(neg_img)
         positive_projection = self(pos_img)
         if isinstance(self.loss_function, NTXentLoss):
             # Note: we assume the two augmented views are the anchor and positive samples
             loss = self.loss_function(anchor_projection, positive_projection)
+            self._log_metrics(
+                loss=loss,
+                anchor=anchor_projection,
+                positive=positive_projection,
+                negative=None,
+                stage="train",
+            )
         else:
+            neg_img = batch["negative"]
+            negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
-        self._log_metrics(
-            loss,
-            anchor_projection,
-            positive_projection,
-            negative_projection,
-            stage="train",
-        )
+            self._log_metrics(
+                loss=loss,
+                anchor=anchor_projection,
+                positive=positive_projection,
+                negative=negative_projection,
+                stage="train",
+            )
         if batch_idx < self.log_batches_per_epoch:
             self.training_step_outputs.extend(
                 detach_sample(
