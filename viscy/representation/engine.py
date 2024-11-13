@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Sequence, TypedDict
+from typing import Literal, Sequence, TypedDict, Tuple
 
 import numpy as np
 import torch
@@ -12,6 +12,61 @@ from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+class NTXentLoss(torch.nn.Module):
+    """
+    Normalized Temperature-scaled Cross Entropy Loss
+
+    From Chen et.al, https://arxiv.org/abs/2002.05709
+    """
+
+    def __init__(self, batch_size, temperature=0.5):
+        super(NTXentLoss, self).__init__()
+        self.batch_size = batch_size
+        self.temperature = temperature
+        self.mask = self._get_correlated_mask(batch_size)
+        self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
+
+    def _get_correlated_mask(self, batch_size):
+        mask = torch.ones((2 * batch_size, 2 * batch_size), dtype=bool)
+        mask = mask.fill_diagonal_(0)
+        for i in range(batch_size):
+            mask[i, batch_size + i] = 0
+            mask[batch_size + i, i] = 0
+        return mask
+
+    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
+    def forward(self, zis, zjs):
+        """
+        zis and zjs are the output projections from the two augmented views
+
+        Here, we assume the two augmented views are the anchor and positive samples
+        """
+        # Concatenate representations along the batch dimension
+        representations = torch.cat([zis, zjs], dim=0)
+
+        # Cosine similarity
+        similarity_matrix = F.cosine_similarity(
+            representations.unsqueeze(1), representations.unsqueeze(0), dim=2
+        )
+
+        # Temperature scaling
+        similarity_matrix = similarity_matrix / self.temperature
+
+        # Find the valid pairs of positive samples
+        positive_samples = torch.cat(
+            [torch.arange(self.batch_size), torch.arange(self.batch_size)], dim=0
+        )
+
+        # Mask out unwanted pairs
+        similarity_matrix = similarity_matrix[self.mask].view(2 * self.batch_size, -1)
+
+        # Calculate NT-Xent Loss as cross-entropy
+        loss = self.criterion(similarity_matrix, positive_samples)
+        loss /= 2 * self.batch_size
+
+        return loss
 
 
 class ContrastivePrediction(TypedDict):
@@ -27,7 +82,7 @@ class ContrastiveModule(LightningModule):
         self,
         encoder: nn.Module | ContrastiveEncoder,
         loss_function: (
-            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss
+            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
         ) = nn.TripletMarginLoss(margin=0.5),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -106,9 +161,13 @@ class ContrastiveModule(LightningModule):
         anchor_projection = self(anchor_img)
         negative_projection = self(neg_img)
         positive_projection = self(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
+        if isinstance(self.loss_function, NTXentLoss):
+            # Note: we assume the two augmented views are the anchor and positive samples
+            loss = self.loss_function(anchor_projection, positive_projection)
+        else:
+            loss = self.loss_function(
+                anchor_projection, positive_projection, negative_projection
+            )
         self._log_metrics(
             loss,
             anchor_projection,
@@ -137,9 +196,13 @@ class ContrastiveModule(LightningModule):
         anchor_projection = self(anchor)
         negative_projection = self(neg_img)
         positive_projection = self(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
+        if isinstance(self.loss_function, NTXentLoss):
+            # Note: we assume the two augmented views are the anchor and positive samples
+            loss = self.loss_function(anchor_projection, positive_projection)
+        else:
+            loss = self.loss_function(
+                anchor_projection, positive_projection, negative_projection
+            )
         self._log_metrics(
             loss, anchor_projection, positive_projection, negative_projection, "val"
         )
