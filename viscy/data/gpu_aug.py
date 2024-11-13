@@ -100,6 +100,7 @@ class CachedOmeZarrDataset(Dataset):
         transform: Compose | None = None,
         array_key: str = "0",
         load_normalization_metadata: bool = True,
+        skip_cache: bool = False,
     ):
         key = 0
         self._metadata_map: dict[int, _CacheMetadata] = {}
@@ -115,6 +116,7 @@ class CachedOmeZarrDataset(Dataset):
         self._cache_map = cache_map
         self.transform = transform
         self.load_normalization_metadata = load_normalization_metadata
+        self.skip_cache = skip_cache
 
     def __len__(self) -> int:
         return len(self._metadata_map)
@@ -123,13 +125,15 @@ class CachedOmeZarrDataset(Dataset):
         position, time_idx, norm_meta = self._metadata_map[idx]
         cache = self._cache_map[idx]
         if cache is None:
-            _logger.debug(f"Caching for index {idx}")
+            _logger.debug(f"Loading volume for index {idx}")
             volume = torch.from_numpy(
                 position[self.array_key]
                 .oindex[time_idx, list(self.channels.values())]
                 .astype(np.float32)
             )
-            self._cache_map[idx] = volume
+            if not self.skip_cache:
+                _logger.debug(f"Caching for index {idx}")
+                self._cache_map[idx] = volume
         else:
             _logger.debug(f"Using cached volume for index {idx}")
             volume = cache
@@ -156,6 +160,7 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         train_gpu_transforms: list[DictTransform],
         val_gpu_transforms: list[DictTransform],
         pin_memory: bool = True,
+        skip_cache: bool = False,
     ):
         super().__init__()
         self.data_path = data_path
@@ -168,6 +173,7 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         self._train_gpu_transforms = Compose(train_gpu_transforms)
         self._val_gpu_transforms = Compose(val_gpu_transforms)
         self.pin_memory = pin_memory
+        self.skip_cache = skip_cache
 
     @property
     def train_cpu_transforms(self) -> Compose:
@@ -204,8 +210,16 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         _logger.debug(f"Training FOVs: {[p.zgroup.name for p in train_fovs]}")
         _logger.debug(f"Validation FOVs: {[p.zgroup.name for p in val_fovs]}")
         self.train_dataset = CachedOmeZarrDataset(
-            train_fovs, self.channels, cache_map, transform=self.train_cpu_transforms
+            train_fovs,
+            self.channels,
+            cache_map,
+            transform=self.train_cpu_transforms,
+            skip_cache=self.skip_cache,
         )
         self.val_dataset = CachedOmeZarrDataset(
-            val_fovs, self.channels, cache_map, transform=self.val_cpu_transforms
+            val_fovs,
+            self.channels,
+            cache_map,
+            transform=self.val_cpu_transforms,
+            skip_cache=self.skip_cache,
         )
