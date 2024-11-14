@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Sequence, TypedDict, Tuple
+from typing import Literal, Sequence, Tuple, TypedDict
 
 import numpy as np
 import torch
@@ -12,66 +12,8 @@ from umap import UMAP
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.utils.log_images import detach_sample, render_images
-from pytorch_metric_learning.losses import SelfSupervisedLoss
-from pytorch_metric_learning.losses import NTXentLoss as NTXentLoss_pml
 
 _logger = logging.getLogger("lightning.pytorch")
-
-
-class NTXentLoss_viscy(torch.nn.Module):
-    """
-    Normalized Temperature-scaled Cross Entropy Loss
-
-    From Chen et.al, https://arxiv.org/abs/2002.05709
-    """
-
-    def __init__(
-        self,
-        temperature=0.5,
-        criterion=torch.nn.CrossEntropyLoss(reduction="sum"),
-    ):
-        super(NTXentLoss_viscy, self).__init__()
-        self.temperature = temperature
-        self.criterion = criterion
-
-    def _get_correlated_mask(self, batch_size):
-        mask = torch.ones((2 * batch_size, 2 * batch_size), dtype=bool)
-        mask = mask.fill_diagonal_(0)
-        for i in range(batch_size):
-            mask[i, batch_size + i] = 0
-            mask[batch_size + i, i] = 0
-        _logger.info(f"mask: {mask}")
-        return mask
-
-    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
-    def forward(self, embeddings, labels):
-        """
-        embeddings = [zis, zjs]
-        zis and zjs are the output projections from the two augmented views.
-        Here, we assume the two augmented views are the anchor and positive samples
-        """
-        # Get the batch size from tensor
-        batch_size = embeddings.shape[0] // 2
-
-        zis, zjs = torch.split(embeddings, batch_size, dim=0)
-
-        # Cosine similarity
-        similarity_matrix = F.cosine_similarity(
-            embeddings.unsqueeze(1), embeddings.unsqueeze(0), dim=2
-        )
-        # Temperature scaling
-        similarity_matrix = similarity_matrix / self.temperature
-
-        mask = self._get_correlated_mask(batch_size).to(similarity_matrix.device)
-
-        # Mask out unwanted pairs
-        similarity_matrix = similarity_matrix[mask].view(2 * batch_size, -1)
-
-        # Calculate NT-Xent Loss as cross-entropy
-        loss = self.criterion(similarity_matrix, labels)
-        loss /= 2 * batch_size
-
-        return loss
 
 
 class ContrastivePrediction(TypedDict):
@@ -87,11 +29,7 @@ class ContrastiveModule(LightningModule):
         self,
         encoder: nn.Module | ContrastiveEncoder,
         loss_function: (
-            nn.Module
-            | nn.CosineEmbeddingLoss
-            | nn.TripletMarginLoss
-            | NTXentLoss_pml
-            | NTXentLoss_viscy
+            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
         ) = nn.TripletMarginLoss(margin=0.5),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -192,7 +130,7 @@ class ContrastiveModule(LightningModule):
         pos_img = batch["positive"]
         anchor_projection = self(anchor_img)
         positive_projection = self(pos_img)
-        if isinstance(self.loss_function, (NTXentLoss_pml, NTXentLoss_viscy)):
+        if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
             )
@@ -249,7 +187,7 @@ class ContrastiveModule(LightningModule):
         pos_img = batch["positive"]
         anchor_projection = self(anchor)
         positive_projection = self(pos_img)
-        if isinstance(self.loss_function, (NTXentLoss_pml, NTXentLoss_viscy)):
+        if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
             )
