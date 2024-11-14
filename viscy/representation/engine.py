@@ -10,23 +10,27 @@ from torch import Tensor, nn
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.utils.log_images import detach_sample, render_images
+from pytorch_metric_learning.losses import SelfSupervisedLoss
+from pytorch_metric_learning.losses import NTXentLoss as NTXentLoss_pml
 
 _logger = logging.getLogger("lightning.pytorch")
 
 
-class NTXentLoss(torch.nn.Module):
+class NTXentLoss_viscy(torch.nn.Module):
     """
     Normalized Temperature-scaled Cross Entropy Loss
 
     From Chen et.al, https://arxiv.org/abs/2002.05709
     """
 
-    def __init__(self, batch_size, temperature=0.5):
-        super(NTXentLoss, self).__init__()
-        self.batch_size = batch_size
+    def __init__(
+        self,
+        temperature=0.5,
+        criterion=torch.nn.CrossEntropyLoss(reduction="sum"),
+    ):
+        super(NTXentLoss_viscy, self).__init__()
         self.temperature = temperature
-        self.mask = self._get_correlated_mask(batch_size)
-        self.criterion = torch.nn.CrossEntropyLoss(reduction="sum")
+        self.criterion = criterion
 
     def _get_correlated_mask(self, batch_size):
         mask = torch.ones((2 * batch_size, 2 * batch_size), dtype=bool)
@@ -34,37 +38,36 @@ class NTXentLoss(torch.nn.Module):
         for i in range(batch_size):
             mask[i, batch_size + i] = 0
             mask[batch_size + i, i] = 0
+        _logger.info(f"mask: {mask}")
         return mask
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
-    def forward(self, zis, zjs):
+    def forward(self, embeddings, labels):
         """
-        zis and zjs are the output projections from the two augmented views
-
+        embeddings = [zis, zjs]
+        zis and zjs are the output projections from the two augmented views.
         Here, we assume the two augmented views are the anchor and positive samples
         """
-        # Concatenate representations along the batch dimension
-        representations = torch.cat([zis, zjs], dim=0)
+        # Get the batch size from tensor
+        batch_size = embeddings.shape[0] // 2
+
+        zis, zjs = torch.split(embeddings, batch_size, dim=0)
 
         # Cosine similarity
         similarity_matrix = F.cosine_similarity(
-            representations.unsqueeze(1), representations.unsqueeze(0), dim=2
+            embeddings.unsqueeze(1), embeddings.unsqueeze(0), dim=2
         )
-
         # Temperature scaling
         similarity_matrix = similarity_matrix / self.temperature
 
-        # Find the valid pairs of positive samples
-        positive_samples = torch.cat(
-            [torch.arange(self.batch_size), torch.arange(self.batch_size)], dim=0
-        ).to(similarity_matrix.device)
+        mask = self._get_correlated_mask(batch_size).to(similarity_matrix.device)
 
         # Mask out unwanted pairs
-        similarity_matrix = similarity_matrix[self.mask].view(2 * self.batch_size, -1)
+        similarity_matrix = similarity_matrix[mask].view(2 * batch_size, -1)
 
         # Calculate NT-Xent Loss as cross-entropy
-        loss = self.criterion(similarity_matrix, positive_samples)
-        loss /= 2 * self.batch_size
+        loss = self.criterion(similarity_matrix, labels)
+        loss /= 2 * batch_size
 
         return loss
 
@@ -82,7 +85,11 @@ class ContrastiveModule(LightningModule):
         self,
         encoder: nn.Module | ContrastiveEncoder,
         loss_function: (
-            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
+            nn.Module
+            | nn.CosineEmbeddingLoss
+            | nn.TripletMarginLoss
+            | NTXentLoss_pml
+            | NTXentLoss_viscy
         ) = nn.TripletMarginLoss(margin=0.5),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -168,9 +175,14 @@ class ContrastiveModule(LightningModule):
         pos_img = batch["positive"]
         anchor_projection = self(anchor_img)
         positive_projection = self(pos_img)
-        if isinstance(self.loss_function, NTXentLoss):
+        if isinstance(self.loss_function, (NTXentLoss_pml, NTXentLoss_viscy)):
+            indices = torch.arange(
+                0, anchor_projection.size(0), device=anchor_projection.device
+            )
+            labels = torch.cat((indices, indices))
             # Note: we assume the two augmented views are the anchor and positive samples
-            loss = self.loss_function(anchor_projection, positive_projection)
+            embeddings = torch.cat((anchor_projection, positive_projection))
+            loss = self.loss_function(embeddings, labels)
             self._log_metrics(
                 loss=loss,
                 anchor=anchor_projection,
@@ -178,6 +190,10 @@ class ContrastiveModule(LightningModule):
                 negative=None,
                 stage="train",
             )
+            if batch_idx < self.log_batches_per_epoch:
+                self.training_step_outputs.extend(
+                    detach_sample((anchor_img, pos_img), self.log_samples_per_batch)
+                )
         else:
             neg_img = batch["negative"]
             negative_projection = self(neg_img)
@@ -191,12 +207,12 @@ class ContrastiveModule(LightningModule):
                 negative=negative_projection,
                 stage="train",
             )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                detach_sample(
-                    (anchor_img, pos_img, neg_img), self.log_samples_per_batch
+            if batch_idx < self.log_batches_per_epoch:
+                self.training_step_outputs.extend(
+                    detach_sample(
+                        (anchor_img, pos_img, neg_img), self.log_samples_per_batch
+                    )
                 )
-            )
         return loss
 
     def on_train_epoch_end(self) -> None:
@@ -208,24 +224,46 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
         anchor = batch["anchor"]
         pos_img = batch["positive"]
-        neg_img = batch["negative"]
         anchor_projection = self(anchor)
-        negative_projection = self(neg_img)
         positive_projection = self(pos_img)
-        if isinstance(self.loss_function, NTXentLoss):
+        if isinstance(self.loss_function, (NTXentLoss_pml, NTXentLoss_viscy)):
+            indices = torch.arange(
+                0, anchor_projection.size(0), device=anchor_projection.device
+            )
+            labels = torch.cat((indices, indices))
             # Note: we assume the two augmented views are the anchor and positive samples
-            loss = self.loss_function(anchor_projection, positive_projection)
+            embeddings = torch.cat((anchor_projection, positive_projection))
+            loss = self.loss_function(embeddings, labels)
+            self._log_metrics(
+                loss=loss,
+                anchor=anchor_projection,
+                positive=positive_projection,
+                negative=None,
+                stage="val",
+            )
+            if batch_idx < self.log_batches_per_epoch:
+                self.validation_step_outputs.extend(
+                    detach_sample((anchor, pos_img), self.log_samples_per_batch)
+                )
         else:
+            neg_img = batch["negative"]
+            negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, "val"
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.validation_step_outputs.extend(
-                detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
+            self._log_metrics(
+                loss=loss,
+                anchor=anchor_projection,
+                positive=positive_projection,
+                negative=negative_projection,
+                stage="val",
             )
+            if batch_idx < self.log_batches_per_epoch:
+                self.validation_step_outputs.extend(
+                    detach_sample(
+                        (anchor, pos_img, neg_img), self.log_samples_per_batch
+                    )
+                )
         return loss
 
     def on_validation_epoch_end(self) -> None:
