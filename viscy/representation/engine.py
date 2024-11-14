@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Sequence, Tuple, TypedDict
+from typing import Literal, Sequence, TypedDict
 
 import numpy as np
 import torch
