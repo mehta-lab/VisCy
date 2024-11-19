@@ -5,7 +5,23 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 
 def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
-    """Extract embeddings and calculate cosine similarities for a specific cell"""
+    """
+    Calculate cosine similarities for a specific cell over time.
+
+    Parameters:
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    fov_name : str
+        Field of view name to identify the specific cell.
+    track_id : int
+        Track ID to identify the specific cell.
+
+    Returns:
+    tuple
+        - time_points (array): Array of time points for the cell.
+        - cosine_similarities (list): Cosine similarities between the embedding
+          at the first time point and each subsequent time point.
+    """
     # Filter the dataset for the specific infected cell
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
@@ -34,7 +50,25 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
 def compute_displacement_mean_std(
     embedding_dataset, max_tau=10, use_cosine=False, use_dissimilarity=False
 ):
-    """Compute the norm of differences between embeddings at t and t + tau"""
+    """
+    Compute the mean and standard deviation of displacements between embeddings at time t and t + tau for each tau.
+
+    Parameters:
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    max_tau : int, optional
+        The maximum tau value to compute displacements for. Default is 10.
+    use_cosine : bool, optional
+        If True, compute cosine similarity instead of Euclidean distance. Default is False.
+    use_dissimilarity : bool, optional
+        If True and use_cosine is True, compute cosine dissimilarity (1 - similarity).
+        Default is False.
+
+    Returns:
+    tuple
+        - mean_displacement_per_tau (dict): Mean displacement for each tau.
+        - std_displacement_per_tau (dict): Standard deviation of displacements for each tau.
+    """
     # Get the arrays of (fov_name, track_id, t, and embeddings)
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
@@ -104,7 +138,27 @@ def compute_displacement(
     use_dissimilarity=False,
     use_umap=False,
 ):
-    """Compute the norm of differences between embeddings at t and t + tau"""
+    """
+    Compute the displacements between embeddings at time t and t + tau for each tau.
+
+    Parameters:
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    max_tau : int, optional
+        The maximum tau value to compute displacements for. Default is 10.
+    use_cosine : bool, optional
+        If True, compute cosine similarity instead of Euclidean distance. Default is False.
+    use_dissimilarity : bool, optional
+        If True and use_cosine is True, compute cosine dissimilarity (1 - similarity).
+        Default is False.
+    use_umap : bool, optional
+        If True, use UMAP embeddings instead of feature embeddings. Default is False.
+
+    Returns:
+    dict
+        A dictionary where the key is tau and the value is a list of displacements
+        for all cells at that tau.
+    """
     # Get the arrays of (fov_name, track_id, t, and embeddings)
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
@@ -164,6 +218,23 @@ def compute_displacement(
 
 
 def calculate_normalized_euclidean_distance_cell(embedding_dataset, fov_name, track_id):
+    """
+    Calculate the normalized Euclidean distance between the embedding at the first time point and each subsequent time point for a specific cell.
+
+    Parameters:
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    fov_name : str
+        Field of view name to identify the specific cell.
+    track_id : int
+        Track ID to identify the specific cell.
+
+    Returns:
+    tuple
+        - time_points (array): Array of time points for the cell.
+        - euclidean_distances (list): Normalized Euclidean distances between the embedding
+          at the first time point and each subsequent time point.
+    """
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
         & (embedding_dataset["track_id"] == track_id),
@@ -189,6 +260,20 @@ def calculate_normalized_euclidean_distance_cell(embedding_dataset, fov_name, tr
 
 
 def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
+    """
+    Compute the mean and standard deviation of displacements between embeddings at time t and t + tau for all cells.
+
+    Parameters:
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    max_tau : int, optional
+        The maximum tau value to compute displacements for. Default is 10.
+
+    Returns:
+    tuple
+        - mean_displacement_per_tau (dict): Mean displacement for each tau.
+        - std_displacement_per_tau (dict): Standard deviation of displacements for each tau.
+    """
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
@@ -247,3 +332,41 @@ def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
     }
 
     return mean_displacement_per_tau, std_displacement_per_tau
+
+
+# Function to compute metrics for dynamic range and smoothness
+def compute_dynamic_smoothness_metrics(mean_displacement_per_tau):
+    """
+    Compute dynamic range and smoothness metrics for displacement curves.
+
+    Parameters:
+    mean_displacement_per_tau: dict with tau as key and mean displacement as value
+
+    Returns:
+    tuple: (dynamic_range, smoothness)
+        - dynamic_range: max displacement - min displacement
+        - smoothness: RMS of second differences of normalized curve
+    """
+    taus = np.array(sorted(mean_displacement_per_tau.keys()))
+    displacements = np.array([mean_displacement_per_tau[tau] for tau in taus])
+
+    dynamic_range = np.max(displacements) - np.min(displacements)
+
+    if np.max(displacements) != np.min(displacements):
+        displacements_normalized = (displacements - np.min(displacements)) / (
+            np.max(displacements) - np.min(displacements)
+        )
+    else:
+        displacements_normalized = displacements - np.min(
+            displacements
+        )  # Handle constant case
+
+    first_diff = np.diff(displacements_normalized)
+
+    second_diff = np.diff(first_diff)
+
+    # Compute RMS of second differences as smoothness metric
+    # Lower values indicate smoother curves
+    smoothness = np.sqrt(np.mean(second_diff**2))
+
+    return dynamic_range, smoothness
