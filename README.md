@@ -14,10 +14,10 @@ This repository provides a pipeline for the following.
 
 - Image translation
   - Robust virtual staining of landmark organelles
-- Image classification
-  - Supervised learning of of cell state (e.g. state of infection)
 - Image representation learning
   - Self-supervised learning of the cell state and organelle phenotypes
+- Semantic segmentation
+  - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**  
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
