@@ -7,7 +7,7 @@ from lightning.pytorch.utilities.combined_loader import CombinedLoader
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy.data.distributed import ShardedDistributedSampler
-from viscy.data.hcs_ram import _collate_samples
+from viscy.data.hcs import _collate_samples
 
 
 class CombineMode(Enum):
