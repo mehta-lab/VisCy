@@ -8,7 +8,7 @@
 ![GitHub forks](https://img.shields.io/github/forks/mehta-lab/VisCy)
 [![SPEC 0 — Minimum Supported Dependencies](https://img.shields.io/badge/SPEC-0-green?labelColor=%23004811&color=%235CA038)](https://scientific-python.org/specs/spec-0000/)
 
-VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
+VisCy (blend of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
 This repository provides a pipeline for the following.
 
