@@ -309,7 +309,6 @@ def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
             for tau in range(0, max_tau + 1):
                 future_time = current_time + tau
 
-
                 future_index = np.where(cell_timepoints == future_time)[0]
 
                 if len(future_index) >= 1:
@@ -318,7 +317,6 @@ def compute_displacement_mean_std_full(embedding_dataset, max_tau=10):
                     future_embedding = future_embedding / np.linalg.norm(
                         future_embedding
                     )
-
 
                     distance = np.linalg.norm(current_embedding - future_embedding)
 
