@@ -50,6 +50,7 @@ visual = [
     "plotly",
     "nbformat",
     "cmap",
+    "phate"
 ]
 dev = [
     "viscy[metrics,examples,visual]",

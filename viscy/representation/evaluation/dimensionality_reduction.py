@@ -8,6 +8,32 @@ from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
 
 
+def compute_phate(
+    embedding_dataset,
+    n_components: int = None,
+    knn: int = 5,
+    decay: int = 40,
+    **phate_kwargs,
+):
+    import phate
+
+    features = embedding_dataset["features"]
+    projections = embedding_dataset["projections"]
+
+    phate_operator = phate.PHATE(
+        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+    )
+    phate_embedding = phate_operator.fit_transform(embedding_dataset["features"].values)
+    phate_projections = phate_operator.transform(
+        embedding_dataset["projections"].values
+    )
+    phate_df = pd.DataFrame(
+        
+    )
+
+    return (phate_embedding, phate_projections, phate_df)
+
+
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
     features = embedding_dataset["features"]
     projections = embedding_dataset["projections"]
