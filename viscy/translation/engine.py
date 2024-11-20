@@ -109,7 +109,7 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
-    :param str chkpt_path: path to the checkpoint to load weights, defaults to None
+    :param str ckpt_path: path to the checkpoint to load weights, defaults to None
     :param int log_batches_per_epoch:
         number of batches to log each training/validation epoch,
         has to be smaller than steps per epoch, defaults to 8
@@ -376,7 +376,8 @@ class VSUNet(LightningModule):
         elif self.tta_type == "median":
             prediction = torch.stack(predictions).median(dim=0).values
         elif self.tta_type == "product":
-            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            # Perform multiplication of predictions in logarithmic space
+            # for numerical stability adding epsilon to avoid log(0) case
             log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
             log_prediction_sum = log_predictions.sum(dim=0)
             prediction = torch.exp(log_prediction_sum)
