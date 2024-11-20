@@ -1,7 +1,7 @@
 import logging
 import os
 import random
-from typing import Literal, Sequence, Union
+from typing import Callable, Literal, Sequence, Union
 
 import numpy as np
 import torch
@@ -476,6 +476,60 @@ class VSUNet(LightningModule):
             ..., pad_y : pad_y + original_y, pad_x : pad_x + original_x
         ]
         return cropped_tensor
+
+
+class AugmentedPredictionVSUNet(LightningModule):
+    def __init__(
+        self,
+        model: nn.Module,
+        forward_transforms: list[Callable[[Tensor], Tensor]],
+        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        reduction: Literal["mean", "median"] = "mean",
+    ) -> None:
+        super().__init__()
+        down_factor = 2**model.num_blocks
+        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self.model = model
+        self._forward_transforms = forward_transforms
+        self._inverse_transforms = inverse_transforms
+        self._reduction = reduction
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.model(x)
+
+    def setup(self, stage: str) -> None:
+        if stage != "predict":
+            raise NotImplementedError(
+                f"Only the 'predict' stage is supported by {type(self)}"
+            )
+
+    def _reduce_predictions(self, preds: list[Tensor]) -> Tensor:
+        prediction = torch.stack(preds, dim=0)
+        if self.reduction == "mean":
+            prediction = prediction.mean(dim=0)
+        elif self.reduction == "median":
+            prediction = prediction.median(dim=0).values
+        return prediction
+
+    def predict_step(
+        self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
+    ) -> Tensor:
+        source = batch["source"]
+        source = self._predict_pad(source)
+        preds = []
+        for forward_t, inverse_t in zip(
+            self._forward_transforms, self._inverse_transforms
+        ):
+            source = forward_t(source)
+            pred = self.forward(source)
+            pred = inverse_t(pred)
+            preds.append(pred)
+        if len(preds) == 1:
+            prediction = preds[0]
+        else:
+            prediction = self._reduce_predictions(preds)
+        prediction = self._predict_pad.inverse(prediction)
+        return prediction
 
 
 class FcmaeUNet(VSUNet):
