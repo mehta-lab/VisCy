@@ -17,21 +17,27 @@ def compute_phate(
 ):
     import phate
 
-    features = embedding_dataset["features"]
-    projections = embedding_dataset["projections"]
-
     phate_operator = phate.PHATE(
         n_components=n_components, knn=knn, decay=decay, **phate_kwargs
     )
     phate_embedding = phate_operator.fit_transform(embedding_dataset["features"].values)
-    phate_projections = phate_operator.transform(
-        embedding_dataset["projections"].values
-    )
+
     phate_df = pd.DataFrame(
-        
+        {
+            "id": embedding_dataset["id"].values,
+            "track_id": embedding_dataset["track_id"].values,
+            "t": embedding_dataset["t"].values,
+            "fov_name": embedding_dataset["fov_name"].values,
+            "PHATE1": phate_embedding[:, 0],
+            "PHATE2": phate_embedding[:, 1],
+            "PHATE3": phate_embedding[:, 2],
+            "PHATE4": phate_embedding[:, 3],
+            "PHATE5": phate_embedding[:, 4],
+            "PHATE6": phate_embedding[:, 5],
+        }
     )
 
-    return (phate_embedding, phate_projections, phate_df)
+    return (phate_embedding, phate_df)
 
 
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
