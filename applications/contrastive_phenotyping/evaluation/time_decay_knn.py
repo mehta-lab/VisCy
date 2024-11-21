@@ -3,6 +3,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.clustering import (
@@ -21,7 +22,10 @@ embeddings = read_embedding_dataset(prediction_path)
 features = embeddings["features"]
 
 # %%
-cross_dist = cross_dissimilarity(features.values, metric="cosine")
+scaled_features = StandardScaler().fit_transform(features.values)
+
+# %%
+cross_dist = cross_dissimilarity(scaled_features, metric="cosine")
 rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
 # %%
