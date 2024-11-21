@@ -274,51 +274,33 @@ class MaskTestDataset(SlidingWindowDataset):
 
 
 class HCSDataModule(LightningDataModule):
-    """
-    Lightning data module for a preprocessed HCS NGFF Store.
+    """Lightning data module for a preprocessed HCS NGFF Store.
 
-    Parameters
-    ----------
-    data_path : str
-        Path to the data store.
-    source_channel : str or Sequence[str]
-        Name(s) of the source channel, e.g. 'Phase'.
-    target_channel : str or Sequence[str]
-        Name(s) of the target channel, e.g. ['Nuclei', 'Membrane'].
-    z_window_size : int
-        Z window size of the 2.5D U-Net, 1 for 2D.
-    split_ratio : float, optional
-        Split ratio of the training subset in the fit stage,
-        e.g. 0.8 means an 80/20 split between training/validation,
-        by default 0.8.
-    batch_size : int, optional
-        Batch size, defaults to 16.
-    num_workers : int, optional
-        Number of data-loading workers, defaults to 8.
-    architecture : Literal["2D", "UNeXt2", "2.5D", "3D"], optional
-        U-Net architecture, defaults to "2.5D".
-    yx_patch_size : tuple[int, int], optional
-        Patch size in (Y, X), defaults to (256, 256).
-    normalizations : list of MapTransform, optional
-        MONAI dictionary transforms applied to selected channels,
-        defaults to ``[]`` (no normalization).
-    augmentations : list of MapTransform, optional
-        MONAI dictionary transforms applied to the training set,
-        defaults to ``[]`` (no augmentation).
-    caching : bool, optional
-        Whether to decompress all the images and cache the result,
-        will store in `/tmp/$SLURM_JOB_ID/` if available,
-        defaults to False.
-    ground_truth_masks : Path or None, optional
-        Path to the ground truth masks,
+    :param str data_path: path to the data store
+    :param str | Sequence[str] source_channel: name(s) of the source channel,
+        e.g. ``'Phase'``
+    :param str | Sequence[str] target_channel: name(s) of the target channel,
+        e.g. ``['Nuclei', 'Membrane']``
+    :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
+    :param float split_ratio: split ratio of the training subset in the fit stage,
+        e.g. 0.8 means a 80/20 split between training/validation,
+        by default 0.8
+    :param int batch_size: batch size, defaults to 16
+    :param int num_workers: number of data-loading workers, defaults to 8
+    :param Literal["2D", "UNeXt2", "2.5D", "3D"] architecture: U-Net architecture,
+        defaults to "2.5D"
+    :param tuple[int, int] yx_patch_size: patch size in (Y, X),
+        defaults to (256, 256)
+    :param list[MapTransform] normalizations: MONAI dictionary transforms
+        applied to selected channels, defaults to [] (no normalization)
+    :param list[MapTransform] augmentations: MONAI dictionary transforms
+        applied to the training set, defaults to [] (no augmentation)
+    :param bool caching: whether to decompress all the images and cache the result,
+        will store in ``/tmp/$SLURM_JOB_ID/`` if available,
+        defaults to False
+    :param Path | None ground_truth_masks: path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
-        defaults to None.
-    persistent_workers : bool, optional
-        Whether to keep the workers alive between fitting epochs,
-        defaults to False.
-    prefetch_factor : int or None, optional
-        Number of samples loaded in advance by each worker during fitting,
-        defaults to None (2 per PyTorch default).
+        defaults to None
     """
 
     def __init__(
@@ -330,7 +312,7 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        target_2d: bool = False,
+        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"] = "2.5D",
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
@@ -345,7 +327,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = target_2d
+        self.target_2d = False if architecture in ["UNeXt2", "3D", "fcmae"] else True
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
