@@ -15,6 +15,29 @@ def compute_phate(
     decay: int = 40,
     **phate_kwargs,
 ):
+    """
+    Compute PHATE embeddings for features
+
+
+    Parameters
+    ----------
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    n_components : int, optional
+        Number of dimensions in the PHATE embedding, by default None
+    knn : int, optional
+        Number of nearest neighbors to use in the KNN graph, by default 5
+    decay : int, optional
+        Decay parameter for the Markov operator, by default 40
+    phate_kwargs : dict, optional
+        Additional keyword arguments for PHATE, by default None
+
+    Returns
+    -------
+    tuple[NDArray, pd.DataFrame]
+        PHATE embeddings and DataFrame with PHATE
+
+    """
     import phate
 
     phate_operator = phate.PHATE(
@@ -22,22 +45,7 @@ def compute_phate(
     )
     phate_embedding = phate_operator.fit_transform(embedding_dataset["features"].values)
 
-    phate_df = pd.DataFrame(
-        {
-            "id": embedding_dataset["id"].values,
-            "track_id": embedding_dataset["track_id"].values,
-            "t": embedding_dataset["t"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "PHATE1": phate_embedding[:, 0],
-            "PHATE2": phate_embedding[:, 1],
-            "PHATE3": phate_embedding[:, 2],
-            "PHATE4": phate_embedding[:, 3],
-            "PHATE5": phate_embedding[:, 4],
-            "PHATE6": phate_embedding[:, 5],
-        }
-    )
-
-    return (phate_embedding, phate_df)
+    return phate_embedding
 
 
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
