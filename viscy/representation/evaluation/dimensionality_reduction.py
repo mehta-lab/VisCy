@@ -1,12 +1,12 @@
 """PCA and UMAP dimensionality reduction."""
 
 import pandas as pd
+import phate
 import umap
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
-import phate
 
 
 def compute_phate(
