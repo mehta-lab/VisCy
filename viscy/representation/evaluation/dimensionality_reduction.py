@@ -6,6 +6,7 @@ from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
+import phate
 
 
 def compute_phate(
@@ -14,7 +15,7 @@ def compute_phate(
     knn: int = 5,
     decay: int = 40,
     **phate_kwargs,
-):
+) -> tuple[phate.PHATE, NDArray]:
     """
     Compute PHATE embeddings for features
 
@@ -34,18 +35,17 @@ def compute_phate(
 
     Returns
     -------
-    tuple[NDArray, pd.DataFrame]
-        PHATE embeddings and DataFrame with PHATE
-
+    phate.PHATE, NDArray
+        PHATE model and PHATE embeddings
     """
     import phate
 
-    phate_operator = phate.PHATE(
+    phate_model = phate.PHATE(
         n_components=n_components, knn=knn, decay=decay, **phate_kwargs
     )
-    phate_embedding = phate_operator.fit_transform(embedding_dataset["features"].values)
+    phate_embedding = phate_model.fit_transform(embedding_dataset["features"].values)
 
-    return phate_embedding
+    return phate_model, phate_embedding
 
 
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):

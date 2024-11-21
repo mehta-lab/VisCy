@@ -12,6 +12,7 @@ from xarray import Dataset, open_zarr
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
 from viscy.representation.evaluation.dimensionality_reduction import (
+    compute_phate,
     _fit_transform_umap,
 )
 
@@ -93,8 +94,11 @@ class EmbeddingWriter(BasePredictionWriter):
         ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
         _logger.info(f"Computing UMAP embeddings for {len(features)} samples.")
         _, umap = _fit_transform_umap(features, n_components=2, normalize=True)
+        _, phate = compute_phate(features)
         ultrack_indices["UMAP1"] = umap[:, 0]
         ultrack_indices["UMAP2"] = umap[:, 1]
+        ultrack_indices["PHATE1"] = phate[:, 0]
+        ultrack_indices["PHATE2"] = phate[:, 1]
         index = pd.MultiIndex.from_frame(ultrack_indices)
         dataset = Dataset(
             {
