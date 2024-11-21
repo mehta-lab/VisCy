@@ -295,8 +295,9 @@ class HCSDataModule(LightningDataModule):
         Batch size, defaults to 16.
     num_workers : int, optional
         Number of data-loading workers, defaults to 8.
-    architecture : Literal["2D", "UNeXt2", "2.5D", "3D"], optional
-        U-Net architecture, defaults to "2.5D".
+    target_2d : bool, optional
+        Whether the target is 2D (e.g. in a 2.5D model),
+        defaults to False.
     yx_patch_size : tuple[int, int], optional
         Patch size in (Y, X), defaults to (256, 256).
     normalizations : list of MapTransform, optional
