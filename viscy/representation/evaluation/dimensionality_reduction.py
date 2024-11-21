@@ -99,6 +99,21 @@ def _fit_transform_umap(
     return umap_model, umap_embedding
 
 
+def _fit_transform_phate(
+    embeddings: NDArray,
+    n_components: int = 2,
+    knn: int = 5,
+    decay: int = 40,
+    n_jobs: int = -1,
+) -> tuple[phate.PHATE, NDArray]:
+    """Fit PHATE model and transform embeddings."""
+    phate_model = phate.PHATE(
+        n_components=n_components, knn=knn, decay=decay, n_jobs=n_jobs
+    )
+    phate_embedding = phate_model.fit_transform(embeddings)
+    return phate_model, phate_embedding
+
+
 def compute_umap(
     embedding_dataset: Dataset, normalize_features: bool = True
 ) -> tuple[umap.UMAP, umap.UMAP, pd.DataFrame]:
