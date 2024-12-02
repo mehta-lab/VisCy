@@ -1,11 +1,51 @@
 """PCA and UMAP dimensionality reduction."""
 
 import pandas as pd
+import phate
 import umap
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
+
+
+def compute_phate(
+    embedding_dataset,
+    n_components: int = None,
+    knn: int = 5,
+    decay: int = 40,
+    **phate_kwargs,
+) -> tuple[phate.PHATE, NDArray]:
+    """
+    Compute PHATE embeddings for features
+
+
+    Parameters
+    ----------
+    embedding_dataset : xarray.Dataset
+        The dataset containing embeddings, timepoints, fov_name, and track_id.
+    n_components : int, optional
+        Number of dimensions in the PHATE embedding, by default None
+    knn : int, optional
+        Number of nearest neighbors to use in the KNN graph, by default 5
+    decay : int, optional
+        Decay parameter for the Markov operator, by default 40
+    phate_kwargs : dict, optional
+        Additional keyword arguments for PHATE, by default None
+
+    Returns
+    -------
+    phate.PHATE, NDArray
+        PHATE model and PHATE embeddings
+    """
+    import phate
+
+    phate_model = phate.PHATE(
+        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+    )
+    phate_embedding = phate_model.fit_transform(embedding_dataset["features"].values)
+
+    return phate_model, phate_embedding
 
 
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
@@ -57,6 +97,21 @@ def _fit_transform_umap(
     umap_model = umap.UMAP(n_components=n_components, random_state=42)
     umap_embedding = umap_model.fit_transform(embeddings)
     return umap_model, umap_embedding
+
+
+def _fit_transform_phate(
+    embeddings: NDArray,
+    n_components: int = 2,
+    knn: int = 5,
+    decay: int = 40,
+    n_jobs: int = -1,
+) -> tuple[phate.PHATE, NDArray]:
+    """Fit PHATE model and transform embeddings."""
+    phate_model = phate.PHATE(
+        n_components=n_components, knn=knn, decay=decay, n_jobs=n_jobs
+    )
+    phate_embedding = phate_model.fit_transform(embeddings)
+    return phate_model, phate_embedding
 
 
 def compute_umap(
