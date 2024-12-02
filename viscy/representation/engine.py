@@ -80,7 +80,6 @@ class ContrastiveModule(LightningModule):
             logger=True,
             sync_dist=True,
         )
-
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
         log_metric_dict = {
