@@ -1,7 +1,7 @@
 import logging
 import os
 import random
-from typing import Literal, Sequence, Union
+from typing import Callable, Literal, Sequence, Union
 
 import numpy as np
 import torch
@@ -109,7 +109,7 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
-    :param str chkpt_path: path to the checkpoint to load weights, defaults to None
+    :param str ckpt_path: path to the checkpoint to load weights, defaults to None
     :param int log_batches_per_epoch:
         number of batches to log each training/validation epoch,
         has to be smaller than steps per epoch, defaults to 8
@@ -376,7 +376,8 @@ class VSUNet(LightningModule):
         elif self.tta_type == "median":
             prediction = torch.stack(predictions).median(dim=0).values
         elif self.tta_type == "product":
-            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            # Perform multiplication of predictions in logarithmic space
+            # for numerical stability adding epsilon to avoid log(0) case
             log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
             log_prediction_sum = log_predictions.sum(dim=0)
             prediction = torch.exp(log_prediction_sum)
@@ -475,6 +476,60 @@ class VSUNet(LightningModule):
             ..., pad_y : pad_y + original_y, pad_x : pad_x + original_x
         ]
         return cropped_tensor
+
+
+class AugmentedPredictionVSUNet(LightningModule):
+    def __init__(
+        self,
+        model: nn.Module,
+        forward_transforms: list[Callable[[Tensor], Tensor]],
+        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        reduction: Literal["mean", "median"] = "mean",
+    ) -> None:
+        super().__init__()
+        down_factor = 2**model.num_blocks
+        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self.model = model
+        self._forward_transforms = forward_transforms
+        self._inverse_transforms = inverse_transforms
+        self._reduction = reduction
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.model(x)
+
+    def setup(self, stage: str) -> None:
+        if stage != "predict":
+            raise NotImplementedError(
+                f"Only the 'predict' stage is supported by {type(self)}"
+            )
+
+    def _reduce_predictions(self, preds: list[Tensor]) -> Tensor:
+        prediction = torch.stack(preds, dim=0)
+        if self._reduction == "mean":
+            prediction = prediction.mean(dim=0)
+        elif self._reduction == "median":
+            prediction = prediction.median(dim=0).values
+        return prediction
+
+    def predict_step(
+        self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
+    ) -> Tensor:
+        source = batch["source"]
+        preds = []
+        for forward_t, inverse_t in zip(
+            self._forward_transforms, self._inverse_transforms
+        ):
+            source = forward_t(source)
+            source = self._predict_pad(source)
+            pred = self.forward(source)
+            pred = self._predict_pad.inverse(pred)
+            pred = inverse_t(pred)
+            preds.append(pred)
+        if len(preds) == 1:
+            prediction = preds[0]
+        else:
+            prediction = self._reduce_predictions(preds)
+        return prediction
 
 
 class FcmaeUNet(VSUNet):
