@@ -505,9 +505,9 @@ class AugmentedPredictionVSUNet(LightningModule):
 
     def _reduce_predictions(self, preds: list[Tensor]) -> Tensor:
         prediction = torch.stack(preds, dim=0)
-        if self.reduction == "mean":
+        if self._reduction == "mean":
             prediction = prediction.mean(dim=0)
-        elif self.reduction == "median":
+        elif self._reduction == "median":
             prediction = prediction.median(dim=0).values
         return prediction
 
@@ -515,20 +515,20 @@ class AugmentedPredictionVSUNet(LightningModule):
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
     ) -> Tensor:
         source = batch["source"]
-        source = self._predict_pad(source)
         preds = []
         for forward_t, inverse_t in zip(
             self._forward_transforms, self._inverse_transforms
         ):
             source = forward_t(source)
+            source = self._predict_pad(source)
             pred = self.forward(source)
+            pred = self._predict_pad.inverse(pred)
             pred = inverse_t(pred)
             preds.append(pred)
         if len(preds) == 1:
             prediction = preds[0]
         else:
             prediction = self._reduce_predictions(preds)
-        prediction = self._predict_pad.inverse(prediction)
         return prediction
 
 
