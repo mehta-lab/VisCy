@@ -262,7 +262,6 @@ class TripletDataset(Dataset):
                 norm_meta=anchor_norm,
             )
         sample = {"anchor": anchor_patch}
-
         if self.fit:
             if self.return_negative:
                 sample.update({"positive": positive_patch, "negative": negative_patch})
