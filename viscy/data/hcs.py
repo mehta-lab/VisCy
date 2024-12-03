@@ -625,7 +625,8 @@ class HCSDataModule(LightningDataModule):
         else:
             self.augmentations = []
         if z_scale_range is not None:
-            if isinstance(z_scale_range, float):
+            if isinstance(z_scale_range, (float, int)):
+                z_scale_range = float(z_scale_range)
                 z_scale_range = (-z_scale_range, z_scale_range)
             if z_scale_range[0] > 0 or z_scale_range[1] < 0:
                 raise ValueError(f"Invalid scaling range: {z_scale_range}")

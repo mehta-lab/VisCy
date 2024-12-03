@@ -27,6 +27,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
+    "pytorch-metric-learning>2.0.0"
 ]
 dynamic = ["version"]
 
