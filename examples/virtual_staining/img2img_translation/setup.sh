@@ -4,7 +4,7 @@ START_DIR=$(pwd)
 
 conda deactivate
 # Create conda environment
-conda create -y --name image2image python=3.10
+conda create -y --name image2image python=3.11
 
 # Install ipykernel in the environment.
 conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name img2img
