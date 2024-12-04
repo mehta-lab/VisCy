@@ -31,7 +31,7 @@ class SegmentationMetrics2D(LightningModule):
         target_binary = target > 0
         coco_metrics = mean_average_precision(pred, target)
         _logger.debug(coco_metrics)
-        self.log_dict(
+        self.logger.log_metrics(
             {
                 "position": batch["position_idx"][0],
                 "time": batch["time_idx"][0],
@@ -42,8 +42,5 @@ class SegmentationMetrics2D(LightningModule):
                 "mAP_50": coco_metrics["map_50"],
                 "mAP_75": coco_metrics["map_75"],
                 "mAR_100": coco_metrics["mar_100"],
-            },
-            on_step=True,
-            on_epoch=True if self.aggregate_epoch else False,
-            batch_size=1,
+            }
         )
