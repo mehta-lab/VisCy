@@ -65,5 +65,5 @@ def small_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
 def labels_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     """Provides a small, not preprocessed HCS OME-Zarr dataset."""
     dataset_path = tmp_path_factory.mktemp("labels.zarr")
-    _build_hcs(dataset_path, ["DAPI"], (2, 16, 16), np.uint16, 3)
+    _build_hcs(dataset_path, ["DAPI", "GFP"], (2, 16, 16), np.uint16, 3)
     return dataset_path
