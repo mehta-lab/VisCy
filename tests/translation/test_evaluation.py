@@ -25,6 +25,7 @@ def test_segmentation_metrics_2d(pred_channel, labels_hcs_dataset, tmp_path) -> 
     trainer = Trainer(logger=CSVLogger(tmp_path, name="", version=""))
     trainer.test(lm, datamodule=dm)
     metrics = pd.read_csv(tmp_path / "metrics.csv")
+    assert len(metrics) > 0
     accuracy = metrics["accuracy"].to_numpy()
     if pred_channel == "DAPI":
         assert_array_equal(accuracy, np.ones_like(accuracy))
