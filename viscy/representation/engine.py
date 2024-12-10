@@ -5,6 +5,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
+from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 
 from viscy.data.typing import TrackingIndex, TripletSample
@@ -27,7 +28,7 @@ class ContrastiveModule(LightningModule):
         self,
         encoder: nn.Module | ContrastiveEncoder,
         loss_function: (
-            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss
+            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
         ) = nn.TripletMarginLoss(margin=0.5),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
@@ -65,7 +66,7 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{phase}/negative_norm: {negative_norm}")
 
     def _log_metrics(
-        self, loss, anchor, positive, negative, stage: Literal["train", "val"]
+        self, loss, anchor, positive, stage: Literal["train", "val"], negative=None
     ):
         self.log(
             f"loss/{stage}",
@@ -77,16 +78,24 @@ class ContrastiveModule(LightningModule):
             sync_dist=True,
         )
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
-        cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
-        euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
+        log_metric_dict = {
+            f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
+            f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
+        }
+
+        if negative is not None:
+            euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
+            cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
+            log_metric_dict[f"metrics/cosine_similarity_negative/{stage}"] = (
+                cosine_sim_neg
+            )
+            log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = (
+                euclidean_dist_neg
+            )
+
         self.log_dict(
-            {
-                f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
-                f"metrics/cosine_similarity_negative/{stage}": cosine_sim_neg,
-                f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
-                f"metrics/euclidean_distance_negative/{stage}": euclidean_dist_neg,
-            },
+            log_metric_dict,
             on_step=False,
             on_epoch=True,
             logger=True,
@@ -99,29 +108,45 @@ class ContrastiveModule(LightningModule):
             key, grid, self.current_epoch, dataformats="HWC"
         )
 
+    def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
+        """Common method for logging step samples"""
+        if batch_idx < self.log_batches_per_epoch:
+            output_list = (
+                self.training_step_outputs
+                if stage == "train"
+                else self.validation_step_outputs
+            )
+            output_list.extend(detach_sample(samples, self.log_samples_per_batch))
+
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
-        neg_img = batch["negative"]
         anchor_projection = self(anchor_img)
-        negative_projection = self(neg_img)
         positive_projection = self(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
+        negative_projection = None
+        if isinstance(self.loss_function, NTXentLoss):
+            indices = torch.arange(
+                0, anchor_projection.size(0), device=anchor_projection.device
+            )
+            labels = torch.cat((indices, indices))
+            # Note: we assume the two augmented views are the anchor and positive samples
+            embeddings = torch.cat((anchor_projection, positive_projection))
+            loss = self.loss_function(embeddings, labels)
+            self._log_step_samples(batch_idx, (anchor_img, pos_img), "train")
+        else:
+            neg_img = batch["negative"]
+            negative_projection = self(neg_img)
+            loss = self.loss_function(
+                anchor_projection, positive_projection, negative_projection
+            )
+            self._log_step_samples(batch_idx, (anchor_img, pos_img, neg_img), "train")
         self._log_metrics(
-            loss,
-            anchor_projection,
-            positive_projection,
-            negative_projection,
+            loss=loss,
+            anchor=anchor_projection,
+            positive=positive_projection,
+            negative=negative_projection,
             stage="train",
         )
-        if batch_idx < self.log_batches_per_epoch:
-            self.training_step_outputs.extend(
-                detach_sample(
-                    (anchor_img, pos_img, neg_img), self.log_samples_per_batch
-                )
-            )
         return loss
 
     def on_train_epoch_end(self) -> None:
@@ -133,20 +158,32 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
         anchor = batch["anchor"]
         pos_img = batch["positive"]
-        neg_img = batch["negative"]
         anchor_projection = self(anchor)
-        negative_projection = self(neg_img)
         positive_projection = self(pos_img)
-        loss = self.loss_function(
-            anchor_projection, positive_projection, negative_projection
-        )
-        self._log_metrics(
-            loss, anchor_projection, positive_projection, negative_projection, "val"
-        )
-        if batch_idx < self.log_batches_per_epoch:
-            self.validation_step_outputs.extend(
-                detach_sample((anchor, pos_img, neg_img), self.log_samples_per_batch)
+        negative_projection = None
+        if isinstance(self.loss_function, NTXentLoss):
+            indices = torch.arange(
+                0, anchor_projection.size(0), device=anchor_projection.device
             )
+            labels = torch.cat((indices, indices))
+            # Note: we assume the two augmented views are the anchor and positive samples
+            embeddings = torch.cat((anchor_projection, positive_projection))
+            loss = self.loss_function(embeddings, labels)
+            self._log_step_samples(batch_idx, (anchor, pos_img), "val")
+        else:
+            neg_img = batch["negative"]
+            negative_projection = self(neg_img)
+            loss = self.loss_function(
+                anchor_projection, positive_projection, negative_projection
+            )
+            self._log_step_samples(batch_idx, (anchor, pos_img, neg_img), "val")
+        self._log_metrics(
+            loss=loss,
+            anchor=anchor_projection,
+            positive=positive_projection,
+            negative=negative_projection,
+            stage="val",
+        )
         return loss
 
     def on_validation_epoch_end(self) -> None:
