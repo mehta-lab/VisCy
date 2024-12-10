@@ -108,11 +108,22 @@ class ContrastiveModule(LightningModule):
             key, grid, self.current_epoch, dataformats="HWC"
         )
 
+    def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
+        """Common method for logging step samples"""
+        if batch_idx < self.log_batches_per_epoch:
+            output_list = (
+                self.training_step_outputs
+                if stage == "train"
+                else self.validation_step_outputs
+            )
+            output_list.extend(detach_sample(samples, self.log_samples_per_batch))
+
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
         anchor_projection = self(anchor_img)
         positive_projection = self(pos_img)
+        negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
@@ -121,36 +132,21 @@ class ContrastiveModule(LightningModule):
             # Note: we assume the two augmented views are the anchor and positive samples
             embeddings = torch.cat((anchor_projection, positive_projection))
             loss = self.loss_function(embeddings, labels)
-            self._log_metrics(
-                loss=loss,
-                anchor=anchor_projection,
-                positive=positive_projection,
-                negative=None,
-                stage="train",
-            )
-            if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(
-                    detach_sample((anchor_img, pos_img), self.log_samples_per_batch)
-                )
+            self._log_step_samples(batch_idx, (anchor_img, pos_img), "train")
         else:
             neg_img = batch["negative"]
             negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
-            self._log_metrics(
-                loss=loss,
-                anchor=anchor_projection,
-                positive=positive_projection,
-                negative=negative_projection,
-                stage="train",
-            )
-            if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(
-                    detach_sample(
-                        (anchor_img, pos_img, neg_img), self.log_samples_per_batch
-                    )
-                )
+            self._log_step_samples(batch_idx, (anchor_img, pos_img, neg_img), "train")
+        self._log_metrics(
+            loss=loss,
+            anchor=anchor_projection,
+            positive=positive_projection,
+            negative=negative_projection,
+            stage="train",
+        )
         return loss
 
     def on_train_epoch_end(self) -> None:
@@ -164,6 +160,7 @@ class ContrastiveModule(LightningModule):
         pos_img = batch["positive"]
         anchor_projection = self(anchor)
         positive_projection = self(pos_img)
+        negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
@@ -172,36 +169,21 @@ class ContrastiveModule(LightningModule):
             # Note: we assume the two augmented views are the anchor and positive samples
             embeddings = torch.cat((anchor_projection, positive_projection))
             loss = self.loss_function(embeddings, labels)
-            self._log_metrics(
-                loss=loss,
-                anchor=anchor_projection,
-                positive=positive_projection,
-                negative=None,
-                stage="val",
-            )
-            if batch_idx < self.log_batches_per_epoch:
-                self.validation_step_outputs.extend(
-                    detach_sample((anchor, pos_img), self.log_samples_per_batch)
-                )
+            self._log_step_samples(batch_idx, (anchor, pos_img), "val")
         else:
             neg_img = batch["negative"]
             negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
-            self._log_metrics(
-                loss=loss,
-                anchor=anchor_projection,
-                positive=positive_projection,
-                negative=negative_projection,
-                stage="val",
-            )
-            if batch_idx < self.log_batches_per_epoch:
-                self.validation_step_outputs.extend(
-                    detach_sample(
-                        (anchor, pos_img, neg_img), self.log_samples_per_batch
-                    )
-                )
+            self._log_step_samples(batch_idx, (anchor, pos_img, neg_img), "val")
+        self._log_metrics(
+            loss=loss,
+            anchor=anchor_projection,
+            positive=positive_projection,
+            negative=negative_projection,
+            stage="val",
+        )
         return loss
 
     def on_validation_epoch_end(self) -> None:
