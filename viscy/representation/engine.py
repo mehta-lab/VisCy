@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
+from umap import UMAP
 
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
@@ -34,6 +35,7 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
+        log_embeddings: bool = False,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -46,6 +48,7 @@ class ContrastiveModule(LightningModule):
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.training_step_outputs = []
         self.validation_step_outputs = []
+        self.log_embeddings = log_embeddings
 
     def forward(self, x: Tensor) -> Tensor:
         "Only return projected embeddings for training and validation."
@@ -118,6 +121,19 @@ class ContrastiveModule(LightningModule):
             )
             output_list.extend(detach_sample(samples, self.log_samples_per_batch))
 
+    def log_embedding_umap(self, embeddings: Tensor, tag: str):
+        _logger.debug(f"Computing UMAP for {tag} embeddings.")
+        umap = UMAP(n_components=2)
+        embeddings_np = embeddings.detach().cpu().numpy()
+        umap_embeddings = umap.fit_transform(embeddings_np)
+
+        # Log UMAP embeddings to TensorBoard
+        self.logger.experiment.add_embedding(
+            umap_embeddings,
+            global_step=self.current_epoch,
+            tag=f"{tag}_umap",
+        )
+
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
@@ -152,6 +168,12 @@ class ContrastiveModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         super().on_train_epoch_end()
         self._log_samples("train_samples", self.training_step_outputs)
+        # Log UMAP embeddings for validation
+        if self.log_embeddings:
+            embeddings = torch.cat(
+                [output["embeddings"] for output in self.validation_step_outputs]
+            )
+            self.log_embedding_umap(embeddings, tag="train")
         self.training_step_outputs = []
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
@@ -189,6 +211,13 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
+        # Log UMAP embeddings for training
+        if self.log_embeddings:
+            embeddings = torch.cat(
+                [output["embeddings"] for output in self.training_step_outputs]
+            )
+            self.log_embedding_umap(embeddings, tag="val")
+
         self.validation_step_outputs = []
 
     def configure_optimizers(self):
