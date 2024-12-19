@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from xarray import open_zarr
+
 from viscy.representation.evaluation.dimensionality_reduction import (
     _fit_transform_phate,
 )
