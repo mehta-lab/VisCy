@@ -4,9 +4,7 @@ from typing import Any
 
 from xarray import open_zarr
 
-from viscy.representation.evaluation.dimensionality_reduction import (
-    _fit_transform_phate,
-)
+from viscy.representation.evaluation.dimensionality_reduction import compute_phate
 
 _logger = logging.getLogger(__name__)
 
@@ -34,14 +32,9 @@ def update_phate_embeddings(
     """
     # Load dataset
     dataset = open_zarr(dataset_path, mode="r+")
-    features = dataset["features"].values
 
-    # Compute new PHATE embeddings
+    # Compute new PHATE embeddings and update dataset
     _logger.info(f"Computing PHATE embeddings with parameters: {phate_kwargs}")
-    _, phate = _fit_transform_phate(features, **phate_kwargs)
-
-    # Update PHATE coordinates
-    dataset["PHATE1"].values = phate[:, 0]
-    dataset["PHATE2"].values = phate[:, 1]
+    compute_phate(dataset, update_dataset=True, **phate_kwargs)
 
     _logger.info(f"Updated PHATE embeddings in {dataset_path}")
