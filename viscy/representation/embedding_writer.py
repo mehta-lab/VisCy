@@ -12,7 +12,7 @@ from xarray import Dataset, open_zarr
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
 from viscy.representation.evaluation.dimensionality_reduction import (
-    _fit_transform_phate,
+    compute_phate,
     _fit_transform_umap,
 )
 
@@ -119,7 +119,7 @@ class EmbeddingWriter(BasePredictionWriter):
             f"Computing dimensionality reductions for {len(features)} samples."
         )
         _, umap = _fit_transform_umap(features, n_components=2, normalize=True)
-        _, phate = _fit_transform_phate(
+        _, phate = compute_phate(
             features,
             **self.phate_kwargs,
         )

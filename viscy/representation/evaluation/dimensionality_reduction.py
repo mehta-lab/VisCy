@@ -11,7 +11,7 @@ from xarray import Dataset
 
 def compute_phate(
     embedding_dataset,
-    n_components: int = None,
+    n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
     update_dataset: bool = False,
@@ -115,22 +115,6 @@ def _fit_transform_umap(
     umap_model = umap.UMAP(n_components=n_components, random_state=42)
     umap_embedding = umap_model.fit_transform(embeddings)
     return umap_model, umap_embedding
-
-
-def _fit_transform_phate(
-    embeddings: NDArray,
-    n_components: int = 2,
-    knn: int = 5,
-    decay: int = 40,
-    n_jobs: int = -1,
-    **phate_kwargs,
-) -> tuple[phate.PHATE, NDArray]:
-    """Fit PHATE model and transform embeddings."""
-    phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, n_jobs=n_jobs, **phate_kwargs
-    )
-    phate_embedding = phate_model.fit_transform(embeddings)
-    return phate_model, phate_embedding
 
 
 def compute_umap(
