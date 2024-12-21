@@ -8,7 +8,12 @@ trainer:
   callbacks:
     - class_path: viscy.representation.embedding_writer.EmbeddingWriter
       init_args:
-        output_path: "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations/predict/test_prediction_code.zarr"
+        output_path: "/path/to/output.zarr"
+        phate_kwargs:
+          n_components: 2
+          knn: 10
+          decay: 50
+          gamma: 1
     # edit the following lines to specify logging path
     # - class_path: lightning.pytorch.loggers.TensorBoardLogger
     #   init_args:
