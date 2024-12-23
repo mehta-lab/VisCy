@@ -10,7 +10,7 @@ from numpy.typing import NDArray
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.clustering import (
     compare_time_offset,
-    cross_dissimilarity,
+    pairwise_distance_matrix,
     rank_nearest_neighbors,
     select_block,
 )
@@ -121,7 +121,7 @@ def analyze_embedding_smoothness(
 
     scaled_features = StandardScaler().fit_transform(features.values)
     # Compute the cosine dissimilarity
-    cross_dist = cross_dissimilarity(scaled_features, metric="cosine")
+    cross_dist = pairwise_distance_matrix(scaled_features, metric="cosine")
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
     # Compute piece-wise dissimilarity and rank difference
