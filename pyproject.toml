@@ -27,6 +27,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
+    "pytorch-metric-learning>2.0.0"
 ]
 dynamic = ["version"]
 
@@ -39,6 +40,7 @@ metrics = [
     "ptflops>=0.7",
     "umap-learn",
     "captum>=0.7.0",
+    "phate",
 ]
 examples = ["napari", "jupyter", "jupytext"]
 visual = [

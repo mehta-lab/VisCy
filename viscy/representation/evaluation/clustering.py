@@ -33,20 +33,20 @@ def knn_accuracy(embeddings, annotations, k=5):
     return accuracy
 
 
-def cross_dissimilarity(features: ArrayLike, metric: str = "cosine") -> NDArray:
-    """Dissimilarity/distance between each pair of samples in the features.
+def pairwise_distance_matrix(features: ArrayLike, metric: str = "cosine") -> NDArray:
+    """Compute pairwise distances between all samples in the feature matrix.
 
     Parameters
     ----------
     features : ArrayLike
         Feature matrix (n_samples, n_features)
     metric : str, optional
-        Metric type, by default "cosine" (cosine dissimilarity)
+        Distance metric to use, by default "cosine"
 
     Returns
     -------
     NDArray
-        Dissimilarity square matrix (n_samples, n_samples)
+        Distance matrix of shape (n_samples, n_samples)
     """
     return cdist(features, features, metric=metric)
 

@@ -1,11 +1,69 @@
 """PCA and UMAP dimensionality reduction."""
 
 import pandas as pd
+import phate
 import umap
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
+
+
+def compute_phate(
+    embedding_dataset,
+    n_components: int = 2,
+    knn: int = 5,
+    decay: int = 40,
+    update_dataset: bool = False,
+    **phate_kwargs,
+) -> tuple[phate.PHATE, NDArray]:
+    """
+    Compute PHATE embeddings for features and optionally update dataset.
+
+    Parameters
+    ----------
+    embedding_dataset : xarray.Dataset or NDArray
+        The dataset containing embeddings, timepoints, fov_name, and track_id,
+        or a numpy array of embeddings.
+    n_components : int, optional
+        Number of dimensions in the PHATE embedding, by default None
+    knn : int, optional
+        Number of nearest neighbors to use in the KNN graph, by default 5
+    decay : int, optional
+        Decay parameter for the Markov operator, by default 40
+    update_dataset : bool, optional
+        Whether to update the PHATE coordinates in the dataset, by default False
+    phate_kwargs : dict, optional
+        Additional keyword arguments for PHATE, by default None
+
+    Returns
+    -------
+    phate.PHATE, NDArray
+        PHATE model and PHATE embeddings
+    """
+    import phate
+
+    # Get embeddings from dataset if needed
+    embeddings = (
+        embedding_dataset["features"].values
+        if isinstance(embedding_dataset, Dataset)
+        else embedding_dataset
+    )
+
+    # Compute PHATE embeddings
+    phate_model = phate.PHATE(
+        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+    )
+    phate_embedding = phate_model.fit_transform(embeddings)
+
+    # Update dataset if requested
+    if update_dataset and isinstance(embedding_dataset, Dataset):
+        for i in range(
+            min(2, phate_embedding.shape[1])
+        ):  # Only update PHATE1 and PHATE2
+            embedding_dataset[f"PHATE{i+1}"].values = phate_embedding[:, i]
+
+    return phate_model, phate_embedding
 
 
 def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
