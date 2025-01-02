@@ -62,6 +62,7 @@ class TripletDataset(Dataset):
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
+        return_negative: bool = True,
     ) -> None:
         """Dataset for triplet sampling of cells based on tracking.
 
@@ -118,6 +119,7 @@ class TripletDataset(Dataset):
             self._specific_cells(self.tracks) if self.predict_cells else self.tracks
         )
         self.valid_anchors = self._filter_anchors(self.tracks)
+        self.return_negative = return_negative
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
         """Exclude tracks that are too close to the border or do not have the next time point.
@@ -242,15 +244,16 @@ class TripletDataset(Dataset):
                     patch=positive_patch,
                     norm_meta=positive_norm,
                 )
-            negative_row = self._sample_negative(anchor_row)
-            negative_patch, negative_norm = self._slice_patch(negative_row)
-            if self.negative_transform:
-                negative_patch = _transform_channel_wise(
-                    transform=self.negative_transform,
-                    channel_names=self.channel_names,
-                    patch=negative_patch,
-                    norm_meta=negative_norm,
-                )
+            if self.return_negative:
+                negative_row = self._sample_negative(anchor_row)
+                negative_patch, negative_norm = self._slice_patch(negative_row)
+                if self.negative_transform:
+                    negative_patch = _transform_channel_wise(
+                        transform=self.negative_transform,
+                        channel_names=self.channel_names,
+                        patch=negative_patch,
+                        norm_meta=negative_norm,
+                    )
         if self.anchor_transform:
             anchor_patch = _transform_channel_wise(
                 transform=self.anchor_transform,
@@ -260,7 +263,10 @@ class TripletDataset(Dataset):
             )
         sample = {"anchor": anchor_patch}
         if self.fit:
-            sample.update({"positive": positive_patch, "negative": negative_patch})
+            if self.return_negative:
+                sample.update({"positive": positive_patch, "negative": negative_patch})
+            else:
+                sample.update({"positive": positive_patch})
         else:
             sample.update({"index": anchor_row[INDEX_COLUMNS].to_dict()})
         return sample
@@ -333,7 +339,7 @@ class TripletDataModule(HCSDataModule):
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
-            architecture="UNeXt2",
+            target_2d=False,
             yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
