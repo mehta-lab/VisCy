@@ -50,7 +50,7 @@ class Sample(TypedDict, total=False):
     # Instance segmentation masks
     labels: OneOrSeq[Tensor]
     # None: not available
-    norm_meta: NormMeta
+    norm_meta: NormMeta | None
 
 
 class ChannelMap(TypedDict):

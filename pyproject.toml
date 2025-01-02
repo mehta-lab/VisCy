@@ -17,7 +17,7 @@ classifiers = [
 ]
 dependencies = [
     "iohub==0.1.0",
-    "torch>=2.1.2",
+    "torch>=2.4.1",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
     "lightning>=2.3.0",
