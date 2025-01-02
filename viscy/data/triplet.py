@@ -339,7 +339,7 @@ class TripletDataModule(HCSDataModule):
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
-            target_2d=bool(z_range[1] - z_range[0] == 1),
+            target_2d=False,
             yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
