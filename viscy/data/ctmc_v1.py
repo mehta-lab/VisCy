@@ -31,7 +31,7 @@ class CTMCv1DataModule(GPUTransformDataModule):
     num_workers : int, optional
         Number of dataloading workers, by default 8.
     val_subsample_ratio : int, optional
-        Skip evert N frames for validation to reduce redundancy in video,
+        Skip every N frames for validation to reduce redundancy in video,
         by default 30.
     channel_name : str, optional
         Name of the DIC channel, by default "DIC".
