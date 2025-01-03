@@ -121,18 +121,60 @@ class ContrastiveModule(LightningModule):
             )
             output_list.extend(detach_sample(samples, self.log_samples_per_batch))
 
-    def log_embedding_umap(self, embeddings: Tensor, tag: str):
-        _logger.debug(f"Computing UMAP for {tag} embeddings.")
-        umap = UMAP(n_components=2)
-        embeddings_np = embeddings.detach().cpu().numpy()
-        umap_embeddings = umap.fit_transform(embeddings_np)
+    def log_embedding_umap(
+        self, embeddings: Tensor, images: Tensor, metadata: list, tag: str
+    ):
+        """Log embeddings with their corresponding images and metadata to TensorBoard using UMAP reduction.
 
-        # Log UMAP embeddings to TensorBoard
+        Args:
+            embeddings: Tensor of embeddings to visualize
+            images: Corresponding images for the embeddings (B, C, T, H, W)
+            metadata: List of strings containing "track_id:fov" for each embedding
+            tag: Name tag for the embedding visualization
+        """
+        _logger.debug(f"Computing UMAP for {tag} embeddings.")
+        umap_reducer = UMAP(
+            n_components=2, random_state=42
+        )  # Fixed random state for consistency
+        embeddings_np = embeddings.detach().cpu().numpy()
+        umap_embeddings = umap_reducer.fit_transform(embeddings_np)
+
+        # Take middle slice of 3D images for visualization
+        images = images.detach().cpu()
+        if images.ndim == 5:  # (B, C, T, H, W)
+            middle_t = images.shape[2] // 2
+            images = images[:, :, middle_t]  # Now (B, C, H, W)
+
+        # Normalize images to [0, 1] for visualization
+        images = (images - images.min()) / (images.max() - images.min())
+
+        # Calculate global step based on current epoch and trainer state
+        global_step = self.current_epoch
+        if hasattr(self, "trainer") and hasattr(self.trainer, "fit_loop"):
+            global_step = self.trainer.fit_loop.epoch_progress.current.completed
+
+        # Log UMAP embeddings with images and metadata to TensorBoard
+        # Use epoch-specific tag to preserve history
+        epoch_tag = f"{tag}_epoch_{global_step}"
         self.logger.experiment.add_embedding(
             umap_embeddings,
-            global_step=self.current_epoch,
-            tag=f"{tag}_umap",
+            metadata=metadata,
+            label_img=images,
+            global_step=global_step,
+            tag=epoch_tag,
         )
+
+        # Also log the raw embeddings for later analysis
+        self.log(
+            f"{tag}_mean_norm", torch.norm(embeddings, dim=1).mean(), on_epoch=True
+        )
+        self.log(f"{tag}_std_norm", torch.norm(embeddings, dim=1).std(), on_epoch=True)
+
+    def _format_metadata(self, index: TrackingIndex | None) -> str:
+        """Format tracking index into a metadata string."""
+        if index is None:
+            return "unknown"
+        return f"track_{index.get('track_id', 'unknown')}:fov_{index.get('fov', 'unknown')}"
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
@@ -168,12 +210,6 @@ class ContrastiveModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         super().on_train_epoch_end()
         self._log_samples("train_samples", self.training_step_outputs)
-        # Log UMAP embeddings for validation
-        if self.log_embeddings:
-            embeddings = torch.cat(
-                [output["embeddings"] for output in self.validation_step_outputs]
-            )
-            self.log_embedding_umap(embeddings, tag="train")
         self.training_step_outputs = []
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
@@ -192,6 +228,28 @@ class ContrastiveModule(LightningModule):
             embeddings = torch.cat((anchor_projection, positive_projection))
             loss = self.loss_function(embeddings, labels)
             self._log_step_samples(batch_idx, (anchor, pos_img), "val")
+            if (
+                self.log_embeddings and batch_idx == 0
+            ):  # Only store first batch for visualization
+                # Create metadata for both anchor and positive samples
+                batch_size = anchor.size(0)
+                metadata = [
+                    str(i) for i in range(batch_size * 2)
+                ]  # Double for both anchor and positive
+                if "index" in batch:
+                    # Create metadata for both anchor and positive views
+                    anchor_metadata = [
+                        self._format_metadata(idx) for idx in batch["index"]
+                    ]
+                    pos_metadata = [
+                        f"{meta}_pos" for meta in anchor_metadata
+                    ]  # Add suffix to distinguish positive samples
+                    metadata = anchor_metadata + pos_metadata
+                self.val_embedding_outputs = {
+                    "embeddings": embeddings.detach(),
+                    "images": torch.cat((anchor, pos_img)).detach(),
+                    "metadata": metadata,
+                }
         else:
             neg_img = batch["negative"]
             negative_projection = self(neg_img)
@@ -199,6 +257,18 @@ class ContrastiveModule(LightningModule):
                 anchor_projection, positive_projection, negative_projection
             )
             self._log_step_samples(batch_idx, (anchor, pos_img, neg_img), "val")
+            if (
+                self.log_embeddings and batch_idx == 0
+            ):  # Only store first batch for visualization
+                batch_size = anchor.size(0)
+                metadata = [str(i) for i in range(batch_size)]
+                if "index" in batch:
+                    metadata = [self._format_metadata(idx) for idx in batch["index"]]
+                self.val_embedding_outputs = {
+                    "embeddings": anchor_projection.detach(),
+                    "images": anchor.detach(),
+                    "metadata": metadata,
+                }
         self._log_metrics(
             loss=loss,
             anchor=anchor_projection,
@@ -211,13 +281,15 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        # Log UMAP embeddings for training
-        if self.log_embeddings:
-            embeddings = torch.cat(
-                [output["embeddings"] for output in self.training_step_outputs]
+        # Log UMAP embeddings for validation
+        if self.log_embeddings and hasattr(self, "val_embedding_outputs"):
+            self.log_embedding_umap(
+                self.val_embedding_outputs["embeddings"],
+                self.val_embedding_outputs["images"],
+                self.val_embedding_outputs["metadata"],
+                tag="embeddings",  # Changed tag to be more generic since we only log validation
             )
-            self.log_embedding_umap(embeddings, tag="val")
-
+            delattr(self, "val_embedding_outputs")
         self.validation_step_outputs = []
 
     def configure_optimizers(self):
