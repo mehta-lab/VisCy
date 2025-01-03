@@ -8,16 +8,16 @@
 ![GitHub forks](https://img.shields.io/github/forks/mehta-lab/VisCy)
 [![SPEC 0 — Minimum Supported Dependencies](https://img.shields.io/badge/SPEC-0-green?labelColor=%23004811&color=%235CA038)](https://scientific-python.org/specs/spec-0000/)
 
-VisCy (abbreviation of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
+VisCy (blend of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
 This repository provides a pipeline for the following.
 
 - Image translation
   - Robust virtual staining of landmark organelles
-- Image classification
-  - Supervised learning of of cell state (e.g. state of infection)
 - Image representation learning
   - Self-supervised learning of the cell state and organelle phenotypes
+- Semantic segmentation
+  - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**  
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
