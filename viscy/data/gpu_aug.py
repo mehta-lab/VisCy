@@ -169,7 +169,29 @@ class CachedOmeZarrDataset(Dataset):
         return sample
 
 
-class CachedOmeZarrDataModule(GPUTransformDataModule):
+class SelectWell:
+    _include_wells: list[str] | None
+
+    def _include_well_name(self, name: str) -> bool:
+        if self._include_wells is None:
+            return True
+        else:
+            return name in self._include_wells
+
+    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
+        positions = []
+        for well_name, well in plate.wells():
+            if self._include_well_name(well_name):
+                for _, p in well.positions():
+                    positions.append(p)
+        if len(positions) < 2:
+            raise ValueError(
+                "At least 2 FOVs are required for training and validation."
+            )
+        return positions
+
+
+class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
     """Data module for cached OME-Zarr arrays.
 
     Parameters
@@ -251,24 +273,6 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions).tolist()
-
-    def _include_well_name(self, name: str) -> bool:
-        if self._include_wells is None:
-            return True
-        else:
-            return name in self._include_wells
-
-    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
-        positions = []
-        for well_name, well in plate.wells():
-            if self._include_well_name(well_name):
-                for _, p in well.positions():
-                    positions.append(p)
-        if len(positions) < 2:
-            raise ValueError(
-                "At least 2 FOVs are required for training and validation."
-            )
-        return positions
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
         if stage not in ("fit", "validate"):
