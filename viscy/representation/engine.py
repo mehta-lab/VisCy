@@ -258,34 +258,56 @@ class ContrastiveModule(LightningModule):
         self,
         anchor_metadata: dict,
         positive_metadata: dict | None = None,
+        negative_metadata: dict | None = None,
         include_positive: bool = False,
+        include_negative: bool = False,
     ) -> tuple[list[list[str]], list[str]]:
         """Prepare metadata for embedding visualization.
 
         Args:
             anchor_metadata: Metadata for anchor samples
             positive_metadata: Metadata for positive samples (optional)
+            negative_metadata: Metadata for negative samples (optional)
             include_positive: Whether to include positive samples in metadata
+            include_negative: Whether to include negative samples in metadata
 
         Returns:
             tuple containing:
                 - metadata: List of lists containing metadata values
                 - metadata_header: List of metadata field names
         """
-        # NOTE: temporarily hardcoded to the following:
-        metadata_header = ["fov_name", "t", "id"]
+        metadata_header = ["fov_name", "t", "id", "type"]
+
+        def process_field(x, field):
+            if field in ["t", "id"] and isinstance(x, torch.Tensor):
+                return str(x.detach().cpu().item())
+            return str(x)
 
         # Create lists for each metadata field
         metadata = [
             [str(x) for x in anchor_metadata["fov_name"]],
-            [str(x.detach().cpu().numpy()) for x in anchor_metadata["t"]],
-            [str(x.detach().cpu().numpy()) for x in anchor_metadata["id"]],
+            [process_field(x, "t") for x in anchor_metadata["t"]],
+            [process_field(x, "id") for x in anchor_metadata["id"]],
+            ["anchor"] * len(anchor_metadata["fov_name"]),  # type field for anchors
         ]
 
         # If including positive samples, extend metadata
         if include_positive and positive_metadata is not None:
-            for i, field in enumerate(metadata_header):
-                metadata[i].extend([str(x) for x in positive_metadata[field]])
+            for i, field in enumerate(metadata_header[:-1]):  # Exclude 'type' field
+                metadata[i].extend(
+                    [process_field(x, field) for x in positive_metadata[field]]
+                )
+            # Add 'positive' type for positive samples
+            metadata[-1].extend(["positive"] * len(positive_metadata["fov_name"]))
+
+        # If including negative samples, extend metadata
+        if include_negative and negative_metadata is not None:
+            for i, field in enumerate(metadata_header[:-1]):  # Exclude 'type' field
+                metadata[i].extend(
+                    [process_field(x, field) for x in negative_metadata[field]]
+                )
+            # Add 'negative' type for negative samples
+            metadata[-1].extend(["negative"] * len(negative_metadata["fov_name"]))
 
         return metadata, metadata_header
 
@@ -308,10 +330,11 @@ class ContrastiveModule(LightningModule):
 
             # Store embeddings for visualization
             if self.current_epoch % self.embedding_log_interval == 0 and batch_idx == 0:
+                # Must include positive samples since we're concatenating embeddings
                 metadata, metadata_header = self._prepare_embedding_metadata(
                     batch["anchor_metadata"],
                     batch["positive_metadata"],
-                    include_positive=True,
+                    include_positive=True,  # Required since we concatenate embeddings
                 )
                 self.val_embedding_outputs = {
                     "embeddings": embeddings.detach(),
@@ -330,11 +353,17 @@ class ContrastiveModule(LightningModule):
             # Store embeddings for visualization
             if self.current_epoch % self.embedding_log_interval == 0 and batch_idx == 0:
                 metadata, metadata_header = self._prepare_embedding_metadata(
-                    batch["anchor_metadata"], include_positive=False
+                    batch["anchor_metadata"],
+                    batch["positive_metadata"],
+                    batch["negative_metadata"],
+                    include_positive=True,  # Required since we concatenate embeddings
+                    include_negative=True,
                 )
                 self.val_embedding_outputs = {
-                    "embeddings": anchor_projection.detach(),
-                    "images": anchor.detach(),
+                    "embeddings": torch.cat(
+                        (anchor_projection, positive_projection, negative_projection)
+                    ).detach(),
+                    "images": torch.cat((anchor, pos_img, neg_img)).detach(),
                     "metadata": list(zip(*metadata)),
                     "metadata_header": metadata_header,
                 }
