@@ -234,6 +234,7 @@ class TripletDataset(Dataset):
             if self.time_interval == "any":
                 positive_patch = anchor_patch.clone()
                 positive_norm = anchor_norm
+                positive_row = anchor_row
             else:
                 positive_row = self._sample_positive(anchor_row)
                 positive_patch, positive_norm = self._slice_patch(positive_row)
@@ -261,14 +262,29 @@ class TripletDataset(Dataset):
                 patch=anchor_patch,
                 norm_meta=anchor_norm,
             )
-        sample = {"anchor": anchor_patch}
+        sample = {
+            "anchor": anchor_patch,
+            "anchor_metadata": anchor_row[
+                INDEX_COLUMNS
+            ].to_dict(),  # Always include metadata
+        }
         if self.fit:
             if self.return_negative:
-                sample.update({"positive": positive_patch, "negative": negative_patch})
+                sample.update(
+                    {
+                        "positive": positive_patch,
+                        "negative": negative_patch,
+                        "positive_metadata": positive_row[INDEX_COLUMNS].to_dict(),
+                        "negative_metadata": negative_row[INDEX_COLUMNS].to_dict(),
+                    }
+                )
             else:
-                sample.update({"positive": positive_patch})
-        else:
-            sample.update({"index": anchor_row[INDEX_COLUMNS].to_dict()})
+                sample.update(
+                    {
+                        "positive": positive_patch,
+                        "positive_index": positive_row[INDEX_COLUMNS].to_dict(),
+                    }
+                )
         return sample
 
 
