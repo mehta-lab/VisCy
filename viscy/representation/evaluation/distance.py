@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List, Literal, Tuple, Union
+from typing import Dict, List, Literal, Tuple, Union, Optional
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -58,7 +58,6 @@ def normalize_embeddings(
 
 def compute_displacement(
     embedding_dataset,
-    max_tau: int = 10,
     distance_metric: Literal[
         "euclidean", "euclidean_squared", "cosine", "cosine_dissimilarity"
     ] = "euclidean_squared",
@@ -77,8 +76,6 @@ def compute_displacement(
     ----------
     embedding_dataset : xarray.Dataset
         Dataset containing embeddings and metadata
-    max_tau : int
-        Maximum time difference to compute displacement for
     distance_metric : str
         The metric to use for computing distances between embeddings.
         Valid options are:
@@ -124,11 +121,11 @@ def compute_displacement(
     if normalize is not None:
         embeddings = normalize_embeddings(embeddings, strategy=normalize)
 
-    # Initialize results dictionary
-    displacement_per_tau = {tau: [] for tau in range(1, max_tau + 1)}
-
-    # Get unique tracks using a set of tuples
+    # Get unique tracks
     unique_tracks = set(zip(fov_names, track_ids))
+
+    # Initialize results dictionary with empty lists
+    displacement_per_tau = defaultdict(list)
 
     # Process each track
     for fov_name, track_id in unique_tracks:
@@ -146,39 +143,35 @@ def compute_displacement(
         for t_idx, t in enumerate(times[:-1]):
             current_embedding = track_embeddings[t_idx]
 
-            # Check each tau
-            for tau in range(1, max_tau + 1):
-                future_time = t + tau
-                # Since times are sorted, we can use searchsorted
-                future_idx = np.searchsorted(times, future_time)
+            # Check all possible future time points
+            for future_idx, future_time in enumerate(
+                times[t_idx + 1 :], start=t_idx + 1
+            ):
+                tau = future_time - t
+                future_embedding = track_embeddings[future_idx]
 
-                if future_idx < len(times) and times[future_idx] == future_time:
-                    future_embedding = track_embeddings[future_idx]
+                if distance_metric in ["cosine", "cosine_dissimilarity"]:
+                    dot_product = np.dot(current_embedding, future_embedding)
+                    norms = np.linalg.norm(current_embedding) * np.linalg.norm(
+                        future_embedding
+                    )
+                    similarity = dot_product / norms
+                    displacement = (
+                        1 - similarity
+                        if distance_metric == "cosine_dissimilarity"
+                        else similarity
+                    )
+                else:  # Euclidean metrics
+                    diff_squared = np.sum((current_embedding - future_embedding) ** 2)
+                    displacement = (
+                        diff_squared
+                        if distance_metric == "euclidean_squared"
+                        else np.sqrt(diff_squared)
+                    )
 
-                    if distance_metric in ["cosine", "cosine_dissimilarity"]:
-                        dot_product = np.dot(current_embedding, future_embedding)
-                        norms = np.linalg.norm(current_embedding) * np.linalg.norm(
-                            future_embedding
-                        )
-                        similarity = dot_product / norms
-                        displacement = (
-                            1 - similarity
-                            if distance_metric == "cosine_dissimilarity"
-                            else similarity
-                        )
-                    else:  # Euclidean metrics
-                        diff_squared = np.sum(
-                            (current_embedding - future_embedding) ** 2
-                        )
-                        displacement = (
-                            diff_squared
-                            if distance_metric == "euclidean_squared"
-                            else np.sqrt(diff_squared)
-                        )
+                displacement_per_tau[int(tau)].append(displacement)
 
-                    displacement_per_tau[tau].append(displacement)
-
-    return displacement_per_tau
+    return dict(displacement_per_tau)
 
 
 def compute_displacement_statistics(
