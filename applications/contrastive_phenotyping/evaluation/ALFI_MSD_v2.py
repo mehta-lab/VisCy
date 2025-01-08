@@ -18,9 +18,8 @@ feature_paths = {
     "Classical": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_classical.zarr",
 }
 
-# Different normalization strategies to test
-norm_strategies = [None, "per_feature", "per_embedding", "per_dataset"]
-labels = {
+# Different normalization strategies and their labels
+norm_strategies = {
     None: "Raw",
     "per_feature": "Per-feature z-score",
     "per_embedding": "Unit norm",
@@ -45,7 +44,7 @@ for label, path in feature_paths.items():
     print(f"\nProcessing {label}...")
     embedding_dataset = read_embedding_dataset(Path(path))
 
-    for norm in norm_strategies:
+    for norm, norm_label in norm_strategies.items():
         # Compute displacements with different normalization strategies
         displacements = compute_displacement(
             embedding_dataset=embedding_dataset,
@@ -53,12 +52,12 @@ for label, path in feature_paths.items():
             normalize=norm,
         )
         means, stds = compute_displacement_statistics(displacements)
-        results[f"{label} ({labels[norm]})"] = (means, stds)
-        raw_displacements[f"{label} ({labels[norm]})"] = displacements
+        results[f"{label} ({norm_label})"] = (means, stds)
+        raw_displacements[f"{label} ({norm_label})"] = displacements
 
         # Print some statistics
         taus = sorted(means.keys())
-        print(f"\n{labels[norm]}:")
+        print(f"\n{norm_label}:")
         print(f"  Number of different τ values: {len(taus)}")
         print(f"  τ range: {min(taus)} to {max(taus)}")
         print(f"  MSD at τ=1: {means[1]:.4f} ± {stds[1]:.4f}")
@@ -67,12 +66,12 @@ for label, path in feature_paths.items():
 fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 axes = axes.ravel()
 
-for i, norm in enumerate(norm_strategies):
+for i, (norm, norm_label) in enumerate(norm_strategies.items()):
     ax = axes[i]
 
     # Plot each time interval for this normalization strategy
     for interval_label, path in feature_paths.items():
-        result_label = f"{interval_label} ({labels[norm]})"
+        result_label = f"{interval_label} ({norm_label})"
         means, stds = results[result_label]
 
         # Sort by tau for plotting
@@ -99,7 +98,7 @@ for i, norm in enumerate(norm_strategies):
 
     ax.set_xlabel("Time Shift (τ)")
     ax.set_ylabel("Mean Square Displacement")
-    ax.set_title(f"MSD vs Time Shift\n({labels[norm]})")
+    ax.set_title(f"MSD vs Time Shift\n({norm_label})")
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -110,12 +109,12 @@ plt.show()
 fig, axes = plt.subplots(2, 2, figsize=(15, 12))
 axes = axes.ravel()
 
-for i, norm in enumerate(norm_strategies):
+for i, (norm, norm_label) in enumerate(norm_strategies.items()):
     ax = axes[i]
 
     # Plot each time interval for this normalization strategy
     for interval_label, path in feature_paths.items():
-        result_label = f"{interval_label} ({labels[norm]})"
+        result_label = f"{interval_label} ({norm_label})"
         means, stds = results[result_label]
 
         # Sort by tau for plotting
@@ -165,51 +164,21 @@ for i, norm in enumerate(norm_strategies):
     ax.set_yscale("log")
     ax.set_xlabel("Time Shift (τ)")
     ax.set_ylabel("Mean Square Displacement")
-    ax.set_title(f"MSD vs Time Shift (log-log)\n({labels[norm]})")
+    ax.set_title(f"MSD vs Time Shift (log-log)\n({norm_label})")
     ax.grid(True, alpha=0.3, which="both")
     ax.legend(title="α = slope in log-log space")
 
 plt.tight_layout()
 plt.show()
 
-# %% Print detailed slope analysis
-print("\nSlope Analysis (α):")
-print("α = 1: Normal diffusion")
-print("α < 1: Sub-diffusion (confined/hindered)")
-print("α > 1: Super-diffusion (directed/active)\n")
-
-for norm in norm_strategies:
-    print(f"\n{labels[norm]}:")
-    for interval_label in feature_paths.keys():
-        result_label = f"{interval_label} ({labels[norm]})"
-        means, _ = results[result_label]
-
-        # Calculate slope
-        taus = np.array(sorted(means.keys()))
-        mean_values = np.array([means[tau] for tau in taus])
-        valid_mask = mean_values > 0
-
-        if np.sum(valid_mask) > 1:
-            log_taus = np.log(taus[valid_mask])
-            log_means = np.log(mean_values[valid_mask])
-            slope, _ = np.polyfit(log_taus, log_means, 1)
-
-            motion_type = (
-                "normal diffusion"
-                if abs(slope - 1) < 0.1
-                else "sub-diffusion" if slope < 1 else "super-diffusion"
-            )
-
-            print(f"  {interval_label}: α = {slope:.2f} ({motion_type})")
-
 # %% Plot slopes analysis
 slopes_data = []
 intervals = []
 norm_types = []
 
-for norm in norm_strategies:
+for norm, norm_label in norm_strategies.items():
     for interval_label in feature_paths.keys():
-        result_label = f"{interval_label} ({labels[norm]})"
+        result_label = f"{interval_label} ({norm_label})"
         means, _ = results[result_label]
 
         # Calculate slope
@@ -224,14 +193,14 @@ for norm in norm_strategies:
 
             slopes_data.append(slope)
             intervals.append(interval_label)
-            norm_types.append(labels[norm])
+            norm_types.append(norm_label)
 
 # Create bar plot
 plt.figure(figsize=(12, 6))
 
 # Set up positions for grouped bars
 unique_intervals = list(feature_paths.keys())
-unique_norms = [labels[n] for n in norm_strategies]
+unique_norms = list(norm_strategies.values())
 x = np.arange(len(unique_intervals))
 width = 0.8 / len(norm_strategies)  # Width of bars
 
