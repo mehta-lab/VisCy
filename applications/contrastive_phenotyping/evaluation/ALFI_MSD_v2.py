@@ -12,6 +12,10 @@ from viscy.representation.evaluation.distance import (
 feature_paths = {
     "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_7mins.zarr",
     "21 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_21mins.zarr",
+    "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_updated_28mins.zarr",
+    "56 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_56mins.zarr",
+    "Cell Aware": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_cellaware.zarr",
+    "Classical": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_classical.zarr",
 }
 
 # Different normalization strategies to test
@@ -27,6 +31,10 @@ labels = {
 interval_colors = {
     "7 min interval": "blue",
     "21 min interval": "red",
+    "28 min interval": "green",
+    "56 min interval": "purple",
+    "Cell Aware": "orange",
+    "Classical": "gray",
 }
 
 # %% Compute MSD for each dataset
@@ -72,26 +80,35 @@ for i, norm in enumerate(norm_strategies):
         mean_values = [means[tau] for tau in taus]
         std_values = [stds[tau] for tau in taus]
 
-        # Plot MSD with confidence band
+        # Plot MSD with confidence band and scatter points
+        # ax.fill_between(
+        #     taus,
+        #     np.array(mean_values) - np.array(std_values),
+        #     np.array(mean_values) + np.array(std_values),
+        #     alpha=0.2,
+        #     color=interval_colors[interval_label],
+        # )
         ax.plot(
             taus,
             mean_values,
             "-",
             color=interval_colors[interval_label],
-            label=f"{interval_label}",
+            alpha=0.5,
+            zorder=1,
         )
-        ax.fill_between(
+        ax.scatter(
             taus,
-            np.array(mean_values) - np.array(std_values),
-            np.array(mean_values) + np.array(std_values),
-            alpha=0.3,
+            mean_values,
             color=interval_colors[interval_label],
+            s=20,
+            label=f"{interval_label}",
+            zorder=2,
         )
 
     ax.set_xlabel("Time Shift (τ)")
     ax.set_ylabel("Mean Square Displacement")
     ax.set_title(f"MSD vs Time Shift\n({labels[norm]})")
-    ax.grid(True)
+    ax.grid(True, alpha=0.3)
     ax.legend()
 
 plt.tight_layout()
