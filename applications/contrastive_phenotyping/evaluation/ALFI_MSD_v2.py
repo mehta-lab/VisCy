@@ -35,7 +35,7 @@ raw_displacements = {}
 for label, path in feature_paths.items():
     print(f"\nProcessing {label}...")
     embedding_dataset = read_embedding_dataset(Path(path))
-
+    embedding_dimension = embedding_dataset["features"].shape[1]
     # Compute displacements
     displacements = compute_displacement(
         embedding_dataset=embedding_dataset,
@@ -46,25 +46,27 @@ for label, path in feature_paths.items():
     raw_displacements[label] = displacements
 
     # Print some statistics
-    taus = sorted(means.keys())
-    print(f"  Number of different τ values: {len(taus)}")
-    print(f"  τ range: {min(taus)} to {max(taus)}")
+    delta_t = sorted(means.keys())
+    print(f"  Number of different τ values: {len(delta_t)}")
+    print(f"  τ range: {min(delta_t)} to {max(delta_t)}")
     print(f"  MSD at τ=1: {means[1]:.4f} ± {stds[1]:.4f}")
 
 # %% Plot MSD vs time (linear scale)
 plt.figure(figsize=(10, 6))
 
+SECONDS_PER_FRAME = 7 * 60  # seconds
 # Plot each time interval
 for interval_label, path in feature_paths.items():
     means, stds = results[interval_label]
 
-    # Sort by tau for plotting
-    taus = sorted(means.keys())
-    mean_values = [means[tau] for tau in taus]
-    std_values = [stds[tau] for tau in taus]
+    # Sort by delta_t for plotting
+    delta_t = sorted(means.keys())
+    mean_values = [means[delta_t] for delta_t in delta_t]
+    std_values = [stds[delta_t] for delta_t in delta_t]
+    delta_t_seconds = [i * SECONDS_PER_FRAME for i in delta_t]
 
     plt.plot(
-        taus,
+        delta_t_seconds,
         mean_values,
         "-",
         color=interval_colors[interval_label],
@@ -72,7 +74,7 @@ for interval_label, path in feature_paths.items():
         zorder=1,
     )
     plt.scatter(
-        taus,
+        delta_t_seconds,
         mean_values,
         color=interval_colors[interval_label],
         s=20,
@@ -80,7 +82,7 @@ for interval_label, path in feature_paths.items():
         zorder=2,
     )
 
-plt.xlabel("Time Shift (τ)")
+plt.xlabel("Time Shift (seconds)")
 plt.ylabel("Mean Square Displacement")
 plt.title("MSD vs Time Shift")
 plt.grid(True, alpha=0.3)
@@ -89,44 +91,44 @@ plt.tight_layout()
 plt.show()
 
 # %% Plot MSD vs time (log-log scale with slopes)
-n_dimensions = 768
 plt.figure(figsize=(10, 6))
 
 # Plot each time interval
 for interval_label, path in feature_paths.items():
     means, stds = results[interval_label]
 
-    # Sort by tau for plotting
-    taus = sorted(means.keys())
-    mean_values = [means[tau] for tau in taus]
-    std_values = [stds[tau] for tau in taus]
+    # Sort by delta_t for plotting
+    delta_t = sorted(means.keys())
+    mean_values = [means[delta_t] for delta_t in delta_t]
+    std_values = [stds[delta_t] for delta_t in delta_t]
+    delta_t_seconds = [i * SECONDS_PER_FRAME for i in delta_t]
 
     # Filter out non-positive values for log scale
     valid_mask = np.array(mean_values) > 0
-    valid_taus = np.array(taus)[valid_mask]
+    valid_delta_t = np.array(delta_t_seconds)[valid_mask]
     valid_means = np.array(mean_values)[valid_mask]
 
     # Calculate slopes for different regions
-    log_taus = np.log(valid_taus)
+    log_delta_t = np.log(valid_delta_t)
     log_means = np.log(valid_means)
 
     # Early slope (first third of points)
-    n_points = len(log_taus)
+    n_points = len(log_delta_t)
     early_end = n_points // 3
     early_slope, early_intercept = np.polyfit(
-        log_taus[:early_end], log_means[:early_end], 1
+        log_delta_t[:early_end], log_means[:early_end], 1
     )
-    early_slope /= 2 * n_dimensions
+    early_slope /= 2 * embedding_dimension
 
     # middle slope (mid portions of points)
     late_start = 2 * (n_points // 3)
     mid_slope, mid_intercept = np.polyfit(
-        log_taus[early_end:late_start], log_means[early_end:late_start], 1
+        log_delta_t[early_end:late_start], log_means[early_end:late_start], 1
     )
-    mid_slope /= 2 * n_dimensions
+    mid_slope /= 2 * embedding_dimension
 
     plt.plot(
-        log_taus,
+        log_delta_t,
         log_means,
         "-",
         color=interval_colors[interval_label],
@@ -134,38 +136,17 @@ for interval_label, path in feature_paths.items():
         zorder=1,
     )
     plt.scatter(
-        log_taus,
+        log_delta_t,
         log_means,
         color=interval_colors[interval_label],
         s=20,
-        label=f"{interval_label} (α_early={early_slope:.2f}, α_mid={mid_slope:.2f})",
+        label=f"{interval_label} (α_early={early_slope:.2e}, α_mid={mid_slope:.2e})",
         zorder=2,
     )
 
-    # # Plot fitted lines for early and late regions
-    # early_fit = np.exp(early_intercept + early_slope * log_taus[:early_end])
-    # mid_fit = np.exp(mid_intercept + mid_slope * log_taus[early_end:late_start])
-
-    # plt.plot(
-    #     early_fit,
-    #     log_taus[:early_end],
-    #     "--",
-    #     color=interval_colors[interval_label],
-    #     alpha=0.3,
-    #     zorder=1,
-    # )
-    # plt.plot(
-    #     mid_fit,
-    #     log_taus[early_end:late_start],
-    #     "--",
-    #     color=interval_colors[interval_label],
-    #     alpha=0.3,
-    #     zorder=1,
-    # )
-
 plt.xscale("log")
 plt.yscale("log")
-plt.xlabel("Time Shift (τ)")
+plt.xlabel("Time Shift (seconds)")
 plt.ylabel("Mean Square Displacement")
 plt.title("MSD vs Time Shift (log-log)")
 plt.grid(True, alpha=0.3, which="both")
@@ -184,24 +165,27 @@ for interval_label in feature_paths.keys():
     means, _ = results[interval_label]
 
     # Calculate slopes
-    taus = np.array(sorted(means.keys()))
-    mean_values = np.array([means[tau] for tau in taus])
+    delta_t = np.array(sorted(means.keys()))
+    mean_values = np.array([means[delta_t] for delta_t in delta_t])
     valid_mask = mean_values > 0
+    delta_t_seconds = [i * SECONDS_PER_FRAME for i in delta_t]
 
     if np.sum(valid_mask) > 3:  # Need at least 4 points to calculate both slopes
-        log_taus = np.log(taus[valid_mask])
+        log_delta_t = np.log(delta_t[valid_mask])
         log_means = np.log(mean_values[valid_mask])
 
         # Calculate early and mid slopes
-        n_points = len(log_taus)
+        n_points = len(log_delta_t)
         early_end = n_points // 3
         late_start = 2 * (n_points // 3)
 
-        early_slope, _ = np.polyfit(log_taus[:early_end], log_means[:early_end], 1)
-        mid_slope, _ = np.polyfit(log_taus[early_end:late_start], log_means[early_end:late_start], 1)
+        early_slope, _ = np.polyfit(log_delta_t[:early_end], log_means[:early_end], 1)
+        mid_slope, _ = np.polyfit(
+            log_delta_t[early_end:late_start], log_means[early_end:late_start], 1
+        )
 
-        early_slopes.append(early_slope/(2*n_dimensions))
-        mid_slopes.append(mid_slope/(2*n_dimensions))
+        early_slopes.append(early_slope / (2 * embedding_dimension))
+        mid_slopes.append(mid_slope / (2 * embedding_dimension))
         intervals.append(interval_label)
 
 # Create bar plot
@@ -212,10 +196,6 @@ width = 0.35
 
 plt.bar(x - width / 2, early_slopes, width, label="Early slope", alpha=0.7)
 plt.bar(x + width / 2, mid_slopes, width, label="Mid slope", alpha=0.7)
-
-# # Add reference lines
-# plt.axhline(y=0.001, color="k", linestyle="--", alpha=0.3, label="Normal diffusion (α=1)")
-# plt.axhline(y=0, color="k", linestyle="-", alpha=0.2)
 
 plt.xlabel("Time Interval")
 plt.ylabel("Slope (α)")
