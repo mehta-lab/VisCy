@@ -10,21 +10,21 @@ from viscy.representation.evaluation.distance import (
 
 # Paths to datasets
 feature_paths = {
-    "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_7mins.zarr",
-    "21 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_21mins.zarr",
-    "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_updated_28mins.zarr",
-    "56 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_56mins.zarr",
-    "Cell Aware": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_cellaware.zarr",
-    "Classical": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_classical.zarr",
+    "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_7mins.zarr",
+    "14 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_14mins.zarr",
+    "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr",
+    "56 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_56mins.zarr",
+    "91 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_91mins.zarr",
+    "Classical": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr",
 }
 
 # Colors for different time intervals
 interval_colors = {
     "7 min interval": "blue",
-    "21 min interval": "red",
+    "14 min interval": "red",
     "28 min interval": "green",
     "56 min interval": "purple",
-    "Cell Aware": "orange",
+    "91 min interval": "orange",
     "Classical": "gray",
 }
 
@@ -89,6 +89,7 @@ plt.tight_layout()
 plt.show()
 
 # %% Plot MSD vs time (log-log scale with slopes)
+n_dimensions = 768
 plt.figure(figsize=(10, 6))
 
 # Plot each time interval
@@ -115,50 +116,52 @@ for interval_label, path in feature_paths.items():
     early_slope, early_intercept = np.polyfit(
         log_taus[:early_end], log_means[:early_end], 1
     )
+    early_slope /= 2 * n_dimensions
 
-    # Late slope (last third of points)
+    # middle slope (mid portions of points)
     late_start = 2 * (n_points // 3)
-    late_slope, late_intercept = np.polyfit(
-        log_taus[late_start:], log_means[late_start:], 1
+    mid_slope, mid_intercept = np.polyfit(
+        log_taus[early_end:late_start], log_means[early_end:late_start], 1
     )
+    mid_slope /= 2 * n_dimensions
 
     plt.plot(
-        valid_taus,
-        valid_means,
+        log_taus,
+        log_means,
         "-",
         color=interval_colors[interval_label],
         alpha=0.5,
         zorder=1,
     )
     plt.scatter(
-        valid_taus,
-        valid_means,
+        log_taus,
+        log_means,
         color=interval_colors[interval_label],
         s=20,
-        label=f"{interval_label} (α_early={early_slope:.2f}, α_late={late_slope:.2f})",
+        label=f"{interval_label} (α_early={early_slope:.2f}, α_mid={mid_slope:.2f})",
         zorder=2,
     )
 
-    # Plot fitted lines for early and late regions
-    early_fit = np.exp(early_intercept + early_slope * log_taus[:early_end])
-    late_fit = np.exp(late_intercept + late_slope * log_taus[late_start:])
+    # # Plot fitted lines for early and late regions
+    # early_fit = np.exp(early_intercept + early_slope * log_taus[:early_end])
+    # mid_fit = np.exp(mid_intercept + mid_slope * log_taus[early_end:late_start])
 
-    plt.plot(
-        valid_taus[:early_end],
-        early_fit,
-        "--",
-        color=interval_colors[interval_label],
-        alpha=0.3,
-        zorder=1,
-    )
-    plt.plot(
-        valid_taus[late_start:],
-        late_fit,
-        "--",
-        color=interval_colors[interval_label],
-        alpha=0.3,
-        zorder=1,
-    )
+    # plt.plot(
+    #     early_fit,
+    #     log_taus[:early_end],
+    #     "--",
+    #     color=interval_colors[interval_label],
+    #     alpha=0.3,
+    #     zorder=1,
+    # )
+    # plt.plot(
+    #     mid_fit,
+    #     log_taus[early_end:late_start],
+    #     "--",
+    #     color=interval_colors[interval_label],
+    #     alpha=0.3,
+    #     zorder=1,
+    # )
 
 plt.xscale("log")
 plt.yscale("log")
@@ -174,7 +177,7 @@ plt.show()
 
 # %% Plot slopes analysis
 early_slopes = []
-late_slopes = []
+mid_slopes = []
 intervals = []
 
 for interval_label in feature_paths.keys():
@@ -189,16 +192,16 @@ for interval_label in feature_paths.keys():
         log_taus = np.log(taus[valid_mask])
         log_means = np.log(mean_values[valid_mask])
 
-        # Calculate early and late slopes
+        # Calculate early and mid slopes
         n_points = len(log_taus)
         early_end = n_points // 3
         late_start = 2 * (n_points // 3)
 
         early_slope, _ = np.polyfit(log_taus[:early_end], log_means[:early_end], 1)
-        late_slope, _ = np.polyfit(log_taus[late_start:], log_means[late_start:], 1)
+        mid_slope, _ = np.polyfit(log_taus[early_end:late_start], log_means[early_end:late_start], 1)
 
-        early_slopes.append(early_slope)
-        late_slopes.append(late_slope)
+        early_slopes.append(early_slope/(2*n_dimensions))
+        mid_slopes.append(mid_slope/(2*n_dimensions))
         intervals.append(interval_label)
 
 # Create bar plot
@@ -208,28 +211,17 @@ x = np.arange(len(intervals))
 width = 0.35
 
 plt.bar(x - width / 2, early_slopes, width, label="Early slope", alpha=0.7)
-plt.bar(x + width / 2, late_slopes, width, label="Late slope", alpha=0.7)
+plt.bar(x + width / 2, mid_slopes, width, label="Mid slope", alpha=0.7)
 
-# Add reference lines
-plt.axhline(y=1, color="k", linestyle="--", alpha=0.3, label="Normal diffusion (α=1)")
-plt.axhline(y=0, color="k", linestyle="-", alpha=0.2)
+# # Add reference lines
+# plt.axhline(y=0.001, color="k", linestyle="--", alpha=0.3, label="Normal diffusion (α=1)")
+# plt.axhline(y=0, color="k", linestyle="-", alpha=0.2)
 
 plt.xlabel("Time Interval")
 plt.ylabel("Slope (α)")
 plt.title("MSD Slopes by Time Interval")
 plt.xticks(x, intervals, rotation=45)
 plt.legend()
-
-# Add annotations for diffusion regimes
-plt.text(
-    plt.xlim()[1] * 1.2, 1.5, "Super-diffusion", rotation=90, verticalalignment="center"
-)
-plt.text(
-    plt.xlim()[1] * 1.2, 0.5, "Sub-diffusion", rotation=90, verticalalignment="center"
-)
-
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
 plt.show()
 
 # %%
