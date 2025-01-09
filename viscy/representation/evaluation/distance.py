@@ -21,54 +21,14 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     return time_points, cosine_similarities.tolist()
 
 
-def normalize_embeddings(
-    embeddings: np.ndarray,
-    strategy: Literal["per_feature", "per_embedding", "per_dataset"] = "per_feature",
-) -> np.ndarray:
-    """Normalize embeddings using different strategies.
-
-    Parameters
-    ----------
-    embeddings : np.ndarray
-        Array of shape (n_samples, n_features) containing embeddings
-    strategy : str
-        Normalization strategy:
-        - "per_feature": z-score each feature across all samples
-        - "per_embedding": normalize each embedding vector to unit norm
-        - "per_dataset": z-score entire dataset (across all features and samples)
-
-    Returns
-    -------
-    np.ndarray
-        Normalized embeddings with same shape as input
-    """
-    if strategy == "per_feature":
-        # Normalize each feature independently
-        return (embeddings - np.mean(embeddings, axis=0)) / np.std(embeddings, axis=0)
-    elif strategy == "per_embedding":
-        # Normalize each embedding to unit norm
-        norms = np.linalg.norm(embeddings, axis=1, keepdims=True)
-        return embeddings / norms
-    elif strategy == "per_dataset":
-        # Normalize entire dataset
-        return (embeddings - np.mean(embeddings)) / np.std(embeddings)
-    else:
-        raise ValueError(f"Unknown normalization strategy: {strategy}")
-
-
 def compute_displacement(
     embedding_dataset,
-    distance_metric: Literal[
-        "euclidean", "euclidean_squared", "cosine", "cosine_dissimilarity"
-    ] = "euclidean_squared",
-    embedding_coords: Literal["UMAP", "PHATE", None] = None,
-    normalize: Literal["per_feature", "per_embedding", "per_dataset", None] = None,
+    distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
 ) -> Dict[int, List[float]]:
     """Compute the displacement or mean square displacement (MSD) of embeddings.
 
     For each time difference τ, computes either:
     - |r(t + τ) - r(t)|² for squared Euclidean (MSD)
-    - |r(t + τ) - r(t)| for Euclidean
     - cos_sim(r(t + τ), r(t)) for cosine
     for all particles and initial times t.
 
@@ -83,17 +43,6 @@ def compute_displacement(
         - "euclidean_squared": Squared Euclidean distance (for MSD, default)
         - "cosine": Cosine similarity
         - "cosine_dissimilarity": 1 - cosine similarity
-    embedding_coords : str or None
-        Which embedding coordinates to use for distance computation:
-        - None: Use original features from dataset (default)
-        - "UMAP": Use UMAP coordinates (UMAP1, UMAP2)
-        - "PHATE": Use PHATE coordinates (PHATE1, PHATE2)
-    normalize : str or None
-        Normalization strategy to apply to embeddings before computing distances:
-        - None: No normalization (default)
-        - "per_feature": z-score each feature across all samples
-        - "per_embedding": normalize each embedding vector to unit norm
-        - "per_dataset": z-score entire dataset (across all features and samples)
 
     Returns
     -------
@@ -104,23 +53,7 @@ def compute_displacement(
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
-
-    # Get embeddings based on specified coordinates
-    if embedding_coords == "UMAP":
-        embeddings = np.vstack(
-            (embedding_dataset["UMAP1"].values, embedding_dataset["UMAP2"].values)
-        ).T
-    elif embedding_coords == "PHATE":
-        embeddings = np.vstack(
-            (embedding_dataset["PHATE1"].values, embedding_dataset["PHATE2"].values)
-        ).T
-    else:
-        embeddings = embedding_dataset["features"].values
-
-    # Normalize embeddings if requested
-    if normalize is not None:
-        embeddings = normalize_embeddings(embeddings, strategy=normalize)
-
+    embeddings = embedding_dataset["features"].values
     # Get unique tracks
     unique_tracks = set(zip(fov_names, track_ids))
 
@@ -150,25 +83,16 @@ def compute_displacement(
                 tau = future_time - t
                 future_embedding = track_embeddings[future_idx]
 
-                if distance_metric in ["cosine", "cosine_dissimilarity"]:
+                if distance_metric in ["cosine"]:
                     dot_product = np.dot(current_embedding, future_embedding)
                     norms = np.linalg.norm(current_embedding) * np.linalg.norm(
                         future_embedding
                     )
                     similarity = dot_product / norms
-                    displacement = (
-                        1 - similarity
-                        if distance_metric == "cosine_dissimilarity"
-                        else similarity
-                    )
+                    displacement = similarity
                 else:  # Euclidean metrics
                     diff_squared = np.sum((current_embedding - future_embedding) ** 2)
-                    displacement = (
-                        diff_squared
-                        if distance_metric == "euclidean_squared"
-                        else np.sqrt(diff_squared)
-                    )
-
+                    displacement = diff_squared
                 displacement_per_tau[int(tau)].append(displacement)
 
     return dict(displacement_per_tau)
