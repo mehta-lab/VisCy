@@ -18,6 +18,7 @@ features_paths = {
     '28 min interval': '/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr',
     '56 min interval': '/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_56mins.zarr',
     '91 min interval': '/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_91mins.zarr',
+    'classical': '/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr',
 }
 
 for interval_name, path in features_paths.items():
@@ -129,9 +130,9 @@ for interval_name, path in features_paths.items():
 
 plt.figure(figsize=(8, 6))
 plt.bar(features_paths.keys(), accuracies)
-plt.ylabel("Accuracy")
-plt.xlabel("Time interval")
-plt.title("Accuracy")
+plt.xticks(rotation=45, ha='right', fontsize=12)
+plt.ylabel("Accuracy", fontsize=14)
+plt.xlabel("Time interval", fontsize=14)
 plt.ylim(0.9, 1)
 plt.show()
 # %%
