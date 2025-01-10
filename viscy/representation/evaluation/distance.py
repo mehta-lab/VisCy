@@ -22,6 +22,20 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     return time_points, cosine_similarities.tolist()
 
 
+def calculate_euclidian_distance_cell(embedding_dataset, fov_name, track_id):
+    """Extract embeddings and calculate euclidean distances for a specific cell"""
+    filtered_data = embedding_dataset.where(
+        (embedding_dataset["fov_name"] == fov_name)
+        & (embedding_dataset["track_id"] == track_id),
+        drop=True,
+    )
+    features = filtered_data["features"].values  # (sample, features)
+    time_points = filtered_data["t"].values  # (sample,)
+    first_time_point_embedding = features[0].reshape(1, -1)
+    euclidean_distances = np.linalg.norm(first_time_point_embedding - features, axis=1)
+    return time_points, euclidean_distances.tolist()
+
+
 def compute_displacement(
     embedding_dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
@@ -85,8 +99,14 @@ def compute_displacement(
             )[0]
 
             if len(matching_indices) == 1:
-                future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
-                displacement = np.sum((current_embedding - future_embedding) ** 2)
+                if distance_metric == "euclidean_squared":
+                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
+                    displacement = np.sum((current_embedding - future_embedding) ** 2)
+                elif distance_metric == "cosine":
+                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
+                    displacement = cosine_similarity(
+                        current_embedding, future_embedding
+                    )
                 displacement_per_delta_t[delta_t].append(displacement)
     return dict(displacement_per_delta_t)
 
