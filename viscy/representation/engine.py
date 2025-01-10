@@ -202,12 +202,12 @@ class ContrastiveModule(LightningModule):
 
         # Log statistics using the original tensor
         self.log(
-            f"{tag}_mean_norm",
+            f"{tag}/mean_norm",
             torch.norm(embeddings_tensor, dim=1).mean(),
             on_epoch=True,
         )
         self.log(
-            f"{tag}_std_norm",
+            f"{tag}/std_norm",
             torch.norm(embeddings_tensor, dim=1).std(),
             on_epoch=True,
         )
