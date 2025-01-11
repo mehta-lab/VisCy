@@ -48,12 +48,7 @@ def pairwise_distance_matrix(features: ArrayLike, metric: str = "cosine") -> NDA
     NDArray
         Distance matrix of shape (n_samples, n_samples)
     """
-    distances = cdist(features, features, metric=metric)
-    if metric == "euclidean":
-        # Normalize by sqrt of embedding dimension
-        print(f"features.shape: {features.shape}")
-        distances /= np.sqrt(features.shape[1])
-    return distances
+    return cdist(features, features, metric=metric)
 
 
 def rank_nearest_neighbors(
