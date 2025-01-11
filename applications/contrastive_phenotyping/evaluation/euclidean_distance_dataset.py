@@ -4,7 +4,6 @@ from typing import Optional
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
 from numpy.typing import NDArray
 
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -25,7 +24,7 @@ from scipy.optimize import minimize_scalar
 plt.style.use("../evaluation/figure.mplstyle")
 
 
-def compute_piece_wise_dissimilarity(
+def compute_piece_wise_distance(
     features_df: pd.DataFrame, cross_dist: NDArray, rank_fractions: NDArray
 ):
     """
@@ -34,22 +33,22 @@ def compute_piece_wise_dissimilarity(
     - The blocks are not square, so we need to get the off diagonal elements
     - Get the 1 and 99 percentile of the off diagonal per block
     """
-    piece_wise_dissimilarity_per_track = []
+    piece_wise_distance_per_track = []
     piece_wise_rank_difference_per_track = []
     for name, subdata in features_df.groupby(["fov_name", "track_id"]):
         if len(subdata) > 1:
             indices = subdata.index.values
-            single_track_dissimilarity = select_block(cross_dist, indices)
+            single_track_distance = select_block(cross_dist, indices)
             single_track_rank_fraction = select_block(rank_fractions, indices)
-            piece_wise_dissimilarity = compare_time_offset(
-                single_track_dissimilarity, time_offset=1
+            piece_wise_distance = compare_time_offset(
+                single_track_distance, time_offset=1
             )
             piece_wise_rank_difference = compare_time_offset(
                 single_track_rank_fraction, time_offset=1
             )
-            piece_wise_dissimilarity_per_track.append(piece_wise_dissimilarity)
+            piece_wise_distance_per_track.append(piece_wise_distance)
             piece_wise_rank_difference_per_track.append(piece_wise_rank_difference)
-    return piece_wise_dissimilarity_per_track, piece_wise_rank_difference_per_track
+    return piece_wise_distance_per_track, piece_wise_rank_difference_per_track
 
 
 def plot_histogram(
@@ -90,7 +89,7 @@ def analyze_embedding_smoothness(
     overwrite: bool = False,
 ) -> dict:
     """
-    Analyze the smoothness and dynamic range of embeddings.
+    Analyze the smoothness and dynamic range of embeddings using Euclidean distance.
 
     Args:
         prediction_path: Path to the embedding dataset
@@ -101,62 +100,61 @@ def analyze_embedding_smoothness(
 
     Returns:
         dict: Dictionary containing metrics including:
-            - dissimilarity_mean: Mean of adjacent frame dissimilarity
-            - dissimilarity_std: Standard deviation of adjacent frame dissimilarity
-            - dissimilarity_median: Median of adjacent frame dissimilarity
-            - dissimilarity_peak: Peak of adjacent frame distribution
-            - dissimilarity_p99: 99th percentile of adjacent frame dissimilarity
-            - dissimilarity_p1: 1st percentile of adjacent frame dissimilarity
-            - dissimilarity_distribution: Full distribution of adjacent frame dissimilarities
-            - random_mean: Mean of random sampling dissimilarity
-            - random_std: Standard deviation of random sampling dissimilarity
-            - random_median: Median of random sampling dissimilarity
+            - distance_mean: Mean of adjacent frame distance
+            - distance_std: Standard deviation of adjacent frame distance
+            - distance_median: Median of adjacent frame distance
+            - distance_peak: Peak of adjacent frame distribution
+            - distance_p99: 99th percentile of adjacent frame distance
+            - distance_p1: 1st percentile of adjacent frame distance
+            - distance_distribution: Full distribution of adjacent frame distances
+            - random_mean: Mean of random sampling distance
+            - random_std: Standard deviation of random sampling distance
+            - random_median: Median of random sampling distance
             - random_peak: Peak of random sampling distribution
-            - random_distribution: Full distribution of random sampling dissimilarities
+            - random_distribution: Full distribution of random sampling distances
             - dynamic_range: Difference between random and adjacent peaks
     """
     # Read the dataset
     embeddings = read_embedding_dataset(prediction_path)
     features = embeddings["features"]
 
-    scaled_features = StandardScaler().fit_transform(features.values)
-    # Compute the cosine dissimilarity
-    cross_dist = pairwise_distance_matrix(scaled_features, metric="cosine")
+    # Compute the Euclidean distance
+    cross_dist = pairwise_distance_matrix(features, metric="euclidean")
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
-    # Compute piece-wise dissimilarity and rank difference
+    # Compute piece-wise distance and rank difference
     features_df = features["sample"].to_dataframe().reset_index(drop=True)
-    piece_wise_dissimilarity_per_track, piece_wise_rank_difference_per_track = (
-        compute_piece_wise_dissimilarity(features_df, cross_dist, rank_fractions)
+    piece_wise_distance_per_track, piece_wise_rank_difference_per_track = (
+        compute_piece_wise_distance(features_df, cross_dist, rank_fractions)
     )
 
-    all_dissimilarity = np.concatenate(piece_wise_dissimilarity_per_track)
+    all_distance = np.concatenate(piece_wise_distance_per_track)
 
-    p99_piece_wise_dissimilarity = np.array(
-        [np.percentile(track, 99) for track in piece_wise_dissimilarity_per_track]
+    p99_piece_wise_distance = np.array(
+        [np.percentile(track, 99) for track in piece_wise_distance_per_track]
     )
-    p1_percentile_piece_wise_dissimilarity = np.array(
-        [np.percentile(track, 1) for track in piece_wise_dissimilarity_per_track]
+    p1_percentile_piece_wise_distance = np.array(
+        [np.percentile(track, 1) for track in piece_wise_distance_per_track]
     )
 
-    # Random sampling values in the dissimilarity matrix with same size as adjacent frame measurements
-    n_samples = len(all_dissimilarity)
+    # Random sampling values in the distance matrix with same size as adjacent frame measurements
+    n_samples = len(all_distance)
     random_indices = np.random.randint(0, len(cross_dist), size=(n_samples, 2))
     sampled_values = cross_dist[random_indices[:, 0], random_indices[:, 1]]
 
     # Compute the peaks of both distributions using KDE
-    adjacent_peak = float(find_distribution_peak(all_dissimilarity))
+    adjacent_peak = float(find_distribution_peak(all_distance))
     random_peak = float(find_distribution_peak(sampled_values))
     dynamic_range = float(random_peak - adjacent_peak)
 
     metrics = {
-        "dissimilarity_mean": float(np.mean(all_dissimilarity)),
-        "dissimilarity_std": float(np.std(all_dissimilarity)),
-        "dissimilarity_median": float(np.median(all_dissimilarity)),
-        "dissimilarity_peak": adjacent_peak,
-        "dissimilarity_p99": p99_piece_wise_dissimilarity,
-        "dissimilarity_p1": p1_percentile_piece_wise_dissimilarity,
-        "dissimilarity_distribution": all_dissimilarity,
+        "distance_mean": float(np.mean(all_distance)),
+        "distance_std": float(np.std(all_distance)),
+        "distance_median": float(np.median(all_distance)),
+        "distance_peak": adjacent_peak,
+        "distance_p99": p99_piece_wise_distance,
+        "distance_p1": p1_percentile_piece_wise_distance,
+        "distance_distribution": all_distance,
         "random_mean": float(np.mean(sampled_values)),
         "random_std": float(np.std(sampled_values)),
         "random_median": float(np.median(sampled_values)),
@@ -166,11 +164,10 @@ def analyze_embedding_smoothness(
     }
 
     if verbose:
-
         # Plot the comparison histogram and save if output_path is provided
         fig = plt.figure()
         sns.histplot(
-            metrics["dissimilarity_distribution"],
+            metrics["distance_distribution"],
             bins=30,
             kde=True,
             color="cyan",
@@ -185,19 +182,17 @@ def analyze_embedding_smoothness(
             alpha=0.5,
             stat="density",
         )
-        plt.xlabel("Cosine Dissimilarity")
+        plt.xlabel("Euclidean Distance")
         plt.ylabel("Density")
         # Add vertical lines for the peaks
-        plt.axvline(
-            x=metrics["dissimilarity_peak"], color="cyan", linestyle="--", alpha=0.8
-        )
+        plt.axvline(x=metrics["distance_peak"], color="cyan", linestyle="--", alpha=0.8)
         plt.axvline(x=metrics["random_peak"], color="red", linestyle="--", alpha=0.8)
         plt.tight_layout()
         plt.legend(["Adjacent Frame", "Random Sample", "Adjacent Peak", "Random Peak"])
 
         if output_path and loss_name:
             output_file = Path(
-                f"{output_path}/cosine_dissimilarity_smoothness_{prediction_path.stem}_{loss_name}.pdf"
+                f"{output_path}/euclidean_distance_smoothness_{prediction_path.stem}_{loss_name}.pdf"
             )
             if output_file.exists() and not overwrite:
                 raise FileExistsError(
@@ -230,7 +225,7 @@ if __name__ == "__main__":
 
     # output_folder to save the distributions as .csv
     output_folder = Path(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/cosine_dissimilarity_distributions"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/euclidean_distance_distributions"
     )
     output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -252,7 +247,7 @@ if __name__ == "__main__":
         # Save distributions to CSV
         distributions_df = pd.DataFrame(
             {
-                "adjacent_frame": pd.Series(metrics["dissimilarity_distribution"]),
+                "adjacent_frame": pd.Series(metrics["distance_distribution"]),
                 "random_sampling": pd.Series(metrics["random_distribution"]),
             }
         )
@@ -261,14 +256,14 @@ if __name__ == "__main__":
         )
         distributions_df.to_csv(csv_path, index=False)
 
-        # Print statistics (rest of the printing code remains the same)
-        print("\nAdjacent Frame Dissimilarity Statistics:")
-        print(f"{'Mean:':<15} {metrics['dissimilarity_mean']:.3f}")
-        print(f"{'Std:':<15} {metrics['dissimilarity_std']:.3f}")
-        print(f"{'Median:':<15} {metrics['dissimilarity_median']:.3f}")
-        print(f"{'Peak:':<15} {metrics['dissimilarity_peak']:.3f}")
-        print(f"{'P1:':<15} {np.mean(metrics['dissimilarity_p1']):.3f}")
-        print(f"{'P99:':<15} {np.mean(metrics['dissimilarity_p99']):.3f}")
+        # Print statistics (existing code)
+        print("\nAdjacent Frame Distance Statistics:")
+        print(f"{'Mean:':<15} {metrics['distance_mean']:.3f}")
+        print(f"{'Std:':<15} {metrics['distance_std']:.3f}")
+        print(f"{'Median:':<15} {metrics['distance_median']:.3f}")
+        print(f"{'Peak:':<15} {metrics['distance_peak']:.3f}")
+        print(f"{'P1:':<15} {np.mean(metrics['distance_p1']):.3f}")
+        print(f"{'P99:':<15} {np.mean(metrics['distance_p99']):.3f}")
 
         # Print random sampling statistics
         print("\nRandom Sampling Statistics:")
@@ -284,7 +279,7 @@ if __name__ == "__main__":
         # Print distribution sizes
         print("\nDistribution Sizes:")
         print(
-            f"{'Adjacent Frame:':<15} {len(metrics['dissimilarity_distribution']):,d} samples"
+            f"{'Adjacent Frame:':<15} {len(metrics['distance_distribution']):,d} samples"
         )
         print(f"{'Random:':<15} {len(metrics['random_distribution']):,d} samples")
 
