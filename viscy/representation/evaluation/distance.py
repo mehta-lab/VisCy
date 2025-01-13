@@ -303,7 +303,7 @@ def compute_piece_wise_dissimilarity(
 
 def compute_embedding_distances(
     prediction_path: Path,
-    output_folder: Path,
+    output_path: Path,
     distance_metric: Literal["cosine", "euclidean", "normalized_euclidean"] = "cosine",
     verbose: bool = False,
 ) -> pd.DataFrame:
@@ -314,8 +314,8 @@ def compute_embedding_distances(
     ----------
     prediction_path : Path
         Path to the embedding dataset
-    output_folder : Path
-        Folder where to save the CSV file
+    output_path : Path
+        name of saved CSV file
     distance_metric : str, optional
         Distance metric to use for computing distances between embeddings
     verbose : bool, optional
@@ -372,7 +372,7 @@ def compute_embedding_distances(
         }
     )
 
-    csv_path = output_folder / f"{prediction_path.stem}_distributions.csv"
+    csv_path = output_path
     distributions_df.to_csv(csv_path, index=False)
 
     return distributions_df
