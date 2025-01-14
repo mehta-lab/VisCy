@@ -28,7 +28,7 @@ kornia_transform = RandomAffine3D(
 
 # %%
 def bench_monai(x):
-    # set_track_meta(False)
+    set_track_meta(False)
     with torch.inference_mode():
         for sample in x:
             _ = monai_transform(sample)
