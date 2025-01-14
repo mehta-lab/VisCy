@@ -141,9 +141,11 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         train_gpu_transforms: list[DictTransform],
         val_gpu_transforms: list[DictTransform],
         pin_memory: bool = True,
+        prefetch_factor: int | None = None,
         array_key: str = "0",
         scratch_dir: Path | None = None,
         include_wells: list[str] | None = None,
+        exclude_fovs: list[str] | None = None,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -160,7 +162,9 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         self.array_key = array_key
         self.scratch_dir = scratch_dir
         self._include_wells = include_wells
+        self._exclude_fovs = exclude_fovs
         self.prepare_data_per_node = True
+        self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
 
     @property
     def preprocessing_transforms(self) -> Compose:

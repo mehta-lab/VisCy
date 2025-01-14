@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
 from viscy.data.typing import DictTransform, NormMeta
+from viscy.preprocessing.precompute import _filter_fovs, _filter_wells
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -36,6 +37,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
     batch_size: int
     num_workers: int
     pin_memory: bool
+    prefetch_factor: int | None
 
     def _maybe_sampler(
         self, dataset: Dataset, shuffle: bool
@@ -59,6 +61,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             collate_fn=list_data_collate,
+            prefetch_factor=self.prefetch_factor,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -74,6 +77,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             collate_fn=list_data_collate,
+            prefetch_factor=self.prefetch_factor,
         )
 
     @property
@@ -171,19 +175,13 @@ class CachedOmeZarrDataset(Dataset):
 
 class SelectWell:
     _include_wells: list[str] | None
-
-    def _include_well_name(self, name: str) -> bool:
-        if self._include_wells is None:
-            return True
-        else:
-            return name in self._include_wells
+    _exclude_fovs: list[str] | None
 
     def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
         positions = []
-        for well_name, well in plate.wells():
-            if self._include_well_name(well_name):
-                for _, p in well.positions():
-                    positions.append(p)
+        for well in _filter_wells(plate, include_wells=self._include_wells):
+            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
+                positions.append(fov)
         if len(positions) < 2:
             raise ValueError(
                 "At least 2 FOVs are required for training and validation."
@@ -237,6 +235,7 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         pin_memory: bool = True,
         skip_cache: bool = False,
         include_wells: list[str] | None = None,
+        exclude_fovs: list[str] | None = None,
     ):
         super().__init__()
         self.data_path = data_path
@@ -251,6 +250,7 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         self.pin_memory = pin_memory
         self.skip_cache = skip_cache
         self._include_wells = include_wells
+        self._exclude_fovs = exclude_fovs
 
     @property
     def train_cpu_transforms(self) -> Compose:
