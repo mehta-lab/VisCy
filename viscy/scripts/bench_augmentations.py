@@ -9,7 +9,7 @@ from torch.utils.benchmark import Timer
 seed_everything(42)
 
 # %%
-x = torch.rand(32, 2, 15, 512, 512, device="cpu")
+x = torch.rand(32, 2, 15, 512, 512, device="cuda")
 
 # %%
 monai_transform = RandAffine(
@@ -22,6 +22,7 @@ monai_transform = RandAffine(
 kornia_transform = RandomAffine3D(
     degrees=(360.0, 0.0, 0.0),
     scale=((0.8, 1.2), (0.7, 1.3), (0.7, 1.3)),
+    p=1.0,
 )
 
 
@@ -50,7 +51,7 @@ monai_timer = Timer(
     globals=globals_injection,
     label="monai",
     setup="from __main__ import bench_monai",
-    num_threads=16
+    # num_threads=16,
 )
 
 kornia_timer = Timer(
@@ -58,7 +59,7 @@ kornia_timer = Timer(
     globals=globals_injection,
     label="kornia",
     setup="from __main__ import bench_kornia",
-    num_threads=16
+    # num_threads=16,
 )
 
 # %%
