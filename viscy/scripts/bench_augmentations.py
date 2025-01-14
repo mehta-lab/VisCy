@@ -27,7 +27,7 @@ kornia_transform = RandomAffine3D(
 
 # %%
 def bench_monai(x):
-    set_track_meta(False)
+    # set_track_meta(False)
     with torch.inference_mode():
         for sample in x:
             _ = monai_transform(sample)
@@ -50,6 +50,7 @@ monai_timer = Timer(
     globals=globals_injection,
     label="monai",
     setup="from __main__ import bench_monai",
+    num_threads=16
 )
 
 kornia_timer = Timer(
@@ -57,6 +58,7 @@ kornia_timer = Timer(
     globals=globals_injection,
     label="kornia",
     setup="from __main__ import bench_kornia",
+    num_threads=16
 )
 
 # %%
