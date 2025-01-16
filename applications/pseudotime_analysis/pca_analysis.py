@@ -8,6 +8,10 @@ import seaborn as sns
 from viscy.representation.embedding_writer import read_embedding_dataset
 from scipy.spatial.distance import pdist, squareform
 
+# Set global random seed for reproducibility
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+
 
 def analyze_pc_loadings(pca, feature_names=None, top_n=5):
     """Analyze which features contribute most to each PC."""
@@ -157,36 +161,129 @@ def analyze_pc_distributions(
 
 def analyze_embeddings_with_pca(
     embedding_path,
-    annotation_path,
-    phenotype_of_interest=2,
+    annotation_path=None,
+    phenotype_of_interest=None,
+    n_random_tracks=10,
     n_components=8,
-    seed_timepoint=55,
+    seed_timepoint=None,
     time_window=10,
+    fov_patterns=None,
 ):
+    """Analyze embeddings using PCA, either for specific phenotypes or random tracks.
+
+    Args:
+        embedding_path: Path to embedding zarr file
+        annotation_path: Optional path to annotation CSV file. If None, uses random tracks
+        phenotype_of_interest: Which phenotype to analyze (only used if annotation_path is provided)
+        n_random_tracks: Number of random tracks to select (only used if annotation_path is None)
+        n_components: Number of PCA components
+        seed_timepoint: Center of time window. If None, uses all timepoints
+        time_window: Size of time window (+/-). Only used if seed_timepoint is not None
+        fov_patterns: List of patterns to filter FOVs (e.g. ['/C/2/*', '/B/3/*']).
+                     Optional even when using annotation_path - can be used to restrict
+                     analysis to specific FOVs while still using phenotype information.
+    """
+    if annotation_path is None:
+        print(f"\nUsing random tracks (global seed: {RANDOM_SEED})")
+
+    if seed_timepoint is None:
+        print("\nUsing all timepoints")
+    else:
+        print(f"\nUsing time window: {seed_timepoint}±{time_window}")
+
     # Load embeddings
     embedding_dataset = read_embedding_dataset(embedding_path)
     features = embedding_dataset["features"]
     track_ids = embedding_dataset["track_id"].values
     fovs = embedding_dataset["fov_name"].values
-    # Add time information for ordering points
     time_points = embedding_dataset["t"].values
 
-    # Load annotations
-    annotations_df = pd.read_csv(annotation_path)
+    # Filter FOVs if patterns are provided
+    if fov_patterns is not None:
+        print(f"\nFiltering FOVs with patterns: {fov_patterns}")
+        fov_mask = np.zeros_like(fovs, dtype=bool)
+        for pattern in fov_patterns:
+            fov_mask |= np.char.find(fovs.astype(str), pattern) >= 0
 
-    # Create a mapping dictionary for annotations
-    annotation_map = {
-        (str(row["FOV"]), int(row["Track_id"])): row["Observed phenotype"]
-        for _, row in annotations_df.iterrows()
-    }
+        # Update all arrays with the FOV mask
+        features = features[fov_mask]
+        track_ids = track_ids[fov_mask]
+        fovs = fovs[fov_mask]
+        time_points = time_points[fov_mask]
 
-    # Create labels array, -1 for unannotated cells
-    labels = np.array(
-        [
-            annotation_map.get((str(fov), int(track_id)), -1)
-            for fov, track_id in zip(fovs, track_ids)
-        ]
-    )
+        print(f"Found {len(np.unique(fovs))} FOVs matching patterns")
+
+    # Get tracks of interest
+    if annotation_path is not None:
+        # Load annotations and get phenotype tracks
+        annotations_df = pd.read_csv(annotation_path)
+        annotation_map = {
+            (str(row["FOV"]), int(row["Track_id"])): row["Observed phenotype"]
+            for _, row in annotations_df.iterrows()
+        }
+        labels = np.array(
+            [
+                annotation_map.get((str(fov), int(track_id)), -1)
+                for fov, track_id in zip(fovs, track_ids)
+            ]
+        )
+        selection_mask = labels == phenotype_of_interest
+        tracks_of_interest = np.unique(track_ids[selection_mask])
+        other_mask = ~selection_mask
+        mode = f"phenotype {phenotype_of_interest}"
+    else:
+        # Select random tracks from different FOVs when possible
+        # Create a mapping of FOV to tracks
+        fov_track_map = {}
+        for fov, track_id in zip(fovs, track_ids):
+            if fov not in fov_track_map:
+                fov_track_map[fov] = []
+            if track_id not in fov_track_map[fov]:  # Avoid duplicates
+                fov_track_map[fov].append(track_id)
+
+        # Get list of all FOVs
+        available_fovs = list(fov_track_map.keys())
+        tracks_of_interest = []
+
+        # First, try to get one track from each FOV
+        np.random.shuffle(available_fovs)  # Randomize FOV order
+        for fov in available_fovs:
+            if len(tracks_of_interest) < n_random_tracks:
+                # Randomly select a track from this FOV
+                track = np.random.choice(fov_track_map[fov])
+                tracks_of_interest.append(track)
+            else:
+                break
+
+        # If we still need more tracks, randomly select from remaining tracks
+        if len(tracks_of_interest) < n_random_tracks:
+            # Get all remaining tracks that aren't already selected
+            remaining_tracks = [
+                track
+                for track in np.unique(track_ids)
+                if track not in tracks_of_interest
+            ]
+            # Select additional tracks
+            additional_tracks = np.random.choice(
+                remaining_tracks,
+                size=min(
+                    n_random_tracks - len(tracks_of_interest), len(remaining_tracks)
+                ),
+                replace=False,
+            )
+            tracks_of_interest.extend(additional_tracks)
+
+        tracks_of_interest = np.array(tracks_of_interest)
+        selection_mask = np.isin(track_ids, tracks_of_interest)
+        other_mask = ~selection_mask
+        labels = np.where(selection_mask, 1, 0)
+        mode = "random tracks"
+
+        # Print selected tracks with their FOVs
+        print("\nSelected tracks:")
+        for track in tracks_of_interest:
+            track_fovs = np.unique(fovs[track_ids == track])
+            print(f"Track {track}: FOV {track_fovs[0]}")
 
     # Scale the features
     scaler = StandardScaler()
@@ -200,9 +297,7 @@ def analyze_embeddings_with_pca(
     explained_variance_ratio = pca.explained_variance_ratio_
     cumulative_variance_ratio = np.cumsum(explained_variance_ratio)
 
-    # Create track-specific colors for the phenotype of interest
-    phenotype_mask = labels == phenotype_of_interest
-    tracks_of_interest = np.unique(track_ids[phenotype_mask])
+    # Create track-specific colors
     track_colors = plt.cm.tab10(np.linspace(0, 1, len(tracks_of_interest)))
     track_color_map = dict(zip(tracks_of_interest, track_colors))
 
@@ -218,8 +313,7 @@ def analyze_embeddings_with_pca(
     ax1.legend(["Individual", "Cumulative"])
 
     # First two components plot
-    # Plot other phenotypes in gray
-    other_mask = labels != phenotype_of_interest
+    # Plot other tracks/cells in gray
     ax2.scatter(
         pca_result[other_mask, 0],
         pca_result[other_mask, 1],
@@ -229,9 +323,9 @@ def analyze_embeddings_with_pca(
         s=10,
     )
 
-    # Plot each track of the phenotype of interest with decreasing opacity
+    # Plot tracks of interest with decreasing opacity
     for track_id in tracks_of_interest:
-        track_mask = (track_ids == track_id) & phenotype_mask
+        track_mask = track_ids == track_id
         track_points = pca_result[track_mask]
         track_times = time_points[track_mask]
 
@@ -240,10 +334,14 @@ def analyze_embeddings_with_pca(
         track_points = track_points[sort_idx]
         track_times = track_times[sort_idx]
 
-        # Select points within the time window
-        time_mask = (track_times >= seed_timepoint - time_window) & (
-            track_times <= seed_timepoint + time_window
-        )
+        # Apply time window if specified
+        if seed_timepoint is not None:
+            time_mask = (track_times >= seed_timepoint - time_window) & (
+                track_times <= seed_timepoint + time_window
+            )
+        else:
+            time_mask = np.ones_like(track_times, dtype=bool)  # Use all points
+
         if np.any(time_mask):  # Only plot if there are points in the window
             window_points = track_points[time_mask]
             window_times = track_times[time_mask]
@@ -269,9 +367,10 @@ def analyze_embeddings_with_pca(
 
     ax2.set_xlabel("First Principal Component")
     ax2.set_ylabel("Second Principal Component")
-    ax2.set_title(
-        f"First Two Principal Components - Phenotype {phenotype_of_interest}\nTime window: {seed_timepoint}±{time_window}"
-    )
+    title = f"First Two Principal Components - {mode}"
+    if seed_timepoint is not None:
+        title += f"\nTime window: {seed_timepoint}±{time_window}"
+    ax2.set_title(title)
     ax2.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 
     plt.tight_layout()
@@ -294,7 +393,7 @@ def analyze_embeddings_with_pca(
 
                 # Plot each track with decreasing opacity
                 for track_id in tracks_of_interest:
-                    track_mask = (track_ids == track_id) & phenotype_mask
+                    track_mask = track_ids == track_id
                     track_points_j = pca_result[track_mask, j]
                     track_points_i = pca_result[track_mask, i]
                     track_times = time_points[track_mask]
@@ -338,7 +437,7 @@ def analyze_embeddings_with_pca(
                     pca_result[other_mask, i], ax=axes[i, i], color="gray", alpha=0.3
                 )
                 for track_id in tracks_of_interest:
-                    track_mask = (track_ids == track_id) & phenotype_mask
+                    track_mask = track_ids == track_id
                     # For histograms, use all points in the time window
                     time_mask = (
                         time_points[track_mask] >= seed_timepoint - time_window
@@ -371,7 +470,7 @@ def analyze_embeddings_with_pca(
         track_ids,
         time_points,
         labels,
-        phenotype_of_interest,
+        1 if annotation_path is None else phenotype_of_interest,
         seed_timepoint,
         time_window,
     )
@@ -394,14 +493,14 @@ def analyze_embeddings_with_pca(
     dist_analysis = analyze_pc_distributions(
         pca_result,
         labels,
-        phenotype_of_interest,
-        time_points,
+        1 if annotation_path is None else phenotype_of_interest,
+        time_points if seed_timepoint is not None else None,
         seed_timepoint,
         time_window,
     )
     print("\nPC Distribution Analysis:")
     print(
-        "(Separation score > 1 suggests good separation between phenotype and background)"
+        "(Separation score > 1 suggests good separation between selected tracks and background)"
     )
     print(dist_analysis.to_string(index=False))
 
@@ -410,6 +509,7 @@ def analyze_embeddings_with_pca(
         pca_result,
         explained_variance_ratio,
         labels,
+        tracks_of_interest,
         pc_analysis,
         cluster_analysis,
         dist_analysis,
@@ -420,20 +520,45 @@ def analyze_embeddings_with_pca(
 if __name__ == "__main__":
     embedding_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
     annotation_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/phenotype_observations.csv"
+    # %%
+    # Using phenotype annotations with specific FOVs
+    print("\nAnalyzing phenotype 1 in specific FOVs:")
     (
         pca,
         pca_result,
         variance_ratio,
         labels,
+        tracks,
         pc_analysis,
         cluster_analysis,
         dist_analysis,
     ) = analyze_embeddings_with_pca(
         embedding_path,
-        annotation_path,
+        annotation_path=annotation_path,
         phenotype_of_interest=1,
         seed_timepoint=55,
         time_window=10,
+        fov_patterns=["/C/2/", "/B/3/", "/B/2/"],  # Specify FOV patterns
+    )
+
+    # Using random tracks from specific FOVs
+    print("\nAnalyzing random tracks from specific FOVs:")
+    (
+        pca,
+        pca_result,
+        variance_ratio,
+        labels,
+        tracks,
+        pc_analysis,
+        cluster_analysis,
+        dist_analysis,
+    ) = analyze_embeddings_with_pca(
+        embedding_path,
+        annotation_path=None,  # This triggers random track selection
+        n_random_tracks=10,
+        seed_timepoint=55,
+        time_window=30,
+        fov_patterns=["/C/2/", "/B/3/", "/B/2/"],  # Specify FOV patterns
     )
 
 # %%
