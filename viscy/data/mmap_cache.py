@@ -192,7 +192,11 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         cache_dir = Path(
             scratch_dir,
             os.getenv("SLURM_JOB_ID", "viscy_cache"),
-            str(torch.distributed.get_rank()),
+            str(
+                torch.distributed.get_rank()
+                if torch.distributed.is_initialized()
+                else 0
+            ),
             self.data_path.name,
         )
         cache_dir.mkdir(parents=True, exist_ok=True)
