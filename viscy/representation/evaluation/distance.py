@@ -305,7 +305,6 @@ def compute_embedding_distances(
     prediction_path: Path,
     output_path: Path,
     distance_metric: Literal["cosine", "euclidean", "normalized_euclidean"] = "cosine",
-    verbose: bool = False,
 ) -> pd.DataFrame:
     """
     Compute and save pairwise distances between embeddings.
@@ -318,8 +317,6 @@ def compute_embedding_distances(
         name of saved CSV file
     distance_metric : str, optional
         Distance metric to use for computing distances between embeddings
-    verbose : bool, optional
-        If True, plots the distance matrix visualization
 
     Returns
     -------
@@ -340,15 +337,15 @@ def compute_embedding_distances(
     if distance_metric == "euclidean":
         cross_dist /= np.sqrt(features.shape[1])
 
-    if verbose:
-        # Plot the distance matrix
-        plt.figure(figsize=(10, 10))
-        plt.imshow(cross_dist, cmap="viridis")
-        plt.colorbar(label=f"{distance_metric.capitalize()} Distance")
-        plt.title(f"{distance_metric.capitalize()} Distance Matrix")
-        plt.tight_layout()
-        plt.show()
-
+    # Plot the distance matrix
+    plt.figure(figsize=(10, 10))
+    plt.imshow(cross_dist, cmap="viridis")
+    plt.colorbar(label=f"{distance_metric.capitalize()} Distance")
+    plt.title(f"{distance_metric.capitalize()} Distance Matrix")
+    plt.tight_layout()
+    base_name = prediction_path.stem
+    plt.savefig(output_path / f"{base_name}_distance_matrix.png", dpi=600)
+    plt.close()
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
     # Compute piece-wise dissimilarity and rank difference
