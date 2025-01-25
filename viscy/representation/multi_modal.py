@@ -94,12 +94,11 @@ class JointContrastiveModule(ContrastiveModule):
         )
         loss_joint = self._info_nce_style_loss(
             anchor_source_projection, anchor_target_projection
+        ) + self._info_nce_style_loss(
+            positive_target_projection, positive_source_projection
         )
-        # + self._info_nce_style_loss(
-        #     positive_target_projection, positive_source_projection
-        # )
         # loss = loss_source + loss_target + loss_joint
-        loss = loss_target + loss_joint
+        loss = loss_target * 2 + loss_joint
         self._log_step_samples(batch_idx, (anchor_img, pos_img), stage)
         self._log_metrics(
             loss=loss,
