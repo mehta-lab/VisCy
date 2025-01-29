@@ -8,6 +8,38 @@ from torch.optim.lr_scheduler import CyclicLR, ReduceLROnPlateau
 
 
 class TarrowModule(LightningModule):
+    """Lightning Module wrapper for TimeArrowNet.
+
+    Parameters
+    ----------
+    backbone : str, default="unet"
+        Dense network architecture
+    projection_head : str, default="minimal_batchnorm"
+        Dense projection head architecture
+    classification_head : str, default="minimal"
+        Classification head architecture
+    n_frames : int, default=2
+        Number of input frames
+    n_features : int, default=16
+        Number of output features from the backbone
+    n_input_channels : int, default=1
+        Number of input channels
+    symmetric : bool, default=False
+        If True, use permutation-equivariant classification head
+    learning_rate : float, default=1e-4
+        Learning rate for optimizer
+    weight_decay : float, default=1e-6
+        Weight decay for optimizer
+    lambda_decorrelation : float, default=0.01
+        Prefactor of decorrelation loss
+    lr_scheduler : str, default="cyclic"
+        Learning rate scheduler ('plateau' or 'cyclic')
+    lr_patience : int, default=50
+        Patience for learning rate scheduler
+    cam_size : tuple or int, optional
+        Size of the class activation map (H, W). If None, use input size.
+    """
+
     def __init__(
         self,
         backbone="unet",
@@ -22,24 +54,9 @@ class TarrowModule(LightningModule):
         lambda_decorrelation=0.01,
         lr_scheduler="cyclic",
         lr_patience=50,
+        cam_size=None,
         **kwargs,
     ):
-        """Lightning Module wrapper for TimeArrowNet.
-
-        Args:
-            backbone: Dense network architecture
-            projection_head: Dense projection head architecture
-            classification_head: Classification head architecture
-            n_frames: Number of input frames
-            n_features: Number of output features from the backbone
-            n_input_channels: Number of input channels
-            symmetric: If True, use permutation-equivariant classification head
-            learning_rate: Learning rate for optimizer
-            weight_decay: Weight decay for optimizer
-            lambda_decorrelation: Prefactor of decorrelation loss
-            lr_scheduler: Learning rate scheduler ('plateau' or 'cyclic')
-            lr_patience: Patience for learning rate scheduler
-        """
         super().__init__()
         self.save_hyperparameters()
 
@@ -51,16 +68,46 @@ class TarrowModule(LightningModule):
             n_features=n_features,
             n_input_channels=n_input_channels,
             symmetric=symmetric,
-            device="cpu",  # Let Lightning handle device placement
+            cam_size=cam_size,
         )
 
         self.criterion = nn.CrossEntropyLoss(reduction="none")
         self.criterion_decorr = DecorrelationLoss()
 
     def forward(self, x):
+        """Forward pass through the model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, n_frames, channels, height, width)
+
+        Returns
+        -------
+        tuple
+            Tuple of (output, projection) where:
+            - output is the classification logits
+            - projection is the feature space projection
+        """
         return self.model(x, mode="both")
 
-    def _shared_step(self, batch, batch_idx, phase="train"):
+    def _shared_step(self, batch, batch_idx, step="train"):
+        """Shared step for training and validation.
+
+        Parameters
+        ----------
+        batch : tuple
+            Tuple of (images, labels)
+        batch_idx : int
+            Index of the current batch
+        step : str, default="train"
+            Current step type ("train" or "val")
+
+        Returns
+        -------
+        torch.Tensor
+            Combined loss (classification + decorrelation)
+        """
         x, y = batch
         out, pro = self(x)
 
@@ -86,10 +133,14 @@ class TarrowModule(LightningModule):
 
         acc = torch.mean((pred == y).float())
 
-        self.log(f"{phase}_loss", loss, prog_bar=True)
-        self.log(f"{phase}_loss_decorr", loss_decorr, prog_bar=True)
-        self.log(f"{phase}_accuracy", acc, prog_bar=True)
-        self.log(f"{phase}_pred1_ratio", pred.sum().float() / len(pred))
+        # Main classification loss
+        self.log(f"loss/{step}_loss", loss, prog_bar=True)
+        # Decorrelation loss for feature space
+        self.log(f"loss/{step}_loss_decorr", loss_decorr, prog_bar=True)
+        # Classification accuracy
+        self.log(f"metric/{step}_accuracy", acc, prog_bar=True)
+        # Ratio of positive predictions (class 1) - useful to detect class imbalance
+        self.log(f"metric/{step}_pred1_ratio", pred.sum().float() / len(pred))
 
         return loss_all
 

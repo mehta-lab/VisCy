@@ -8,6 +8,36 @@ import torch
 
 
 class TarrowDataModule(LightningDataModule):
+    """Lightning DataModule for TimeArrowNet training.
+
+    Parameters
+    ----------
+    ome_zarr_path : str or Path
+        Path to OME-Zarr file
+    channel_name : str
+        Name of the channel to load
+    train_split : float, default=0.8
+        Fraction of data to use for training (0.0 to 1.0)
+    batch_size : int, default=16
+        Batch size for dataloaders
+    num_workers : int, default=8
+        Number of workers for dataloaders
+    prefetch_factor : int, optional
+        Prefetch factor for dataloaders
+    include_fov_names : list[str], default=[]
+        List of FOV names to include. If empty, use all FOVs
+    train_samples_per_epoch : int, default=100000
+        Number of training samples per epoch
+    val_samples_per_epoch : int, default=10000
+        Number of validation samples per epoch
+    resolution : int, default=0
+        Resolution level to load from OME-Zarr
+    z_slice : int, default=0
+        Z-slice to load
+    **kwargs : dict
+        Additional arguments passed to TarrowDataset
+    """
+
     def __init__(
         self,
         ome_zarr_path: str | Path,
@@ -23,22 +53,6 @@ class TarrowDataModule(LightningDataModule):
         z_slice: int = 0,
         **kwargs,
     ):
-        """Initialize TarrowDataModule.
-
-        Args:
-            ome_zarr_path: Path to OME-Zarr file
-            channel_name: Name of the channel to load
-            train_split: Fraction of data to use for training (0.0 to 1.0)
-            batch_size: Batch size for dataloaders
-            num_workers: Number of workers for dataloaders
-            prefetch_factor: Prefetch factor for dataloaders
-            include_fov_names: List of FOV names to include. If empty, use all FOVs.
-            train_samples_per_epoch: Number of training samples per epoch
-            val_samples_per_epoch: Number of validation samples per epoch
-            resolution: Resolution level to load from OME-Zarr
-            z_slice: Z-slice to load
-            **kwargs: Additional arguments passed to TarrowDataset
-        """
         super().__init__()
         self.ome_zarr_path = ome_zarr_path
         self.channel_name = channel_name
@@ -56,14 +70,20 @@ class TarrowDataModule(LightningDataModule):
     def _get_channel_index(self, plate) -> int:
         """Get the index of the specified channel from the plate metadata.
 
-        Args:
-            plate: OME-Zarr plate object
+        Parameters
+        ----------
+        plate : iohub.ngff.Plate
+            OME-Zarr plate object
 
-        Returns:
+        Returns
+        -------
+        int
             Index of the specified channel
 
-        Raises:
-            ValueError: If channel_name is not found in available channels
+        Raises
+        ------
+        ValueError
+            If channel_name is not found in available channels
         """
         # Get channel names from first position
         _, first_pos = next(plate.positions())
@@ -80,11 +100,16 @@ class TarrowDataModule(LightningDataModule):
     ) -> list[np.ndarray]:
         """Load all images from positions into memory.
 
-        Args:
-            positions: List of positions to load
-            channel_idx: Index of channel to load
+        Parameters
+        ----------
+        positions : list[Position]
+            List of positions to load
+        channel_idx : int
+            Index of channel to load
 
-        Returns:
+        Returns
+        -------
+        list[np.ndarray]
             List of 2D numpy arrays
         """
         imgs = []
@@ -96,6 +121,18 @@ class TarrowDataModule(LightningDataModule):
         return imgs
 
     def setup(self, stage: str):
+        """Set up the data module for a specific stage.
+
+        Parameters
+        ----------
+        stage : str
+            Stage to set up for ("fit", "test", or "predict")
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not "fit"
+        """
         plate = open_ome_zarr(self.ome_zarr_path, mode="r")
 
         # Get channel index once
@@ -140,6 +177,13 @@ class TarrowDataModule(LightningDataModule):
             raise NotImplementedError(f"Invalid stage: {stage}")
 
     def train_dataloader(self):
+        """Create the training dataloader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader for training data with random sampling
+        """
         return DataLoader(
             self.train_dataset,
             sampler=torch.utils.data.RandomSampler(
@@ -154,6 +198,13 @@ class TarrowDataModule(LightningDataModule):
         )
 
     def val_dataloader(self):
+        """Create the validation dataloader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader for validation data with random sampling
+        """
         return DataLoader(
             self.val_dataset,
             sampler=torch.utils.data.RandomSampler(
@@ -168,6 +219,18 @@ class TarrowDataModule(LightningDataModule):
         )
 
     def test_dataloader(self):
+        """Create the test dataloader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader for test data without shuffling
+
+        Raises
+        ------
+        NotImplementedError
+            Test stage is not implemented yet
+        """
         return DataLoader(
             self.test_dataset,
             batch_size=self.batch_size,
