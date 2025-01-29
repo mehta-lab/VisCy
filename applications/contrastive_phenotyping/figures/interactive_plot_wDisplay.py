@@ -1,4 +1,3 @@
-
 # This is a simple example of an interactive plot using Dash.
 from pathlib import Path
 import dash
@@ -12,9 +11,13 @@ from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 import dash.dependencies as dd
+from functools import lru_cache
+from collections import defaultdict
+import atexit
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks
+from viscy.utils.log_images import render_images
 
 # Initialize Dash app
 app = dash.Dash(__name__)
@@ -24,6 +27,7 @@ features_path = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/jun_time_interval_1_epoch_178.zarr"
 )
 embedding_dataset = read_embedding_dataset(features_path)
+
 features = embedding_dataset["features"]
 scaled_features = StandardScaler().fit_transform(features.values)
 pca = PCA(n_components=3)
@@ -34,6 +38,10 @@ features = (
     .assign_coords(PCA3=("sample", embedding[:, 2]))
     .set_index(sample=["PCA1", "PCA2", "PCA3"], append=True)
 )
+
+# Filter data for FOVs starting with '/0/6/000000'
+mask = features.coords['fov_name'].str.startswith('/0/6/000000')
+features = features.sel(sample=mask)
 
 df = pd.DataFrame({k: v for k, v in features.coords.items() if k != "features"})
 
@@ -67,72 +75,104 @@ app.layout = html.Div([
     ])
 ])
 
-# Helper function to convert numpy array to base64 image
+def normalize_image(img_array):
+    """Normalize a single image array to [0, 255]"""
+    img_array = np.clip(img_array, img_array.min(), img_array.max())
+    img_array = (img_array - img_array.min()) / (img_array.max() - img_array.min())
+    return (img_array * 255).astype(np.uint8)
+
 def numpy_to_base64(img_array):
-    # Clip, normalize, and scale to the range [0, 255]
-    img_array = np.clip(img_array, img_array.min(), img_array.max()) # Clip values to the expected range
-    img_array = (img_array - img_array.min()) / (img_array.max() - img_array.min())  # Normalize to [0, 1]
-    img_array = (img_array * 255).astype(np.uint8)  # Scale to [0, 255] and convert to uint8
-    
+    """Convert numpy array to base64 string"""
+    # Ensure img_array is uint8 before creating Image
+    if not isinstance(img_array, np.uint8):
+        img_array = img_array.astype(np.uint8)
     img = Image.fromarray(img_array)
     buffered = BytesIO()
     img.save(buffered, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode("utf-8")
 
+# Create an image cache before initializing the Dash app
+image_cache = {}
 
-# Callback to update the image when a point is hovered over
+def cleanup_cache():
+    """Clear the image cache when the program exits"""
+    print("Cleaning up image cache...")
+    image_cache.clear()
+
+# Register the cleanup function
+atexit.register(cleanup_cache)
+
+def preload_images(df):
+    """Preload all images into memory"""
+    print("Preloading images into cache...")
+    
+    groups = df.groupby(['fov_name', 'track_id'])
+    
+    for (fov_name, track_id), group in groups:
+        # Find the lowest t value for this group
+        min_t = group['t'].min()
+        
+        predict_dataset = dataset_of_tracks(
+            data_path,
+            tracks_path,
+            [fov_name],
+            [track_id],
+            z_range=(31,36),
+            source_channel=["Phase3D", "MultiCam_GFP_mCherry_BF-Prime BSI Express"],
+        )
+            
+        try:
+            image_patches = np.stack([p["anchor"].numpy() for p in predict_dataset])
+            
+            for i in range(image_patches.shape[0]):
+                img = image_patches[i]
+                t = group['t'].iloc[i]
+                cache_key = (fov_name, track_id, t)
+                
+                # Extract and normalize each channel independently
+                channel1 = normalize_image(img[0, 2])  # First channel at z=2
+                channel2 = normalize_image(np.max(img[1], axis=0))  # Max projection of second channel
+                
+                # Ensure both channels are uint8
+                channel1 = channel1.astype(np.uint8)
+                channel2 = channel2.astype(np.uint8)
+                
+                # Concatenate the normalized channels horizontally
+                combined_img = np.hstack((channel1, channel2))
+                
+                # Store the base64 string in the cache
+                try:
+                    image_cache[cache_key] = numpy_to_base64(combined_img)
+                except Exception as e:
+                    print(f"Error converting image to base64 for {cache_key}: {e}")
+                    continue
+                
+        except Exception as e:
+            print(f"Error processing images for {fov_name}, {track_id}: {e}")
+            continue
+    
+    print(f"Cached {len(image_cache)} images")
+
+# Call preload before creating the Dash app
+preload_images(df)
+
+# Modify the callback to use cached images
 @app.callback(
     dd.Output("hover-image", "src"),
     [dd.Input("scatter-plot", "hoverData")]
 )
 def update_image(hoverData):
     if hoverData is None:
-        return ""  # Return empty if no hover
+        return ""
 
     # Extract the necessary information from hoverData
-    fov_name = hoverData['points'][0]['hovertext']  # fov_name is in hovertext
-    track_id = hoverData['points'][0]['customdata'][2]  # track_id from hover_data
-    t = hoverData['points'][0]['customdata'][1]  # t from hover_data
-
-    print(f"Hovering over: fov_name={fov_name}, track_id={track_id}, t={t}")
-
-    # Lookup the image path based on fov_name, track_id, and t
-    # image_key = (fov_name, track_id, t)
-
-    # Get the image URL if it exists
-    # return image_paths.get(image_key, "")  # Return empty string if no match
-    source_channel = ["Phase3D"]
-    z_range = (33,34)
-    predict_dataset = dataset_of_tracks(
-        data_path,
-        tracks_path,
-        [fov_name],
-        [track_id],
-        z_range=z_range,
-        source_channel=source_channel,
-    )
-    # image_patch = np.stack([p["anchor"][0, 7].numpy() for p in predict_dataset])
-
-    # Check if the dataset was retrieved successfully
-    if not predict_dataset:
-        print(f"No dataset found for fov_name={fov_name}, track_id={track_id}, t={t}")
-        return ""  # Return empty if no dataset is found
-
-    # Extract the image patch (assuming it's a numpy array)
-    try:
-        image_patch = np.stack([p["anchor"][0].numpy() for p in predict_dataset])
-        image_patch = image_patch[0,0]
-        print(f"Image patch shape: {image_patch.shape}")
-    except Exception as e:
-        print(f"Error extracting image patch: {e}")
-        return ""
-
-    # Check if the image is valid (this step is just a safety check)
-    if image_patch.ndim != 2:
-        print(f"Invalid image data: image_patch is not 2D.")
-        return ""
-
-    return numpy_to_base64(image_patch)
+    fov_name = hoverData['points'][0]['hovertext']
+    track_id = hoverData['points'][0]['customdata'][2]
+    t = hoverData['points'][0]['customdata'][1]
+    
+    # Get image from cache
+    cache_key = (fov_name, track_id, t)
+    return image_cache.get(cache_key, "")
 
 if __name__ == '__main__':
-    app.run_server(debug=True)
+    app.run_server(debug=False)
