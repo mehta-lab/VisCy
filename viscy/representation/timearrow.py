@@ -1,13 +1,18 @@
+import logging
+from typing import Literal, Sequence
+
+import numpy as np
 import torch
 import torch.nn as nn
-import torchvision
 from lightning.pytorch import LightningModule
-from lightning.pytorch.callbacks import Callback
 from tarrow.models import TimeArrowNet
 from tarrow.models.losses import DecorrelationLoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CyclicLR, ReduceLROnPlateau
-from torch.utils.data import DataLoader
+
+from viscy.utils.log_images import render_images
+
+logger = logging.getLogger(__name__)
 
 
 class TarrowModule(LightningModule):
@@ -41,6 +46,10 @@ class TarrowModule(LightningModule):
         Patience for learning rate scheduler
     cam_size : tuple or int, optional
         Size of the class activation map (H, W). If None, use input size.
+    log_batches_per_epoch : int, default=8
+        Number of batches to log samples from during training
+    log_samples_per_batch : int, default=1
+        Number of samples to log from each batch
     """
 
     def __init__(
@@ -58,10 +67,17 @@ class TarrowModule(LightningModule):
         lr_scheduler="cyclic",
         lr_patience=50,
         cam_size=None,
+        log_batches_per_epoch=8,
+        log_samples_per_batch=1,
         **kwargs,
     ):
         super().__init__()
         self.save_hyperparameters()
+
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
 
         self.model = TimeArrowNet(
             backbone=backbone,
@@ -75,6 +91,48 @@ class TarrowModule(LightningModule):
 
         self.criterion = nn.CrossEntropyLoss(reduction="none")
         self.criterion_decorr = DecorrelationLoss()
+
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+        """Log sample images to TensorBoard.
+
+        Parameters
+        ----------
+        key : str
+            Key for logging
+        imgs : Sequence[Sequence[np.ndarray]]
+            List of image pairs to log
+        """
+        grid = render_images(imgs, cmaps=["gray"] * 2)  # Only 2 timepoints
+        self.logger.experiment.add_image(
+            key, grid, self.current_epoch, dataformats="HWC"
+        )
+
+    def _log_step_samples(self, batch_idx, images, stage: Literal["train", "val"]):
+        """Log samples from a batch.
+
+        Parameters
+        ----------
+        batch_idx : int
+            Index of current batch
+        images : torch.Tensor
+            Batch of images with shape (B, T, C, H, W)
+        stage : str
+            Either "train" or "val"
+        """
+        if batch_idx < self.log_batches_per_epoch:
+            # Get first n samples from batch
+            n = min(self.log_samples_per_batch, images.shape[0])
+            samples = images[:n].detach().cpu().numpy()
+
+            # Split into pairs of timepoints
+            pairs = [(sample[0], sample[1]) for sample in samples]
+
+            output_list = (
+                self.training_step_outputs
+                if stage == "train"
+                else self.validation_step_outputs
+            )
+            output_list.extend(pairs)
 
     def forward(self, x):
         """Forward pass through the model.
@@ -111,6 +169,10 @@ class TarrowModule(LightningModule):
             Combined loss (classification + decorrelation)
         """
         x, y = batch
+
+        # Log sample images
+        self._log_step_samples(batch_idx, x, step)
+
         out, pro = self(x)
 
         if out.ndim > 2:
@@ -170,134 +232,48 @@ class TarrowModule(LightningModule):
                 "optimizer": optimizer,
                 "lr_scheduler": {
                     "scheduler": scheduler,
-                    "monitor": "val_loss",
+                    "monitor": "loss/val_loss",
+                    "interval": "epoch",
                 },
             }
         elif self.hparams.lr_scheduler == "cyclic":
+            # Get dataloader length accounting for DDP
+            dataloader = self.trainer.datamodule.train_dataloader()
+            steps_per_epoch = len(dataloader)
+
+            # Account for gradient accumulation and multiple GPUs
+            if self.trainer.accumulate_grad_batches:
+                steps_per_epoch = (
+                    steps_per_epoch // self.trainer.accumulate_grad_batches
+                )
+
+            total_steps = steps_per_epoch * self.trainer.max_epochs
+
             scheduler = CyclicLR(
                 optimizer,
                 base_lr=self.hparams.learning_rate,
                 max_lr=self.hparams.learning_rate * 10,
                 cycle_momentum=False,
-                step_size_up=self.trainer.estimated_stepping_batches,
+                step_size_up=total_steps // 2,  # Half the total steps for one cycle
                 scale_mode="cycle",
                 scale_fn=lambda x: 0.9**x,
             )
-            return {"optimizer": optimizer, "lr_scheduler": scheduler}
+            return {
+                "optimizer": optimizer,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                },
+            }
 
-    def embedding(self, x):
-        """Get dense embeddings from the model.
+    def on_train_epoch_end(self):
+        """Log collected training samples at end of epoch."""
+        if self.training_step_outputs:
+            self._log_samples("train_samples", self.training_step_outputs)
+            self.training_step_outputs = []
 
-        Parameters
-        ----------
-        x : torch.Tensor
-            Input tensor of shape (batch_size, n_frames, channels, height, width)
-
-        Returns
-        -------
-        torch.Tensor
-            Dense embeddings from the backbone network
-        """
-        return self.model.embedding(x)
-
-
-class TarrowVisualizationCallback(Callback):
-    """Callback for visualizing cells and embeddings in TensorBoard.
-
-    Parameters
-    ----------
-    dataset : Dataset
-        Dataset to visualize
-    max_samples : int, default=100
-        Maximum number of samples to visualize
-    log_every_n_epochs : int, default=3
-        How often to log visualizations
-    cam_size : tuple or int, optional
-        Size for class activation maps. If None, use original size
-    """
-
-    def __init__(self, dataset, max_samples=100, log_every_n_epochs=3, cam_size=None):
-        """
-        Parameters
-        ----------
-        dataset : Dataset
-            Dataset to visualize
-        max_samples : int, default=100
-            Maximum number of samples to visualize
-        log_every_n_epochs : int, default=3
-            How often to log visualizations
-        cam_size : tuple or int, optional
-            Size for class activation maps. If None, use original size
-        """
-        super().__init__()
-        self.dataset = dataset
-        self.max_samples = max_samples
-        self.log_every_n_epochs = log_every_n_epochs
-        self.cam_size = cam_size
-
-    def on_train_epoch_end(self, trainer, pl_module):
-        if (trainer.current_epoch + 1) % self.log_every_n_epochs == 0:
-            # Get samples from dataset
-            loader = DataLoader(
-                self.dataset,
-                batch_size=min(32, self.max_samples),
-                shuffle=True,
-            )
-            batch = next(iter(loader))
-            images, labels = batch
-            images = images.to(pl_module.device)
-
-            # Get embeddings
-            with torch.no_grad():
-                embeddings = pl_module.embedding(images)
-                out, _ = pl_module(images)
-                preds = torch.argmax(out, dim=1)
-
-            # Log images
-            grid = torchvision.utils.make_grid(
-                images[:, 0],  # First timepoint
-                nrow=8,
-                normalize=True,
-                value_range=(images.min(), images.max()),
-            )
-            trainer.logger.experiment.add_image(
-                "cells/timepoint1",
-                grid,
-                trainer.current_epoch,
-            )
-
-            grid = torchvision.utils.make_grid(
-                images[:, 1],  # Second timepoint
-                nrow=8,
-                normalize=True,
-                value_range=(images.min(), images.max()),
-            )
-            trainer.logger.experiment.add_image(
-                "cells/timepoint2",
-                grid,
-                trainer.current_epoch,
-            )
-
-            # Log embeddings
-            trainer.logger.experiment.add_embedding(
-                embeddings.reshape(len(embeddings), -1),
-                metadata=[
-                    f"label={l.item()}, pred={p.item()}" for l, p in zip(labels, preds)
-                ],
-                label_img=images[:, 0],  # Use first timepoint as label image
-                global_step=trainer.current_epoch,
-            )
-
-            # Log CAMs if cam_size is provided
-            if self.cam_size is not None and hasattr(pl_module.model, "get_cam"):
-                cam = pl_module.model.get_cam(images, size=self.cam_size)
-                grid = torchvision.utils.make_grid(
-                    cam.unsqueeze(1),  # Add channel dimension
-                    nrow=8,
-                    normalize=True,
-                )
-                trainer.logger.experiment.add_image(
-                    "cells/cam",
-                    grid,
-                    trainer.current_epoch,
-                )
+    def on_validation_epoch_end(self):
+        """Log collected validation samples at end of epoch."""
+        if self.validation_step_outputs:
+            self._log_samples("val_samples", self.validation_step_outputs)
+            self.validation_step_outputs = []
