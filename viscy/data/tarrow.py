@@ -34,6 +34,10 @@ class TarrowDataModule(LightningDataModule):
         Resolution level to load from OME-Zarr
     z_slice : int, default=0
         Z-slice to load
+    pin_memory : bool, default=True
+        Whether to pin memory
+    persistent_workers : bool, default=True
+        Whether to keep the workers alive between epochs
     **kwargs : dict
         Additional arguments passed to TarrowDataset
     """
@@ -51,6 +55,8 @@ class TarrowDataModule(LightningDataModule):
         val_samples_per_epoch: int = 10000,
         resolution: int = 0,
         z_slice: int = 0,
+        pin_memory: bool = True,
+        persistent_workers: bool = True,
         **kwargs,
     ):
         super().__init__()

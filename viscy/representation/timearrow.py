@@ -5,6 +5,9 @@ from tarrow.models import TimeArrowNet
 from tarrow.models.losses import DecorrelationLoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CyclicLR, ReduceLROnPlateau
+from lightning.pytorch.callbacks import Callback
+from torch.utils.data import DataLoader
+import torchvision
 
 
 class TarrowModule(LightningModule):
@@ -68,7 +71,6 @@ class TarrowModule(LightningModule):
             n_features=n_features,
             n_input_channels=n_input_channels,
             symmetric=symmetric,
-            cam_size=cam_size,
         )
 
         self.criterion = nn.CrossEntropyLoss(reduction="none")
@@ -182,3 +184,120 @@ class TarrowModule(LightningModule):
                 scale_fn=lambda x: 0.9**x,
             )
             return {"optimizer": optimizer, "lr_scheduler": scheduler}
+
+    def embedding(self, x):
+        """Get dense embeddings from the model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (batch_size, n_frames, channels, height, width)
+
+        Returns
+        -------
+        torch.Tensor
+            Dense embeddings from the backbone network
+        """
+        return self.model.embedding(x)
+
+
+class TarrowVisualizationCallback(Callback):
+    """Callback for visualizing cells and embeddings in TensorBoard.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        Dataset to visualize
+    max_samples : int, default=100
+        Maximum number of samples to visualize
+    log_every_n_epochs : int, default=3
+        How often to log visualizations
+    cam_size : tuple or int, optional
+        Size for class activation maps. If None, use original size
+    """
+
+    def __init__(self, dataset, max_samples=100, log_every_n_epochs=3, cam_size=None):
+        """
+        Parameters
+        ----------
+        dataset : Dataset
+            Dataset to visualize
+        max_samples : int, default=100
+            Maximum number of samples to visualize
+        log_every_n_epochs : int, default=3
+            How often to log visualizations
+        cam_size : tuple or int, optional
+            Size for class activation maps. If None, use original size
+        """
+        super().__init__()
+        self.dataset = dataset
+        self.max_samples = max_samples
+        self.log_every_n_epochs = log_every_n_epochs
+        self.cam_size = cam_size
+
+    def on_train_epoch_end(self, trainer, pl_module):
+        if (trainer.current_epoch + 1) % self.log_every_n_epochs == 0:
+            # Get samples from dataset
+            loader = DataLoader(
+                self.dataset,
+                batch_size=min(32, self.max_samples),
+                shuffle=True,
+            )
+            batch = next(iter(loader))
+            images, labels = batch
+            images = images.to(pl_module.device)
+
+            # Get embeddings
+            with torch.no_grad():
+                embeddings = pl_module.embedding(images)
+                out, _ = pl_module(images)
+                preds = torch.argmax(out, dim=1)
+
+            # Log images
+            grid = torchvision.utils.make_grid(
+                images[:, 0],  # First timepoint
+                nrow=8,
+                normalize=True,
+                value_range=(images.min(), images.max()),
+            )
+            trainer.logger.experiment.add_image(
+                "cells/timepoint1",
+                grid,
+                trainer.current_epoch,
+            )
+
+            grid = torchvision.utils.make_grid(
+                images[:, 1],  # Second timepoint
+                nrow=8,
+                normalize=True,
+                value_range=(images.min(), images.max()),
+            )
+            trainer.logger.experiment.add_image(
+                "cells/timepoint2",
+                grid,
+                trainer.current_epoch,
+            )
+
+            # Log embeddings
+            trainer.logger.experiment.add_embedding(
+                embeddings.reshape(len(embeddings), -1),
+                metadata=[
+                    f"label={l.item()}, pred={p.item()}" for l, p in zip(labels, preds)
+                ],
+                label_img=images[:, 0],  # Use first timepoint as label image
+                global_step=trainer.current_epoch,
+            )
+
+            # Log CAMs if cam_size is provided
+            if self.cam_size is not None and hasattr(pl_module.model, "get_cam"):
+                cam = pl_module.model.get_cam(images, size=self.cam_size)
+                grid = torchvision.utils.make_grid(
+                    cam.unsqueeze(1),  # Add channel dimension
+                    nrow=8,
+                    normalize=True,
+                )
+                trainer.logger.experiment.add_image(
+                    "cells/cam",
+                    grid,
+                    trainer.current_epoch,
+                )
