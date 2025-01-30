@@ -1,13 +1,13 @@
 import torch
 import torch.nn as nn
+import torchvision
 from lightning.pytorch import LightningModule
+from lightning.pytorch.callbacks import Callback
 from tarrow.models import TimeArrowNet
 from tarrow.models.losses import DecorrelationLoss
 from torch.optim import Adam
 from torch.optim.lr_scheduler import CyclicLR, ReduceLROnPlateau
-from lightning.pytorch.callbacks import Callback
 from torch.utils.data import DataLoader
-import torchvision
 
 
 class TarrowModule(LightningModule):

@@ -1,10 +1,11 @@
 from pathlib import Path
+
 import numpy as np
+import torch
 from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from tarrow.data.tarrow_dataset import TarrowDataset
-from torch.utils.data import DataLoader, ConcatDataset
-import torch
+from torch.utils.data import DataLoader
 
 
 class TarrowDataModule(LightningDataModule):
