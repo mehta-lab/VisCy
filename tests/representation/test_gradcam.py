@@ -6,6 +6,8 @@ import torchvision.transforms as transforms
 from lightning.pytorch import LightningModule, Trainer
 from torch.utils.data import DataLoader
 from lightning.pytorch.loggers import TensorBoardLogger
+import matplotlib.pyplot as plt
+import numpy as np
 
 from viscy.callbacks.gradcam import GradCAMCallback
 
@@ -149,6 +151,7 @@ def main():
     # Create data loaders
     train_loader = DataLoader(train_dataset, batch_size=32, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=32)
+    vis_loader = DataLoader(vis_dataset, batch_size=32)  # Added visualization loader
 
     # Initialize model
     model = ResNetClassifier()
@@ -168,13 +171,76 @@ def main():
         accelerator="auto",
         devices=1,
         logger=TensorBoardLogger(
-            save_dir="your/log/path",  # specify your desired log directory
-            name="gradcam_experiment",  # experiment name
+            save_dir="/home/eduardo.hirata/repos/viscy/tests/representation/lightning_logs",  # specify your desired log directory
+            name="gradcam_cifar",  # experiment name
         ),
     )
 
     # Train model
     trainer.fit(model, train_loader, val_loader)
+
+    # Test GradCAM visualization
+    test_gradcam_visualization(model, vis_loader)
+
+
+def test_gradcam_visualization(model, dataloader):
+    """Test GradCAM visualization.
+
+    Parameters
+    ----------
+    model : LightningModule
+        The trained model
+    dataloader : DataLoader
+        DataLoader containing samples to visualize
+    """
+    model.eval()
+    # Get a sample from validation set
+    batch = next(iter(dataloader))
+    images, labels = batch
+
+    # Generate GradCAM for first sample
+    sample_img = images[0]  # Shape: (C, H, W)
+    cam = model.gradcam(sample_img)
+
+    # Plot the results
+    fig, axes = plt.subplots(1, 3, figsize=(30, 10))
+
+    # Original image
+    img = images[0].squeeze().cpu().numpy()
+    if img.ndim == 3:  # Handle RGB images
+        axes[0].imshow(np.transpose(img, (1, 2, 0)))
+    else:  # Handle grayscale images
+        axes[0].imshow(img, cmap="gray")
+    axes[0].set_title("Original Image")
+    plt.colorbar(axes[0].images[0], ax=axes[0])
+
+    # GradCAM visualization
+    im = axes[1].imshow(cam, cmap="magma")
+    axes[1].set_title("GradCAM")
+    plt.colorbar(im, ax=axes[1])
+
+    # Overlay GradCAM on original image
+    img = images[0].squeeze().cpu().numpy()
+    if img.ndim == 3:  # Handle RGB images
+        img = np.transpose(img, (1, 2, 0))
+    img = (img - img.min()) / (img.max() - img.min())  # Normalize to [0,1]
+    cam_norm = (cam - cam.min()) / (cam.max() - cam.min())  # Normalize to [0,1]
+
+    # Create RGB overlay
+    if img.ndim == 2:  # Convert grayscale to RGB
+        img_rgb = np.stack([img] * 3, axis=-1)
+    else:  # Already RGB
+        img_rgb = img
+    cam_rgb = plt.cm.magma(cam_norm)[..., :3]  # Convert to RGB using magma colormap
+    overlay = 0.7 * img_rgb + 0.3 * cam_rgb
+
+    axes[2].imshow(overlay)
+    axes[2].set_title("GradCAM Overlay")
+
+    plt.suptitle(f"GradCAM Visualization (Predicted: {labels[0].item()})", y=1.05)
+    plt.savefig("./gradcam_cifar.png")
+    plt.close()
+    # plt.show()
 
 
 if __name__ == "__main__":

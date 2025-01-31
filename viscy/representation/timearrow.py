@@ -277,3 +277,113 @@ class TarrowModule(LightningModule):
         if self.validation_step_outputs:
             self._log_samples("val_samples", self.validation_step_outputs)
             self.validation_step_outputs = []
+
+    def gradcam(self, x, **kwargs):
+        """Generate GradCAM visualization for the projection layer.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (T, C, H, W)
+        **kwargs : dict
+            Additional arguments passed to model's gradcam method
+
+        Returns
+        -------
+        numpy.ndarray
+            GradCAM visualization
+        """
+        # Store training mode and switch to eval
+        was_training = self.training
+        self.eval()
+
+        # Store gradients and activations
+        self.gradients = None
+        self.activations = None
+
+        # Register hooks
+        def save_gradients(grad):
+            self.gradients = grad
+
+        def save_activations(module, input, output):
+            self.activations = output
+
+        # Get the target layer (last conv layer of backbone)
+        target_layer = None
+        for module in self.model.backbone.modules():
+            if isinstance(module, nn.Conv2d):
+                target_layer = module
+
+        if target_layer is None:
+            raise RuntimeError("Could not find suitable layer for GradCAM")
+
+        # Register hooks
+        h = target_layer.register_forward_hook(save_activations)
+        h_bp = target_layer.register_backward_hook(
+            lambda m, grad_in, grad_out: save_gradients(grad_out[0])
+        )
+
+        try:
+            # Add batch dimension if needed
+            if x.ndim == 4:
+                x = x.unsqueeze(0)
+
+            x = x.to(self.device)
+
+            # Enable gradients for computation
+            with torch.enable_grad():
+                x = x.requires_grad_(True)
+
+                # Forward pass through model
+                output = self.model(x, mode="both")
+                if isinstance(output, tuple):
+                    output = output[0]  # Get classification output
+
+                # Get predicted class (or use class 0 for binary case)
+                if output.ndim > 2:
+                    # Handle spatial outputs by averaging
+                    output = torch.mean(output, tuple(range(2, output.ndim)))
+                pred = output.argmax(dim=1)
+
+                # Create one hot vector for backward pass
+                one_hot = torch.zeros_like(output, device=self.device)
+                one_hot[0][pred] = 1
+
+                # Clear gradients
+                self.zero_grad(set_to_none=False)
+
+                # Backward pass
+                output.backward(gradient=one_hot)
+
+                # Ensure we have valid gradients and activations
+                if self.gradients is None or self.activations is None:
+                    raise RuntimeError(
+                        "No gradients or activations available for GradCAM computation"
+                    )
+
+                # Calculate weights and generate CAM
+                weights = torch.mean(self.gradients, dim=(2, 3))
+                cam = torch.sum(weights[:, :, None, None] * self.activations, dim=1)
+                cam = torch.relu(cam)
+
+                # Interpolate CAM to input size
+                cam = (
+                    torch.nn.functional.interpolate(
+                        cam.unsqueeze(0),
+                        size=x.shape[-2:],
+                        mode="bilinear",
+                        align_corners=False,
+                    )[0, 0]
+                    .cpu()
+                    .detach()
+                    .numpy()
+                )
+
+                return cam
+
+        finally:
+            # Clean up
+            h.remove()
+            h_bp.remove()
+            # Restore original training mode
+            self.train(mode=was_training)

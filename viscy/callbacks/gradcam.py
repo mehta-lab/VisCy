@@ -4,6 +4,9 @@ import torch
 import torchvision
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
+import numpy as np
+import matplotlib.pyplot as plt
+from skimage.exposure import rescale_intensity
 
 
 class GradCAMCallback(Callback):
@@ -19,6 +22,9 @@ class GradCAMCallback(Callback):
         Maximum number of samples to visualize per dataset
     max_height : int, default=720
         Maximum height of output visualization
+    mode : str, default="separate"
+        Visualization mode: "separate" for individual images and activations,
+        or "overlay" for activation map overlaid on input image
     """
 
     def __init__(
@@ -27,12 +33,15 @@ class GradCAMCallback(Callback):
         every_n_epochs: int = 10,
         max_samples: int = 5,
         max_height: int = 720,
+        mode: str = "overlay",
     ):
         super().__init__()
         self.visual_datasets = visual_datasets
         self.every_n_epochs = every_n_epochs
         self.max_samples = max_samples
         self.max_height = max_height
+        assert mode in ["separate", "overlay"], "Mode must be 'separate' or 'overlay'"
+        self.mode = mode
 
     def on_validation_epoch_end(
         self, trainer: Trainer, pl_module: LightningModule
@@ -42,51 +51,87 @@ class GradCAMCallback(Callback):
             return
 
         pl_module.eval()
+        device = pl_module.device
 
         for dataset_idx, dataset in enumerate(self.visual_datasets):
             # Get a few samples
             samples = []
-            cams = []
+            activations = []
 
             for i, (x, _) in enumerate(dataset):
                 if i >= self.max_samples:
                     break
 
-                # Move tensor to same device as model
-                x = x.to(pl_module.device)
+                try:
+                    # Move tensor to same device as model
+                    x = x.to(device)
 
-                # Generate GradCAM - no need to add batch dimension here since gradcam() does it
-                cam = pl_module.gradcam(x)
+                    # Generate class activation map
+                    activation_map = pl_module.gradcam(x)
 
-                # Convert to RGB images for visualization
-                x_img = self._tensor_to_img(
-                    x.cpu()
-                )  # removed [0] since x is already unbatched
-                cam_img = self._tensor_to_img(torch.from_numpy(cam))
-                overlay = self._create_overlay(x_img, cam_img)
+                    # Convert to RGB images for visualization
+                    x_img = x[0].cpu().numpy()  # Take first timepoint
+                    if x_img.ndim == 3:  # Handle (C,H,W) case
+                        x_img = x_img[0]  # Take first channel
+                    x_img = rescale_intensity(x_img, in_range="image", out_range=(0, 1))
 
-                samples.append(x_img)
-                cams.append(overlay)
+                    # Create activation map visualization
+                    activation_norm = self._normalize_cam(
+                        torch.from_numpy(activation_map)
+                    )
+                    activation_rgb = plt.cm.magma(activation_norm.numpy())[..., :3]
 
-            # Stack images for grid visualization
-            samples_grid = torchvision.utils.make_grid(
-                [torch.from_numpy(img) for img in samples], nrow=len(samples)
-            )
-            cams_grid = torchvision.utils.make_grid(
-                [torch.from_numpy(img) for img in cams], nrow=len(cams)
-            )
+                    if self.mode == "separate":
+                        # Keep sample as grayscale
+                        x_vis = torch.from_numpy(x_img).unsqueeze(0).float()
+                        activation_vis = (
+                            torch.from_numpy(activation_rgb).permute(2, 0, 1).float()
+                        )
+                    else:  # overlay mode
+                        # Convert input to RGB
+                        x_rgb = np.stack([x_img] * 3, axis=-1)
+                        # Create overlay
+                        overlay = self._create_overlay(x_rgb, activation_rgb)
+                        x_vis = torch.from_numpy(x_rgb).permute(2, 0, 1).float()
+                        activation_vis = (
+                            torch.from_numpy(overlay).permute(2, 0, 1).float()
+                        )
 
-            # Log to tensorboard
-            trainer.logger.experiment.add_image(
-                f"gradcam/dataset_{dataset_idx}/samples",
-                samples_grid,
-                trainer.current_epoch,
-            )
-            trainer.logger.experiment.add_image(
-                f"gradcam/dataset_{dataset_idx}/cams",
-                cams_grid,
-                trainer.current_epoch,
-            )
+                    samples.append(x_vis.cpu())  # Ensure on CPU for visualization
+                    activations.append(
+                        activation_vis.cpu()
+                    )  # Ensure on CPU for visualization
+
+                except Exception as e:
+                    print(f"Error processing sample {i}: {str(e)}")
+                    continue
+
+            if samples:  # Only proceed if we have samples
+                try:
+                    # Stack images for grid visualization
+                    samples_grid = torchvision.utils.make_grid(
+                        samples, nrow=len(samples), normalize=True, value_range=(0, 1)
+                    )
+                    activations_grid = torchvision.utils.make_grid(
+                        activations,
+                        nrow=len(activations),
+                        normalize=True,
+                        value_range=(0, 1),
+                    )
+
+                    # Log to tensorboard
+                    trainer.logger.experiment.add_image(
+                        f"gradcam/dataset_{dataset_idx}/samples",
+                        samples_grid,
+                        trainer.current_epoch,
+                    )
+                    trainer.logger.experiment.add_image(
+                        f"gradcam/dataset_{dataset_idx}/{'overlays' if self.mode == 'overlay' else 'activations'}",
+                        activations_grid,
+                        trainer.current_epoch,
+                    )
+                except Exception as e:
+                    print(f"Error creating visualization grid: {str(e)}")
 
     @staticmethod
     def _tensor_to_img(tensor: torch.Tensor) -> torch.Tensor:
@@ -101,3 +146,8 @@ class GradCAMCallback(Callback):
     ) -> torch.Tensor:
         """Create overlay of image and CAM"""
         return (1 - alpha) * img + alpha * cam
+
+    @staticmethod
+    def _normalize_cam(cam: torch.Tensor) -> torch.Tensor:
+        """Normalize CAM to [0,1]"""
+        return (cam - cam.min()) / (cam.max() - cam.min() + 1e-8)
