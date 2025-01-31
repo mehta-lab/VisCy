@@ -1,12 +1,11 @@
 import logging
-from typing import List
 
+import matplotlib.pyplot as plt
+import numpy as np
 import torch
 import torchvision
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
-import numpy as np
-import matplotlib.pyplot as plt
 from skimage.exposure import rescale_intensity
 
 logger = logging.getLogger(__name__)
@@ -21,8 +20,6 @@ class GradCAMCallback(Callback):
         Generate visualizations every n epochs
     max_samples : int, default=5
         Maximum number of samples to visualize per dataset
-    max_height : int, default=720
-        Maximum height of output visualization
     mode : str, default="overlay"
         Visualization mode: "separate" for individual images and activations,
         or "overlay" for activation map overlaid on input image
@@ -32,13 +29,11 @@ class GradCAMCallback(Callback):
         self,
         every_n_epochs: int = 10,
         max_samples: int = 5,
-        max_height: int = 720,
         mode: str = "overlay",
     ):
         super().__init__()
         self.every_n_epochs = every_n_epochs
         self.max_samples = max_samples
-        self.max_height = max_height
         assert mode in ["separate", "overlay"], "Mode must be 'separate' or 'overlay'"
         self.mode = mode
 

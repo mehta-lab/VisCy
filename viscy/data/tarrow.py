@@ -1,7 +1,8 @@
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Sequence
 
 import numpy as np
+import torch.nn as nn
 from iohub.ngff import Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
 from tarrow.data.tarrow_dataset import TarrowDataset
@@ -49,6 +50,8 @@ class TarrowDataModule(LightningDataModule):
         Whether to pin memory
     persistent_workers : bool, default=True
         Whether to keep the workers alive between epochs
+    augmentations : list[nn.Module], default=[]
+        List of Kornia augmentation transforms to apply during training
     **kwargs : dict
         Additional arguments passed to TarrowDataset
     """
@@ -72,6 +75,7 @@ class TarrowDataModule(LightningDataModule):
         normalization: Callable[[np.ndarray], np.ndarray] | None = None,
         pin_memory: bool = True,
         persistent_workers: bool = True,
+        augmentations: Sequence[nn.Module] = [],
         **kwargs,
     ):
         super().__init__()
@@ -91,37 +95,31 @@ class TarrowDataModule(LightningDataModule):
         self.z_slice = z_slice
         self.kwargs = kwargs
         self.normalization = normalization
+        self.pin_memory = pin_memory
+        self.persistent_workers = persistent_workers
+        self.augmentations = augmentations
 
         self._filter_positions()
         self._channel_idx = self._get_channel_index()
 
-    def _get_channel_index(self, plate) -> int:
-        """Get the index of the specified channel from the plate metadata.
+    def _get_channel_index(self) -> int:
+        """Get the index of the specified channel from the plate metadata."""
+        with open_ome_zarr(self.ome_zarr_path, mode="r") as plate:
+            _, first_pos = next(plate.positions())
+        return first_pos.channel_names.index(self.channel_name)
 
-        Parameters
-        ----------
-        plate : iohub.ngff.Plate
-            OME-Zarr plate object
+    def _create_augmentation_pipeline(self) -> nn.Sequential | None:
+        """Create the augmentation pipeline for training.
 
         Returns
         -------
-        int
-            Index of the specified channel
-
-        Raises
-        ------
-        ValueError
-            If channel_name is not found in available channels
+        nn.Sequential | None
+            Sequential container of Kornia augmentations or None if no augmentations
         """
-        # Get channel names from first position
-        _, first_pos = next(plate.positions())
-        try:
-            return first_pos.channel_names.index(self.channel_name)
-        except ValueError:
-            available_channels = ", ".join(first_pos.channel_names)
-            raise ValueError(
-                f"Channel '{self.channel_name}' not found. Available channels: {available_channels}"
-            )
+        if not self.augmentations:
+            return None
+
+        return nn.Sequential(*self.augmentations)
 
     def _load_images(self, position: Position, channel_idx: int) -> list[np.ndarray]:
         """Load all images from positions into memory.
@@ -162,6 +160,9 @@ class TarrowDataModule(LightningDataModule):
             list_dataset = []
             list_visual_dataset = []
 
+            # Create augmentation pipeline
+            augmenter = self._create_augmentation_pipeline()
+
             for pos in self.positions:
                 pos_imgs = self._load_images(pos, self._channel_idx)
                 list_dataset.append(
@@ -169,6 +170,7 @@ class TarrowDataModule(LightningDataModule):
                         imgs=pos_imgs,
                         normalize=self.normalization,
                         size=self.patch_size,
+                        augmenter=augmenter,  # Pass augmenter to dataset
                         **self.kwargs,
                     )
                 )
@@ -229,12 +231,6 @@ class TarrowDataModule(LightningDataModule):
 
         self.positions = positions
 
-    def _get_channel_index(self):
-        """Get the index of the specified channel from the plate metadata."""
-        with open_ome_zarr(self.ome_zarr_path, mode="r") as plate:
-            _, first_pos = next(plate.positions())
-        return first_pos.channel_names.index(self.channel_name)
-
     def train_dataloader(self):
         """Create the training dataloader.
 
@@ -249,7 +245,7 @@ class TarrowDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=True if self.num_workers > 0 else False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             shuffle=True,
         )
 
@@ -267,7 +263,7 @@ class TarrowDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=True if self.num_workers > 0 else False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             shuffle=False,
         )
 
@@ -285,7 +281,7 @@ class TarrowDataModule(LightningDataModule):
             num_workers=self.num_workers,
             persistent_workers=True if self.num_workers > 0 else False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
-            pin_memory=True,
+            pin_memory=self.pin_memory,
             shuffle=False,
         )
 

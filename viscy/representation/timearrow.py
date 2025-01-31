@@ -44,8 +44,6 @@ class TarrowModule(LightningModule):
         Learning rate scheduler ('plateau' or 'cyclic')
     lr_patience : int, default=50
         Patience for learning rate scheduler
-    cam_size : tuple or int, optional
-        Size of the class activation map (H, W). If None, use input size.
     log_batches_per_epoch : int, default=8
         Number of batches to log samples from during training
     log_samples_per_batch : int, default=1
