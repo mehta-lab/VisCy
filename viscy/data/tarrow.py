@@ -23,6 +23,10 @@ class TarrowDataModule(LightningDataModule):
         Fraction of data to use for training (0.0 to 1.0)
     patch_size : tuple[int, int], default=(128, 128)
         Patch size for TarrowDataset
+    visual_patch_size : tuple[int, int] | None, default=None
+        Patch size for visualization dataset
+    visual_batch_size : int | None, default=None
+        Batch size for visualization dataloader
     batch_size : int, default=16
         Batch size for dataloaders
     num_workers : int, default=8
@@ -57,6 +61,8 @@ class TarrowDataModule(LightningDataModule):
         batch_size: int = 16,
         num_workers: int = 8,
         patch_size: tuple[int, int] = (128, 128),
+        visual_patch_size: tuple[int, int] | None = None,
+        visual_batch_size: int | None = None,
         prefetch_factor: int | None = None,
         include_fov_names: list[str] = [],
         train_samples_per_epoch: int = 100000,
@@ -75,7 +81,9 @@ class TarrowDataModule(LightningDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.prefetch_factor = prefetch_factor
-        self.path_size = patch_size
+        self.patch_size = patch_size
+        self.visual_patch_size = visual_patch_size or tuple(4 * x for x in patch_size)
+        self.visual_batch_size = visual_batch_size or min(4, batch_size)
         self.include_fov_names = include_fov_names
         self.train_samples_per_epoch = train_samples_per_epoch
         self.val_samples_per_epoch = val_samples_per_epoch
@@ -150,18 +158,26 @@ class TarrowDataModule(LightningDataModule):
         NotImplementedError
             If stage is not "fit"
         """
-
-        # Get channel index once
-
         if stage == "fit":
             list_dataset = []
+            list_visual_dataset = []
+
             for pos in self.positions:
                 pos_imgs = self._load_images(pos, self._channel_idx)
                 list_dataset.append(
                     TarrowDataset(
                         imgs=pos_imgs,
                         normalize=self.normalization,
-                        size=self.path_size,
+                        size=self.patch_size,
+                        **self.kwargs,
+                    )
+                )
+                # Create visualization dataset with larger patches
+                list_visual_dataset.append(
+                    TarrowDataset(
+                        imgs=pos_imgs,
+                        normalize=self.normalization,
+                        size=self.visual_patch_size,
                         **self.kwargs,
                     )
                 )
@@ -172,12 +188,22 @@ class TarrowDataModule(LightningDataModule):
             # Shuffle the list of datasets
             shuffled_indices = set_fit_global_state(len(list_dataset))
             list_dataset = [list_dataset[i] for i in shuffled_indices]
+            list_visual_dataset = [
+                list_visual_dataset[i] for i in shuffled_indices
+            ]  # Use same shuffling
 
             # Create training dataset with first train_split% of images
             self.train_dataset = ConcatDataset(list_dataset[:split_idx])
-
-            # Create validation dataset with remaining images
             self.val_dataset = ConcatDataset(list_dataset[split_idx:])
+
+            # Take up to n_visual samples from validation set
+            # NOTE fixed to take the first n_visual samples from validation set
+            self.visual_batch_size = max(
+                len(list_visual_dataset[split_idx:]), self.visual_batch_size
+            )
+            self.visual_dataset = ConcatDataset(
+                list_visual_dataset[split_idx : split_idx + self.visual_batch_size]
+            )
 
         elif stage == "test":
             raise NotImplementedError(f"Invalid stage: {stage}")
@@ -238,6 +264,24 @@ class TarrowDataModule(LightningDataModule):
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            persistent_workers=True if self.num_workers > 0 else False,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            pin_memory=True,
+            shuffle=False,
+        )
+
+    def visual_dataloader(self):
+        """Create the visualization dataloader.
+
+        Returns
+        -------
+        torch.utils.data.DataLoader
+            DataLoader for visualization data
+        """
+        return DataLoader(
+            self.visual_dataset,
+            batch_size=self.visual_batch_size,
             num_workers=self.num_workers,
             persistent_workers=True if self.num_workers > 0 else False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,

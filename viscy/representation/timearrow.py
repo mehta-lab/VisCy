@@ -66,7 +66,6 @@ class TarrowModule(LightningModule):
         lambda_decorrelation=0.01,
         lr_scheduler="cyclic",
         lr_patience=50,
-        cam_size=None,
         log_batches_per_epoch=8,
         log_samples_per_batch=1,
         **kwargs,
