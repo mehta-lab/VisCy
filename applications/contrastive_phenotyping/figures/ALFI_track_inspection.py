@@ -32,7 +32,7 @@ daughter1_track = 4  # 12
 daughter2_track = 5  # 13
 
 # %% plot the eucledian distance over time lag for a parent cell for different time intervals
-
+# plt.figure(figsize=(10, 6))
 def compute_displacement_track(fov_name, track_id, current_time, distance_metric="euclidean_squared", max_delta_t=10):
 
     fov_names = embedding_dataset["fov_name"].values
@@ -53,7 +53,7 @@ def compute_displacement_track(fov_name, track_id, current_time, distance_metric
         max_delta_t = timepoints.max()
 
     displacement_per_delta_t = defaultdict(list)
-
+    displacement_per_delta_t[0].append(0)
     # Compute displacements for each delta t
     for delta_t in range(1, max_delta_t + 1):
         future_time = current_time + delta_t
@@ -67,6 +67,11 @@ def compute_displacement_track(fov_name, track_id, current_time, distance_metric
             if distance_metric == "euclidean_squared":
                 future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
                 displacement = np.sum((current_embedding - future_embedding) ** 2)
+                displacements = (current_embedding - future_embedding) ** 2
+                # plt.hist(displacements, bins=30, alpha=0.5, label=f"delta_t={delta_t}")
+                # sns.kdeplot(displacements.flatten(), label=f"delta_t={delta_t}", bw_adjust=0.5)
+                # sns.jointplot(x=current_embedding.flatten(), y=displacements.flatten(), kind="kde", fill=True, label=f"delta_t={delta_t}")
+            
             elif distance_metric == "cosine":
                 future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
                 displacement = cosine_similarity(
@@ -81,16 +86,18 @@ def compute_displacement_track(fov_name, track_id, current_time, distance_metric
 plt.figure(figsize=(10, 6))
 for label, path in feature_paths.items():
     embedding_dataset = read_embedding_dataset(path)
+    # interval = int(''.join(filter(str.isdigit, label)))
     displacement_per_delta_t = compute_displacement_track(track_well, parent_id, 1)
     delta_ts = sorted(displacement_per_delta_t.keys())
+    # plt.hist(displacement_per_delta_t, bins=30, alpha=0.5, label=f"delta_t={label}")
     displacements = [np.mean(displacement_per_delta_t[delta_t]) for delta_t in delta_ts]
-    plt.plot(delta_ts, displacements, label=label)
-
+    plt.plot(delta_ts, displacements, label=f"{label}")
+    
 plt.xlabel("Time Interval (delta t)")
 plt.ylabel("Displacement (Euclidean Distance)")
 plt.title("Displacement vs Time Interval for Parent Cell")
 plt.legend()
-plt.show()
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/ALFI_parent_euclidean_distance.pdf", dpi=300)
 
 # %% Task B: plot the phate map and overlay the dividing cell trajectory
 
@@ -115,7 +122,11 @@ sns.scatterplot(
 
 # %% color using human annotation for cell cycle state
 
-def load_annotation(da, path, name, categories: dict | None = None):
+def load_annotation(da, path, name, exclude, categories: dict | None = None):
+
+    PHATE1 = da["PHATE1"].values
+    PHATE2 = da["PHATE2"].values
+
     annotation = pd.read_csv(path)
     # annotation_columns = annotation.columns.tolist()
     # print(annotation_columns)
@@ -126,9 +137,12 @@ def load_annotation(da, path, name, categories: dict | None = None):
     )
     selected = annotation.reindex(mi)[name]
     if categories:
+        PHATE1 = PHATE1[selected != exclude]
+        PHATE2 = PHATE2[selected != exclude]
+        selected = selected[selected.isin(categories.keys())]
         selected = selected.astype("category").cat.rename_categories(categories)
-    return selected
-
+    
+    return selected, PHATE1, PHATE2
 
 # %% load the cell cycle state annotation
 
@@ -136,10 +150,11 @@ ann_root = Path(
     "/hpc/projects/organelle_phenotyping/ALFI_models_data/datasets/zarr_datasets"
 )
 
-division = load_annotation(
+division, PHATE1, PHATE2 = load_annotation(
     embedding_dataset,
     ann_root / "test_annotations.csv",
     "division",
+    -1,
     {0: "interphase", 1: "mitosis"},
 )
 
@@ -166,13 +181,18 @@ cell_daughter2 = pd.DataFrame(np.column_stack(cell_daughter2), columns=["PHATE1"
 # %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
 
 sns.scatterplot(
-    x=embedding_dataset["PHATE1"],
-    y=embedding_dataset["PHATE2"],
+    x=PHATE1,
+    y=PHATE2,
     hue=division,
-    palette={"interphase": "steelblue", "mitosis": "orangered", -1: "green"},
+    palette={"interphase": "steelblue", "mitosis": "orangered", -1: "orangered"},
     s=7,
     alpha=0.5,
 )
+plt.xticks(fontsize=10)
+plt.yticks(fontsize=10)
+plt.xlabel("PHATE1", fontsize=14)
+plt.ylabel("PHATE2", fontsize=14)
+plt.legend(fontsize=12)
 
 # sns.lineplot(x=cell_parent["PHATE1"], y=cell_parent["PHATE2"], color="black", linewidth=2)
 # sns.lineplot(
@@ -248,5 +268,7 @@ daughter2_arrow = FancyArrowPatch(
     shrinkB=0,
 )
 plt.gca().add_patch(daughter2_arrow)
+
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/ALFI_div_track_classical.pdf", dpi=300)
 
 # %%
