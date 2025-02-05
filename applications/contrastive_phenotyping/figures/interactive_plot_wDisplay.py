@@ -321,6 +321,7 @@ class ImageDisplayApp:
 
         fig = go.Figure()
 
+        # Add background points with hover info
         all_tracks_df = self.features_df[
             self.features_df["fov_name"].isin(self.fov_tracks.keys())
         ]
@@ -330,8 +331,16 @@ class ImageDisplayApp:
                 y=all_tracks_df["PCA2"],
                 mode="markers",
                 marker=dict(size=12, color="lightgray", opacity=0.3),
-                hoverinfo="skip",
-                showlegend=False,
+                name="Other points",
+                text=[
+                    f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
+                    for track_id, t, fov in zip(
+                        all_tracks_df["track_id"],
+                        all_tracks_df["t"],
+                        all_tracks_df["fov_name"],
+                    )
+                ],
+                hoverinfo="text",
             )
         )
 
@@ -382,6 +391,7 @@ class ImageDisplayApp:
         """Create scatter plot with time-based coloring"""
         fig = go.Figure()
 
+        # Add background points with hover info
         all_tracks_df = self.features_df[
             self.features_df["fov_name"].isin(self.fov_tracks.keys())
         ]
@@ -391,8 +401,16 @@ class ImageDisplayApp:
                 y=all_tracks_df["PCA2"],
                 mode="markers",
                 marker=dict(size=12, color="lightgray", opacity=0.3),
-                hoverinfo="skip",
-                showlegend=False,
+                name="Other points",
+                text=[
+                    f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
+                    for track_id, t, fov in zip(
+                        all_tracks_df["track_id"],
+                        all_tracks_df["t"],
+                        all_tracks_df["fov_name"],
+                    )
+                ],
+                hoverinfo="text",
             )
         )
 
