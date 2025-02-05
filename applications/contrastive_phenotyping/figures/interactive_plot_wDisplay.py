@@ -34,6 +34,7 @@ class ImageDisplayApp:
         fov_tracks: dict[str, list[int] | str],
         z_range: tuple[int, int] | list[int] = (0, 1),
         yx_patch_size: tuple[int, int] | list[int] = (128, 128),
+        num_PC_components: int = 3,
     ) -> None:
         self.data_path = Path(data_path)
         self.tracks_path = Path(tracks_path)
@@ -48,6 +49,7 @@ class ImageDisplayApp:
         self.yx_patch_size = yx_patch_size
         self.filtered_tracks_by_fov = {}
         self._z_idx = (self.z_range[1] - self.z_range[0]) // 2
+        self.num_PC_components = num_PC_components
         # Initialize data
         self._prepare_data()
         self._create_figure()
@@ -62,13 +64,24 @@ class ImageDisplayApp:
 
         # PCA transformation
         scaled_features = StandardScaler().fit_transform(features.values)
-        pca = PCA(n_components=3)
+        pca = PCA(n_components=self.num_PC_components)
         pca_coords = pca.fit_transform(scaled_features)
 
         # Add PCA coordinates to the features dataframe
-        self.features_df["PCA1"] = pca_coords[:, 0]
-        self.features_df["PCA2"] = pca_coords[:, 1]
-        self.features_df["PCA3"] = pca_coords[:, 2]
+        for i in range(self.num_PC_components):
+            self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+
+        # Store explained variance for each component
+        self.explained_variance = [
+            f"PC{i+1} ({var:.1f}%)"
+            for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+        ]
+
+        # Create PC selection options with explained variance
+        self.pc_options = [
+            {"label": pc_label, "value": f"PCA{i+1}"}
+            for i, pc_label in enumerate(self.explained_variance)
+        ]
 
         # Process each FOV and its track IDs
         all_filtered_features = []
@@ -119,7 +132,7 @@ class ImageDisplayApp:
                     [
                         html.Div(
                             style={
-                                "width": "60%",
+                                "width": "100%",
                                 "display": "inline-block",
                                 "verticalAlign": "top",
                             },
@@ -130,6 +143,7 @@ class ImageDisplayApp:
                                         "display": "flex",
                                         "alignItems": "center",
                                         "gap": "20px",
+                                        "flexWrap": "wrap",
                                     },
                                     children=[
                                         html.Div(
@@ -170,6 +184,34 @@ class ImageDisplayApp:
                                                 ),
                                             ]
                                         ),
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "X-axis:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="x-axis",
+                                                    options=self.pc_options,
+                                                    value="PCA1",
+                                                    style={"width": "200px"},
+                                                ),
+                                            ]
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "Y-axis:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="y-axis",
+                                                    options=self.pc_options,
+                                                    value="PCA2",
+                                                    style={"width": "200px"},
+                                                ),
+                                            ]
+                                        ),
                                     ],
                                 ),
                                 dcc.Loading(
@@ -188,17 +230,17 @@ class ImageDisplayApp:
                         ),
                         html.Div(
                             style={
-                                "width": "40%",
-                                "display": "inline-block",
-                                "verticalAlign": "top",
-                                "paddingLeft": "20px",
+                                "width": "100%",
+                                "display": "block",
+                                "marginTop": "20px",
                             },
                             children=[
                                 html.Div(
                                     id="track-timeline",
                                     style={
-                                        "height": "80vh",
+                                        "height": "auto",
                                         "overflowY": "auto",
+                                        "maxHeight": "80vh",
                                     },
                                 ),
                             ],
@@ -210,14 +252,19 @@ class ImageDisplayApp:
 
         @self.app.callback(
             dd.Output("scatter-plot", "figure"),
-            [dd.Input("color-mode", "value"), dd.Input("show-arrows", "value")],
+            [
+                dd.Input("color-mode", "value"),
+                dd.Input("show-arrows", "value"),
+                dd.Input("x-axis", "value"),
+                dd.Input("y-axis", "value"),
+            ],
         )
-        def update_figure(color_mode, show_arrows):
+        def update_figure(color_mode, show_arrows, x_axis, y_axis):
             show_arrows = "show" in (show_arrows or [])
             if color_mode == "track":
-                return self._create_track_colored_figure(show_arrows)
+                return self._create_track_colored_figure(show_arrows, x_axis, y_axis)
             else:
-                return self._create_time_colored_figure(show_arrows)
+                return self._create_time_colored_figure(show_arrows, x_axis, y_axis)
 
         @self.app.callback(
             dd.Output("track-timeline", "children"),
@@ -254,19 +301,18 @@ class ImageDisplayApp:
                         # Define styles based on whether this is the clicked timepoint
                         is_clicked = t == clicked_time
                         image_style = {
-                            "width": "100px",
-                            "height": "100px",
-                            "margin": "2px",
+                            "width": "150px",
+                            "height": "150px",
+                            "margin": "5px",
                             "display": "inline-block",
-                            "border": (
-                                "3px solid #007bff" if is_clicked else "none"
-                            ),  # Blue border for clicked image
+                            "border": "3px solid #007bff" if is_clicked else "none",
                         }
                         time_style = {
                             "textAlign": "center",
-                            "fontSize": "24px" if is_clicked else "18px",
+                            "fontSize": "14px",
                             "fontWeight": "bold" if is_clicked else "normal",
                             "color": "#007bff" if is_clicked else "black",
+                            "marginTop": "5px",
                         }
 
                         images.append(
@@ -281,14 +327,25 @@ class ImageDisplayApp:
                                         style=time_style,
                                     ),
                                 ],
-                                style={"display": "inline-block"},
+                                style={
+                                    "display": "inline-block",
+                                    "margin": "5px",
+                                    "verticalAlign": "top",
+                                },
                             )
                         )
 
                 if images:  # Only add row if there are images
                     channel_rows.extend(
                         [
-                            html.H5(f"{channel}", style={"margin": "5px"}),
+                            html.H5(
+                                f"{channel}",
+                                style={
+                                    "margin": "10px 5px",
+                                    "fontSize": "16px",
+                                    "fontWeight": "bold",
+                                },
+                            ),
                             html.Div(
                                 images,
                                 style={
@@ -297,7 +354,8 @@ class ImageDisplayApp:
                                     "padding": "10px",
                                     "border": "1px solid #ddd",
                                     "borderRadius": "5px",
-                                    "marginBottom": "10px",
+                                    "marginBottom": "20px",
+                                    "backgroundColor": "#f8f9fa",
                                 },
                             ),
                         ]
@@ -305,12 +363,22 @@ class ImageDisplayApp:
 
             return html.Div(
                 [
-                    html.H4(f"Track {track_id} (FOV: {fov_name})"),
+                    html.H4(
+                        f"Track {track_id} (FOV: {fov_name})",
+                        style={
+                            "marginBottom": "20px",
+                            "fontSize": "20px",
+                            "fontWeight": "bold",
+                        },
+                    ),
                     html.Div(channel_rows),
-                ]
+                ],
+                style={"padding": "20px"},
             )
 
-    def _create_track_colored_figure(self, show_arrows=False):
+    def _create_track_colored_figure(
+        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2"
+    ):
         """Create scatter plot with track-based coloring"""
         unique_tracks = self.filtered_features_df["track_id"].unique()
         cmap = plt.cm.tab20
@@ -327,8 +395,8 @@ class ImageDisplayApp:
         ]
         fig.add_trace(
             go.Scatter(
-                x=all_tracks_df["PCA1"],
-                y=all_tracks_df["PCA2"],
+                x=all_tracks_df[x_axis],
+                y=all_tracks_df[y_axis],
                 mode="markers",
                 marker=dict(size=12, color="lightgray", opacity=0.3),
                 name="Other points",
@@ -352,8 +420,8 @@ class ImageDisplayApp:
             # Add points
             fig.add_trace(
                 go.Scatter(
-                    x=track_data["PCA1"],
-                    y=track_data["PCA2"],
+                    x=track_data[x_axis],
+                    y=track_data[y_axis],
                     mode="markers",
                     marker=dict(size=15, color=track_colors[track_id]),
                     name=f"Track {track_id}",
@@ -369,25 +437,27 @@ class ImageDisplayApp:
             if show_arrows and len(track_data) > 1:
                 for i in range(len(track_data) - 1):
                     fig.add_annotation(
-                        x=track_data["PCA1"].iloc[i + 1],
-                        y=track_data["PCA2"].iloc[i + 1],
-                        ax=track_data["PCA1"].iloc[i],
-                        ay=track_data["PCA2"].iloc[i],
+                        x=track_data[x_axis].iloc[i + 1],
+                        y=track_data[y_axis].iloc[i + 1],
+                        ax=track_data[x_axis].iloc[i],
+                        ay=track_data[y_axis].iloc[i],
                         xref="x",
                         yref="y",
                         axref="x",
                         ayref="y",
                         showarrow=True,
-                        arrowhead=2,
-                        arrowsize=2,
+                        arrowhead=4,
+                        arrowsize=3,
                         arrowwidth=2,
                         arrowcolor=track_colors[track_id],
                     )
 
-        self._update_figure_layout(fig)
+        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
 
-    def _create_time_colored_figure(self, show_arrows=False):
+    def _create_time_colored_figure(
+        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2"
+    ):
         """Create scatter plot with time-based coloring"""
         fig = go.Figure()
 
@@ -397,8 +467,8 @@ class ImageDisplayApp:
         ]
         fig.add_trace(
             go.Scatter(
-                x=all_tracks_df["PCA1"],
-                y=all_tracks_df["PCA2"],
+                x=all_tracks_df[x_axis],
+                y=all_tracks_df[y_axis],
                 mode="markers",
                 marker=dict(size=12, color="lightgray", opacity=0.3),
                 name="Other points",
@@ -417,8 +487,8 @@ class ImageDisplayApp:
         # Add time-colored points
         fig.add_trace(
             go.Scatter(
-                x=self.filtered_features_df["PCA1"],
-                y=self.filtered_features_df["PCA2"],
+                x=self.filtered_features_df[x_axis],
+                y=self.filtered_features_df[y_axis],
                 mode="markers",
                 marker=dict(
                     size=15,
@@ -449,31 +519,41 @@ class ImageDisplayApp:
                 if len(track_data) > 1:
                     for i in range(len(track_data) - 1):
                         fig.add_annotation(
-                            x=track_data["PCA1"].iloc[i + 1],
-                            y=track_data["PCA2"].iloc[i + 1],
-                            ax=track_data["PCA1"].iloc[i],
-                            ay=track_data["PCA2"].iloc[i],
+                            x=track_data[x_axis].iloc[i + 1],
+                            y=track_data[y_axis].iloc[i + 1],
+                            ax=track_data[x_axis].iloc[i],
+                            ay=track_data[y_axis].iloc[i],
                             xref="x",
                             yref="y",
                             axref="x",
                             ayref="y",
                             showarrow=True,
-                            arrowhead=2,
-                            arrowsize=2,
+                            arrowhead=4,
+                            arrowsize=3,
                             arrowwidth=2,
                             arrowcolor="gray",
                         )
 
-        self._update_figure_layout(fig)
+        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
 
-    def _update_figure_layout(self, fig):
+    def _update_figure_layout(self, fig, x_axis="PCA1", y_axis="PCA2"):
         """Update the layout for a figure"""
+        # Get the axis labels with explained variance
+        x_label = next(
+            (opt["label"] for opt in self.pc_options if opt["value"] == x_axis),
+            x_axis,
+        )
+        y_label = next(
+            (opt["label"] for opt in self.pc_options if opt["value"] == y_axis),
+            y_axis,
+        )
+
         fig.update_layout(
             plot_bgcolor="white",
             title="PCA visualization of Selected Tracks",
-            xaxis_title="PC1",
-            yaxis_title="PC2",
+            xaxis_title=x_label,
+            yaxis_title=y_label,
             uirevision=True,
             hovermode="closest",
             showlegend=True,
@@ -642,6 +722,7 @@ if __name__ == "__main__":
             fov_tracks=fov_tracks_dict,
             z_range=(31, 36),
             yx_patch_size=(128, 128),
+            num_PC_components=8,
         )
         app.preload_images()
         app.run(debug=True)  # Debug mode without reloader
