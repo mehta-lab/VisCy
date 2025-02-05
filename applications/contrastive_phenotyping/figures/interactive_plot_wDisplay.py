@@ -229,11 +229,10 @@ class ImageDisplayApp:
             if clickData is None:
                 return html.Div("Click on a point to see the track timeline")
 
-            # Parse the hover text to get track_id and fov_name
+            # Parse the hover text to get track_id, time and fov_name
             hover_text = clickData["points"][0]["text"]
-
-            # Text format is "Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
             track_id = int(hover_text.split("<br>")[0].split(": ")[1])
+            clicked_time = int(hover_text.split("<br>")[1].split(": ")[1])
             fov_name = hover_text.split("<br>")[2].split(": ")[1]
 
             # Get all timepoints for this track
@@ -252,24 +251,34 @@ class ImageDisplayApp:
                 for t in track_data["t"].unique():
                     cache_key = (fov_name, track_id, t)
                     if cache_key in self.image_cache:
+                        # Define styles based on whether this is the clicked timepoint
+                        is_clicked = t == clicked_time
+                        image_style = {
+                            "width": "100px",
+                            "height": "100px",
+                            "margin": "2px",
+                            "display": "inline-block",
+                            "border": (
+                                "3px solid #007bff" if is_clicked else "none"
+                            ),  # Blue border for clicked image
+                        }
+                        time_style = {
+                            "textAlign": "center",
+                            "fontSize": "24px" if is_clicked else "18px",
+                            "fontWeight": "bold" if is_clicked else "normal",
+                            "color": "#007bff" if is_clicked else "black",
+                        }
+
                         images.append(
                             html.Div(
                                 [
                                     html.Img(
                                         src=self.image_cache[cache_key][channel],
-                                        style={
-                                            "width": "100px",
-                                            "height": "100px",
-                                            "margin": "2px",
-                                            "display": "inline-block",
-                                        },
+                                        style=image_style,
                                     ),
                                     html.Div(
                                         f"t={t}",
-                                        style={
-                                            "textAlign": "center",
-                                            "fontSize": "10px",
-                                        },
+                                        style=time_style,
                                     ),
                                 ],
                                 style={"display": "inline-block"},
