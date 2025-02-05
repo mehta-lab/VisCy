@@ -47,7 +47,7 @@ class ImageDisplayApp:
         self.z_range = z_range
         self.yx_patch_size = yx_patch_size
         self.filtered_tracks_by_fov = {}
-
+        self._z_idx = (self.z_range[1] - self.z_range[0]) // 2
         # Initialize data
         self._prepare_data()
         self._create_figure()
@@ -523,8 +523,9 @@ class ImageDisplayApp:
                     # Process each channel based on its type
                     processed_channels = {}
                     for idx, channel in enumerate(self.channels_to_display):
-                        if channel == "Phase3D":
-                            processed = self._normalize_image(img[0, idx, 2])
+                        if channel in ["Phase3D", "DIC", "BF"]:
+                            # FIXME: the z is hardcorded.
+                            processed = self._normalize_image(img[0, idx, self._z_idx])
                         else:
                             processed = self._normalize_image(
                                 np.max(img[0, idx], axis=0)
