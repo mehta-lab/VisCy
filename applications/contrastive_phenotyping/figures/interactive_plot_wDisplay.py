@@ -212,6 +212,29 @@ class ImageDisplayApp:
                                                 ),
                                             ]
                                         ),
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "Trajectory:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.RadioItems(
+                                                    id="trajectory-mode",
+                                                    options=[
+                                                        {
+                                                            "label": "X-axis",
+                                                            "value": "x",
+                                                        },
+                                                        {
+                                                            "label": "Y-axis",
+                                                            "value": "y",
+                                                        },
+                                                    ],
+                                                    value="x",
+                                                    inline=True,
+                                                ),
+                                            ]
+                                        ),
                                     ],
                                 ),
                                 dcc.Loading(
@@ -220,7 +243,13 @@ class ImageDisplayApp:
                                         dcc.Graph(
                                             id="scatter-plot",
                                             figure=self.fig,
-                                            config={"displayModeBar": False},
+                                            config={
+                                                "displayModeBar": False,
+                                                "editable": True,
+                                                "edits": {
+                                                    "shapePosition": True,
+                                                },
+                                            },
                                             style={"height": "50vh"},
                                         ),
                                     ],
@@ -228,6 +257,31 @@ class ImageDisplayApp:
                                 ),
                             ],
                         ),
+                        # Trajectory Images Section
+                        html.Div(
+                            [
+                                html.H4(
+                                    "Points along trajectory",
+                                    style={
+                                        "marginTop": "20px",
+                                        "marginBottom": "10px",
+                                    },
+                                ),
+                                html.Div(
+                                    id="trajectory-images",
+                                    style={
+                                        "overflowX": "auto",
+                                        "whiteSpace": "nowrap",
+                                        "padding": "10px",
+                                        "border": "1px solid #ddd",
+                                        "borderRadius": "5px",
+                                        "marginBottom": "20px",
+                                        "backgroundColor": "#f8f9fa",
+                                    },
+                                ),
+                            ]
+                        ),
+                        # Track Timeline Section (existing)
                         html.Div(
                             style={
                                 "width": "100%",
@@ -251,20 +305,38 @@ class ImageDisplayApp:
         )
 
         @self.app.callback(
-            dd.Output("scatter-plot", "figure"),
+            [
+                dd.Output("scatter-plot", "figure"),
+                dd.Output("trajectory-images", "children"),
+            ],
             [
                 dd.Input("color-mode", "value"),
                 dd.Input("show-arrows", "value"),
                 dd.Input("x-axis", "value"),
                 dd.Input("y-axis", "value"),
+                dd.Input("trajectory-mode", "value"),
+                dd.Input("scatter-plot", "relayoutData"),
             ],
         )
-        def update_figure(color_mode, show_arrows, x_axis, y_axis):
+        def update_figure(
+            color_mode, show_arrows, x_axis, y_axis, trajectory_mode, relayout_data
+        ):
             show_arrows = "show" in (show_arrows or [])
             if color_mode == "track":
-                return self._create_track_colored_figure(show_arrows, x_axis, y_axis)
+                fig = self._create_track_colored_figure(
+                    show_arrows, x_axis, y_axis, trajectory_mode
+                )
             else:
-                return self._create_time_colored_figure(show_arrows, x_axis, y_axis)
+                fig = self._create_time_colored_figure(
+                    show_arrows, x_axis, y_axis, trajectory_mode
+                )
+
+            # Get points within the trajectory region and create images
+            trajectory_images = self._get_trajectory_images(
+                x_axis, y_axis, trajectory_mode, relayout_data
+            )
+
+            return fig, trajectory_images
 
         @self.app.callback(
             dd.Output("track-timeline", "children"),
@@ -304,15 +376,16 @@ class ImageDisplayApp:
                             "width": "150px",
                             "height": "150px",
                             "margin": "5px",
-                            "display": "inline-block",
-                            "border": "3px solid #007bff" if is_clicked else "none",
+                            "border": (
+                                "3px solid #007bff" if is_clicked else "1px solid #ddd"
+                            ),
                         }
                         time_style = {
+                            "fontSize": "12px",
                             "textAlign": "center",
-                            "fontSize": "14px",
                             "fontWeight": "bold" if is_clicked else "normal",
                             "color": "#007bff" if is_clicked else "black",
-                            "marginTop": "5px",
+                            "marginTop": "2px",
                         }
 
                         images.append(
@@ -377,7 +450,7 @@ class ImageDisplayApp:
             )
 
     def _create_track_colored_figure(
-        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2"
+        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2", trajectory_mode="x"
     ):
         """Create scatter plot with track-based coloring"""
         unique_tracks = self.filtered_features_df["track_id"].unique()
@@ -452,11 +525,66 @@ class ImageDisplayApp:
                         arrowcolor=track_colors[track_id],
                     )
 
+        # Add draggable shaded region for trajectory
+        x_range = [
+            self.filtered_features_df[x_axis].min(),
+            self.filtered_features_df[x_axis].max(),
+        ]
+        y_range = [
+            self.filtered_features_df[y_axis].min(),
+            self.filtered_features_df[y_axis].max(),
+        ]
+
+        # Add padding to ranges
+        x_padding = (x_range[1] - x_range[0]) * 0.1
+        y_padding = (y_range[1] - y_range[0]) * 0.1
+        x_range = [x_range[0] - x_padding, x_range[1] + x_padding]
+        y_range = [y_range[0] - y_padding, y_range[1] + y_padding]
+
+        if trajectory_mode == "x":
+            # Vertical shaded region
+            x_mid = (x_range[0] + x_range[1]) / 2
+            tolerance = (x_range[1] - x_range[0]) * 0.05  # 5% tolerance
+
+            # Add draggable shaded region
+            fig.add_shape(
+                type="rect",
+                x0=x_mid - tolerance,
+                x1=x_mid + tolerance,
+                y0=y_range[0],
+                y1=y_range[1],
+                fillcolor="rgba(0, 0, 255, 0.1)",
+                line=dict(width=1, color="blue"),
+                layer="below",
+                editable=True,
+            )
+        else:
+            # Horizontal shaded region
+            y_mid = (y_range[0] + y_range[1]) / 2
+            tolerance = (y_range[1] - y_range[0]) * 0.05  # 5% tolerance
+
+            # Add draggable shaded region
+            fig.add_shape(
+                type="rect",
+                x0=x_range[0],
+                x1=x_range[1],
+                y0=y_mid - tolerance,
+                y1=y_mid + tolerance,
+                fillcolor="rgba(255, 0, 0, 0.1)",
+                line=dict(width=1, color="red"),
+                layer="below",
+                editable=True,
+            )
+
+        # Update axes ranges to show the full region
+        fig.update_xaxes(range=x_range)
+        fig.update_yaxes(range=y_range)
+
         self._update_figure_layout(fig, x_axis, y_axis)
         return fig
 
     def _create_time_colored_figure(
-        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2"
+        self, show_arrows=False, x_axis="PCA1", y_axis="PCA2", trajectory_mode="x"
     ):
         """Create scatter plot with time-based coloring"""
         fig = go.Figure()
@@ -533,6 +661,61 @@ class ImageDisplayApp:
                             arrowwidth=2,
                             arrowcolor="gray",
                         )
+
+        # Add draggable shaded region for trajectory
+        x_range = [
+            self.filtered_features_df[x_axis].min(),
+            self.filtered_features_df[x_axis].max(),
+        ]
+        y_range = [
+            self.filtered_features_df[y_axis].min(),
+            self.filtered_features_df[y_axis].max(),
+        ]
+
+        # Add padding to ranges
+        x_padding = (x_range[1] - x_range[0]) * 0.1
+        y_padding = (y_range[1] - y_range[0]) * 0.1
+        x_range = [x_range[0] - x_padding, x_range[1] + x_padding]
+        y_range = [y_range[0] - y_padding, y_range[1] + y_padding]
+
+        if trajectory_mode == "x":
+            # Vertical shaded region
+            x_mid = (x_range[0] + x_range[1]) / 2
+            tolerance = (x_range[1] - x_range[0]) * 0.05  # 5% tolerance
+
+            # Add draggable shaded region
+            fig.add_shape(
+                type="rect",
+                x0=x_mid - tolerance,
+                x1=x_mid + tolerance,
+                y0=y_range[0],
+                y1=y_range[1],
+                fillcolor="rgba(0, 0, 255, 0.1)",
+                line=dict(width=1, color="blue"),
+                layer="below",
+                editable=True,
+            )
+        else:
+            # Horizontal shaded region
+            y_mid = (y_range[0] + y_range[1]) / 2
+            tolerance = (y_range[1] - y_range[0]) * 0.05  # 5% tolerance
+
+            # Add draggable shaded region
+            fig.add_shape(
+                type="rect",
+                x0=x_range[0],
+                x1=x_range[1],
+                y0=y_mid - tolerance,
+                y1=y_mid + tolerance,
+                fillcolor="rgba(255, 0, 0, 0.1)",
+                line=dict(width=1, color="red"),
+                layer="below",
+                editable=True,
+            )
+
+        # Update axes ranges to show the full region
+        fig.update_xaxes(range=x_range)
+        fig.update_yaxes(range=y_range)
 
         self._update_figure_layout(fig, x_axis, y_axis)
         return fig
@@ -652,6 +835,132 @@ class ImageDisplayApp:
         """Clear the image cache when the program exits"""
         logging.info("Cleaning up image cache...")
         self.image_cache.clear()
+
+    def _get_trajectory_images(self, x_axis, y_axis, trajectory_mode, relayout_data):
+        """Get images of points within the trajectory region"""
+        if not relayout_data or not any(
+            key.startswith("shapes") for key in relayout_data
+        ):
+            return html.Div("Drag the shaded region to see points along the trajectory")
+
+        # Extract shaded region position from relayout_data
+        region_center = None
+        if trajectory_mode == "x":
+            # For x-mode, look for x0 and x1 to get center
+            x0_key = next((k for k in relayout_data if k.endswith(".x0")), None)
+            x1_key = next((k for k in relayout_data if k.endswith(".x1")), None)
+            if x0_key and x1_key:
+                x0 = relayout_data[x0_key]
+                x1 = relayout_data[x1_key]
+                region_center = (x0 + x1) / 2
+        else:
+            # For y-mode, look for y0 and y1 to get center
+            y0_key = next((k for k in relayout_data if k.endswith(".y0")), None)
+            y1_key = next((k for k in relayout_data if k.endswith(".y1")), None)
+            if y0_key and y1_key:
+                y0 = relayout_data[y0_key]
+                y1 = relayout_data[y1_key]
+                region_center = (y0 + y1) / 2
+
+        if region_center is None:
+            return html.Div("Drag the shaded region to see points along the trajectory")
+
+        # Calculate tolerance and find nearby points
+        if trajectory_mode == "x":
+            data_range = (
+                self.filtered_features_df[x_axis].max()
+                - self.filtered_features_df[x_axis].min()
+            )
+            tolerance = data_range * 0.05
+            distances = abs(self.filtered_features_df[x_axis] - region_center)
+            sort_by = y_axis
+        else:
+            data_range = (
+                self.filtered_features_df[y_axis].max()
+                - self.filtered_features_df[y_axis].min()
+            )
+            tolerance = data_range * 0.05
+            distances = abs(self.filtered_features_df[y_axis] - region_center)
+            sort_by = x_axis
+
+        # Get points within tolerance
+        nearby_points = self.filtered_features_df[distances <= tolerance].sort_values(
+            sort_by
+        )
+
+        if len(nearby_points) == 0:
+            return html.Div("No points found in the selected region")
+
+        # Create channel rows
+        channel_rows = []
+        for channel in self.channels_to_display:
+            images = []
+            for _, row in nearby_points.iterrows():
+                cache_key = (row["fov_name"], row["track_id"], row["t"])
+                if cache_key in self.image_cache:
+                    images.append(
+                        html.Div(
+                            [
+                                html.Img(
+                                    src=self.image_cache[cache_key][channel],
+                                    style={
+                                        "width": "150px",
+                                        "height": "150px",
+                                        "margin": "5px",
+                                        "border": "1px solid #ddd",
+                                    },
+                                ),
+                                html.Div(
+                                    f"Track {row['track_id']}, t={row['t']}",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontSize": "12px",
+                                    },
+                                ),
+                                html.Div(
+                                    f"{x_axis}: {row[x_axis]:.2f}, {y_axis}: {row[y_axis]:.2f}",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontSize": "10px",
+                                        "color": "#666",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "display": "inline-block",
+                                "margin": "5px",
+                                "verticalAlign": "top",
+                            },
+                        )
+                    )
+
+            if images:  # Only add row if there are images
+                channel_rows.extend(
+                    [
+                        html.H5(
+                            f"{channel}",
+                            style={
+                                "margin": "10px 5px",
+                                "fontSize": "16px",
+                                "fontWeight": "bold",
+                            },
+                        ),
+                        html.Div(
+                            images,
+                            style={
+                                "overflowX": "auto",
+                                "whiteSpace": "nowrap",
+                                "padding": "10px",
+                                "border": "1px solid #ddd",
+                                "borderRadius": "5px",
+                                "marginBottom": "20px",
+                                "backgroundColor": "#f8f9fa",
+                            },
+                        ),
+                    ]
+                )
+
+        return html.Div(channel_rows)
 
     def run(self, debug=False, port=None):
         """Run the Dash server
