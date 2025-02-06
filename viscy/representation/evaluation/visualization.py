@@ -671,9 +671,7 @@ class EmbeddingVisualizationApp:
         # Add background points with hover info (excluding the colored tracks)
         background_df = self.features_df[
             (self.features_df["fov_name"].isin(self.fov_tracks.keys()))
-            & (
-                ~self.features_df["track_id"].isin(unique_tracks)
-            )  # Exclude tracks that will be colored
+            & (~self.features_df["track_id"].isin(unique_tracks))
         ]
 
         if not background_df.empty:
@@ -713,7 +711,7 @@ class EmbeddingVisualizationApp:
                         size=15,
                         color=track_colors[track_id],
                         line=dict(width=1, color="black"),
-                        opacity=1.0,  # Set initial opacity to 1
+                        opacity=1.0,
                     ),
                     name=f"Track {track_id}",
                     text=[
@@ -721,47 +719,61 @@ class EmbeddingVisualizationApp:
                         for t, fov in zip(track_data["t"], track_data["fov_name"])
                     ],
                     hoverinfo="text",
-                    unselected=dict(
-                        marker=dict(
-                            opacity=0.3, size=15
-                        )  # Keep size consistent when unselected
-                    ),
-                    selected=dict(
-                        marker=dict(size=20, opacity=1.0)  # Larger size when selected
-                    ),
+                    unselected=dict(marker=dict(opacity=0.3, size=15)),
+                    selected=dict(marker=dict(size=20, opacity=1.0)),
                 )
             )
 
-            # Add arrows if requested
+            # Add trajectory lines and arrows if requested
             if show_arrows and len(track_data) > 1:
                 x_coords = track_data[x_axis].values
                 y_coords = track_data[y_axis].values
-                distances = np.sqrt(np.diff(x_coords) ** 2 + np.diff(y_coords) ** 2)
-                threshold = np.median(distances) * 0.5
+                t_coords = track_data["t"].values
 
-                arrow_x = []
-                arrow_y = []
-
-                for i in range(len(track_data) - 1):
-                    if distances[i] > threshold:
-                        arrow_x.extend([x_coords[i], x_coords[i + 1], None])
-                        arrow_y.extend([y_coords[i], y_coords[i + 1], None])
-
-                if arrow_x:
-                    fig.add_trace(
-                        go.Scatter(
-                            x=arrow_x,
-                            y=arrow_y,
-                            mode="lines",
-                            line=dict(
-                                color=track_colors[track_id],
-                                width=1,
-                                dash="dot",
-                            ),
-                            showlegend=False,
-                            hoverinfo="skip",
-                        )
+                # Add dashed lines for the trajectory
+                fig.add_trace(
+                    go.Scatter(
+                        x=x_coords,
+                        y=y_coords,
+                        mode="lines",
+                        line=dict(
+                            color=track_colors[track_id],
+                            width=1,
+                            dash="dot",
+                        ),
+                        showlegend=False,
+                        hoverinfo="skip",
                     )
+                )
+
+                # Add arrows at regular intervals
+                arrow_interval = max(
+                    1, len(track_data) // 5
+                )  # Show ~5 arrows per track
+                for i in range(0, len(track_data) - 1, arrow_interval):
+                    # Calculate arrow angle
+                    dx = x_coords[i + 1] - x_coords[i]
+                    dy = y_coords[i + 1] - y_coords[i]
+
+                    # Only add arrow if there's significant movement
+                    if dx * dx + dy * dy > 1e-6:  # Minimum distance threshold
+                        # Add arrow annotation
+                        fig.add_annotation(
+                            x=x_coords[i + 1],
+                            y=y_coords[i + 1],
+                            ax=x_coords[i],
+                            ay=y_coords[i],
+                            xref="x",
+                            yref="y",
+                            axref="x",
+                            ayref="y",
+                            showarrow=True,
+                            arrowhead=2,
+                            arrowsize=2,
+                            arrowwidth=2,
+                            arrowcolor=track_colors[track_id],
+                            opacity=0.8,
+                        )
 
         # Add draggable shaded region for trajectory only if in region selection mode
         if selection_mode == "region":
