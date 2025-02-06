@@ -244,9 +244,21 @@ class ImageDisplayApp:
                                             id="scatter-plot",
                                             figure=self.fig,
                                             config={
-                                                "displayModeBar": False,
-                                                "editable": True,
+                                                "displayModeBar": True,
+                                                "editable": False,
+                                                "showEditInChartStudio": False,
+                                                "modeBarButtonsToRemove": [
+                                                    "select2d",
+                                                    "lasso2d",
+                                                    "zoomIn2d",
+                                                    "zoomOut2d",
+                                                    "autoScale2d",
+                                                    "resetScale2d",
+                                                ],
                                                 "edits": {
+                                                    "annotationPosition": False,
+                                                    "annotationTail": False,
+                                                    "annotationText": False,
                                                     "shapePosition": True,
                                                 },
                                             },
@@ -321,7 +333,7 @@ class ImageDisplayApp:
         def update_figure(
             color_mode, show_arrows, x_axis, y_axis, trajectory_mode, relayout_data
         ):
-            show_arrows = "show" in (show_arrows or [])
+            show_arrows = len(show_arrows or []) > 0  # Fix for arrow visibility
             if color_mode == "track":
                 fig = self._create_track_colored_figure(
                     show_arrows, x_axis, y_axis, trajectory_mode
@@ -523,6 +535,8 @@ class ImageDisplayApp:
                         arrowsize=3,
                         arrowwidth=2,
                         arrowcolor=track_colors[track_id],
+                        opacity=1,
+                        standoff=4,
                     )
 
         # Add draggable shaded region for trajectory
@@ -660,6 +674,8 @@ class ImageDisplayApp:
                             arrowsize=3,
                             arrowwidth=2,
                             arrowcolor="gray",
+                            opacity=1,
+                            standoff=4,
                         )
 
         # Add draggable shaded region for trajectory
