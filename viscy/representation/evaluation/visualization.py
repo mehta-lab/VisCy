@@ -51,6 +51,9 @@ class EmbeddingVisualizationApp:
         self.filtered_tracks_by_fov = {}
         self._z_idx = (self.z_range[1] - self.z_range[0]) // 2
         self.num_PC_components = num_PC_components
+        # Initialize cluster storage before preparing data and creating figure
+        self.clusters = []  # List to store all clusters
+        self.cluster_points = set()  # Set to track all points in clusters
         # Initialize data
         self._prepare_data()
         self._create_figure()
@@ -118,6 +121,126 @@ class EmbeddingVisualizationApp:
         """Initialize the Dash application"""
         self.app = dash.Dash(__name__)
 
+        # Add cluster assignment button next to clear selection
+        cluster_controls = html.Div(
+            [
+                html.Button(
+                    "Assign to New Cluster",
+                    id="assign-cluster",
+                    style={
+                        "backgroundColor": "#28a745",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
+                    "Clear All Clusters",
+                    id="clear-clusters",
+                    style={
+                        "backgroundColor": "#dc3545",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
+                    "Clear Selection",
+                    id="clear-selection",
+                    style={
+                        "backgroundColor": "#6c757d",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                    },
+                ),
+            ],
+            style={"marginLeft": "10px", "display": "inline-block"},
+        )
+
+        # Add cluster controls to the layout where the clear selection button was
+        # Update the selection mode div in the layout
+        selection_controls = html.Div(
+            [
+                html.Label(
+                    "Selection mode:",
+                    style={"marginRight": "10px"},
+                ),
+                dcc.RadioItems(
+                    id="selection-mode",
+                    options=[
+                        {"label": "Shaded region", "value": "region"},
+                        {"label": "Lasso", "value": "lasso"},
+                    ],
+                    value="region",
+                    inline=True,
+                ),
+                cluster_controls,
+            ]
+        )
+
+        # Create tabs for different views
+        tabs = dcc.Tabs(
+            id="view-tabs",
+            value="trajectory-tab",
+            children=[
+                dcc.Tab(
+                    label="Trajectory View",
+                    value="trajectory-tab",
+                    children=[
+                        html.Div(
+                            id="trajectory-images",
+                            style={
+                                "padding": "10px",
+                                "marginTop": "10px",
+                            },
+                        ),
+                    ],
+                ),
+                dcc.Tab(
+                    label="Track Timeline",
+                    value="timeline-tab",
+                    children=[
+                        html.Div(
+                            id="track-timeline",
+                            style={
+                                "height": "auto",
+                                "overflowY": "auto",
+                                "maxHeight": "80vh",
+                                "padding": "10px",
+                                "marginTop": "10px",
+                            },
+                        ),
+                    ],
+                ),
+                dcc.Tab(
+                    label="Clusters",
+                    value="clusters-tab",
+                    id="clusters-tab",
+                    children=[
+                        html.Div(
+                            id="cluster-container",
+                            style={
+                                "padding": "10px",
+                                "marginTop": "10px",
+                            },
+                        ),
+                    ],
+                    style={"display": "none"},  # Initially hidden
+                ),
+            ],
+            style={"marginTop": "20px"},
+        )
+
+        # Update layout to use tabs
         self.app.layout = html.Div(
             style={
                 "maxWidth": "95vw",
@@ -213,42 +336,7 @@ class EmbeddingVisualizationApp:
                                                 ),
                                             ]
                                         ),
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "Selection mode:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.RadioItems(
-                                                    id="selection-mode",
-                                                    options=[
-                                                        {
-                                                            "label": "Shaded region",
-                                                            "value": "region",
-                                                        },
-                                                        {
-                                                            "label": "Lasso",
-                                                            "value": "lasso",
-                                                        },
-                                                    ],
-                                                    value="region",
-                                                    inline=True,
-                                                ),
-                                                html.Button(
-                                                    "Clear Selection",
-                                                    id="clear-selection",
-                                                    style={
-                                                        "marginLeft": "10px",
-                                                        "backgroundColor": "#dc3545",
-                                                        "color": "white",
-                                                        "border": "none",
-                                                        "padding": "5px 10px",
-                                                        "borderRadius": "4px",
-                                                        "cursor": "pointer",
-                                                    },
-                                                ),
-                                            ]
-                                        ),
+                                        selection_controls,
                                         html.Div(
                                             [
                                                 html.Label(
@@ -274,79 +362,38 @@ class EmbeddingVisualizationApp:
                                         ),
                                     ],
                                 ),
-                                dcc.Loading(
-                                    id="loading",
-                                    children=[
-                                        dcc.Graph(
-                                            id="scatter-plot",
-                                            figure=self.fig,
-                                            config={
-                                                "displayModeBar": True,
-                                                "editable": False,
-                                                "showEditInChartStudio": False,
-                                                "modeBarButtonsToRemove": [
-                                                    "select2d",
-                                                    "resetScale2d",
-                                                ],
-                                                "edits": {
-                                                    "annotationPosition": False,
-                                                    "annotationTail": False,
-                                                    "annotationText": False,
-                                                    "shapePosition": True,
-                                                },
-                                                "scrollZoom": True,
-                                            },
-                                            style={"height": "50vh"},
-                                        ),
-                                    ],
-                                    type="default",
-                                ),
-                            ],
-                        ),
-                        # Trajectory Images Section
-                        html.Div(
-                            [
-                                html.H4(
-                                    "Points along trajectory",
-                                    style={
-                                        "marginTop": "20px",
-                                        "marginBottom": "10px",
-                                    },
-                                ),
-                                html.Div(
-                                    id="trajectory-images",
-                                    style={
-                                        "overflowX": "auto",
-                                        "whiteSpace": "nowrap",
-                                        "padding": "10px",
-                                        "border": "1px solid #ddd",
-                                        "borderRadius": "5px",
-                                        "marginBottom": "20px",
-                                        "backgroundColor": "#f8f9fa",
-                                    },
-                                ),
-                            ]
-                        ),
-                        # Track Timeline Section (existing)
-                        html.Div(
-                            style={
-                                "width": "100%",
-                                "display": "block",
-                                "marginTop": "20px",
-                            },
-                            children=[
-                                html.Div(
-                                    id="track-timeline",
-                                    style={
-                                        "height": "auto",
-                                        "overflowY": "auto",
-                                        "maxHeight": "80vh",
-                                    },
-                                ),
                             ],
                         ),
                     ]
                 ),
+                dcc.Loading(
+                    id="loading",
+                    children=[
+                        dcc.Graph(
+                            id="scatter-plot",
+                            figure=self.fig,
+                            config={
+                                "displayModeBar": True,
+                                "editable": False,
+                                "showEditInChartStudio": False,
+                                "modeBarButtonsToRemove": [
+                                    "select2d",
+                                    "resetScale2d",
+                                ],
+                                "edits": {
+                                    "annotationPosition": False,
+                                    "annotationTail": False,
+                                    "annotationText": False,
+                                    "shapePosition": True,
+                                },
+                                "scrollZoom": True,
+                            },
+                            style={"height": "50vh"},
+                        ),
+                    ],
+                    type="default",
+                ),
+                tabs,
             ],
         )
 
@@ -650,6 +697,105 @@ class EmbeddingVisualizationApp:
                 ]
             )
 
+        # Add callback to show/hide clusters tab
+        @self.app.callback(
+            [
+                dd.Output("clusters-tab", "style"),
+                dd.Output("cluster-container", "children"),
+                dd.Output("view-tabs", "value"),
+                dd.Output("scatter-plot", "figure", allow_duplicate=True),
+            ],
+            [
+                dd.Input("assign-cluster", "n_clicks"),
+                dd.Input("clear-clusters", "n_clicks"),
+            ],
+            [
+                dd.State("scatter-plot", "selectedData"),
+                dd.State("scatter-plot", "figure"),
+                dd.State("color-mode", "value"),
+                dd.State("show-arrows", "value"),
+                dd.State("x-axis", "value"),
+                dd.State("y-axis", "value"),
+                dd.State("trajectory-mode", "value"),
+                dd.State("selection-mode", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_clusters_tab(
+            assign_clicks,
+            clear_clicks,
+            selected_data,
+            current_figure,
+            color_mode,
+            show_arrows,
+            x_axis,
+            y_axis,
+            trajectory_mode,
+            selection_mode,
+        ):
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+            button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+            if (
+                button_id == "assign-cluster"
+                and selected_data
+                and selected_data.get("points")
+            ):
+                # Create new cluster from selected points
+                new_cluster = []
+                for point in selected_data["points"]:
+                    text = point["text"]
+                    lines = text.split("<br>")
+                    track_id = int(lines[0].split(": ")[1])
+                    t = int(lines[1].split(": ")[1])
+                    fov = lines[2].split(": ")[1]
+
+                    cache_key = (fov, track_id, t)
+                    if cache_key in self.image_cache:
+                        new_cluster.append(
+                            {
+                                "track_id": track_id,
+                                "t": t,
+                                "fov_name": fov,
+                            }
+                        )
+                        self.cluster_points.add(cache_key)
+
+                if new_cluster:
+                    self.clusters.append(new_cluster)
+                    # Create new figure with updated colors
+                    fig = self._create_track_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                        trajectory_mode,
+                        selection_mode,
+                    )
+                    return (
+                        {"display": "block"},
+                        self._get_cluster_images(),
+                        "clusters-tab",
+                        fig,
+                    )
+
+            elif button_id == "clear-clusters":
+                self.clusters = []
+                self.cluster_points.clear()
+                # Restore original coloring
+                fig = self._create_track_colored_figure(
+                    len(show_arrows or []) > 0,
+                    x_axis,
+                    y_axis,
+                    trajectory_mode,
+                    selection_mode,
+                )
+                return {"display": "none"}, None, "trajectory-tab", fig
+
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
     def _create_track_colored_figure(
         self,
         show_arrows=False,
@@ -701,6 +847,40 @@ class EmbeddingVisualizationApp:
                 self.filtered_features_df["track_id"] == track_id
             ].sort_values("t")
 
+            # Get points for this track that are in clusters
+            track_points = list(
+                zip(
+                    [fov for fov in track_data["fov_name"]],
+                    [track_id] * len(track_data),
+                    [t for t in track_data["t"]],
+                )
+            )
+
+            # Determine colors based on cluster membership
+            colors = []
+            opacities = []
+            if self.clusters:
+                cluster_colors = [
+                    f"rgb{tuple(int(x*255) for x in plt.cm.Set2(i % 8)[:3])}"
+                    for i in range(len(self.clusters))
+                ]
+                point_to_cluster = {}
+                for cluster_idx, cluster in enumerate(self.clusters):
+                    for point in cluster:
+                        point_key = (point["fov_name"], point["track_id"], point["t"])
+                        point_to_cluster[point_key] = cluster_idx
+
+                for point in track_points:
+                    if point in point_to_cluster:
+                        colors.append(cluster_colors[point_to_cluster[point]])
+                        opacities.append(1.0)
+                    else:
+                        colors.append("lightgray")
+                        opacities.append(0.3)
+            else:
+                colors = [track_colors[track_id]] * len(track_data)
+                opacities = [1.0] * len(track_data)
+
             # Add points
             fig.add_trace(
                 go.Scatter(
@@ -709,9 +889,9 @@ class EmbeddingVisualizationApp:
                     mode="markers",
                     marker=dict(
                         size=15,
-                        color=track_colors[track_id],
+                        color=colors,
                         line=dict(width=1, color="black"),
-                        opacity=1.0,
+                        opacity=opacities,
                     ),
                     name=f"Track {track_id}",
                     text=[
@@ -728,7 +908,6 @@ class EmbeddingVisualizationApp:
             if show_arrows and len(track_data) > 1:
                 x_coords = track_data[x_axis].values
                 y_coords = track_data[y_axis].values
-                t_coords = track_data["t"].values
 
                 # Add dashed lines for the trajectory
                 fig.add_trace(
@@ -1279,9 +1458,13 @@ class EmbeddingVisualizationApp:
         if not selected_data or not selected_data.get("points"):
             return html.Div("Use the lasso tool to select points")
 
-        selected_info = []
+        # Dictionary to store points for each lasso selection
+        lasso_clusters = {}
+
+        # Track which points we've seen to avoid duplicates within clusters
         seen_points = set()
 
+        # Process each selected point
         for point in selected_data["points"]:
             text = point["text"]
             lines = text.split("<br>")
@@ -1290,87 +1473,73 @@ class EmbeddingVisualizationApp:
             fov = lines[2].split(": ")[1]
 
             point_id = (track_id, t, fov)
-            if point_id not in seen_points:
-                seen_points.add(point_id)
-                # Check if the point exists in the cache before adding
-                cache_key = (fov, track_id, t)
-                if cache_key in self.image_cache:
-                    selected_info.append(
-                        {
-                            "track_id": track_id,
-                            "t": t,
-                            "fov_name": fov,
-                            x_axis: point["x"],
-                            y_axis: point["y"],
-                            "cluster": len(selected_info) // 10 + 1,
-                        }
-                    )
-                else:
-                    logger.debug(f"Skipping point {point_id} as it's not in the cache")
+            cache_key = (fov, track_id, t)
 
-        if not selected_info:
+            # Skip if we don't have the image in cache
+            if cache_key not in self.image_cache:
+                logger.debug(f"Skipping point {point_id} as it's not in the cache")
+                continue
+
+            # Determine which curve (lasso selection) this point belongs to
+            curve_number = point.get("curveNumber", 0)
+            if curve_number not in lasso_clusters:
+                lasso_clusters[curve_number] = []
+
+            # Only add if we haven't seen this point in this cluster
+            cluster_point_id = (curve_number, point_id)
+            if cluster_point_id not in seen_points:
+                seen_points.add(cluster_point_id)
+                lasso_clusters[curve_number].append(
+                    {
+                        "track_id": track_id,
+                        "t": t,
+                        "fov_name": fov,
+                        x_axis: point["x"],
+                        y_axis: point["y"],
+                    }
+                )
+
+        if not lasso_clusters:
             return html.Div("No cached images found for the selected points")
 
-        selected_points = pd.DataFrame(selected_info)
-
-        # Get the corresponding points from filtered_features_df using merge
-        nearby_points = pd.merge(
-            self.filtered_features_df,
-            selected_points[["track_id", "t", "fov_name", "cluster"]],
-            on=["track_id", "t", "fov_name"],
-            how="inner",
-        ).sort_values(x_axis)
-
-        if len(nearby_points) == 0:
-            return html.Div("No points selected")
-
-        # Create sections for each cluster
+        # Create sections for each lasso selection
         cluster_sections = []
-        for cluster_id in sorted(selected_points["cluster"].unique()):
-            cluster_points = nearby_points[nearby_points["cluster"] == cluster_id]
+        for cluster_idx, points in lasso_clusters.items():
+            cluster_df = pd.DataFrame(points)
 
             # Create channel rows for this cluster
             channel_rows = []
             for channel in self.channels_to_display:
                 images = []
-                for _, row in cluster_points.iterrows():
+                for _, row in cluster_df.iterrows():
                     cache_key = (row["fov_name"], row["track_id"], row["t"])
-                    if cache_key in self.image_cache:
-                        images.append(
-                            html.Div(
-                                [
-                                    html.Img(
-                                        src=self.image_cache[cache_key][channel],
-                                        style={
-                                            "width": "150px",
-                                            "height": "150px",
-                                            "margin": "5px",
-                                            "border": "1px solid #ddd",
-                                        },
-                                    ),
-                                    html.Div(
-                                        f"Track {row['track_id']}, t={row['t']}",
-                                        style={
-                                            "textAlign": "center",
-                                            "fontSize": "12px",
-                                        },
-                                    ),
-                                    html.Div(
-                                        f"{x_axis}: {row[x_axis]:.2f}, {y_axis}: {row[y_axis]:.2f}",
-                                        style={
-                                            "textAlign": "center",
-                                            "fontSize": "10px",
-                                            "color": "#666",
-                                        },
-                                    ),
-                                ],
-                                style={
-                                    "display": "inline-block",
-                                    "margin": "5px",
-                                    "verticalAlign": "top",
-                                },
-                            )
+                    images.append(
+                        html.Div(
+                            [
+                                html.Img(
+                                    src=self.image_cache[cache_key][channel],
+                                    style={
+                                        "width": "150px",
+                                        "height": "150px",
+                                        "margin": "5px",
+                                        "border": "1px solid #ddd",
+                                    },
+                                ),
+                                html.Div(
+                                    f"Track {row['track_id']}, t={row['t']}",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontSize": "12px",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "display": "inline-block",
+                                "margin": "5px",
+                                "verticalAlign": "top",
+                            },
                         )
+                    )
 
                 if images:  # Only add row if there are images
                     channel_rows.extend(
@@ -1403,7 +1572,7 @@ class EmbeddingVisualizationApp:
                     html.Div(
                         [
                             html.H3(
-                                f"Cluster {cluster_id}",
+                                f"Lasso Selection {cluster_idx + 1}",
                                 style={
                                     "marginTop": "30px",
                                     "marginBottom": "15px",
@@ -1429,7 +1598,144 @@ class EmbeddingVisualizationApp:
         return html.Div(
             [
                 html.H2(
-                    f"Selected Points ({len(cluster_sections)} clusters)",
+                    f"Selected Points ({len(cluster_sections)} selections)",
+                    style={
+                        "marginBottom": "20px",
+                        "fontSize": "28px",
+                        "fontWeight": "bold",
+                        "color": "#2c3e50",
+                    },
+                ),
+                html.Div(cluster_sections),
+            ]
+        )
+
+    def _get_cluster_images(self):
+        """Display images for all clusters"""
+        if not self.clusters:
+            return html.Div("No clusters created yet")
+
+        # Create cluster colors once
+        cluster_colors = [
+            f"rgb{tuple(int(x*255) for x in plt.cm.Set2(i % 8)[:3])}"
+            for i in range(len(self.clusters))
+        ]
+
+        cluster_sections = []
+        for cluster_idx, cluster_points in enumerate(self.clusters):
+            # Create channel rows for this cluster
+            channel_rows = []
+            for channel in self.channels_to_display:
+                images = []
+                for point in cluster_points:
+                    cache_key = (point["fov_name"], point["track_id"], point["t"])
+                    images.append(
+                        html.Div(
+                            [
+                                html.Img(
+                                    src=self.image_cache[cache_key][channel],
+                                    style={
+                                        "width": "150px",
+                                        "height": "150px",
+                                        "margin": "5px",
+                                        "border": f"2px solid {cluster_colors[cluster_idx]}",
+                                        "borderRadius": "4px",
+                                    },
+                                ),
+                                html.Div(
+                                    f"Track {point['track_id']}, t={point['t']}",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontSize": "12px",
+                                    },
+                                ),
+                            ],
+                            style={
+                                "display": "inline-block",
+                                "margin": "5px",
+                                "verticalAlign": "top",
+                            },
+                        )
+                    )
+
+                if images:
+                    channel_rows.extend(
+                        [
+                            html.H5(
+                                f"{channel}",
+                                style={
+                                    "margin": "10px 5px",
+                                    "fontSize": "16px",
+                                    "fontWeight": "bold",
+                                },
+                            ),
+                            html.Div(
+                                images,
+                                style={
+                                    "overflowX": "auto",
+                                    "whiteSpace": "nowrap",
+                                    "padding": "10px",
+                                    "border": "1px solid #ddd",
+                                    "borderRadius": "5px",
+                                    "marginBottom": "20px",
+                                    "backgroundColor": "#f8f9fa",
+                                },
+                            ),
+                        ]
+                    )
+
+            if channel_rows:
+                cluster_sections.append(
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(
+                                        f"Cluster {cluster_idx + 1}",
+                                        style={
+                                            "color": cluster_colors[cluster_idx],
+                                            "fontWeight": "bold",
+                                            "fontSize": "24px",
+                                        },
+                                    ),
+                                    html.Span(
+                                        f" ({len(cluster_points)} points)",
+                                        style={
+                                            "color": "#2c3e50",
+                                            "fontSize": "24px",
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "marginTop": "30px",
+                                    "marginBottom": "15px",
+                                    "borderBottom": f"2px solid {cluster_colors[cluster_idx]}",
+                                    "paddingBottom": "5px",
+                                },
+                            ),
+                            html.Div(
+                                channel_rows,
+                                style={
+                                    "backgroundColor": "#ffffff",
+                                    "padding": "15px",
+                                    "borderRadius": "8px",
+                                    "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                                },
+                            ),
+                        ]
+                    )
+                )
+
+        return html.Div(
+            [
+                html.H2(
+                    [
+                        "Clusters ",
+                        html.Span(
+                            f"({len(self.clusters)} total)",
+                            style={"color": "#666"},
+                        ),
+                    ],
                     style={
                         "marginBottom": "20px",
                         "fontSize": "28px",

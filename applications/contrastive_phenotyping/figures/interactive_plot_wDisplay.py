@@ -60,7 +60,7 @@ if __name__ == "__main__":
             for fov in unique_fovs:
                 if fov not in fov_tracks_dict:
                     fov_tracks_dict[fov] = []
-            app = ImageDisplayApp(
+            app = EmbeddingVisualizationApp(
                 data_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr",
                 tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr",
                 features_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr",
@@ -77,7 +77,7 @@ if __name__ == "__main__":
                 "/0/6/000000": [1, 5, 6, 7, 9, 14, 15],
                 # "/0/3/002000": "all",  # Use all tracks for this FOV
             }
-            app = ImageDisplayApp(
+            app = EmbeddingVisualizationApp(
                 data_path="/hpc/projects/organelle_phenotyping/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/registered_chunked.zarr",
                 tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.2-tracking/track.zarr",
                 features_path="/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/jun_time_interval_1_epoch_178.zarr",
