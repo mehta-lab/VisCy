@@ -233,6 +233,19 @@ class ImageDisplayApp:
                                                     value="region",
                                                     inline=True,
                                                 ),
+                                                html.Button(
+                                                    "Clear Selection",
+                                                    id="clear-selection",
+                                                    style={
+                                                        "marginLeft": "10px",
+                                                        "backgroundColor": "#dc3545",
+                                                        "color": "white",
+                                                        "border": "none",
+                                                        "padding": "5px 10px",
+                                                        "borderRadius": "4px",
+                                                        "cursor": "pointer",
+                                                    },
+                                                ),
                                             ]
                                         ),
                                         html.Div(
@@ -352,6 +365,7 @@ class ImageDisplayApp:
                 dd.Input("scatter-plot", "relayoutData"),
                 dd.Input("scatter-plot", "selectedData"),
             ],
+            [dd.State("scatter-plot", "figure")],
         )
         def update_figure(
             color_mode,
@@ -362,6 +376,7 @@ class ImageDisplayApp:
             selection_mode,
             relayout_data,
             selected_data,
+            current_figure,
         ):
             show_arrows = len(show_arrows or []) > 0  # Fix for arrow visibility
 
@@ -392,9 +407,7 @@ class ImageDisplayApp:
                 # Update dragmode based on selection mode
                 fig.update_layout(
                     dragmode="lasso" if selection_mode == "lasso" else "pan",
-                    uirevision=(
-                        "true" if triggered_id != "selection-mode" else None
-                    ),  # Reset UI state when switching modes
+                    uirevision="true",  # Preserve zoom/pan state
                 )
             else:
                 # If the trigger was not a figure-changing event, keep the current figure
@@ -438,6 +451,39 @@ class ImageDisplayApp:
                     if not isinstance(selected_data, dash._callback.NoUpdate)
                     else ctx.inputs.get("scatter-plot.selectedData")
                 )
+
+                # For lasso mode, accumulate selections
+                if (
+                    triggered_id == "scatter-plot"
+                    and current_selected_data
+                    and current_selected_data.get("points")
+                    and current_figure
+                    and current_figure.get("data")
+                ):
+                    # Get existing selections from the current figure
+                    existing_selections = []
+                    for trace in current_figure["data"]:
+                        if (
+                            trace.get("selectedpoints") is not None
+                            and trace.get("x") is not None
+                            and trace.get("y") is not None
+                            and trace.get("text") is not None
+                        ):
+                            selected_indices = trace["selectedpoints"]
+                            for idx in selected_indices:
+                                if idx < len(trace["x"]):
+                                    existing_selections.append(
+                                        {
+                                            "x": trace["x"][idx],
+                                            "y": trace["y"][idx],
+                                            "text": trace["text"][idx],
+                                        }
+                                    )
+
+                    # Add existing selections to the current selection
+                    if existing_selections:
+                        current_selected_data["points"].extend(existing_selections)
+
                 trajectory_images = self._get_trajectory_images_lasso(
                     x_axis, y_axis, current_selected_data
                 )
@@ -1116,6 +1162,8 @@ class ImageDisplayApp:
         # Extract track_id, time, and fov from hover text for each selected point
         selected_info = []
         seen_points = set()  # To track unique points
+
+        # Process all points in the selection
         for point in selected_data["points"]:
             text = point["text"]
             lines = text.split("<br>")
@@ -1134,6 +1182,8 @@ class ImageDisplayApp:
                         "fov_name": fov,
                         x_axis: point["x"],
                         y_axis: point["y"],
+                        "cluster": len(selected_info) // 10
+                        + 1,  # Group points into clusters of 10
                     }
                 )
 
@@ -1142,7 +1192,7 @@ class ImageDisplayApp:
         # Get the corresponding points from filtered_features_df using merge
         nearby_points = pd.merge(
             self.filtered_features_df,
-            selected_points[["track_id", "t", "fov_name"]],
+            selected_points[["track_id", "t", "fov_name", "cluster"]],
             on=["track_id", "t", "fov_name"],
             how="inner",
         ).sort_values(x_axis)
@@ -1150,76 +1200,122 @@ class ImageDisplayApp:
         if len(nearby_points) == 0:
             return html.Div("No points selected")
 
-        # Create channel rows
-        channel_rows = []
-        for channel in self.channels_to_display:
-            images = []
-            for _, row in nearby_points.iterrows():
-                cache_key = (row["fov_name"], row["track_id"], row["t"])
-                if cache_key in self.image_cache:
-                    images.append(
-                        html.Div(
-                            [
-                                html.Img(
-                                    src=self.image_cache[cache_key][channel],
-                                    style={
-                                        "width": "150px",
-                                        "height": "150px",
-                                        "margin": "5px",
-                                        "border": "1px solid #ddd",
-                                    },
-                                ),
-                                html.Div(
-                                    f"Track {row['track_id']}, t={row['t']}",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontSize": "12px",
-                                    },
-                                ),
-                                html.Div(
-                                    f"{x_axis}: {row[x_axis]:.2f}, {y_axis}: {row[y_axis]:.2f}",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontSize": "10px",
-                                        "color": "#666",
-                                    },
-                                ),
-                            ],
-                            style={
-                                "display": "inline-block",
-                                "margin": "5px",
-                                "verticalAlign": "top",
-                            },
+        # Create sections for each cluster
+        cluster_sections = []
+        for cluster_id in sorted(selected_points["cluster"].unique()):
+            cluster_points = nearby_points[nearby_points["cluster"] == cluster_id]
+
+            # Create channel rows for this cluster
+            channel_rows = []
+            for channel in self.channels_to_display:
+                images = []
+                for _, row in cluster_points.iterrows():
+                    cache_key = (row["fov_name"], row["track_id"], row["t"])
+                    if cache_key in self.image_cache:
+                        images.append(
+                            html.Div(
+                                [
+                                    html.Img(
+                                        src=self.image_cache[cache_key][channel],
+                                        style={
+                                            "width": "150px",
+                                            "height": "150px",
+                                            "margin": "5px",
+                                            "border": "1px solid #ddd",
+                                        },
+                                    ),
+                                    html.Div(
+                                        f"Track {row['track_id']}, t={row['t']}",
+                                        style={
+                                            "textAlign": "center",
+                                            "fontSize": "12px",
+                                        },
+                                    ),
+                                    html.Div(
+                                        f"{x_axis}: {row[x_axis]:.2f}, {y_axis}: {row[y_axis]:.2f}",
+                                        style={
+                                            "textAlign": "center",
+                                            "fontSize": "10px",
+                                            "color": "#666",
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "display": "inline-block",
+                                    "margin": "5px",
+                                    "verticalAlign": "top",
+                                },
+                            )
                         )
+
+                if images:  # Only add row if there are images
+                    channel_rows.extend(
+                        [
+                            html.H5(
+                                f"{channel}",
+                                style={
+                                    "margin": "10px 5px",
+                                    "fontSize": "16px",
+                                    "fontWeight": "bold",
+                                },
+                            ),
+                            html.Div(
+                                images,
+                                style={
+                                    "overflowX": "auto",
+                                    "whiteSpace": "nowrap",
+                                    "padding": "10px",
+                                    "border": "1px solid #ddd",
+                                    "borderRadius": "5px",
+                                    "marginBottom": "20px",
+                                    "backgroundColor": "#f8f9fa",
+                                },
+                            ),
+                        ]
                     )
 
-            if images:  # Only add row if there are images
-                channel_rows.extend(
-                    [
-                        html.H5(
-                            f"{channel}",
-                            style={
-                                "margin": "10px 5px",
-                                "fontSize": "16px",
-                                "fontWeight": "bold",
-                            },
-                        ),
-                        html.Div(
-                            images,
-                            style={
-                                "overflowX": "auto",
-                                "whiteSpace": "nowrap",
-                                "padding": "10px",
-                                "border": "1px solid #ddd",
-                                "borderRadius": "5px",
-                                "marginBottom": "20px",
-                                "backgroundColor": "#f8f9fa",
-                            },
-                        ),
-                    ]
+            if channel_rows:  # Only add cluster section if it has images
+                cluster_sections.append(
+                    html.Div(
+                        [
+                            html.H3(
+                                f"Cluster {cluster_id}",
+                                style={
+                                    "marginTop": "30px",
+                                    "marginBottom": "15px",
+                                    "fontSize": "24px",
+                                    "fontWeight": "bold",
+                                    "borderBottom": "2px solid #007bff",
+                                    "paddingBottom": "5px",
+                                },
+                            ),
+                            html.Div(
+                                channel_rows,
+                                style={
+                                    "backgroundColor": "#ffffff",
+                                    "padding": "15px",
+                                    "borderRadius": "8px",
+                                    "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                                },
+                            ),
+                        ]
+                    )
                 )
 
-        return html.Div(channel_rows)
+        return html.Div(
+            [
+                html.H2(
+                    f"Selected Points ({len(cluster_sections)} clusters)",
+                    style={
+                        "marginBottom": "20px",
+                        "fontSize": "28px",
+                        "fontWeight": "bold",
+                        "color": "#2c3e50",
+                    },
+                ),
+                html.Div(cluster_sections),
+            ]
+        )
 
     def run(self, debug=False, port=None):
         """Run the Dash server
