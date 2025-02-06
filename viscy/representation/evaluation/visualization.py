@@ -180,7 +180,7 @@ class EmbeddingVisualizationApp:
                         {"label": "Shaded region", "value": "region"},
                         {"label": "Lasso", "value": "lasso"},
                     ],
-                    value="region",
+                    value="region",  # Changed default to lasso
                     inline=True,
                 ),
                 cluster_controls,
@@ -774,6 +774,13 @@ class EmbeddingVisualizationApp:
                         trajectory_mode,
                         selection_mode,
                     )
+                    # Ensure the dragmode is set based on selection_mode
+                    fig.update_layout(
+                        dragmode="lasso" if selection_mode == "lasso" else "pan",
+                        clickmode="event+select",
+                        uirevision="true",  # Keep the UI state
+                        selectdirection="any",
+                    )
                     return (
                         {"display": "block"},
                         self._get_cluster_images(),
@@ -791,6 +798,13 @@ class EmbeddingVisualizationApp:
                     y_axis,
                     trajectory_mode,
                     selection_mode,
+                )
+                # Ensure the dragmode is set based on selection_mode
+                fig.update_layout(
+                    dragmode="lasso" if selection_mode == "lasso" else "pan",
+                    clickmode="event+select",
+                    uirevision="true",  # Keep the UI state
+                    selectdirection="any",
                 )
                 return {"display": "none"}, None, "trajectory-tab", fig
 
@@ -1611,7 +1625,7 @@ class EmbeddingVisualizationApp:
         )
 
     def _get_cluster_images(self):
-        """Display images for all clusters"""
+        """Display images for all clusters in a grid layout"""
         if not self.clusters:
             return html.Div("No clusters created yet")
 
@@ -1621,10 +1635,11 @@ class EmbeddingVisualizationApp:
             for i in range(len(self.clusters))
         ]
 
-        cluster_sections = []
+        # Create individual cluster panels
+        cluster_panels = []
         for cluster_idx, cluster_points in enumerate(self.clusters):
-            # Create channel rows for this cluster
-            channel_rows = []
+            # Create a single scrollable container for all channels
+            all_channel_images = []
             for channel in self.channels_to_display:
                 images = []
                 for point in cluster_points:
@@ -1635,9 +1650,9 @@ class EmbeddingVisualizationApp:
                                 html.Img(
                                     src=self.image_cache[cache_key][channel],
                                     style={
-                                        "width": "150px",
-                                        "height": "150px",
-                                        "margin": "5px",
+                                        "width": "100px",
+                                        "height": "100px",
+                                        "margin": "2px",
                                         "border": f"2px solid {cluster_colors[cluster_idx]}",
                                         "borderRadius": "4px",
                                     },
@@ -1646,46 +1661,47 @@ class EmbeddingVisualizationApp:
                                     f"Track {point['track_id']}, t={point['t']}",
                                     style={
                                         "textAlign": "center",
-                                        "fontSize": "12px",
+                                        "fontSize": "10px",
                                     },
                                 ),
                             ],
                             style={
                                 "display": "inline-block",
-                                "margin": "5px",
+                                "margin": "2px",
                                 "verticalAlign": "top",
                             },
                         )
                     )
 
                 if images:
-                    channel_rows.extend(
+                    all_channel_images.extend(
                         [
-                            html.H5(
+                            html.H6(
                                 f"{channel}",
                                 style={
-                                    "margin": "10px 5px",
-                                    "fontSize": "16px",
+                                    "margin": "5px",
+                                    "fontSize": "12px",
                                     "fontWeight": "bold",
+                                    "position": "sticky",
+                                    "left": "0",
+                                    "backgroundColor": "#f8f9fa",
+                                    "zIndex": "1",
+                                    "paddingLeft": "5px",
                                 },
                             ),
                             html.Div(
                                 images,
                                 style={
-                                    "overflowX": "auto",
                                     "whiteSpace": "nowrap",
-                                    "padding": "10px",
-                                    "border": "1px solid #ddd",
-                                    "borderRadius": "5px",
-                                    "marginBottom": "20px",
-                                    "backgroundColor": "#f8f9fa",
+                                    "marginBottom": "10px",
                                 },
                             ),
                         ]
                     )
 
-            if channel_rows:
-                cluster_sections.append(
+            if all_channel_images:
+                # Create a panel for this cluster with synchronized scrolling
+                cluster_panels.append(
                     html.Div(
                         [
                             html.Div(
@@ -1695,36 +1711,63 @@ class EmbeddingVisualizationApp:
                                         style={
                                             "color": cluster_colors[cluster_idx],
                                             "fontWeight": "bold",
-                                            "fontSize": "24px",
+                                            "fontSize": "16px",
                                         },
                                     ),
                                     html.Span(
                                         f" ({len(cluster_points)} points)",
                                         style={
                                             "color": "#2c3e50",
-                                            "fontSize": "24px",
+                                            "fontSize": "14px",
                                         },
                                     ),
                                 ],
                                 style={
-                                    "marginTop": "30px",
-                                    "marginBottom": "15px",
+                                    "marginBottom": "10px",
                                     "borderBottom": f"2px solid {cluster_colors[cluster_idx]}",
                                     "paddingBottom": "5px",
+                                    "position": "sticky",
+                                    "top": "0",
+                                    "backgroundColor": "white",
+                                    "zIndex": "1",
                                 },
                             ),
                             html.Div(
-                                channel_rows,
+                                all_channel_images,
                                 style={
+                                    "overflowX": "auto",
+                                    "overflowY": "auto",
+                                    "height": "400px",
                                     "backgroundColor": "#ffffff",
-                                    "padding": "15px",
+                                    "padding": "10px",
                                     "borderRadius": "8px",
                                     "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
                                 },
                             ),
-                        ]
+                        ],
+                        style={
+                            "width": "24%",
+                            "display": "inline-block",
+                            "verticalAlign": "top",
+                            "padding": "5px",
+                            "boxSizing": "border-box",
+                        },
                     )
                 )
+
+        # Create rows of 4 panels each
+        rows = []
+        for i in range(0, len(cluster_panels), 4):
+            row = html.Div(
+                cluster_panels[i : i + 4],
+                style={
+                    "display": "flex",
+                    "justifyContent": "flex-start",
+                    "gap": "10px",
+                    "marginBottom": "10px",
+                },
+            )
+            rows.append(row)
 
         return html.Div(
             [
@@ -1743,7 +1786,14 @@ class EmbeddingVisualizationApp:
                         "color": "#2c3e50",
                     },
                 ),
-                html.Div(cluster_sections),
+                html.Div(
+                    rows,
+                    style={
+                        "maxHeight": "calc(100vh - 200px)",
+                        "overflowY": "auto",
+                        "padding": "10px",
+                    },
+                ),
             ]
         )
 
