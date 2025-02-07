@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
+import os
+import tempfile
 from logging import getLogger
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -8,18 +9,16 @@ from typing import TYPE_CHECKING, Literal
 import numpy as np
 import torch
 from iohub.ngff import Plate, Position, open_ome_zarr
-from lightning.pytorch import LightningDataModule
 from monai.data.meta_obj import set_track_meta
-from monai.data.utils import list_data_collate
 from monai.transforms.compose import Compose
+from tensordict.memmap import MemoryMappedTensor
 from torch import Tensor
 from torch.multiprocessing import Manager
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
-from viscy.data.distributed import ShardedDistributedSampler
+from viscy.data.gpu_aug import GPUTransformDataModule, SelectWell
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
 from viscy.data.typing import DictTransform, NormMeta
-from viscy.preprocessing.precompute import _filter_fovs, _filter_wells
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -29,104 +28,17 @@ _logger = getLogger("lightning.pytorch")
 _CacheMetadata = tuple[Position, int, NormMeta | None]
 
 
-class GPUTransformDataModule(ABC, LightningDataModule):
-    """Abstract data module with GPU transforms."""
-
-    train_dataset: Dataset
-    val_dataset: Dataset
-    batch_size: int
-    num_workers: int
-    pin_memory: bool
-    prefetch_factor: int | None
-
-    def _maybe_sampler(
-        self, dataset: Dataset, shuffle: bool
-    ) -> ShardedDistributedSampler | None:
-        return (
-            ShardedDistributedSampler(dataset, shuffle=shuffle)
-            if torch.distributed.is_initialized()
-            else None
-        )
-
-    def train_dataloader(self) -> DataLoader:
-        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
-        _logger.debug(f"Using training sampler {sampler}")
-        return DataLoader(
-            self.train_dataset,
-            batch_size=self.batch_size,
-            shuffle=False if sampler else True,
-            sampler=sampler,
-            persistent_workers=True if self.num_workers > 0 else False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=False,
-            collate_fn=list_data_collate,
-            prefetch_factor=self.prefetch_factor,
-        )
-
-    def val_dataloader(self) -> DataLoader:
-        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
-        _logger.debug(f"Using validation sampler {sampler}")
-        return DataLoader(
-            self.val_dataset,
-            batch_size=self.batch_size,
-            shuffle=False,
-            sampler=sampler,
-            persistent_workers=True if self.num_workers > 0 else False,
-            num_workers=self.num_workers,
-            pin_memory=self.pin_memory,
-            drop_last=False,
-            collate_fn=list_data_collate,
-            prefetch_factor=self.prefetch_factor,
-        )
-
-    @property
-    @abstractmethod
-    def train_cpu_transforms(self) -> Compose: ...
-
-    @property
-    @abstractmethod
-    def train_gpu_transforms(self) -> Compose: ...
-
-    @property
-    @abstractmethod
-    def val_cpu_transforms(self) -> Compose: ...
-
-    @property
-    @abstractmethod
-    def val_gpu_transforms(self) -> Compose: ...
-
-
-class CachedOmeZarrDataset(Dataset):
-    """Dataset for cached OME-Zarr arrays.
-
-    Parameters
-    ----------
-    positions : list[Position]
-        List of FOVs to load images from.
-    channel_names : list[str]
-        List of channel names to load.
-    cache_map : DictProxy
-        Shared dictionary for caching loaded volumes.
-    transform : Compose | None, optional
-        Composed transforms to be applied on the CPU, by default None
-    array_key : str, optional
-        The image array key name (multi-scale level), by default "0"
-    load_normalization_metadata : bool, optional
-        Load normalization metadata in the sample dictionary, by default True
-    skip_cache : bool, optional
-        Skip caching to save RAM, by default False
-    """
-
+class MmappedDataset(Dataset):
     def __init__(
         self,
         positions: list[Position],
         channel_names: list[str],
         cache_map: DictProxy,
-        transform: Compose | None = None,
+        buffer: MemoryMappedTensor,
+        preprocess_transforms: Compose | None = None,
+        cpu_transform: Compose | None = None,
         array_key: str = "0",
         load_normalization_metadata: bool = True,
-        skip_cache: bool = False,
     ):
         key = 0
         self._metadata_map: dict[int, _CacheMetadata] = {}
@@ -139,57 +51,54 @@ class CachedOmeZarrDataset(Dataset):
                 key += 1
         self.channels = {ch: position.get_channel_index(ch) for ch in channel_names}
         self.array_key = array_key
+        self._buffer = buffer
         self._cache_map = cache_map
-        self.transform = transform
+        self.preprocess_transforms = preprocess_transforms
+        self.cpu_transform = cpu_transform
         self.load_normalization_metadata = load_normalization_metadata
-        self.skip_cache = skip_cache
 
     def __len__(self) -> int:
         return len(self._metadata_map)
 
+    def _split_channels(self, volume: Tensor) -> dict[str, Tensor]:
+        return {name: img[None] for name, img in zip(self.channels.keys(), volume)}
+
+    def _preprocess_volume(self, volume: Tensor, norm_meta) -> Tensor:
+        if self.preprocess_transforms:
+            orig_shape = volume.shape
+            sample = self._split_channels(volume)
+            if self.load_normalization_metadata:
+                sample["norm_meta"] = norm_meta
+            sample = self.preprocess_transforms(sample)
+            volume = torch.cat([sample[name] for name in self.channels.keys()], dim=0)
+            assert volume.shape == orig_shape, (volume.shape, orig_shape, sample.keys())
+        return volume
+
     def __getitem__(self, idx: int) -> dict[str, Tensor]:
         position, time_idx, norm_meta = self._metadata_map[idx]
-        cache = self._cache_map[idx]
-        if cache is None:
+        if not self._cache_map[idx]:
             _logger.debug(f"Loading volume for index {idx}")
             volume = torch.from_numpy(
                 position[self.array_key]
                 .oindex[time_idx, list(self.channels.values())]
                 .astype(np.float32)
             )
-            if not self.skip_cache:
-                _logger.debug(f"Caching for index {idx}")
-                self._cache_map[idx] = volume
+            volume = self._preprocess_volume(volume, norm_meta)
+            _logger.debug(f"Caching for index {idx}")
+            self._cache_map[idx] = True
+            self._buffer[idx] = volume
         else:
             _logger.debug(f"Using cached volume for index {idx}")
-            volume = cache
-        sample = {name: img[None] for name, img in zip(self.channels.keys(), volume)}
-        if self.load_normalization_metadata:
-            sample["norm_meta"] = norm_meta
-        if self.transform:
-            sample = self.transform(sample)
+            volume = self._buffer[idx]
+        sample = self._split_channels(volume)
+        if self.cpu_transform:
+            sample = self.cpu_transform(sample)
         if not isinstance(sample, list):
             sample = [sample]
         return sample
 
 
-class SelectWell:
-    _include_wells: list[str] | None
-    _exclude_fovs: list[str] | None
-
-    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
-        positions = []
-        for well in _filter_wells(plate, include_wells=self._include_wells):
-            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
-                positions.append(fov)
-        if len(positions) < 2:
-            raise ValueError(
-                "At least 2 FOVs are required for training and validation."
-            )
-        return positions
-
-
-class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
+class MmappedDataModule(GPUTransformDataModule, SelectWell):
     """Data module for cached OME-Zarr arrays.
 
     Parameters
@@ -217,8 +126,6 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         Use page-locked memory in data-loaders, by default True
     skip_cache : bool, optional
         Skip caching for this dataset, by default False
-    include_wells : list[str], optional
-        List of well names to include in the dataset, by default None (all)
     """
 
     def __init__(
@@ -228,29 +135,40 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         batch_size: int,
         num_workers: int,
         split_ratio: float,
+        preprocess_transforms: list[DictTransform],
         train_cpu_transforms: list[DictTransform],
         val_cpu_transforms: list[DictTransform],
         train_gpu_transforms: list[DictTransform],
         val_gpu_transforms: list[DictTransform],
         pin_memory: bool = True,
-        skip_cache: bool = False,
+        prefetch_factor: int | None = None,
+        array_key: str = "0",
+        scratch_dir: Path | None = None,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
     ):
         super().__init__()
-        self.data_path = data_path
+        self.data_path = Path(data_path)
         self.channels = _ensure_channel_list(channels)
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.split_ratio = split_ratio
+        self._preprocessing_transforms = Compose(preprocess_transforms)
         self._train_cpu_transforms = Compose(train_cpu_transforms)
         self._val_cpu_transforms = Compose(val_cpu_transforms)
         self._train_gpu_transforms = Compose(train_gpu_transforms)
         self._val_gpu_transforms = Compose(val_gpu_transforms)
         self.pin_memory = pin_memory
-        self.skip_cache = skip_cache
+        self.array_key = array_key
+        self.scratch_dir = scratch_dir
         self._include_wells = include_wells
         self._exclude_fovs = exclude_fovs
+        self.prepare_data_per_node = True
+        self.prefetch_factor = prefetch_factor if self.num_workers > 0 else None
+
+    @property
+    def preprocessing_transforms(self) -> Compose:
+        return self._preprocessing_transforms
 
     @property
     def train_cpu_transforms(self) -> Compose:
@@ -268,35 +186,70 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
     def val_gpu_transforms(self) -> Compose:
         return self._val_gpu_transforms
 
+    @property
+    def cache_dir(self) -> Path:
+        scratch_dir = self.scratch_dir or Path(tempfile.gettempdir())
+        cache_dir = Path(
+            scratch_dir,
+            os.getenv("SLURM_JOB_ID", "viscy_cache"),
+            str(
+                torch.distributed.get_rank()
+                if torch.distributed.is_initialized()
+                else 0
+            ),
+            self.data_path.name,
+        )
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        return cache_dir
+
     def _set_fit_global_state(self, num_positions: int) -> list[int]:
         # disable metadata tracking in MONAI for performance
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions).tolist()
 
+    def _buffer_shape(self, arr_shape, fovs) -> tuple[int, ...]:
+        return (len(fovs) * arr_shape[0], len(self.channels), *arr_shape[2:])
+
     def setup(self, stage: Literal["fit", "validate"]) -> None:
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
-        cache_map = Manager().dict()
         plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")
         positions = self._filter_fit_fovs(plate)
+        arr_shape = positions[0][self.array_key].shape
         shuffled_indices = self._set_fit_global_state(len(positions))
         num_train_fovs = int(len(positions) * self.split_ratio)
         train_fovs = [positions[i] for i in shuffled_indices[:num_train_fovs]]
         val_fovs = [positions[i] for i in shuffled_indices[num_train_fovs:]]
         _logger.debug(f"Training FOVs: {[p.zgroup.name for p in train_fovs]}")
         _logger.debug(f"Validation FOVs: {[p.zgroup.name for p in val_fovs]}")
-        self.train_dataset = CachedOmeZarrDataset(
-            train_fovs,
-            self.channels,
-            cache_map,
-            transform=self.train_cpu_transforms,
-            skip_cache=self.skip_cache,
+        train_buffer = MemoryMappedTensor.empty(
+            self._buffer_shape(arr_shape, train_fovs),
+            dtype=torch.float32,
+            filename=self.cache_dir / "train.mmap",
         )
-        self.val_dataset = CachedOmeZarrDataset(
-            val_fovs,
-            self.channels,
-            cache_map,
-            transform=self.val_cpu_transforms,
-            skip_cache=self.skip_cache,
+        val_buffer = MemoryMappedTensor.empty(
+            self._buffer_shape(arr_shape, val_fovs),
+            dtype=torch.float32,
+            filename=self.cache_dir / "val.mmap",
+        )
+        cache_map_train = Manager().dict()
+        self.train_dataset = MmappedDataset(
+            positions=train_fovs,
+            channel_names=self.channels,
+            cache_map=cache_map_train,
+            buffer=train_buffer,
+            preprocess_transforms=self.preprocessing_transforms,
+            cpu_transform=self.train_cpu_transforms,
+            array_key=self.array_key,
+        )
+        cache_map_val = Manager().dict()
+        self.val_dataset = MmappedDataset(
+            positions=val_fovs,
+            channel_names=self.channels,
+            cache_map=cache_map_val,
+            buffer=val_buffer,
+            preprocess_transforms=self.preprocessing_transforms,
+            cpu_transform=self.val_cpu_transforms,
+            array_key=self.array_key,
         )
