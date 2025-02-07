@@ -36,12 +36,15 @@ class EmbeddingVisualizationApp:
         z_range: tuple[int, int] | list[int] = (0, 1),
         yx_patch_size: tuple[int, int] | list[int] = (128, 128),
         num_PC_components: int = 3,
+        cache_path: str | None = None,
+        num_loading_workers: int = 16,
     ) -> None:
         self.data_path = Path(data_path)
         self.tracks_path = Path(tracks_path)
         self.features_path = Path(features_path)
         self.fov_tracks = fov_tracks
         self.image_cache = {}
+        self.cache_path = Path(cache_path) if cache_path else None
         self.app = None
         self.features_df = None
         self.fig = None
@@ -51,6 +54,7 @@ class EmbeddingVisualizationApp:
         self.filtered_tracks_by_fov = {}
         self._z_idx = (self.z_range[1] - self.z_range[0]) // 2
         self.num_PC_components = num_PC_components
+        self.num_loading_workers = num_loading_workers
         # Initialize cluster storage before preparing data and creating figure
         self.clusters = []  # List to store all clusters
         self.cluster_points = set()  # Set to track all points in clusters
@@ -836,11 +840,13 @@ class EmbeddingVisualizationApp:
 
         if not background_df.empty:
             fig.add_trace(
-                go.Scatter(
+                go.Scattergl(  # Changed to Scattergl for better performance
                     x=background_df[x_axis],
                     y=background_df[y_axis],
                     mode="markers",
-                    marker=dict(size=12, color="lightgray", opacity=0.3),
+                    marker=dict(
+                        size=12, color="lightgray", opacity=0.3
+                    ),  # Reduced size
                     name="Other tracks",
                     text=[
                         f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
@@ -852,6 +858,7 @@ class EmbeddingVisualizationApp:
                     ],
                     hoverinfo="text",
                     showlegend=True,
+                    hoverlabel=dict(namelength=-1),  # Show full text in hover
                 )
             )
 
@@ -895,14 +902,14 @@ class EmbeddingVisualizationApp:
                 colors = [track_colors[track_id]] * len(track_data)
                 opacities = [1.0] * len(track_data)
 
-            # Add points
+            # Add points using Scattergl for better performance
             fig.add_trace(
-                go.Scatter(
+                go.Scattergl(
                     x=track_data[x_axis],
                     y=track_data[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=15,
+                        size=10,  # Reduced size
                         color=colors,
                         line=dict(width=1, color="black"),
                         opacity=opacities,
@@ -913,8 +920,9 @@ class EmbeddingVisualizationApp:
                         for t, fov in zip(track_data["t"], track_data["fov_name"])
                     ],
                     hoverinfo="text",
-                    unselected=dict(marker=dict(opacity=0.3, size=15)),
-                    selected=dict(marker=dict(size=20, opacity=1.0)),
+                    unselected=dict(marker=dict(opacity=0.3, size=10)),  # Reduced size
+                    selected=dict(marker=dict(size=12, opacity=1.0)),  # Reduced size
+                    hoverlabel=dict(namelength=-1),  # Show full text in hover
                 )
             )
 
@@ -923,9 +931,9 @@ class EmbeddingVisualizationApp:
                 x_coords = track_data[x_axis].values
                 y_coords = track_data[y_axis].values
 
-                # Add dashed lines for the trajectory
+                # Add dashed lines for the trajectory using Scattergl
                 fig.add_trace(
-                    go.Scatter(
+                    go.Scattergl(
                         x=x_coords,
                         y=y_coords,
                         mode="lines",
@@ -939,10 +947,10 @@ class EmbeddingVisualizationApp:
                     )
                 )
 
-                # Add arrows at regular intervals
+                # Add arrows at regular intervals (reduced frequency)
                 arrow_interval = max(
-                    1, len(track_data) // 5
-                )  # Show ~5 arrows per track
+                    1, len(track_data) // 3
+                )  # Reduced number of arrows
                 for i in range(0, len(track_data) - 1, arrow_interval):
                     # Calculate arrow angle
                     dx = x_coords[i + 1] - x_coords[i]
@@ -962,8 +970,8 @@ class EmbeddingVisualizationApp:
                             ayref="y",
                             showarrow=True,
                             arrowhead=2,
-                            arrowsize=2,
-                            arrowwidth=2,
+                            arrowsize=1,  # Reduced size
+                            arrowwidth=1,  # Reduced width
                             arrowcolor=track_colors[track_id],
                             opacity=0.8,
                         )
@@ -1036,16 +1044,16 @@ class EmbeddingVisualizationApp:
         """Create scatter plot with time-based coloring"""
         fig = go.Figure()
 
-        # Add background points with hover info
+        # Add background points with hover info using Scattergl
         all_tracks_df = self.features_df[
             self.features_df["fov_name"].isin(self.fov_tracks.keys())
         ]
         fig.add_trace(
-            go.Scatter(
+            go.Scattergl(
                 x=all_tracks_df[x_axis],
                 y=all_tracks_df[y_axis],
                 mode="markers",
-                marker=dict(size=12, color="lightgray", opacity=0.3),
+                marker=dict(size=12, color="lightgray", opacity=0.3),  # Reduced size
                 name="Other points",
                 text=[
                     f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
@@ -1056,17 +1064,18 @@ class EmbeddingVisualizationApp:
                     )
                 ],
                 hoverinfo="text",
+                hoverlabel=dict(namelength=-1),  # Show full text in hover
             )
         )
 
-        # Add time-colored points
+        # Add time-colored points using Scattergl
         fig.add_trace(
-            go.Scatter(
+            go.Scattergl(
                 x=self.filtered_features_df[x_axis],
                 y=self.filtered_features_df[y_axis],
                 mode="markers",
                 marker=dict(
-                    size=15,
+                    size=10,  # Reduced size
                     color=self.filtered_features_df["t"],
                     colorscale="Viridis",
                     colorbar=dict(title="Time"),
@@ -1081,6 +1090,7 @@ class EmbeddingVisualizationApp:
                 ],
                 hoverinfo="text",
                 showlegend=False,
+                hoverlabel=dict(namelength=-1),  # Show full text in hover
             )
         )
 
@@ -1242,8 +1252,105 @@ class EmbeddingVisualizationApp:
             "utf-8"
         )
 
+    def save_cache(self, cache_path: str | None = None):
+        """Save the image cache to disk using pickle.
+
+        Parameters
+        ----------
+        cache_path : str | None, optional
+            Path to save the cache. If None, uses self.cache_path, by default None
+        """
+        import pickle
+
+        if cache_path is None:
+            if self.cache_path is None:
+                logger.warning("No cache path specified, skipping cache save")
+                return
+            cache_path = self.cache_path
+        else:
+            cache_path = Path(cache_path)
+
+        # Create parent directory if it doesn't exist
+        cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Save cache metadata for validation
+        cache_metadata = {
+            "data_path": str(self.data_path),
+            "tracks_path": str(self.tracks_path),
+            "features_path": str(self.features_path),
+            "channels": self.channels_to_display,
+            "z_range": self.z_range,
+            "yx_patch_size": self.yx_patch_size,
+            "cache_size": len(self.image_cache),
+        }
+
+        try:
+            logger.info(f"Saving image cache to {cache_path}")
+            with open(cache_path, "wb") as f:
+                pickle.dump((cache_metadata, self.image_cache), f)
+            logger.info(f"Successfully saved cache with {len(self.image_cache)} images")
+        except Exception as e:
+            logger.error(f"Error saving cache: {e}")
+
+    def load_cache(self, cache_path: str | None = None) -> bool:
+        """Load the image cache from disk using pickle.
+
+        Parameters
+        ----------
+        cache_path : str | None, optional
+            Path to load the cache from. If None, uses self.cache_path, by default None
+
+        Returns
+        -------
+        bool
+            True if cache was successfully loaded, False otherwise
+        """
+        import pickle
+
+        if cache_path is None:
+            if self.cache_path is None:
+                logger.warning("No cache path specified, skipping cache load")
+                return False
+            cache_path = self.cache_path
+        else:
+            cache_path = Path(cache_path)
+
+        if not cache_path.exists():
+            logger.warning(f"Cache file {cache_path} does not exist")
+            return False
+
+        try:
+            logger.info(f"Loading image cache from {cache_path}")
+            with open(cache_path, "rb") as f:
+                cache_metadata, loaded_cache = pickle.load(f)
+
+            # Validate cache metadata
+            if (
+                cache_metadata["data_path"] != str(self.data_path)
+                or cache_metadata["tracks_path"] != str(self.tracks_path)
+                or cache_metadata["features_path"] != str(self.features_path)
+                or cache_metadata["channels"] != self.channels_to_display
+                or cache_metadata["z_range"] != self.z_range
+                or cache_metadata["yx_patch_size"] != self.yx_patch_size
+            ):
+                logger.warning("Cache metadata mismatch, skipping cache load")
+                return False
+
+            self.image_cache = loaded_cache
+            logger.info(
+                f"Successfully loaded cache with {len(self.image_cache)} images"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"Error loading cache: {e}")
+            return False
+
     def preload_images(self):
         """Preload all images into memory"""
+        # Try to load from cache first
+        if self.cache_path and self.load_cache():
+            return
+
         logger.info("Preloading images into cache...")
         logger.info(f"FOVs to process: {list(self.filtered_tracks_by_fov.keys())}")
 
@@ -1266,7 +1373,7 @@ class EmbeddingVisualizationApp:
                     initial_yx_patch_size=self.yx_patch_size,
                     final_yx_patch_size=self.yx_patch_size,
                     batch_size=1,
-                    num_workers=16,
+                    num_workers=self.num_loading_workers,
                     normalizations=None,
                     predict_cells=True,
                 )
@@ -1333,6 +1440,10 @@ class EmbeddingVisualizationApp:
         cached_tracks = set((key[0], key[1]) for key in self.image_cache.keys())
         logger.info(f"Cached FOVs: {cached_fovs}")
         logger.info(f"Number of unique track-FOV combinations: {len(cached_tracks)}")
+
+        # Save cache if path is specified
+        if self.cache_path:
+            self.save_cache()
 
     def _cleanup_cache(self):
         """Clear the image cache when the program exits"""
