@@ -168,6 +168,7 @@ class EmbeddingVisualizationApp:
                 # Add data stores
                 dcc.Store(id="selected-tracks-store", storage_type="memory"),
                 dcc.Store(id="cluster-store", storage_type="memory"),
+                dcc.Store(id="image-click-store", storage_type="memory"),
                 # Main content
                 dash.html.H1(
                     "Track Visualization",
@@ -241,7 +242,7 @@ class EmbeddingVisualizationApp:
                     )
                 return fig, html.Div("Use the lasso tool to select points"), None
 
-            # Create new figure when necessary
+            # Create new figure only when necessary
             if trigger_id in [
                 "color-mode",
                 "show-arrows",
@@ -266,9 +267,11 @@ class EmbeddingVisualizationApp:
                     selectdirection="any",
                 )
             else:
+                # For lasso selection or relayout, keep the current figure to maintain colors
                 fig = current_figure
 
             # Get trajectory images based on selection mode and trigger
+            trajectory_images = dash.no_update
             if trigger_id == "scatter-plot":
                 if selection_mode == "region" and relayout_data:
                     trajectory_images = self._get_trajectory_images_region(
@@ -284,8 +287,6 @@ class EmbeddingVisualizationApp:
                             "lasso" if selection_mode == "lasso" else "shaded region"
                         )
                     )
-            else:
-                trajectory_images = dash.no_update
 
             return fig, trajectory_images, selected_data
 
@@ -294,26 +295,43 @@ class EmbeddingVisualizationApp:
                 Output("clusters-tab", "style"),
                 Output("cluster-container", "children"),
                 Output("view-tabs", "value"),
+                Output("scatter-plot", "figure", allow_duplicate=True),
             ],
             [
                 Input("cluster-button", "n_clicks"),
                 Input("clear-clusters", "n_clicks"),
             ],
             [
-                Input("scatter-plot", "selectedData"),
-                Input("eps-slider", "value"),
-                Input("min-samples-slider", "value"),
+                State("scatter-plot", "selectedData"),
+                State("scatter-plot", "figure"),
+                State("color-mode", "value"),
+                State("show-arrows", "value"),
+                State("x-axis", "value"),
+                State("y-axis", "value"),
+                State("trajectory-mode", "value"),
+                State("selection-mode", "value"),
             ],
+            prevent_initial_call=True,
         )
         def update_clusters(
-            cluster_clicks, clear_clicks, selected_data, eps, min_samples
+            cluster_clicks,
+            clear_clicks,
+            selected_data,
+            current_figure,
+            color_mode,
+            show_arrows,
+            x_axis,
+            y_axis,
+            trajectory_mode,
+            selection_mode,
         ):
             """Update cluster display."""
             ctx = dash.callback_context
             if not ctx.triggered:
-                return {"display": "none"}, None, "trajectory-tab"
+                return {"display": "none"}, None, "trajectory-tab", dash.no_update
 
             button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            show_arrows = len(show_arrows or []) > 0
 
             if button_id == "cluster-button" and selected_data:
                 # Create new cluster from selected points
@@ -339,35 +357,74 @@ class EmbeddingVisualizationApp:
 
                 if new_cluster:
                     self.clusters.append(new_cluster)
+                    # Create updated figure with new cluster colors
+                    if color_mode == "track":
+                        fig = self._create_track_colored_figure(
+                            show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
+                        )
+                    else:
+                        fig = self._create_time_colored_figure(
+                            show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
+                        )
+
+                    # Maintain lasso selection mode
+                    fig.update_layout(
+                        dragmode="lasso" if selection_mode == "lasso" else "pan",
+                        clickmode="event+select",
+                        uirevision="true",
+                        selectdirection="any",
+                    )
+
                     return (
                         {"display": "block"},
                         self._get_cluster_images(),
                         "clusters-tab",
+                        fig,
                     )
 
             elif button_id == "clear-clusters":
                 self.clusters = []
                 self.cluster_points.clear()
-                return {"display": "none"}, None, "trajectory-tab"
+                # Create updated figure with cleared clusters
+                if color_mode == "track":
+                    fig = self._create_track_colored_figure(
+                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
+                    )
+                else:
+                    fig = self._create_time_colored_figure(
+                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
+                    )
+                return {"display": "none"}, None, "trajectory-tab", fig
 
-            return dash.no_update, dash.no_update, dash.no_update
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         @self.app.callback(
             Output("track-timeline", "children"),
-            [Input("scatter-plot", "clickData")],
+            [Input("scatter-plot", "clickData"), Input("image-click-store", "data")],
             prevent_initial_call=True,
         )
-        def update_track_timeline(clickData):
+        def update_track_timeline(clickData, image_click_data):
             """Update the track timeline with images from the clicked track."""
-            if not clickData:
+            ctx = dash.callback_context
+            if not ctx.triggered:
                 return html.Div("Click on a point to see its track timeline")
 
-            # Extract track information from the clicked point
-            point = clickData["points"][0]
-            text = point["text"]
-            lines = text.split("<br>")
-            track_id = int(lines[0].split(": ")[1])
-            fov = lines[2].split(": ")[1]
+            # Determine which point was clicked (either from scatter plot or image)
+            if ctx.triggered[0]["prop_id"] == "scatter-plot.clickData":
+                if not clickData:
+                    return html.Div("Click on a point to see its track timeline")
+                point = clickData["points"][0]
+                text = point["text"]
+                lines = text.split("<br>")
+                track_id = int(lines[0].split(": ")[1])
+                clicked_t = int(lines[1].split(": ")[1])
+                fov = lines[2].split(": ")[1]
+            else:  # Image was clicked
+                if not image_click_data:
+                    return dash.no_update
+                track_id = image_click_data["track_id"]
+                clicked_t = image_click_data["t"]
+                fov = image_click_data["fov_name"]
 
             # Get all points for this track
             track_data = self.filtered_features_df[
@@ -388,34 +445,66 @@ class EmbeddingVisualizationApp:
                         cache_key in self.image_cache
                         and channel in self.image_cache[cache_key]
                     ):
-                        channel_row.append(
-                            html.Div(
-                                [
-                                    html.Img(
-                                        src=self.image_cache[cache_key][channel],
-                                        style={
-                                            "width": "150px",
-                                            "height": "150px",
-                                            "border": "1px solid #ddd",
-                                            "borderRadius": "4px",
-                                        },
-                                    ),
-                                    html.Div(
-                                        f"t={row['t']}",
-                                        style={
-                                            "textAlign": "center",
-                                            "fontSize": "12px",
-                                            "marginTop": "5px",
-                                        },
-                                    ),
-                                ],
-                                style={
-                                    "display": "inline-block",
-                                    "margin": "5px",
-                                    "verticalAlign": "top",
-                                },
-                            )
+                        # Add blue border for clicked timepoint
+                        is_clicked = row["t"] == clicked_t
+                        border_style = (
+                            "3px solid #007bff" if is_clicked else "1px solid #ddd"
                         )
+
+                        div_props = {
+                            "children": [
+                                html.Img(
+                                    src=self.image_cache[cache_key][channel],
+                                    style={
+                                        "width": "150px",
+                                        "height": "150px",
+                                        "border": border_style,
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                        "boxShadow": (
+                                            "0 2px 4px rgba(0,0,0,0.1)"
+                                            if is_clicked
+                                            else "none"
+                                        ),
+                                    },
+                                    id={
+                                        "type": "image",
+                                        "track_id": row["track_id"],
+                                        "t": row["t"],
+                                        "fov": row["fov_name"],
+                                    },
+                                ),
+                                html.Div(
+                                    f"t={row['t']}",
+                                    style={
+                                        "textAlign": "center",
+                                        "fontSize": "12px",
+                                        "marginTop": "5px",
+                                        "color": "#007bff" if is_clicked else "#666",
+                                        "fontWeight": (
+                                            "bold" if is_clicked else "normal"
+                                        ),
+                                    },
+                                ),
+                            ],
+                            "style": {
+                                "display": "inline-block",
+                                "margin": "5px",
+                                "verticalAlign": "top",
+                                "padding": "4px",
+                                "backgroundColor": (
+                                    "#f8f9fa" if is_clicked else "transparent"
+                                ),
+                                "borderRadius": "8px",
+                            },
+                        }
+
+                        # Only add id if it's the clicked timepoint
+                        if is_clicked:
+                            div_props["id"] = f"timepoint-{row['t']}"
+
+                        image_div = html.Div(**div_props)
+                        channel_row.append(image_div)
 
                 if channel_row:
                     timeline_content.extend(
@@ -444,8 +533,23 @@ class EmbeddingVisualizationApp:
             if not timeline_content:
                 return html.Div("No images found in cache for this track")
 
+            # Add JavaScript to scroll to the clicked timepoint
+            scroll_script = dcc.Location(id="url", refresh=False)
+            if clicked_t is not None:
+                scroll_script = html.Script(
+                    f"""
+                    setTimeout(function() {{
+                        var element = document.getElementById("timepoint-{clicked_t}");
+                        if (element) {{
+                            element.scrollIntoView({{ behavior: 'smooth', block: 'center', inline: 'center' }});
+                        }}
+                    }}, 100);
+                    """
+                )
+
             return html.Div(
                 [
+                    scroll_script,
                     html.H2(
                         f"Track {track_id} Timeline",
                         style={
@@ -470,6 +574,131 @@ class EmbeddingVisualizationApp:
                     ),
                 ]
             )
+
+        @self.app.callback(
+            [
+                Output("scatter-plot", "selectedData", allow_duplicate=True),
+                Output("scatter-plot", "figure", allow_duplicate=True),
+            ],
+            [Input("image-click-store", "data")],
+            [
+                State("scatter-plot", "figure"),
+                State("color-mode", "value"),
+                State("show-arrows", "value"),
+                State("x-axis", "value"),
+                State("y-axis", "value"),
+                State("trajectory-mode", "value"),
+                State("selection-mode", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def update_selected_point(
+            click_data,
+            current_figure,
+            color_mode,
+            show_arrows,
+            x_axis,
+            y_axis,
+            trajectory_mode,
+            selection_mode,
+        ):
+            """Update the selected point in the scatter plot when an image is clicked."""
+            if not click_data:
+                return dash.no_update, dash.no_update
+
+            # Find the point in the filtered_features_df that matches the clicked image
+            point_data = self.filtered_features_df[
+                (self.filtered_features_df["fov_name"] == click_data["fov_name"])
+                & (self.filtered_features_df["track_id"] == click_data["track_id"])
+                & (self.filtered_features_df["t"] == click_data["t"])
+            ]
+
+            if point_data.empty:
+                return dash.no_update, dash.no_update
+
+            # Create selectedData format with the actual x, y coordinates
+            selected_data = {
+                "points": [
+                    {
+                        "x": float(point_data[x_axis].iloc[0]),
+                        "y": float(point_data[y_axis].iloc[0]),
+                        "text": f"Track: {click_data['track_id']}<br>Time: {click_data['t']}<br>FOV: {click_data['fov_name']}",
+                    }
+                ]
+            }
+
+            # Create a new figure with updated opacities
+            show_arrows = len(show_arrows or []) > 0
+            if color_mode == "track":
+                fig = self._create_track_colored_figure(
+                    show_arrows,
+                    x_axis,
+                    y_axis,
+                    trajectory_mode,
+                    selection_mode,
+                    highlight_point=(
+                        click_data["fov_name"],
+                        click_data["track_id"],
+                        click_data["t"],
+                    ),
+                )
+            else:
+                fig = self._create_time_colored_figure(
+                    show_arrows,
+                    x_axis,
+                    y_axis,
+                    trajectory_mode,
+                    selection_mode,
+                    highlight_point=(
+                        click_data["fov_name"],
+                        click_data["track_id"],
+                        click_data["t"],
+                    ),
+                )
+
+            # Maintain the current layout settings
+            fig.update_layout(
+                dragmode="lasso" if selection_mode == "lasso" else "pan",
+                clickmode="event+select",
+                uirevision="true",
+                selectdirection="any",
+            )
+
+            return selected_data, fig
+
+        @self.app.callback(
+            Output("image-click-store", "data"),
+            [
+                Input(
+                    {
+                        "type": "image",
+                        "track_id": dash.ALL,
+                        "t": dash.ALL,
+                        "fov": dash.ALL,
+                    },
+                    "n_clicks",
+                )
+            ],
+            prevent_initial_call=True,
+        )
+        def handle_image_click(n_clicks):
+            """Handle image click events and store the clicked point data."""
+            ctx = dash.callback_context
+            if not ctx.triggered:
+                return dash.no_update
+
+            # Get the ID of the clicked image
+            prop_id = ctx.triggered[0]["prop_id"]
+            if not prop_id:
+                return dash.no_update
+
+            # Extract the clicked image's data from its ID
+            clicked_id = eval(prop_id.split(".")[0])
+            return {
+                "track_id": clicked_id["track_id"],
+                "t": clicked_id["t"],
+                "fov_name": clicked_id["fov"],
+            }
 
     def run(self, debug=False, port=None):
         """Run the Dash server.
@@ -530,6 +759,7 @@ class EmbeddingVisualizationApp:
         y_axis="PCA2",
         trajectory_mode="x",
         selection_mode="region",
+        highlight_point=None,
     ) -> go.Figure:
         """Create scatter plot with track-based coloring."""
         return FigureCreator.create_track_colored_figure(
@@ -542,6 +772,7 @@ class EmbeddingVisualizationApp:
             y_axis,
             trajectory_mode,
             selection_mode,
+            highlight_point=highlight_point,
         )
 
     def _create_time_colored_figure(
@@ -551,6 +782,7 @@ class EmbeddingVisualizationApp:
         y_axis="PCA2",
         trajectory_mode="x",
         selection_mode="region",
+        highlight_point=None,
     ) -> go.Figure:
         """Create scatter plot with time-based coloring."""
         return FigureCreator.create_time_colored_figure(
@@ -561,6 +793,7 @@ class EmbeddingVisualizationApp:
             y_axis,
             trajectory_mode,
             selection_mode,
+            highlight_point=highlight_point,
         )
 
     def _create_view_tabs(self):
@@ -845,6 +1078,17 @@ class EmbeddingVisualizationApp:
         if len(nearby_points) == 0:
             return html.Div("No points found in the selected region")
 
+        # Create cluster color mapping
+        cluster_colors = [
+            f"rgb{tuple(int(x*255) for x in plt.cm.Set2(i % 8)[:3])}"
+            for i in range(len(self.clusters))
+        ]
+        point_to_cluster = {}
+        for cluster_idx, cluster in enumerate(self.clusters):
+            for point in cluster:
+                point_key = (point["fov_name"], point["track_id"], point["t"])
+                point_to_cluster[point_key] = cluster_idx
+
         # Create a single scrollable container for all channels
         timeline_content = []
         for channel in self.channels_to_display:
@@ -855,6 +1099,12 @@ class EmbeddingVisualizationApp:
                     cache_key in self.image_cache
                     and channel in self.image_cache[cache_key]
                 ):
+                    # Determine border color based on cluster membership
+                    border_style = "1px solid #ddd"
+                    if cache_key in point_to_cluster:
+                        cluster_idx = point_to_cluster[cache_key]
+                        border_style = f"2px solid {cluster_colors[cluster_idx]}"
+
                     channel_row.append(
                         html.Div(
                             [
@@ -863,8 +1113,15 @@ class EmbeddingVisualizationApp:
                                     style={
                                         "width": "150px",
                                         "height": "150px",
-                                        "border": "1px solid #ddd",
+                                        "border": border_style,
                                         "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                    id={
+                                        "type": "image",
+                                        "track_id": row["track_id"],
+                                        "t": row["t"],
+                                        "fov": row["fov_name"],
                                     },
                                 ),
                                 html.Div(
@@ -879,6 +1136,11 @@ class EmbeddingVisualizationApp:
                                         "textAlign": "center",
                                         "fontSize": "12px",
                                         "marginTop": "5px",
+                                        "color": (
+                                            cluster_colors[point_to_cluster[cache_key]]
+                                            if cache_key in point_to_cluster
+                                            else "#2c3e50"
+                                        ),
                                     },
                                 ),
                             ],
@@ -1018,6 +1280,13 @@ class EmbeddingVisualizationApp:
                                             "height": "150px",
                                             "border": "1px solid #ddd",
                                             "borderRadius": "4px",
+                                            "cursor": "pointer",
+                                        },
+                                        id={
+                                            "type": "image",
+                                            "track_id": row["track_id"],
+                                            "t": row["t"],
+                                            "fov": row["fov_name"],
                                         },
                                     ),
                                 ]
@@ -1147,6 +1416,13 @@ class EmbeddingVisualizationApp:
                                             "margin": "2px",
                                             "border": f"2px solid {cluster_colors[cluster_idx]}",
                                             "borderRadius": "4px",
+                                            "cursor": "pointer",
+                                        },
+                                        id={
+                                            "type": "image",
+                                            "track_id": point["track_id"],
+                                            "t": point["t"],
+                                            "fov": point["fov_name"],
                                         },
                                     ),
                                     html.Div(

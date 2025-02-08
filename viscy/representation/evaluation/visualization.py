@@ -124,283 +124,261 @@ class EmbeddingVisualizationApp:
     def _init_app(self):
         """Initialize the Dash application"""
         self.app = dash.Dash(__name__)
+        
+        # Initialize the layout
+        self.app.layout = self._create_main_layout()
+        
+        # Register callbacks
+        self._register_selection_callbacks()
+        self._register_figure_update_callbacks()
+        self._register_timeline_callbacks()
+        self._register_cluster_callbacks()
 
-        # Add cluster assignment button next to clear selection
-        cluster_controls = html.Div(
-            [
-                html.Button(
-                    "Assign to New Cluster",
-                    id="assign-cluster",
-                    style={
-                        "backgroundColor": "#28a745",
-                        "color": "white",
-                        "border": "none",
-                        "padding": "5px 10px",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "marginRight": "10px",
-                    },
-                ),
-                html.Button(
-                    "Clear All Clusters",
-                    id="clear-clusters",
-                    style={
-                        "backgroundColor": "#dc3545",
-                        "color": "white",
-                        "border": "none",
-                        "padding": "5px 10px",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                        "marginRight": "10px",
-                    },
-                ),
-                html.Button(
-                    "Clear Selection",
-                    id="clear-selection",
-                    style={
-                        "backgroundColor": "#6c757d",
-                        "color": "white",
-                        "border": "none",
-                        "padding": "5px 10px",
-                        "borderRadius": "4px",
-                        "cursor": "pointer",
-                    },
-                ),
-            ],
-            style={"marginLeft": "10px", "display": "inline-block"},
-        )
-
-        # Add cluster controls to the layout where the clear selection button was
-        # Update the selection mode div in the layout
-        selection_controls = html.Div(
-            [
-                html.Label(
-                    "Selection mode:",
-                    style={"marginRight": "10px"},
-                ),
-                dcc.RadioItems(
-                    id="selection-mode",
-                    options=[
-                        {"label": "Shaded region", "value": "region"},
-                        {"label": "Lasso", "value": "lasso"},
-                    ],
-                    value="region",  # Changed default to lasso
-                    inline=True,
-                ),
-                cluster_controls,
-            ]
-        )
-
-        # Create tabs for different views
-        tabs = dcc.Tabs(
-            id="view-tabs",
-            value="trajectory-tab",
-            children=[
-                dcc.Tab(
-                    label="Trajectory View",
-                    value="trajectory-tab",
-                    children=[
-                        html.Div(
-                            id="trajectory-images",
-                            style={
-                                "padding": "10px",
-                                "marginTop": "10px",
-                            },
-                        ),
-                    ],
-                ),
-                dcc.Tab(
-                    label="Track Timeline",
-                    value="timeline-tab",
-                    children=[
-                        html.Div(
-                            id="track-timeline",
-                            style={
-                                "height": "auto",
-                                "overflowY": "auto",
-                                "maxHeight": "80vh",
-                                "padding": "10px",
-                                "marginTop": "10px",
-                            },
-                        ),
-                    ],
-                ),
-                dcc.Tab(
-                    label="Clusters",
-                    value="clusters-tab",
-                    id="clusters-tab",
-                    children=[
-                        html.Div(
-                            id="cluster-container",
-                            style={
-                                "padding": "10px",
-                                "marginTop": "10px",
-                            },
-                        ),
-                    ],
-                    style={"display": "none"},  # Initially hidden
-                ),
-            ],
-            style={"marginTop": "20px"},
-        )
-
-        # Update layout to use tabs
-        self.app.layout = html.Div(
+    def _create_main_layout(self):
+        """Create the main application layout"""
+        return html.Div(
             style={
                 "maxWidth": "95vw",
                 "margin": "auto",
                 "padding": "20px",
             },
             children=[
-                html.H1(
-                    "Track Visualization",
-                    style={"textAlign": "center", "marginBottom": "20px"},
-                ),
-                html.Div(
-                    [
-                        html.Div(
-                            style={
-                                "width": "100%",
-                                "display": "inline-block",
-                                "verticalAlign": "top",
-                            },
-                            children=[
-                                html.Div(
-                                    style={
-                                        "marginBottom": "20px",
-                                        "display": "flex",
-                                        "alignItems": "center",
-                                        "gap": "20px",
-                                        "flexWrap": "wrap",
-                                    },
-                                    children=[
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "Color by:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.Dropdown(
-                                                    id="color-mode",
-                                                    options=[
-                                                        {
-                                                            "label": "Track ID",
-                                                            "value": "track",
-                                                        },
-                                                        {
-                                                            "label": "Time",
-                                                            "value": "time",
-                                                        },
-                                                    ],
-                                                    value="track",
-                                                    style={"width": "200px"},
-                                                ),
-                                            ]
-                                        ),
-                                        html.Div(
-                                            [
-                                                dcc.Checklist(
-                                                    id="show-arrows",
-                                                    options=[
-                                                        {
-                                                            "label": "Show arrows",
-                                                            "value": "show",
-                                                        }
-                                                    ],
-                                                    value=[],
-                                                    style={"marginLeft": "20px"},
-                                                ),
-                                            ]
-                                        ),
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "X-axis:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.Dropdown(
-                                                    id="x-axis",
-                                                    options=self.pc_options,
-                                                    value="PCA1",
-                                                    style={"width": "200px"},
-                                                ),
-                                            ]
-                                        ),
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "Y-axis:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.Dropdown(
-                                                    id="y-axis",
-                                                    options=self.pc_options,
-                                                    value="PCA2",
-                                                    style={"width": "200px"},
-                                                ),
-                                            ]
-                                        ),
-                                        selection_controls,
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "Trajectory:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.RadioItems(
-                                                    id="trajectory-mode",
-                                                    options=[
-                                                        {
-                                                            "label": "X-axis",
-                                                            "value": "x",
-                                                        },
-                                                        {
-                                                            "label": "Y-axis",
-                                                            "value": "y",
-                                                        },
-                                                    ],
-                                                    value="x",
-                                                    inline=True,
-                                                ),
-                                            ]
-                                        ),
-                                    ],
-                                ),
-                            ],
-                        ),
-                    ]
-                ),
-                dcc.Loading(
-                    id="loading",
-                    children=[
-                        dcc.Graph(
-                            id="scatter-plot",
-                            figure=self.fig,
-                            config={
-                                "displayModeBar": True,
-                                "editable": False,
-                                "showEditInChartStudio": False,
-                                "modeBarButtonsToRemove": [
-                                    "select2d",
-                                    "resetScale2d",
-                                ],
-                                "edits": {
-                                    "annotationPosition": False,
-                                    "annotationTail": False,
-                                    "annotationText": False,
-                                    "shapePosition": True,
-                                },
-                                "scrollZoom": True,
-                            },
-                            style={"height": "50vh"},
-                        ),
-                    ],
-                    type="default",
-                ),
-                tabs,
+                self._create_header(),
+                self._create_control_panel(),
+                self._create_scatter_plot(),
+                self._create_view_tabs(),
             ],
         )
 
+    def _create_header(self):
+        """Create the header section"""
+        return html.H1(
+            "Track Visualization",
+            style={"textAlign": "center", "marginBottom": "20px"},
+        )
+
+    def _create_control_panel(self):
+        """Create the control panel with all input controls"""
+        return html.Div([
+            self._create_color_controls(),
+            self._create_axis_controls(),
+            self._create_selection_controls(),
+            self._create_trajectory_controls(),
+        ], style={
+            "marginBottom": "20px",
+            "display": "flex",
+            "alignItems": "center",
+            "gap": "20px",
+            "flexWrap": "wrap",
+        })
+
+    def _create_color_controls(self):
+        """Create color mode and arrow controls"""
+        return html.Div([
+            html.Label("Color by:", style={"marginRight": "10px"}),
+            dcc.Dropdown(
+                id="color-mode",
+                options=[
+                    {"label": "Track ID", "value": "track"},
+                    {"label": "Time", "value": "time"},
+                ],
+                value="track",
+                style={"width": "200px"},
+            ),
+            dcc.Checklist(
+                id="show-arrows",
+                options=[{"label": "Show arrows", "value": "show"}],
+                value=[],
+                style={"marginLeft": "20px"},
+            ),
+        ])
+
+    def _create_axis_controls(self):
+        """Create axis selection controls"""
+        return html.Div([
+            html.Div([
+                html.Label("X-axis:", style={"marginRight": "10px"}),
+                dcc.Dropdown(
+                    id="x-axis",
+                    options=self.pc_options,
+                    value="PCA1",
+                    style={"width": "200px"},
+                ),
+            ]),
+            html.Div([
+                html.Label("Y-axis:", style={"marginRight": "10px"}),
+                dcc.Dropdown(
+                    id="y-axis",
+                    options=self.pc_options,
+                    value="PCA2",
+                    style={"width": "200px"},
+                ),
+            ]),
+        ])
+
+    def _create_selection_controls(self):
+        """Create selection mode and cluster controls"""
+        return html.Div([
+            html.Label("Selection mode:", style={"marginRight": "10px"}),
+            dcc.RadioItems(
+                id="selection-mode",
+                options=[
+                    {"label": "Shaded region", "value": "region"},
+                    {"label": "Lasso", "value": "lasso"},
+                ],
+                value="region",
+                inline=True,
+            ),
+            self._create_cluster_controls(),
+        ])
+
+    def _create_cluster_controls(self):
+        """Create cluster assignment buttons"""
+        return html.Div([
+            html.Button(
+                "Assign to New Cluster",
+                id="assign-cluster",
+                style=self._get_button_style("success"),
+            ),
+            html.Button(
+                "Clear All Clusters",
+                id="clear-clusters",
+                style=self._get_button_style("danger"),
+            ),
+            html.Button(
+                "Clear Selection",
+                id="clear-selection",
+                style=self._get_button_style("secondary"),
+            ),
+        ], style={"marginLeft": "10px", "display": "inline-block"})
+
+    def _create_trajectory_controls(self):
+        """Create trajectory mode controls"""
+        return html.Div([
+            html.Label("Trajectory:", style={"marginRight": "10px"}),
+            dcc.RadioItems(
+                id="trajectory-mode",
+                options=[
+                    {"label": "X-axis", "value": "x"},
+                    {"label": "Y-axis", "value": "y"},
+                ],
+                value="x",
+                inline=True,
+            ),
+        ])
+
+    def _create_scatter_plot(self):
+        """Create the main scatter plot component"""
+        return dcc.Loading(
+            id="loading",
+            children=[
+                dcc.Graph(
+                    id="scatter-plot",
+                    figure=self.fig,
+                    config=self._get_scatter_plot_config(),
+                    style={"height": "50vh"},
+                ),
+            ],
+            type="default",
+        )
+
+    def _create_view_tabs(self):
+        """Create the view tabs section"""
+        return dcc.Tabs(
+            id="view-tabs",
+            value="trajectory-tab",
+            children=[
+                self._create_trajectory_tab(),
+                self._create_timeline_tab(),
+                self._create_clusters_tab(),
+            ],
+            style={"marginTop": "20px"},
+        )
+
+    def _create_trajectory_tab(self):
+        """Create the trajectory view tab"""
+        return dcc.Tab(
+            label="Trajectory View",
+            value="trajectory-tab",
+            children=[
+                html.Div(
+                    id="trajectory-images",
+                    style={"padding": "10px", "marginTop": "10px"},
+                ),
+            ],
+        )
+
+    def _create_timeline_tab(self):
+        """Create the track timeline tab"""
+        return dcc.Tab(
+            label="Track Timeline",
+            value="timeline-tab",
+            children=[
+                html.Div(
+                    id="track-timeline",
+                    style={
+                        "height": "auto",
+                        "overflowY": "auto",
+                        "maxHeight": "80vh",
+                        "padding": "10px",
+                        "marginTop": "10px",
+                    },
+                ),
+            ],
+        )
+
+    def _create_clusters_tab(self):
+        """Create the clusters tab"""
+        return dcc.Tab(
+            label="Clusters",
+            value="clusters-tab",
+            id="clusters-tab",
+            children=[
+                html.Div(
+                    id="cluster-container",
+                    style={"padding": "10px", "marginTop": "10px"},
+                ),
+            ],
+            style={"display": "none"},
+        )
+
+    @staticmethod
+    def _get_button_style(button_type):
+        """Get style for a button of specified type"""
+        colors = {
+            "success": "#28a745",
+            "danger": "#dc3545",
+            "secondary": "#6c757d",
+        }
+        return {
+            "backgroundColor": colors[button_type],
+            "color": "white",
+            "border": "none",
+            "padding": "5px 10px",
+            "borderRadius": "4px",
+            "cursor": "pointer",
+            "marginRight": "10px",
+        }
+
+    @staticmethod
+    def _get_scatter_plot_config():
+        """Get configuration for scatter plot"""
+        return {
+            "displayModeBar": True,
+            "editable": False,
+            "showEditInChartStudio": False,
+            "modeBarButtonsToRemove": ["select2d", "resetScale2d"],
+            "edits": {
+                "annotationPosition": False,
+                "annotationTail": False,
+                "annotationText": False,
+                "shapePosition": True,
+            },
+            "scrollZoom": True,
+        }
+
+    def _register_selection_callbacks(self):
+        """Register callbacks for selection handling"""
         @self.app.callback(
             [
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
@@ -417,17 +395,11 @@ class EmbeddingVisualizationApp:
                 dd.State("trajectory-mode", "value"),
                 dd.State("selection-mode", "value"),
             ],
-            prevent_initial_call=True,
+            prevent_initial_call=True
         )
         def clear_selection(
-            n_clicks,
-            current_figure,
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            trajectory_mode,
-            selection_mode,
+            n_clicks, current_figure, color_mode, show_arrows,
+            x_axis, y_axis, trajectory_mode, selection_mode
         ):
             if n_clicks:
                 # Create a new figure with no selections
@@ -458,6 +430,8 @@ class EmbeddingVisualizationApp:
                 return fig, html.Div("Use the lasso tool to select points"), None
             return dash.no_update, dash.no_update, dash.no_update
 
+    def _register_figure_update_callbacks(self):
+        """Register callbacks for figure updates"""
         @self.app.callback(
             [
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
@@ -475,18 +449,12 @@ class EmbeddingVisualizationApp:
                 dd.Input("scatter-plot", "selectedData"),
             ],
             [dd.State("scatter-plot", "figure")],
-            prevent_initial_call=True,
+            prevent_initial_call=True
         )
         def update_figure(
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            trajectory_mode,
-            selection_mode,
-            relayout_data,
-            selected_data,
-            current_figure,
+            color_mode, show_arrows, x_axis, y_axis,
+            trajectory_mode, selection_mode, relayout_data,
+            selected_data, current_figure
         ):
             show_arrows = len(show_arrows or []) > 0
 
@@ -542,6 +510,7 @@ class EmbeddingVisualizationApp:
                 )
 
             # Get trajectory images based on selection mode
+            trajectory_images = None
             if selection_mode == "region":
                 trajectory_images = self._get_trajectory_images_region(
                     x_axis, y_axis, trajectory_mode, relayout_data
@@ -553,6 +522,8 @@ class EmbeddingVisualizationApp:
 
             return fig, trajectory_images, selected_data
 
+    def _register_timeline_callbacks(self):
+        """Register callbacks for timeline updates"""
         @self.app.callback(
             dd.Output("track-timeline", "children"),
             [dd.Input("scatter-plot", "clickData")],
@@ -640,7 +611,6 @@ class EmbeddingVisualizationApp:
                                     "padding": "5px",
                                 },
                             )
-                        )
 
                 if channel_images:
                     # Add channel label
@@ -701,7 +671,8 @@ class EmbeddingVisualizationApp:
                 ]
             )
 
-        # Add callback to show/hide clusters tab
+    def _register_cluster_callbacks(self):
+        """Register callbacks for cluster handling"""
         @self.app.callback(
             [
                 dd.Output("clusters-tab", "style"),
@@ -725,18 +696,9 @@ class EmbeddingVisualizationApp:
             ],
             prevent_initial_call=True,
         )
-        def update_clusters_tab(
-            assign_clicks,
-            clear_clicks,
-            selected_data,
-            current_figure,
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            trajectory_mode,
-            selection_mode,
-        ):
+        def update_clusters(assign_clicks, clear_clicks, selected_data,
+                          current_figure, color_mode, show_arrows, x_axis,
+                          y_axis, trajectory_mode, selection_mode):
             ctx = dash.callback_context
             if not ctx.triggered:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update

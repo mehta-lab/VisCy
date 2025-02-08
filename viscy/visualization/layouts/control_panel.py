@@ -1,6 +1,6 @@
 """Control panel layout component."""
 
-from typing import Any, Dict, List
+from typing import Dict, List
 
 from dash import dcc, html
 
