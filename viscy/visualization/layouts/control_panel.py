@@ -32,156 +32,192 @@ class ControlPanel(DashComponent):
         """
         return html.Div(
             [
-                self._create_color_controls(),
-                self._create_axis_controls(),
-                self._create_selection_controls(),
-                self._create_trajectory_controls(),
-                self._create_clustering_controls(),
+                # Single row containing all controls
+                html.Div(
+                    [
+                        # Left side: Axis and Display controls
+                        html.Div(
+                            [
+                                # Axis controls
+                                html.Div(
+                                    [
+                                        html.Label(
+                                            "X-axis:", style={"marginRight": "10px"}
+                                        ),
+                                        dcc.Dropdown(
+                                            id="x-axis",
+                                            options=self.pc_options,
+                                            value=self.pc_options[0]["value"],
+                                            style={"width": "200px"},
+                                        ),
+                                    ],
+                                    style={
+                                        "marginRight": "20px",
+                                        "display": "inline-block",
+                                    },
+                                ),
+                                html.Div(
+                                    [
+                                        html.Label(
+                                            "Y-axis:", style={"marginRight": "10px"}
+                                        ),
+                                        dcc.Dropdown(
+                                            id="y-axis",
+                                            options=self.pc_options,
+                                            value=self.pc_options[1]["value"],
+                                            style={"width": "200px"},
+                                        ),
+                                    ],
+                                    style={
+                                        "marginRight": "20px",
+                                        "display": "inline-block",
+                                    },
+                                ),
+                                # Display controls
+                                html.Div(
+                                    [
+                                        dcc.Checklist(
+                                            id="show-arrows",
+                                            options=[
+                                                {
+                                                    "label": "Show Arrows",
+                                                    "value": "show",
+                                                }
+                                            ],
+                                            value=[],
+                                            style={"marginRight": "20px"},
+                                        ),
+                                        dcc.RadioItems(
+                                            id="color-mode",
+                                            options=[
+                                                {
+                                                    "label": "Track Color",
+                                                    "value": "track",
+                                                },
+                                                {
+                                                    "label": "Time Color",
+                                                    "value": "time",
+                                                },
+                                            ],
+                                            value="track",
+                                        ),
+                                    ],
+                                    style={
+                                        "display": "inline-block",
+                                        "marginRight": "20px",
+                                    },
+                                ),
+                            ],
+                            style={"display": "inline-block", "marginRight": "20px"},
+                        ),
+                        # Right side: Cluster buttons
+                        html.Div(
+                            [
+                                html.Button(
+                                    "Add New Cluster",
+                                    id="cluster-button",
+                                    n_clicks=0,
+                                    style={
+                                        "backgroundColor": "#28a745",  # Green
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "10px 20px",
+                                        "marginRight": "10px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "Clear Selection",
+                                    id="clear-selection",
+                                    n_clicks=0,
+                                    style={
+                                        "backgroundColor": "#6c757d",  # Gray
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "10px 20px",
+                                        "marginRight": "10px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "Clear All Clusters",
+                                    id="clear-clusters",
+                                    n_clicks=0,
+                                    style={
+                                        "backgroundColor": "#dc3545",  # Red
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "10px 20px",
+                                        "marginRight": "10px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "Export Clusters",
+                                    id="export-clusters",
+                                    n_clicks=0,
+                                    style={
+                                        "backgroundColor": "#17a2b8",  # Blue
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "10px 20px",
+                                        "marginRight": "10px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                                html.Button(
+                                    "Import Clusters",
+                                    id="import-clusters",
+                                    n_clicks=0,
+                                    style={
+                                        "backgroundColor": "#17a2b8",  # Blue
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "10px 20px",
+                                        "marginRight": "10px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                            ],
+                            style={"display": "inline-block"},
+                        ),
+                        dcc.Download(id="download-clusters"),
+                        dcc.Upload(
+                            id="upload-clusters",
+                            children=html.Div(
+                                ["Drag and Drop or ", html.A("Select a File")]
+                            ),
+                            style={
+                                "width": "100%",
+                                "height": "60px",
+                                "lineHeight": "60px",
+                                "borderWidth": "1px",
+                                "borderStyle": "dashed",
+                                "borderRadius": "5px",
+                                "textAlign": "center",
+                                "margin": "10px 0",
+                                "display": "none",
+                            },
+                            multiple=False,
+                        ),
+                    ],
+                    style={
+                        "display": "flex",
+                        "flexDirection": "row",
+                        "alignItems": "center",
+                        "justifyContent": "space-between",
+                        "marginBottom": "20px",
+                        "padding": "10px",
+                        "backgroundColor": "#f8f9fa",
+                        "borderRadius": "8px",
+                        "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                    },
+                ),
             ],
-            style=CommonStyles.get_style("flex_container"),
-        )
-
-    def _create_color_controls(self) -> html.Div:
-        """Create color mode and arrow controls."""
-        return html.Div(
-            [
-                html.Label("Color by:", style={"marginRight": "10px"}),
-                dcc.Dropdown(
-                    id="color-mode",
-                    options=[
-                        {"label": "Track ID", "value": "track"},
-                        {"label": "Time", "value": "time"},
-                    ],
-                    value="track",
-                    style={"width": "200px"},
-                ),
-                dcc.Checklist(
-                    id="show-arrows",
-                    options=[{"label": "Show arrows", "value": "show"}],
-                    value=[],
-                    style={"marginLeft": "20px"},
-                ),
-            ]
-        )
-
-    def _create_axis_controls(self) -> html.Div:
-        """Create axis selection controls."""
-        return html.Div(
-            [
-                html.Div(
-                    [
-                        html.Label("X-axis:", style={"marginRight": "10px"}),
-                        dcc.Dropdown(
-                            id="x-axis",
-                            options=self.pc_options,
-                            value="PCA1",
-                            style={"width": "200px"},
-                        ),
-                    ]
-                ),
-                html.Div(
-                    [
-                        html.Label("Y-axis:", style={"marginRight": "10px"}),
-                        dcc.Dropdown(
-                            id="y-axis",
-                            options=self.pc_options,
-                            value="PCA2",
-                            style={"width": "200px"},
-                        ),
-                    ]
-                ),
-            ]
-        )
-
-    def _create_selection_controls(self) -> html.Div:
-        """Create selection mode and cluster controls."""
-        return html.Div(
-            [
-                html.Label("Selection mode:", style={"marginRight": "10px"}),
-                dcc.RadioItems(
-                    id="selection-mode",
-                    options=[
-                        {"label": "Shaded region", "value": "region"},
-                        {"label": "Lasso", "value": "lasso"},
-                    ],
-                    value="region",
-                    inline=True,
-                ),
-                self._create_cluster_controls(),
-            ]
-        )
-
-    def _create_cluster_controls(self) -> html.Div:
-        """Create cluster assignment buttons."""
-        return html.Div(
-            [
-                Button(
-                    "Assign to New Cluster", "cluster-button", "success"
-                ).create_layout(),
-                Button(
-                    "Clear All Clusters", "clear-clusters", "danger"
-                ).create_layout(),
-                Button(
-                    "Clear Selection", "clear-selection", "secondary"
-                ).create_layout(),
-            ],
-            style={"marginLeft": "10px", "display": "inline-block"},
-        )
-
-    def _create_trajectory_controls(self) -> html.Div:
-        """Create trajectory mode controls."""
-        return html.Div(
-            [
-                html.Label("Trajectory:", style={"marginRight": "10px"}),
-                dcc.RadioItems(
-                    id="trajectory-mode",
-                    options=[
-                        {"label": "X-axis", "value": "x"},
-                        {"label": "Y-axis", "value": "y"},
-                    ],
-                    value="x",
-                    inline=True,
-                ),
-            ]
-        )
-
-    def _create_clustering_controls(self) -> html.Div:
-        """Create clustering parameter controls."""
-        return html.Div(
-            [
-                html.Label("Clustering Parameters:", style={"marginBottom": "10px"}),
-                html.Div(
-                    [
-                        html.Label("Epsilon:", style={"marginRight": "10px"}),
-                        dcc.Slider(
-                            id="eps-slider",
-                            min=0.1,
-                            max=2.0,
-                            step=0.1,
-                            value=0.5,
-                            marks={i / 2: str(i / 2) for i in range(1, 9)},
-                        ),
-                    ],
-                    style={"marginBottom": "10px"},
-                ),
-                html.Div(
-                    [
-                        html.Label("Min Samples:", style={"marginRight": "10px"}),
-                        dcc.Slider(
-                            id="min-samples-slider",
-                            min=2,
-                            max=10,
-                            step=1,
-                            value=3,
-                            marks={i: str(i) for i in range(2, 11)},
-                        ),
-                    ],
-                ),
-            ],
-            style=CommonStyles.get_style(
-                "container",
-                padding="15px",
-                margin_top="20px",
-                width="100%",
-            ),
+            style=CommonStyles.get_style("container"),
         )

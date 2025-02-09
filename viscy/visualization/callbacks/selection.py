@@ -1,143 +1,205 @@
-"""Selection callbacks for the visualization app."""
+"""Selection-related callbacks for the visualization app."""
 
-from typing import Dict, Any, List, Optional, Tuple
-import numpy as np
-import pandas as pd
-from dash import Input, Output, State, callback_context
-from sklearn.cluster import DBSCAN
+import json
+from typing import Dict, Any, List, Optional
+
+import dash
+from dash import html
+from dash.dependencies import Input, Output, State
+from dash.exceptions import PreventUpdate
+
+from viscy.visualization.components.scrollable_container import ScrollableContainer
 
 
 class SelectionCallbacks:
-    """Callbacks for handling track selection and clustering."""
+    """Class to handle selection-related callbacks."""
 
-    def __init__(self, app_instance):
-        """Initialize the callbacks.
+    def __init__(self, app):
+        """Initialize the selection callbacks.
 
-        Parameters
-        ----------
-        app_instance : EmbeddingVisualizationApp
-            The main application instance.
+        Args:
+            app: The main visualization app instance.
         """
-        self.app_instance = app_instance
+        self.app = app
 
     def register(self):
-        """Register all selection callbacks."""
+        """Register all selection-related callbacks."""
+        self._register_selection_callback()
+        self._register_clear_selection_callback()
 
-        @self.app_instance.app.callback(
+    def _register_selection_callback(self):
+        """Register callback for point selection."""
+
+        @self.app.app.callback(
             [
-                Output("selected-tracks-store", "data"),
-                Output("cluster-store", "data"),
+                Output("track-timeline", "children", allow_duplicate=True),
+                Output("scatter-plot", "selectedData", allow_duplicate=True),
             ],
+            [Input("scatter-plot", "clickData")],
             [
-                Input("scatter-plot", "selectedData"),
-                Input("cluster-button", "n_clicks"),
+                State("scatter-plot", "selectedData"),
+                State("view-tabs", "value"),
             ],
-            [
-                State("selected-tracks-store", "data"),
-                State("cluster-store", "data"),
-                State("eps-slider", "value"),
-                State("min-samples-slider", "value"),
-            ],
+            prevent_initial_call=True,
         )
         def update_selection(
-            selected_data: Dict[str, Any],
-            cluster_clicks: int,
-            selected_tracks: Dict[str, Any],
-            cluster_data: Dict[str, Any],
-            eps: float,
-            min_samples: int,
-        ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
-            """Update the selection based on user interaction.
-
-            Parameters
-            ----------
-            selected_data : Dict[str, Any]
-                Data for selected points.
-            cluster_clicks : int
-                Number of times cluster button was clicked.
-            selected_tracks : Dict[str, Any]
-                Currently selected tracks.
-            cluster_data : Dict[str, Any]
-                Current cluster data.
-            eps : float
-                DBSCAN epsilon parameter.
-            min_samples : int
-                DBSCAN min_samples parameter.
-
-            Returns
-            -------
-            Tuple[Dict[str, Any], Dict[str, Any]]
-                Updated selection and cluster data.
-            """
-            ctx = callback_context
+            click_data: Optional[Dict[str, Any]],
+            selected_data: Optional[Dict[str, Any]],
+            active_tab: str,
+        ):
+            """Update selection based on click or lasso."""
+            ctx = dash.callback_context
             if not ctx.triggered:
-                return selected_tracks or {}, cluster_data or {}
+                raise PreventUpdate
 
-            trigger_id = ctx.triggered[0]["prop_id"].split(".")[0]
+            # If we're in clusters tab and have lasso selection, keep it
+            if active_tab == "clusters-tab" and selected_data:
+                return dash.no_update, selected_data
 
-            if trigger_id == "scatter-plot":
-                if not selected_data:
-                    return {}, {}
+            # Handle single point click for timeline view
+            if click_data and click_data.get("points"):
+                point = click_data["points"][0]
+                text = point["text"]
+                lines = text.split("<br>")
 
-                points = selected_data["points"]
-                selected = {
-                    "points": [
-                        {
-                            "fov_name": point["text"].split("<br>")[2].split(": ")[1],
-                            "track_id": int(
-                                point["text"].split("<br>")[0].split(": ")[1]
-                            ),
-                            "t": int(point["text"].split("<br>")[1].split(": ")[1]),
-                        }
-                        for point in points
-                    ]
-                }
-                return selected, cluster_data or {}
+                # Extract track information
+                if "Cluster:" in lines[0]:
+                    # Clicked on a cluster point
+                    track_id = int(lines[1].split(": ")[1])
+                    t = int(lines[2].split(": ")[1])
+                    fov = lines[3].split(": ")[1]
+                else:
+                    # Clicked on a regular point
+                    track_id = int(lines[0].split(": ")[1])
+                    t = int(lines[1].split(": ")[1])
+                    fov = lines[2].split(": ")[1]
 
-            elif trigger_id == "cluster-button" and selected_tracks:
-                points = selected_tracks["points"]
-                if len(points) < min_samples:
-                    return selected_tracks, {}
+                # Get all timepoints for this track
+                track_data = self.app.filtered_features_df[
+                    (self.app.filtered_features_df["fov_name"] == fov)
+                    & (self.app.filtered_features_df["track_id"] == track_id)
+                ].sort_values("t")
 
-                # Extract features for clustering
-                features = []
-                for point in points:
-                    track_data = self.app_instance.filtered_features_df[
-                        (
-                            self.app_instance.filtered_features_df["fov_name"]
-                            == point["fov_name"]
+                if track_data.empty:
+                    return (
+                        html.Div(f"No timeline data found for Track {track_id}"),
+                        None,  # Clear selection
+                    )
+
+                # Create image grids for each channel
+                channel_grids = []
+                for channel in self.app.channels_to_display:
+                    images = []
+                    for _, row in track_data.iterrows():
+                        cache_key = (row["fov_name"], row["track_id"], row["t"])
+                        if (
+                            cache_key in self.app.image_cache
+                            and channel in self.app.image_cache[cache_key]
+                        ):
+                            images.append(
+                                html.Div(
+                                    [
+                                        html.Img(
+                                            src=self.app.image_cache[cache_key][
+                                                channel
+                                            ],
+                                            style={
+                                                "width": "150px",
+                                                "height": "150px",
+                                                "border": (
+                                                    "2px solid #ffd700"  # Gold border for clicked timepoint
+                                                    if row["t"] == t
+                                                    else "1px solid #ddd"
+                                                ),
+                                                "borderRadius": "4px",
+                                                "cursor": "pointer",
+                                            },
+                                            id={
+                                                "type": "image",
+                                                "track_id": row["track_id"],
+                                                "t": row["t"],
+                                                "fov": row["fov_name"],
+                                            },
+                                        ),
+                                        html.Div(
+                                            f"Time: {row['t']}",
+                                            style={
+                                                "fontSize": "12px",
+                                                "textAlign": "center",
+                                                "marginTop": "5px",
+                                                "fontWeight": (
+                                                    "bold"
+                                                    if row["t"] == t
+                                                    else "normal"
+                                                ),
+                                            },
+                                        ),
+                                    ],
+                                    style={
+                                        "display": "inline-block",
+                                        "margin": "5px",
+                                        "verticalAlign": "top",
+                                    },
+                                )
+                            )
+
+                    if images:
+                        channel_grids.append(
+                            html.Div(
+                                [
+                                    html.H4(
+                                        channel,
+                                        style={
+                                            "marginTop": "10px",
+                                            "marginBottom": "10px",
+                                            "fontSize": "16px",
+                                            "fontWeight": "bold",
+                                            "color": "#2c3e50",
+                                            "paddingLeft": "10px",
+                                        },
+                                    ),
+                                    html.Div(
+                                        images,
+                                        style={
+                                            "whiteSpace": "nowrap",
+                                            "marginBottom": "20px",
+                                        },
+                                    ),
+                                ]
+                            )
                         )
-                        & (
-                            self.app_instance.filtered_features_df["track_id"]
-                            == point["track_id"]
-                        )
-                        & (self.app_instance.filtered_features_df["t"] == point["t"])
-                    ]
-                    if not track_data.empty:
-                        pca_cols = [
-                            col for col in track_data.columns if col.startswith("PCA")
-                        ]
-                        features.append(track_data[pca_cols].values[0])
 
-                if not features:
-                    return selected_tracks, {}
+                if not channel_grids:
+                    return (
+                        html.Div("No images found in cache for this track."),
+                        None,  # Clear selection
+                    )
 
-                # Perform clustering
-                features = np.array(features)
-                dbscan = DBSCAN(eps=eps, min_samples=min_samples)
-                labels = dbscan.fit_predict(features)
+                return (
+                    ScrollableContainer(
+                        title=f"Track {track_id} Timeline (FOV: {fov})",
+                        content=html.Div(
+                            channel_grids,
+                            style={"padding": "20px"},
+                        ),
+                        max_height="80vh",
+                        direction="horizontal",
+                    ).create_layout(),
+                    None,  # Clear selection after showing timeline
+                )
 
-                # Group points by cluster
-                clusters = []
-                for label in np.unique(labels):
-                    if label == -1:
-                        continue
-                    cluster_points = [
-                        point for i, point in enumerate(points) if labels[i] == label
-                    ]
-                    if cluster_points:
-                        clusters.append({"points": cluster_points})
+            return dash.no_update, dash.no_update
 
-                return selected_tracks, {"clusters": clusters}
+    def _register_clear_selection_callback(self):
+        """Register callback for clearing selection."""
 
-            return selected_tracks or {}, cluster_data or {}
+        @self.app.app.callback(
+            Output("scatter-plot", "selectedData"),
+            [Input("clear-selection", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def clear_selection(n_clicks):
+            """Clear the current selection."""
+            if n_clicks:
+                return None
+            raise PreventUpdate

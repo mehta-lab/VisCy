@@ -1,4 +1,4 @@
-"""Reusable scatter plot component."""
+"""Scatter plot component."""
 
 from typing import Any, Dict, List, Optional
 
@@ -10,55 +10,30 @@ from viscy.visualization.styles.common import CommonStyles
 
 
 class ScatterPlot(DashComponent):
-    """A reusable scatter plot component."""
+    """Scatter plot component."""
 
-    def __init__(
-        self,
-        figure: go.Figure,
-        plot_id: str = "scatter-plot",
-        height: str = "50vh",
-        loading: bool = True,
-    ):
+    def __init__(self, figure):
         """Initialize the scatter plot.
 
         Parameters
         ----------
-        figure : go.Figure
-            The plotly figure to display.
-        plot_id : str, optional
-            The plot ID, by default "scatter-plot"
-        height : str, optional
-            The plot height, by default "50vh"
-        loading : bool, optional
-            Whether to show loading indicator, by default True
+        figure : plotly.graph_objects.Figure
+            The initial figure to display.
         """
         self.figure = figure
-        self.plot_id = plot_id
-        self.height = height
-        self.loading = loading
-
-    @staticmethod
-    def get_default_config() -> Dict[str, Any]:
-        """Get default plot configuration.
-
-        Returns
-        -------
-        Dict[str, Any]
-            The default configuration.
-        """
-        return {
-            "displayModeBar": True,
-            "editable": False,
-            "showEditInChartStudio": False,
-            "modeBarButtonsToRemove": ["select2d", "resetScale2d"],
-            "edits": {
-                "annotationPosition": False,
-                "annotationTail": False,
-                "annotationText": False,
-                "shapePosition": True,
-            },
-            "scrollZoom": True,
-        }
+        # Set initial layout settings
+        self.figure.update_layout(
+            dragmode="lasso",
+            clickmode="event+select",
+            uirevision="same",  # Keep selection state
+            selectdirection="any",
+            showlegend=True,
+            margin=dict(l=20, r=20, t=20, b=20),
+            modebar=dict(
+                remove=["select2d", "lasso2d", "autoScale2d"],
+                orientation="v",
+            ),
+        )
 
     def create_layout(self) -> html.Div:
         """Create the scatter plot layout.
@@ -68,19 +43,32 @@ class ScatterPlot(DashComponent):
         html.Div
             The scatter plot component.
         """
-        plot = dcc.Graph(
-            id=self.plot_id,
-            figure=self.figure,
-            config=self.get_default_config(),
-            style={"height": self.height},
-        )
-
-        if self.loading:
-            return html.Div(
+        return html.Div(
+            [
                 dcc.Loading(
-                    id=f"{self.plot_id}-loading",
-                    children=[plot],
-                    type="default",
+                    id="scatter-plot-loading",
+                    type="circle",
+                    children=[
+                        dcc.Graph(
+                            id="scatter-plot",
+                            figure=self.figure,
+                            style={"height": "70vh"},
+                            config={
+                                "displayModeBar": True,
+                                "modeBarButtonsToRemove": [
+                                    "select2d",
+                                    "lasso2d",
+                                    "autoScale2d",
+                                ],
+                                "displaylogo": False,
+                                "scrollZoom": True,
+                            },
+                            clear_on_unhover=True,
+                            responsive=True,
+                            selectedData=None,  # Initialize with no selection
+                        )
+                    ],
                 )
-            )
-        return html.Div(plot)
+            ],
+            style=CommonStyles.get_style("container"),
+        )

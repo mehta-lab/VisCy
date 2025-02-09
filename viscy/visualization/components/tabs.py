@@ -5,11 +5,12 @@ from typing import Any, Dict, List
 from dash import dcc, html
 
 from viscy.visualization.base import DashComponent
+from viscy.visualization.components.cluster_manager import ClusterManager
 from viscy.visualization.styles.common import CommonStyles
 
 
 class ViewTabs(DashComponent):
-    """A component for view tabs (trajectory, timeline, clusters)."""
+    """A component for view tabs (timeline, clusters)."""
 
     def __init__(self):
         """Initialize the view tabs."""
@@ -25,26 +26,12 @@ class ViewTabs(DashComponent):
         """
         return dcc.Tabs(
             id="view-tabs",
-            value="trajectory-tab",
+            value="clusters-tab",
             children=[
-                self._create_trajectory_tab(),
-                self._create_timeline_tab(),
                 self._create_clusters_tab(),
+                self._create_timeline_tab(),
             ],
             style={"marginTop": "20px"},
-        )
-
-    def _create_trajectory_tab(self) -> dcc.Tab:
-        """Create the trajectory view tab."""
-        return dcc.Tab(
-            label="Trajectory View",
-            value="trajectory-tab",
-            children=[
-                html.Div(
-                    id="trajectory-images",
-                    style=CommonStyles.get_style("container"),
-                ),
-            ],
         )
 
     def _create_timeline_tab(self) -> dcc.Tab:
@@ -70,12 +57,14 @@ class ViewTabs(DashComponent):
         return dcc.Tab(
             label="Clusters",
             value="clusters-tab",
-            id="clusters-tab",
             children=[
                 html.Div(
-                    id="cluster-container",
-                    style=CommonStyles.get_style("container"),
+                    id="cluster-list",
+                    style=CommonStyles.get_style(
+                        "container",
+                        max_height="80vh",
+                        overflow_y="auto",
+                    ),
                 ),
             ],
-            style={"display": "none"},
         )
