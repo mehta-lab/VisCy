@@ -195,7 +195,9 @@ class FigureCreator:
 
             # Add arrows if requested
             if show_arrows:
-                FigureCreator._add_arrows(fig, track_data, x_axis, y_axis, "x")
+                FigureCreator._add_arrows(
+                    fig, track_data, x_axis, y_axis, "x", track_color
+                )
 
         # Update layout
         FigureCreator._update_figure_layout(fig, x_axis, y_axis)
@@ -211,28 +213,7 @@ class FigureCreator:
         y_axis: str = "PCA2",
         highlight_point: Optional[Tuple] = None,
     ) -> go.Figure:
-        """Create scatter plot with time-based coloring.
-
-        Parameters
-        ----------
-        features_df : pd.DataFrame
-            The full features dataframe.
-        filtered_features_df : pd.DataFrame
-            The filtered features dataframe.
-        show_arrows : bool, optional
-            Whether to show arrows, by default False
-        x_axis : str, optional
-            X-axis label, by default "PCA1"
-        y_axis : str, optional
-            Y-axis label, by default "PCA2"
-        highlight_point : Optional[Tuple], optional
-            Point to highlight, by default None
-
-        Returns
-        -------
-        go.Figure
-            The scatter plot figure.
-        """
+        """Create scatter plot with time-based coloring."""
         fig = go.Figure()
 
         # Create background scatter plot with all points
@@ -247,6 +228,7 @@ class FigureCreator:
                     "Background",
                     opacity=0.1,
                     show_in_legend=False,
+                    selectable=False,
                 )
             )
 
@@ -261,14 +243,6 @@ class FigureCreator:
                 else 1.0
             )
 
-            # Create color scale based on time
-            min_t = track_data["t"].min()
-            max_t = track_data["t"].max()
-            colors = [
-                f"rgb{tuple(int(x*255) for x in plt.cm.viridis((t - min_t) / (max_t - min_t))[:3])}"
-                for t in track_data["t"]
-            ]
-
             if highlight_point and (fov, track_id) == (
                 highlight_point[0],
                 highlight_point[1],
@@ -279,17 +253,11 @@ class FigureCreator:
                 other_data = track_data[~highlight_mask]
 
                 if not other_data.empty:
-                    other_colors = [
-                        colors[i]
-                        for i, is_highlight in enumerate(~highlight_mask)
-                        if is_highlight
-                    ]
                     fig.add_trace(
-                        FigureCreator._create_scatter_trace(
+                        FigureCreator._create_time_colored_trace(
                             other_data,
                             x_axis,
                             y_axis,
-                            other_colors,
                             f"Track {track_id}",
                             opacity=0.3,
                             show_in_legend=True,
@@ -297,17 +265,11 @@ class FigureCreator:
                     )
 
                 if not highlighted_data.empty:
-                    highlight_colors = [
-                        colors[i]
-                        for i, is_highlight in enumerate(highlight_mask)
-                        if is_highlight
-                    ]
                     fig.add_trace(
-                        FigureCreator._create_scatter_trace(
+                        FigureCreator._create_time_colored_trace(
                             highlighted_data,
                             x_axis,
                             y_axis,
-                            highlight_colors,
                             f"Track {track_id} (Selected)",
                             opacity=1.0,
                             show_in_legend=False,
@@ -315,11 +277,10 @@ class FigureCreator:
                     )
             else:
                 fig.add_trace(
-                    FigureCreator._create_scatter_trace(
+                    FigureCreator._create_time_colored_trace(
                         track_data,
                         x_axis,
                         y_axis,
-                        colors,
                         f"Track {track_id}",
                         opacity=base_opacity,
                         show_in_legend=True,
@@ -328,11 +289,20 @@ class FigureCreator:
 
             # Add arrows if requested
             if show_arrows:
-                FigureCreator._add_arrows(fig, track_data, x_axis, y_axis, "x")
+                # Get the middle time point color for arrows
+                mid_t = track_data["t"].iloc[len(track_data) // 2]
+                norm_t = (mid_t - filtered_features_df["t"].min()) / (
+                    filtered_features_df["t"].max() - filtered_features_df["t"].min()
+                )
+                track_color = (
+                    f"rgb{tuple(int(x*255) for x in plt.cm.viridis(norm_t)[:3])}"
+                )
+                FigureCreator._add_arrows(
+                    fig, track_data, x_axis, y_axis, "x", track_color
+                )
 
         # Update layout
         FigureCreator._update_figure_layout(fig, x_axis, y_axis)
-
         return fig
 
     @staticmethod
@@ -342,6 +312,7 @@ class FigureCreator:
         x_axis: str,
         y_axis: str,
         trajectory_mode: str,
+        track_color: Optional[str] = None,
     ):
         """Add arrows to the figure to show trajectory direction.
 
@@ -357,6 +328,8 @@ class FigureCreator:
             Y-axis label.
         trajectory_mode : str
             Trajectory mode.
+        track_color : Optional[str]
+            Color to use for the arrows, matching the track color.
         """
         # Sort data by time
         track_data = track_data.sort_values("t")
@@ -369,11 +342,24 @@ class FigureCreator:
         dx = np.diff(x)
         dy = np.diff(y)
 
+        # Select evenly spaced indices for max 5 arrows
+        n_points = len(dx)
+        if n_points <= 5:
+            indices = range(n_points)
+        else:
+            indices = np.linspace(0, n_points - 1, 5, dtype=int)
+
         # Add arrows as scatter traces
-        for i in range(len(dx)):
+        for i in indices:
             # Calculate arrow head coordinates
             arrow_x = [x[i], x[i] + dx[i]]
             arrow_y = [y[i], y[i] + dy[i]]
+
+            # Use track color with some transparency, or default to gray if no color provided
+            arrow_color = track_color if track_color else "rgba(100,100,100,0.8)"
+            if track_color and track_color.startswith("rgb"):
+                # Convert rgb to rgba with 0.8 opacity
+                arrow_color = track_color.replace("rgb", "rgba").replace(")", ",0.8)")
 
             # Add arrow trace
             fig.add_trace(
@@ -382,9 +368,9 @@ class FigureCreator:
                     y=arrow_y,
                     mode="lines",
                     line=dict(
-                        color="rgba(100,100,100,0.5)",
-                        width=1,
-                        dash="dot",
+                        color=arrow_color,
+                        width=2.5,
+                        dash="solid",
                     ),
                     showlegend=False,
                     hoverinfo="skip",
@@ -400,7 +386,7 @@ class FigureCreator:
         name: str,
         opacity: float = 1.0,
         show_in_legend: bool = True,
-        selectable: bool = True,  # New parameter to control selectability
+        selectable: bool = True,
     ) -> go.Scattergl:
         """Create a scatter trace."""
         hover_text = [
@@ -408,39 +394,108 @@ class FigureCreator:
             for track_id, t, fov in zip(df["track_id"], df["t"], df["fov_name"])
         ]
 
-        return go.Scattergl(
-            x=df[x_axis],
-            y=df[y_axis],
-            mode="markers",
-            marker=dict(
-                color=color,
-                size=12,
-                opacity=opacity,
-                line=dict(width=1, color="rgba(50,50,50,0.2)"),
-            ),
-            name=name,
-            text=hover_text,
-            hoverinfo="text",
-            showlegend=show_in_legend,
-            selected=dict(
+        # Handle both single color and color list cases
+        marker_dict = {
+            "size": 12,
+            "opacity": opacity,
+            "line": dict(width=1, color="rgba(50,50,50,0.2)"),
+        }
+
+        # If color is a string, use it directly
+        if isinstance(color, str):
+            marker_dict["color"] = color
+            selected_color = color
+            unselected_color = color
+        # If color is a list, use it for the base color and use a neutral color for selected/unselected
+        else:
+            marker_dict["color"] = color
+            # Use a neutral color for selection states when using color arrays
+            selected_color = "rgba(100,100,100,1.0)"
+            unselected_color = "rgba(100,100,100,0.3)"
+
+        scatter_args = {
+            "x": df[x_axis],
+            "y": df[y_axis],
+            "mode": "markers",
+            "marker": marker_dict,
+            "name": name,
+            "text": hover_text,
+            "hoverinfo": "text",
+            "showlegend": show_in_legend,
+            "selectedpoints": [],
+        }
+
+        # Only add selection styling if the point is selectable
+        if selectable:
+            scatter_args.update(
+                {
+                    "selected": dict(
+                        marker=dict(
+                            color=selected_color,
+                            size=12,
+                            opacity=1.0,
+                        )
+                    ),
+                    "unselected": dict(
+                        marker=dict(
+                            color=unselected_color,
+                            opacity=opacity,
+                        )
+                    ),
+                }
+            )
+
+        return go.Scattergl(**scatter_args)
+
+    @staticmethod
+    def _create_time_colored_trace(
+        df: pd.DataFrame,
+        x_axis: str,
+        y_axis: str,
+        name: str,
+        opacity: float = 1.0,
+        show_in_legend: bool = True,
+    ) -> go.Scattergl:
+        """Create a time-colored scatter trace."""
+        hover_text = [
+            f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
+            for track_id, t, fov in zip(df["track_id"], df["t"], df["fov_name"])
+        ]
+
+        marker_dict = {
+            "size": 12,
+            "opacity": opacity,
+            "line": dict(width=1, color="rgba(50,50,50,0.2)"),
+            "color": df["t"],
+            "colorscale": "Viridis",
+            "showscale": False,
+        }
+
+        scatter_args = {
+            "x": df[x_axis],
+            "y": df[y_axis],
+            "mode": "markers",
+            "marker": marker_dict,
+            "name": name,
+            "text": hover_text,
+            "hoverinfo": "text",
+            "showlegend": show_in_legend,
+            "selectedpoints": None,  # Allow only single point selection
+            "selected": dict(
                 marker=dict(
-                    color=color,  # Keep original color
-                    size=12,
-                    opacity=(
-                        1.0 if selectable else opacity
-                    ),  # Only change opacity if selectable
+                    size=14,
+                    opacity=1.0,
+                    color="#007bff",  # Use blue color for selected points
                 )
             ),
-            unselected=dict(
+            "unselected": dict(
                 marker=dict(
-                    color=color,  # Keep original color
-                    opacity=(
-                        opacity if selectable else opacity
-                    ),  # Keep original opacity for non-selectable points
+                    opacity=opacity,
                 )
             ),
-            selectedpoints=[],  # Initialize with no selection
-        )
+        }
+
+        return go.Scattergl(**scatter_args)
 
     @staticmethod
     def _update_figure_layout(

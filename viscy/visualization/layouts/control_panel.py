@@ -87,7 +87,7 @@ class ControlPanel(DashComponent):
                                             value=[],
                                             style={"marginRight": "20px"},
                                         ),
-                                        dcc.RadioItems(
+                                        dcc.Dropdown(
                                             id="color-mode",
                                             options=[
                                                 {
@@ -100,6 +100,8 @@ class ControlPanel(DashComponent):
                                                 },
                                             ],
                                             value="track",
+                                            style={"width": "150px"},
+                                            clearable=False,
                                         ),
                                     ],
                                     style={
