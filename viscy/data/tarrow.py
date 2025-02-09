@@ -8,7 +8,9 @@ from lightning.pytorch import LightningDataModule
 from tarrow.data.tarrow_dataset import TarrowDataset
 from torch.utils.data import ConcatDataset, DataLoader
 
-from viscy.utils.engine_state import set_fit_global_state
+# FIXME: This module is not available in the viscy package,so shuffle the list of datasets manually.
+# from viscy.utils.engine_state import set_fit_global_state
+import random
 
 
 class TarrowDataModule(LightningDataModule):
@@ -188,7 +190,11 @@ class TarrowDataModule(LightningDataModule):
             split_idx = int(len(self.positions) * self.train_split)
 
             # Shuffle the list of datasets
-            shuffled_indices = set_fit_global_state(len(list_dataset))
+            
+            #FIXME: This module is not available in the viscy package,so shuffle the list of datasets manually.
+            # shuffled_indices = set_fit_global_state(len(list_dataset))
+            shuffled_indices = list(range(len(list_dataset)))
+            random.shuffle(shuffled_indices)
             list_dataset = [list_dataset[i] for i in shuffled_indices]
             list_visual_dataset = [
                 list_visual_dataset[i] for i in shuffled_indices
