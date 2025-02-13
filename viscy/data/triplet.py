@@ -98,6 +98,8 @@ class TripletDataset(Dataset):
             by default "any"
             (sample negative from another track any time point
             and use the augmented anchor patch as positive)
+        return_negative : bool, optional
+            Whether to return the negative sample, by default True
         """
         self.positions = positions
         self.channel_names = channel_names
@@ -291,6 +293,7 @@ class TripletDataModule(HCSDataModule):
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
+        return_negative: bool = True,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -330,6 +333,8 @@ class TripletDataModule(HCSDataModule):
             Future time interval to sample positive and anchor from,
             "any" means sampling negative from another track any time point
             and using the augmented anchor patch as positive), by default "any"
+        return_negative : bool, optional
+            Whether to return the negative sample, by default True
         """
         super().__init__(
             data_path=data_path,
@@ -352,6 +357,7 @@ class TripletDataModule(HCSDataModule):
         self.include_fov_names = include_fov_names
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
+        self.return_negative = return_negative
 
     def _align_tracks_tables_with_positions(
         self,
@@ -411,6 +417,7 @@ class TripletDataModule(HCSDataModule):
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
+            return_negative=self.return_negative,
             **dataset_settings,
         )
 
@@ -422,6 +429,7 @@ class TripletDataModule(HCSDataModule):
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
+            return_negative=self.return_negative,
             **dataset_settings,
         )
 
