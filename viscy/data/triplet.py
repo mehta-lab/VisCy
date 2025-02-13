@@ -99,7 +99,9 @@ class TripletDataset(Dataset):
             (sample negative from another track any time point
             and use the augmented anchor patch as positive)
         return_negative : bool, optional
-            Whether to return the negative sample, by default True
+            Whether to return the negative sample during the fit stage
+            (can be set to False when using a loss function like NT-Xent),
+            by default True
         """
         self.positions = positions
         self.channel_names = channel_names
