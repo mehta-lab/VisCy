@@ -6,6 +6,7 @@ from monai.transforms import (
     CenterSpatialCropd,
     RandAdjustContrastd,
     RandAffined,
+    RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
@@ -160,3 +161,14 @@ class CenterSpatialCropd(CenterSpatialCropd):
         **kwargs,
     ):
         super().__init__(keys=keys, roi_size=roi_size, **kwargs)
+
+
+class RandFlipd(RandFlipd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        prob: float,
+        spatial_axis: Sequence[int] | int,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)
