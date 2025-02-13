@@ -334,7 +334,9 @@ class TripletDataModule(HCSDataModule):
             "any" means sampling negative from another track any time point
             and using the augmented anchor patch as positive), by default "any"
         return_negative : bool, optional
-            Whether to return the negative sample, by default True
+            Whether to return the negative sample during the fit stage
+            (can be set to False when using a loss function like NT-Xent),
+            by default True
         """
         super().__init__(
             data_path=data_path,
