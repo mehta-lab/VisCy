@@ -1,174 +1,200 @@
+from typing import TypedDict
+
 import numpy as np
-from numpy import fft
+import pandas as pd
+from mahotas.features import haralick, zernike_moments
+from numpy.typing import ArrayLike
 from skimage.feature import graycomatrix, graycoprops
-from skimage.filters import gaussian, threshold_otsu
+from skimage.measure import regionprops
 
 
-class FeatureExtractor:
-    # FIXME: refactor into a separate module with standalone functions
+class IntensityFeatures(TypedDict):
+    """
+    Intensity features extracted from a single cell.
+    """
 
-    def __init__(self):
-        pass
+    mean: float
+    std: float
+    min: float
+    max: float
 
-    def compute_fourier_descriptors(image):
+
+class TextureFeatures(TypedDict):
+    """
+    Texture features extracted from a single cell
+    """
+
+    spectral_entropy: float
+    contrast: float
+    entropy: float
+    homogeneity: float
+    dissimilarity: float
+
+
+class MorphologyFeatures(TypedDict):
+    """
+    Morphology features extracted from a single cell
+    """
+
+    area: float
+    perimeter: float
+    circularity: float
+    eccentricity: float
+
+
+class SymmetryDescriptor(TypedDict):
+    """
+    Symmetry descriptor extracted from a single cell
+    """
+
+    zerknike_moments: ArrayLike
+    radial_intenstiy_gradient: ArrayLike
+
+
+class TrackFeatures(TypedDict):
+    """Track features extracted from a single track"""
+
+    instantaneous_velocity: float
+
+
+class CellFeatures:
+    """
+    Cell features extracted from a single cell image patch
+
+    Parameters:
+        image: Image patch with shape (Y,X)
+        segmentation_mask: Segmentation mask with shape (C,Y,X)
+
+    Attributes:
+        intensity_features: Intensity features
+        texture_features: Texture features
+        morphology_features: Morphology features
+        symmetry_descriptor: Symmetry descriptor
+
+    """
+
+    def __init__(
+        self,
+        image: ArrayLike,
+        segmentation_mask: ArrayLike = None,
+    ):
+        self.image = image
+        self.segmentation_mask = segmentation_mask
+
+        # Feature dictionaries
+        self.intensity_features: IntensityFeatures | None = None
+        self.texture_features: TextureFeatures | None = None
+        self.morphology_features: dict[str, dict] | None = None
+        self.symmetry_descriptor: SymmetryDescriptor | None = None
+
+    def compute_intensity_features(self) -> IntensityFeatures:
+        """Compute intensity features."""
+        return {
+            "mean": np.mean(self.image),
+            "std": np.std(self.image),
+            "min": np.min(self.image),
+            "max": np.max(self.image),
+        }
+
+    def compute_texture_features(self) -> TextureFeatures:
         """
-        Compute the Fourier descriptors of the image
-        The sensor or nuclear shape changes when infected, which can be captured by analyzing Fourier descriptors
-        :param np.array image: input image
-        :return: Fourier descriptors
+        Compute texture features
         """
-        # Convert contour to complex numbers
-        contour_complex = image[:, 0] + 1j * image[:, 1]
+        texture_features = {}
 
-        # Compute Fourier descriptors
-        descriptors = np.fft.fft(contour_complex)
+        texture_features["spectral_entropy"] = self._compute_spectral_entropy()
+        # TODO: Add contrast, entropy, homogeneity, dissimilarity
+        # self._compute_contrast()
+        # self._compute_entropy()
+        # self._compute_homogeneity()
+        # self._compute_dissimilarity()
 
-        return descriptors
+        raise NotImplementedError
 
-    def analyze_symmetry(descriptors):
+    def _compute_spectral_entropy(self):
+        """Compute spectral entropy"""
+        # TODO: Implement spectral entropy
+
+        raise NotImplementedError
+
+    def compute_morphology_features(
+        self,
+        segmentation_channel_names: list[str],
+        properties: list[str] = ["area", "perimeter", "circularity", "eccentricity"],
+    ) -> dict[str, dict]:
         """
-        Analyze the symmetry of the Fourier descriptors
-        Symmetry of the sensor or nuclear shape changes when infected
-        :param np.array descriptors: Fourier descriptors
-        :return: standard deviation of the descriptors
+        Compute morphology features for each segmentation channel.
+
+        Args:
+            segmentation_channel_names: Names of channels in segmentation mask
+            properties: List of regionprops properties to compute
+
+        Returns:
+            Dictionary mapping channel names to their morphology features
         """
-        # Normalize descriptors
-        descriptors = np.abs(descriptors) / np.max(np.abs(descriptors))
+        assert self.segmentation_mask is not None, "Segmentation mask is required"
+        assert (
+            len(segmentation_channel_names) == self.segmentation_mask.shape[0]
+        ), "Number of channel names must match number of channels in mask"
 
-        return np.std(descriptors)  # Lower standard deviation indicates higher symmetry
+        morphology_features = {}
+        for idx, channel_name in enumerate(segmentation_channel_names):
+            channel_mask = self.segmentation_mask[idx]
+            regionprops_dict = regionprops(channel_mask)[0]
 
-    def compute_area(input_image, sigma=0.6):
-        """Create a binary mask using morphological operations
-        Sensor area will increase when infected due to expression in nucleus
-        :param np.array input_image: generate masks from this 3D image
-        :param float sigma: Gaussian blur standard deviation, increase in value increases blur
-        :return: area of the sensor mask & mean intensity inside the sensor area
-        """
+            # Extract only requested properties
+            morphology_features[channel_name] = {
+                prop: getattr(regionprops_dict, prop) for prop in properties
+            }
 
-        input_image_blur = gaussian(input_image, sigma=sigma)
+        self.morphology_features = morphology_features
+        return morphology_features
 
-        thresh = threshold_otsu(input_image_blur)
-        mask = input_image >= thresh
+    def compute_all_features(self) -> pd.DataFrame:
+        """Compute all available features."""
+        self.intensity_features = self.compute_intensity_features()
+        self.texture_features = self.compute_texture_features()
+        self.morphology_features = self.compute_morphology_features()
+        return self.to_df()
 
-        # Apply sensor mask to the image
-        masked_image = input_image * mask
+    def to_df(self) -> pd.DataFrame:
+        """Convert all features to a pandas DataFrame."""
+        features_dict = {}
+        if self.intensity_features:
+            features_dict.update(self.intensity_features)
+        if self.texture_features:
+            features_dict.update(self.texture_features)
+        if self.morphology_features:
+            features_dict.update(self.morphology_features)
 
-        # Compute the mean intensity inside the sensor area
-        masked_intensity = np.mean(masked_image)
+        return pd.DataFrame(features_dict)
 
-        return masked_intensity, np.sum(mask)
 
-    def compute_spectral_entropy(image):
-        """
-        Compute the spectral entropy of the image
-        High frequency components are observed to increase in phase and reduce in sensor when cell is infected
-        :param np.array image: input image
-        :return: spectral entropy
-        """
+class DynamicFeatures:
+    """
+    Dyanamic track based features extracted from a single track
 
-        # Compute the 2D Fourier Transform
-        f_transform = fft.fft2(image)
+    Parameters:
+        tracking_df: Tracking dataframe
 
-        # Compute the power spectrum
-        power_spectrum = np.abs(f_transform) ** 2
+    Attributes:
+        track_features: Track features
+    """
 
-        # Compute the probability distribution
-        power_spectrum += 1e-10  # Avoid log(0) issues
-        prob_distribution = power_spectrum / np.sum(power_spectrum)
+    def __init__(self, tracking_df: pd.DataFrame):
+        self.tracking_df = tracking_df
+        self.track_features: TrackFeatures | None = None
 
-        # Compute the spectral entropy
-        entropy = -np.sum(prob_distribution * np.log(prob_distribution))
+    def compute_instantaneous_velocity(self) -> float:
+        """Compute instantaneous velocity"""
 
-        return entropy
+        raise NotImplementedError
 
-    def compute_glcm_features(image):
-        """
-        Compute the contrast, dissimilarity and homogeneity of the image
-        Both sensor and phase texture changes when infected, smooth in sensor, and rough in phase
-        :param np.array image: input image
-        :return: contrast, dissimilarity, homogeneity
-        """
+    def compute_all_features(self) -> pd.DataFrame:
+        """Compute all available features."""
+        self.track_features = self.compute_instantaneous_velocity()
+        return self.to_df()
 
-        # Normalize the input image from 0 to 255
-        image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
-        image = image.astype(np.uint8)
-
-        # Compute the GLCM
-        distances = [1]  # Distance between pixels
-        angles = [0]  # Angle in radians
-
-        glcm = graycomatrix(image, distances, angles, symmetric=True, normed=True)
-
-        # Compute GLCM properties
-        contrast = graycoprops(glcm, "contrast")[0, 0]
-        dissimilarity = graycoprops(glcm, "dissimilarity")[0, 0]
-        homogeneity = graycoprops(glcm, "homogeneity")[0, 0]
-
-        return contrast, dissimilarity, homogeneity
-
-    def compute_iqr(image):
-        """
-        Compute the interquartile range of pixel intensities
-        Observed to increase when cell is infected
-        :param np.array image: input image
-        :return: interquartile range of pixel intensities
-        """
-
-        # Compute the interquartile range of pixel intensities
-        iqr = np.percentile(image, 75) - np.percentile(image, 25)
-
-        return iqr
-
-    def compute_mean_intensity(image):
-        """
-        Compute the mean pixel intensity
-        Expected to vary when cell morphology changes due to infection, divison or death
-        :param np.array image: input image
-        :return: mean pixel intensity
-        """
-
-        # Compute the mean pixel intensity
-        mean_intensity = np.mean(image)
-
-        return mean_intensity
-
-    def compute_std_dev(image):
-        """
-        Compute the standard deviation of pixel intensities
-        Expected to vary when cell morphology changes due to infection, divison or death
-        :param np.array image: input image
-        :return: standard deviation of pixel intensities
-        """
-        # Compute the standard deviation of pixel intensities
-        std_dev = np.std(image)
-
-        return std_dev
-
-    def compute_radial_intensity_gradient(image):
-        """
-        Compute the radial intensity gradient of the image
-        The sensor relocalizes inside the nucleus, which is center of the image when cells are infected
-        Expected negative gradient when infected and zero to positive gradient when not infected
-        :param np.array image: input image
-        :return: radial intensity gradient
-        """
-        # normalize the image
-        image = (image - np.min(image)) / (np.max(image) - np.min(image))
-
-        # compute the intensity gradient from center to periphery
-        y, x = np.indices(image.shape)
-        center = np.array(image.shape) / 2
-        r = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
-        r = r.astype(int)
-        tbin = np.bincount(r.ravel(), image.ravel())
-        nr = np.bincount(r.ravel())
-        radial_intensity_values = tbin / nr
-
-        # get the slope radial_intensity_values
-        from scipy.stats import linregress
-
-        radial_intensity_gradient = linregress(
-            range(len(radial_intensity_values)), radial_intensity_values
-        )
-
-        return radial_intensity_gradient[0]
+    def to_df(self) -> pd.DataFrame:
+        """Convert all features to a pandas DataFrame."""
+        return pd.DataFrame(self.track_features)
