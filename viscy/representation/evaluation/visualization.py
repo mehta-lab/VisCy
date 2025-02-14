@@ -681,6 +681,48 @@ class EmbeddingVisualizationApp:
 
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
+        @self.app.callback(
+            [
+                dd.Output("scatter-plot", "figure", allow_duplicate=True),
+                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
+            ],
+            [dd.Input("clear-selection", "n_clicks")],
+            [
+                dd.State("color-mode", "value"),
+                dd.State("show-arrows", "value"),
+                dd.State("x-axis", "value"),
+                dd.State("y-axis", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def clear_selection(n_clicks, color_mode, show_arrows, x_axis, y_axis):
+            """Callback to clear the selection and restore original opacity"""
+            if n_clicks:
+                # Create a new figure with no selections
+                if color_mode == "track":
+                    fig = self._create_track_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+                else:
+                    fig = self._create_time_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+
+                # Update layout to maintain lasso mode but clear selections
+                fig.update_layout(
+                    dragmode="lasso",
+                    clickmode="event+select",
+                    uirevision=None,  # Reset UI state
+                    selectdirection="any",
+                )
+
+                return fig, None  # Return new figure and clear selectedData
+            return dash.no_update, dash.no_update
+
     def _create_track_colored_figure(
         self,
         show_arrows=False,
