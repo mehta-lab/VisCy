@@ -70,26 +70,54 @@ class EmbeddingVisualizationApp:
         features = embedding_dataset["features"]
         self.features_df = features["sample"].to_dataframe().reset_index(drop=True)
 
-        # PCA transformation
-        scaled_features = StandardScaler().fit_transform(features.values)
-        pca = PCA(n_components=self.num_PC_components)
-        pca_coords = pca.fit_transform(scaled_features)
+        # Check if UMAP or PHATE columns already exist
+        existing_dims = []
+        dim_options = []
 
-        # Add PCA coordinates to the features dataframe
-        for i in range(self.num_PC_components):
-            self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+        # Check for PCA and compute if needed
+        if not any(col.startswith("PCA") for col in self.features_df.columns):
+            # PCA transformation
+            scaled_features = StandardScaler().fit_transform(features.values)
+            pca = PCA(n_components=self.num_PC_components)
+            pca_coords = pca.fit_transform(scaled_features)
 
-        # Store explained variance for each component
-        self.explained_variance = [
-            f"PC{i+1} ({var:.1f}%)"
-            for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+            # Add PCA coordinates to the features dataframe
+            for i in range(self.num_PC_components):
+                self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+
+            # Store explained variance for PCA
+            self.pca_explained_variance = [
+                f"PC{i+1} ({var:.1f}%)"
+                for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+            ]
+
+            # Add PCA options
+            for i, pc_label in enumerate(self.pca_explained_variance):
+                dim_options.append({"label": pc_label, "value": f"PCA{i+1}"})
+                existing_dims.append(f"PCA{i+1}")
+
+        # Check for UMAP coordinates
+        umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
+        if umap_dims:
+            for dim in umap_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
+
+        # Check for PHATE coordinates
+        phate_dims = [
+            col for col in self.features_df.columns if col.startswith("PHATE")
         ]
+        if phate_dims:
+            for dim in phate_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
 
-        # Create PC selection options with explained variance
-        self.pc_options = [
-            {"label": pc_label, "value": f"PCA{i+1}"}
-            for i, pc_label in enumerate(self.explained_variance)
-        ]
+        # Store dimension options for dropdowns
+        self.dim_options = dim_options
+
+        # Set default x and y axes based on available dimensions
+        self.default_x = existing_dims[0] if existing_dims else "PCA1"
+        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PCA2"
 
         # Process each FOV and its track IDs
         all_filtered_features = []
@@ -285,8 +313,8 @@ class EmbeddingVisualizationApp:
                                                 ),
                                                 dcc.Dropdown(
                                                     id="x-axis",
-                                                    options=self.pc_options,
-                                                    value="PCA1",
+                                                    options=self.dim_options,
+                                                    value=self.default_x,
                                                     style={"width": "200px"},
                                                 ),
                                             ]
@@ -299,8 +327,8 @@ class EmbeddingVisualizationApp:
                                                 ),
                                                 dcc.Dropdown(
                                                     id="y-axis",
-                                                    options=self.pc_options,
-                                                    value="PCA2",
+                                                    options=self.dim_options,
+                                                    value=self.default_y,
                                                     style={"width": "200px"},
                                                 ),
                                             ]
@@ -384,13 +412,9 @@ class EmbeddingVisualizationApp:
                 "y-axis",
             ]:
                 if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        show_arrows, x_axis, y_axis
-                    )
+                    fig = self._create_track_colored_figure(show_arrows, x_axis, y_axis)
                 else:
-                    fig = self._create_time_colored_figure(
-                        show_arrows, x_axis, y_axis
-                    )
+                    fig = self._create_time_colored_figure(show_arrows, x_axis, y_axis)
 
                 # Update dragmode and selection settings
                 fig.update_layout(
@@ -660,10 +684,13 @@ class EmbeddingVisualizationApp:
     def _create_track_colored_figure(
         self,
         show_arrows=False,
-        x_axis="PCA1",
-        y_axis="PCA2",
+        x_axis=None,
+        y_axis=None,
     ):
         """Create scatter plot with track-based coloring"""
+        x_axis = x_axis or self.default_x
+        y_axis = y_axis or self.default_y
+
         unique_tracks = self.filtered_features_df["track_id"].unique()
         cmap = plt.cm.tab20
         track_colors = {
@@ -707,15 +734,17 @@ class EmbeddingVisualizationApp:
         ]
 
         if not background_df.empty:
+            # Subsample background points if there are too many
+            if len(background_df) > 5000:  # Adjust this threshold as needed
+                background_df = background_df.sample(n=5000, random_state=42)
+
             fig.add_trace(
-                go.Scattergl(  # Changed to Scattergl for better performance
+                go.Scattergl(
                     x=background_df[x_axis],
                     y=background_df[y_axis],
                     mode="markers",
-                    marker=dict(
-                        size=12, color="lightgray", opacity=0.3
-                    ),  # Reduced size
-                    name="Other tracks",
+                    marker=dict(size=12, color="lightgray", opacity=0.3),
+                    name=f"Other tracks (showing {len(background_df)} of {len(self.features_df)} points)",
                     text=[
                         f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
                         for track_id, t, fov in zip(
@@ -726,7 +755,7 @@ class EmbeddingVisualizationApp:
                     ],
                     hoverinfo="text",
                     showlegend=True,
-                    hoverlabel=dict(namelength=-1),  # Show full text in hover
+                    hoverlabel=dict(namelength=-1),
                 )
             )
 
@@ -849,12 +878,15 @@ class EmbeddingVisualizationApp:
     def _create_time_colored_figure(
         self,
         show_arrows=False,
-        x_axis="PCA1",
-        y_axis="PCA2",
+        x_axis=None,
+        y_axis=None,
     ):
         """Create scatter plot with time-based coloring"""
+        x_axis = x_axis or self.default_x
+        y_axis = y_axis or self.default_y
+
         fig = go.Figure()
-        
+
         # Set initial layout with lasso mode
         fig.update_layout(
             dragmode="lasso",
@@ -882,17 +914,22 @@ class EmbeddingVisualizationApp:
         fig.update_xaxes(showgrid=False)
         fig.update_yaxes(showgrid=False)
 
-        # Add background points with hover info using Scattergl
+        # Add background points with hover info
         all_tracks_df = self.features_df[
             self.features_df["fov_name"].isin(self.fov_tracks.keys())
         ]
+
+        # Subsample background points if there are too many
+        if len(all_tracks_df) > 5000:  # Adjust this threshold as needed
+            all_tracks_df = all_tracks_df.sample(n=5000, random_state=42)
+
         fig.add_trace(
             go.Scattergl(
                 x=all_tracks_df[x_axis],
                 y=all_tracks_df[y_axis],
                 mode="markers",
-                marker=dict(size=12, color="lightgray", opacity=0.3),  # Reduced size
-                name="Other points",
+                marker=dict(size=12, color="lightgray", opacity=0.3),
+                name=f"Other points (showing {len(all_tracks_df)} of {len(self.features_df)} points)",
                 text=[
                     f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
                     for track_id, t, fov in zip(
@@ -902,7 +939,7 @@ class EmbeddingVisualizationApp:
                     )
                 ],
                 hoverinfo="text",
-                hoverlabel=dict(namelength=-1),  # Show full text in hover
+                hoverlabel=dict(namelength=-1),
             )
         )
 
