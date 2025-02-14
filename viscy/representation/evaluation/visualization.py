@@ -305,25 +305,6 @@ class EmbeddingVisualizationApp:
                                                 ),
                                             ]
                                         ),
-                                        html.Div(
-                                            [
-                                                html.Label(
-                                                    "Selection mode:",
-                                                    style={"marginRight": "10px"},
-                                                ),
-                                                dcc.RadioItems(
-                                                    id="selection-mode",
-                                                    options=[
-                                                        {
-                                                            "label": "Lasso",
-                                                            "value": "lasso",
-                                                        },
-                                                    ],
-                                                    value="lasso",
-                                                    inline=True,
-                                                ),
-                                            ]
-                                        ),
                                         cluster_controls,
                                     ],
                                 ),
@@ -367,64 +348,11 @@ class EmbeddingVisualizationApp:
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
                 dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
             ],
-            [dd.Input("clear-selection", "n_clicks")],
-            [
-                dd.State("scatter-plot", "figure"),
-                dd.State("color-mode", "value"),
-                dd.State("show-arrows", "value"),
-                dd.State("x-axis", "value"),
-                dd.State("y-axis", "value"),
-                dd.State("selection-mode", "value"),
-            ],
-            prevent_initial_call=True,
-        )
-        def clear_selection(
-            n_clicks,
-            current_figure,
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            selection_mode,
-        ):
-            if n_clicks:
-                # Create a new figure with no selections
-                if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        len(show_arrows or []) > 0,
-                        x_axis,
-                        y_axis,
-                        selection_mode,
-                    )
-                else:
-                    fig = self._create_time_colored_figure(
-                        len(show_arrows or []) > 0,
-                        x_axis,
-                        y_axis,
-                        selection_mode,
-                    )
-
-                fig.update_layout(
-                    dragmode="lasso" if selection_mode == "lasso" else "pan",
-                    clickmode="event+select",
-                    uirevision=None,  # Reset UI state
-                    selectdirection="any",
-                )
-
-                return fig, html.Div("Use the lasso tool to select points")
-            return dash.no_update, dash.no_update
-
-        @self.app.callback(
-            [
-                dd.Output("scatter-plot", "figure", allow_duplicate=True),
-                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
-            ],
             [
                 dd.Input("color-mode", "value"),
                 dd.Input("show-arrows", "value"),
                 dd.Input("x-axis", "value"),
                 dd.Input("y-axis", "value"),
-                dd.Input("selection-mode", "value"),
                 dd.Input("scatter-plot", "relayoutData"),
                 dd.Input("scatter-plot", "selectedData"),
             ],
@@ -436,7 +364,6 @@ class EmbeddingVisualizationApp:
             show_arrows,
             x_axis,
             y_axis,
-            selection_mode,
             relayout_data,
             selected_data,
             current_figure,
@@ -455,15 +382,14 @@ class EmbeddingVisualizationApp:
                 "show-arrows",
                 "x-axis",
                 "y-axis",
-                "selection-mode",
             ]:
                 if color_mode == "track":
                     fig = self._create_track_colored_figure(
-                        show_arrows, x_axis, y_axis, selection_mode
+                        show_arrows, x_axis, y_axis
                     )
                 else:
                     fig = self._create_time_colored_figure(
-                        show_arrows, x_axis, y_axis, selection_mode
+                        show_arrows, x_axis, y_axis
                     )
 
                 # Update dragmode and selection settings
@@ -475,24 +401,6 @@ class EmbeddingVisualizationApp:
                 )
             else:
                 fig = dash.no_update
-
-            # Handle selection mode changes
-            if triggered_id == "selection-mode":
-                selected_data = None
-                if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        show_arrows, x_axis, y_axis, selection_mode
-                    )
-                else:
-                    fig = self._create_time_colored_figure(
-                        show_arrows, x_axis, y_axis, selection_mode
-                    )
-                fig.update_layout(
-                    dragmode="lasso",
-                    clickmode="event+select",
-                    uirevision=None,
-                    selectdirection="any",
-                )
 
             return fig, selected_data
 
@@ -663,7 +571,6 @@ class EmbeddingVisualizationApp:
                 dd.State("show-arrows", "value"),
                 dd.State("x-axis", "value"),
                 dd.State("y-axis", "value"),
-                dd.State("selection-mode", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -676,7 +583,6 @@ class EmbeddingVisualizationApp:
             show_arrows,
             x_axis,
             y_axis,
-            selection_mode,
         ):
             ctx = dash.callback_context
             if not ctx.triggered:
@@ -716,7 +622,6 @@ class EmbeddingVisualizationApp:
                         len(show_arrows or []) > 0,
                         x_axis,
                         y_axis,
-                        selection_mode,
                     )
                     # Ensure the dragmode is set based on selection_mode
                     fig.update_layout(
@@ -740,7 +645,6 @@ class EmbeddingVisualizationApp:
                     len(show_arrows or []) > 0,
                     x_axis,
                     y_axis,
-                    selection_mode,
                 )
                 # Ensure the dragmode is set based on selection_mode
                 fig.update_layout(
@@ -758,7 +662,6 @@ class EmbeddingVisualizationApp:
         show_arrows=False,
         x_axis="PCA1",
         y_axis="PCA2",
-        selection_mode="lasso",
     ):
         """Create scatter plot with track-based coloring"""
         unique_tracks = self.filtered_features_df["track_id"].unique()
@@ -769,6 +672,33 @@ class EmbeddingVisualizationApp:
         }
 
         fig = go.Figure()
+
+        # Set initial layout with lasso mode
+        fig.update_layout(
+            dragmode="lasso",
+            clickmode="event+select",
+            selectdirection="any",
+            plot_bgcolor="white",
+            title="PCA visualization of Selected Tracks",
+            xaxis_title=x_axis,
+            yaxis_title=y_axis,
+            uirevision=True,
+            hovermode="closest",
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                title="Tracks",
+                bordercolor="Black",
+                borderwidth=1,
+            ),
+            margin=dict(l=50, r=150, t=50, b=50),
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=False)
 
         # Add background points with hover info (excluding the colored tracks)
         background_df = self.features_df[
@@ -914,7 +844,6 @@ class EmbeddingVisualizationApp:
                             opacity=0.8,
                         )
 
-        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
 
     def _create_time_colored_figure(
@@ -922,10 +851,36 @@ class EmbeddingVisualizationApp:
         show_arrows=False,
         x_axis="PCA1",
         y_axis="PCA2",
-        selection_mode="lasso",
     ):
         """Create scatter plot with time-based coloring"""
         fig = go.Figure()
+        
+        # Set initial layout with lasso mode
+        fig.update_layout(
+            dragmode="lasso",
+            clickmode="event+select",
+            selectdirection="any",
+            plot_bgcolor="white",
+            title="PCA visualization of Selected Tracks",
+            xaxis_title=x_axis,
+            yaxis_title=y_axis,
+            uirevision=True,
+            hovermode="closest",
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                title="Tracks",
+                bordercolor="Black",
+                borderwidth=1,
+            ),
+            margin=dict(l=50, r=150, t=50, b=50),
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=False)
 
         # Add background points with hover info using Scattergl
         all_tracks_df = self.features_df[
@@ -1017,43 +972,7 @@ class EmbeddingVisualizationApp:
                                 hoverinfo="skip",
                             )
                         )
-        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
-
-    def _update_figure_layout(self, fig, x_axis="PCA1", y_axis="PCA2"):
-        """Update the layout for a figure"""
-        # Get the axis labels with explained variance
-        x_label = next(
-            (opt["label"] for opt in self.pc_options if opt["value"] == x_axis),
-            x_axis,
-        )
-        y_label = next(
-            (opt["label"] for opt in self.pc_options if opt["value"] == y_axis),
-            y_axis,
-        )
-
-        fig.update_layout(
-            plot_bgcolor="white",
-            title="PCA visualization of Selected Tracks",
-            xaxis_title=x_label,
-            yaxis_title=y_label,
-            uirevision=True,
-            hovermode="closest",
-            showlegend=True,
-            legend=dict(
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02,
-                title="Tracks",
-                bordercolor="Black",
-                borderwidth=1,
-            ),
-            margin=dict(l=50, r=150, t=50, b=50),
-            autosize=True,
-        )
-        fig.update_xaxes(showgrid=False)
-        fig.update_yaxes(showgrid=False)
 
     @staticmethod
     def _normalize_image(img_array):
@@ -1453,6 +1372,7 @@ class EmbeddingVisualizationApp:
                 images = []
                 for point in cluster_points:
                     cache_key = (point["fov_name"], point["track_id"], point["t"])
+
                     images.append(
                         html.Div(
                             [
