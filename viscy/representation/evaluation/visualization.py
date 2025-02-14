@@ -385,7 +385,7 @@ class EmbeddingVisualizationApp:
                 dd.Input("scatter-plot", "selectedData"),
             ],
             [dd.State("scatter-plot", "figure")],
-            prevent_initial_call=True
+            prevent_initial_call=True,
         )
         def update_figure(
             color_mode,
@@ -428,8 +428,6 @@ class EmbeddingVisualizationApp:
 
             return fig, selected_data
 
-    def _register_timeline_callbacks(self):
-        """Register callbacks for timeline updates"""
         @self.app.callback(
             dd.Output("track-timeline", "children"),
             [dd.Input("scatter-plot", "clickData")],
@@ -517,6 +515,7 @@ class EmbeddingVisualizationApp:
                                     "padding": "5px",
                                 },
                             )
+                        )
 
                 if channel_images:
                     # Add channel label
@@ -577,8 +576,7 @@ class EmbeddingVisualizationApp:
                 ]
             )
 
-    def _register_cluster_callbacks(self):
-        """Register callbacks for cluster handling"""
+        # Add callback to show/hide clusters tab
         @self.app.callback(
             [
                 dd.Output("clusters-tab", "style"),
