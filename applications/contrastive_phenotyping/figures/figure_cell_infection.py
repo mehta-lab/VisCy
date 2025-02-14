@@ -8,155 +8,93 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
-from umap import UMAP
 
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import load_annotation
+from viscy.representation.evaluation.dimensionality_reduction import compute_phate
 
 # %% Paths and parameters.
 
 
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
-)
-data_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
-)
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
 )
 
-
-# %%
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-# %%
-# Compute UMAP over all features
 features = embedding_dataset["features"]
-# or select a well:
-# features = features[features["fov_name"].str.contains("B/4")]
 
+# %% compute and store phate components
 
-scaled_features = StandardScaler().fit_transform(features.values)
-umap = UMAP()
-# Fit UMAP on all features
-embedding = umap.fit_transform(scaled_features)
-
-features = (
-    features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-    .assign_coords(UMAP2=("sample", embedding[:, 1]))
-    .set_index(sample=["UMAP1", "UMAP2"], append=True)
-)
-features
-
-pca = PCA(n_components=4)
-# scaled_features = StandardScaler().fit_transform(features.values)
-# pca_features = pca.fit_transform(scaled_features)
-pca_features = pca.fit_transform(features.values)
-
-
-features = (
-    features.assign_coords(PCA1=("sample", pca_features[:, 0]))
-    .assign_coords(PCA2=("sample", pca_features[:, 1]))
-    .assign_coords(PCA3=("sample", pca_features[:, 2]))
-    .assign_coords(PCA4=("sample", pca_features[:, 3]))
-    .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4"], append=True)
+phate_embedding = compute_phate(
+    embedding_dataset=embedding_dataset,
+    n_components=2,
+    knn=5,
+    decay=40,
+    n_jobs=15,
 )
 
 # %% OVERLAY INFECTION ANNOTATION
-ann_root = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
-)
+
+# load the infection state annotation
+def load_annotation(da, path, name, categories: dict | None = None):
+    annotation = pd.read_csv(path)
+    annotation["fov_name"] = "/" + annotation["fov_name"]
+    annotation = annotation.set_index(["fov_name", "id"])
+    mi = pd.MultiIndex.from_arrays(
+        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+    )
+    selected = annotation.reindex(mi)[name]
+    if categories:
+        selected = selected.astype("category").cat.rename_categories(categories)
+    return selected
+        
+ann_root = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred")
 
 infection = load_annotation(
     features,
     ann_root / "extracted_inf_state.csv",
     "infection_state",
-    {0.0: "background", 1.0: "uninfected", 2.0: "infected"},
+    {0:"background", 1: "uninfected", 2: "infected"},
 )
 
-# %% plot the umap
+# %% filter background class from the data
 
-# remove the rows in umap and annotation for background class
-# Convert UMAP coordinates to a DataFrame
-umap_npy = embedding.copy()
 infection_npy = infection.cat.codes.values
-
-# Filter out the background class
-umap_npy_filtered = umap_npy[infection_npy != 0]
 infection_npy_filtered = infection_npy[infection_npy != 0]
 
 feature_npy = features.values
 feature_npy_filtered = feature_npy[infection_npy != 0]
 
-sns.scatterplot(
-    x=umap_npy_filtered[:, 0],
-    y=umap_npy_filtered[:, 1],
-    hue=infection_npy_filtered,
-    palette={1: "steelblue", 2: "orangered"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-plt.legend([], [], frameon=False)
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/umap_infection.png",
-    format="png",
-    dpi=300,
-)
-
-# %% plot PCA components with infection hue
-
-pca_npy = pca_features.copy()
-pca_npy_filtered = pca_npy[infection_npy != 0]
-
-sns.scatterplot(
-    x=pca_npy_filtered[:, 0],
-    y=pca_npy_filtered[:, 1],
-    hue=infection_npy_filtered,
-    palette={1: "steelblue", 2: "orangered"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-plt.legend([], [], frameon=False)
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/pca_infection.png",
-    format="png",
-    dpi=300,
-)
-
-# %% combine the umap, pca and infection annotation in one dataframe
-
-data = pd.DataFrame(
-    {
-        "UMAP1": umap_npy_filtered[:, 0],
-        "UMAP2": umap_npy_filtered[:, 1],
-        "PCA1": pca_npy_filtered[:, 0],
-        "PCA2": pca_npy_filtered[:, 1],
-        "PCA3": pca_npy_filtered[:, 2],
-        "PCA4": pca_npy_filtered[:, 3],
-        "infection": infection_npy_filtered,
-    }
-)
-
 # add time and well info into dataframe
 time_npy = features["t"].values
 time_npy_filtered = time_npy[infection_npy != 0]
-data["time"] = time_npy_filtered
+
+phate1_npy = phate_embedding[1][:,0]
+phate1_npy_filtered = phate1_npy[infection_npy != 0]
+
+phate2_npy = phate_embedding[1][:,1]
+phate2_npy_filtered = phate2_npy[infection_npy != 0]
 
 fov_name_list = features["fov_name"].values
 fov_name_list_filtered = fov_name_list[infection_npy != 0]
-data["fov_name"] = fov_name_list_filtered
 
+data = pd.DataFrame(
+    {
+        "infection": infection_npy_filtered,
+        "time": time_npy_filtered,
+        "fov_name": fov_name_list_filtered,
+        "PHATE1": phate1_npy_filtered,
+        "PHATE2": phate2_npy_filtered,
+    }
+)
 # Add all 768 features to the dataframe
-for i in range(768):
-    data[f"feature_{i+1}"] = feature_npy_filtered[:, i]
+feature_columns = pd.DataFrame(feature_npy_filtered, columns=[f"feature_{i+1}" for i in range(768)])
+data = pd.concat([data, feature_columns], axis=1)
 
-# %% manually split the dataset into training and testing set by well name
+# %% manually data the dataset into training and testing set by well name
 
 # dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
 data_train_val = data[
@@ -174,19 +112,13 @@ data_test = data[
 
 # %% train a linear classifier to predict infection state from PCA components
 
-from sklearn.linear_model import LogisticRegression
-
 x_train = data_train_val.drop(
     columns=[
         "infection",
         "fov_name",
         "time",
-        "UMAP1",
-        "UMAP2",
-        "PCA1",
-        "PCA2",
-        "PCA3",
-        "PCA4",
+        "PHATE1",
+        "PHATE2",
     ]
 )
 y_train = data_train_val["infection"]
@@ -194,41 +126,21 @@ y_train = data_train_val["infection"]
 # train a logistic regression model
 clf = LogisticRegression(random_state=0).fit(x_train, y_train)
 
+# test the trained classifer on the other half of the data
+
 x_test = data_test.drop(
     columns=[
         "infection",
         "fov_name",
         "time",
-        "UMAP1",
-        "UMAP2",
-        "PCA1",
-        "PCA2",
-        "PCA3",
-        "PCA4",
+        "PHATE1",
+        "PHATE2",
     ]
 )
 y_test = data_test["infection"]
 
 # predict the infection state for the testing set
 y_pred = clf.predict(x_test)
-
-# %% construct confusion matrix to compare the true and predicted infection state
-
-import seaborn as sns
-from sklearn.metrics import confusion_matrix
-
-cm = confusion_matrix(y_test, y_pred)
-cm_percentage = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
-sns.heatmap(cm_percentage, annot=True, fmt=".2f", cmap="viridis")
-plt.xlabel("Predicted")
-plt.ylabel("True")
-plt.title("Confusion Matrix (Percentage)")
-plt.xticks(ticks=[0.5, 1.5], labels=["uninfected", "infected"])
-plt.yticks(ticks=[0.5, 1.5], labels=["uninfected", "infected"])
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/confusion_matrix.svg",
-    format="svg",
-)
 
 # %% use the trained classifier to perform prediction on the entire dataset
 
@@ -285,233 +197,97 @@ for time in time_points_test:
     infected_true_infected.append(infected_cell * 100 / total_cell)
 
 
-# %% perform prediction on the june dataset
+# %% perform prediction on the mantis dataset
 
 #  Paths and parameters.
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/jun_time_interval_1_epoch_178.zarr"
-)
-data_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/2-register/registered_chunked.zarr"
-)
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_06_13_SEC61_TOMM20_ZIKV_DENGUE_1/4.2-tracking/track.zarr"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/2024_11_07_NTXent_phase_sensor/sensor_phase_160patch_98ckpt_rev5.zarr"
 )
 
-# %%
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
 
-# %%
-june_features = embedding_dataset["features"]
+mantis_features = embedding_dataset["features"]
 
-scaled_features = StandardScaler().fit_transform(june_features.values)
-umap = UMAP()
-# Fit UMAP on all features
-embedding = umap.fit_transform(scaled_features)
+# %% plot mantis and Feb test combined UMAP
 
-june_features = (
-    june_features.assign_coords(UMAP1=("sample", embedding[:, 0]))
-    .assign_coords(UMAP2=("sample", embedding[:, 1]))
-    .set_index(sample=["UMAP1", "UMAP2"], append=True)
-)
-june_features
+# add time and well info into dataframe
+mantis_time_npy = mantis_features["t"].values
+mantis_fov_npy = mantis_features["fov_name"].values
+mantis_phate1_npy = mantis_features["PHATE1"].values
+mantis_phate2_npy = mantis_features["PHATE2"].values
 
-pca = PCA(n_components=4)
-pca_features = pca.fit_transform(june_features.values)
-
-# %%
-
-# sns.scatterplot(
-#    x=june_features["UMAP1"],
-#    y=june_features["UMAP2"],
-#    hue=june_pred,
-#    palette={1: 'blue', 2: 'red'},
-#    hue_order=[1, 2],
-#    s=7,
-#    alpha=0.8,
-# )
-# plt.legend([], [], frameon=False)
-# plt.xlim(0, 15)
-# plt.savefig('/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/june_umap_infection.png', format='png', dpi=300)
-
-# %% plot June and Feb test combined UMAP
-
-june_umap_npy = embedding.copy()
-june_pca_npy = pca_features.copy()
-june_data = pd.DataFrame(
+mantis_data = pd.DataFrame(
     {
-        "UMAP1": june_umap_npy[:, 0],
-        "UMAP2": june_umap_npy[:, 1],
-        "PCA1": june_pca_npy[:, 0],
-        "PCA2": june_pca_npy[:, 1],
-        "PCA3": june_pca_npy[:, 2],
-        "PCA4": june_pca_npy[:, 3],
-        "infection": np.nan,
+        "time": mantis_time_npy,
+        "fov_name": mantis_fov_npy,
+        "PHATE1": mantis_phate1_npy,
+        "PHATE2": mantis_phate2_npy,
     }
 )
 
-# add time and well info into dataframe
-june_data["time"] = june_features["t"].values
-
-june_data["fov_name"] = june_features["fov_name"].values
-
 # Add all 768 features to the dataframe
-june_features_npy = june_features.values
+mantis_features_npy = mantis_features.values
 for i in range(768):
-    june_data[f"feature_{i+1}"] = june_features_npy[:, i]
+    mantis_data[f"feature_{i+1}"] = mantis_features_npy[:, i]
 
-# use one mock and one dengue infecected well only
-june_data = june_data[
-    june_data["fov_name"].str.contains("/0/6")
-    | june_data["fov_name"].str.contains("/0/2")
+# use wells with mCherry sensor only
+mantis_data = mantis_data[
+    mantis_data["fov_name"].str.contains("/B/3")
+    | mantis_data["fov_name"].str.contains("/C/2")
 ]
 
 # add the predicted infection state
-june_pred = clf.predict(
-    june_data.drop(
+mantis_pred = clf.predict(
+    mantis_data.drop(
         columns=[
-            "infection",
             "fov_name",
             "time",
-            "UMAP1",
-            "UMAP2",
-            "PCA1",
-            "PCA2",
-            "PCA3",
-            "PCA4",
+            "PHATE1",
+            "PHATE2",
         ]
     )
 )
-june_data["predicted_infection"] = june_pred
-
-# %% combine the june and feb data
-
-combined_data = pd.concat([data_test, june_data])
-
-# perform the umap analysis again with the 768 features
-features = combined_data.drop(
-    columns=[
-        "infection",
-        "predicted_infection",
-        "fov_name",
-        "time",
-        "UMAP1",
-        "UMAP2",
-        "PCA1",
-        "PCA2",
-        "PCA3",
-        "PCA4",
-    ]
-)
-scaled_features = StandardScaler().fit_transform(features.values)
-umap = UMAP()
-# Fit UMAP on all features
-embedding = umap.fit_transform(scaled_features)
-
-# overwrite the umap coordinates on combined data
-combined_data["UMAP1"] = embedding[:, 0]
-combined_data["UMAP2"] = embedding[:, 1]
-
-# plot the combined data with 'fov_name' starting with '/A and '/B' hue 'infection' and '/0' hue 'predicted_infection'
-Feb_split = combined_data[
-    combined_data["fov_name"].str.contains("/A")
-    | combined_data["fov_name"].str.contains("/B")
-]
-June_split = combined_data[combined_data["fov_name"].str.contains("/0")]
-
-sns.scatterplot(
-    x=June_split["UMAP1"],
-    y=June_split["UMAP2"],
-    hue=June_split["predicted_infection"],
-    palette={1: "blue", 2: "red"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-sns.scatterplot(
-    x=Feb_split["UMAP1"],
-    y=Feb_split["UMAP2"],
-    hue=Feb_split["infection"],
-    palette={1: "steelblue", 2: "orange"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-plt.legend([], [], frameon=False)
-# plt.savefig('/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_infection.png', format='png', dpi=300)
-
-# plot the scatterplot hue well name '/A' and '/B' are blue and '/0' are red
-combined_data["color"] = combined_data["fov_name"].apply(
-    lambda x: "brown" if x.startswith("/0") else "green"
-)
-
-sns.scatterplot(
-    x=combined_data["UMAP1"],
-    y=combined_data["UMAP2"],
-    hue="color",
-    palette={"green": "green", "brown": "brown"},
-    data=combined_data,
-    s=7,
-    alpha=0.2,  # Increased transparency
-)
-plt.xlim(-5, 5)
-plt.ylim(-2, 20)
-plt.legend([], [], frameon=False)
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_well.png",
-    format="png",
-    dpi=300,
-)
-
-# plot the predicted infection state with combined data
-sns.scatterplot(
-    x=combined_data["UMAP1"],
-    y=combined_data["UMAP2"],
-    hue=combined_data["predicted_infection"],
-    palette={1: "blue", 2: "red"},
-    hue_order=[1, 2],
-    s=7,
-    alpha=0.8,
-)
-plt.xlim(-5, 5)
-plt.ylim(-2, 20)
-plt.legend([], [], frameon=False)
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/combined_umap_predicted_infection.png",
-    format="png",
-    dpi=300,
-)
+mantis_data["predicted_infection"] = mantis_pred
 
 # %% plot % infected over time
 
-time_points_june = np.unique(June_split["time"])
+time_points_mantis = np.unique(mantis_data["time"])
 
-infected_june_cntrl = []
-infected_june_infected = []
+infected_mantis_cntrl = []
+infected_infected = []
+mock_wells = '/B/3' # Create regex pattern for mock wells
+infected_wells = '/C/2'  # Create regex pattern for dengue infected wells
 
-for time in time_points_june:
-    infected_june = June_split[
-        (June_split["fov_name"].str.startswith("/0/2"))
-        & (June_split["time"] == time)
-        & (June_split["predicted_infection"] == 2)
+for time in time_points_mantis:
+    infected_mantis = mantis_data[
+        (mantis_data["fov_name"].str.contains(mock_wells))
+        & (mantis_data["time"] == time)
+        & (mantis_data["predicted_infection"] == 2)
     ].shape[0]
-    total_june = June_split[
-        (June_split["fov_name"].str.startswith("/0/2")) & (June_split["time"] == time)
+    total_mantis = mantis_data[
+        (mantis_data["fov_name"].str.contains(mock_wells)) & (mantis_data["time"] == time)
     ].shape[0]
-    infected_june_cntrl.append(infected_june * 100 / total_june)
-    infected_june = June_split[
-        (June_split["fov_name"].str.startswith("/0/6"))
-        & (June_split["time"] == time)
-        & (June_split["predicted_infection"] == 2)
+    if total_mantis!=0:
+        infected_mantis_cntrl.append(infected_mantis * 100 / total_mantis)
+    else:
+        infected_mantis_cntrl.append(0)
+
+    infected_mantis = mantis_data[
+        (mantis_data["fov_name"].str.contains(infected_wells))
+        & (mantis_data["time"] == time)
+        & (mantis_data["predicted_infection"] == 2)
     ].shape[0]
-    total_june = June_split[
-        (June_split["fov_name"].str.startswith("/0/6")) & (June_split["time"] == time)
+    total_mantis = mantis_data[
+        (mantis_data["fov_name"].str.contains(infected_wells)) & (mantis_data["time"] == time)
     ].shape[0]
-    infected_june_infected.append(infected_june * 100 / total_june)
+    if total_mantis!=0:
+        infected_infected.append(infected_mantis * 100 / total_mantis)
+    else:
+        infected_infected.append(0)
 
 
-# plot infected percentage over time for both wells
+# %% plot infected percentage over time for both wells
 plt.plot(
     time_points_test * 0.5 + 3,
     infected_true_cntrl,
@@ -541,16 +317,16 @@ plt.plot(
     marker="+",
 )
 plt.plot(
-    time_points_june * 2 + 3,
-    infected_june_cntrl,
+    time_points_mantis * 0.167 + 4,
+    infected_mantis_cntrl,
     label="mock new predicted",
     color="blue",
     marker="o",
 )
 plt.plot(
-    time_points_june * 2 + 3,
-    infected_june_infected,
-    label="MOI new predicted",
+    time_points_mantis * 0.167 + 4,
+    infected_infected,
+    label="MOI infected predicted",
     color="red",
     marker="o",
 )
@@ -558,7 +334,7 @@ plt.xlabel("HPI")
 plt.ylabel("Infected percentage")
 plt.legend()
 plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/infected_percentage_withJune.svg",
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/infected_percentage_withmantis.svg",
     format="svg",
 )
 
@@ -568,8 +344,8 @@ for time in range(48):
     plt.clf()
     sns.scatterplot(
         data=data_test[(data_test["time"] == time)],
-        x="UMAP1",
-        y="UMAP2",
+        x="PHATE1",
+        y="PHATE2",
         hue="infection",
         palette={1: "steelblue", 2: "orangered"},
         hue_order=[1, 2],
@@ -578,11 +354,11 @@ for time in range(48):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*0.5+3} HPI")
-    plt.ylim(-10, 20)
-    plt.xlim(2, 18)
+    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI")
+    plt.ylim(-0.05, 0.03)
+    plt.xlim(-0.05, 0.04)
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_true_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_true/phate_feb_true_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
@@ -595,8 +371,8 @@ for time in range(48):
     plt.clf()
     sns.scatterplot(
         data=data_test[(data_test["time"] == time)],
-        x="UMAP1",
-        y="UMAP2",
+        x="PHATE1",
+        y="PHATE2",
         hue="predicted_infection",
         palette={1: "blue", 2: "red"},
         hue_order=[1, 2],
@@ -605,25 +381,25 @@ for time in range(48):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*0.5+3} HPI")
-    plt.ylim(-10, 18)
-    plt.xlim(2, 18)
+    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI")
+    plt.ylim(-0.05, 0.03)
+    plt.xlim(-0.05, 0.03)
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_feb_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_test/phate_feb_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
         dpi=300,
     )
 
-# %% appendix video for infection dynamics umap, June data, colored by predicted infection
+# %% appendix video for infection dynamics umap, mantis data, colored by predicted infection
 
-for time in range(12):
+for time in range(len(time_points_mantis)):
     plt.clf()
     sns.scatterplot(
-        data=June_split[(June_split["time"] == time)],
-        x="UMAP1",
-        y="UMAP2",
+        data=mantis_data[(mantis_data["time"] == time)],
+        x="PHATE1",
+        y="PHATE2",
         hue="predicted_infection",
         palette={1: "blue", 2: "red"},
         hue_order=[1, 2],
@@ -632,15 +408,15 @@ for time in range(12):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*2+3} HPI")
-    plt.ylim(-8, 10)
-    plt.xlim(-5, 5)
+    plt.suptitle(f"Time: {(time*0.167+4):.2f} HPI")
+    plt.ylim(-0.04, 0.04)
+    plt.xlim(-0.04, 0.04)
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/infection/video_umap/umap_june_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Mantis/phate_mantis_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
         dpi=300,
     )
 
-# %%
+# %% 

@@ -83,25 +83,22 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
     pc_features = PCA_features.fit_transform(scaled_features)
     pc_projection = PCA_projection.fit_transform(scaled_projections)
 
-    # Prepare DataFrame with id and PCA coordinates
-    pca_df = pd.DataFrame(
-        {
-            "id": embedding_dataset["id"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "PCA1": pc_features[:, 0],
-            "PCA2": pc_features[:, 1],
-            "PCA3": pc_features[:, 2],
-            "PCA4": pc_features[:, 3],
-            "PCA5": pc_features[:, 4],
-            "PCA6": pc_features[:, 5],
-            "PCA1_proj": pc_projection[:, 0],
-            "PCA2_proj": pc_projection[:, 1],
-            "PCA3_proj": pc_projection[:, 2],
-            "PCA4_proj": pc_projection[:, 3],
-            "PCA5_proj": pc_projection[:, 4],
-            "PCA6_proj": pc_projection[:, 5],
-        }
-    )
+    # Create base dictionary with id and fov_name
+    pca_dict = {
+        "id": embedding_dataset["id"].values,
+        "fov_name": embedding_dataset["fov_name"].values,
+    }
+
+    # Add PCA components for features
+    for i in range(pc_features.shape[1]):
+        pca_dict[f"PCA{i+1}"] = pc_features[:, i]
+
+    # Add PCA components for projections
+    for i in range(pc_projection.shape[1]):
+        pca_dict[f"PCA{i+1}_proj"] = pc_projection[:, i]
+
+    # Create DataFrame with all components
+    pca_df = pd.DataFrame(pca_dict)
 
     return PCA_features, PCA_projection, pca_df
 
