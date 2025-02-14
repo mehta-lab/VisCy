@@ -39,7 +39,7 @@ tracks_path = Path(
 
 source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
 seg_channel = ["nuclei_prediction_labels_labels"]
-z_range = (30, 35)
+z_range = (16, 21)
 normalizations = None
 # fov_name = "/0/6/000000"
 # track_id = 21
@@ -73,7 +73,7 @@ features_df = features_df.drop(columns=["features"])
 df = features_df.drop_duplicates()
 features = df.reset_index(drop=True)
 
-features = features[features["fov_name"].str.startswith("/C/2/000000")]
+features = features[features["fov_name"].str.startswith(("/C/2/000000", "/B/3/000000", "/C/1/000000", "/B/2/000000"))]
 
 features["Phase Symmetry Score"] = np.nan
 features["Fluor Symmetry Score"] = np.nan
@@ -91,8 +91,11 @@ features["Fluor Mean Intensity"] = np.nan
 features["Phase Standard Deviation"] = np.nan
 features["Fluor Standard Deviation"] = np.nan
 features["Fluor weighted intensity gradient"] = np.nan
+features["Phase weighted intensity gradient"] = np.nan
 features["Fluor texture"] = np.nan
 features["Phase texture"] = np.nan
+features["Perimeter"] = np.nan
+features["Nuclear area"] = np.nan
 features["Perimeter area ratio"] = np.nan
 features["Nucleus eccentricity"] = np.nan
 features["Instantaneous velocity"] = np.nan
@@ -197,8 +200,10 @@ def compute_perimeter_area_ratio(image):
         # Add area of all contours for this label
         for contour in contours:
             total_area += cv2.contourArea(contour)
+    average_area = total_area / (len(np.unique(image))-1)
+    average_perimeter = total_perimeter / (len(np.unique(image))-1)
 
-    return total_perimeter / total_area
+    return average_perimeter, average_area, total_perimeter / total_area
 
 def texture_features(image):
     """Compute the texture features of the image.
@@ -315,9 +320,7 @@ def compute_instantaneous_velocity(track_info, row_idx):
 
 fov_names_list = features["fov_name"].unique()
 unique_fov_names = sorted(list(set(fov_names_list)))
-
-iteration_count = 0
-max_iterations = 100
+max_iterations = 20
 
 for fov_name in unique_fov_names:
     csv_files = list((Path(str(tracks_path) + str(fov_name))).glob("*.csv"))
@@ -325,6 +328,8 @@ for fov_name in unique_fov_names:
 
     unique_track_ids = features[features["fov_name"] == fov_name]["track_id"].unique()
     unique_track_ids = list(set(unique_track_ids))
+
+    iteration_count = 0
 
     for track_id in unique_track_ids:
         if iteration_count >= max_iterations:
@@ -350,8 +355,12 @@ for fov_name in unique_fov_names:
 
         whole = np.stack([p["anchor"] for p in prediction_dataset])
         seg_mask = np.stack([p["anchor"] for p in track_channel])
+        # Normalize phase image to 0-255 range
         phase = whole[:, 0, 2]
+        phase = ((phase - phase.min()) / (phase.max() - phase.min()) * 255).astype(np.uint8)
+        # Normalize fluorescence image to 0-255 range
         fluor = np.max(whole[:, 1], axis=1)
+        fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
         nucl_mask = seg_mask[:, 0, 0]
 
         for t in range(phase.shape[0]):
@@ -392,13 +401,15 @@ for fov_name in unique_fov_names:
 
             # Compute gradient for localization in organelle channel
             fluor_weighted_gradient = compute_weighted_intensity_gradient(fluor[t])
+            # Compute gradient for localization in phase channel
+            phase_weighted_gradient = compute_weighted_intensity_gradient(phase[t])
 
             # compute the texture features using haralick
             phase_texture = texture_features(phase[t])
             fluor_texture = texture_features(fluor[t])
 
             # compute the perimeter of the nuclear segmentations found inside the patch
-            perimeter_area_ratio = compute_perimeter_area_ratio(nucl_mask[t])
+            perimeter, nucl_area, perimeter_area_ratio = compute_perimeter_area_ratio(nucl_mask[t])
 
             # compute the eccentricity of the nucleus
             seg_eccentricity = nucleus_eccentricity(nucl_mask[t])
@@ -427,8 +438,11 @@ for fov_name in unique_fov_names:
                 "Phase Standard Deviation": phase_std_dev,
                 "Fluor Standard Deviation": fluor_std_dev,
                 "Fluor weighted intensity gradient": fluor_weighted_gradient,
+                "Phase weighted intensity gradient": phase_weighted_gradient,
                 "Phase texture": phase_texture,
                 "Fluor texture": fluor_texture,
+                "Perimeter": perimeter,
+                "Nuclear area": nucl_area,
                 "Perimeter area ratio": perimeter_area_ratio,
                 "Nucleus eccentricity": seg_eccentricity,
                 "Instantaneous velocity": inst_velocity,
@@ -451,13 +465,13 @@ for fov_name in unique_fov_names:
 
 # Save the features dataframe to a CSV file
 features.to_csv(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle.csv",
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell.csv",
     index=False,
 )
 
 # # read the features dataframe from the CSV file
 # features = pd.read_csv(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan.csv"
+#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle.csv"
 # )
 # remove the column "Perimeter"
 # features = features.drop(columns=["Perimeter"])
@@ -491,7 +505,8 @@ plt.ylabel("PCA Features", fontsize=12)
 plt.xticks(fontsize=12)  # Increase x-axis tick labels
 plt.yticks(fontsize=12)  # Increase y-axis tick labels
 plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle.svg"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.png",
+    dpi=300
 )
 
 
