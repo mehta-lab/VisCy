@@ -70,26 +70,54 @@ class EmbeddingVisualizationApp:
         features = embedding_dataset["features"]
         self.features_df = features["sample"].to_dataframe().reset_index(drop=True)
 
-        # PCA transformation
-        scaled_features = StandardScaler().fit_transform(features.values)
-        pca = PCA(n_components=self.num_PC_components)
-        pca_coords = pca.fit_transform(scaled_features)
+        # Check if UMAP or PHATE columns already exist
+        existing_dims = []
+        dim_options = []
 
-        # Add PCA coordinates to the features dataframe
-        for i in range(self.num_PC_components):
-            self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+        # Check for PCA and compute if needed
+        if not any(col.startswith("PCA") for col in self.features_df.columns):
+            # PCA transformation
+            scaled_features = StandardScaler().fit_transform(features.values)
+            pca = PCA(n_components=self.num_PC_components)
+            pca_coords = pca.fit_transform(scaled_features)
 
-        # Store explained variance for each component
-        self.explained_variance = [
-            f"PC{i+1} ({var:.1f}%)"
-            for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+            # Add PCA coordinates to the features dataframe
+            for i in range(self.num_PC_components):
+                self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+
+            # Store explained variance for PCA
+            self.pca_explained_variance = [
+                f"PC{i+1} ({var:.1f}%)"
+                for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+            ]
+
+            # Add PCA options
+            for i, pc_label in enumerate(self.pca_explained_variance):
+                dim_options.append({"label": pc_label, "value": f"PCA{i+1}"})
+                existing_dims.append(f"PCA{i+1}")
+
+        # Check for UMAP coordinates
+        umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
+        if umap_dims:
+            for dim in umap_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
+
+        # Check for PHATE coordinates
+        phate_dims = [
+            col for col in self.features_df.columns if col.startswith("PHATE")
         ]
+        if phate_dims:
+            for dim in phate_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
 
-        # Create PC selection options with explained variance
-        self.pc_options = [
-            {"label": pc_label, "value": f"PCA{i+1}"}
-            for i, pc_label in enumerate(self.explained_variance)
-        ]
+        # Store dimension options for dropdowns
+        self.dim_options = dim_options
+
+        # Set default x and y axes based on available dimensions
+        self.default_x = existing_dims[0] if existing_dims else "PCA1"
+        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PCA2"
 
         # Process each FOV and its track IDs
         all_filtered_features = []
@@ -124,318 +152,228 @@ class EmbeddingVisualizationApp:
     def _init_app(self):
         """Initialize the Dash application"""
         self.app = dash.Dash(__name__)
-        
-        # Initialize the layout
-        self.app.layout = self._create_main_layout()
-        
-        # Register callbacks
-        self._register_selection_callbacks()
-        self._register_figure_update_callbacks()
-        self._register_timeline_callbacks()
-        self._register_cluster_callbacks()
 
-    def _create_main_layout(self):
-        """Create the main application layout"""
-        return html.Div(
+        # Add cluster assignment button next to clear selection
+        cluster_controls = html.Div(
+            [
+                html.Button(
+                    "Assign to New Cluster",
+                    id="assign-cluster",
+                    style={
+                        "backgroundColor": "#28a745",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
+                    "Clear All Clusters",
+                    id="clear-clusters",
+                    style={
+                        "backgroundColor": "#dc3545",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
+                    "Clear Selection",
+                    id="clear-selection",
+                    style={
+                        "backgroundColor": "#6c757d",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                    },
+                ),
+            ],
+            style={"marginLeft": "10px", "display": "inline-block"},
+        )
+        # Create tabs for different views
+        tabs = dcc.Tabs(
+            id="view-tabs",
+            value="timeline-tab",
+            children=[
+                dcc.Tab(
+                    label="Track Timeline",
+                    value="timeline-tab",
+                    children=[
+                        html.Div(
+                            id="track-timeline",
+                            style={
+                                "height": "auto",
+                                "overflowY": "auto",
+                                "maxHeight": "80vh",
+                                "padding": "10px",
+                                "marginTop": "10px",
+                            },
+                        ),
+                    ],
+                ),
+                dcc.Tab(
+                    label="Clusters",
+                    value="clusters-tab",
+                    id="clusters-tab",
+                    children=[
+                        html.Div(
+                            id="cluster-container",
+                            style={
+                                "padding": "10px",
+                                "marginTop": "10px",
+                            },
+                        ),
+                    ],
+                    style={"display": "none"},  # Initially hidden
+                ),
+            ],
+            style={"marginTop": "20px"},
+        )
+
+        # Update layout to use tabs
+        self.app.layout = html.Div(
             style={
                 "maxWidth": "95vw",
                 "margin": "auto",
                 "padding": "20px",
             },
             children=[
-                self._create_header(),
-                self._create_control_panel(),
-                self._create_scatter_plot(),
-                self._create_view_tabs(),
-            ],
-        )
-
-    def _create_header(self):
-        """Create the header section"""
-        return html.H1(
-            "Track Visualization",
-            style={"textAlign": "center", "marginBottom": "20px"},
-        )
-
-    def _create_control_panel(self):
-        """Create the control panel with all input controls"""
-        return html.Div([
-            self._create_color_controls(),
-            self._create_axis_controls(),
-            self._create_selection_controls(),
-            self._create_trajectory_controls(),
-        ], style={
-            "marginBottom": "20px",
-            "display": "flex",
-            "alignItems": "center",
-            "gap": "20px",
-            "flexWrap": "wrap",
-        })
-
-    def _create_color_controls(self):
-        """Create color mode and arrow controls"""
-        return html.Div([
-            html.Label("Color by:", style={"marginRight": "10px"}),
-            dcc.Dropdown(
-                id="color-mode",
-                options=[
-                    {"label": "Track ID", "value": "track"},
-                    {"label": "Time", "value": "time"},
-                ],
-                value="track",
-                style={"width": "200px"},
-            ),
-            dcc.Checklist(
-                id="show-arrows",
-                options=[{"label": "Show arrows", "value": "show"}],
-                value=[],
-                style={"marginLeft": "20px"},
-            ),
-        ])
-
-    def _create_axis_controls(self):
-        """Create axis selection controls"""
-        return html.Div([
-            html.Div([
-                html.Label("X-axis:", style={"marginRight": "10px"}),
-                dcc.Dropdown(
-                    id="x-axis",
-                    options=self.pc_options,
-                    value="PCA1",
-                    style={"width": "200px"},
+                html.H1(
+                    "Track Visualization",
+                    style={"textAlign": "center", "marginBottom": "20px"},
                 ),
-            ]),
-            html.Div([
-                html.Label("Y-axis:", style={"marginRight": "10px"}),
-                dcc.Dropdown(
-                    id="y-axis",
-                    options=self.pc_options,
-                    value="PCA2",
-                    style={"width": "200px"},
-                ),
-            ]),
-        ])
-
-    def _create_selection_controls(self):
-        """Create selection mode and cluster controls"""
-        return html.Div([
-            html.Label("Selection mode:", style={"marginRight": "10px"}),
-            dcc.RadioItems(
-                id="selection-mode",
-                options=[
-                    {"label": "Shaded region", "value": "region"},
-                    {"label": "Lasso", "value": "lasso"},
-                ],
-                value="region",
-                inline=True,
-            ),
-            self._create_cluster_controls(),
-        ])
-
-    def _create_cluster_controls(self):
-        """Create cluster assignment buttons"""
-        return html.Div([
-            html.Button(
-                "Assign to New Cluster",
-                id="assign-cluster",
-                style=self._get_button_style("success"),
-            ),
-            html.Button(
-                "Clear All Clusters",
-                id="clear-clusters",
-                style=self._get_button_style("danger"),
-            ),
-            html.Button(
-                "Clear Selection",
-                id="clear-selection",
-                style=self._get_button_style("secondary"),
-            ),
-        ], style={"marginLeft": "10px", "display": "inline-block"})
-
-    def _create_trajectory_controls(self):
-        """Create trajectory mode controls"""
-        return html.Div([
-            html.Label("Trajectory:", style={"marginRight": "10px"}),
-            dcc.RadioItems(
-                id="trajectory-mode",
-                options=[
-                    {"label": "X-axis", "value": "x"},
-                    {"label": "Y-axis", "value": "y"},
-                ],
-                value="x",
-                inline=True,
-            ),
-        ])
-
-    def _create_scatter_plot(self):
-        """Create the main scatter plot component"""
-        return dcc.Loading(
-            id="loading",
-            children=[
-                dcc.Graph(
-                    id="scatter-plot",
-                    figure=self.fig,
-                    config=self._get_scatter_plot_config(),
-                    style={"height": "50vh"},
-                ),
-            ],
-            type="default",
-        )
-
-    def _create_view_tabs(self):
-        """Create the view tabs section"""
-        return dcc.Tabs(
-            id="view-tabs",
-            value="trajectory-tab",
-            children=[
-                self._create_trajectory_tab(),
-                self._create_timeline_tab(),
-                self._create_clusters_tab(),
-            ],
-            style={"marginTop": "20px"},
-        )
-
-    def _create_trajectory_tab(self):
-        """Create the trajectory view tab"""
-        return dcc.Tab(
-            label="Trajectory View",
-            value="trajectory-tab",
-            children=[
                 html.Div(
-                    id="trajectory-images",
-                    style={"padding": "10px", "marginTop": "10px"},
+                    [
+                        html.Div(
+                            style={
+                                "width": "100%",
+                                "display": "inline-block",
+                                "verticalAlign": "top",
+                            },
+                            children=[
+                                html.Div(
+                                    style={
+                                        "marginBottom": "20px",
+                                        "display": "flex",
+                                        "alignItems": "center",
+                                        "gap": "20px",
+                                        "flexWrap": "wrap",
+                                    },
+                                    children=[
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "Color by:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="color-mode",
+                                                    options=[
+                                                        {
+                                                            "label": "Track ID",
+                                                            "value": "track",
+                                                        },
+                                                        {
+                                                            "label": "Time",
+                                                            "value": "time",
+                                                        },
+                                                    ],
+                                                    value="track",
+                                                    style={"width": "200px"},
+                                                ),
+                                            ]
+                                        ),
+                                        html.Div(
+                                            [
+                                                dcc.Checklist(
+                                                    id="show-arrows",
+                                                    options=[
+                                                        {
+                                                            "label": "Show arrows",
+                                                            "value": "show",
+                                                        }
+                                                    ],
+                                                    value=[],
+                                                    style={"marginLeft": "20px"},
+                                                ),
+                                            ]
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "X-axis:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="x-axis",
+                                                    options=self.dim_options,
+                                                    value=self.default_x,
+                                                    style={"width": "200px"},
+                                                ),
+                                            ]
+                                        ),
+                                        html.Div(
+                                            [
+                                                html.Label(
+                                                    "Y-axis:",
+                                                    style={"marginRight": "10px"},
+                                                ),
+                                                dcc.Dropdown(
+                                                    id="y-axis",
+                                                    options=self.dim_options,
+                                                    value=self.default_y,
+                                                    style={"width": "200px"},
+                                                ),
+                                            ]
+                                        ),
+                                        cluster_controls,
+                                    ],
+                                ),
+                            ],
+                        ),
+                    ]
                 ),
+                dcc.Loading(
+                    id="loading",
+                    children=[
+                        dcc.Graph(
+                            id="scatter-plot",
+                            figure=self.fig,
+                            config={
+                                "displayModeBar": True,
+                                "editable": False,
+                                "showEditInChartStudio": False,
+                                "modeBarButtonsToRemove": [
+                                    "select2d",
+                                    "resetScale2d",
+                                ],
+                                "edits": {
+                                    "annotationPosition": False,
+                                    "annotationTail": False,
+                                    "annotationText": False,
+                                    "shapePosition": True,
+                                },
+                                "scrollZoom": True,
+                            },
+                            style={"height": "50vh"},
+                        ),
+                    ],
+                    type="default",
+                ),
+                tabs,
             ],
         )
 
-    def _create_timeline_tab(self):
-        """Create the track timeline tab"""
-        return dcc.Tab(
-            label="Track Timeline",
-            value="timeline-tab",
-            children=[
-                html.Div(
-                    id="track-timeline",
-                    style={
-                        "height": "auto",
-                        "overflowY": "auto",
-                        "maxHeight": "80vh",
-                        "padding": "10px",
-                        "marginTop": "10px",
-                    },
-                ),
-            ],
-        )
-
-    def _create_clusters_tab(self):
-        """Create the clusters tab"""
-        return dcc.Tab(
-            label="Clusters",
-            value="clusters-tab",
-            id="clusters-tab",
-            children=[
-                html.Div(
-                    id="cluster-container",
-                    style={"padding": "10px", "marginTop": "10px"},
-                ),
-            ],
-            style={"display": "none"},
-        )
-
-    @staticmethod
-    def _get_button_style(button_type):
-        """Get style for a button of specified type"""
-        colors = {
-            "success": "#28a745",
-            "danger": "#dc3545",
-            "secondary": "#6c757d",
-        }
-        return {
-            "backgroundColor": colors[button_type],
-            "color": "white",
-            "border": "none",
-            "padding": "5px 10px",
-            "borderRadius": "4px",
-            "cursor": "pointer",
-            "marginRight": "10px",
-        }
-
-    @staticmethod
-    def _get_scatter_plot_config():
-        """Get configuration for scatter plot"""
-        return {
-            "displayModeBar": True,
-            "editable": False,
-            "showEditInChartStudio": False,
-            "modeBarButtonsToRemove": ["select2d", "resetScale2d"],
-            "edits": {
-                "annotationPosition": False,
-                "annotationTail": False,
-                "annotationText": False,
-                "shapePosition": True,
-            },
-            "scrollZoom": True,
-        }
-
-    def _register_selection_callbacks(self):
-        """Register callbacks for selection handling"""
         @self.app.callback(
             [
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
-                dd.Output("trajectory-images", "children", allow_duplicate=True),
-                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
-            ],
-            [dd.Input("clear-selection", "n_clicks")],
-            [
-                dd.State("scatter-plot", "figure"),
-                dd.State("color-mode", "value"),
-                dd.State("show-arrows", "value"),
-                dd.State("x-axis", "value"),
-                dd.State("y-axis", "value"),
-                dd.State("trajectory-mode", "value"),
-                dd.State("selection-mode", "value"),
-            ],
-            prevent_initial_call=True
-        )
-        def clear_selection(
-            n_clicks, current_figure, color_mode, show_arrows,
-            x_axis, y_axis, trajectory_mode, selection_mode
-        ):
-            if n_clicks:
-                # Create a new figure with no selections
-                if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        len(show_arrows or []) > 0,
-                        x_axis,
-                        y_axis,
-                        trajectory_mode,
-                        selection_mode,
-                    )
-                else:
-                    fig = self._create_time_colored_figure(
-                        len(show_arrows or []) > 0,
-                        x_axis,
-                        y_axis,
-                        trajectory_mode,
-                        selection_mode,
-                    )
-
-                fig.update_layout(
-                    dragmode="lasso" if selection_mode == "lasso" else "pan",
-                    clickmode="event+select",
-                    uirevision=None,  # Reset UI state
-                    selectdirection="any",
-                )
-
-                return fig, html.Div("Use the lasso tool to select points"), None
-            return dash.no_update, dash.no_update, dash.no_update
-
-    def _register_figure_update_callbacks(self):
-        """Register callbacks for figure updates"""
-        @self.app.callback(
-            [
-                dd.Output("scatter-plot", "figure", allow_duplicate=True),
-                dd.Output("trajectory-images", "children", allow_duplicate=True),
                 dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
             ],
             [
@@ -443,8 +381,6 @@ class EmbeddingVisualizationApp:
                 dd.Input("show-arrows", "value"),
                 dd.Input("x-axis", "value"),
                 dd.Input("y-axis", "value"),
-                dd.Input("trajectory-mode", "value"),
-                dd.Input("selection-mode", "value"),
                 dd.Input("scatter-plot", "relayoutData"),
                 dd.Input("scatter-plot", "selectedData"),
             ],
@@ -452,9 +388,13 @@ class EmbeddingVisualizationApp:
             prevent_initial_call=True
         )
         def update_figure(
-            color_mode, show_arrows, x_axis, y_axis,
-            trajectory_mode, selection_mode, relayout_data,
-            selected_data, current_figure
+            color_mode,
+            show_arrows,
+            x_axis,
+            y_axis,
+            relayout_data,
+            selected_data,
+            current_figure,
         ):
             show_arrows = len(show_arrows or []) > 0
 
@@ -470,20 +410,15 @@ class EmbeddingVisualizationApp:
                 "show-arrows",
                 "x-axis",
                 "y-axis",
-                "selection-mode",
             ]:
                 if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
-                    )
+                    fig = self._create_track_colored_figure(show_arrows, x_axis, y_axis)
                 else:
-                    fig = self._create_time_colored_figure(
-                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
-                    )
+                    fig = self._create_time_colored_figure(show_arrows, x_axis, y_axis)
 
                 # Update dragmode and selection settings
                 fig.update_layout(
-                    dragmode="lasso" if selection_mode == "lasso" else "pan",
+                    dragmode="lasso",
                     clickmode="event+select",
                     uirevision="true",
                     selectdirection="any",
@@ -491,36 +426,7 @@ class EmbeddingVisualizationApp:
             else:
                 fig = dash.no_update
 
-            # Handle selection mode changes
-            if triggered_id == "selection-mode":
-                selected_data = None
-                if color_mode == "track":
-                    fig = self._create_track_colored_figure(
-                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
-                    )
-                else:
-                    fig = self._create_time_colored_figure(
-                        show_arrows, x_axis, y_axis, trajectory_mode, selection_mode
-                    )
-                fig.update_layout(
-                    dragmode="lasso" if selection_mode == "lasso" else "pan",
-                    clickmode="event+select",
-                    uirevision=None,
-                    selectdirection="any",
-                )
-
-            # Get trajectory images based on selection mode
-            trajectory_images = None
-            if selection_mode == "region":
-                trajectory_images = self._get_trajectory_images_region(
-                    x_axis, y_axis, trajectory_mode, relayout_data
-                )
-            else:
-                trajectory_images = self._get_trajectory_images_lasso(
-                    x_axis, y_axis, selected_data
-                )
-
-            return fig, trajectory_images, selected_data
+            return fig, selected_data
 
     def _register_timeline_callbacks(self):
         """Register callbacks for timeline updates"""
@@ -691,14 +597,19 @@ class EmbeddingVisualizationApp:
                 dd.State("show-arrows", "value"),
                 dd.State("x-axis", "value"),
                 dd.State("y-axis", "value"),
-                dd.State("trajectory-mode", "value"),
-                dd.State("selection-mode", "value"),
             ],
             prevent_initial_call=True,
         )
-        def update_clusters(assign_clicks, clear_clicks, selected_data,
-                          current_figure, color_mode, show_arrows, x_axis,
-                          y_axis, trajectory_mode, selection_mode):
+        def update_clusters_tab(
+            assign_clicks,
+            clear_clicks,
+            selected_data,
+            current_figure,
+            color_mode,
+            show_arrows,
+            x_axis,
+            y_axis,
+        ):
             ctx = dash.callback_context
             if not ctx.triggered:
                 return dash.no_update, dash.no_update, dash.no_update, dash.no_update
@@ -737,12 +648,10 @@ class EmbeddingVisualizationApp:
                         len(show_arrows or []) > 0,
                         x_axis,
                         y_axis,
-                        trajectory_mode,
-                        selection_mode,
                     )
                     # Ensure the dragmode is set based on selection_mode
                     fig.update_layout(
-                        dragmode="lasso" if selection_mode == "lasso" else "pan",
+                        dragmode="lasso",
                         clickmode="event+select",
                         uirevision="true",  # Keep the UI state
                         selectdirection="any",
@@ -762,29 +671,70 @@ class EmbeddingVisualizationApp:
                     len(show_arrows or []) > 0,
                     x_axis,
                     y_axis,
-                    trajectory_mode,
-                    selection_mode,
                 )
                 # Ensure the dragmode is set based on selection_mode
                 fig.update_layout(
-                    dragmode="lasso" if selection_mode == "lasso" else "pan",
+                    dragmode="lasso",
                     clickmode="event+select",
                     uirevision="true",  # Keep the UI state
                     selectdirection="any",
                 )
-                return {"display": "none"}, None, "trajectory-tab", fig
+                return {"display": "none"}, None, "timeline-tab", fig
 
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        @self.app.callback(
+            [
+                dd.Output("scatter-plot", "figure", allow_duplicate=True),
+                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
+            ],
+            [dd.Input("clear-selection", "n_clicks")],
+            [
+                dd.State("color-mode", "value"),
+                dd.State("show-arrows", "value"),
+                dd.State("x-axis", "value"),
+                dd.State("y-axis", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def clear_selection(n_clicks, color_mode, show_arrows, x_axis, y_axis):
+            """Callback to clear the selection and restore original opacity"""
+            if n_clicks:
+                # Create a new figure with no selections
+                if color_mode == "track":
+                    fig = self._create_track_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+                else:
+                    fig = self._create_time_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+
+                # Update layout to maintain lasso mode but clear selections
+                fig.update_layout(
+                    dragmode="lasso",
+                    clickmode="event+select",
+                    uirevision=None,  # Reset UI state
+                    selectdirection="any",
+                )
+
+                return fig, None  # Return new figure and clear selectedData
+            return dash.no_update, dash.no_update
 
     def _create_track_colored_figure(
         self,
         show_arrows=False,
-        x_axis="PCA1",
-        y_axis="PCA2",
-        trajectory_mode="x",
-        selection_mode="region",
+        x_axis=None,
+        y_axis=None,
     ):
         """Create scatter plot with track-based coloring"""
+        x_axis = x_axis or self.default_x
+        y_axis = y_axis or self.default_y
+
         unique_tracks = self.filtered_features_df["track_id"].unique()
         cmap = plt.cm.tab20
         track_colors = {
@@ -794,6 +744,33 @@ class EmbeddingVisualizationApp:
 
         fig = go.Figure()
 
+        # Set initial layout with lasso mode
+        fig.update_layout(
+            dragmode="lasso",
+            clickmode="event+select",
+            selectdirection="any",
+            plot_bgcolor="white",
+            title="PCA visualization of Selected Tracks",
+            xaxis_title=x_axis,
+            yaxis_title=y_axis,
+            uirevision=True,
+            hovermode="closest",
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                title="Tracks",
+                bordercolor="Black",
+                borderwidth=1,
+            ),
+            margin=dict(l=50, r=150, t=50, b=50),
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=False)
+
         # Add background points with hover info (excluding the colored tracks)
         background_df = self.features_df[
             (self.features_df["fov_name"].isin(self.fov_tracks.keys()))
@@ -801,15 +778,17 @@ class EmbeddingVisualizationApp:
         ]
 
         if not background_df.empty:
+            # Subsample background points if there are too many
+            if len(background_df) > 5000:  # Adjust this threshold as needed
+                background_df = background_df.sample(n=5000, random_state=42)
+
             fig.add_trace(
-                go.Scattergl(  # Changed to Scattergl for better performance
+                go.Scattergl(
                     x=background_df[x_axis],
                     y=background_df[y_axis],
                     mode="markers",
-                    marker=dict(
-                        size=12, color="lightgray", opacity=0.3
-                    ),  # Reduced size
-                    name="Other tracks",
+                    marker=dict(size=12, color="lightgray", opacity=0.3),
+                    name=f"Other tracks (showing {len(background_df)} of {len(self.features_df)} points)",
                     text=[
                         f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
                         for track_id, t, fov in zip(
@@ -820,7 +799,7 @@ class EmbeddingVisualizationApp:
                     ],
                     hoverinfo="text",
                     showlegend=True,
-                    hoverlabel=dict(namelength=-1),  # Show full text in hover
+                    hoverlabel=dict(namelength=-1),
                 )
             )
 
@@ -938,85 +917,63 @@ class EmbeddingVisualizationApp:
                             opacity=0.8,
                         )
 
-        # Add draggable shaded region for trajectory only if in region selection mode
-        if selection_mode == "region":
-            x_range = [
-                self.filtered_features_df[x_axis].min(),
-                self.filtered_features_df[x_axis].max(),
-            ]
-            y_range = [
-                self.filtered_features_df[y_axis].min(),
-                self.filtered_features_df[y_axis].max(),
-            ]
-
-            # Add padding to ranges
-            x_padding = (x_range[1] - x_range[0]) * 0.1
-            y_padding = (y_range[1] - y_range[0]) * 0.1
-            x_range = [x_range[0] - x_padding, x_range[1] + x_padding]
-            y_range = [y_range[0] - y_padding, y_range[1] + y_padding]
-
-            if trajectory_mode == "x":
-                # Vertical shaded region
-                x_mid = (x_range[0] + x_range[1]) / 2
-                tolerance = (x_range[1] - x_range[0]) * 0.05  # 5% tolerance
-
-                fig.add_shape(
-                    type="rect",
-                    x0=x_mid - tolerance,
-                    x1=x_mid + tolerance,
-                    y0=y_range[0],
-                    y1=y_range[1],
-                    fillcolor="rgba(0, 0, 255, 0.1)",
-                    line=dict(width=1, color="blue"),
-                    layer="below",
-                    editable=True,
-                )
-            else:
-                # Horizontal shaded region
-                y_mid = (y_range[0] + y_range[1]) / 2
-                tolerance = (y_range[1] - y_range[0]) * 0.05  # 5% tolerance
-
-                fig.add_shape(
-                    type="rect",
-                    x0=x_range[0],
-                    x1=x_range[1],
-                    y0=y_mid - tolerance,
-                    y1=y_mid + tolerance,
-                    fillcolor="rgba(255, 0, 0, 0.1)",
-                    line=dict(width=1, color="red"),
-                    layer="below",
-                    editable=True,
-                )
-
-            # Update axes ranges to show the full region
-            fig.update_xaxes(range=x_range)
-            fig.update_yaxes(range=y_range)
-
-        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
 
     def _create_time_colored_figure(
         self,
         show_arrows=False,
-        x_axis="PCA1",
-        y_axis="PCA2",
-        trajectory_mode="x",
-        selection_mode="region",
+        x_axis=None,
+        y_axis=None,
     ):
         """Create scatter plot with time-based coloring"""
+        x_axis = x_axis or self.default_x
+        y_axis = y_axis or self.default_y
+
         fig = go.Figure()
 
-        # Add background points with hover info using Scattergl
+        # Set initial layout with lasso mode
+        fig.update_layout(
+            dragmode="lasso",
+            clickmode="event+select",
+            selectdirection="any",
+            plot_bgcolor="white",
+            title="PCA visualization of Selected Tracks",
+            xaxis_title=x_axis,
+            yaxis_title=y_axis,
+            uirevision=True,
+            hovermode="closest",
+            showlegend=True,
+            legend=dict(
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+                title="Tracks",
+                bordercolor="Black",
+                borderwidth=1,
+            ),
+            margin=dict(l=50, r=150, t=50, b=50),
+            autosize=True,
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=False)
+
+        # Add background points with hover info
         all_tracks_df = self.features_df[
             self.features_df["fov_name"].isin(self.fov_tracks.keys())
         ]
+
+        # Subsample background points if there are too many
+        if len(all_tracks_df) > 5000:  # Adjust this threshold as needed
+            all_tracks_df = all_tracks_df.sample(n=5000, random_state=42)
+
         fig.add_trace(
             go.Scattergl(
                 x=all_tracks_df[x_axis],
                 y=all_tracks_df[y_axis],
                 mode="markers",
-                marker=dict(size=12, color="lightgray", opacity=0.3),  # Reduced size
-                name="Other points",
+                marker=dict(size=12, color="lightgray", opacity=0.3),
+                name=f"Other points (showing {len(all_tracks_df)} of {len(self.features_df)} points)",
                 text=[
                     f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
                     for track_id, t, fov in zip(
@@ -1026,7 +983,7 @@ class EmbeddingVisualizationApp:
                     )
                 ],
                 hoverinfo="text",
-                hoverlabel=dict(namelength=-1),  # Show full text in hover
+                hoverlabel=dict(namelength=-1),
             )
         )
 
@@ -1096,100 +1053,7 @@ class EmbeddingVisualizationApp:
                                 hoverinfo="skip",
                             )
                         )
-
-        # Add draggable shaded region for trajectory only if in region selection mode
-        if selection_mode == "region":
-            x_range = [
-                self.filtered_features_df[x_axis].min(),
-                self.filtered_features_df[x_axis].max(),
-            ]
-            y_range = [
-                self.filtered_features_df[y_axis].min(),
-                self.filtered_features_df[y_axis].max(),
-            ]
-
-            # Add padding to ranges
-            x_padding = (x_range[1] - x_range[0]) * 0.1
-            y_padding = (y_range[1] - y_range[0]) * 0.1
-            x_range = [x_range[0] - x_padding, x_range[1] + x_padding]
-            y_range = [y_range[0] - y_padding, y_range[1] + y_padding]
-
-            if trajectory_mode == "x":
-                # Vertical shaded region
-                x_mid = (x_range[0] + x_range[1]) / 2
-                tolerance = (x_range[1] - x_range[0]) * 0.05  # 5% tolerance
-
-                # Add draggable shaded region
-                fig.add_shape(
-                    type="rect",
-                    x0=x_mid - tolerance,
-                    x1=x_mid + tolerance,
-                    y0=y_range[0],
-                    y1=y_range[1],
-                    fillcolor="rgba(0, 0, 255, 0.1)",
-                    line=dict(width=1, color="blue"),
-                    layer="below",
-                    editable=True,
-                )
-            else:
-                # Horizontal shaded region
-                y_mid = (y_range[0] + y_range[1]) / 2
-                tolerance = (y_range[1] - y_range[0]) * 0.05  # 5% tolerance
-
-                # Add draggable shaded region
-                fig.add_shape(
-                    type="rect",
-                    x0=x_range[0],
-                    x1=x_range[1],
-                    y0=y_mid - tolerance,
-                    y1=y_mid + tolerance,
-                    fillcolor="rgba(255, 0, 0, 0.1)",
-                    line=dict(width=1, color="red"),
-                    layer="below",
-                    editable=True,
-                )
-
-            # Update axes ranges to show the full region
-            fig.update_xaxes(range=x_range)
-            fig.update_yaxes(range=y_range)
-
-        self._update_figure_layout(fig, x_axis, y_axis)
         return fig
-
-    def _update_figure_layout(self, fig, x_axis="PCA1", y_axis="PCA2"):
-        """Update the layout for a figure"""
-        # Get the axis labels with explained variance
-        x_label = next(
-            (opt["label"] for opt in self.pc_options if opt["value"] == x_axis),
-            x_axis,
-        )
-        y_label = next(
-            (opt["label"] for opt in self.pc_options if opt["value"] == y_axis),
-            y_axis,
-        )
-
-        fig.update_layout(
-            plot_bgcolor="white",
-            title="PCA visualization of Selected Tracks",
-            xaxis_title=x_label,
-            yaxis_title=y_label,
-            uirevision=True,
-            hovermode="closest",
-            showlegend=True,
-            legend=dict(
-                yanchor="top",
-                y=1,
-                xanchor="left",
-                x=1.02,
-                title="Tracks",
-                bordercolor="Black",
-                borderwidth=1,
-            ),
-            margin=dict(l=50, r=150, t=50, b=50),
-            autosize=True,
-        )
-        fig.update_xaxes(showgrid=False)
-        fig.update_yaxes(showgrid=False)
 
     @staticmethod
     def _normalize_image(img_array):
@@ -1412,134 +1276,6 @@ class EmbeddingVisualizationApp:
         logging.info("Cleaning up image cache...")
         self.image_cache.clear()
 
-    def _get_trajectory_images_region(
-        self, x_axis, y_axis, trajectory_mode, relayout_data
-    ):
-        """Get images of points within the shaded region"""
-        if not relayout_data or not any(
-            key.startswith("shapes") for key in relayout_data
-        ):
-            return html.Div("Drag the shaded region to see points along the trajectory")
-
-        # Extract shaded region position from relayout_data
-        region_center = None
-        if trajectory_mode == "x":
-            # For x-mode, look for x0 and x1 to get center
-            x0_key = next((k for k in relayout_data if k.endswith(".x0")), None)
-            x1_key = next((k for k in relayout_data if k.endswith(".x1")), None)
-            if x0_key and x1_key:
-                x0 = relayout_data[x0_key]
-                x1 = relayout_data[x1_key]
-                region_center = (x0 + x1) / 2
-        else:
-            # For y-mode, look for y0 and y1 to get center
-            y0_key = next((k for k in relayout_data if k.endswith(".y0")), None)
-            y1_key = next((k for k in relayout_data if k.endswith(".y1")), None)
-            if y0_key and y1_key:
-                y0 = relayout_data[y0_key]
-                y1 = relayout_data[y1_key]
-                region_center = (y0 + y1) / 2
-
-        if region_center is None:
-            return html.Div("Drag the shaded region to see points along the trajectory")
-
-        # Calculate tolerance and find nearby points
-        if trajectory_mode == "x":
-            data_range = (
-                self.filtered_features_df[x_axis].max()
-                - self.filtered_features_df[x_axis].min()
-            )
-            tolerance = data_range * 0.05
-            distances = abs(self.filtered_features_df[x_axis] - region_center)
-            sort_by = y_axis
-        else:
-            data_range = (
-                self.filtered_features_df[y_axis].max()
-                - self.filtered_features_df[y_axis].min()
-            )
-            tolerance = data_range * 0.05
-            distances = abs(self.filtered_features_df[y_axis] - region_center)
-            sort_by = x_axis
-
-        # Get points within tolerance
-        nearby_points = self.filtered_features_df[distances <= tolerance].sort_values(
-            sort_by
-        )
-
-        if len(nearby_points) == 0:
-            return html.Div("No points found in the selected region")
-
-        # Create channel rows
-        channel_rows = []
-        for channel in self.channels_to_display:
-            images = []
-            for _, row in nearby_points.iterrows():
-                cache_key = (row["fov_name"], row["track_id"], row["t"])
-                if cache_key in self.image_cache:
-                    images.append(
-                        html.Div(
-                            [
-                                html.Img(
-                                    src=self.image_cache[cache_key][channel],
-                                    style={
-                                        "width": "150px",
-                                        "height": "150px",
-                                        "margin": "5px",
-                                        "border": "1px solid #ddd",
-                                    },
-                                ),
-                                html.Div(
-                                    f"Track {row['track_id']}, t={row['t']}",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontSize": "12px",
-                                    },
-                                ),
-                                html.Div(
-                                    f"{x_axis}: {row[x_axis]:.2f}, {y_axis}: {row[y_axis]:.2f}",
-                                    style={
-                                        "textAlign": "center",
-                                        "fontSize": "10px",
-                                        "color": "#666",
-                                    },
-                                ),
-                            ],
-                            style={
-                                "display": "inline-block",
-                                "margin": "5px",
-                                "verticalAlign": "top",
-                            },
-                        )
-                    )
-
-            if images:  # Only add row if there are images
-                channel_rows.extend(
-                    [
-                        html.H5(
-                            f"{channel}",
-                            style={
-                                "margin": "10px 5px",
-                                "fontSize": "16px",
-                                "fontWeight": "bold",
-                            },
-                        ),
-                        html.Div(
-                            images,
-                            style={
-                                "overflowX": "auto",
-                                "whiteSpace": "nowrap",
-                                "padding": "10px",
-                                "border": "1px solid #ddd",
-                                "borderRadius": "5px",
-                                "marginBottom": "20px",
-                                "backgroundColor": "#f8f9fa",
-                            },
-                        ),
-                    ]
-                )
-
-        return html.Div(channel_rows)
-
     def _get_trajectory_images_lasso(self, x_axis, y_axis, selected_data):
         """Get images of points selected by lasso"""
         if not selected_data or not selected_data.get("points"):
@@ -1717,6 +1453,7 @@ class EmbeddingVisualizationApp:
                 images = []
                 for point in cluster_points:
                     cache_key = (point["fov_name"], point["track_id"], point["t"])
+
                     images.append(
                         html.Div(
                             [
