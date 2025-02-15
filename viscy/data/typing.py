@@ -1,6 +1,6 @@
 from typing import Callable, NamedTuple, Sequence, TypedDict, TypeVar
 
-from torch import Tensor
+from torch import ShortTensor, Tensor
 
 # TODO: use typing.NotRequired when upgrading to Python 3.11
 from typing_extensions import NotRequired
@@ -51,6 +51,17 @@ class Sample(TypedDict, total=False):
     labels: OneOrSeq[Tensor]
     # None: not available
     norm_meta: NormMeta | None
+
+
+class SegmentationSample(TypedDict):
+    """
+    Segmentation sample type for mini-batches.
+    """
+
+    pred: ShortTensor
+    target: ShortTensor
+    position_idx: OneOrSeq[int]
+    time_idx: OneOrSeq[int]
 
 
 class ChannelMap(TypedDict):
