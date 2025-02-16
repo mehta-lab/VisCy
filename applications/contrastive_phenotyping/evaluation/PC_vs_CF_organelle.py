@@ -15,14 +15,15 @@ import numpy as np
 import seaborn as sns
 import cv2
 from sklearn.decomposition import PCA
-import mahotas.features
+import mahotas as mh
 import pandas as pd
+import scipy.stats
+from numpy import fft
+from skimage.feature import graycomatrix, graycoprops
+from skimage.filters import gaussian, threshold_otsu
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks
-from viscy.representation.evaluation.feature import (
-    FeatureExtractor as FE,
-)
 
 # %%
 features_path = Path(
@@ -41,8 +42,8 @@ source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
 seg_channel = ["nuclei_prediction_labels_labels"]
 z_range = (16, 21)
 normalizations = None
-# fov_name = "/0/6/000000"
-# track_id = 21
+fov_name = "/B/1/000000"
+track_id = 74
 
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
@@ -75,33 +76,58 @@ features = df.reset_index(drop=True)
 
 features = features[features["fov_name"].str.startswith(("/C/2/000000", "/B/3/000000", "/C/1/000000", "/B/2/000000"))]
 
-features["Phase Symmetry Score"] = np.nan
-features["Fluor Symmetry Score"] = np.nan
-features["Fluor Area"] = np.nan
-features["Masked fluor Intensity"] = np.nan
-features["Entropy Phase"] = np.nan
-features["Contrast Phase"] = np.nan
-features["Dissimilarity Phase"] = np.nan
-features["Homogeneity Phase"] = np.nan
-features["Contrast Fluor"] = np.nan
-features["Dissimilarity Fluor"] = np.nan
-features["Homogeneity Fluor"] = np.nan
-features["Phase IQR"] = np.nan
+# features computed to extract the value and texture features from image patches
+# mean intensity
+features["Phase Mean Intensity"] = np.nan
 features["Fluor Mean Intensity"] = np.nan
+# standard deviation
 features["Phase Standard Deviation"] = np.nan
 features["Fluor Standard Deviation"] = np.nan
+# kurtosis
+features["Fluor kurtosis"] = np.nan
+features["Phase kurtosis"] = np.nan
+# skewness
+features["Fluor skewness"] = np.nan
+features["Phase skewness"] = np.nan
+# entropy
+features["Entropy Phase"] = np.nan
+features["Entropy Fluor"] = np.nan
+# iqr
+features["Phase IQR"] = np.nan
+features["Fluor IQR"] = np.nan
+# contrast
+features["Contrast Phase"] = np.nan
+features["Contrast Fluor"] = np.nan
+# texture
+features["Phase texture"] = np.nan
+features["Fluor texture"] = np.nan
+
+# organelle segmentation features
+features["Fluor Area"] = np.nan
+features["Masked fluor Intensity"] = np.nan
+features["Perimeter"] = np.nan
+
+# nuclear segmentation based features
 features["Fluor weighted intensity gradient"] = np.nan
 features["Phase weighted intensity gradient"] = np.nan
-features["Fluor texture"] = np.nan
-features["Phase texture"] = np.nan
+
 features["Perimeter"] = np.nan
 features["Nuclear area"] = np.nan
 features["Perimeter area ratio"] = np.nan
 features["Nucleus eccentricity"] = np.nan
+
 features["Instantaneous velocity"] = np.nan
 features["Fluor localization"] = np.nan
 
+# Zernike moment 0
+features["Zernike moment std"] = np.nan
+features["Zernike moment mean"] = np.nan
+
 # %% iterate over new features and compute them
+
+def normalize_image(image):
+    """Normalize the image to 0-255 range."""
+    return (image - image.min()) / (image.max() - image.min()) * 255
 
 # weighted intensity gradient
 def compute_weighted_intensity_gradient(image):
@@ -205,7 +231,7 @@ def compute_perimeter_area_ratio(image):
 
     return average_perimeter, average_area, total_perimeter / total_area
 
-def texture_features(image):
+def compute_texture_features(image):
     """Compute the texture features of the image.
     
     Args:
@@ -216,7 +242,7 @@ def texture_features(image):
     """
     # rescale image to 0 to 255 and convert to uint8
     image_rescaled = (image - image.min()) / (image.max() - image.min()) * 255
-    texture_features = mahotas.features.haralick(image_rescaled.astype('uint8')).ptp(0)
+    texture_features = mh.features.haralick(image_rescaled.astype('uint8')).ptp(0)
     return np.mean(texture_features)
 
 def nucleus_eccentricity(image):
@@ -316,11 +342,170 @@ def compute_instantaneous_velocity(track_info, row_idx):
     velocity = distance / max(time_diff, 1e-6)
     return velocity
 
+def compute_kurtosis(image):
+    """Compute the kurtosis of the image."""
+    normalized_image = normalize_image(image)
+    kurtosis = scipy.stats.kurtosis(normalized_image, fisher=True, axis=None)
+    return kurtosis
+
+def compute_skewness(image):
+    """Compute the skewness of the image."""
+    normalized_image = normalize_image(image)
+    skewness = scipy.stats.skew(normalized_image, axis=None)
+    return skewness
+
+def compute_spectral_entropy(image):
+    """
+    Compute the spectral entropy of the image
+    High frequency components are observed to increase in phase and reduce in sensor when cell is infected
+    :param np.array image: input image
+    :return: spectral entropy
+    """
+
+    # Compute the 2D Fourier Transform
+    f_transform = fft.fft2(image)
+
+    # Compute the power spectrum
+    power_spectrum = np.abs(f_transform) ** 2
+
+    # Compute the probability distribution
+    power_spectrum += 1e-10  # Avoid log(0) issues
+    prob_distribution = power_spectrum / np.sum(power_spectrum)
+
+    # Compute the spectral entropy
+    entropy = -np.sum(prob_distribution * np.log(prob_distribution))
+
+    return entropy
+
+def compute_iqr(image):
+    """
+    Compute the interquartile range of pixel intensities
+    Observed to increase when cell is infected
+    :param np.array image: input image
+    :return: interquartile range of pixel intensities
+    """
+
+    # Compute the interquartile range of pixel intensities
+    iqr = np.percentile(image, 75) - np.percentile(image, 25)
+
+    return iqr
+
+def compute_mean_intensity(image):
+    """
+    Compute the mean pixel intensity
+    Expected to vary when cell morphology changes due to infection, divison or death
+    :param np.array image: input image
+    :return: mean pixel intensity
+    """
+
+    # Compute the mean pixel intensity
+    mean_intensity = np.mean(image)
+
+    return mean_intensity
+
+def compute_std_dev(image):
+    """
+    Compute the standard deviation of pixel intensities
+    Expected to vary when cell morphology changes due to infection, divison or death
+    :param np.array image: input image
+    :return: standard deviation of pixel intensities
+    """
+    # Compute the standard deviation of pixel intensities
+    std_dev = np.std(image)
+
+    return std_dev
+
+def compute_glcm_features(image):
+    """
+    Compute the contrast, dissimilarity and homogeneity of the image
+    Both sensor and phase texture changes when infected, smooth in sensor, and rough in phase
+    :param np.array image: input image
+    :return: contrast, dissimilarity, homogeneity
+    """
+
+    # Normalize the input image from 0 to 255
+    image = (image - np.min(image)) * (255 / (np.max(image) - np.min(image)))
+    image = image.astype(np.uint8)
+
+    # Compute the GLCM
+    distances = [1]  # Distance between pixels
+    angles = [45]  # Angle in radians
+
+    glcm = graycomatrix(image, distances, angles, symmetric=True, normed=True)
+
+    # Compute GLCM properties - average across all angles
+    contrast = graycoprops(glcm, "contrast")[0, 0]
+    dissimilarity = graycoprops(glcm, "dissimilarity")[0, 0]
+    homogeneity = graycoprops(glcm, "homogeneity")[0, 0]
+
+    return contrast, dissimilarity, homogeneity
+
+def compute_area(input_image, sigma=0.6):
+    """Create a binary mask using morphological operations
+    Sensor area will increase when infected due to expression in nucleus
+    :param np.array input_image: generate masks from this 3D image
+    :param float sigma: Gaussian blur standard deviation, increase in value increases blur
+    :return: area of the sensor mask & mean intensity inside the sensor area
+    """
+
+    input_image_blur = gaussian(input_image, sigma=sigma)
+
+    thresh = threshold_otsu(input_image_blur)
+    mask = input_image >= thresh
+
+    # Apply sensor mask to the image
+    masked_image = input_image * mask
+
+    # Compute the mean intensity inside the sensor area
+    masked_intensity = np.mean(masked_image)
+
+    return masked_intensity, np.sum(mask)
+
+def compute_radial_intensity_gradient(image):
+    """
+    Compute the radial intensity gradient of the image
+    The sensor relocalizes inside the nucleus, which is center of the image when cells are infected
+    Expected negative gradient when infected and zero to positive gradient when not infected
+    :param np.array image: input image
+    :return: radial intensity gradient
+    """
+    # normalize the image
+    image = (image - np.min(image)) / (np.max(image) - np.min(image))
+
+    # compute the intensity gradient from center to periphery
+    y, x = np.indices(image.shape)
+    center = np.array(image.shape) / 2
+    r = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
+    r = r.astype(int)
+    tbin = np.bincount(r.ravel(), image.ravel())
+    nr = np.bincount(r.ravel())
+    radial_intensity_values = tbin / nr
+
+    # get the slope radial_intensity_values
+    from scipy.stats import linregress
+
+    radial_intensity_gradient = linregress(
+        range(len(radial_intensity_values)), radial_intensity_values
+    )
+
+    return radial_intensity_gradient[0]
+
+def compute_zernike_momemnts(image):
+    """ 
+    Compute the Zernike moments of the image
+    :param np.array image: input image
+    :return: Zernike moments
+    """
+    # compute the Zernike moments
+    zernike_moments = mh.features.zernike_moments(image, 32)
+    # return standard deviation (for level of variation in texture) and mean (for overall level of texture) of the zernike moments
+    return np.std(zernike_moments), np.mean(zernike_moments)
+
 # %% compute the computed features and add them to the dataset
 
 fov_names_list = features["fov_name"].unique()
 unique_fov_names = sorted(list(set(fov_names_list)))
-max_iterations = 20
+max_iterations = 50
 
 for fov_name in unique_fov_names:
     csv_files = list((Path(str(tracks_path) + str(fov_name))).glob("*.csv"))
@@ -355,49 +540,59 @@ for fov_name in unique_fov_names:
 
         whole = np.stack([p["anchor"] for p in prediction_dataset])
         seg_mask = np.stack([p["anchor"] for p in track_channel])
-        # Normalize phase image to 0-255 range
         phase = whole[:, 0, 2]
-        phase = ((phase - phase.min()) / (phase.max() - phase.min()) * 255).astype(np.uint8)
+        # Normalize phase image to 0-255 range
+        # phase = ((phase - phase.min()) / (phase.max() - phase.min()) * 255).astype(np.uint8)
         # Normalize fluorescence image to 0-255 range
         fluor = np.max(whole[:, 1], axis=1)
-        fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
+        # fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
         nucl_mask = seg_mask[:, 0, 0]
 
         for t in range(phase.shape[0]):
 
-            # Compute Fourier descriptors for phase image
-            phase_descriptors = FE.compute_fourier_descriptors(phase[t])
-            # Analyze symmetry of phase image
-            phase_symmetry_score = FE.analyze_symmetry(phase_descriptors)
+            # compute mean intensity of the fluor
+            fluor_mean_intensity = compute_mean_intensity(fluor[t])
+            #compute mean intensity of the phase
+            phase_mean_intensity = compute_mean_intensity(phase[t])
 
-            # Compute Fourier descriptors for fluor image
-            fluor_descriptors = FE.compute_fourier_descriptors(fluor[t])
-            # Analyze symmetry of fluor image
-            fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
+            # compute standard deviation of the fluor
+            fluor_std_dev = compute_std_dev(fluor[t])
+            # compute standard deviation of the phase
+            phase_std_dev = compute_std_dev(phase[t])
+
+            # compute kurtosis of the fluor
+            fluor_kurtosis = compute_kurtosis(fluor[t])
+            # compute kurtosis of the phase
+            phase_kurtosis = compute_kurtosis(phase[t])
+
+            # compute skewness of the fluor
+            fluor_skewness = compute_skewness(fluor[t])
+            # compute skewness of the phase
+            phase_skewness = compute_skewness(phase[t])
 
             # Compute area of fluor
-            masked_intensity, area = FE.compute_area(fluor[t])
+            masked_intensity, area = compute_area(fluor[t])
 
             # Compute higher frequency features using spectral entropy
-            entropy_phase = FE.compute_spectral_entropy(phase[t])
+            entropy_phase = compute_spectral_entropy(phase[t])
 
             # Compute texture analysis using GLCM
             contrast_phase, dissimilarity_phase, homogeneity_phase = (
-                FE.compute_glcm_features(phase[t])
+                compute_glcm_features(phase[t])
             )
             contrast_fluor, dissimilarity_fluor, homogeneity_fluor = (
-                FE.compute_glcm_features(fluor[t])
+                compute_glcm_features(fluor[t])
             )
 
             # Compute interqualtile range of pixel intensities
-            iqr = FE.compute_iqr(phase[t])
+            iqr = compute_iqr(phase[t])
 
             # Compute mean pixel intensity
-            fluor_mean_intensity = FE.compute_mean_intensity(fluor[t])
+            fluor_mean_intensity = compute_mean_intensity(fluor[t])
 
             # Compute standard deviation of pixel intensities
-            phase_std_dev = FE.compute_std_dev(phase[t])
-            fluor_std_dev = FE.compute_std_dev(fluor[t])
+            phase_std_dev = compute_std_dev(phase[t])
+            fluor_std_dev = compute_std_dev(fluor[t])
 
             # Compute gradient for localization in organelle channel
             fluor_weighted_gradient = compute_weighted_intensity_gradient(fluor[t])
@@ -405,8 +600,8 @@ for fov_name in unique_fov_names:
             phase_weighted_gradient = compute_weighted_intensity_gradient(phase[t])
 
             # compute the texture features using haralick
-            phase_texture = texture_features(phase[t])
-            fluor_texture = texture_features(fluor[t])
+            phase_texture = compute_texture_features(phase[t])
+            fluor_texture = compute_texture_features(fluor[t])
 
             # compute the perimeter of the nuclear segmentations found inside the patch
             perimeter, nucl_area, perimeter_area_ratio = compute_perimeter_area_ratio(nucl_mask[t])
@@ -420,19 +615,23 @@ for fov_name in unique_fov_names:
             # compute the localization of the fluor
             fluor_location = fluor_localization(fluor[t], nucl_mask[t])
 
+            # compute the zernike moments
+            zernike_std_fluor, zernike_mean_fluor = compute_zernike_momemnts(fluor[t])
+            zernike_std_phase, zernike_mean_phase = compute_zernike_momemnts(phase[t])
+
             # Create dictionary mapping feature names to their computed values
             feature_values = {
-                "Fluor Symmetry Score": fluor_symmetry_score,
-                "Phase Symmetry Score": phase_symmetry_score,
+                "Phase Mean Intensity": phase_mean_intensity,
+                "Phase Kurtosis": phase_kurtosis,
+                "Phase Skewness": phase_skewness,
+                "Fluor Mean Intensity": fluor_mean_intensity,
+                "Fluor Kurtosis": fluor_kurtosis,
+                "Fluor Skewness": fluor_skewness,
                 "Fluor Area": area,
                 "Masked fluor Intensity": masked_intensity,
                 "Entropy Phase": entropy_phase,
                 "Contrast Phase": contrast_phase,
-                "Dissimilarity Phase": dissimilarity_phase,
-                "Homogeneity Phase": homogeneity_phase,
                 "Contrast Fluor": contrast_fluor,
-                "Dissimilarity Fluor": dissimilarity_fluor,
-                "Homogeneity Fluor": homogeneity_fluor,
                 "Phase IQR": iqr,
                 "Fluor Mean Intensity": fluor_mean_intensity,
                 "Phase Standard Deviation": phase_std_dev,
@@ -447,6 +646,10 @@ for fov_name in unique_fov_names:
                 "Nucleus eccentricity": seg_eccentricity,
                 "Instantaneous velocity": inst_velocity,
                 "Fluor localization": fluor_location,
+                "Zernike moment std": zernike_std_fluor,
+                "Zernike moment mean": zernike_mean_fluor,
+                "Zernike moment std phase": zernike_std_phase,
+                "Zernike moment mean phase": zernike_mean_phase,
             }
 
             # Update features dataframe using the dictionary
