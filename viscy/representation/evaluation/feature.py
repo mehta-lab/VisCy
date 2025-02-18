@@ -2,7 +2,6 @@ from typing import TypedDict
 
 import numpy as np
 import pandas as pd
-from mahotas.features import haralick, zernike_moments
 from numpy.typing import ArrayLike
 from skimage.feature import graycomatrix, graycoprops
 from skimage.measure import regionprops
@@ -28,25 +27,52 @@ class IntensityFeatures(TypedDict):
     spectral_entropy: float
     iqr: float
     weighted_intensity_gradient: float
+    
 
-    def __init__(self, image: ArrayLike):
-        super().__init__()
+class TextureFeatures(TypedDict):
+    """Texture features extracted from a single cell."""
+    spectral_entropy: float
+    contrast: float
+    entropy: float
+    homogeneity: float
+    dissimilarity: float
+    texture_mean: float
+
+    
+class MorphologyFeatures(TypedDict):
+    """Morphology features extracted from a single cell."""
+    area: float
+    perimeter: float
+    perimeter_area_ratio: float
+    eccentricity: float
+    fluor_localization: float
+    masked_intensity: float
+
+class SymmetryDescriptor(TypedDict):
+    """
+    Symmetry descriptor extracted from a single cell
+    """
+    zernike_std: float
+    zernike_mean: float
+    radial_intensity_gradient: float
+
+
+class TrackFeatures(TypedDict):
+    """Track features extracted from a single track"""
+
+    instantaneous_velocity: float
+
+
+class CellFeatures:
+    """Cell features extracted from a single cell image patch."""
+
+    def __init__(self, image: ArrayLike, segmentation_mask: ArrayLike = None):
         self.image = image
-        self.update(self._compute_features())
-
-    def _compute_features(self) -> dict:
-        """Compute all intensity features."""
-        return {
-            "mean": self._compute_mean_intensity(),
-            "std": self._compute_std_dev(),
-            "min": np.min(self.image),
-            "max": np.max(self.image),
-            "kurtosis": self._compute_kurtosis(),
-            "skewness": self._compute_skewness(),
-            "spectral_entropy": self._compute_spectral_entropy(),
-            "iqr": self._compute_iqr(),
-            "weighted_intensity_gradient": self._compute_weighted_intensity_gradient()
-        }
+        self.segmentation_mask = segmentation_mask
+        self.intensity_features = None
+        self.texture_features = None 
+        self.morphology_features = None
+        self.symmetry_descriptor = None
 
     def _compute_kurtosis(self):
         """Compute the kurtosis of the image."""
@@ -59,42 +85,6 @@ class IntensityFeatures(TypedDict):
         normalized_image = normalize_image(self.image)
         skewness = scipy.stats.skew(normalized_image, axis=None)
         return skewness
-    
-    def _compute_spectral_entropy(self):
-        """
-        Compute the spectral entropy of the image
-        High frequency components are observed to increase in phase and reduce in sensor when cell is infected
-        :param np.array image: input image
-        :return: spectral entropy
-        """
-
-        # Compute the 2D Fourier Transform
-        f_transform = fft.fft2(self.image)
-
-        # Compute the power spectrum
-        power_spectrum = np.abs(f_transform) ** 2
-
-        # Compute the probability distribution
-        power_spectrum += 1e-10  # Avoid log(0) issues
-        prob_distribution = power_spectrum / np.sum(power_spectrum)
-
-        # Compute the spectral entropy
-        entropy = -np.sum(prob_distribution * np.log(prob_distribution))
-
-        return entropy
-    
-    def _compute_mean_intensity(self):
-        """
-        Compute the mean pixel intensity
-        Expected to vary when cell morphology changes due to infection, divison or death
-        :param np.array image: input image
-        :return: mean pixel intensity
-        """
-
-        # Compute the mean pixel intensity
-        mean_intensity = np.mean(self.image)
-
-        return mean_intensity
 
     def _compute_std_dev(self):
         """
@@ -200,31 +190,29 @@ class IntensityFeatures(TypedDict):
         
         return slope
 
-class TextureFeatures(TypedDict):
-    """Texture features extracted from a single cell."""
-    spectral_entropy: float
-    contrast: float
-    entropy: float
-    homogeneity: float
-    dissimilarity: float
-    texture_mean: float
+    def _compute_spectral_entropy(self):
+        """
+        Compute the spectral entropy of the image
+        High frequency components are observed to increase in phase and reduce in sensor when cell is infected
+        :param np.array image: input image
+        :return: spectral entropy
+        """
 
-    def __init__(self, image: ArrayLike):
-        super().__init__()
-        self.image = image
-        self.update(self._compute_features())
+        # Compute the 2D Fourier Transform
+        f_transform = fft.fft2(self.image)
 
-    def _compute_features(self) -> dict:
-        """Compute all texture features."""
-        contrast, dissimilarity, homogeneity = self._compute_glcm_features()
-        return {
-            "spectral_entropy": self._compute_spectral_entropy(),
-            "contrast": contrast,
-            "homogeneity": homogeneity,
-            "dissimilarity": dissimilarity,
-            "texture_mean": self._compute_texture_features()
-        }
+        # Compute the power spectrum
+        power_spectrum = np.abs(f_transform) ** 2
 
+        # Compute the probability distribution
+        power_spectrum += 1e-10  # Avoid log(0) issues
+        prob_distribution = power_spectrum / np.sum(power_spectrum)
+
+        # Compute the spectral entropy
+        entropy = -np.sum(prob_distribution * np.log(prob_distribution))
+
+        return entropy
+    
     def _compute_texture_features(self):
         """Compute the texture features of the image.
         
@@ -238,76 +226,40 @@ class TextureFeatures(TypedDict):
         image_rescaled = (self.image - self.image.min()) / (self.image.max() - self.image.min()) * 255
         texture_features = mh.features.haralick(image_rescaled.astype('uint8')).ptp(0)
         return np.mean(texture_features)
-
-class MorphologyFeatures(TypedDict):
-    """Morphology features extracted from a single cell."""
-    area: float
-    perimeter: float
-    perimeter_area_ratio: float
-    eccentricity: float
-    fluor_localization: float
-    masked_intensity: float
-
-    def __init__(self, image: ArrayLike):
-        super().__init__()
-        self.image = image
-        self.update(self._compute_features())
-
-    def _compute_features(self) -> dict:
-        """Compute all morphology features."""
-        perimeter, area, ratio = self._compute_perimeter_area_ratio()
-        masked_intensity, area_value = self._compute_area()
-        return {
-            "masked_area": area_value,
-            "area": area,
-            "perimeter": perimeter,
-            "perimeter_area_ratio": ratio,
-            "eccentricity": self._compute_nucleus_eccentricity(),
-            "fluor_localization": self._compute_fluor_localization(),
-            "masked_intensity": masked_intensity
-        }
-
+    
     def _compute_perimeter_area_ratio(self):
-        """Compute the perimeter of the nuclear segmentations found inside the patch.
-        
-        Args:
-            image (np.ndarray): Input image with nuclear segmentation labels
-            
-        Returns:
-            float: Total perimeter of the nuclear segmentations found inside the patch
-        """
+        """Compute the perimeter of the nuclear segmentations found inside the patch."""
         total_perimeter = 0
         total_area = 0
         
         # Get the binary mask of each nuclear segmentation labels
         for label in np.unique(self.image):
             if label != 0:  # Skip background
-                continue
                 
-            # Create binary mask for current label
-            mask = (self.image == label)
-            
-            # Convert to proper format for OpenCV
-            mask = mask.astype(np.uint8)
-            
-            # Ensure we have a 2D array
-            if mask.ndim > 2:
-                # Take the first channel if multi-channel
-                mask = mask[:, :, 0] if mask.shape[-1] > 1 else mask.squeeze()
-            
-            # Ensure we have values 0 and 1 only
-            mask = (mask > 0).astype(np.uint8) * 255
-            
-            # Find contours in the binary mask
-            contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-            
-            # Add perimeter of all contours for this label
-            for contour in contours:
-                total_perimeter += cv2.arcLength(contour, closed=True)
-            
-            # Add area of all contours for this label
-            for contour in contours:
-                total_area += cv2.contourArea(contour)
+                # Create binary mask for current label
+                mask = (self.image == label)
+                
+                # Convert to proper format for OpenCV
+                mask = mask.astype(np.uint8)
+                
+                # Ensure we have a 2D array
+                if mask.ndim > 2:
+                    # Take the first channel if multi-channel
+                    mask = mask[:, :, 0] if mask.shape[-1] > 1 else mask.squeeze()
+                
+                # Ensure we have values 0 and 1 only
+                mask = (mask > 0).astype(np.uint8) * 255
+                
+                # Find contours in the binary mask
+                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+                
+                # Add perimeter of all contours for this label
+                for contour in contours:
+                    total_perimeter += cv2.arcLength(contour, closed=True)
+                
+                # Add area of all contours for this label
+                for contour in contours:
+                    total_area += cv2.contourArea(contour)
         average_area = total_area / (len(np.unique(self.image))-1)
         average_perimeter = total_perimeter / (len(np.unique(self.image))-1)
 
@@ -393,18 +345,7 @@ class MorphologyFeatures(TypedDict):
         masked_intensity = np.mean(masked_image)
 
         return masked_intensity, np.sum(mask)
-
-class SymmetryDescriptor(TypedDict):
-    """
-    Symmetry descriptor extracted from a single cell
-    """
-
-    zernike_moments: ArrayLike
-    radial_intensity_gradient: ArrayLike
-
-    def __init__(self, image: ArrayLike):
-        self.image = image
-
+    
     def _compute_zernike_moments(self):
         """Compute the Zernike moments of the image"""
         zernike_moments = mh.features.zernike_moments(self.image, 32)
@@ -438,18 +379,87 @@ class SymmetryDescriptor(TypedDict):
         )
 
         return radial_intensity_gradient[0]
-
-
-class TrackFeatures(TypedDict):
-    """Track features extracted from a single track"""
-
-    instantaneous_velocity: float
-
-    def __init__(self, track_info: pd.DataFrame, row_idx: int):
-        self.track_info = track_info
-        self.row_idx = row_idx
     
-    def compute_instantaneous_velocity(self):
+
+    def compute_all_features(self) -> pd.DataFrame:
+        """Compute all features."""
+        # Compute intensity features
+        self.intensity_features = IntensityFeatures(
+            mean=float(np.mean(self.image)),
+            std=self._compute_std_dev(),
+            min=float(np.min(self.image)),
+            max=float(np.max(self.image)),
+            kurtosis=self._compute_kurtosis(),
+            skewness=self._compute_skewness(),
+            spectral_entropy=self._compute_spectral_entropy(),
+            iqr=self._compute_iqr(),
+            weighted_intensity_gradient=self._compute_weighted_intensity_gradient()
+        )
+
+        # Compute texture features
+        contrast, dissimilarity, homogeneity = self._compute_glcm_features()
+        self.texture_features = TextureFeatures(
+            spectral_entropy=self._compute_spectral_entropy(),
+            contrast=contrast,
+            entropy=self._compute_spectral_entropy(),  # Note: This could be redundant
+            homogeneity=homogeneity,
+            dissimilarity=dissimilarity,
+            texture_mean=self._compute_texture_features()
+        )
+        
+        if self.segmentation_mask is not None:
+            masked_intensity, area = self._compute_area()
+            perimeter, area, ratio = self._compute_perimeter_area_ratio()
+            self.morphology_features = MorphologyFeatures(
+                area=area,
+                perimeter=perimeter,
+                perimeter_area_ratio=ratio,
+                eccentricity=self._compute_nucleus_eccentricity(),
+                fluor_localization=self._compute_fluor_localization(),
+                masked_intensity=masked_intensity
+            )
+            
+            zernike = self._compute_zernike_moments()
+            self.symmetry_descriptor = SymmetryDescriptor(
+                zernike_std=float(np.std(zernike)),
+                zernike_mean=float(np.mean(zernike)),
+                radial_intensity_gradient=self._compute_radial_intensity_gradient()
+            )
+            
+        return self.to_df()
+
+    def to_df(self) -> pd.DataFrame:
+        """Convert all features to a pandas DataFrame."""
+        features_dict = {}
+        if self.intensity_features:
+            features_dict.update(self.intensity_features)
+        if self.texture_features:
+            features_dict.update(self.texture_features)
+        if self.morphology_features:
+            features_dict.update(self.morphology_features)
+        if self.symmetry_descriptor:
+            features_dict.update(self.symmetry_descriptor)
+        return pd.DataFrame([features_dict])
+
+
+class DynamicFeatures:
+    """
+    Dyanamic track based features extracted from a single track
+
+    Parameters:
+        tracking_df: Tracking dataframe
+
+    Attributes:
+        track_features: Track features
+    """
+
+    def __init__(self, tracking_df: pd.DataFrame):
+        self.tracking_df = tracking_df
+        self.track_features: TrackFeatures | None = None
+        self.row_idx = 0  # Add this to track current position
+        self.track_info = tracking_df  # Rename for clarity
+
+    def compute_instantaneous_velocity(self) -> float:
         """Compute the instantaneous velocity of the cell.
 
         Args:
@@ -483,64 +493,7 @@ class TrackFeatures(TypedDict):
             return 0.0
             
         # Compute velocity (avoid division by zero)
-        velocity = distance / max(time_diff, 1e-6)
-        return velocity
-
-
-class CellFeatures:
-    """Cell features extracted from a single cell image patch."""
-
-    def __init__(self, image: ArrayLike, segmentation_mask: ArrayLike = None):
-        self.image = normalize_image(image)
-        self.segmentation_mask = segmentation_mask
-        self.intensity_features = None
-        self.texture_features = None 
-        self.morphology_features = None
-        self.symmetry_descriptor = None
-
-    def compute_all_features(self) -> pd.DataFrame:
-        """Compute all available features."""
-        self.intensity_features = IntensityFeatures(self.image)
-        self.texture_features = TextureFeatures(self.image)
-        
-        if self.segmentation_mask is not None:
-            self.morphology_features = MorphologyFeatures(self.image)
-            self.symmetry_descriptor = SymmetryDescriptor(self.image)
-            
-        return self.to_df()
-
-    def to_df(self) -> pd.DataFrame:
-        """Convert all features to a pandas DataFrame."""
-        features_dict = {}
-        if self.intensity_features:
-            features_dict.update(self.intensity_features)
-        if self.texture_features:
-            features_dict.update(self.texture_features)
-        if self.morphology_features:
-            features_dict.update(self.morphology_features)
-        if self.symmetry_descriptor:
-            features_dict.update(self.symmetry_descriptor)
-        return pd.DataFrame([features_dict])
-
-
-class DynamicFeatures:
-    """
-    Dyanamic track based features extracted from a single track
-
-    Parameters:
-        tracking_df: Tracking dataframe
-
-    Attributes:
-        track_features: Track features
-    """
-
-    def __init__(self, tracking_df: pd.DataFrame):
-        self.tracking_df = tracking_df
-        self.track_features: TrackFeatures | None = None
-
-    def compute_instantaneous_velocity(self) -> float:
-        """Compute instantaneous velocity"""
-        instantaneous_velocity = self.track_features.compute_instantaneous_velocity()
+        instantaneous_velocity = distance / max(time_diff, 1e-6)
         return instantaneous_velocity
 
     def compute_all_features(self) -> pd.DataFrame:
