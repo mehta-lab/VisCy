@@ -71,52 +71,49 @@ features = df.reset_index(drop=True)
 
 features = features[features["fov_name"].str.startswith(("/C/2/000000", "/B/3/000000", "/C/1/000000", "/B/2/000000"))]
 
-# features computed to extract the value and texture features from image patches
-# mean intensity
-features["Phase Mean Intensity"] = np.nan
-features["Fluor Mean Intensity"] = np.nan
-# standard deviation
-features["Phase Standard Deviation"] = np.nan
-features["Fluor Standard Deviation"] = np.nan
-# kurtosis
-features["Fluor Kurtosis"] = np.nan
-features["Phase Kurtosis"] = np.nan
-# skewness
-features["Fluor Skewness"] = np.nan
-features["Phase Skewness"] = np.nan
-# entropy
-features["Entropy Phase"] = np.nan
-features["Entropy Fluor"] = np.nan
-# iqr
-features["Phase IQR"] = np.nan
-features["Fluor IQR"] = np.nan
-# contrast
-features["Contrast Phase"] = np.nan
-features["Contrast Fluor"] = np.nan
-# texture
-features["Phase texture"] = np.nan
-features["Fluor texture"] = np.nan
+# Define feature categories and their corresponding column names
+feature_columns = {
+    'basic_features': [
+        ('Mean Intensity', ['Phase', 'Fluor']),
+        ('Standard Deviation', ['Phase', 'Fluor']),
+        ('Kurtosis', ['Phase', 'Fluor']),
+        ('Skewness', ['Phase', 'Fluor']),
+        ('Entropy', ['Phase', 'Fluor']),
+        ('IQR', ['Phase', 'Fluor']),
+        ('Dissimilarity', ['Phase', 'Fluor']),
+        ('Contrast', ['Phase', 'Fluor']),
+        ('texture', ['Phase', 'Fluor']),
+        ('Weighted Intensity Gradient', ['Phase', 'Fluor']),
+        ('Radial Intensity Gradient', ['Phase', 'Fluor']),
+        ('Zernike moment std', ['Phase', 'Fluor']),
+        ('Zernike moment mean', ['Phase', 'Fluor']),
+        ('Intensity localization', ['Phase','Fluor']),
+    ],
+    'organelle_features': [
+        'Fluor Area',
+        'Fluor masked intensity',
+    ],
+    'nuclear_features': [
+        'Nuclear area',
+        'Perimeter',
+        'Perimeter area ratio',
+        'Nucleus eccentricity',
+    ],
+    'dynamic_features': [
+        'Instantaneous velocity',
+    ],
+}
 
-# organelle segmentation features
-features["Fluor Area"] = np.nan
-features["Masked fluor Intensity"] = np.nan
-features["Perimeter"] = np.nan
-
-# nuclear segmentation based features
-features["Fluor weighted intensity gradient"] = np.nan
-features["Phase weighted intensity gradient"] = np.nan
-
-features["Perimeter"] = np.nan
-features["Nuclear area"] = np.nan
-features["Perimeter area ratio"] = np.nan
-features["Nucleus eccentricity"] = np.nan
-
-features["Instantaneous velocity"] = np.nan
-features["Fluor localization"] = np.nan
-
-# Zernike moment 0
-features["Zernike moment std"] = np.nan
-features["Zernike moment mean"] = np.nan
+# Initialize all feature columns
+for category, feature_list in feature_columns.items():
+    if isinstance(feature_list[0], tuple):  # Handle features with multiple channels
+        for feature, channels in feature_list:
+            for channel in channels:
+                col_name = f"{channel} {feature}"
+                features[col_name] = np.nan
+    else:  # Handle single features
+        for feature in feature_list:
+            features[feature] = np.nan
 
 # %% compute the computed features and add them to the dataset
 
@@ -169,93 +166,89 @@ for fov_name in unique_fov_names:
 
             # Basic statistical features for both channels
             phase_features = CellFeatures(phase[t], nucl_mask[t])
-            phase_features.compute_all_features()
+            PF = phase_features.compute_all_features()
 
             # Get all basic statistical measures at once
             phase_stats = {
-                'mean_intensity': phase_features.intensity_features['mean'],
-                'std_dev': phase_features.intensity_features['std'],
-                'kurtosis': phase_features.intensity_features['kurtosis'],
-                'skewness': phase_features.intensity_features['skewness'],
-                'iqr': phase_features.intensity_features['iqr'],
-                'entropy': phase_features.texture_features['spectral_entropy'],
-                'contrast': phase_features.texture_features['contrast'],
-                'texture': phase_features.texture_features['texture'],
-                'Zernike moment std': phase_features.symmetry_descriptor['zernike_moments_std'],
-                'Zernike moment mean': phase_features.symmetry_descriptor['zernike_moments_mean'],
-                'radial_intensity_gradient': phase_features.symmetry_descriptor['radial_intensity_gradient'],
-                'weighted_intensity_gradient': phase_features.intensity_features['weighted_intensity_gradient'],
+                'mean_intensity': PF['mean_intensity'],
+                'std_dev': PF['std_dev'],
+                'kurtosis': PF['kurtosis'],
+                'skewness': PF['skewness'],
+                'iqr': PF['iqr'],
+                'entropy': PF['spectral_entropy'],
+                'dissimilarity': PF['dissimilarity'],
+                'contrast': PF['contrast'],
+                'texture': PF['texture'],
+                'Zernike moment std': PF['zernike_std'],
+                'Zernike moment mean': PF['zernike_mean'],
+                'radial_intensity_gradient': PF['radial_intensity_gradient'],
+                'weighted_intensity_gradient': PF['weighted_intensity_gradient'],
+                'intensity_localization': PF['intensity_localization'],
             }
 
             fluor_features = CellFeatures(fluor[t], nucl_mask[t])
-            fluor_features.compute_all_features()
+            FF = fluor_features.compute_all_features()
 
             fluor_stats = {
-                'mean_intensity': fluor_features.intensity_features['mean'],
-                'std_dev': fluor_features.intensity_features['std'],
-                'kurtosis': fluor_features.intensity_features['kurtosis'],
-                'skewness': fluor_features.intensity_features['skewness'],
-                'iqr': fluor_features.intensity_features['iqr'],
-                'entropy': fluor_features.texture_features['spectral_entropy'],
-                'contrast': fluor_features.texture_features['contrast'],
-                'texture': fluor_features.texture_features['texture'],
-                'masked_area': fluor_features.morphology_features['masked_area'],
-                'masked_intensity': fluor_features.morphology_features['masked_intensity'],
-                'localization': fluor_features.morphology_features['fluor_localization'],
-                'weighted_intensity_gradient': fluor_features.intensity_features['weighted_intensity_gradient'],
-                'radial_intensity_gradient': fluor_features.symmetry_descriptor['radial_intensity_gradient'],
-                'Zernike moment std': fluor_features.symmetry_descriptor['zernike_moments_std'],
-                'Zernike moment mean': fluor_features.symmetry_descriptor['zernike_moments_mean'],
+                'mean_intensity': FF['mean_intensity'],
+                'std_dev': FF['std_dev'],
+                'kurtosis': FF['kurtosis'],
+                'skewness': FF['skewness'],
+                'iqr': FF['iqr'],
+                'entropy': FF['spectral_entropy'],
+                'contrast': FF['contrast'],
+                'dissimilarity': FF['dissimilarity'],
+                'texture': FF['texture'],
+                'masked_area': FF['masked_area'],
+                'masked_intensity': FF['masked_intensity'],
+                'weighted_intensity_gradient': FF['weighted_intensity_gradient'],
+                'radial_intensity_gradient': FF['radial_intensity_gradient'],
+                'Zernike moment std': FF['zernike_std'],
+                'Zernike moment mean': FF['zernike_mean'],
+                'intensity_localization': FF['intensity_localization'],
+                'masked_intensity': FF['masked_intensity'],
+                'area': FF['area'],
             }
 
             mask_features = CellFeatures(nucl_mask[t], nucl_mask[t])
-            mask_features.compute_all_features()
+            MF = mask_features.compute_all_features()
 
             mask_stats = {
-                'perimeter': mask_features.morphology_features['perimeter'],
-                'area': mask_features.morphology_features['area'],
-                'eccentricity': mask_features.morphology_features['eccentricity'],
-                'perimeter_area_ratio': mask_features.morphology_features['perimeter_area_ratio'],
+                'perimeter': MF['perimeter'],
+                'area': MF['area'],
+                'eccentricity': MF['eccentricity'],
+                'perimeter_area_ratio': MF['perimeter_area_ratio'],
             }
 
-            dynamic_features = DynamicFeatures(tracks_df)
-            dynamic_features.compute_all_features()
-            dynamic_stats = {
-                'instantaneous_velocity': dynamic_features.instantaneous_velocity,
-            }
+            # dynamic_features = DynamicFeatures(tracks_df)
+            # DF = dynamic_features.compute_all_features()
+            # dynamic_stats = {
+            #     'instantaneous_velocity': DF['instantaneous_velocity'],
+            # }
 
-            # Create dictionary mapping feature names to their computed values
-            feature_values = {
-                "Phase Mean Intensity": phase_stats['mean_intensity'],
-                "Phase Standard Deviation": phase_stats['std_dev'],
-                "Phase Kurtosis": phase_stats['kurtosis'],
-                "Phase Skewness": phase_stats['skewness'],
-                "Phase IQR": phase_stats['iqr'],
-                "Fluor Mean Intensity": fluor_stats['mean_intensity'],
-                "Fluor Standard Deviation": fluor_stats['std_dev'],
-                "Fluor Kurtosis": fluor_stats['kurtosis'],
-                "Fluor Skewness": fluor_stats['skewness'],
-                "Fluor IQR": fluor_stats['iqr'],
-                "Fluor Area": fluor_stats['area'],
-                "Masked fluor Intensity": fluor_stats['masked_intensity'],
-                "Entropy Phase": phase_stats['entropy'],
-                "Entropy Fluor": fluor_stats['entropy'],
-                "Contrast Phase": phase_stats['contrast'],
-                "Contrast Fluor": fluor_stats['contrast'],
-                "Phase texture": phase_stats['texture'],
-                "Fluor texture": fluor_stats['texture'],
-                "Fluor weighted intensity gradient": fluor_stats['weighted_intensity_gradient'],
-                "Phase weighted intensity gradient": phase_stats['weighted_intensity_gradient'],
-                "Perimeter": mask_stats['perimeter'],
+            # Create dictionaries for each feature category
+            phase_feature_mapping = {
+                f"Phase {k.replace('_', ' ').title()}": v 
+                for k, v in phase_stats.items() 
+            }
+            
+            fluor_feature_mapping = {
+                f"Fluor {k.replace('_', ' ').title()}": v 
+                for k, v in fluor_stats.items() 
+            }
+            
+            mask_feature_mapping = {
                 "Nuclear area": mask_stats['area'],
+                "Perimeter": mask_stats['perimeter'],
                 "Perimeter area ratio": mask_stats['perimeter_area_ratio'],
-                "Nucleus eccentricity": mask_stats['eccentricity'],
-                "Instantaneous velocity": dynamic_stats['instantaneous_velocity'],
-                "Fluor localization": fluor_stats['localization'],
-                "Zernike moment std": fluor_stats['zernike_moments_std'],
-                "Zernike moment mean": fluor_stats['zernike_moments_mean'],
-                "Zernike moment std phase": phase_stats['zernike_moments_std'],
-                "Zernike moment mean phase": phase_stats['zernike_moments_mean'],
+                "Nucleus eccentricity": mask_stats['eccentricity']
+            }
+
+            # Combine all feature dictionaries
+            feature_values = {
+                **phase_feature_mapping,
+                **fluor_feature_mapping,
+                **mask_feature_mapping,
             }
 
             # Update features dataframe using the dictionary

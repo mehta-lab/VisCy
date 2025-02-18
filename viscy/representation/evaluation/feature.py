@@ -6,7 +6,6 @@ from numpy.typing import ArrayLike
 from skimage.feature import graycomatrix, graycoprops
 from skimage.measure import regionprops
 import mahotas as mh
-import cv2
 import scipy.stats
 from numpy import fft
 from skimage.feature import graycomatrix, graycoprops
@@ -18,10 +17,10 @@ def normalize_image(image: ArrayLike) -> ArrayLike:
 
 class IntensityFeatures(TypedDict):
     """Intensity features extracted from a single cell."""
-    mean: float
-    std: float
-    min: float
-    max: float
+    mean_intensity: float
+    std_dev: float
+    min_intensity: float
+    max_intensity: float
     kurtosis: float
     skewness: float
     spectral_entropy: float
@@ -36,7 +35,7 @@ class TextureFeatures(TypedDict):
     entropy: float
     homogeneity: float
     dissimilarity: float
-    texture_mean: float
+    texture: float
 
     
 class MorphologyFeatures(TypedDict):
@@ -45,9 +44,9 @@ class MorphologyFeatures(TypedDict):
     perimeter: float
     perimeter_area_ratio: float
     eccentricity: float
-    fluor_localization: float
+    intensity_localization: float
     masked_intensity: float
-
+    masked_area: float
 class SymmetryDescriptor(TypedDict):
     """
     Symmetry descriptor extracted from a single cell
@@ -85,18 +84,6 @@ class CellFeatures:
         normalized_image = normalize_image(self.image)
         skewness = scipy.stats.skew(normalized_image, axis=None)
         return skewness
-
-    def _compute_std_dev(self):
-        """
-        Compute the standard deviation of pixel intensities
-        Expected to vary when cell morphology changes due to infection, divison or death
-        :param np.array image: input image
-        :return: standard deviation of pixel intensities
-        """
-        # Compute the standard deviation of pixel intensities
-        std_dev = np.std(self.image)
-
-        return std_dev
 
     def _compute_glcm_features(self):
         """
@@ -232,72 +219,37 @@ class CellFeatures:
         total_perimeter = 0
         total_area = 0
         
-        # Get the binary mask of each nuclear segmentation labels
-        for label in np.unique(self.image):
-            if label != 0:  # Skip background
-                
-                # Create binary mask for current label
-                mask = (self.image == label)
-                
-                # Convert to proper format for OpenCV
-                mask = mask.astype(np.uint8)
-                
-                # Ensure we have a 2D array
-                if mask.ndim > 2:
-                    # Take the first channel if multi-channel
-                    mask = mask[:, :, 0] if mask.shape[-1] > 1 else mask.squeeze()
-                
-                # Ensure we have values 0 and 1 only
-                mask = (mask > 0).astype(np.uint8) * 255
-                
-                # Find contours in the binary mask
-                contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-                
-                # Add perimeter of all contours for this label
-                for contour in contours:
-                    total_perimeter += cv2.arcLength(contour, closed=True)
-                
-                # Add area of all contours for this label
-                for contour in contours:
-                    total_area += cv2.contourArea(contour)
-        average_area = total_area / (len(np.unique(self.image))-1)
-        average_perimeter = total_perimeter / (len(np.unique(self.image))-1)
+        # Use regionprops to analyze each labeled region
+        regions = regionprops(self.segmentation_mask)
+        
+        if not regions:  # If no regions found
+            return 0, 0, 0
+            
+        # Sum up perimeter and area for all regions
+        for region in regions:
+            total_perimeter += region.perimeter
+            total_area += region.area
+            
+        average_area = total_area / len(regions)
+        average_perimeter = total_perimeter / len(regions)
 
         return average_perimeter, average_area, total_perimeter / total_area
 
     def _compute_nucleus_eccentricity(self):
         """Compute the eccentricity of the nucleus.
         
-        Args:
-            image (np.ndarray): Input image with nuclear segmentation labels
-            
         Returns:
-            float: Eccentricity of the nucleus
+            float: Average eccentricity of the nuclei in the image
         """
-        # convert the label image to a binary image and ensure single channel
-        binary_image = (self.image > 0).astype(np.uint8)
-        if binary_image.ndim > 2:
-            binary_image = binary_image[:,:,0]  # Take first channel if multi-channel
-        binary_image = cv2.convertScaleAbs(binary_image * 255)  # Ensure proper OpenCV format
+        # Use regionprops to analyze each labeled region
+        regions = regionprops(self.segmentation_mask)
         
-        contours, _ = cv2.findContours(binary_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-        
-        eccentricities = []
-        
-        for contour in contours:
-            # Fit an ellipse to the contour (works well for ellipse-like shapes)
-            if len(contour) >= 5:  # At least 5 points are required to fit an ellipse
-                ellipse = cv2.fitEllipse(contour)
-                (center, axes, angle) = ellipse
-                
-                # Extract the lengths of the semi-major and semi-minor axes
-                major_axis, minor_axis = max(axes), min(axes)
-                
-                # Calculate the eccentricity using the formula: e = sqrt(1 - (b^2 / a^2))
-                eccentricity = np.sqrt(1 - (minor_axis**2 / major_axis**2))
-                eccentricities.append(eccentricity)
-        
-        return np.mean(eccentricities)
+        if not regions:  # If no regions found
+            return 0.0
+            
+        # Calculate mean eccentricity across all regions
+        eccentricities = [region.eccentricity for region in regions]
+        return float(np.mean(eccentricities))
     
     def _compute_Eucledian_distance_transform(self):
         """Compute the Euclidean distance transform of a binary mask.
@@ -310,14 +262,15 @@ class CellFeatures:
                     the Euclidean distance to the nearest non-zero pixel
         """
         # Ensure the image is binary
-        binary_mask = (self.image > 0).astype(np.uint8)
+        binary_mask = (self.segmentation_mask > 0).astype(np.uint8)
         
-        # Compute the distance transform
-        dist_transform = cv2.distanceTransform(binary_mask, cv2.DIST_L2, cv2.DIST_MASK_PRECISE)
+        # Compute the distance transform using scikit-image
+        from scipy.ndimage import distance_transform_edt
+        dist_transform = distance_transform_edt(binary_mask)
         
         return dist_transform
     
-    def _compute_fluor_localization(self):
+    def _compute_intensity_localization(self):
         """ Compute localization of fluor using Eucledian distance transformation and fluor intensity"""
         # compute EDT of mask
         edt = self._compute_Eucledian_distance_transform()
@@ -385,10 +338,10 @@ class CellFeatures:
         """Compute all features."""
         # Compute intensity features
         self.intensity_features = IntensityFeatures(
-            mean=float(np.mean(self.image)),
-            std=self._compute_std_dev(),
-            min=float(np.min(self.image)),
-            max=float(np.max(self.image)),
+            mean_intensity=float(np.mean(self.image)),
+            std_dev=float(np.std(self.image)),
+            min_intensity=float(np.min(self.image)),
+            max_intensity=float(np.max(self.image)),
             kurtosis=self._compute_kurtosis(),
             skewness=self._compute_skewness(),
             spectral_entropy=self._compute_spectral_entropy(),
@@ -404,19 +357,20 @@ class CellFeatures:
             entropy=self._compute_spectral_entropy(),  # Note: This could be redundant
             homogeneity=homogeneity,
             dissimilarity=dissimilarity,
-            texture_mean=self._compute_texture_features()
+            texture=self._compute_texture_features()
         )
         
         if self.segmentation_mask is not None:
-            masked_intensity, area = self._compute_area()
+            masked_intensity, masked_area = self._compute_area()
             perimeter, area, ratio = self._compute_perimeter_area_ratio()
             self.morphology_features = MorphologyFeatures(
                 area=area,
                 perimeter=perimeter,
                 perimeter_area_ratio=ratio,
                 eccentricity=self._compute_nucleus_eccentricity(),
-                fluor_localization=self._compute_fluor_localization(),
-                masked_intensity=masked_intensity
+                intensity_localization=self._compute_intensity_localization(),
+                masked_intensity=masked_intensity,
+                masked_area=masked_area
             )
             
             zernike = self._compute_zernike_moments()
