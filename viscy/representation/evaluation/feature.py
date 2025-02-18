@@ -258,6 +258,7 @@ class MorphologyFeatures(TypedDict):
         perimeter, area, ratio = self._compute_perimeter_area_ratio()
         masked_intensity, area_value = self._compute_area()
         return {
+            "masked_area": area_value,
             "area": area,
             "perimeter": perimeter,
             "perimeter_area_ratio": ratio,
