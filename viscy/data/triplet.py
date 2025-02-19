@@ -14,7 +14,16 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
-INDEX_COLUMNS = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+INDEX_COLUMNS = [
+    "fov_name",
+    "track_id",
+    "t",
+    "id",
+    "parent_track_id",
+    "parent_id",
+    "y",
+    "x",
+]
 
 
 def _scatter_channels(
