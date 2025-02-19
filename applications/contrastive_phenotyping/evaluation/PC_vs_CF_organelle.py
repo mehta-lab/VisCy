@@ -37,8 +37,8 @@ source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
 seg_channel = ["nuclei_prediction_labels_labels"]
 z_range = (16, 21)
 normalizations = None
-# fov_name = "/B/1/000000"
-# track_id = 74
+# fov_name = "/B/2/000000"
+# track_id = 24
 
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
@@ -75,26 +75,26 @@ features = features[features["fov_name"].str.startswith(("/C/2/000000", "/B/3/00
 feature_columns = {
     'basic_features': [
         ('Mean Intensity', ['Phase', 'Fluor']),
-        ('Standard Deviation', ['Phase', 'Fluor']),
+        ('Std Dev', ['Phase', 'Fluor']),
         ('Kurtosis', ['Phase', 'Fluor']),
         ('Skewness', ['Phase', 'Fluor']),
         ('Entropy', ['Phase', 'Fluor']),
-        ('IQR', ['Phase', 'Fluor']),
+        ('Interquartile Range', ['Phase', 'Fluor']),
         ('Dissimilarity', ['Phase', 'Fluor']),
         ('Contrast', ['Phase', 'Fluor']),
-        ('texture', ['Phase', 'Fluor']),
+        ('Texture', ['Phase', 'Fluor']),
         ('Weighted Intensity Gradient', ['Phase', 'Fluor']),
         ('Radial Intensity Gradient', ['Phase', 'Fluor']),
-        ('Zernike moment std', ['Phase', 'Fluor']),
-        ('Zernike moment mean', ['Phase', 'Fluor']),
-        ('Intensity localization', ['Phase','Fluor']),
+        ('Zernike Moment Std', ['Phase', 'Fluor']),
+        ('Zernike Moment Mean', ['Phase', 'Fluor']),
+        ('Intensity Localization', ['Phase','Fluor']),
     ],
     'organelle_features': [
         'Fluor Area',
-        'Fluor masked intensity',
+        'Fluor Masked Intensity',
     ],
     'nuclear_features': [
-        'Nuclear area',
+        'Nuclear Area',
         'Perimeter',
         'Perimeter area ratio',
         'Nucleus eccentricity',
@@ -162,6 +162,8 @@ for fov_name in unique_fov_names:
         # fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
         nucl_mask = seg_mask[:, 0, 0]
 
+        # find the minimum time point
+        t_min = np.min(track_subdf["t"])
         for t in range(phase.shape[0]):
 
             # Basic statistical features for both channels
@@ -174,7 +176,7 @@ for fov_name in unique_fov_names:
                 'std_dev': PF['std_dev'],
                 'kurtosis': PF['kurtosis'],
                 'skewness': PF['skewness'],
-                'iqr': PF['iqr'],
+                'interquartile_range': PF['iqr'],
                 'entropy': PF['spectral_entropy'],
                 'dissimilarity': PF['dissimilarity'],
                 'contrast': PF['contrast'],
@@ -194,7 +196,7 @@ for fov_name in unique_fov_names:
                 'std_dev': FF['std_dev'],
                 'kurtosis': FF['kurtosis'],
                 'skewness': FF['skewness'],
-                'iqr': FF['iqr'],
+                'interquartile_range': FF['iqr'],
                 'entropy': FF['spectral_entropy'],
                 'contrast': FF['contrast'],
                 'dissimilarity': FF['dissimilarity'],
@@ -251,14 +253,14 @@ for fov_name in unique_fov_names:
                 **mask_feature_mapping,
             }
 
-            # Update features dataframe using the dictionary
+            # update the features dataframe
             for feature_name, value in feature_values.items():
                 features.loc[
-                    (features["fov_name"] == fov_name)
-                    & (features["track_id"] == track_id)
-                    & (features["t"] == t),
+                    (features["fov_name"] == fov_name) & 
+                    (features["track_id"] == track_id) & 
+                    (features["t"] == t_min+t),
                     feature_name
-                ] = value
+                ] = value[0]
 
         # iteration_count += 1
         print(f"Processed {fov_name}+{track_id}")
