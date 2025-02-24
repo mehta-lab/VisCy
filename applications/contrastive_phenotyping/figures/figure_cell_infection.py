@@ -12,10 +12,10 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
+from viscy.representation.evaluation import dataset_of_tracks
 from viscy.representation.evaluation.dimensionality_reduction import compute_phate
 
 # %% Paths and parameters.
-
 
 features_path = Path(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
@@ -59,6 +59,8 @@ infection = load_annotation(
     "infection_state",
     {0:"background", 1: "uninfected", 2: "infected"},
 )
+data_path_Feb = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr")
+tracks_path_Feb = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr")
 
 # %% filter background class from the data
 
@@ -81,11 +83,15 @@ phate2_npy_filtered = phate2_npy[infection_npy != 0]
 fov_name_list = features["fov_name"].values
 fov_name_list_filtered = fov_name_list[infection_npy != 0]
 
+track_id_list = features["track_id"].values
+track_id_list_filtered = track_id_list[infection_npy != 0]
+
 data = pd.DataFrame(
     {
         "infection": infection_npy_filtered,
         "time": time_npy_filtered,
         "fov_name": fov_name_list_filtered,
+        "track_id": track_id_list_filtered,
         "PHATE1": phate1_npy_filtered,
         "PHATE2": phate2_npy_filtered,
     }
@@ -116,6 +122,7 @@ x_train = data_train_val.drop(
     columns=[
         "infection",
         "fov_name",
+        "track_id",
         "time",
         "PHATE1",
         "PHATE2",
@@ -132,6 +139,7 @@ x_test = data_test.drop(
     columns=[
         "infection",
         "fov_name",
+        "track_id",
         "time",
         "PHATE1",
         "PHATE2",
@@ -203,6 +211,12 @@ for time in time_points_test:
 features_path = Path(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/2024_11_07_NTXent_phase_sensor/sensor_phase_160patch_98ckpt_rev5.zarr"
 )
+data_path_mantis = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr"
+)
+tracks_path_mantis = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
+)
 
 embedding_dataset = read_embedding_dataset(features_path)
 embedding_dataset
@@ -214,6 +228,7 @@ mantis_features = embedding_dataset["features"]
 # add time and well info into dataframe
 mantis_time_npy = mantis_features["t"].values
 mantis_fov_npy = mantis_features["fov_name"].values
+mantis_track_id_npy = mantis_features["track_id"].values
 mantis_phate1_npy = mantis_features["PHATE1"].values
 mantis_phate2_npy = mantis_features["PHATE2"].values
 
@@ -221,6 +236,7 @@ mantis_data = pd.DataFrame(
     {
         "time": mantis_time_npy,
         "fov_name": mantis_fov_npy,
+        "track_id": mantis_track_id_npy,
         "PHATE1": mantis_phate1_npy,
         "PHATE2": mantis_phate2_npy,
     }
@@ -243,6 +259,7 @@ mantis_pred = clf.predict(
         columns=[
             "fov_name",
             "time",
+            "track_id",
             "PHATE1",
             "PHATE2",
         ]
@@ -338,27 +355,143 @@ plt.savefig(
     format="svg",
 )
 
-# %% appendix video for infection dynamics umap, Feb test data, colored by human revised annotation
+# %% appendix video for infection dynamics phatemap, Feb test data, colored by human revised annotation
+# add image patches of one track to the phatemap
+
+fov_name_mock = "/B/3/9"
+track_id_mock = [[100]]
+fov_name_inf = "/B/4/9"
+track_id_inf = [[44]]
+z_range = (24,29)
+source_channel = ["Phase3D", "RFP"]
+
+all_whole = []  # Initialize empty list to store arrays
+for i, no_labels in enumerate(track_id_mock):
+    prediction_dataset = dataset_of_tracks(
+        data_path_Feb,
+        tracks_path_Feb,
+        [fov_name_mock],
+        track_id_mock[i],
+        z_range=z_range,
+        source_channel=source_channel,
+        initial_yx_patch_size=(128,128),
+        final_yx_patch_size=(128,128),
+    )
+    whole = np.stack([p["anchor"] for p in prediction_dataset])
+    all_whole.append(whole)  # Add current whole array to list
+
+# Concatenate all arrays along first dimension
+whole_combined_mock = np.concatenate(all_whole, axis=0)
+
+phase_mock = whole_combined_mock[:, 0, 2]
+fluor_mock = np.max(whole_combined_mock[:, 1], axis=1)
+
+all_whole = []  # Initialize empty list to store arrays
+for i, no_labels in enumerate(track_id_inf):
+    prediction_dataset = dataset_of_tracks(
+        data_path_Feb,
+        tracks_path_Feb,
+        [fov_name_inf],
+        track_id_inf[i],
+        z_range=z_range,
+        source_channel=source_channel,
+        initial_yx_patch_size=(128,128),
+        final_yx_patch_size=(128,128),
+    )
+    whole = np.stack([p["anchor"] for p in prediction_dataset])
+    all_whole.append(whole)  # Add current whole array to list
+
+# Concatenate all arrays along first dimension
+whole_combined_inf = np.concatenate(all_whole, axis=0)
+
+phase_inf = whole_combined_inf[:, 0, 2]
+fluor_inf = np.max(whole_combined_inf[:, 1], axis=1)
 
 for time in range(48):
     plt.clf()
+    # Create figure with 1x3 layout (scatterplot on left, 2x2 image grid on right)
+    fig = plt.figure(figsize=(16, 8))  # Reduced overall width from 20 to 16
+    gs = fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], height_ratios=[1, 1], 
+                         wspace=0.05,  # Reduced horizontal spacing between subplots
+                         hspace=0.2)   # Reduced vertical spacing between subplots
+    
+    # PHATE scatter plot (spans both rows on the left)
+    ax1 = fig.add_subplot(gs[:, 0])
+    # Background scatter plot with more transparency
     sns.scatterplot(
         data=data_test[(data_test["time"] == time)],
         x="PHATE1",
         y="PHATE2",
         hue="infection",
-        palette={1: "steelblue", 2: "orangered"},
+        palette={1: "steelblue", 2: "orange"},
         hue_order=[1, 2],
-        s=20,
-        alpha=0.8,
+        s=80,
+        alpha=0.3,  # Increased transparency for background points
+        ax=ax1
     )
-    handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI")
-    plt.ylim(-0.05, 0.03)
-    plt.xlim(-0.05, 0.04)
+    
+    # Highlight tracks with larger markers
+    for fov_name, track_ids in [(fov_name_mock, track_id_mock), (fov_name_inf, track_id_inf)]:
+        highlight_data = data_test[
+            (data_test["time"] == time) & 
+            (data_test["fov_name"] == fov_name) & 
+            (data_test["track_id"].isin([item for sublist in track_ids for item in sublist] if isinstance(track_ids[0], list) else track_ids))
+        ]
+        if not highlight_data.empty:
+            # Use the same color as the original points but larger size
+            ax1.scatter(
+                highlight_data["PHATE1"],
+                highlight_data["PHATE2"],
+                s=400,  # Increased size
+                c=["steelblue" if pred == 1 else "orange" for pred in highlight_data["infection"]],
+                alpha=1.0,  # Full opacity for highlighted points
+                edgecolor="black",
+                linewidth=2,
+                zorder=5
+            )
+    
+    handles, _ = ax1.get_legend_handles_labels()
+    ax1.legend(handles=handles, labels=["uninfected", "infected"], fontsize=20)
+    ax1.set_ylim(-0.05, 0.05)
+    ax1.set_xlim(-0.05, 0.05)
+    ax1.tick_params(axis='both', labelsize=18)
+    ax1.set_xlabel('PHATE1', fontsize=20)
+    ax1.set_ylabel('PHATE2', fontsize=20)
+    
+    # Mock condition images
+    # Phase image (top middle)
+    ax2 = fig.add_subplot(gs[0, 1])
+    if time < len(phase_mock):
+        ax2.imshow(phase_mock[time], cmap='gray')
+    ax2.set_title('Mock Phase', fontsize=20, pad=5)  # Reduced padding
+    ax2.axis('off')
+    
+    # Fluorescence image (top right)
+    ax3 = fig.add_subplot(gs[0, 2])
+    if time < len(fluor_mock):
+        ax3.imshow(fluor_mock[time], cmap='gray')
+    ax3.set_title('Mock sensor', fontsize=20, pad=5)  # Reduced padding
+    ax3.axis('off')
+    
+    # Infected condition images
+    # Phase image (bottom middle)
+    ax4 = fig.add_subplot(gs[1, 1])
+    if time < len(phase_inf):
+        ax4.imshow(phase_inf[time], cmap='gray')
+    ax4.set_title('Infected Phase', fontsize=20, pad=5)  # Reduced padding
+    ax4.axis('off')
+    
+    # Fluorescence image (bottom right)
+    ax5 = fig.add_subplot(gs[1, 2])
+    if time < len(fluor_inf):
+        ax5.imshow(fluor_inf[time], cmap='gray')
+    ax5.set_title('Infected sensor', fontsize=20, pad=5)  # Reduced padding
+    ax5.axis('off')
+    
+    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI", fontsize=20)
+    plt.tight_layout()
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_true/phate_feb_true_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_true_wImages/phate_feb_true_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
@@ -369,6 +502,15 @@ for time in range(48):
 
 for time in range(48):
     plt.clf()
+    # Create figure with 1x3 layout (scatterplot on left, 2x2 image grid on right)
+    fig = plt.figure(figsize=(16, 8))  # Reduced overall width from 20 to 16
+    gs = fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], height_ratios=[1, 1], 
+                         wspace=0.05,  # Reduced horizontal spacing between subplots
+                         hspace=0.2)   # Reduced vertical spacing between subplots
+    
+    # PHATE scatter plot (spans both rows on the left)
+    ax1 = fig.add_subplot(gs[:, 0])
+    # Background scatter plot with more transparency
     sns.scatterplot(
         data=data_test[(data_test["time"] == time)],
         x="PHATE1",
@@ -376,16 +518,73 @@ for time in range(48):
         hue="predicted_infection",
         palette={1: "blue", 2: "red"},
         hue_order=[1, 2],
-        s=20,
-        alpha=0.8,
+        s=80,
+        alpha=0.3,  # Increased transparency for background points
+        ax=ax1
     )
-    handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI")
-    plt.ylim(-0.05, 0.03)
-    plt.xlim(-0.05, 0.03)
+    
+    # Highlight tracks with larger markers
+    for fov_name, track_ids in [(fov_name_mock, track_id_mock), (fov_name_inf, track_id_inf)]:
+        highlight_data = data_test[
+            (data_test["time"] == time) & 
+            (data_test["fov_name"] == fov_name) & 
+            (data_test["track_id"].isin([item for sublist in track_ids for item in sublist] if isinstance(track_ids[0], list) else track_ids))
+        ]
+        if not highlight_data.empty:
+            # Use the same color as the original points but larger size
+            ax1.scatter(
+                highlight_data["PHATE1"],
+                highlight_data["PHATE2"],
+                s=400,  # Increased size
+                c=["blue" if pred == 1 else "red" for pred in highlight_data["predicted_infection"]],
+                alpha=1.0,  # Full opacity for highlighted points
+                edgecolor="black",
+                linewidth=2,
+                zorder=5
+            )
+    
+    handles, _ = ax1.get_legend_handles_labels()
+    ax1.legend(handles=handles, labels=["uninfected", "infected"], fontsize=20)
+    ax1.set_ylim(-0.05, 0.03)
+    ax1.set_xlim(-0.05, 0.03)
+    ax1.tick_params(axis='both', labelsize=18)
+    ax1.set_xlabel('PHATE1', fontsize=20)
+    ax1.set_ylabel('PHATE2', fontsize=20)
+    
+    # Mock condition images
+    # Phase image (top middle)
+    ax2 = fig.add_subplot(gs[0, 1])
+    if time < len(phase_mock):
+        ax2.imshow(phase_mock[time], cmap='gray')
+    ax2.set_title('Mock Phase', fontsize=20, pad=5)  # Reduced padding
+    ax2.axis('off')
+    
+    # Fluorescence image (top right)
+    ax3 = fig.add_subplot(gs[0, 2])
+    if time < len(fluor_mock):
+        ax3.imshow(fluor_mock[time], cmap='gray')
+    ax3.set_title('Mock sensor', fontsize=20, pad=5)  # Reduced padding
+    ax3.axis('off')
+    
+    # Infected condition images
+    # Phase image (bottom middle)
+    ax4 = fig.add_subplot(gs[1, 1])
+    if time < len(phase_inf):
+        ax4.imshow(phase_inf[time], cmap='gray')
+    ax4.set_title('Infected Phase', fontsize=20, pad=5)  # Reduced padding
+    ax4.axis('off')
+    
+    # Fluorescence image (bottom right)
+    ax5 = fig.add_subplot(gs[1, 2])
+    if time < len(fluor_inf):
+        ax5.imshow(fluor_inf[time], cmap='gray')
+    ax5.set_title('Infected sensor', fontsize=20, pad=5)  # Reduced padding
+    ax5.axis('off')
+    
+    plt.suptitle(f"Time: {(time*0.5+3):.2f} HPI", fontsize=20)
+    plt.tight_layout()
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_test/phate_feb_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Feb_test_wImages/phate_feb_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
@@ -393,9 +592,68 @@ for time in range(48):
     )
 
 # %% appendix video for infection dynamics umap, mantis data, colored by predicted infection
+# add image patch to the side of the plot and highlight the scatter point in phatemap over time
+
+fov_name_mock = "/B/3/000000"
+track_id_mock = [[130],[131],[132]]
+fov_name_inf = "/C/2/000000"
+track_id_inf = [[110],[112],[114],[116]]
+z_range = (16, 21)
+source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
+
+all_whole = []  # Initialize empty list to store arrays
+for i, no_labels in enumerate(track_id_mock):
+    prediction_dataset = dataset_of_tracks(
+        data_path_mantis,
+        tracks_path_mantis,
+        [fov_name_mock],
+        track_id_mock[i],
+        z_range=z_range,
+        source_channel=source_channel,
+        initial_yx_patch_size=(192,192),
+        final_yx_patch_size=(192,192),
+    )
+    whole = np.stack([p["anchor"] for p in prediction_dataset])
+    all_whole.append(whole)  # Add current whole array to list
+
+# Concatenate all arrays along first dimension
+whole_combined_mock = np.concatenate(all_whole, axis=0)
+
+phase_mock = whole_combined_mock[:, 0, 2]
+fluor_mock = np.max(whole_combined_mock[:, 1], axis=1)
+
+all_whole = []  # Initialize empty list to store arrays
+for i, no_labels in enumerate(track_id_inf):
+    prediction_dataset = dataset_of_tracks(
+        data_path_mantis,
+        tracks_path_mantis,
+        [fov_name_inf],
+        track_id_inf[i],
+        z_range=z_range,
+        source_channel=source_channel,
+        initial_yx_patch_size=(192,192),
+        final_yx_patch_size=(192,192),
+    )
+    whole = np.stack([p["anchor"] for p in prediction_dataset])
+    all_whole.append(whole)  # Add current whole array to list
+
+# Concatenate all arrays along first dimension
+whole_combined_inf = np.concatenate(all_whole, axis=0)
+
+phase_inf = whole_combined_inf[:, 0, 2]
+fluor_inf = np.max(whole_combined_inf[:, 1], axis=1)
 
 for time in range(len(time_points_mantis)):
     plt.clf()
+    # Create figure with 1x3 layout (scatterplot on left, 2x2 image grid on right)
+    fig = plt.figure(figsize=(16, 8))  # Reduced overall width from 20 to 16
+    gs = fig.add_gridspec(2, 3, width_ratios=[2, 1, 1], height_ratios=[1, 1], 
+                         wspace=0.05,  # Reduced horizontal spacing between subplots
+                         hspace=0.2)   # Reduced vertical spacing between subplots
+    
+    # PHATE scatter plot (spans both rows on the left)
+    ax1 = fig.add_subplot(gs[:, 0])
+    # Background scatter plot with more transparency
     sns.scatterplot(
         data=mantis_data[(mantis_data["time"] == time)],
         x="PHATE1",
@@ -403,20 +661,79 @@ for time in range(len(time_points_mantis)):
         hue="predicted_infection",
         palette={1: "blue", 2: "red"},
         hue_order=[1, 2],
-        s=20,
-        alpha=0.8,
+        s=80,
+        alpha=0.3,  # Increased transparency for background points
+        ax=ax1
     )
-    handles, _ = plt.gca().get_legend_handles_labels()
-    plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {(time*0.167+4):.2f} HPI")
-    plt.ylim(-0.04, 0.04)
-    plt.xlim(-0.04, 0.04)
+    
+    # Highlight tracks with larger markers
+    for fov_name, track_ids in [(fov_name_mock, track_id_mock), (fov_name_inf, track_id_inf)]:
+        highlight_data = mantis_data[
+            (mantis_data["time"] == time) & 
+            (mantis_data["fov_name"] == fov_name) & 
+            (mantis_data["track_id"].isin([item for sublist in track_ids for item in sublist] if isinstance(track_ids[0], list) else track_ids))
+        ]
+        if not highlight_data.empty:
+            # Use the same color as the original points but larger size
+            ax1.scatter(
+                highlight_data["PHATE1"],
+                highlight_data["PHATE2"],
+                s=400,  # Increased size
+                c=["blue" if pred == 1 else "red" for pred in highlight_data["predicted_infection"]],
+                alpha=1.0,  # Full opacity for highlighted points
+                edgecolor="black",
+                linewidth=2,
+                zorder=5
+            )
+    
+    handles, _ = ax1.get_legend_handles_labels()
+    ax1.legend(handles=handles, labels=["uninfected", "infected"], fontsize=20)
+    ax1.set_ylim(-0.04, 0.04)
+    ax1.set_xlim(-0.04, 0.04)
+    ax1.tick_params(axis='both', labelsize=18)
+    ax1.set_xlabel('PHATE1', fontsize=20)
+    ax1.set_ylabel('PHATE2', fontsize=20)
+    
+    # Mock condition images
+    # Phase image (top middle)
+    ax2 = fig.add_subplot(gs[0, 1])
+    if time < len(phase_mock):
+        ax2.imshow(phase_mock[time], cmap='gray')
+    ax2.set_title('Mock Phase', fontsize=20, pad=5)  # Reduced padding
+    ax2.axis('off')
+    
+    # Fluorescence image (top right)
+    ax3 = fig.add_subplot(gs[0, 2])
+    if time < len(fluor_mock):
+        ax3.imshow(fluor_mock[time], cmap='gray')
+    ax3.set_title('Mock SEC61', fontsize=20, pad=5)  # Reduced padding
+    ax3.axis('off')
+    
+    # Infected condition images
+    # Phase image (bottom middle)
+    ax4 = fig.add_subplot(gs[1, 1])
+    if time < len(phase_inf):
+        ax4.imshow(phase_inf[time], cmap='gray')
+    ax4.set_title('Infected Phase', fontsize=20, pad=5)  # Reduced padding
+    ax4.axis('off')
+    
+    # Fluorescence image (bottom right)
+    ax5 = fig.add_subplot(gs[1, 2])
+    if time < len(fluor_inf):
+        ax5.imshow(fluor_inf[time], cmap='gray')
+    ax5.set_title('Infected SEC61', fontsize=20, pad=5)  # Reduced padding
+    ax5.axis('off')
+    
+    plt.suptitle(f"Time: {(time*0.167+4):.2f} HPI", fontsize=20)
+    plt.tight_layout()
     plt.savefig(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Mantis/phate_mantis_predicted_infection_"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/video/Phate_Mantis_wImage/phate_mantis_predicted_infection_"
         + str(time).zfill(3)
         + ".png",
         format="png",
         dpi=300,
+        bbox_inches='tight'
     )
+    plt.close()
 
 # %% 
