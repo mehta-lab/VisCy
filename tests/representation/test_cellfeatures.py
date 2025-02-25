@@ -1,9 +1,4 @@
-import sys
-from pathlib import Path
 
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
-
-import pytest
 import numpy as np
 from viscy.representation.evaluation.feature import CellFeatures
 
@@ -27,7 +22,7 @@ class TestCellFeatures:
         """
         return np.random.uniform(min_val, max_val, size).astype(np.int32)
     
-    def create_binary_image(self, size=(100, 100), threshold=128):
+    def create_binary_image(self, size=(100, 100)):
         """
         Create a binary image
         """
