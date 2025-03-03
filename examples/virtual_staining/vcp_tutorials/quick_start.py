@@ -57,7 +57,7 @@ Assuming a Unix-like shell.
 
 # %%
 # Validate installation
-# viscy --help
+# !viscy --help
 
 # %%
 # Download the example dataset
