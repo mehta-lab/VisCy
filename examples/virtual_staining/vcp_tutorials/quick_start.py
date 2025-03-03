@@ -209,15 +209,16 @@ fluor_membrane = fluor_store[0][0, 2, 0]  # (t,c,z,y,x)
 # Plot
 import matplotlib.pyplot as plt
 import numpy as np
-from skimage.exposure import rescale_intensity
 from cmap import Colormap
+from skimage.exposure import rescale_intensity
 
 
 def render_rgb(image: np.ndarray, colormap: Colormap):
     image = rescale_intensity(image, out_range=(0, 1))
     image = colormap(image)
     return image
-  
+
+
 vs_nucleus_rgb = render_rgb(vs_nucleus, Colormap("bop_blue"))
 vs_membrane_rgb = render_rgb(vs_membrane, Colormap("bop_orange"))
 merged_vs = (vs_nucleus_rgb + vs_membrane_rgb).clip(0, 1)
