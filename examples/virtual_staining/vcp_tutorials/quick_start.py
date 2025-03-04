@@ -48,6 +48,10 @@ about how the dataset and model were generated.
 The commands below will install the required packages and download the example dataset and model checkpoint.
 It may take a few minutes to download all the files.
 Assuming a Unix-like shell.
+
+## Setup Google Colab
+If you are using Google Colab,
+choose the 'T4' GPU runtime for faster execution (CPU is also supported).
 """
 
 # %%
