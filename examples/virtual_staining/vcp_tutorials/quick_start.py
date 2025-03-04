@@ -138,23 +138,37 @@ data_module = HCSDataModule(
 )
 
 # %%
-# Setup the model.
-# Dictionary that specifies key parameters of the model.
-config_VSCyto2D = {
-    "in_channels": 1,
-    "out_channels": 2,
-    "encoder_blocks": [3, 3, 9, 3],
-    "dims": [96, 192, 384, 768],
-    "decoder_conv_blocks": 2,
-    "stem_kernel_size": [1, 2, 2],
-    "in_stack_depth": 1,
-    "pretraining": False,
-}
+# Load the VSCyto2D model from the downloaded checkpoint
+# VSCyto2D is fine-tuned from a FCMAE-pretrained UNeXt2 model.
+# See this module for options to configure the model:
+from viscy.unet.networks.fcmae import FullyConvolutionalMAE
+# ?FullyConvolutionalMAE
 
+# %%
 model_VSCyto2D = FcmaeUNet.load_from_checkpoint(
-    model_ckpt_path, model_config=config_VSCyto2D
+    model_ckpt_path,
+    model_config={
+        # number of input channels
+        # must match the number of channels in the input data
+        "in_channels": 1,
+        # number of output channels
+        # must match the number of target channels in the data module
+        "out_channels": 2,
+        # number of ConvNeXt v2 blocks in each stage of the encoder
+        "encoder_blocks": [3, 3, 9, 3],
+        # feature map channels in each stage of the encoder
+        "dims": [96, 192, 384, 768],
+        # number of ConvNeXt v2 blocks in each stage of the decoder
+        "decoder_conv_blocks": 2,
+        # kernel size in the stem layer
+        "stem_kernel_size": [1, 2, 2],
+        # axial size of the input image
+        # must match the Z-window size in the data module
+        "in_stack_depth": 1,
+        # whether to perform masking (for FCMAE pre-training)
+        "pretraining": False,
+    },
 )
-model_VSCyto2D = model_VSCyto2D.eval()
 
 # %%
 # Visualize the model graph
