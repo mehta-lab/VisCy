@@ -1,7 +1,7 @@
 """
-This module enables evaluation of learned representations using annotations, such as 
-* cell division labels, 
-* infection state labels, 
+This module enables evaluation of learned representations using annotations, such as
+* cell division labels,
+* infection state labels,
 * labels predicted using supervised classifiers,
 * computed image features.
 
@@ -11,7 +11,7 @@ Following evaluation methods are implemented:
 * Correlation between embeddings and computed features using rank correlation.
 
 TODO: consider time- and condition-dependent clustering and UMAP visualization of patches developed earlier:
-https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py 
+https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 
 import pandas as pd
