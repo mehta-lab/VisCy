@@ -142,10 +142,12 @@ data_module = HCSDataModule(
 # VSCyto2D is fine-tuned from a FCMAE-pretrained UNeXt2 model.
 # See this module for options to configure the model:
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
+
 # ?FullyConvolutionalMAE
 
 # %%
-model_VSCyto2D = FcmaeUNet.load_from_checkpoint(
+vs_cyto_2d = FcmaeUNet.load_from_checkpoint(
+    # checkpoint path
     model_ckpt_path,
     model_config={
         # number of input channels
@@ -173,27 +175,31 @@ model_VSCyto2D = FcmaeUNet.load_from_checkpoint(
 # %%
 # Visualize the model graph
 model_graph = draw_graph(
-    model_VSCyto2D,
-    (model_VSCyto2D.example_input_array),
+    vs_cyto_2d,
+    (vs_cyto_2d.example_input_array),
     graph_name="VSCyto2D",
     roll=True,
     depth=3,
     expand_nested=True,
 )
 
-fcmae = model_graph.visual_graph
-fcmae
+model_graph.visual_graph
 
 # %%
-# Setup the Trainer
+# Setup the trainer for prediction
+# The trainer can be further configured to better utilize the available hardware,
+# For example using GPUs and half precision.
+# Callbacks can also be used to customize logging and prediction writing.
+# See the API documentation for more details:
+# ?VisCyTrainer
+
+# %%
+# Initialize the trainer
+# The prediction writer callback will save the predictions to an OME-Zarr store
 trainer = VisCyTrainer(callbacks=[HCSPredictionWriter(output_path)])
 
-# Start the predictions
-trainer.predict(
-    model=model_VSCyto2D,
-    datamodule=data_module,
-    return_predictions=False,
-)
+# Run prediction
+trainer.predict(model=vs_cyto_2d, datamodule=data_module, return_predictions=False)
 
 # %% [markdown]
 """
