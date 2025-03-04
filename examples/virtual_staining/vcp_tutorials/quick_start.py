@@ -9,7 +9,7 @@
 """
 # Learning Goals
 
-* Download the VSCyto2D model.
+* Download the VSCyto2D model and an example dataset.
 * Predict nuclei and plasma membrane from quantitative phase.
 """
 
@@ -30,6 +30,13 @@ The VSCyto2D model is a 2D U-Net that predicts and cell nuclei and plasma membra
 from quantitative label-free images such as quantitative phase, Zernike phase, and brightfield.
 It has been trained on A549, HEK293T, and BJ-5ta cells.
 
+Alternative models are optimized for different sample types and imaging conditions:
+
+* [VSCyto3D](https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto3D):
+3D UNeXt2 model for predicting cell nuclei and plasma membrane from high-resolution volumetric images.
+* [VSNeuromast](https://public.czbiohub.org/comp.micro/viscy/VS_models/VSNeuromast):
+3D UNeXt2 model for predicting cell nuclei and plasma membrane in zebrafish neuromasts.
+
 ## Example Dataset
 
 The example dataset contains quantitative phase and paired nuclei and plasma membrane fluorescence images of A549 cells.
@@ -47,11 +54,16 @@ about how the dataset and model were generated.
 
 The commands below will install the required packages and download the example dataset and model checkpoint.
 It may take a few minutes to download all the files.
-Assuming a Unix-like shell.
 
 ## Setup Google Colab
+
 If you are using Google Colab,
 choose the 'T4' GPU runtime for faster execution (CPU is also supported).
+
+## Setup Local Environment
+
+The commands below assume a Unix-like shell with `wget` installed.
+On Windows, the files can be downloaded manually from the URLs.
 """
 
 # %%
@@ -239,6 +251,7 @@ def render_rgb(image: np.ndarray, colormap: Colormap):
     image = rescale_intensity(image, out_range=(0, 1))
     image = colormap(image)
     return image
+
 
 # Render the images as RGB in false colors
 vs_nucleus_rgb = render_rgb(vs_nucleus, Colormap("bop_blue"))
