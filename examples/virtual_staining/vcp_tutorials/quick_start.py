@@ -92,51 +92,51 @@ root_dir = Path()
 input_data_path = root_dir / "a549_hoechst_cellmask_test.zarr"
 # TODO: modify the path to the downloaded checkpoint
 model_ckpt_path = root_dir / "epoch=399-step=23200.ckpt"
-# TODO: modify the path
-# Zarr store to save the predictions
+# TODO: modify the path to save the predictions
 output_path = root_dir / "a549_prediction.zarr"
 # TODO: Choose an FOV
 fov = "0/0/0"
 
-input_data_path = input_data_path / fov
 
 # %%
-# Create the VSCyto2D network
-
-# Reduce the batch size if encountering out-of-memory errors
-BATCH_SIZE = 8
-# NOTE: Set the number of workers to 0 for Windows and macOS
-# since multiprocessing only works with a
-# `if __name__ == '__main__':` guard.
-# On Linux, set it to the number of CPU cores to maximize performance.
-NUM_WORKERS = 0
-phase_channel_name = "Phase3D"
-
-# %%
-# See API documentation for more details. For example:
+# Configure the data module for loading example images in prediction mode.
+# See API documentation for how to use it with a different dataset.
+# For example, View the documentation for the HCSDataModule class by running:
 # ?HCSDataModule
 
 # %%
-# Setup the data module.
+# Setup the data module to use the example dataset
 data_module = HCSDataModule(
-    data_path=input_data_path,
-    source_channel=phase_channel_name,
+    # Path to HCS or Single-FOV OME-Zarr dataset
+    data_path=input_data_path / fov,
+    # Name of the input phase channel
+    source_channel="Phase3D",
+    # Desired name of the output channels
     target_channel=["Membrane", "Nuclei"],
+    # Axial input size, 1 for 2D models
     z_window_size=1,
-    split_ratio=0.8,
-    batch_size=BATCH_SIZE,
-    num_workers=NUM_WORKERS,
+    # Batch size
+    # Adjust based on available memory (reduce if seeing OOM errors)
+    batch_size=8,
+    # Number of workers for data loading
+    # Set to 0 for Windows and macOS if running in a notebook,
+    # since multiprocessing only works with a `if __name__ == '__main__':` guard.
+    # On Linux, set it based on available CPU cores to maximize performance.
+    num_workers=4,
+    # Normalization strategy
+    # This one uses pre-computed statistics from `viscy preprocess`
+    # to subtract the median and divide by the interquartile range (IQR).
+    # It can also be replaced by other MONAI transforms.
     normalizations=[
         NormalizeSampled(
-            [phase_channel_name],
+            ["Phase3D"],
             level="fov_statistics",
             subtrahend="median",
             divisor="iqr",
         )
     ],
 )
-data_module.prepare_data()
-data_module.setup(stage="predict")
+
 # %%
 # Setup the model.
 # Dictionary that specifies key parameters of the model.
