@@ -215,21 +215,19 @@ Below we show a snapshot in the notebook.
 """
 
 # %%
-# Open the output_zarr store and inspect the output
-# Show the individual channels and the fused in a 1x3 plot
+# Read images from Zarr stores
 
-# Open the predicted data
-vs_store = open_ome_zarr(output_path / fov, mode="r")
-# Get the 2D images
-vs_nucleus = vs_store[0][0, 0, 0]  # (t,c,z,y,x)
-vs_membrane = vs_store[0][0, 1, 0]  # (t,c,z,y,x)
+# Open the prediction store and get the 2D images from 5D arrays (t,c,z,y,x)
+with open_ome_zarr(output_path / fov) as vs_store:
+    vs_nucleus = vs_store[0][0, 0, 0]
+    vs_membrane = vs_store[0][0, 1, 0]
+
 # Open the experimental fluorescence dataset
-fluor_store = open_ome_zarr(input_data_path, mode="r")
-# Get the 2D images
-# NOTE: Channel indeces hardcoded for this dataset
-fluor_nucleus = fluor_store[0][0, 1, 0]  # (t,c,z,y,x)
-fluor_membrane = fluor_store[0][0, 2, 0]  # (t,c,z,y,x)
+with open_ome_zarr(input_data_path / fov) as fluor_store:
+    fluor_nucleus = fluor_store[0][0, 1, 0]
+    fluor_membrane = fluor_store[0][0, 2, 0]
 
+# %%
 # Plot
 import matplotlib.pyplot as plt
 import numpy as np
@@ -242,7 +240,7 @@ def render_rgb(image: np.ndarray, colormap: Colormap):
     image = colormap(image)
     return image
 
-
+# Render the images as RGB in false colors
 vs_nucleus_rgb = render_rgb(vs_nucleus, Colormap("bop_blue"))
 vs_membrane_rgb = render_rgb(vs_membrane, Colormap("bop_orange"))
 merged_vs = (vs_nucleus_rgb + vs_membrane_rgb).clip(0, 1)
@@ -252,6 +250,7 @@ fluor_membrane_rgb = render_rgb(fluor_membrane, Colormap("magenta"))
 merged_fluor = (fluor_nucleus_rgb + fluor_membrane_rgb).clip(0, 1)
 
 # Plot
+# Show the individual channels and then fused in a grid
 fig, ax = plt.subplots(2, 3, figsize=(15, 10))
 
 # Virtual staining plots
@@ -273,10 +272,5 @@ ax[1, 2].set_title("Experimental Fluorescence Nuclei+Membrane")
 # turnoff axis
 for a in ax.flatten():
     a.axis("off")
-plt.margins(0, 0)
 plt.tight_layout()
 plt.show()
-
-
-vs_store.close()
-fluor_store.close()
