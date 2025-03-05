@@ -4,11 +4,13 @@
 import pandas as pd
 import seaborn as sns
 import timm
+import numpy as np
 import torch
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from pathlib import Path
+from sklearn.linear_model import LogisticRegression
 
 from viscy.data.triplet import TripletDataModule
 from viscy.transforms import ScaleIntensityRangePercentilesd
@@ -88,5 +90,66 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PCA1")
 ax.set_ylabel("PCA2")
+
+# %% compute the accuracy of the model using a linear classifier
+
+# remove rows with division = -1
+tracks = tracks[tracks["division"] != -1]
+
+# dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
+data_train_val = tracks[
+    tracks["fov_name"].str.contains("/0/0/0")
+    | tracks["fov_name"].str.contains("/0/1/0")
+    | tracks["fov_name"].str.contains("/0/2/0")
+]
+
+data_test = tracks[
+    tracks["fov_name"].str.contains("/0/3/0")
+    | tracks["fov_name"].str.contains("/0/4/0")
+]
+
+x_train = data_train_val.drop(
+    columns=[
+         "division",
+        "fov_name",
+        "t",
+        "track_id",
+        "id",
+        "parent_id",
+        "parent_track_id",
+        "pca_0",
+        "pca_1",
+    ]
+)
+y_train = data_train_val["division"]
+
+# train a logistic regression model
+clf = LogisticRegression(random_state=0).fit(x_train, y_train)
+
+# test the trained classifer on the other half of the data
+
+x_test = data_test.drop(
+    columns=[
+        "division",
+        "fov_name",
+        "t",
+        "track_id",
+        "id",
+        "parent_id",
+        "parent_track_id",
+        "pca_0",
+        "pca_1",
+    ]
+)
+y_test = data_test["division"]
+
+# predict the infection state for the testing set
+y_pred = clf.predict(x_test)
+
+# compute the accuracy of the classifier
+
+accuracy = np.mean(y_pred == y_test)
+# save the accuracy for final ploting
+print(f"Accuracy of model: {accuracy}")
 
 # %%
