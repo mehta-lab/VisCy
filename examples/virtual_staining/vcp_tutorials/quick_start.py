@@ -57,8 +57,10 @@ It may take a few minutes to download all the files.
 
 ## Setup Google Colab
 
-If you are using Google Colab,
-choose the 'T4' GPU runtime for faster execution (CPU is also supported).
+To run this quick-start guide using Google Colab,
+choose the 'T4' GPU runtime from the "Connect" dropdown menu
+in the upper-right corner of this notebook for faster execution.
+Using a GPU significantly speeds up running model inference, but CPU compute can also be used.
 
 ## Setup Local Environment
 
