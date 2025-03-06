@@ -61,7 +61,8 @@ The VSCyto2D model only requires label-free images for inference.
 To run inference on your own data,
 convert them into the OME-Zarr data format using iohub or other
 [tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
-and run pre-processing with the `viscy preprocess` CLI.
+and run [pre-processing](https://github.com/mehta-lab/VisCy/blob/main/docs/usage.md#preprocessing)
+with the `viscy preprocess` CLI.
 """
 
 # %% [markdown]
