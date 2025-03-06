@@ -32,9 +32,9 @@ used to predict cellular landmarks (e.g., nuclei and plasma membranes)
 from label-free images (e.g. quantitative phase, Zernike phase contrast, and brightfield).
 This quick-start guide focuses on the VSCyto2D model.
 
-The VSCyto2D model is a 2D U-Net that predicts and cell nuclei and plasma membrane from label-free images.
-It has been trained on A549, HEK293T, and BJ-5ta cells,
-and optimized for high-throughput screening applications.
+VSCyto2D is a 2D U-Net model that has been trained on A549, HEK293T, and BJ-5ta cells.
+This model enables users to jointly stain cell nuclei and plasma membranes from 2D label-free images
+that are commonly generated for image-based screens.
 
 Alternative models are optimized for different sample types and imaging conditions:
 
