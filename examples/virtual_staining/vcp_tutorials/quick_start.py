@@ -46,6 +46,14 @@ It has pre-computed statistics for normalization, generated using the `viscy pre
 
 Refer to our [preprint](https://doi.org/10.1101/2024.05.31.596901) for more details
 about how the dataset and model were generated.
+
+## User Data
+
+The VSCyto2D model only requires label-free images for inference.
+To run inference on your own data,
+convert them into the OME-Zarr data format using iohub or other
+[tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
+and run pre-processing with the `viscy preprocess` CLI.
 """
 
 # %% [markdown]
