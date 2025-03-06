@@ -46,7 +46,8 @@ from high-resolution volumetric images.
 
 ## Example Dataset
 
-The example dataset contains quantitative phase and paired nuclei and plasma membrane fluorescence images of A549 cells.
+The A549 example dataset used in this quick-start guide contains
+quantitative phase and paired fluorescence images of cell nuclei and plasma membrane.
 It is stored in OME-Zarr format and can be downloaded from
 [here](https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/test/a549_hoechst_cellmask_test.zarr).
 It has pre-computed statistics for normalization, generated using the `viscy preprocess` CLI.
