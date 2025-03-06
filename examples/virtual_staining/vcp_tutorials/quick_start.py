@@ -9,8 +9,9 @@
 """
 # Learning Goals
 
-* Download the VSCyto2D model and an example dataset.
-* Predict nuclei and plasma membrane from quantitative phase.
+* Download the VSCyto2D model and an example dataset containing A549 cell images.
+* Run VSCyto2D model inference for joint virtual staining of cell nuclei and plasma membrane.
+* Visualize and compare virtually and experimentally stained cells.
 """
 
 # %% [markdown]
