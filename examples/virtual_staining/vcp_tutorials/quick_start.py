@@ -27,9 +27,14 @@ Python>=3.10
 
 ## Model
 
-The VSCyto2D model is a 2D U-Net that predicts and cell nuclei and plasma membrane
-from quantitative label-free images such as quantitative phase, Zernike phase, and brightfield.
-It has been trained on A549, HEK293T, and BJ-5ta cells.
+Robust virtual staining models are a collection of models (VSCyto2D, VSCyto3D, and VSNeuromast)
+used to predict cellular landmarks (e.g., nuclei and plasma membranes)
+from label-free images (e.g. quantitative phase, Zernike phase contrast, and brightfield).
+This quick-start guide focuses on the VSCyto2D model.
+
+The VSCyto2D model is a 2D U-Net that predicts and cell nuclei and plasma membrane from label-free images.
+It has been trained on A549, HEK293T, and BJ-5ta cells,
+and optimized for high-throughput screening applications.
 
 Alternative models are optimized for different sample types and imaging conditions:
 
