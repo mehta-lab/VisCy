@@ -32,16 +32,17 @@ used to predict cellular landmarks (e.g., nuclei and plasma membranes)
 from label-free images (e.g. quantitative phase, Zernike phase contrast, and brightfield).
 This quick-start guide focuses on the VSCyto2D model.
 
-VSCyto2D is a 2D U-Net model that has been trained on A549, HEK293T, and BJ-5ta cells.
+VSCyto2D is a 2D UNeXt2 model that has been trained on A549, HEK293T, and BJ-5ta cells.
 This model enables users to jointly stain cell nuclei and plasma membranes from 2D label-free images
 that are commonly generated for image-based screens.
 
 Alternative models are optimized for different sample types and imaging conditions:
 
 * [VSCyto3D](https://public.czbiohub.org/comp.micro/viscy/VS_models/VSCyto3D):
-3D UNeXt2 model for predicting cell nuclei and plasma membrane from high-resolution volumetric images.
+3D UNeXt2 model for joint virtual staining of cell nuclei and plasma membrane
+from high-resolution volumetric images.
 * [VSNeuromast](https://public.czbiohub.org/comp.micro/viscy/VS_models/VSNeuromast):
-3D UNeXt2 model for predicting cell nuclei and plasma membrane in zebrafish neuromasts.
+3D UNeXt2 model for joint virtual staining of nuclei and plasma membrane in zebrafish neuromasts.
 
 ## Example Dataset
 
