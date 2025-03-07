@@ -121,11 +121,14 @@ from viscy.translation.engine import FcmaeUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
 
 # %%
+# NOTE: Nothing needs to be changed in this code block for the example to work.
+# If using your own data, please modify the paths below.
+
 # TODO: Set download paths, by default the working directory is used
 root_dir = Path()
-# TODO: modify the path to the downloaded dataset
+# TODO: modify the path to the input dataset
 input_data_path = root_dir / "a549_hoechst_cellmask_test.zarr"
-# TODO: modify the path to the downloaded checkpoint
+# TODO: modify the path to the model checkpoint
 model_ckpt_path = root_dir / "epoch=399-step=23200.ckpt"
 # TODO: modify the path to save the predictions
 output_path = root_dir / "a549_prediction.zarr"
