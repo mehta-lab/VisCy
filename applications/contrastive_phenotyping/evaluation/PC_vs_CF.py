@@ -14,436 +14,409 @@ import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.decomposition import PCA
+import pandas as pd
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks
-from viscy.representation.evaluation.feature import (
-    FeatureExtractor as FE,
-)
+from viscy.representation.evaluation.feature import CellFeatures
 
-# %%
+# %% function to read the embedding dataset and return the features
+
+def compute_features_and_PCA(features_path: Path, data_path: Path, tracks_path: Path, source_channel: list, seg_channel: list, z_range: tuple):
+    """
+    Read the embedding dataset and return the features and 8 PCA components
+    """
+    embedding_dataset = read_embedding_dataset(features_path)
+    embedding_dataset
+
+    # load all unprojected features:
+    features = embedding_dataset["features"]
+
+    # PCA analysis of the features
+
+    pca = PCA(n_components=8)
+    pca_features = pca.fit_transform(features.values)
+    features = (
+        features.assign_coords(PCA1=("sample", pca_features[:, 0]))
+        .assign_coords(PCA2=("sample", pca_features[:, 1]))
+        .assign_coords(PCA3=("sample", pca_features[:, 2]))
+        .assign_coords(PCA4=("sample", pca_features[:, 3]))
+        .assign_coords(PCA5=("sample", pca_features[:, 4]))
+        .assign_coords(PCA6=("sample", pca_features[:, 5]))
+        .assign_coords(PCA7=("sample", pca_features[:, 6]))
+        .assign_coords(PCA8=("sample", pca_features[:, 7]))
+        .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"], append=True)
+    )
+
+
+    # convert the xarray to dataframe structure and add columns for computed features
+    features_df = features.to_dataframe()
+    features_df = features_df.drop(columns=["features"])
+    df = features_df.drop_duplicates()
+    features = df.reset_index(drop=True)
+
+    features = features[features["fov_name"].str.startswith(("/C/2/000000", "/B/3/000000", "/C/1/000000", "/B/2/000000"))]
+
+    # Define feature categories and their corresponding column names
+    feature_columns = {
+        'basic_features': [
+            ('Mean Intensity', ['Phase', 'Fluor']),
+            ('Std Dev', ['Phase', 'Fluor']),
+            ('Kurtosis', ['Phase', 'Fluor']),
+            ('Skewness', ['Phase', 'Fluor']),
+            ('Entropy', ['Phase', 'Fluor']),
+            ('Interquartile Range', ['Phase', 'Fluor']),
+            ('Dissimilarity', ['Phase', 'Fluor']),
+            ('Contrast', ['Phase', 'Fluor']),
+            ('Texture', ['Phase', 'Fluor']),
+            ('Weighted Intensity Gradient', ['Phase', 'Fluor']),
+            ('Radial Intensity Gradient', ['Phase', 'Fluor']),
+            ('Zernike Moment Std', ['Phase', 'Fluor']),
+            ('Zernike Moment Mean', ['Phase', 'Fluor']),
+            ('Intensity Localization', ['Phase','Fluor']),
+        ],
+        'organelle_features': [
+            'Fluor Area',
+            'Fluor Masked Intensity',
+        ],
+        'nuclear_features': [
+            'Nuclear Area',
+            'Perimeter',
+            'Perimeter area ratio',
+            'Nucleus eccentricity',
+        ],
+        'dynamic_features': [
+            'Instantaneous velocity',
+        ],
+    }
+
+    # Initialize all feature columns
+    for category, feature_list in feature_columns.items():
+        if isinstance(feature_list[0], tuple):  # Handle features with multiple channels
+            for feature, channels in feature_list:
+                for channel in channels:
+                    col_name = f"{channel} {feature}"
+                    features[col_name] = np.nan
+        else:  # Handle single features
+            for feature in feature_list:
+                features[feature] = np.nan
+
+    # compute the computed features and add them to the dataset
+
+    fov_names_list = features["fov_name"].unique()
+    unique_fov_names = sorted(list(set(fov_names_list)))
+    # max_iterations = 50
+
+    for fov_name in unique_fov_names:
+        csv_files = list((Path(str(tracks_path) + str(fov_name))).glob("*.csv"))
+        tracks_df = pd.read_csv(str(csv_files[0]))
+
+        unique_track_ids = features[features["fov_name"] == fov_name]["track_id"].unique()
+        unique_track_ids = list(set(unique_track_ids))
+
+        # iteration_count = 0
+
+        for track_id in unique_track_ids:
+            # if iteration_count >= max_iterations:
+            #     break
+            track_subdf = tracks_df[tracks_df["track_id"] == track_id]
+                
+            prediction_dataset = dataset_of_tracks(
+                data_path,
+                tracks_path,
+                [fov_name],
+                [track_id],
+                z_range=z_range,
+                source_channel=source_channel,
+            )
+            track_channel = dataset_of_tracks(
+                tracks_path,
+                tracks_path,
+                [fov_name],
+                [track_id],
+                z_range=(0,1),
+                source_channel=seg_channel,
+            )
+
+            whole = np.stack([p["anchor"] for p in prediction_dataset])
+            seg_mask = np.stack([p["anchor"] for p in track_channel])
+            phase = whole[:, 0, 2]
+            # Normalize phase image to 0-255 range
+            # phase = ((phase - phase.min()) / (phase.max() - phase.min()) * 255).astype(np.uint8)
+            # Normalize fluorescence image to 0-255 range
+            fluor = np.max(whole[:, 1], axis=1)
+            # fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
+            nucl_mask = seg_mask[:, 0, 0]
+
+            # find the minimum time point
+            t_min = np.min(track_subdf["t"])
+            for t in range(phase.shape[0]):
+
+                # Basic statistical features for both channels
+                phase_features = CellFeatures(phase[t], nucl_mask[t])
+                PF = phase_features.compute_all_features()
+
+                # Get all basic statistical measures at once
+                phase_stats = {
+                    'mean_intensity': PF['mean_intensity'],
+                    'std_dev': PF['std_dev'],
+                    'kurtosis': PF['kurtosis'],
+                    'skewness': PF['skewness'],
+                    'interquartile_range': PF['iqr'],
+                    'entropy': PF['spectral_entropy'],
+                    'dissimilarity': PF['dissimilarity'],
+                    'contrast': PF['contrast'],
+                    'texture': PF['texture'],
+                    'Zernike moment std': PF['zernike_std'],
+                    'Zernike moment mean': PF['zernike_mean'],
+                    'radial_intensity_gradient': PF['radial_intensity_gradient'],
+                    'weighted_intensity_gradient': PF['weighted_intensity_gradient'],
+                    'intensity_localization': PF['intensity_localization'],
+                }
+
+                fluor_features = CellFeatures(fluor[t], nucl_mask[t])
+                FF = fluor_features.compute_all_features()
+
+                fluor_stats = {
+                    'mean_intensity': FF['mean_intensity'],
+                    'std_dev': FF['std_dev'],
+                    'kurtosis': FF['kurtosis'],
+                    'skewness': FF['skewness'],
+                    'interquartile_range': FF['iqr'],
+                    'entropy': FF['spectral_entropy'],
+                    'contrast': FF['contrast'],
+                    'dissimilarity': FF['dissimilarity'],
+                    'texture': FF['texture'],
+                    'masked_area': FF['masked_area'],
+                    'masked_intensity': FF['masked_intensity'],
+                    'weighted_intensity_gradient': FF['weighted_intensity_gradient'],
+                    'radial_intensity_gradient': FF['radial_intensity_gradient'],
+                    'Zernike moment std': FF['zernike_std'],
+                    'Zernike moment mean': FF['zernike_mean'],
+                    'intensity_localization': FF['intensity_localization'],
+                    'masked_intensity': FF['masked_intensity'],
+                    'area': FF['area'],
+                }
+
+                mask_features = CellFeatures(nucl_mask[t], nucl_mask[t])
+                MF = mask_features.compute_all_features()
+
+                mask_stats = {
+                    'perimeter': MF['perimeter'],
+                    'area': MF['area'],
+                    'eccentricity': MF['eccentricity'],
+                    'perimeter_area_ratio': MF['perimeter_area_ratio'],
+                }
+
+                # dynamic_features = DynamicFeatures(tracks_df)
+                # DF = dynamic_features.compute_all_features()
+                # dynamic_stats = {
+                #     'instantaneous_velocity': DF['instantaneous_velocity'],
+                # }
+
+                # Create dictionaries for each feature category
+                phase_feature_mapping = {
+                    f"Phase {k.replace('_', ' ').title()}": v 
+                    for k, v in phase_stats.items() 
+                }
+                
+                fluor_feature_mapping = {
+                    f"Fluor {k.replace('_', ' ').title()}": v 
+                    for k, v in fluor_stats.items() 
+                }
+                
+                mask_feature_mapping = {
+                    "Nuclear area": mask_stats['area'],
+                    "Perimeter": mask_stats['perimeter'],
+                    "Perimeter area ratio": mask_stats['perimeter_area_ratio'],
+                    "Nucleus eccentricity": mask_stats['eccentricity']
+                }
+
+                # Combine all feature dictionaries
+                feature_values = {
+                    **phase_feature_mapping,
+                    **fluor_feature_mapping,
+                    **mask_feature_mapping,
+                }
+
+                # update the features dataframe
+                for feature_name, value in feature_values.items():
+                    features.loc[
+                        (features["fov_name"] == fov_name) & 
+                        (features["track_id"] == track_id) & 
+                        (features["t"] == t_min+t),
+                        feature_name
+                    ] = value[0]
+
+            # iteration_count += 1
+            print(f"Processed {fov_name}+{track_id}")
+
+# %% save all feature dataframe to png file
+def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
+    # remove the rows with missing values
+    features = features.dropna()
+
+    # sub_features = features[features["Time"] == 20]
+    feature_df_removed = features.drop(
+        columns=["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id", "UMAP1", "UMAP2"]
+    )
+
+    # Compute correlation between PCA features and computed features
+    correlation = feature_df_removed.corr(method="spearman")
+
+    # display PCA correlation as a heatmap
+
+    plt.figure(figsize=(40, 8))
+    sns.heatmap(
+        correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"]).loc[
+            "PCA1":"PCA8", :
+        ],
+        annot=True,
+        cmap="coolwarm",
+        fmt=".2f",
+        annot_kws={'size': 12}  # Increase annotation text size
+    )
+    plt.title("Correlation between PCA features and computed features", fontsize=12)
+    plt.xlabel("Computed Features", fontsize=12)
+    plt.ylabel("PCA Features", fontsize=12)
+    plt.xticks(fontsize=12)  # Increase x-axis tick labels
+    plt.yticks(fontsize=12)  # Increase y-axis tick labels
+    plt.savefig(
+        filename,
+        dpi=300
+    )
+    plt.close()
+
+    return correlation
+
+# %% for organelle features
+
 features_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
 )
 data_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr"
 )
 tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
 )
 
-# %%
-
-source_channel = ["Phase3D", "RFP"]
-z_range = (28, 43)
+source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
+seg_channel = ["nuclei_prediction_labels_labels"]
+z_range = (16, 21)
 normalizations = None
-# fov_name = "/B/4/5"
-# track_id = 11
+# fov_name = "/B/2/000000"
+# track_id = 24
 
-embedding_dataset = read_embedding_dataset(features_path)
-embedding_dataset
-
-# load all unprojected features:
-features = embedding_dataset["features"]
-
-# %% PCA analysis of the features
-
-pca = PCA(n_components=5)
-pca_features = pca.fit_transform(features.values)
-features = (
-    features.assign_coords(PCA1=("sample", pca_features[:, 0]))
-    .assign_coords(PCA2=("sample", pca_features[:, 1]))
-    .assign_coords(PCA3=("sample", pca_features[:, 2]))
-    .assign_coords(PCA4=("sample", pca_features[:, 3]))
-    .assign_coords(PCA5=("sample", pca_features[:, 4]))
-    .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"], append=True)
-)
-
-# %% convert the xarray to dataframe structure and add columns for computed features
-features_df = features.to_dataframe()
-features_df = features_df.drop(columns=["features"])
-df = features_df.drop_duplicates()
-features = df.reset_index(drop=True)
-
-features = features[features["fov_name"].str.startswith("/B/")]
-
-features["Phase Symmetry Score"] = np.nan
-features["Fluor Symmetry Score"] = np.nan
-features["Sensor Area"] = np.nan
-features["Masked Sensor Intensity"] = np.nan
-features["Entropy Phase"] = np.nan
-features["Entropy Fluor"] = np.nan
-features["Contrast Phase"] = np.nan
-features["Dissimilarity Phase"] = np.nan
-features["Homogeneity Phase"] = np.nan
-features["Contrast Fluor"] = np.nan
-features["Dissimilarity Fluor"] = np.nan
-features["Homogeneity Fluor"] = np.nan
-features["Phase IQR"] = np.nan
-features["Fluor Mean Intensity"] = np.nan
-features["Phase Standard Deviation"] = np.nan
-features["Fluor Standard Deviation"] = np.nan
-features["Phase radial profile"] = np.nan
-features["Fluor radial profile"] = np.nan
-
-# %% compute the computed features and add them to the dataset
-
-fov_names_list = features["fov_name"].unique()
-unique_fov_names = sorted(list(set(fov_names_list)))
-
-
-for fov_name in unique_fov_names:
-
-    unique_track_ids = features[features["fov_name"] == fov_name]["track_id"].unique()
-    unique_track_ids = list(set(unique_track_ids))
-
-    for track_id in unique_track_ids:
-
-        prediction_dataset = dataset_of_tracks(
-            data_path,
-            tracks_path,
-            [fov_name],
-            [track_id],
-            source_channel=source_channel,
-        )
-
-        whole = np.stack([p["anchor"] for p in prediction_dataset])
-        phase = whole[:, 0, 3]
-        fluor = np.max(whole[:, 1], axis=1)
-
-        for t in range(phase.shape[0]):
-            # Compute Fourier descriptors for phase image
-            phase_descriptors = FE.compute_fourier_descriptors(phase[t])
-            # Analyze symmetry of phase image
-            phase_symmetry_score = FE.analyze_symmetry(phase_descriptors)
-
-            # Compute Fourier descriptors for fluor image
-            fluor_descriptors = FE.compute_fourier_descriptors(fluor[t])
-            # Analyze symmetry of fluor image
-            fluor_symmetry_score = FE.analyze_symmetry(fluor_descriptors)
-
-            # Compute area of sensor
-            masked_intensity, area = FE.compute_area(fluor[t])
-
-            # Compute higher frequency features using spectral entropy
-            entropy_phase = FE.compute_spectral_entropy(phase[t])
-            entropy_fluor = FE.compute_spectral_entropy(fluor[t])
-
-            # Compute texture analysis using GLCM
-            contrast_phase, dissimilarity_phase, homogeneity_phase = (
-                FE.compute_glcm_features(phase[t])
-            )
-            contrast_fluor, dissimilarity_fluor, homogeneity_fluor = (
-                FE.compute_glcm_features(fluor[t])
-            )
-
-            # Compute interqualtile range of pixel intensities
-            iqr = FE.compute_iqr(phase[t])
-
-            # Compute mean pixel intensity
-            fluor_mean_intensity = FE.compute_mean_intensity(fluor[t])
-
-            # Compute standard deviation of pixel intensities
-            phase_std_dev = FE.compute_std_dev(phase[t])
-            fluor_std_dev = FE.compute_std_dev(fluor[t])
-
-            # Compute radial intensity gradient
-            phase_radial_profile = FE.compute_radial_intensity_gradient(phase[t])
-            fluor_radial_profile = FE.compute_radial_intensity_gradient(fluor[t])
-
-            # update the features dataframe with the computed features
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Fluor Symmetry Score",
-            ] = fluor_symmetry_score
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Phase Symmetry Score",
-            ] = phase_symmetry_score
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Sensor Area",
-            ] = area
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Masked Sensor Intensity",
-            ] = masked_intensity
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Entropy Phase",
-            ] = entropy_phase
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Entropy Fluor",
-            ] = entropy_fluor
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Contrast Phase",
-            ] = contrast_phase
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Dissimilarity Phase",
-            ] = dissimilarity_phase
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Homogeneity Phase",
-            ] = homogeneity_phase
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Contrast Fluor",
-            ] = contrast_fluor
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Dissimilarity Fluor",
-            ] = dissimilarity_fluor
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Homogeneity Fluor",
-            ] = homogeneity_fluor
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Phase IQR",
-            ] = iqr
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Fluor Mean Intensity",
-            ] = fluor_mean_intensity
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Phase Standard Deviation",
-            ] = phase_std_dev
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Fluor Standard Deviation",
-            ] = fluor_std_dev
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Phase radial profile",
-            ] = phase_radial_profile
-            features.loc[
-                (features["fov_name"] == fov_name)
-                & (features["track_id"] == track_id)
-                & (features["t"] == t),
-                "Fluor radial profile",
-            ] = fluor_radial_profile
-
-# %%
+features_organelle = compute_features_and_PCA(features_path, data_path, tracks_path, source_channel, seg_channel, z_range)
 
 # Save the features dataframe to a CSV file
-features.to_csv(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan.csv",
+features_organelle.to_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell.csv",
     index=False,
 )
 
-# # read the features dataframe from the CSV file
-# features = pd.read_csv(
-#     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan.csv"
-# )
+correlation_organelle = compute_correlation_and_save_png(features_organelle, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.png")
 
-# remove the rows with missing values
-features = features.dropna()
+# %% for sensor features
 
-# sub_features = features[features["Time"] == 20]
-feature_df_removed = features.drop(
-    columns=["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+features_path = Path(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
+)
+data_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
+)
+tracks_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 )
 
-# Compute correlation between PCA features and computed features
-correlation = feature_df_removed.corr(method="spearman")
+source_channel = ["Phase3D", "RFP"]
+seg_channel = ["Nuclei_prediction_labels"]
+z_range = (28, 43)
+# fov_name = "/B/4/5"
+# track_id = 11
 
-# %% display PCA correlation as a heatmap
+features_sensor = compute_features_and_PCA(features_path, data_path, tracks_path, source_channel, seg_channel, z_range)
 
-plt.figure(figsize=(20, 5))
-sns.heatmap(
-    correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5"]).loc[
-        "PCA1":"PCA5", :
-    ],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
+features_sensor.to_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_sensor.csv",
+    index=False,
 )
-plt.title("Correlation between PCA features and computed features")
-plt.xlabel("Computed Features")
-plt.ylabel("PCA Features")
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca.svg"
-)
+correlation_sensor = compute_correlation_and_save_png(features_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor.png")
 
-
-# %% plot PCA vs set of computed features
+# %% plot PCA vs set of computed features for sensor features
 
 set_features = [
-    "Fluor radial profile",
-    "Homogeneity Phase",
-    "Phase IQR",
-    "Phase Standard Deviation",
-    "Sensor Area",
-    "Homogeneity Fluor",
-    "Contrast Fluor",
-    "Phase radial profile",
+    "Fluor Radial Intensity Gradient",
+    "Fluor Kurtosis",
+    "Phase Entropy",
+    "Phase Std Dev",
+    "Perimeter area ratio",
+    "Phase Interquartile Range",
+    "Phase Skewness",
+    "Fluor Interquartile Range",
+    "Nuclear area",
+    "Fluor Area",
+    "Perimeter",
+    "Fluor Texture",
 ]
 
 plt.figure(figsize=(8, 10))
 sns.heatmap(
-    correlation.loc[set_features, "PCA1":"PCA5"],
+    correlation_sensor.loc[set_features, "PCA1":"PCA6"],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
+    annot_kws={'size': 18},
     vmin=-1,
     vmax=1,
 )
+plt.xlabel("Computed Features", fontsize=18)
+plt.ylabel("PCA Features", fontsize=18)
+plt.xticks(fontsize=18)  # Increase x-axis tick labels
+plt.yticks(fontsize=18)  # Increase y-axis tick labels
 
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures.svg"
 )
 
-# %% find the cell patches with the highest and lowest value in each feature
+# %% plot PCA vs set of computed features for organelle features
 
-def save_patches(fov_name, track_id):
-    data_path = Path(
-        "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
-    )
-    tracks_path = Path(
-        "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
-    )
-    source_channel = ["Phase3D", "RFP"]
-    prediction_dataset = dataset_of_tracks(
-        data_path,
-        tracks_path,
-        [fov_name],
-        [track_id],
-        source_channel=source_channel,
-    )
-    whole = np.stack([p["anchor"] for p in prediction_dataset])
-    phase = whole[:, 0]
-    fluor = whole[:, 1]
-    out_dir = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/data/computed_features/"
-    fov_name_out = fov_name.replace("/", "_")
-    np.save(
-        (os.path.join(out_dir, "phase" + fov_name_out + "_" + str(track_id) + ".npy")),
-        phase,
-    )
-    np.save(
-        (os.path.join(out_dir, "fluor" + fov_name_out + "_" + str(track_id) + ".npy")),
-        fluor,
-    )
+set_features = [
+    "Phase Interquartile Range",
+    "Phase Std Dev",
+    "Phase Entropy",
+    # "Fluor Mean Intensity",
+    # "Fluor Interquartile Range",
+    "Perimeter area ratio",  
+    # "Fluor Std Dev",
+    # "Fluor Entropy",
+    "Fluor Zernike Moment Mean",
+    "Fluor Weighted Intensity Gradient",
+    "Phase Kurtosis",
+    "Fluor Kurtosis",
+    "Fluor Contrast",
+    "Fluor Zernike Moment Std",
+    "Fluor Intensity Localization",
+    "Fluor Interquartile Range",
+]
 
-
-# PCA1: Fluor radial profile
-highest_fluor_radial_profile = features.loc[features["Fluor radial profile"].idxmax()]
-print("Row with highest 'Fluor radial profile':")
-# print(highest_fluor_radial_profile)
-print(
-    f"fov_name: {highest_fluor_radial_profile['fov_name']}, time: {highest_fluor_radial_profile['t']}"
+plt.figure(figsize=(10, 10))
+sns.heatmap(
+    correlation_organelle.loc[set_features, "PCA1":"PCA8"],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+    annot_kws={'size': 18},
+    vmin=-1,
+    vmax=1,
 )
-save_patches(
-    highest_fluor_radial_profile["fov_name"], highest_fluor_radial_profile["track_id"]
+plt.xlabel("Computed Features", fontsize=18)
+plt.ylabel("PCA Features", fontsize=18)
+plt.xticks(fontsize=18)  # Increase x-axis tick labels
+plt.yticks(fontsize=18)  # Increase y-axis tick labels
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_multiwell.svg"
 )
 
-lowest_fluor_radial_profile = features.loc[features["Fluor radial profile"].idxmin()]
-print("Row with lowest 'Fluor radial profile':")
-# print(lowest_fluor_radial_profile)
-print(
-    f"fov_name: {lowest_fluor_radial_profile['fov_name']}, time: {lowest_fluor_radial_profile['t']}"
-)
-save_patches(
-    lowest_fluor_radial_profile["fov_name"], lowest_fluor_radial_profile["track_id"]
-)
-
-# PCA2: Entropy phase
-highest_entropy_phase = features.loc[features["Entropy Phase"].idxmax()]
-print("Row with highest 'Entropy Phase':")
-# print(highest_entropy_phase)
-print(
-    f"fov_name: {highest_entropy_phase['fov_name']}, time: {highest_entropy_phase['t']}"
-)
-save_patches(highest_entropy_phase["fov_name"], highest_entropy_phase["track_id"])
-
-lowest_entropy_phase = features.loc[features["Entropy Phase"].idxmin()]
-print("Row with lowest 'Entropy Phase':")
-# print(lowest_entropy_phase)
-print(
-    f"fov_name: {lowest_entropy_phase['fov_name']}, time: {lowest_entropy_phase['t']}"
-)
-save_patches(lowest_entropy_phase["fov_name"], lowest_entropy_phase["track_id"])
-
-# PCA3: Phase IQR
-highest_phase_iqr = features.loc[features["Phase IQR"].idxmax()]
-print("Row with highest 'Phase IQR':")
-# print(highest_phase_iqr)
-print(f"fov_name: {highest_phase_iqr['fov_name']}, time: {highest_phase_iqr['t']}")
-save_patches(highest_phase_iqr["fov_name"], highest_phase_iqr["track_id"])
-
-tenth_lowest_phase_iqr = features.nsmallest(10, "Phase IQR").iloc[9]
-print("Row with tenth lowest 'Phase IQR':")
-# print(tenth_lowest_phase_iqr)
-print(
-    f"fov_name: {tenth_lowest_phase_iqr['fov_name']}, time: {tenth_lowest_phase_iqr['t']}"
-)
-save_patches(tenth_lowest_phase_iqr["fov_name"], tenth_lowest_phase_iqr["track_id"])
-
-# PCA4: Phase Standard Deviation
-highest_phase_std_dev = features.loc[features["Phase Standard Deviation"].idxmax()]
-print("Row with highest 'Phase Standard Deviation':")
-# print(highest_phase_std_dev)
-print(
-    f"fov_name: {highest_phase_std_dev['fov_name']}, time: {highest_phase_std_dev['t']}"
-)
-save_patches(highest_phase_std_dev["fov_name"], highest_phase_std_dev["track_id"])
-
-lowest_phase_std_dev = features.loc[features["Phase Standard Deviation"].idxmin()]
-print("Row with lowest 'Phase Standard Deviation':")
-# print(lowest_phase_std_dev)
-print(
-    f"fov_name: {lowest_phase_std_dev['fov_name']}, time: {lowest_phase_std_dev['t']}"
-)
-save_patches(lowest_phase_std_dev["fov_name"], lowest_phase_std_dev["track_id"])
-
-# PCA5: Sensor area
-highest_sensor_area = features.loc[features["Sensor Area"].idxmax()]
-print("Row with highest 'Sensor Area':")
-# print(highest_sensor_area)
-print(f"fov_name: {highest_sensor_area['fov_name']}, time: {highest_sensor_area['t']}")
-save_patches(highest_sensor_area["fov_name"], highest_sensor_area["track_id"])
-
-tenth_lowest_sensor_area = features.nsmallest(10, "Sensor Area").iloc[9]
-print("Row with tenth lowest 'Sensor Area':")
-# print(tenth_lowest_sensor_area)
-print(
-    f"fov_name: {tenth_lowest_sensor_area['fov_name']}, time: {tenth_lowest_sensor_area['t']}"
-)
-save_patches(tenth_lowest_sensor_area["fov_name"], tenth_lowest_sensor_area["track_id"])
+# %%
