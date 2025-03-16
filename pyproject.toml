@@ -51,6 +51,7 @@ visual = [
     "plotly",
     "nbformat",
     "cmap",
+    'dash',
 ]
 dev = [
     "viscy[metrics,examples,visual]",
