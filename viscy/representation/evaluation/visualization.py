@@ -723,6 +723,51 @@ class EmbeddingVisualizationApp:
                 return fig, None  # Return new figure and clear selectedData
             return dash.no_update, dash.no_update
 
+    def _calculate_equal_aspect_ranges(self, x_data, y_data):
+        """Calculate ranges for x and y axes to ensure equal aspect ratio.
+
+        Parameters
+        ----------
+        x_data : array-like
+            Data for x-axis
+        y_data : array-like
+            Data for y-axis
+
+        Returns
+        -------
+        tuple
+            (x_range, y_range) as tuples of (min, max) with equal scaling
+        """
+        # Get data ranges
+        x_min, x_max = np.min(x_data), np.max(x_data)
+        y_min, y_max = np.min(y_data), np.max(y_data)
+
+        # Add padding (5% on each side)
+        x_padding = 0.05 * (x_max - x_min)
+        y_padding = 0.05 * (y_max - y_min)
+
+        x_min -= x_padding
+        x_max += x_padding
+        y_min -= y_padding
+        y_max += y_padding
+
+        # Ensure equal scaling by using the larger range
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+
+        if x_range > y_range:
+            # Expand y-range to match x-range aspect ratio
+            y_center = (y_max + y_min) / 2
+            y_min = y_center - x_range / 2
+            y_max = y_center + x_range / 2
+        else:
+            # Expand x-range to match y-range aspect ratio
+            x_center = (x_max + x_min) / 2
+            x_min = x_center - y_range / 2
+            x_max = x_center + y_range / 2
+
+        return (x_min, x_max), (y_min, y_max)
+
     def _create_track_colored_figure(
         self,
         show_arrows=False,
@@ -915,6 +960,23 @@ class EmbeddingVisualizationApp:
                             opacity=0.8,
                         )
 
+        # Compute axis ranges to ensure equal aspect ratio
+        all_x_data = self.filtered_features_df[x_axis]
+        all_y_data = self.filtered_features_df[y_axis]
+
+        if not all_x_data.empty and not all_y_data.empty:
+            x_range, y_range = self._calculate_equal_aspect_ranges(
+                all_x_data, all_y_data
+            )
+
+            # Set equal aspect ratio and range
+            fig.update_layout(
+                xaxis=dict(
+                    range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"
+                ),
+                yaxis=dict(range=y_range, constrain="domain"),
+            )
+
         return fig
 
     def _create_time_colored_figure(
@@ -1051,6 +1113,23 @@ class EmbeddingVisualizationApp:
                                 hoverinfo="skip",
                             )
                         )
+
+        # Compute axis ranges to ensure equal aspect ratio
+        all_x_data = self.filtered_features_df[x_axis]
+        all_y_data = self.filtered_features_df[y_axis]
+        if not all_x_data.empty and not all_y_data.empty:
+            x_range, y_range = self._calculate_equal_aspect_ranges(
+                all_x_data, all_y_data
+            )
+
+            # Set equal aspect ratio and range
+            fig.update_layout(
+                xaxis=dict(
+                    range=x_range, scaleanchor="y", scaleratio=1, constrain="domain"
+                ),
+                yaxis=dict(range=y_range, constrain="domain"),
+            )
+
         return fig
 
     @staticmethod
