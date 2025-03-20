@@ -312,7 +312,7 @@ class CellFeatures:
         # compute EDT of mask
         edt = self._compute_Eucledian_distance_transform()
         # compute the intensity weighted center of the fluor
-        intensity_weighted_center = np.sum(self.image * edt) / np.sum(edt)
+        intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + 1e-10)
         return intensity_weighted_center
 
     def _compute_area(self, sigma=0.6):
@@ -571,11 +571,13 @@ class DynamicFeatures:
         angles = np.zeros(len(vectors) - 1)
         for i in range(len(vectors) - 1):
             v1, v2 = vectors[i], vectors[i + 1]
-            cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2))
+            cos_angle = np.dot(v1, v2) / (
+                np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10
+            )
             angles[i] = np.arccos(np.clip(cos_angle, -1.0, 1.0))
 
         # Compute angular velocities (change in angle over time)
-        angular_velocities = angles / dt[1:]
+        angular_velocities = angles / (dt[1:] + 1e-10)
 
         return (
             float(np.mean(angular_velocities)),
