@@ -130,7 +130,6 @@ test_track_path = "/hpc/projects/organelle_phenotyping/ALFI_models_data/datasets
 
 # %% load annotations for train and test data
 
-
 def load_annotation(da, path, name, categories: dict | None = None):
 
     annotation = pd.read_csv(path)
@@ -384,5 +383,77 @@ ax5.set_yticks([])
 
 plt.tight_layout()
 plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/phatemap_joint_ALFI_timeaware_wImages.pdf", dpi=300)
+
+# %% save the scatterplot and images separately as png and pdf
+
+# Create scatter plot with white edges
+plt.scatter(phate_embedding_timeaware[:, 0], phate_embedding_timeaware[:, 1], 
+           c=division.map(color_map), alpha=0.7, s=40,
+           edgecolor='white', linewidth=0.5)  # Add white edges to points
+for fov_name, track_id, t, data_path, track_path, name in conditions:
+    highlight_data = dic_data[
+        (dic_data["fov_name"] == fov_name) & 
+        (dic_data["track_id"] == track_id[0]) & 
+        (dic_data["time"] == t) &
+        (dic_data["cell_type"] == name)
+    ]
+    if not highlight_data.empty:
+        plt.scatter(highlight_data["PHATE1"], highlight_data["PHATE2"], 
+            c=highlight_data["cell_type"].map(color_map), alpha=0.7, s=500,
+            edgecolor='black', linewidth=2, zorder=5)
+plt.legend([])
+plt.xticks([])
+plt.yticks([])
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/phatemap_joint_ALFI_timeaware_wImages_scatterplot.png", dpi=300)
+
+
+# save the 4 images separately as a pdf
+fig = plt.figure(figsize=(16, 8))
+gs = fig.add_gridspec(2, 2, width_ratios=[1, 1], height_ratios=[1, 1], 
+                        wspace=0.05,  # Reduced horizontal spacing between subplots
+                        hspace=0.2)   # Reduced vertical spacing between subplots
+
+ax2 = fig.add_subplot(gs[0, 0])
+ax2.imshow(dic_images[cell_type_test_mitosis][0], cmap='gray')
+ax2.set_title(cell_type_test_mitosis, fontsize=18)
+for spine in ax2.spines.values():
+    spine.set_color(color_map[cell_type_test_mitosis])
+    spine.set_linewidth(6)  # Increased from 3 to 6
+ax2.axis('on')
+ax2.set_xticks([])
+ax2.set_yticks([])
+
+ax3 = fig.add_subplot(gs[1, 0])
+ax3.imshow(dic_images[cell_type_test_interphase][0], cmap='gray')
+ax3.set_title(cell_type_test_interphase, fontsize=18)
+for spine in ax3.spines.values():
+    spine.set_color(color_map[cell_type_test_interphase])
+    spine.set_linewidth(6)  # Increased from 3 to 6
+ax3.axis('on')
+ax3.set_xticks([])
+ax3.set_yticks([])
+
+ax4 = fig.add_subplot(gs[0, 1])
+ax4.imshow(dic_images[cell_type_train_mitosis][0], cmap='gray')
+ax4.set_title(cell_type_train_mitosis, fontsize=18)
+for spine in ax4.spines.values():
+    spine.set_color(color_map[cell_type_train_mitosis])
+    spine.set_linewidth(6)  # Increased from 3 to 6
+ax4.axis('on')
+ax4.set_xticks([])
+ax4.set_yticks([])
+
+ax5 = fig.add_subplot(gs[1, 1])
+ax5.imshow(dic_images[cell_type_train_interphase][0], cmap='gray')
+ax5.set_title(cell_type_train_interphase, fontsize=18)
+for spine in ax5.spines.values():
+    spine.set_color(color_map[cell_type_train_interphase])
+    spine.set_linewidth(6)  # Increased from 3 to 6
+ax5.axis('on')
+ax5.set_xticks([])
+ax5.set_yticks([])
+
+plt.tight_layout()
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/phatemap_joint_ALFI_timeaware_wImages_images.pdf", dpi=300)
 
 # %%
