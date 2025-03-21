@@ -8,6 +8,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 
@@ -100,6 +101,45 @@ data = pd.DataFrame(
 feature_columns = pd.DataFrame(feature_npy_filtered, columns=[f"feature_{i+1}" for i in range(768)])
 data = pd.concat([data, feature_columns], axis=1)
 
+# %% compute PCA components
+
+color_map = {
+    2: 'red',
+    1: 'blue',
+}
+
+pca = PCA(n_components=2)
+pca.fit(data.drop(columns=["infection", "fov_name", "track_id", "time", "PHATE1", "PHATE2"]))
+pca_embedding = pca.transform(data.drop(columns=["infection", "fov_name", "track_id", "time", "PHATE1", "PHATE2"]))
+
+# plot the PCA components with infection state
+fig = plt.figure(figsize=(10, 8))
+scatter = plt.scatter(pca_embedding[:,0], pca_embedding[:,1], 
+           c=data["infection"].map(color_map),
+           s=25,  
+           edgecolor='white',
+           linewidth=0.5)
+
+# Add legend to group points
+legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                            markerfacecolor=color, label=label, markersize=10,
+                            markeredgecolor='white', markeredgewidth=0.5)
+                  for label, color in color_map.items()]
+plt.legend([])
+plt.xlabel("PCA component 1")
+plt.ylabel("PCA component 2")
+plt.title("PCA of cell features colored by infection state")
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/PCA_sensor_infection.svg",
+    format="svg",
+)
+# save as png
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/PCA_sensor_infection.png",
+    format="png",
+    dpi=300,
+)
+
 # %% manually data the dataset into training and testing set by well name
 
 # dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
@@ -145,14 +185,26 @@ x_test = data_test.drop(
         "PHATE2",
     ]
 )
+x_data = data.drop(
+    columns=[
+        "infection",
+        "fov_name",
+        "track_id",
+        "time",
+        "PHATE1",
+        "PHATE2",
+    ]
+)
 y_test = data_test["infection"]
 
 # predict the infection state for the testing set
 y_pred = clf.predict(x_test)
+data_pred = clf.predict(x_data)
 
 # %% use the trained classifier to perform prediction on the entire dataset
 
 data_test["predicted_infection"] = y_pred
+data["predicted_infection"] = data_pred
 
 # plot the predicted infection state over time for /B/3 well and /B/4 well
 time_points_test = np.unique(data_test["time"])
@@ -736,4 +788,53 @@ for time in range(len(time_points_mantis)):
     )
     plt.close()
 
-# %% 
+# %% plot phatemaps for Feb data and mantis 10 minute data with infection prediction hue
+colormap = {1: "blue", 2: "red"}
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(1, 1, 1)
+ax.scatter(data["PHATE1"], data["PHATE2"], 
+           c=data["predicted_infection"].map(colormap), 
+           s=25,  
+           edgecolor='white',
+           linewidth=0.5)
+# Add legend to group points
+legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                            markerfacecolor=color, label=label, markersize=10,
+                            markeredgecolor='white', markeredgewidth=0.5)
+                  for label, color in color_map.items()]
+ax.legend([])
+ax.set_xlabel("PHATE1")
+ax.set_ylabel("PHATE2")
+
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Feb_sensor_infection.png",
+    format="png",
+    dpi=300,
+)
+
+# %% plot phatemaps for mantis data with infection prediction hue
+
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(1, 1, 1)
+ax.scatter(mantis_data["PHATE1"], mantis_data["PHATE2"], 
+           c=mantis_data["predicted_infection"].map(colormap), 
+           s=25,  
+           edgecolor='white',
+           linewidth=0.5)
+# Add legend to group points
+legend_elements = [plt.Line2D([0], [0], marker='o', color='w', 
+                            markerfacecolor=color, label=label, markersize=10,
+                            markeredgecolor='white', markeredgewidth=0.5)
+                  for label, color in color_map.items()]
+ax.legend([])
+ax.set_xlabel("PHATE1")
+ax.set_ylabel("PHATE2")
+
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Mantis_infection.png",
+    format="png",
+    dpi=300,
+)
+
+
+# %%
