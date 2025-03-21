@@ -413,6 +413,14 @@ class CellFeatures:
             masked_intensity=masked_intensity,
             masked_area=masked_area,
         )
+    
+    def compute_symmetry_descriptor(self):
+        """Compute the symmetry descriptor of the image"""
+        self.symmetry_descriptor = SymmetryDescriptor(
+            zernike_std=np.std(self._compute_zernike_moments()),
+            zernike_mean=np.mean(self._compute_zernike_moments()),
+            radial_intensity_gradient=self._compute_radial_intensity_gradient(),
+        )
 
     def compute_all_features(self) -> pd.DataFrame:
         """Compute all features."""
@@ -421,6 +429,9 @@ class CellFeatures:
 
         # Compute texture features
         self.compute_texture_features()
+
+        # Compute symmetry descriptor
+        self.compute_symmetry_descriptor()
 
         if self.segmentation_mask is not None:
             self.compute_morphology_features()
