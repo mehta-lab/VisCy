@@ -259,6 +259,8 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
                 # iteration_count += 1
                 print(f"Processed {fov_name}+{track_id}")
 
+    return embedding_df
+
 # %% save all feature dataframe to png file
 def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
     # remove the rows with missing values
