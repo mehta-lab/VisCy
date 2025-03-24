@@ -16,7 +16,6 @@ from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
     cosine_similarity,
-    dice,
     jaccard_index,
     mean_absolute_error,
     mean_squared_error,
@@ -24,6 +23,7 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
+from torchmetrics.functional.segmentation import dice_score
 
 from viscy.data.combined import CombinedDataModule
 from viscy.data.gpu_aug import GPUTransformDataModule
@@ -319,8 +319,8 @@ class VSUNet(LightningModule):
                     if compute
                     else -1
                 ),
-                "test_metrics/dice": (
-                    dice(pred_binary, target_binary) if compute else -1
+                "test_metrics/dice_score": (
+                    dice_score(pred_binary, target_binary) if compute else -1
                 ),
                 "test_metrics/jaccard": (
                     jaccard_index(pred_binary, target_binary, task="binary")
