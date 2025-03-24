@@ -105,7 +105,8 @@ from skimage import metrics  # for metrics.
 # pytorch lightning wrapper for Tensorboard.
 from skimage.color import label2rgb
 from torch.utils.tensorboard import SummaryWriter  # for logging to tensorboard
-from torchmetrics.functional import accuracy, dice, jaccard_index
+from torchmetrics.functional import accuracy, jaccard_index
+from torchmetrics.functional.segmentation import dice_score
 from tqdm import tqdm
 
 # HCSDataModule makes it easy to load data during training.
