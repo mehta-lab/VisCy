@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Generator, Literal
 
 import dask.array as da
 from dask.diagnostics import ProgressBar
-from iohub.ngff.nodes import open_ome_zarr
+from iohub.ngff import open_ome_zarr
 
 if TYPE_CHECKING:
     from iohub.ngff.nodes import Plate, Position, Well
