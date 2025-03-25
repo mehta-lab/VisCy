@@ -88,6 +88,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
         "id": embedding_dataset["id"].values,
         "fov_name": embedding_dataset["fov_name"].values,
         "t": embedding_dataset["t"].values,
+        "track_id": embedding_dataset["track_id"].values,
     }
 
     # Add PCA components for features
