@@ -219,6 +219,8 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         Skip caching for this dataset, by default False
     include_wells : list[str], optional
         List of well names to include in the dataset, by default None (all)
+    include_wells : list[str], optional
+        List of well names to include in the dataset, by default None (all)
     """
 
     def __init__(
@@ -273,6 +275,24 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions).tolist()
+
+    def _include_well_name(self, name: str) -> bool:
+        if self._include_wells is None:
+            return True
+        else:
+            return name in self._include_wells
+
+    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
+        positions = []
+        for well_name, well in plate.wells():
+            if self._include_well_name(well_name):
+                for _, p in well.positions():
+                    positions.append(p)
+        if len(positions) < 2:
+            raise ValueError(
+                "At least 2 FOVs are required for training and validation."
+            )
+        return positions
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
         if stage not in ("fit", "validate"):
