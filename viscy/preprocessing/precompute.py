@@ -1,4 +1,5 @@
 """Precompute normalization and store a plain C array"""
+from __future__ import annotations
 
 from pathlib import Path
 from typing import TYPE_CHECKING, Generator, Literal
