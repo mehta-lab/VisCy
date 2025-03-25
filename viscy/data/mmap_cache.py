@@ -124,8 +124,17 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         Transforms to be applied on the GPU during validation.
     pin_memory : bool, optional
         Use page-locked memory in data-loaders, by default True
-    skip_cache : bool, optional
-        Skip caching for this dataset, by default False
+    prefetch_factor : int | None, optional
+        Prefetching ratio for the torch dataloader, by default None
+    array_key : str, optional
+        Name of the image arrays (multiscales level), by default "0"
+    scratch_dir : Path | None, optional
+        Path to the scratch directory,
+        by default None (use OS temporary data directory)
+    include_wells : list[str] | None, optional
+        Include only a subset of wells, by default None (include all wells)
+    exclude_fovs : list[str] | None, optional
+        Exclude FOVs, by default None (do not exclude any FOVs)
     """
 
     def __init__(
