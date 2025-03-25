@@ -1,11 +1,14 @@
 """Precompute normalization and store a plain C array"""
 
 from pathlib import Path
-from typing import Generator, Literal
+from typing import TYPE_CHECKING, Generator, Literal
 
 import dask.array as da
 from dask.diagnostics import ProgressBar
-from iohub.ngff.nodes import Plate, Position, Well, open_ome_zarr
+from iohub.ngff.nodes import open_ome_zarr
+
+if TYPE_CHECKING:
+    from iohub.ngff.nodes import Plate, Position, Well
 
 
 def _normalize_image(
