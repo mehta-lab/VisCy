@@ -39,8 +39,8 @@ class SegmentationMetrics2D(LightningModule):
                 "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
                 "dice": (
                     dice_score(
-                        pred_binary.long(),
-                        target_binary.long(),
+                        pred_binary.long()[None],
+                        target_binary.long()[None],
                         num_classes=2,
                         input_format="index",
                     )
