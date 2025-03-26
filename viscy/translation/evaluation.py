@@ -37,11 +37,7 @@ class SegmentationMetrics2D(LightningModule):
                 "position": batch["position_idx"][0],
                 "time": batch["time_idx"][0],
                 "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
-                "dice": (
-                    dice_score(
-                        pred_binary, target_binary, num_classes=2, input_format="index"
-                    )
-                ),
+                "dice": (dice_score(pred_binary, target_binary)),
                 "jaccard": (jaccard_index(pred_binary, target_binary, task="binary")),
                 "mAP": coco_metrics["map"],
                 "mAP_50": coco_metrics["map_50"],
