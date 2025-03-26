@@ -1,6 +1,6 @@
 # %% [markdown]
 """
-# Quick Start: 2D Virtual Staining of A549 Cells
+# Quick Start: Cytoland
 
 **Estimated time to complete:** 15 minutes
 """
