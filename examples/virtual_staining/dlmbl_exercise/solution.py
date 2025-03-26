@@ -1483,8 +1483,8 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
                 pred_label_binary, target_label_binary, task="binary"
             ).item(),
             "dice": dice_score(
-                pred_label_binary,
-                target_label_binary,
+                pred_label_binary.long(),
+                target_label_binary.long(),
                 num_classes=2,
                 input_format="index",
             ).item(),

@@ -321,7 +321,10 @@ class VSUNet(LightningModule):
                 ),
                 "test_metrics/dice_score": (
                     dice_score(
-                        pred_binary, target_binary, num_classes=2, input_format="index"
+                        pred_binary.long(),
+                        target_binary.long(),
+                        num_classes=2,
+                        input_format="index",
                     )
                     if compute
                     else -1
