@@ -250,16 +250,19 @@ Below we show a snapshot in the notebook.
 
 # %%
 # Read images from Zarr stores
+# Choose the ROI for better visualization
+y_slice = slice(0, 512)
+x_slice = slice(0, 512)
 
 # Open the prediction store and get the 2D images from 5D arrays (t,c,z,y,x)
 with open_ome_zarr(output_path / fov) as vs_store:
-    vs_nucleus = vs_store[0][0, 0, 0]
-    vs_membrane = vs_store[0][0, 1, 0]
+    vs_nucleus = vs_store[0][0, 0, 0, y_slice, x_slice]
+    vs_membrane = vs_store[0][0, 1, 0, y_slice, x_slice]
 
 # Open the experimental fluorescence dataset
 with open_ome_zarr(input_data_path / fov) as fluor_store:
-    fluor_nucleus = fluor_store[0][0, 1, 0]
-    fluor_membrane = fluor_store[0][0, 2, 0]
+    fluor_nucleus = fluor_store[0][0, 1, 0, y_slice, x_slice]
+    fluor_membrane = fluor_store[0][0, 2, 0, y_slice, x_slice]
 
 # %%
 # Plot
