@@ -3,7 +3,8 @@
 import logging
 
 from lightning.pytorch import LightningModule
-from torchmetrics.functional import accuracy, dice, jaccard_index
+from torchmetrics.functional import accuracy, jaccard_index
+from torchmetrics.functional.segmentation import dice_score
 
 from viscy.data.typing import SegmentationSample
 from viscy.translation.evaluation_metrics import mean_average_precision
@@ -36,7 +37,7 @@ class SegmentationMetrics2D(LightningModule):
                 "position": batch["position_idx"][0],
                 "time": batch["time_idx"][0],
                 "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
-                "dice": (dice(pred_binary, target_binary)),
+                "dice": (dice_score(pred_binary, target_binary)),
                 "jaccard": (jaccard_index(pred_binary, target_binary, task="binary")),
                 "mAP": coco_metrics["map"],
                 "mAP_50": coco_metrics["map_50"],
