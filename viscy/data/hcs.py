@@ -141,6 +141,12 @@ class SlidingWindowDataset(Dataset):
             img_arr: ImageArray = fov["0"]
             ts = img_arr.frames
             zs = img_arr.slices - self.z_window_size + 1
+            if zs < 1:
+                raise IndexError(
+                    f"Z window size {self.z_window_size} "
+                    f"is larger than the number of Z slices ({img_arr.slices}) "
+                    f"for FOV {fov.name}."
+                )
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
