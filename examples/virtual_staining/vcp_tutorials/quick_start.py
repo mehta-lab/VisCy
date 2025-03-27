@@ -90,6 +90,15 @@ On Windows, the files can be downloaded manually from the URLs.
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
 # !pip install "viscy[metrics,visual]==0.3.0rc3"
 
+# %% [markdown]
+"""
+<div class="alert alert-warning">
+On Google Colab, please restart the session after installing dependencies.
+Click 'Runtime -> Restart session' in the header bar
+or press <kbd>⌘</kbd>/<kbd>Ctrl</kbd> + <kbd>m</kbd> <kbd>.</kbd>.
+</div>
+"""
+
 # %%
 # Validate installation
 # !viscy --help
