@@ -312,3 +312,14 @@ for a in ax.flatten():
     a.axis("off")
 plt.tight_layout()
 plt.show()
+
+# %% [markdown]
+"""
+## Responsible Use
+
+We are committed to advancing the responsible development and use of artificial intelligence.
+Please follow our <Link text="Acceptable Use Policy" url="/acceptable-use-policy" />  when engaging with our services.
+
+Should you have any security or privacy issues or questions related to the services,
+please reach out to our team at <Email to="security@chanzuckerberg.com"/> or <Email to="privacy@chanzuckerberg.com" /> respectively.
+"""
