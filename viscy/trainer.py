@@ -8,6 +8,7 @@ from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
+from viscy.preprocessing.precompute import precompute_array
 from viscy.utils.meta_utils import generate_normalization_metadata
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -104,3 +105,26 @@ class VisCyTrainer(Trainer):
             },
         )
         _logger.info(f"ONNX exported at {export_path}")
+
+    def precompute(
+        self,
+        data_path: Path,
+        output_path: Path,
+        channel_names: list[str],
+        subtrahends: list[Literal["mean"] | float],
+        divisors: list[Literal["std"] | tuple[float, float]],
+        image_array_key: str = "0",
+        include_wells: list[str] | None = None,
+        exclude_fovs: list[str] | None = None,
+        model: LightningModule | None = None,
+    ):
+        precompute_array(
+            data_path=data_path,
+            output_path=output_path,
+            channel_names=channel_names,
+            subtrahends=subtrahends,
+            divisors=divisors,
+            image_array_key=image_array_key,
+            include_wells=include_wells,
+            exclude_fovs=exclude_fovs,
+        )
