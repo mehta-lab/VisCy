@@ -320,7 +320,14 @@ class VSUNet(LightningModule):
                     else -1
                 ),
                 "test_metrics/dice_score": (
-                    dice_score(pred_binary, target_binary) if compute else -1
+                    dice_score(
+                        pred_binary.long(),
+                        target_binary.long(),
+                        num_classes=2,
+                        input_format="index",
+                    )
+                    if compute
+                    else -1
                 ),
                 "test_metrics/jaccard": (
                     jaccard_index(pred_binary, target_binary, task="binary")
