@@ -88,7 +88,7 @@ On Windows, the files can be downloaded manually from the URLs.
 # %%
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
-# !pip install "viscy[metrics,visual]==0.3.0rc2"
+# !pip install "viscy[metrics,visual]==0.3.0rc3"
 
 # %%
 # Validate installation
