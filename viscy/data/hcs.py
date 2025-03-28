@@ -105,7 +105,7 @@ class SlidingWindowDataset(Dataset):
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
     :param str pyramid_resolution: pyramid level.
-        defaults to 0 (full resolution)
+        defaults to "0" (full resolution)
     :param DictTransform | None transform:
         a callable that transforms data, defaults to None
     """
