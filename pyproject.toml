@@ -7,13 +7,13 @@ name = "viscy"
 description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
 requires-python = ">=3.11"
-license = { file = "LICENSE" }
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: BSD License",
 ]
 dependencies = [
     "iohub==0.1.0",
@@ -27,7 +27,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
-    "pytorch-metric-learning>2.0.0"
+    "pytorch-metric-learning>2.0.0",
 ]
 dynamic = ["version"]
 
