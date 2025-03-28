@@ -326,8 +326,8 @@ plt.show()
 ## Responsible Use
 
 We are committed to advancing the responsible development and use of artificial intelligence.
-Please follow our <Link text="Acceptable Use Policy" url="/acceptable-use-policy" />  when engaging with our services.
+Please follow our [Acceptable Use Policy](https://virtualcellmodels.cziscience.com/acceptable-use-policy) when engaging with our services.
 
 Should you have any security or privacy issues or questions related to the services,
-please reach out to our team at <Email to="security@chanzuckerberg.com"/> or <Email to="privacy@chanzuckerberg.com" /> respectively.
+please reach out to our team at [security@chanzuckerberg.com](mailto:security@chanzuckerberg.com) or [privacy@chanzuckerberg.com](mailto:privacy@chanzuckerberg.com) respectively.
 """
