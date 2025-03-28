@@ -149,9 +149,9 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 1. We recommend using a new Conda/virtual environment.
 
     ```sh
-    conda create --name viscy python=3.10
+    conda create --name viscy python=3.11
     # OR specify a custom path since the dependencies are large:
-    # conda create --prefix /path/to/conda/envs/viscy python=3.10
+    # conda create --prefix /path/to/conda/envs/viscy python=3.11
     ```
 
 2. Install a released version of VisCy from PyPI:
