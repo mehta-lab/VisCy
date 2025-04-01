@@ -26,7 +26,7 @@ Python>=3.10
 """
 # Introduction
 
-See the [model card](https://virtualcellmodels.cziscience.com/models)
+See the [model card](https://virtualcellmodels.cziscience.com/paper/cytoland2025)
 for more details about the Cytoland models. 
 
 VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells.
