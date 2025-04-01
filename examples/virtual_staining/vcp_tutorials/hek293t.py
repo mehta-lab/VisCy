@@ -143,11 +143,15 @@ from pathlib import Path
 
 import numpy as np
 import stackview
-from google.colab import output
 from iohub import open_ome_zarr
 from skimage.exposure import rescale_intensity
 
-output.enable_custom_widget_manager()
+try:
+    from google.colab import output
+
+    output.enable_custom_widget_manager()
+except ImportError:
+    pass
 
 
 # %%
