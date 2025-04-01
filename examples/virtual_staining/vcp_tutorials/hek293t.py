@@ -119,6 +119,7 @@ The image may need to be resampled to roughly match the voxel size of the exampl
 
 # %%
 # Run the CLI command to run inference
+# This will take about 2 minutes on Google Colab (T4 GPU)
 # !viscy predict -c predict.yml
 
 # %% [markdown]
