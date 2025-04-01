@@ -1,21 +1,10 @@
 # MLflow wrapper for Viscy models - Requirements
-# Based on the core dependencies from pyproject.toml
 
 # Core dependencies
-torch>=2.4.1
+torch>=2.4.
 mlflow==2.20.0
+monai>=1.4.0
+timm>=0.9.5
 numpy
 pandas
 requests
-
-# Viscy dependencies 
-# Note: When installing this package, viscy should be installed separately
-# or installed from the main project
-timm>=0.9.5
-monai>=1.4.0
-scikit-image
-matplotlib>=3.9.0
-
-# For testing
-pytest
-pytest-cov 

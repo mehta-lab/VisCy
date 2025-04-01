@@ -17,7 +17,7 @@ from viscy.data.hcs import HCSDataModule
 from viscy.translation.engine import FcmaeUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
 from viscy.trainer import VisCyTrainer
-from viscy.transforms import NormalizeSampled
+from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 
 # %% [markdown] tags=[]
 #
@@ -35,17 +35,18 @@ from viscy.transforms import NormalizeSampled
 
 # %%
 # TODO: Set download paths
-root_dir = Path("")
+# root_dir = Path("/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_datasets")
 # TODO: modify the path to the downloaded dataset
-input_data_path = root_dir / "VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
+input_data_path = "/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_datasets/VSCyto2D/test/a549_hoechst_cellmask_test.zarr"
 # TODO: modify the path to the downloaded checkpoint
-model_ckpt_path = "/epoch=399-step=23200.ckpt"
+model_ckpt_path = "/hpc/projects/comp.micro/virtual_staining/datasets/public/VS_models/VSCyto2D/VSCyto2D/epoch=399-step=23200.ckpt"
 # TODO: modify the path
 # Zarr store to save the predictions
-output_path = root_dir / "./a549_prediction.zarr"
+output_path = "/home/eduardo.hirata/repos/viscy/examples/virtual_staining/tmp/a549_prediction_percentiles.zarr"
 # TODO: Choose an FOV
 fov = "0/0/0"
 
+input_data_path = Path(input_data_path)
 input_data_path = input_data_path / fov
 
 # %%
@@ -57,7 +58,7 @@ BATCH_SIZE = 8
 # since multiprocessing only works with a
 # `if __name__ == '__main__':` guard.
 # On Linux, set it to the number of CPU cores to maximize performance.
-NUM_WORKERS = 0
+NUM_WORKERS = 15
 phase_channel_name = "Phase3D"
 
 # %%[markdown]
@@ -78,13 +79,20 @@ data_module = HCSDataModule(
     split_ratio=0.8,
     batch_size=BATCH_SIZE,
     num_workers=NUM_WORKERS,
-    architecture="fcmae",
+    # architecture="fcmae",
     normalizations=[
-        NormalizeSampled(
+        # NormalizeSampled(
+        #     [phase_channel_name],
+        #     level="fov_statistics",
+        #     subtrahend="median",
+        #     divisor="iqr",
+        # )
+        ScaleIntensityRangePercentilesd(
             [phase_channel_name],
-            level="fov_statistics",
-            subtrahend="median",
-            divisor="iqr",
+            lower=0.5,
+            upper=99.5,
+            b_min=0,
+            b_max=1,
         )
     ],
 )

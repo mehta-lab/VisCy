@@ -15,6 +15,11 @@ import mlflow.pyfunc
 import numpy as np
 from mlflow.models import ModelSignature
 
+import logging
+
+logger = logging.getLogger(__name__)
+
+
 # Import the correct modules - using viscy instead of vscyto
 try:
     from iohub.ngff import open_ome_zarr
@@ -50,8 +55,26 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
         self.model_config = model_config
         self.model_ckpt_path = model_ckpt_path
         self.output_path = output_path
+        self._output_store_path = None
 
         # Initialize these as None for lazy loading
+        self._model = None
+        self._trainer = None
+        self._temp_dirs = []
+
+    def __getstate__(self):
+        """Custom serialization to avoid storing transient objects."""
+        state = self.__dict__.copy()
+        # Don't pickle these objects as they may contain references to file systems
+        state["_model"] = None
+        state["_trainer"] = None
+        state["_temp_dirs"] = []
+        return state
+
+    def __setstate__(self, state):
+        """Custom deserialization to restore the object."""
+        self.__dict__.update(state)
+        # Model and trainer will be initialized lazily when needed
         self._model = None
         self._trainer = None
         self._temp_dirs = []
@@ -80,16 +103,16 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
         self._temp_dirs.append(tmp_output_dir)
 
         if self.output_path is None:
-            output_path = Path(tmp_output_dir) / "output.zarr"
+            self._output_store_path = Path(tmp_output_dir) / "output.zarr"
         else:
-            output_path = self.output_path
+            self._output_store_path = self.output_path
 
         # Initialize the prediction writer callback
         try:
             # Initialize the trainer with prediction writer
             self._trainer = VisCyTrainer(
                 accelerator="auto",
-                callbacks=[HCSPredictionWriter(output_store=output_path)],
+                callbacks=[HCSPredictionWriter(output_store=self._output_store_path)],
             )
         except Exception as e:
             self._cleanup_temp_dirs()
@@ -106,6 +129,25 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
                         f"Warning: Failed to clean up temporary directory {tmp_dir}: {e}"
                     )
         self._temp_dirs = []
+
+    def _safe_collate_fn(self, batch):
+        """Custom collate function that handles None values in normalization metadata"""
+        from torch.utils.data._utils.collate import default_collate
+
+        # Filter out None values from the batch
+        filtered_batch = []
+        for item in batch:
+            # Create a clean version of each sample without None values
+            clean_item = {}
+            for k, v in item.items():
+                if v is not None:
+                    clean_item[k] = v
+            filtered_batch.append(clean_item)
+
+        # Use default_collate on the filtered batch
+        if filtered_batch:
+            return default_collate(filtered_batch)
+        return batch
 
     @staticmethod
     def preprocess_input(data):
@@ -189,13 +231,12 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
         Returns:
             np.ndarray: Predicted output (CYX format)
         """
-        # If this is a signature inference call (context may be None during signature inference)
-        if context is None and getattr(
+        # For signature inference calls or when context is None, return dummy output
+        is_signature_inference = context is None and getattr(
             mlflow.pyfunc, "_is_signature_inference_call", False
-        ):
-            print(
-                "Detected signature inference call. Returning dummy output for signature inference."
-            )
+        )
+        if is_signature_inference:
+            logger.info("Detected signature inference call. Returning dummy output.")
             # Return a properly shaped dummy output based on input shape
             input_shape = np.asarray(model_input).shape
             if len(input_shape) == 2:
@@ -205,10 +246,13 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
             return np.zeros((2, 256, 256), dtype=np.float32)
 
         # Ensure model and trainer are initialized
-        self._initialize_model_and_trainer()
-
-        # Preprocess input to ensure it's in the correct format
-        processed_data = self.preprocess_input(model_input)
+        try:
+            self._initialize_model_and_trainer()
+        except Exception as e:
+            logger.error(f"Failed to initialize model and trainer: {e}")
+            if is_signature_inference or context is None:
+                return np.zeros((2, 256, 256), dtype=np.float32)
+            raise RuntimeError(f"Failed to initialize model and trainer: {e}")
 
         # Create temporary directory for input data
         tmp_input_dir = tempfile.mkdtemp(prefix="cytoland_input_")
@@ -218,6 +262,9 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
         tmp_input_zarr = Path(tmp_input_dir) / "input.zarr"
 
         try:
+            # Preprocess input to ensure it's in the correct format
+            processed_data = self.preprocess_input(model_input)
+
             # Write input data to Zarr file
             with open_ome_zarr(
                 tmp_input_zarr,
@@ -240,14 +287,14 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
                 target_channel=["nuclei", "membrane"],
                 z_window_size=1,
                 batch_size=1,
-                num_workers=13,
+                num_workers=0,  # Using 0 workers to avoid multiprocessing issues
                 normalizations=[
                     ScaleIntensityRangePercentilesd(
                         keys=["Phase3D"],
                         lower=0.5,
                         upper=99.5,
-                        b_min=0.0,
-                        b_max=1.0,
+                        b_min=0,
+                        b_max=1,
                     )
                 ],
             )
@@ -255,27 +302,22 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
             data_module.setup(stage="predict")
 
             # Run prediction
-
-            # TODO: set the matmul to high precision if possible
-            # torch.set_float32_matmul_precision("high")
+            self._model.eval()
             self._trainer.predict(
                 self._model, datamodule=data_module, return_predictions=False
             )
-            # Read output from Zarr file
-            if self.output_path is None:
-                output_path = Path(self._temp_dirs[0]) / "output.zarr"
-            else:
-                output_path = self.output_path
 
             # Check if output Zarr exists
-            if not os.path.exists(output_path):
-                print(f"Output Zarr not found: {output_path}")
-                if context is None:  # Might be a signature inference call
+            if not os.path.exists(self._output_store_path):
+                logger.warning(f"Output Zarr not found: {self._output_store_path}")
+                if is_signature_inference or context is None:
                     return np.zeros((2, 256, 256), dtype=np.float32)
-                raise FileNotFoundError(f"Output Zarr not found: {output_path}")
+                raise FileNotFoundError(
+                    f"Output Zarr not found: {self._output_store_path}"
+                )
 
             # Open Zarr file and read predictions
-            with open_ome_zarr(output_path / "0/0/0", mode="r") as z_output:
+            with open_ome_zarr(self._output_store_path / "0/0/0", mode="r") as z_output:
                 # Try different paths to find predictions
                 predictions = z_output["0"][:]
 
@@ -285,8 +327,10 @@ class MLFlowCytoLand(mlflow.pyfunc.PythonModel):
             return predictions
 
         except Exception as e:
+            logger.error(f"Failed to make prediction: {e}")
+            if is_signature_inference or context is None:
+                return np.zeros((2, 256, 256), dtype=np.float32)
             raise RuntimeError(f"Failed to make prediction: {e}")
-
         finally:
             # Clean up temporary directories
             self._cleanup_temp_dirs()
@@ -463,7 +507,7 @@ def save_cytoland_model(
 
     # If overwrite is True and the directory exists, remove it first
     if overwrite and os.path.exists(output_directory):
-        print(f"Overwriting existing directory: {output_directory}")
+        logger.info(f"Overwriting existing directory: {output_directory}")
         shutil.rmtree(output_directory)
 
     # Configure model
@@ -479,29 +523,29 @@ def save_cytoland_model(
         input_example = np.exp(
             -(1 / 8) * ((x - 32) ** 2 + (y - 32) ** 2) / 64**2
         ).astype(np.float32)
-        print(
+        logger.info(
             f"Created default input example with shape: {input_example.shape}, dtype: {input_example.dtype}"
         )
     else:
         # Ensure the input example is 2D (YX format) for MLflow signature and float32 dtype
         input_example = np.asarray(input_example, dtype=np.float32)
         if len(input_example.shape) == 5:  # TCZYX format
-            print(
+            logger.info(
                 f"Converting input example from TCZYX to YX format: {input_example.shape}"
             )
             input_example = input_example[0, 0, 0]  # Extract first slice
         elif len(input_example.shape) == 4:  # CZYX or TZYX format
-            print(
+            logger.info(
                 f"Converting input example from 4D to YX format: {input_example.shape}"
             )
             input_example = input_example[0, 0]  # Extract first slice
         elif len(input_example.shape) == 3:  # ZYX or CYX format
-            print(
+            logger.info(
                 f"Converting input example from 3D to YX format: {input_example.shape}"
             )
             input_example = input_example[0]  # Extract first slice
         # No conversion needed if it's already 2D
-        print(
+        logger.info(
             f"Using input example with shape: {input_example.shape}, dtype: {input_example.dtype}"
         )
 
@@ -534,6 +578,7 @@ def save_cytoland_model(
         ]
 
     # Prepare signature if not skipping signature inference
+    # TODO: probably better to have some pydantic model for the input and output
     signature = None
     if not skip_signature_inference:
         try:
