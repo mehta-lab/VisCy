@@ -1,0 +1,10 @@
+# MLflow wrapper for Viscy models - Requirements
+
+# Core dependencies
+torch>=2.4.
+mlflow==2.20.0
+monai>=1.4.0
+timm>=0.9.5
+numpy
+pandas
+requests
