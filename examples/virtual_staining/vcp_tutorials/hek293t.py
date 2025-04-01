@@ -179,3 +179,13 @@ stackview.switch(
     display_min=0.0,
     display_max=1.0,
 )
+
+# %% [markdown]
+"""
+# Summary
+
+In the above example, we demonstrated how to use the VSCyto3D model to stain cell nuclei and plasma membranes.
+Note how the experimental fluorescence is missing for a subset of cells.
+This is due to loss of genetic labeling.
+The virtually stained images is not affected by this issue and can robustly label all cells.
+"""
