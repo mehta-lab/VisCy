@@ -27,7 +27,7 @@ Python>=3.10
 
 ## Model
 
-Robust virtual staining models are a collection of models (VSCyto2D, VSCyto3D, and VSNeuromast)
+The Cytoland virtual staining models are a collection of models (VSCyto2D, VSCyto3D, and VSNeuromast)
 used to predict cellular landmarks (e.g., nuclei and plasma membranes)
 from label-free images (e.g. quantitative phase, Zernike phase contrast, and brightfield).
 This quick-start guide focuses on the VSCyto2D model.
