@@ -268,7 +268,7 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
 
     # sub_features = features[features["Time"] == 20]
     feature_df_removed = features.drop(
-        columns=["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id", "UMAP1", "UMAP2"]
+        columns=["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
     )
 
     # Compute correlation between PCA features and computed features
@@ -306,6 +306,11 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
 
     return correlation
 
+
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+
 # %% for organelle features
 
 features_path = Path(
@@ -335,78 +340,6 @@ features_organelle.to_csv(
 )
 
 correlation_organelle = compute_correlation_and_save_png(features_organelle, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.png")
-
-# %% for sensor features
-
-features_path = Path(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
-)
-data_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
-)
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
-)
-
-source_channel = ["Phase3D", "RFP"]
-seg_channel = ["Nuclei_prediction_labels"]
-z_range = (28, 43)
-fov_list = ["/A/3","/B/3","/B/4"]
-# fov_name = "/B/4/5"
-# track_id = 11
-
-features_sensor = compute_features(features_path, data_path, tracks_path, source_channel, seg_channel, z_range, fov_list)
-
-features_sensor.to_csv(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv",
-    index=False,
-)
-correlation_sensor = compute_correlation_and_save_png(features_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor.png")
-
-# %% plot PCA vs set of computed features for sensor features
-
-set_features = [
-    "Fluor Radial Intensity Gradient",
-    "Fluor Kurtosis",
-    "Phase Entropy",
-    "Phase Std Dev",
-    "Perimeter area ratio",
-    "Phase Interquartile Range",
-    "Phase Skewness",
-    "Fluor Interquartile Range",
-    "Nuclear area",
-    "Fluor Area",
-    "Perimeter",
-    "Fluor Texture",
-]
-
-plt.figure(figsize=(8, 10))
-sns.heatmap(
-    correlation_sensor.loc[set_features, "PCA1":"PCA6"],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-    annot_kws={'size': 18},
-    vmin=-1,
-    vmax=1,
-)
-plt.xlabel("Computed Features", fontsize=18)
-plt.ylabel("PCA Features", fontsize=18)
-plt.xticks(fontsize=18)  # Increase x-axis tick labels
-plt.yticks(fontsize=18)  # Increase y-axis tick labels
-
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures.svg"
-)
-
-# plot the PCA1 vs PCA2 map for sensor features
-
-plt.figure(figsize=(10, 10))
-sns.scatterplot(
-    x="PCA1",
-    y="PCA2",
-    data=features_sensor,
-)
 
 # %% plot PCA vs set of computed features for organelle features
 
@@ -439,6 +372,87 @@ plt.xticks(fontsize=18)  # Increase x-axis tick labels
 plt.yticks(fontsize=18)  # Increase y-axis tick labels
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_refinedPCA.svg"
+)
+
+
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+
+# %% for sensor features
+
+features_path = Path(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
+)
+data_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
+)
+tracks_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
+)
+
+source_channel = ["Phase3D", "RFP"]
+seg_channel = ["Nuclei_prediction_labels"]
+z_range = (28, 43)
+fov_list = ["/A/3","/B/3","/B/4"]
+# fov_name = "/B/4/5"
+# track_id = 11
+
+features_sensor = compute_features(features_path, data_path, tracks_path, source_channel, seg_channel, z_range, fov_list)
+
+features_sensor.to_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv",
+    index=False,
+)
+# drop columns 'Nuclear area' and 'Instantaneous velocity'
+features_sensor = features_sensor.drop(columns=["Nuclear Area", "Instantaneous velocity"])
+# take a subset of the dropping 768 features
+feature_columns=[f"feature_{i+1}" for i in range(768)]
+features_subset_sensor = features_sensor.drop(columns=feature_columns)
+correlation_sensor = compute_correlation_and_save_png(features_subset_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.png")
+
+# %% plot PCA vs set of computed features for sensor features
+
+set_features = [
+    "Fluor Radial Intensity Gradient",
+    "Fluor Kurtosis",
+    "Phase Entropy",
+    "Phase Std Dev",
+    "Perimeter area ratio",
+    "Phase Interquartile Range",
+    "Phase Skewness",
+    "Fluor Interquartile Range",
+    "Fluor Area",
+    "Perimeter",
+    "Fluor Texture",
+]
+
+plt.figure(figsize=(8, 10))
+sns.heatmap(
+    correlation_sensor.loc[set_features, "PCA1":"PCA6"],
+    annot=True,
+    cmap="coolwarm",
+    fmt=".2f",
+    annot_kws={'size': 18},
+    vmin=-1,
+    vmax=1,
+)
+plt.xlabel("Computed Features", fontsize=18)
+plt.ylabel("PCA Features", fontsize=18)
+plt.xticks(fontsize=18)  # Increase x-axis tick labels
+plt.yticks(fontsize=18)  # Increase y-axis tick labels
+
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_allset_sensor.svg"
+)
+
+# plot the PCA1 vs PCA2 map for sensor features
+
+plt.figure(figsize=(10, 10))
+sns.scatterplot(
+    x="PCA1",
+    y="PCA2",
+    data=features_sensor,
 )
 
 # %%
