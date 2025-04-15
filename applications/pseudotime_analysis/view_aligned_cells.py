@@ -214,3 +214,70 @@ for lineage_label, lineage_df in top_n_cells.groupby("lineage_label"):
     print(warp_tidx_start)
 
 # %%
+# Let's compare with the more robust alignment method from plotting_utils.py
+import sys
+
+sys.path.append(str(Path(__file__).resolve().parent))
+from plotting_utils import align_image_stacks
+
+# Prepare the reference pattern as the embeddings for the reference tracks
+reference_embeddings = []
+for track_id in reference_tracks:
+    track_emb = test_data_timeaware_embeddings.sel(
+        sample=(reference_fov, track_id)
+    ).features.values
+    reference_embeddings.append(track_emb)
+reference_pattern = np.concatenate(reference_embeddings, axis=0)
+
+# Create a DataFrame in the format expected by align_image_stacks
+aligned_cells_df = []
+for _, row in top_n_cells.iterrows():
+    fov_id = row["fov_id"]
+    track_ids_list = (
+        eval(row["track_ids"])
+        if isinstance(row["track_ids"], str)
+        else row["track_ids"]
+    )
+
+    # Get warping path in the correct format (list of tuples)
+    warping_path = (
+        eval(row["warping_path"])
+        if isinstance(row["warping_path"], str)
+        else row["warping_path"]
+    )
+    warping_path = [
+        (int(ref_idx), int(query_idx)) for ref_idx, query_idx in warping_path
+    ]
+
+    aligned_cells_df.append(
+        {
+            "fov_name": fov_id,
+            "track_ids": track_ids_list,
+            "warp_path": warping_path,
+            "start_timepoint": 0,  # We'll align from the beginning
+            "end_timepoint": len(reference_pattern),
+            "distance": row.get("distance", 0.0),
+        }
+    )
+
+aligned_cells_df = pd.DataFrame(aligned_cells_df)
+
+# Use the align_image_stacks function
+lineage_images, robust_aligned_stacks = align_image_stacks(
+    reference_pattern=reference_pattern,
+    top_aligned_cells=aligned_cells_df,
+    input_data_path=dataset_path,
+    tracks_path=tracks_path,
+    source_channels=["DIC"],
+    yx_patch_size=(256, 256),
+    z_range=(0, 1),
+    view_ref_sector_only=True,
+    napari_viewer=None,  # We'll add to the viewer manually
+)
+
+# Add the robustly aligned stacks to the viewer
+for i, aligned_stack in enumerate(robust_aligned_stacks):
+    lineage_info = aligned_cells_df.iloc[i]
+    fov_name = lineage_info["fov_name"]
+    track_id = lineage_info["track_ids"][0] if lineage_info["track_ids"] else "unknown"
+    viewer.add_image(aligned_stack, name=f"Robust_{fov_name}_track_{track_id}")

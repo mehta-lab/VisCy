@@ -64,7 +64,7 @@ t_warped = np.concatenate(
         np.linspace(0, 1.5 * np.pi, num_timepoints // 2),  # First 1.5 periods
         np.linspace(
             2.5 * np.pi, 4 * np.pi, num_timepoints // 2
-        ),  # Last 1.5 periods (skip middle)
+        ),  # Last 1.5 periods (sshkip middle)
     ]
 )
 for dim in range(embedding_dim):
@@ -78,7 +78,7 @@ cell_embeddings[4] += np.random.randn(num_timepoints, embedding_dim) * 0.15
 cell_embeddings[5] = np.roll(
     base_pattern, shift=num_timepoints // 4, axis=0
 )  # 1/4 cycle shift
-cell_embeddings[5] += np.random.randn(num_timepoints, embedding_dim) * 0.15
+cell_embeddings[5] += np.random.randn(num_timepoints, embedding_dim) * 0.2
 
 # Cell 7 - Double frequency (faster oscillations)
 for dim in range(embedding_dim):

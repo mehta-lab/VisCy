@@ -4,7 +4,8 @@ import numpy as np
 from dtaidistance import dtw
 from scipy.cluster.hierarchy import dendrogram, linkage
 
-# DEMO test for the DTW distance using sinusoidals
+# testing if we can use DTW to align cell trajectories using a short reference pattern
+
 np.random.seed(42)
 timepoints = 50
 cells = 8
@@ -26,6 +27,9 @@ plt.legend()
 plt.title("Original Cell Trajectories")
 plt.show()
 # %%
+# Set reference cell for all subsequent analysis
+reference_cell = 0  # Use first cell as reference
+
 # Compute DTW distance matrix
 dtw_matrix = np.zeros((cells, cells))
 for i in range(cells):
@@ -60,8 +64,6 @@ plt.show()
 
 # %%
 # Align cells using DTW with distance filtering
-reference_cell = 0  # Use first cell as reference
-
 # Set a threshold for maximum allowed DTW distance
 # Cells with distances above this threshold won't be aligned
 # This can be set based on the distribution of distances or domain knowledge

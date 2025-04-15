@@ -1,4 +1,5 @@
 # Plotting utils
+import logging
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,8 @@ import pandas as pd
 import xarray as xr
 
 from viscy.data.triplet import TripletDataModule
+
+logger = logging.getLogger(__name__)
 
 
 def plot_reference_aligned_average(
@@ -414,6 +417,9 @@ def align_image_stacks(
     top_aligned_cells: pd.DataFrame,
     input_data_path: Path,
     tracks_path: Path,
+    source_channels: list[str],
+    yx_patch_size: tuple[int, int] = (192, 192),
+    z_range: tuple[int, int] = (0, 1),
     view_ref_sector_only: bool = True,
     napari_viewer=None,
 ) -> tuple[list, list]:
@@ -425,6 +431,9 @@ def align_image_stacks(
         top_aligned_cells: DataFrame with alignment information
         input_data_path: Path to the input data
         tracks_path: Path to the tracks data
+        source_channels: List of channels to include
+        yx_patch_size: Patch size for images
+        z_range: Z-range to include
         view_ref_sector_only: If True, only show the section that matches the reference pattern
         napari_viewer: Optional napari viewer for visualization
 
@@ -444,17 +453,16 @@ def align_image_stacks(
         fov_name = row["fov_name"]
         track_ids = row["track_ids"]
         warp_path = row["warp_path"]
-        start_time = int(row["start_timepoint"])  # Ensure start_time is an integer
-        end_time = int(row["end_timepoint"])  # Ensure end_time is an integer
+        start_time = int(row["start_timepoint"])
 
-        # Initialize the data module
+        print(f"Aligning images for {fov_name} with track ids: {track_ids}")
         data_module = TripletDataModule(
             data_path=input_data_path,
             tracks_path=tracks_path,
-            source_channel=["Phase3D", "raw GFP EX488 EM525-45"],
-            z_range=[10, 30],
-            initial_yx_patch_size=(192, 192),
-            final_yx_patch_size=(192, 192),
+            source_channel=source_channels,
+            z_range=z_range,
+            initial_yx_patch_size=yx_patch_size,
+            final_yx_patch_size=yx_patch_size,
             batch_size=1,
             num_workers=12,
             predict_cells=True,
@@ -463,7 +471,7 @@ def align_image_stacks(
         )
         data_module.setup("predict")
 
-        # Get the images and timepoints for the lineage
+        # Get the images for the lineage
         lineage_images = []
         for batch in data_module.predict_dataloader():
             image = batch["anchor"].numpy()[0]
@@ -471,6 +479,7 @@ def align_image_stacks(
 
         lineage_images = np.array(lineage_images)
         all_lineage_images.append(lineage_images)
+        print(f"Lineage images shape: {np.array(lineage_images).shape}")
 
         # Create an aligned stack based on the warping path
         if view_ref_sector_only:
@@ -479,26 +488,51 @@ def align_image_stacks(
                 dtype=lineage_images.dtype,
             )
 
-            # Create a mapping from reference indices to lineage indices
-            ref_to_lineage = {}
-            for ref_idx, query_idx in warp_path:
-                lineage_idx = int(start_time + query_idx)
-                if 0 <= lineage_idx < len(lineage_images):
-                    ref_to_lineage[ref_idx] = lineage_idx
-
-            # Fill the aligned stack, ensuring every reference index is covered
+            # Map each reference timepoint to the corresponding lineage timepoint
             for ref_idx in range(len(reference_pattern)):
-                if ref_idx in ref_to_lineage:
-                    aligned_stack[ref_idx] = lineage_images[ref_to_lineage[ref_idx]]
+                # Find matches in warping path for this reference index
+                matches = [(i, q) for i, q in warp_path if i == ref_idx]
+
+                if matches:
+                    # Get the corresponding lineage timepoint (first match if multiple)
+                    print(f"Found match for ref idx: {ref_idx}")
+                    match = matches[0]
+                    query_idx = match[1]
+                    lineage_idx = int(start_time + query_idx)
+                    print(
+                        f"Lineage index: {lineage_idx}, start time: {start_time}, query idx: {query_idx}, ref idx: {ref_idx}"
+                    )
+                    # Copy the image if it's within bounds
+                    if 0 <= lineage_idx < len(lineage_images):
+                        aligned_stack[ref_idx] = lineage_images[lineage_idx]
+                    else:
+                        # Find nearest valid timepoint if out of bounds
+                        nearest_idx = min(max(0, lineage_idx), len(lineage_images) - 1)
+                        aligned_stack[ref_idx] = lineage_images[nearest_idx]
                 else:
-                    # Handle missing indices - find the closest available reference index
-                    if ref_to_lineage:
+                    # If no direct match, find closest reference timepoint in warping path
+                    print(f"No match found for ref idx: {ref_idx}")
+                    all_ref_indices = [i for i, _ in warp_path]
+                    if all_ref_indices:
                         closest_ref_idx = min(
-                            ref_to_lineage.keys(), key=lambda x: abs(x - ref_idx)
+                            all_ref_indices, key=lambda x: abs(x - ref_idx)
                         )
-                        aligned_stack[ref_idx] = lineage_images[
-                            ref_to_lineage[closest_ref_idx]
+                        closest_matches = [
+                            (i, q) for i, q in warp_path if i == closest_ref_idx
                         ]
+
+                        if closest_matches:
+                            closest_query_idx = closest_matches[0][1]
+                            lineage_idx = int(start_time + closest_query_idx)
+
+                            if 0 <= lineage_idx < len(lineage_images):
+                                aligned_stack[ref_idx] = lineage_images[lineage_idx]
+                            else:
+                                # Bound to valid range
+                                nearest_idx = min(
+                                    max(0, lineage_idx), len(lineage_images) - 1
+                                )
+                                aligned_stack[ref_idx] = lineage_images[nearest_idx]
 
             all_aligned_stacks.append(aligned_stack)
             if napari_viewer:
@@ -509,7 +543,6 @@ def align_image_stacks(
                 )
         else:
             # View the whole lineage shifted by the start time
-            # Ensure start_time is an integer for slicing
             start_idx = int(start_time)
             aligned_stack = lineage_images[start_idx:]
             all_aligned_stacks.append(aligned_stack)
@@ -530,7 +563,10 @@ def find_pattern_matches(
     window_step_fraction: float = 0.25,
     num_candidates: int = 3,
     max_distance: float = float("inf"),
+    max_skew: float = 0.8,  # Add skewness parameter
     save_path: str | None = None,
+    method: str = "bernd_clifford",
+    normalize: bool = True,
 ) -> pd.DataFrame:
     """
     Find the best matches of a reference pattern in multiple lineages using DTW.
@@ -542,12 +578,14 @@ def find_pattern_matches(
         window_step_fraction: Fraction of reference pattern length to use as window step
         num_candidates: Number of best candidates to consider per lineage
         max_distance: Maximum distance threshold to consider a match
+        max_skew: Maximum allowed path skewness (0-1, where 0=perfect diagonal)
         save_path: Optional path to save the results CSV
+        method: DTW method to use - 'bernd_clifford' (from utils.py) or 'dtai' (dtaidistance library)
 
     Returns:
         DataFrame with match positions and distances
     """
-    from dtaidistance.dtw_ndim import warping_path
+    from scipy.spatial.distance import cdist
     from tqdm import tqdm
 
     # Calculate window step based on reference pattern length
@@ -557,6 +595,7 @@ def find_pattern_matches(
         "fov_name": [],
         "track_ids": [],
         "distance": [],
+        "skewness": [],  # Add skewness to results
         "warp_path": [],
         "start_timepoint": [],
         "end_timepoint": [],
@@ -567,6 +606,7 @@ def find_pattern_matches(
         total=len(filtered_lineages),
         desc="Finding pattern matches",
     ):
+        print(f"Finding pattern matches for {fov_name} with track ids: {track_ids}")
         # Reconstruct the concatenated lineage
         lineages = []
         track_offsets = (
@@ -584,20 +624,40 @@ def find_pattern_matches(
 
         lineage_embeddings = np.concatenate(lineages, axis=0)
 
-        # Find best matches using DTW
-        best_matches = find_best_match_dtw(
-            lineage_embeddings,
-            reference_pattern=reference_pattern,
-            num_candidates=num_candidates,
-            window_step=window_step,
-            max_distance=max_distance,
-        )
+        # Find best matches using the selected DTW method
+        if method == "bernd_clifford":
+            matches_df = find_best_match_dtw_bernd_clifford(
+                lineage_embeddings,
+                reference_pattern=reference_pattern,
+                num_candidates=num_candidates,
+                window_step=window_step,
+                max_distance=max_distance,
+                max_skew=max_skew,
+                normalize=normalize,
+            )
+        else:
+            matches_df = find_best_match_dtw(
+                lineage_embeddings,
+                reference_pattern=reference_pattern,
+                num_candidates=num_candidates,
+                window_step=window_step,
+                max_distance=max_distance,
+                max_skew=max_skew,
+                normalize=normalize,
+            )
 
-        if len(best_matches) > 0:
-            best_pos, best_path, best_dist = best_matches[0]
+        if not matches_df.empty:
+            # Get the best match (first row of the sorted DataFrame)
+            best_match = matches_df.iloc[0]
+            best_pos = best_match["position"]
+            best_path = best_match["path"]
+            best_dist = best_match["distance"]
+            best_skew = best_match["skewness"]
+
             all_match_positions["fov_name"].append(fov_name)
             all_match_positions["track_ids"].append(track_ids)
             all_match_positions["distance"].append(best_dist)
+            all_match_positions["skewness"].append(best_skew)
             all_match_positions["warp_path"].append(best_path)
             all_match_positions["start_timepoint"].append(best_pos)
             all_match_positions["end_timepoint"].append(
@@ -607,6 +667,7 @@ def find_pattern_matches(
             all_match_positions["fov_name"].append(fov_name)
             all_match_positions["track_ids"].append(track_ids)
             all_match_positions["distance"].append(None)
+            all_match_positions["skewness"].append(None)
             all_match_positions["warp_path"].append(None)
             all_match_positions["start_timepoint"].append(None)
             all_match_positions["end_timepoint"].append(None)
@@ -615,8 +676,10 @@ def find_pattern_matches(
     all_match_positions = pd.DataFrame(all_match_positions)
     all_match_positions = all_match_positions.dropna()
 
-    # Sort by distance (best matches first)
-    all_match_positions = all_match_positions.sort_values(by="distance", ascending=True)
+    # Sort by distance (primary) and skewness (secondary)
+    all_match_positions = all_match_positions.sort_values(
+        by=["distance", "skewness"], ascending=[True, True]
+    )
 
     # Save to CSV if path is provided
     if save_path:
@@ -631,9 +694,11 @@ def find_best_match_dtw(
     num_candidates: int = 5,
     window_step: int = 5,
     max_distance: float = float("inf"),
-) -> list[tuple[int, list, float]]:
+    max_skew: float = 0.8,
+    normalize: bool = True,
+) -> pd.DataFrame:
     """
-    Find the best matches in a lineage using DTW.
+    Find the best matches in a lineage using DTW with dtaidistance.
 
     Args:
         lineage: The lineage to search (t,embeddings).
@@ -641,31 +706,120 @@ def find_best_match_dtw(
         num_candidates: The number of candidates to return.
         window_step: The step size for the window.
         max_distance: Maximum distance threshold to consider a match.
+        max_skew: Maximum allowed path skewness (0-1).
 
     Returns:
-        List of tuples (position, warping_path, distance) for the best matches
+        DataFrame with position, warping_path, distance, and skewness for the best matches
     """
     from dtaidistance.dtw_ndim import warping_path
+
+    from utils import path_skew
 
     dtw_results = []
     n_windows = len(lineage) - len(reference_pattern) + 1
 
     if n_windows <= 0:
-        return []
+        return pd.DataFrame(columns=["position", "path", "distance", "skewness"])
 
     for i in range(0, n_windows, window_step):
         window = lineage[i : i + len(reference_pattern)]
         path, dist = warping_path(
-            window,
             reference_pattern,
+            window,
             include_distance=True,
         )
-        if dist <= max_distance:
-            dtw_results.append((i, path, dist))
+        if normalize:
+            # Normalize by path length to match bernd_clifford method
+            dist = dist / len(path)
+        # Calculate skewness using the utils function
+        skewness = path_skew(path, len(reference_pattern), len(window))
 
-    sorted_dtw_results = sorted(dtw_results, key=lambda x: x[2])[:num_candidates]
+        if dist <= max_distance and skewness <= max_skew:
+            dtw_results.append(
+                {"position": i, "path": path, "distance": dist, "skewness": skewness}
+            )
 
-    return sorted_dtw_results
+    # Convert to DataFrame
+    results_df = pd.DataFrame(dtw_results)
+
+    # Sort by distance first (primary) and then by skewness (secondary)
+    if not results_df.empty:
+        results_df = results_df.sort_values(by=["distance", "skewness"]).head(
+            num_candidates
+        )
+
+    return results_df
+
+
+def find_best_match_dtw_bernd_clifford(
+    lineage: np.ndarray,
+    reference_pattern: np.ndarray,
+    num_candidates: int = 5,
+    window_step: int = 5,
+    normalize: bool = True,
+    max_distance: float = float("inf"),
+    max_skew: float = 0.8,
+) -> pd.DataFrame:
+    """
+    Find the best matches in a lineage using DTW with the utils.py implementation.
+
+    Args:
+        lineage: The lineage to search (t,embeddings).
+        reference_pattern: The pattern to search for (t,embeddings).
+        num_candidates: The number of candidates to return.
+        window_step: The step size for the window.
+        max_distance: Maximum distance threshold to consider a match.
+        max_skew: Maximum allowed path skewness (0-1).
+
+    Returns:
+        DataFrame with position, warping_path, distance, and skewness for the best matches
+    """
+    from scipy.spatial.distance import cdist
+
+    from utils import dtw_with_matrix, path_skew
+
+    dtw_results = []
+    n_windows = len(lineage) - len(reference_pattern) + 1
+
+    if n_windows <= 0:
+        return pd.DataFrame(columns=["position", "path", "distance", "skewness"])
+
+    for i in range(0, n_windows, window_step):
+        window = lineage[i : i + len(reference_pattern)]
+
+        # Create distance matrix
+        distance_matrix = cdist(reference_pattern, window, metric="euclidean")
+
+        # Apply DTW using utils.py implementation
+        distance, _, path = dtw_with_matrix(distance_matrix, normalize=normalize)
+
+        # Calculate skewness
+        skewness = path_skew(path, len(reference_pattern), len(window))
+
+        # Only add if both distance and skewness pass thresholds
+        if distance <= max_distance and skewness <= max_skew:
+            logger.debug(
+                f"Found match at {i} with distance {distance} and skewness {skewness}"
+            )
+            dtw_results.append(
+                {
+                    "position": i,
+                    "path": path,
+                    "distance": distance,
+                    "skewness": skewness,
+                }
+            )
+
+    # Convert to DataFrame
+    results_df = pd.DataFrame(dtw_results)
+
+    # Sort by distance first (primary) and then by skewness (secondary)
+    if not results_df.empty:
+        results_df = results_df.sort_values(by=["distance", "skewness"]).head(
+            num_candidates
+        )
+
+    return results_df
 
 
 def create_consensus_embedding(
@@ -743,3 +897,89 @@ def create_consensus_embedding(
         consensus_embedding += weights[i] * aligned_embedding
 
     return consensus_embedding
+
+
+def identify_lineages(
+    tracking_df: pd.DataFrame, return_both_branches: bool = False
+) -> list[tuple[str, list[int]]]:
+    """
+    Identifies all distinct lineages in the cell tracking data, following only
+    one branch after each division event.
+
+    Args:
+        annotations_path: Path to the annotations CSV file
+
+    Returns:
+        A list of tuples, where each tuple contains (fov_id, [track_ids])
+        representing a single branch lineage within a single FOV
+    """
+    # Read the CSV file
+
+    # Process each FOV separately to handle repeated track_ids
+    all_lineages = []
+
+    # Group by FOV
+    for fov_id, fov_df in tracking_df.groupby("fov_name"):
+        # Create a dictionary to map tracks to their parents within this FOV
+        child_to_parent = {}
+
+        # Group by track_id and get the first row for each track to find its parent
+        for track_id, track_group in fov_df.groupby("track_id"):
+            first_row = track_group.iloc[0]
+            parent_track_id = first_row["parent_track_id"]
+
+            if parent_track_id != -1:
+                child_to_parent[track_id] = parent_track_id
+
+        # Find root tracks (those without parents or with parent_track_id = -1)
+        all_tracks = set(fov_df["track_id"].unique())
+        child_tracks = set(child_to_parent.keys())
+        root_tracks = all_tracks - child_tracks
+
+        # Additional validation for root tracks
+        root_tracks = set()
+        for track_id in all_tracks:
+            track_data = fov_df[fov_df["track_id"] == track_id]
+            # Check if it's truly a root track
+            if (
+                track_data.iloc[0]["parent_track_id"] == -1
+                or track_data.iloc[0]["parent_track_id"] not in all_tracks
+            ):
+                root_tracks.add(track_id)
+
+        # Build a parent-to-children mapping
+        parent_to_children = {}
+        for child, parent in child_to_parent.items():
+            if parent not in parent_to_children:
+                parent_to_children[parent] = []
+            parent_to_children[parent].append(child)
+
+        # Function to get all branches from each parent
+        def get_all_branches(track_id):
+            branches = []
+            current_branch = [track_id]
+
+            if track_id in parent_to_children:
+                # For each child, get all their branches
+                for child in parent_to_children[track_id]:
+                    child_branches = get_all_branches(child)
+                    # Add current track to start of each child branch
+                    for branch in child_branches:
+                        branches.append(current_branch + branch)
+            else:
+                # If no children, return just this track
+                branches.append(current_branch)
+
+            return branches
+
+        # Build lineages starting from root tracks within this FOV
+        for root_track in root_tracks:
+            # Get all branches from this root
+            lineage_tracks = get_all_branches(root_track)
+            if return_both_branches:
+                for branch in lineage_tracks:
+                    all_lineages.append((fov_id, branch))
+            else:
+                all_lineages.append((fov_id, lineage_tracks[0]))
+
+    return all_lineages

@@ -105,6 +105,47 @@ def identify_lineages(annotations_path: Path) -> list[tuple[str, list[int]]]:
     return all_lineages
 
 
+def path_skew(warping_path, ref_len, query_len):
+    """
+    Calculate the skewness of a DTW warping path.
+
+    Args:
+        warping_path: List of tuples (ref_idx, query_idx) representing the warping path
+        ref_len: Length of the reference sequence
+        query_len: Length of the query sequence
+
+    Returns:
+        A skewness metric between 0 and 1, where:
+        - 0 means perfectly diagonal path (ideal alignment)
+        - 1 means completely skewed (worst alignment)
+    """
+    # Convert path to numpy array for easier manipulation
+    path_array = np.array(warping_path)
+
+    # Calculate "ideal" diagonal indices
+    diagonal_x = np.linspace(0, ref_len - 1, len(warping_path))
+    diagonal_y = np.linspace(0, query_len - 1, len(warping_path))
+    diagonal_path = np.column_stack((diagonal_x, diagonal_y))
+
+    # Calculate distances from points on the warping path to the diagonal
+    # Normalize based on max possible distance (corner to diagonal)
+    max_distance = max(ref_len, query_len)
+
+    # Calculate distance from each point to the diagonal
+    distances = []
+    for i, (x, y) in enumerate(path_array):
+        # Find the closest point on the diagonal
+        dx, dy = diagonal_path[i]
+        # Simple Euclidean distance
+        dist = np.sqrt((x - dx) ** 2 + (y - dy) ** 2)
+        distances.append(dist)
+
+    # Average normalized distance as skewness metric
+    skew = np.mean(distances) / max_distance
+
+    return skew
+
+
 def dtw_with_matrix(distance_matrix, normalize=True):
     """
     Compute DTW using a pre-computed distance matrix.
