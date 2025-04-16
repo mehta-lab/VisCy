@@ -23,6 +23,7 @@ _logger = logging.getLogger("lightning.pytorch")
 def read_embedding_dataset(path: Path) -> Dataset:
     """
     Read the embedding dataset written by the EmbeddingWriter callback.
+    Supports both legacy datasets (without x/y coordinates) and new datasets.
 
     Parameters
     ----------
@@ -34,7 +35,19 @@ def read_embedding_dataset(path: Path) -> Dataset:
     Dataset
         Xarray dataset with features and projections.
     """
-    return open_zarr(path).set_index(sample=INDEX_COLUMNS)
+    dataset = open_zarr(path)
+    # Check which index columns are present in the dataset
+    available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
+
+    # Warn if any INDEX_COLUMNS are missing
+    missing_cols = set(INDEX_COLUMNS) - set(available_cols)
+    if missing_cols:
+        _logger.warning(
+            f"Dataset at {path} is missing index columns: {sorted(missing_cols)}. "
+            "This appears to be a legacy dataset format."
+        )
+
+    return dataset.set_index(sample=available_cols)
 
 
 def _move_and_stack_embeddings(
