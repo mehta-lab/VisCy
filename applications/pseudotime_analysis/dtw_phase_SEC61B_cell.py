@@ -52,14 +52,16 @@ if NAPARI:
 
 # %%
 input_data_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
+)
+
+
+feature_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
 )
 # feature_path = Path(
-#     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
+#     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions_infection/2chan_192patch_100ckpt_timeAware_ntxent_GT.zarr"
 # )
-feature_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions_infection/2chan_192patch_100ckpt_timeAware_ntxent_GT.zarr"
-)
 tracks_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
 )
@@ -116,7 +118,9 @@ if ANNOTATE_FOV:
     viewer.dims.ndisplay = 3
 
 # %%
-CONDITION = "infection"  # remodelling_no_sensor, remodelling_w_sensor, cell_division
+CONDITION = (
+    "remodelling_w_sensor"  # remodelling_no_sensor, remodelling_w_sensor, cell_division
+)
 
 if CONDITION == "remodelling_no_sensor":
     # Get the reference lineage

@@ -1,5 +1,6 @@
 """Interactive visualization of phenotype data."""
 
+# %%
 import logging
 from pathlib import Path
 
@@ -57,28 +58,37 @@ def load_phenotype_annotations(annotation_path: str | Path) -> dict:
     return phenotype_dict, unique_fovs
 
 
+# %%
 def main():
     """Main function to run the visualization app."""
     # Configuration
     DEBUG = True
-    VIZ_DATASET = "microglia"  # ["organelle", "phenotype", "microglia"]
+    VIZ_DATASET = "organelle"  # ["organelle", "phenotype", "microglia"]
 
     if VIZ_DATASET == "organelle":
         SELECTED_OBSERVED_PHENOTYPE = 2
         annotation_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/phenotype_observations.csv"
         phenotype_dict, unique_fovs = load_phenotype_annotations(annotation_path)
         fov_tracks_dict = phenotype_dict[SELECTED_OBSERVED_PHENOTYPE]
+
+        fov_tracks_dict = {
+            "/C/2/000000": list(range(300)),
+            "/C/2/000001": list(range(300)),
+            # "/C/1/001000": list(range(100)),
+        }
         if not DEBUG:
             # Add empty lists for FOVs not in the phenotype
             for fov in unique_fovs:
                 if fov not in fov_tracks_dict:
                     phenotype_dict[fov] = []
+
         viz_config = {
             "data_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr",
             "tracks_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr",
-            "features_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr",
+            "features_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr",
             "channels_to_display": ["Phase3D", "raw GFP EX488 EM525-45"],
-            "fov_tracks": phenotype_dict[SELECTED_OBSERVED_PHENOTYPE],
+            # "fov_tracks": phenotype_dict[SELECTED_OBSERVED_PHENOTYPE],
+            "fov_tracks": fov_tracks_dict,
             "z_range": (25, 40),
             "yx_patch_size": (192, 192),
             "num_PC_components": 8,
@@ -125,3 +135,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+# %%
