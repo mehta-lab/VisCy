@@ -22,13 +22,13 @@ VAL_FOVS = test_virus + test_mock
 prediction_from_scratch = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/from-scratch-last-1126.csv"
 )
-prediction_from_scratch["model"] = "from-scratch"
+prediction_from_scratch["pretraining"] = "ImageNet"
 
 prediction_finetuned = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/fine-tune-last-1126.csv"
 )
-pretrained_name = "DynaCLR\npre-trained"
-prediction_finetuned["model"] = pretrained_name
+pretrained_name = "DynaCLR"
+prediction_finetuned["pretraining"] = pretrained_name
 
 prediction = pd.concat([prediction_from_scratch, prediction_finetuned], axis=0)
 
@@ -47,21 +47,21 @@ print(
 # %%
 prediction["HPI"] = prediction["t"] / 6 + 3
 
-bins = [3, 9, 15, 21, 24]
-labels = [f"{start}-{end} HPI" for start, end in zip(bins[:-1], bins[1:])]
+bins = [3, 6, 9, 12, 15, 18, 21, 24]
+labels = [f"{start}-{end}" for start, end in zip(bins[:-1], bins[1:])]
 prediction["stage"] = pd.cut(prediction["HPI"], bins=bins, labels=labels, right=True)
 prediction["well"] = prediction["fov_name"].apply(
     lambda x: "ZIKV" if x in test_virus else "Mock"
 )
 comparison = prediction.melt(
-    id_vars=["fov_name", "id", "HPI", "well", "stage", "model"],
+    id_vars=["fov_name", "id", "HPI", "well", "stage", "pretraining"],
     value_vars=["label", "prediction_binary"],
     var_name="source",
     value_name="value",
 )
 with sns.axes_style("whitegrid"):
     ax = sns.lineplot(
-        data=comparison[comparison["model"] == pretrained_name],
+        data=comparison[comparison["pretraining"] == pretrained_name],
         x="HPI",
         y="value",
         hue="well",
@@ -73,7 +73,7 @@ with sns.axes_style("whitegrid"):
     ax.set_ylabel("Infection ratio")
 
 # %%
-id_vars = ["stage", "model"]
+id_vars = ["stage", "pretraining"]
 
 accuracy_by_t = prediction.groupby(id_vars).apply(
     lambda x: float(accuracy_score(x["label"], x["prediction_binary"]))
@@ -89,7 +89,7 @@ metrics_df = pd.DataFrame(
 
 metrics_long = metrics_df.melt(
     id_vars=id_vars,
-    value_vars=["accuracy", "F1"],
+    value_vars=["accuracy"],
     var_name="metric",
     value_name="score",
 )
@@ -98,26 +98,23 @@ with sns.axes_style("ticks"):
     plt.style.use("./figure.mplstyle")
     g = sns.catplot(
         data=metrics_long,
-        # row="well",
-        col="stage",
-        x="metric",
+        x="stage",
         y="score",
-        hue="model",
-        kind="bar",
-        height=2,
-        aspect=0.6,
+        hue="pretraining",
+        kind="point",
+        linewidth=1.5,
+        linestyles="--",
     )
-    g.set_titles(template="{col_name}")
-    g.set_axis_labels("", "score")
-    g.tight_layout()
-    g.figure.set_size_inches(5.5, 2)
+    g.set_axis_labels("HPI", "accuracy")
+    sns.move_legend(g, "upper left", bbox_to_anchor=(0.35, 1.1))
+    g.figure.set_size_inches(3.5, 2)
     plt.show()
 
 
 # %%
 g.figure.savefig(
     Path.home()
-    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/metrics.pdf",
+    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/metrics_points.pdf",
     dpi=300,
 )
 
