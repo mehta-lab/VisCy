@@ -9,6 +9,7 @@ import seaborn as sns
 import xarray as xr
 from matplotlib.colors import LinearSegmentedColormap, Normalize
 
+from utils import find_top_matching_tracks
 from viscy.representation.embedding_writer import read_embedding_dataset
 
 # %%
@@ -264,26 +265,6 @@ plot_comparative_alignments(cell_division_df, infection_df)
 
 
 # %%
-def find_top_matching_tracks(cell_division_df, infection_df, n_top=10) -> pd.DataFrame:
-    # Find common tracks between datasets
-    intersection_df = pd.merge(
-        cell_division_df,
-        infection_df,
-        on=["fov_name", "track_ids"],
-        how="inner",
-        suffixes=("_df1", "_df2"),
-    )
-
-    # Add column with sum of the values
-    intersection_df["distance_sum"] = (
-        intersection_df["distance_df1"] + intersection_df["distance_df2"]
-    )
-
-    # Find rows with the smallest sum
-    intersection_df.sort_values(by="distance_sum", ascending=True, inplace=True)
-    return intersection_df.head(n_top)
-
-
 # Side-by-side comparison with alignment-based coloring
 def plot_aligned_tracks_side_by_side(
     intersection_df: pd.DataFrame, feature_df: pd.DataFrame, n_top=5

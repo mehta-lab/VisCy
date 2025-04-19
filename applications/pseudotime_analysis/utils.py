@@ -251,3 +251,23 @@ def filter_lineages_by_timepoints(lineages, annotation_path, min_timepoints=10):
             filtered_lineages.append((fov_id, track_ids))
 
     return filtered_lineages
+
+
+def find_top_matching_tracks(cell_division_df, infection_df, n_top=10) -> pd.DataFrame:
+    # Find common tracks between datasets
+    intersection_df = pd.merge(
+        cell_division_df,
+        infection_df,
+        on=["fov_name", "track_ids"],
+        how="inner",
+        suffixes=("_df1", "_df2"),
+    )
+
+    # Add column with sum of the values
+    intersection_df["distance_sum"] = (
+        intersection_df["distance_df1"] + intersection_df["distance_df2"]
+    )
+
+    # Find rows with the smallest sum
+    intersection_df.sort_values(by="distance_sum", ascending=True, inplace=True)
+    return intersection_df.head(n_top)
