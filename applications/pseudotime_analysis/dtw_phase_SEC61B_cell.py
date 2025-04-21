@@ -51,17 +51,26 @@ if NAPARI:
 
 
 # %%
+CONDITION = "organelle_only"  # remodelling_no_sensor, remodelling_w_sensor, cell_division, organelle_only ,infection
+
 input_data_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
 )
 
-
-feature_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
-)
-# feature_path = Path(
-#     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions_infection/2chan_192patch_100ckpt_timeAware_ntxent_GT.zarr"
-# )
+if CONDITION == "remodelling_no_sensor" or CONDITION == "remodelling_w_sensor":
+    feature_path = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
+    )
+elif CONDITION == "organelle_only":
+    feature_path = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_organelle_only_ntxent_192patch_ckpt52_rev8_GT.zarr"
+    )
+elif CONDITION == "cell_division":
+    feature_path = Path("")
+elif CONDITION == "infection":
+    feature_path = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions_infection/2chan_192patch_100ckpt_timeAware_ntxent_GT.zarr"
+    )
 tracks_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
 )
@@ -118,9 +127,7 @@ if ANNOTATE_FOV:
     viewer.dims.ndisplay = 3
 
 # %%
-CONDITION = (
-    "remodelling_w_sensor"  # remodelling_no_sensor, remodelling_w_sensor, cell_division
-)
+
 
 if CONDITION == "remodelling_no_sensor":
     # Get the reference lineage
@@ -130,7 +137,7 @@ if CONDITION == "remodelling_no_sensor":
     reference_timepoints = [55, 70]  # organelle remodeling
 
 # From the C/2 SEC61B-DV-pl40
-elif CONDITION == "remodelling_w_sensor":
+elif CONDITION == "remodelling_w_sensor" or CONDITION == "organelle_only":
     # reference_lineage_fov = "/C/2/000001"
     # reference_lineage_track_id = 115
     # reference_timepoints = [47, 70] #sensor rellocalization and partial remodelling
@@ -190,6 +197,9 @@ reference_pattern = np.concatenate(reference_lineage)
 reference_pattern = reference_pattern[reference_timepoints[0] : reference_timepoints[1]]
 
 # %%
+output_root = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/figure"
+)
 # Find all matches to the reference pattern
 all_match_positions = find_pattern_matches(
     reference_pattern,
@@ -198,7 +208,7 @@ all_match_positions = find_pattern_matches(
     window_step_fraction=0.1,
     num_candidates=3,
     method="bernd_clifford",
-    save_path=f"./SEC61B/20241107_SEC61B_{CONDITION}_matching_lineages.csv",
+    save_path=output_root / f"SEC61B/20241107_SEC61B_{CONDITION}_matching_lineages.csv",
 )
 
 # %%
@@ -234,13 +244,15 @@ consensus_embedding = create_consensus_embedding(
 # saving the consensus embedding as xarray dataset
 consensus_embedding_ds = xr.Dataset({"sample": (["t", "channel"], consensus_embedding)})
 consensus_embedding_ds.to_zarr(
-    f"./SEC61B/20241107_SEC61B_{CONDITION}_consensus_embedding.zarr", mode="w"
+    output_root / f"SEC61B/20241107_SEC61B_{CONDITION}_consensus_embedding.zarr",
+    mode="w",
 )
 plot_reference_vs_full_lineages(
     reference_pattern,
     top_n_aligned_cells,
     embeddings_dataset,
-    save_path=f"./SEC61B/20241107_SEC61B_{CONDITION}_reference_vs_full_lineages.png",
+    save_path=output_root
+    / f"SEC61B/20241107_SEC61B_{CONDITION}_reference_vs_full_lineages.png",
 )
 
 
@@ -252,7 +264,8 @@ all_match_positions_wrt_consensus = find_pattern_matches(
     embeddings_dataset,
     window_step_fraction=0.25,  # Step size as fraction of reference pattern length
     num_candidates=3,
-    save_path=f"./SEC61B/20241107_SEC61B_{CONDITION}_consensus_matching_lineages.csv",
+    save_path=output_root
+    / f"SEC61B/20241107_SEC61B_{CONDITION}_consensus_matching_lineages.csv",
 )
 top_n_aligned_cells_wrt_consensus = all_match_positions_wrt_consensus.head(n_cells)
 
@@ -260,7 +273,8 @@ plot_reference_vs_full_lineages(
     consensus_embedding,
     top_n_aligned_cells_wrt_consensus,
     embeddings_dataset,
-    save_path=f"./SEC61B/20241107_SEC61B_{CONDITION}_consensus_vs_full_lineages.png",
+    save_path=output_root
+    / f"SEC61B/20241107_SEC61B_{CONDITION}_consensus_vs_full_lineages.png",
 )
 # %%
 all_lineage_images, all_aligned_stacks = align_image_stacks(
