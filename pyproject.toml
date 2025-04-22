@@ -77,5 +77,9 @@ line-length = 88
 
 [tool.ruff]
 src = ["viscy", "tests"]
-lint.extend-select = ["I001"]
-lint.isort.known-first-party = ["viscy"]
+
+[tool.ruff.lint]
+extend-select = ["I001"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["viscy"]
