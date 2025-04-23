@@ -14,15 +14,29 @@ from viscy.data.typing import SegmentationSample
 _logger = logging.getLogger("lightning.pytorch")
 
 
-class SegmentationDataset(Dataset):
+class TargetPredictionDataset(Dataset):
+    """
+    A PyTorch Dataset providing paired target and prediction images / volumes from OME-Zarr
+    datasets.
+
+    Attributes:
+        pred_dataset (Plate): The prediction dataset Plate object.
+        target_dataset (Plate): The target dataset Plate object.
+        pred_channel (str): The channel name in the prediction dataset.
+        target_channel (str): The channel name in the target dataset.
+        pred_z_slice (int | slice | None): The z-slice or range of z-slices for the prediction dataset. Defaults to None which is converted to slice(None).
+        target_z_slice (int | slice | None): The z-slice or range of z-slices for the target dataset. Defaults to None which is converted to slice(None).
+        img_name (str): The name of the image to retrieve from the datasets. Defaults to "0".
+        dtype (np.dtype | None): The data type to cast the images to. Defaults to np.int16.
+    """
     def __init__(
         self,
         pred_dataset: Plate,
         target_dataset: Plate,
         pred_channel: str,
         target_channel: str,
-        pred_z_slice: int | slice,
-        target_z_slice: int | slice,
+        pred_z_slice: int | slice | None = None,
+        target_z_slice: int | slice | None = None,
         img_name: str = "0",
         dtype: np.dtype | None = np.int16,
     ) -> None:
@@ -31,8 +45,8 @@ class SegmentationDataset(Dataset):
         self.target_dataset = target_dataset
         self.pred_channel = pred_dataset.get_channel_index(pred_channel)
         self.target_channel = target_dataset.get_channel_index(target_channel)
-        self.pred_z_slice = pred_z_slice
-        self.target_z_slice = target_z_slice
+        self.pred_z_slice = pred_z_slice if pred_z_slice is not None else slice(None)
+        self.target_z_slice = target_z_slice if target_z_slice is not None else slice(None)
         self.img_name = img_name
         self.dtype = dtype
         self._build_indices()
@@ -67,17 +81,18 @@ class SegmentationDataset(Dataset):
         return {"pred": pred, "target": target, "position_idx": p, "time_idx": t}
 
 
-class SegmentationDataModule(LightningDataModule):
+class TargetPredictionDataModule(LightningDataModule):
     def __init__(
         self,
         pred_dataset: Path,
         target_dataset: Path,
         pred_channel: str,
         target_channel: str,
-        pred_z_slice: int,
-        target_z_slice: int,
+        pred_z_slice: int | slice | None,
+        target_z_slice: int | slice | None,
         batch_size: int,
         num_workers: int,
+        dtype: np.dtype | None = np.int16,
     ) -> None:
         super().__init__()
         self.pred_dataset = open_ome_zarr(pred_dataset)
@@ -88,17 +103,19 @@ class SegmentationDataModule(LightningDataModule):
         self.target_z_slice = target_z_slice
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.dtype = dtype
 
     def setup(self, stage: str) -> None:
         if stage != "test":
             raise NotImplementedError("Only test stage is supported!")
-        self.test_dataset = SegmentationDataset(
+        self.test_dataset = TargetPredictionDataset(
             self.pred_dataset,
             self.target_dataset,
             self.pred_channel,
             self.target_channel,
             self.pred_z_slice,
             self.target_z_slice,
+            dtype=self.dtype,
         )
 
     def test_dataloader(self) -> DataLoader:

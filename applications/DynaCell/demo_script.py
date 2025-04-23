@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 from lightning.pytorch.loggers import CSVLogger
 
-from viscy.data.segmentation import SegmentationDataModule
+from viscy.data.segmentation import TargetPredictionDataModule
 from viscy.trainer import Trainer
 from viscy.translation.evaluation import SegmentationMetrics2D
 
@@ -22,7 +22,7 @@ def main(method: Literal["segmentation2D", "segmentation3D"] = "segmentation2D")
     tmp_path = Path(tempfile.mkdtemp())
 
     if method == "segmentation2D":
-        dm = SegmentationDataModule()
+        dm = TargetPredictionDataModule()
         lm = SegmentationMetrics2D()
     elif method == "segmentation3D":
         pass
