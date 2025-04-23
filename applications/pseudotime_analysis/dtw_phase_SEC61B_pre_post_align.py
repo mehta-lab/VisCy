@@ -1,7 +1,7 @@
 # %%
 import logging
 from pathlib import Path
-
+import ast
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -14,7 +14,9 @@ from plotting_utils import (
     identify_lineages,
     plot_reference_vs_full_lineages,
 )
+from tqdm import tqdm
 
+from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
 
 # Create a custom logger for just this script
@@ -39,7 +41,6 @@ logger.propagate = False
 logger.info("DTW analysis logger is configured and working!")
 
 NAPARI = True
-ANNOTATE_FOV = False
 
 if NAPARI:
     import os
@@ -51,23 +52,22 @@ if NAPARI:
 
 
 # %%
-CONDITION = "infection"  # remodelling_no_sensor, remodelling_w_sensor, cell_division, organelle_only ,infection
+CONDITION_EMBEDDINGS = "phase_n_organelle"
+CONDITION_TO_ALIGN = "infection"
 
 input_data_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
 )
 
-if CONDITION == "remodelling_no_sensor" or CONDITION == "remodelling_w_sensor":
+if CONDITION_EMBEDDINGS == "phase_n_organelle":
     feature_path = Path(
         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_2chan__ntxent_192patch_70ckpt_rev7_GT.zarr"
     )
-elif CONDITION == "organelle_only":
+elif CONDITION_EMBEDDINGS == "organelle_only":
     feature_path = Path(
         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/timeAware_organelle_only_ntxent_192patch_ckpt52_rev8_GT.zarr"
     )
-elif CONDITION == "cell_division":
-    feature_path = Path("")
-elif CONDITION == "infection":
+elif CONDITION_EMBEDDINGS == "phase_n_sensor":
     feature_path = Path(
         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/3-phenotyping/predictions_infection/2chan_192patch_100ckpt_timeAware_ntxent_GT.zarr"
     )
@@ -77,10 +77,9 @@ tracks_path = Path(
 embeddings_dataset = read_embedding_dataset(feature_path)
 feature_df = embeddings_dataset["sample"].to_dataframe().reset_index(drop=True)
 
+# Logic to find lineages
 lineages = identify_lineages(feature_df)
-
 logger.info(f"Found {len(lineages)} distinct lineages")
-
 filtered_lineages = []
 min_timepoints = 20
 for fov_id, track_ids in lineages:
@@ -99,36 +98,8 @@ logger.info(
     f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints"
 )
 # %%
-if ANNOTATE_FOV:
-    # Display fov for QC
-    fov = "C/2/001001"
-    labels_dataset = open_ome_zarr(tracks_path / fov)
-    fluor_dataset = open_ome_zarr(input_data_path / fov)
-    channels_to_display = [
-        "raw GFP EX488 EM525-45",
-        "raw mCherry EX561 EM600-37",
-    ]
-    channels_indices = [
-        fluor_dataset.get_channel_index(channel) for channel in channels_to_display
-    ]
-
-    viewer.add_image(
-        fluor_dataset[0][:, channels_indices[0]], colormap="green", blending="additive"
-    )
-    viewer.add_image(
-        fluor_dataset[0][:, channels_indices[1]],
-        colormap="magenta",
-        blending="additive",
-    )
-    labels_layer = viewer.add_labels(labels_dataset[0][:, 0], blending="translucent")
-    labels_layer.opacity = 0.5
-    labels_layer.rendering = "translucent"
-
-    viewer.dims.ndisplay = 3
-
-# %%
-
-if CONDITION == "remodelling_no_sensor":
+# Find the reference pattern
+if CONDITION_TO_ALIGN == "phase_n_organelle":
     # Get the reference lineage
     # From the B/2 SEC61B-DV
     reference_lineage_fov = "/B/2/001000"
@@ -136,39 +107,21 @@ if CONDITION == "remodelling_no_sensor":
     reference_timepoints = [55, 70]  # organelle remodeling
 
 # From the C/2 SEC61B-DV-pl40
-elif CONDITION == "remodelling_w_sensor" or CONDITION == "organelle_only":
-    # reference_lineage_fov = "/C/2/000001"
-    # reference_lineage_track_id = 115
-    # reference_timepoints = [47, 70] #sensor rellocalization and partial remodelling
-
-    # reference_lineage_fov = "/C/2/000001"
-    # reference_lineage_track_id = 158
-    # reference_timepoints = [44, 74]  # sensor rellocalization and partial remodelling
-
+elif (
+    CONDITION_TO_ALIGN == "remodelling_w_sensor"
+    or CONDITION_TO_ALIGN == "organelle_only"
+):
     reference_lineage_fov = "/C/2/001000"
     reference_lineage_track_id = [129]
     reference_timepoints = [8, 70]  # sensor rellocalization and partial remodelling
 
-    # From nuclear rellocalization
-    # reference_lineage_fov = "/C/2/001001"
-    # reference_lineage_track_id = [130, 131, 132]
-    # reference_timepoints = [10, 80]  # sensor rellocalization and partial remodelling
-
-    # reference_lineage_fov = "/C/2/001001"
-    # reference_lineage_track_id = [160, 161]
-    # reference_timepoints = [10, 80]  # sensor rellocalization and partial remodelling
-
-    # reference_lineage_fov = "/C/2/001001"
-    # reference_lineage_track_id = [126, 127]
-    # reference_timepoints = [20, 70]  # sensor rellocalization and partial remodelling
-
-elif CONDITION == "infection":
+elif CONDITION_TO_ALIGN == "infection":
     reference_lineage_fov = "/C/2/001000"
     reference_lineage_track_id = [129]
     reference_timepoints = [8, 70]  # sensor rellocalization and partial remodelling
 
 # Cell division
-elif CONDITION == "cell_division":
+elif CONDITION_TO_ALIGN == "cell_division":
     reference_lineage_fov = "/C/2/000001"
     reference_lineage_track_id = [107, 108, 109]
     reference_timepoints = [25, 70]
@@ -196,21 +149,21 @@ reference_pattern = np.concatenate(reference_lineage)
 reference_pattern = reference_pattern[reference_timepoints[0] : reference_timepoints[1]]
 
 # %%
+
 output_root = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/figure"
 )
-# Find all matches to the reference pattern
-all_match_positions = find_pattern_matches(
-    reference_pattern,
-    filtered_lineages,
-    embeddings_dataset,
-    window_step_fraction=0.1,
-    num_candidates=4,
-    method="bernd_clifford",
-    save_path=output_root / f"SEC61B/20241107_SEC61B_{CONDITION}_matching_lineages.csv",
+output_save_dir = (
+    output_root / f"SEC61B/features_{CONDITION_EMBEDDINGS}_by_{CONDITION_TO_ALIGN}"
 )
+output_save_dir.mkdir(parents=True, exist_ok=True)
 
-# %%
+# Find the matching lineages
+matches_df_path = Path(
+    output_root / f"SEC61B/20241107_SEC61B_{CONDITION_TO_ALIGN}_matching_lineages.csv"
+)
+# Find all matches to the reference pattern
+all_match_positions = pd.read_csv(matches_df_path)
 # Get the top N aligned cells
 n_cells = 5
 top_n_aligned_cells = all_match_positions.head(n_cells)
@@ -227,9 +180,8 @@ view_ref_sector_only = (True,)
 all_lineage_images = []
 all_aligned_stacks = []
 all_unaligned_stacks = []
-from tqdm import tqdm
-from viscy.data.triplet import TripletDataModule
 
+# Get aligned and unaligned stacks
 top_aligned_cells = top_n_aligned_cells
 napari_viewer = viewer if NAPARI else None
 
@@ -239,8 +191,8 @@ for idx, row in tqdm(
     desc="Aligning images",
 ):
     fov_name = row["fov_name"]
-    track_ids = row["track_ids"]
-    warp_path = row["warp_path"]
+    track_ids = ast.literal_eval(row["track_ids"])
+    warp_path = ast.literal_eval(row["warp_path"])
     start_time = int(row["start_timepoint"])
 
     print(f"Aligning images for {fov_name} with track ids: {track_ids}")
@@ -329,66 +281,68 @@ for idx, row in tqdm(
         all_aligned_stacks.append(aligned_stack)
         all_unaligned_stacks.append(unaligned_stack)
 
-        all_aligned_stacks = np.array(all_aligned_stacks)
-        all_unaligned_stacks = np.array(all_unaligned_stacks)
+all_aligned_stacks = np.array(all_aligned_stacks)
+all_unaligned_stacks = np.array(all_unaligned_stacks)
 
 # %%
-for idx, row in top_aligned_cells.reset_index().iterrows():
-    fov_name = row["fov_name"]
-    track_ids = row["track_ids"]
+# Plot the aligned and unaligned stacks
+if NAPARI:
+    for idx, row in top_aligned_cells.reset_index().iterrows():
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
 
-    aligned_stack = all_aligned_stacks[idx]
-    unaligned_stack = all_unaligned_stacks[idx]
+        aligned_stack = all_aligned_stacks[idx]
+        unaligned_stack = all_unaligned_stacks[idx]
 
-    unaligned_gfp_mip = np.max(unaligned_stack[:, 1, :, :], axis=1)
-    aligned_gfp_mip = np.max(aligned_stack[:, 1, :, :], axis=1)
-    unaligned_mcherry_mip = np.max(unaligned_stack[:, 2, :, :], axis=1)
-    aligned_mcherry_mip = np.max(aligned_stack[:, 2, :, :], axis=1)
+        unaligned_gfp_mip = np.max(unaligned_stack[:, 1, :, :], axis=1)
+        aligned_gfp_mip = np.max(aligned_stack[:, 1, :, :], axis=1)
+        unaligned_mcherry_mip = np.max(unaligned_stack[:, 2, :, :], axis=1)
+        aligned_mcherry_mip = np.max(aligned_stack[:, 2, :, :], axis=1)
 
-    z_slice = 15
-    unaligned_phase = unaligned_stack[:, 0, z_slice, :]
-    aligned_phase = aligned_stack[:, 0, z_slice, :]
+        z_slice = 15
+        unaligned_phase = unaligned_stack[:, 0, z_slice, :]
+        aligned_phase = aligned_stack[:, 0, z_slice, :]
 
-    # unaligned
-    viewer.add_image(
-        unaligned_gfp_mip,
-        name=f"unaligned_gfp_{fov_name}_{track_ids[0]}",
-        colormap="green",
-        contrast_limits=(106, 215),
-    )
-    viewer.add_image(
-        unaligned_mcherry_mip,
-        name=f"unaligned_mcherry_{fov_name}_{track_ids[0]}",
-        colormap="magenta",
-        contrast_limits=(106, 190),
-    )
-    viewer.add_image(
-        unaligned_phase,
-        name=f"unaligned_phase_{fov_name}_{track_ids[0]}",
-        colormap="gray",
-        contrast_limits=(-0.74, 0.4),
-    )
-    # aligned
-    viewer.add_image(
-        aligned_gfp_mip,
-        name=f"aligned_gfp_{fov_name}_{track_ids[0]}",
-        colormap="green",
-        contrast_limits=(106, 215),
-    )
-    viewer.add_image(
-        aligned_mcherry_mip,
-        name=f"aligned_mcherry_{fov_name}_{track_ids[0]}",
-        colormap="magenta",
-        contrast_limits=(106, 190),
-    )
-    viewer.add_image(
-        aligned_phase,
-        name=f"aligned_phase_{fov_name}_{track_ids[0]}",
-        colormap="gray",
-        contrast_limits=(-0.74, 0.4),
-    )
-viewer.grid.enabled = True
-viewer.grid.shape = (-1, 6)
+        # unaligned
+        viewer.add_image(
+            unaligned_gfp_mip,
+            name=f"unaligned_gfp_{fov_name}_{track_ids[0]}",
+            colormap="green",
+            contrast_limits=(106, 215),
+        )
+        viewer.add_image(
+            unaligned_mcherry_mip,
+            name=f"unaligned_mcherry_{fov_name}_{track_ids[0]}",
+            colormap="magenta",
+            contrast_limits=(106, 190),
+        )
+        viewer.add_image(
+            unaligned_phase,
+            name=f"unaligned_phase_{fov_name}_{track_ids[0]}",
+            colormap="gray",
+            contrast_limits=(-0.74, 0.4),
+        )
+        # aligned
+        viewer.add_image(
+            aligned_gfp_mip,
+            name=f"aligned_gfp_{fov_name}_{track_ids[0]}",
+            colormap="green",
+            contrast_limits=(106, 215),
+        )
+        viewer.add_image(
+            aligned_mcherry_mip,
+            name=f"aligned_mcherry_{fov_name}_{track_ids[0]}",
+            colormap="magenta",
+            contrast_limits=(106, 190),
+        )
+        viewer.add_image(
+            aligned_phase,
+            name=f"aligned_phase_{fov_name}_{track_ids[0]}",
+            colormap="gray",
+            contrast_limits=(-0.74, 0.4),
+        )
+    viewer.grid.enabled = True
+    viewer.grid.shape = (-1, 6)
 
 
 # %%
@@ -396,8 +350,7 @@ def plot_unaligned_vs_aligned_embeddings(
     reference_pattern: np.ndarray,
     top_aligned_cells: pd.DataFrame,
     embeddings_dataset: xr.Dataset,
-    output_root: Path,
-    condition: str,
+    output_save_dir: Path,
 ):
     """
     Plot the unaligned and aligned embeddings using PCA dimensions (PC1 and PC2) compared to the reference track.
@@ -407,8 +360,7 @@ def plot_unaligned_vs_aligned_embeddings(
         reference_pattern: The reference pattern embeddings
         top_aligned_cells: DataFrame with alignment information
         embeddings_dataset: Dataset containing embeddings
-        output_root: Path to save the output figures
-        condition: String describing the condition
+        output_save_dir: Path to save the output figures
     """
     from sklearn.decomposition import PCA
     from sklearn.preprocessing import StandardScaler
@@ -425,7 +377,7 @@ def plot_unaligned_vs_aligned_embeddings(
     # Process each lineage once to collect all data
     for _, row in top_aligned_cells.iterrows():
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
+        track_ids = ast.literal_eval(row["track_ids"])
 
         # Process each track in this lineage
         for track_id in track_ids:
@@ -462,8 +414,8 @@ def plot_unaligned_vs_aligned_embeddings(
     # Process each aligned cell for visualization
     for i, (_, row) in enumerate(top_aligned_cells.iterrows()):
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-        warp_path = row["warp_path"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        warp_path = ast.literal_eval(row["warp_path"])
         start_time = int(row["start_timepoint"])
         distance = row["distance"]
 
@@ -706,653 +658,17 @@ def plot_unaligned_vs_aligned_embeddings(
         plt.legend()
 
         plt.tight_layout()
-        save_path = (
-            output_root
-            / f"SEC61B/20241107_SEC61B_{condition}_lineage_{i+1}_pca_full_timeline.png"
-        )
+        save_path = output_save_dir / f"lineage_{i+1}_pca_full_timeline.png"
         plt.savefig(save_path, dpi=300, bbox_inches="tight")
         logger.info(f"Plot saved to {save_path}")
 
-    return output_root / f"SEC61B/20241107_SEC61B_{condition}_pca_full_timeline"
-
 
 # Plot the unaligned and aligned embeddings
-plot_path = plot_unaligned_vs_aligned_embeddings(
+plot_unaligned_vs_aligned_embeddings(
     reference_pattern,
     top_n_aligned_cells,
     embeddings_dataset,
-    output_root,
-    CONDITION,
-)
-
-# %%
-
-
-def plot_dtw_alignment_comparison(
-    reference_pattern: np.ndarray,
-    top_aligned_cells: pd.DataFrame,
-    embeddings_dataset: xr.Dataset,
-    output_root: Path,
-    condition: str,
-):
-    """
-    Create a comparative visualization showing how DTW aligns responses in PC1 and PC2 across multiple lineages.
-
-    Args:
-        reference_pattern: The reference pattern embeddings
-        top_aligned_cells: DataFrame with alignment information
-        embeddings_dataset: Dataset containing embeddings
-        output_root: Path to save the output figures
-        condition: String describing the condition
-    """
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-
-    # Collect all embedding data for PCA
-    all_embeddings = []
-
-    # Add reference pattern
-    all_embeddings.append(reference_pattern)
-
-    # Add all lineage data
-    all_lineage_data = {}
-    for _, row in top_aligned_cells.iterrows():
-        fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-
-        for track_id in track_ids:
-            key = (fov_name, track_id)
-            if key not in all_lineage_data:
-                track_data = embeddings_dataset.sel(
-                    sample=(fov_name, track_id)
-                ).features.values
-                all_lineage_data[key] = track_data
-                all_embeddings.append(track_data)
-
-    # Combine all embeddings for PCA
-    all_embeddings_flat = np.vstack(all_embeddings)
-
-    # Standardize data
-    scaler = StandardScaler()
-    all_embeddings_scaled = scaler.fit_transform(all_embeddings_flat)
-
-    # Apply PCA
-    pca = PCA(n_components=2)
-    pca.fit(all_embeddings_scaled)
-
-    # Get the explained variance
-    explained_variance = pca.explained_variance_ratio_ * 100
-    logger.info(
-        f"PCA explained variance: PC1 {explained_variance[0]:.2f}%, PC2 {explained_variance[1]:.2f}%"
-    )
-
-    # Transform reference pattern
-    reference_scaled = scaler.transform(reference_pattern)
-    reference_pca = pca.transform(reference_scaled)
-
-    # Create arrays to store unaligned and aligned data for all lineages
-    all_unaligned_pc1 = []
-    all_unaligned_pc2 = []
-    all_aligned_pc1 = []
-    all_aligned_pc2 = []
-    lineage_labels = []
-
-    # Process each lineage
-    for i, (_, row) in enumerate(top_aligned_cells.iterrows()):
-        fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-        warp_path = row["warp_path"]
-        start_time = int(row["start_timepoint"])
-
-        # Get the lineage embeddings
-        lineage_embeddings = []
-        for track_id in track_ids:
-            key = (fov_name, track_id)
-            track_data = all_lineage_data[key]
-            lineage_embeddings.append(track_data)
-
-        lineage_embeddings = np.concatenate(lineage_embeddings)
-
-        # Get unaligned window (starting from alignment point)
-        unaligned_window = lineage_embeddings[
-            start_time : start_time + len(reference_pattern)
-        ]
-        # Pad if needed
-        if len(unaligned_window) < len(reference_pattern):
-            pad_length = len(reference_pattern) - len(unaligned_window)
-            padding = np.zeros((pad_length, unaligned_window.shape[1]))
-            unaligned_window = np.vstack((unaligned_window, padding))
-        # Trim if needed
-        elif len(unaligned_window) > len(reference_pattern):
-            unaligned_window = unaligned_window[: len(reference_pattern)]
-
-        # Create aligned embeddings using the warping path
-        aligned_embeddings = np.zeros_like(reference_pattern)
-
-        # Map each reference timepoint to the corresponding lineage timepoint
-        for ref_idx, query_idx in warp_path:
-            lineage_idx = int(start_time + query_idx)
-            if 0 <= lineage_idx < len(lineage_embeddings):
-                aligned_embeddings[ref_idx] = lineage_embeddings[lineage_idx]
-
-        # Fill in any missing values for the aligned embeddings
-        ref_indices_in_path = set(i for i, _ in warp_path)
-        for ref_idx in range(len(reference_pattern)):
-            if ref_idx not in ref_indices_in_path and ref_indices_in_path:
-                closest_ref_idx = min(
-                    ref_indices_in_path, key=lambda x: abs(x - ref_idx)
-                )
-                closest_matches = [(i, q) for i, q in warp_path if i == closest_ref_idx]
-                if closest_matches:
-                    closest_query_idx = closest_matches[0][1]
-                    lineage_idx = int(start_time + closest_query_idx)
-                    if 0 <= lineage_idx < len(lineage_embeddings):
-                        aligned_embeddings[ref_idx] = lineage_embeddings[lineage_idx]
-
-        # Transform to PCA
-        unaligned_scaled = scaler.transform(unaligned_window)
-        unaligned_pca = pca.transform(unaligned_scaled)
-
-        aligned_scaled = scaler.transform(aligned_embeddings)
-        aligned_pca = pca.transform(aligned_scaled)
-
-        # Store for comparison
-        all_unaligned_pc1.append(unaligned_pca[:, 0])
-        all_unaligned_pc2.append(unaligned_pca[:, 1])
-        all_aligned_pc1.append(aligned_pca[:, 0])
-        all_aligned_pc2.append(aligned_pca[:, 1])
-        lineage_labels.append(f"Lineage {i+1}")
-
-    # Create a 2x2 figure showing PC1 and PC2 before and after alignment
-    fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-
-    # Colors for lineages
-    lineage_colors = plt.cm.tab10(np.linspace(0, 1, len(top_aligned_cells)))
-
-    # Plot PC1 - Unaligned
-    ax = axes[0, 0]
-    ax.plot(
-        range(len(reference_pca)),
-        reference_pca[:, 0],
-        "k-",
-        linewidth=2.5,
-        label="Reference",
-    )
-    for i, pc1_values in enumerate(all_unaligned_pc1):
-        ax.plot(
-            range(len(pc1_values)),
-            pc1_values,
-            color=lineage_colors[i],
-            alpha=0.7,
-            linewidth=1.5,
-            label=lineage_labels[i],
-        )
-    ax.set_title(f"PC1 - Before Alignment ({explained_variance[0]:.2f}%)")
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel("PC1 Value")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # Plot PC1 - Aligned
-    ax = axes[0, 1]
-    ax.plot(
-        range(len(reference_pca)),
-        reference_pca[:, 0],
-        "k-",
-        linewidth=2.5,
-        label="Reference",
-    )
-    for i, pc1_values in enumerate(all_aligned_pc1):
-        ax.plot(
-            range(len(pc1_values)),
-            pc1_values,
-            color=lineage_colors[i],
-            alpha=0.7,
-            linewidth=1.5,
-            label=lineage_labels[i],
-        )
-    ax.set_title(f"PC1 - After DTW Alignment ({explained_variance[0]:.2f}%)")
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel("PC1 Value")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # Plot PC2 - Unaligned
-    ax = axes[1, 0]
-    ax.plot(
-        range(len(reference_pca)),
-        reference_pca[:, 1],
-        "k-",
-        linewidth=2.5,
-        label="Reference",
-    )
-    for i, pc2_values in enumerate(all_unaligned_pc2):
-        ax.plot(
-            range(len(pc2_values)),
-            pc2_values,
-            color=lineage_colors[i],
-            alpha=0.7,
-            linewidth=1.5,
-            label=lineage_labels[i],
-        )
-    ax.set_title(f"PC2 - Before Alignment ({explained_variance[1]:.2f}%)")
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel("PC2 Value")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # Plot PC2 - Aligned
-    ax = axes[1, 1]
-    ax.plot(
-        range(len(reference_pca)),
-        reference_pca[:, 1],
-        "k-",
-        linewidth=2.5,
-        label="Reference",
-    )
-    for i, pc2_values in enumerate(all_aligned_pc2):
-        ax.plot(
-            range(len(pc2_values)),
-            pc2_values,
-            color=lineage_colors[i],
-            alpha=0.7,
-            linewidth=1.5,
-            label=lineage_labels[i],
-        )
-    ax.set_title(f"PC2 - After DTW Alignment ({explained_variance[1]:.2f}%)")
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel(f"PC2 ({explained_variance[1]:.2f}%)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    plt.suptitle(f"DTW Alignment Comparison - {condition.upper()}", fontsize=20)
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-
-    # Save figure
-    save_path = (
-        output_root / f"SEC61B/20241107_SEC61B_{condition}_dtw_alignment_comparison.png"
-    )
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    logger.info(f"DTW alignment comparison saved to {save_path}")
-
-    return save_path
-
-
-# Create the DTW alignment comparison visualization
-dtw_comparison_path = plot_dtw_alignment_comparison(
-    reference_pattern, top_n_aligned_cells, embeddings_dataset, output_root, CONDITION
-)
-
-# %%
-
-
-def plot_heterogeneity_vs_alignment(
-    reference_pattern: np.ndarray,
-    top_aligned_cells: pd.DataFrame,
-    embeddings_dataset: xr.Dataset,
-    output_root: Path,
-    condition: str,
-):
-    """
-    Create a visualization that compares the heterogeneity in unaligned data
-    versus the reduced variability after alignment.
-
-    Args:
-        reference_pattern: The reference pattern embeddings
-        top_aligned_cells: DataFrame with alignment information
-        embeddings_dataset: Dataset containing embeddings
-        output_root: Path to save the output figures
-        condition: String describing the condition
-    """
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
-    import scipy.stats as stats
-
-    # Collect all embedding data for PCA
-    all_embeddings = []
-
-    # Add reference pattern
-    all_embeddings.append(reference_pattern)
-
-    # Add all lineage data
-    all_lineage_data = {}
-    for _, row in top_aligned_cells.iterrows():
-        fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-
-        for track_id in track_ids:
-            key = (fov_name, track_id)
-            if key not in all_lineage_data:
-                track_data = embeddings_dataset.sel(
-                    sample=(fov_name, track_id)
-                ).features.values
-                all_lineage_data[key] = track_data
-                all_embeddings.append(track_data)
-
-    # Combine all embeddings for PCA
-    all_embeddings_flat = np.vstack(all_embeddings)
-
-    # Standardize data
-    scaler = StandardScaler()
-    all_embeddings_scaled = scaler.fit_transform(all_embeddings_flat)
-
-    # Apply PCA
-    pca = PCA(n_components=2)
-    pca.fit(all_embeddings_scaled)
-
-    # Get the explained variance
-    explained_variance = pca.explained_variance_ratio_ * 100
-    logger.info(
-        f"PCA explained variance: PC1 {explained_variance[0]:.2f}%, PC2 {explained_variance[1]:.2f}%"
-    )
-
-    # Transform reference pattern
-    reference_scaled = scaler.transform(reference_pattern)
-    reference_pca = pca.transform(reference_scaled)
-
-    # Create arrays to store unaligned and aligned data for all lineages
-    all_unaligned_pc1 = []
-    all_unaligned_pc2 = []
-    all_aligned_pc1 = []
-    all_aligned_pc2 = []
-
-    # Process each lineage
-    for i, (_, row) in enumerate(top_aligned_cells.iterrows()):
-        fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-        warp_path = row["warp_path"]
-        start_time = int(row["start_timepoint"])
-
-        # Get the lineage embeddings
-        lineage_embeddings = []
-        for track_id in track_ids:
-            key = (fov_name, track_id)
-            track_data = all_lineage_data[key]
-            lineage_embeddings.append(track_data)
-
-        lineage_embeddings = np.concatenate(lineage_embeddings)
-
-        # Get unaligned window
-        unaligned_window = lineage_embeddings[
-            start_time : start_time + len(reference_pattern)
-        ]
-        # Pad if needed
-        if len(unaligned_window) < len(reference_pattern):
-            pad_length = len(reference_pattern) - len(unaligned_window)
-            padding = np.zeros((pad_length, unaligned_window.shape[1]))
-            unaligned_window = np.vstack((unaligned_window, padding))
-        # Trim if needed
-        elif len(unaligned_window) > len(reference_pattern):
-            unaligned_window = unaligned_window[: len(reference_pattern)]
-
-        # Create aligned embeddings using the warping path
-        aligned_embeddings = np.zeros_like(reference_pattern)
-
-        # Map each reference timepoint to the corresponding lineage timepoint
-        for ref_idx, query_idx in warp_path:
-            lineage_idx = int(start_time + query_idx)
-            if 0 <= lineage_idx < len(lineage_embeddings):
-                aligned_embeddings[ref_idx] = lineage_embeddings[lineage_idx]
-
-        # Fill in any missing values for the aligned embeddings
-        ref_indices_in_path = set(i for i, _ in warp_path)
-        for ref_idx in range(len(reference_pattern)):
-            if ref_idx not in ref_indices_in_path and ref_indices_in_path:
-                closest_ref_idx = min(
-                    ref_indices_in_path, key=lambda x: abs(x - ref_idx)
-                )
-                closest_matches = [(i, q) for i, q in warp_path if i == closest_ref_idx]
-                if closest_matches:
-                    closest_query_idx = closest_matches[0][1]
-                    lineage_idx = int(start_time + closest_query_idx)
-                    if 0 <= lineage_idx < len(lineage_embeddings):
-                        aligned_embeddings[ref_idx] = lineage_embeddings[lineage_idx]
-
-        # Transform to PCA
-        unaligned_scaled = scaler.transform(unaligned_window)
-        unaligned_pca = pca.transform(unaligned_scaled)
-
-        aligned_scaled = scaler.transform(aligned_embeddings)
-        aligned_pca = pca.transform(aligned_scaled)
-
-        # Store for comparison
-        all_unaligned_pc1.append(unaligned_pca[:, 0])
-        all_unaligned_pc2.append(unaligned_pca[:, 1])
-        all_aligned_pc1.append(aligned_pca[:, 0])
-        all_aligned_pc2.append(aligned_pca[:, 1])
-
-    # Convert to numpy arrays for easier manipulation
-    all_unaligned_pc1 = np.array(all_unaligned_pc1)
-    all_unaligned_pc2 = np.array(all_unaligned_pc2)
-    all_aligned_pc1 = np.array(all_aligned_pc1)
-    all_aligned_pc2 = np.array(all_aligned_pc2)
-
-    # Calculate mean and standard deviation at each timepoint
-    pc1_unaligned_mean = np.mean(all_unaligned_pc1, axis=0)
-    pc1_unaligned_std = np.std(all_unaligned_pc1, axis=0)
-    pc1_aligned_mean = np.mean(all_aligned_pc1, axis=0)
-    pc1_aligned_std = np.std(all_aligned_pc1, axis=0)
-
-    pc2_unaligned_mean = np.mean(all_unaligned_pc2, axis=0)
-    pc2_unaligned_std = np.std(all_unaligned_pc2, axis=0)
-    pc2_aligned_mean = np.mean(all_aligned_pc2, axis=0)
-    pc2_aligned_std = np.std(all_aligned_pc2, axis=0)
-
-    # Calculate 95% confidence intervals
-    pc1_unaligned_ci = stats.sem(all_unaligned_pc1, axis=0) * stats.t.ppf(
-        0.975, len(all_unaligned_pc1) - 1
-    )
-    pc1_aligned_ci = stats.sem(all_aligned_pc1, axis=0) * stats.t.ppf(
-        0.975, len(all_aligned_pc1) - 1
-    )
-    pc2_unaligned_ci = stats.sem(all_unaligned_pc2, axis=0) * stats.t.ppf(
-        0.975, len(all_unaligned_pc2) - 1
-    )
-    pc2_aligned_ci = stats.sem(all_aligned_pc2, axis=0) * stats.t.ppf(
-        0.975, len(all_aligned_pc2) - 1
-    )
-
-    # Calculate overall variance reduction
-    pc1_variance_reduction = np.mean(pc1_unaligned_std) / np.mean(pc1_aligned_std)
-    pc2_variance_reduction = np.mean(pc2_unaligned_std) / np.mean(pc2_aligned_std)
-
-    # Calculate average standard deviation (a measure of heterogeneity)
-    pc1_unaligned_avg_std = np.mean(pc1_unaligned_std)
-    pc1_aligned_avg_std = np.mean(pc1_aligned_std)
-    pc2_unaligned_avg_std = np.mean(pc2_unaligned_std)
-    pc2_aligned_avg_std = np.mean(pc2_aligned_std)
-
-    # Create a figure showing the heterogeneity reduction
-    fig, axes = plt.subplots(2, 2, figsize=(20, 16))
-
-    time_points = np.arange(len(reference_pca))
-
-    # PC1 Unaligned with heterogeneity shading
-    ax = axes[0, 0]
-    ax.plot(time_points, reference_pca[:, 0], "k-", linewidth=2.5, label="Reference")
-    ax.plot(
-        time_points,
-        pc1_unaligned_mean,
-        color="blue",
-        linewidth=2,
-        label="Mean Response",
-    )
-
-    # Add individual lines with low opacity to show heterogeneity
-    for i in range(len(all_unaligned_pc1)):
-        ax.plot(
-            time_points, all_unaligned_pc1[i], color="blue", alpha=0.15, linewidth=1
-        )
-
-    # Add confidence band
-    ax.fill_between(
-        time_points,
-        pc1_unaligned_mean - pc1_unaligned_ci,
-        pc1_unaligned_mean + pc1_unaligned_ci,
-        color="blue",
-        alpha=0.2,
-        label="95% CI",
-    )
-
-    # Add standard deviation band
-    ax.fill_between(
-        time_points,
-        pc1_unaligned_mean - pc1_unaligned_std,
-        pc1_unaligned_mean + pc1_unaligned_std,
-        color="blue",
-        alpha=0.1,
-        label="±1 SD",
-    )
-
-    ax.set_title(
-        f"PC1 - Heterogeneous Responses (Before Alignment)\nAvg SD: {pc1_unaligned_avg_std:.3f}"
-    )
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel(f"PC1 ({explained_variance[0]:.2f}%)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # PC1 Aligned with reduced heterogeneity
-    ax = axes[0, 1]
-    ax.plot(time_points, reference_pca[:, 0], "k-", linewidth=2.5, label="Reference")
-    ax.plot(
-        time_points, pc1_aligned_mean, color="red", linewidth=2, label="Mean Response"
-    )
-
-    # Add individual lines with low opacity
-    for i in range(len(all_aligned_pc1)):
-        ax.plot(time_points, all_aligned_pc1[i], color="red", alpha=0.15, linewidth=1)
-
-    # Add confidence band
-    ax.fill_between(
-        time_points,
-        pc1_aligned_mean - pc1_aligned_ci,
-        pc1_aligned_mean + pc1_aligned_ci,
-        color="red",
-        alpha=0.2,
-        label="95% CI",
-    )
-
-    # Add standard deviation band
-    ax.fill_between(
-        time_points,
-        pc1_aligned_mean - pc1_aligned_std,
-        pc1_aligned_mean + pc1_aligned_std,
-        color="red",
-        alpha=0.1,
-        label="±1 SD",
-    )
-
-    ax.set_title(
-        f"PC1 - Aligned Responses (After DTW)\nAvg SD: {pc1_aligned_avg_std:.3f}, {pc1_variance_reduction:.2f}x variance reduction"
-    )
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel(f"PC1 ({explained_variance[0]:.2f}%)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # PC2 Unaligned with heterogeneity shading
-    ax = axes[1, 0]
-    ax.plot(time_points, reference_pca[:, 1], "k-", linewidth=2.5, label="Reference")
-    ax.plot(
-        time_points,
-        pc2_unaligned_mean,
-        color="blue",
-        linewidth=2,
-        label="Mean Response",
-    )
-
-    # Add individual lines with low opacity
-    for i in range(len(all_unaligned_pc2)):
-        ax.plot(
-            time_points, all_unaligned_pc2[i], color="blue", alpha=0.15, linewidth=1
-        )
-
-    # Add confidence band
-    ax.fill_between(
-        time_points,
-        pc2_unaligned_mean - pc2_unaligned_ci,
-        pc2_unaligned_mean + pc2_unaligned_ci,
-        color="blue",
-        alpha=0.2,
-        label="95% CI",
-    )
-
-    # Add standard deviation band
-    ax.fill_between(
-        time_points,
-        pc2_unaligned_mean - pc2_unaligned_std,
-        pc2_unaligned_mean + pc2_unaligned_std,
-        color="blue",
-        alpha=0.1,
-        label="±1 SD",
-    )
-
-    ax.set_title(
-        f"PC2 - Heterogeneous Responses (Before Alignment)\nAvg SD: {pc2_unaligned_avg_std:.3f}"
-    )
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel(f"PC2 ({explained_variance[1]:.2f}%)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    # PC2 Aligned with reduced heterogeneity
-    ax = axes[1, 1]
-    ax.plot(time_points, reference_pca[:, 1], "k-", linewidth=2.5, label="Reference")
-    ax.plot(
-        time_points, pc2_aligned_mean, color="red", linewidth=2, label="Mean Response"
-    )
-
-    # Add individual lines with low opacity
-    for i in range(len(all_aligned_pc2)):
-        ax.plot(time_points, all_aligned_pc2[i], color="red", alpha=0.15, linewidth=1)
-
-    # Add confidence band
-    ax.fill_between(
-        time_points,
-        pc2_aligned_mean - pc2_aligned_ci,
-        pc2_aligned_mean + pc2_aligned_ci,
-        color="red",
-        alpha=0.2,
-        label="95% CI",
-    )
-
-    # Add standard deviation band
-    ax.fill_between(
-        time_points,
-        pc2_aligned_mean - pc2_aligned_std,
-        pc2_aligned_mean + pc2_aligned_std,
-        color="red",
-        alpha=0.1,
-        label="±1 SD",
-    )
-
-    ax.set_title(
-        f"PC2 - Aligned Responses (After DTW)\nAvg SD: {pc2_aligned_avg_std:.3f}, {pc2_variance_reduction:.2f}x variance reduction"
-    )
-    ax.set_xlabel("Reference Timepoint")
-    ax.set_ylabel(f"PC2 ({explained_variance[1]:.2f}%)")
-    ax.grid(True, alpha=0.3)
-    ax.legend(loc="best")
-
-    plt.suptitle(
-        f"Heterogeneity Reduction with DTW Alignment - {condition.upper()}", fontsize=20
-    )
-    plt.tight_layout(rect=[0, 0, 1, 0.97])
-
-    # Save figure
-    save_path = (
-        output_root / f"SEC61B/20241107_SEC61B_{condition}_heterogeneity_reduction.png"
-    )
-    plt.savefig(save_path, dpi=300, bbox_inches="tight")
-    logger.info(f"Heterogeneity reduction visualization saved to {save_path}")
-
-    return save_path
-
-
-# Create the heterogeneity vs alignment visualization
-heterogeneity_path = plot_heterogeneity_vs_alignment(
-    reference_pattern, top_n_aligned_cells, embeddings_dataset, output_root, CONDITION
+    output_save_dir,
 )
 
 
@@ -1378,7 +694,7 @@ def plot_reference_vs_full_lineages(
     all_lineage_lengths = []
     for _, row in top_aligned_cells.iterrows():
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
+        track_ids = ast.literal_eval(row["track_ids"])
         lineage_embeddings = embeddings_dataset.sel(
             sample=(fov_name, track_ids)
         ).features.values
@@ -1422,8 +738,8 @@ def plot_reference_vs_full_lineages(
     # Then plot each lineage with the matched section highlighted
     for i, (_, row) in enumerate(top_aligned_cells.iterrows()):
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-        warp_path = row["warp_path"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        warp_path = ast.literal_eval(row["warp_path"])
         start_time = row["start_timepoint"]
         distance = row["distance"]
 
@@ -1544,23 +860,21 @@ def plot_reference_vs_full_lineages(
 
 
 # %%
-
 plot_reference_vs_full_lineages(
     reference_pattern,
     top_n_aligned_cells,
     embeddings_dataset,
     save_path=output_root
-    / f"SEC61B/20241107_SEC61B_{CONDITION}_reference_vs_full_lineages.png",
+    / f"SEC61B/20241107_SEC61B_features_{CONDITION_EMBEDDINGS}_reference_vs_full_lineages.png",
 )
 
+
 # %%
-
-
 def plot_direct_overlay_comparison(
     reference_pattern: np.ndarray,
     top_aligned_cells: pd.DataFrame,
     embeddings_dataset: xr.Dataset,
-    output_root: Path,
+    output_save_dir: Path,
     condition: str,
 ):
     """
@@ -1570,7 +884,7 @@ def plot_direct_overlay_comparison(
         reference_pattern: The reference pattern embeddings
         top_aligned_cells: DataFrame with alignment information
         embeddings_dataset: Dataset containing embeddings
-        output_root: Path to save the output figures
+        output_save_dir: Path to save the output figures
         condition: String describing the condition
     """
     n_cells = len(top_aligned_cells)
@@ -1583,8 +897,8 @@ def plot_direct_overlay_comparison(
     # Process each aligned cell
     for i, (_, row) in enumerate(top_aligned_cells.iterrows()):
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
-        warp_path = row["warp_path"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        warp_path = ast.literal_eval(row["warp_path"])
         start_time = int(row["start_timepoint"])
         distance = row["distance"]
 
@@ -1683,8 +997,8 @@ def plot_direct_overlay_comparison(
 
     # Save figure
     save_path = (
-        output_root
-        / f"SEC61B/20241107_SEC61B_{condition}_direct_overlay_comparison.png"
+        output_save_dir
+        / f"20241107_SEC61B_{CONDITION_EMBEDDINGS}_direct_overlay_comparison.png"
     )
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     logger.info(f"Direct overlay comparison saved to {save_path}")
@@ -1694,12 +1008,15 @@ def plot_direct_overlay_comparison(
 
 # Plot direct overlay comparison
 overlay_comparison_path = plot_direct_overlay_comparison(
-    reference_pattern, top_n_aligned_cells, embeddings_dataset, output_root, CONDITION
+    reference_pattern,
+    top_n_aligned_cells,
+    embeddings_dataset,
+    output_save_dir,
+    CONDITION_EMBEDDINGS,
 )
 
+
 # %%
-
-
 def create_trajectory_comparison_video(
     reference_pattern: np.ndarray,
     top_aligned_cells: pd.DataFrame,
@@ -1723,11 +1040,11 @@ def create_trajectory_comparison_video(
         lineage_idx: Index of the lineage to visualize (default: 0)
         fps: Frames per second for the video (default: 5)
     """
-    import matplotlib.pyplot as plt
     import matplotlib.animation as animation
-    from matplotlib.lines import Line2D
-    from matplotlib.colors import Normalize
     import matplotlib.cm as cm
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+    from matplotlib.lines import Line2D
 
     # Set dark theme
     plt.style.use("dark_background")
@@ -1735,8 +1052,8 @@ def create_trajectory_comparison_video(
     # Get the row for the selected lineage
     row = top_aligned_cells.iloc[lineage_idx]
     fov_name = row["fov_name"]
-    track_ids = row["track_ids"]
-    warp_path = row["warp_path"]
+    track_ids = ast.literal_eval(row["track_ids"])
+    warp_path = ast.literal_eval(row["warp_path"])
     start_time = int(row["start_timepoint"])
 
     # Get the selected stacks
@@ -1951,14 +1268,6 @@ def create_trajectory_comparison_video(
         0, aligned_embeddings[0, 1], "ro", markersize=10
     )
 
-    # Add a main title
-    # plt.suptitle(
-    #     f"Heterogeneity vs Alignment - {condition.upper()} - {fov_name}, track {track_ids[0]}",
-    #     fontsize=16,
-    #     color="white",
-    #     y=0.98,
-    # )
-
     # Instead of tight_layout, manually adjust the figure margins
     fig.subplots_adjust(
         left=0.02, right=0.98, bottom=0.05, top=0.90, wspace=0.05, hspace=0.3
@@ -2018,17 +1327,6 @@ def create_trajectory_comparison_video(
         point_unaligned_dim1.set_data([frame], [unaligned_window[frame, 1]])
         point_aligned_dim1.set_data([frame], [aligned_embeddings[frame, 1]])
 
-        # Add frame number to the titles
-        # ax_unaligned_phase.set_title(f"Unaligned Phase - Frame {frame}", color="white")
-        # ax_unaligned_gfp.set_title(f"Unaligned GFP - Frame {frame}", color="white")
-        # ax_unaligned_mcherry.set_title(
-        #     f"Unaligned mCherry - Frame {frame}", color="white"
-        # )
-
-        # ax_aligned_phase.set_title(f"Aligned Phase - Frame {frame}", color="white")
-        # ax_aligned_gfp.set_title(f"Aligned GFP - Frame {frame}", color="white")
-        # ax_aligned_mcherry.set_title(f"Aligned mCherry - Frame {frame}", color="white")
-
         # Return all artists that were updated
         return [
             unaligned_phase_img,
@@ -2068,11 +1366,10 @@ if len(all_aligned_stacks) > 0 and len(all_unaligned_stacks) > 0:
     for idx, row in top_n_aligned_cells.reset_index().iterrows():
         fov_name = row["fov_name"][1:].replace("/", "_")
         track_ids = row["track_ids"]
-        save_path = output_root / f"SEC61B/heterogeneity_vs_alignment"
+        save_path = output_save_dir / "heterogeneity_vs_alignment"
         save_path.mkdir(parents=True, exist_ok=True)
         save_path = (
-            save_path
-            / f"20241107_SEC61B_{CONDITION}_fov_{fov_name}_track_{track_ids[0]}.mp4"
+            save_path / f"20241107_SEC61B_fov_{fov_name}_track_{track_ids[0]}.mp4"
         )
 
         video_path = create_trajectory_comparison_video(
@@ -2085,8 +1382,6 @@ if len(all_aligned_stacks) > 0 and len(all_unaligned_stacks) > 0:
             lineage_idx=idx,
             fps=5,
         )
-
-# %%
 
 
 # %%
@@ -2155,7 +1450,7 @@ def plot_multiple_lineages_unaligned(
         # Get data for this lineage
         row = top_aligned_cells.iloc[i]
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
+        track_ids = ast.literal_eval(row["track_ids"])
         start_time = int(row["start_timepoint"])
 
         # Get unaligned stack for this lineage
@@ -2293,11 +1588,9 @@ def plot_multiple_lineages_unaligned(
 
 # %%
 # Create the comparison plot for unaligned trajectories
+# NOTE for testing used lineage 3
 if len(all_unaligned_stacks) > 0:
-    save_path = output_root / f"SEC61B/multiple_lineages"
-    save_path.mkdir(parents=True, exist_ok=True)
-    output_file = save_path / f"20241107_SEC61B_{CONDITION}_unaligned_comparison.png"
-
+    output_file = output_save_dir / "20241107_SEC61B_unaligned_comparison.png"
     unaligned_plot = plot_multiple_lineages_unaligned(
         reference_pattern,
         top_n_aligned_cells,
@@ -2338,8 +1631,8 @@ def create_multiple_lineages_video(
         fps: Frames per second for the video (default: 5)
         show_title: Whether to show the main title with frame counter (default: False)
     """
-    import matplotlib.pyplot as plt
     import matplotlib.animation as animation
+    import matplotlib.pyplot as plt
     from matplotlib.colors import Normalize
 
     # Set dark theme
@@ -2384,9 +1677,9 @@ def create_multiple_lineages_video(
         # Get data for this lineage
         row = top_aligned_cells.iloc[i]
         fov_name = row["fov_name"]
-        track_ids = row["track_ids"]
+        track_ids = ast.literal_eval(row["track_ids"])
         start_time = int(row["start_timepoint"])
-        warp_path = row["warp_path"]
+        warp_path = ast.literal_eval(row["warp_path"])
 
         # Get image stack for this lineage
         stack = image_stacks[i]
@@ -2639,13 +1932,11 @@ def create_multiple_lineages_video(
 # Create video files for both unaligned and aligned trajectories
 if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
     # Create directory for output
-    save_path = output_root / f"SEC61B/multiple_lineages_videos"
+    save_path = output_save_dir / f"multiple_lineages_videos"
     save_path.mkdir(parents=True, exist_ok=True)
 
     # Create unaligned video
-    unaligned_video_path = (
-        save_path / f"20241107_SEC61B_{CONDITION}_unaligned_trajectories.mp4"
-    )
+    unaligned_video_path = save_path / f"20241107_SEC61B_unaligned_trajectories.mp4"
     create_multiple_lineages_video(
         reference_pattern,
         top_n_aligned_cells,
@@ -2660,9 +1951,7 @@ if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
     print(f"Created video files at {unaligned_video_path}")
 
     # Create aligned video
-    aligned_video_path = (
-        save_path / f"20241107_SEC61B_{CONDITION}_aligned_trajectories.mp4"
-    )
+    aligned_video_path = save_path / f"20241107_SEC61B_aligned_trajectories.mp4"
     create_multiple_lineages_video(
         reference_pattern,
         top_n_aligned_cells,
