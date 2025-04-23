@@ -24,6 +24,7 @@ class SegmentationDataset(Dataset):
         pred_z_slice: int | slice,
         target_z_slice: int | slice,
         img_name: str = "0",
+        dtype: np.dtype | None = np.int16,
     ) -> None:
         super().__init__()
         self.pred_dataset = pred_dataset
@@ -33,6 +34,7 @@ class SegmentationDataset(Dataset):
         self.pred_z_slice = pred_z_slice
         self.target_z_slice = target_z_slice
         self.img_name = img_name
+        self.dtype = dtype
         self._build_indices()
 
     def _build_indices(self) -> None:
@@ -55,12 +57,13 @@ class SegmentationDataset(Dataset):
     def __getitem__(self, idx: int) -> SegmentationSample:
         pred_img, target_img, p, t = self._indices[idx]
         _logger.debug(f"Target image: {target_img.name}")
-        pred = torch.from_numpy(
-            pred_img[t, self.pred_channel, self.pred_z_slice].astype(np.int16)
-        )
-        target = torch.from_numpy(
-            target_img[t, self.target_channel, self.target_z_slice].astype(np.int16)
-        )
+        _pred = pred_img[t, self.pred_channel, self.pred_z_slice]
+        _target = target_img[t, self.target_channel, self.target_z_slice]
+        if self.dtype is not None:
+            _pred = _pred.astype(self.dtype)
+            _target = _target.astype(self.dtype)
+        pred = torch.from_numpy(_pred.astype(self.dtype))
+        target = torch.from_numpy(_target.astype(self.dtype))
         return {"pred": pred, "target": target, "position_idx": p, "time_idx": t}
 
 

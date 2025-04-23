@@ -1,4 +1,4 @@
-"""Test stage lightning module for comparing virtual staining and segmentations."""
+"""Test stage lightning modules for comparing segmentation based on  virtual staining and fluorescence ground truth"""
 
 import logging
 
