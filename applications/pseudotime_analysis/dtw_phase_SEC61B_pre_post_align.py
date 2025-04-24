@@ -1,7 +1,8 @@
 # %%
+import ast
 import logging
 from pathlib import Path
-import ast
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from tqdm import tqdm
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
+from viscy.representation.evaluation.dimensionality_reduction import compute_pca
 
 # Create a custom logger for just this script
 logger = logging.getLogger("viscy")
@@ -1139,7 +1141,7 @@ def create_trajectory_comparison_video(
     # Define contrast limits for each channel
     phase_limits = (-0.74, 0.4)
     gfp_limits = (106, 215)
-    mcherry_limits = (106, 190)
+    mcherry_limits = (106, 170)
 
     # Get the initial images
     unaligned_phase_init = unaligned_stack[0, 0, z_slice, :]
@@ -1595,7 +1597,6 @@ if len(all_unaligned_stacks) > 0:
         reference_pattern,
         top_n_aligned_cells,
         embeddings_dataset,
-        all_unaligned_stacks,
         output_path=output_file,
         num_lineages=3,
         time_point=20,
@@ -1941,7 +1942,6 @@ if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
         reference_pattern,
         top_n_aligned_cells,
         embeddings_dataset,
-        all_unaligned_stacks,
         output_path=unaligned_video_path,
         mode="unaligned",
         num_lineages=3,
@@ -1956,7 +1956,6 @@ if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
         reference_pattern,
         top_n_aligned_cells,
         embeddings_dataset,
-        all_aligned_stacks,
         output_path=aligned_video_path,
         mode="aligned",
         num_lineages=3,
@@ -1964,5 +1963,2361 @@ if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
         show_title=False,  # Set to False to remove the title
     )
     print(f"Created video files at {aligned_video_path}")
+
+# %%
+# Compute the PCA
+n_components = 8
+_, _, embeddings_PCA_df = compute_pca(embeddings_dataset, n_components=n_components)
+
+
+# %%
+def create_pca_trajectory_video(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    all_unaligned_stacks: np.ndarray,
+    all_aligned_stacks: np.ndarray,
+    output_path: Path,
+    lineage_idx: int = 0,
+    fps: int = 5,
+):
+    """
+    Create a video comparing unaligned vs aligned trajectories with a moving point over time,
+    using pre-computed PCA components (PC1 and PC2).
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        all_unaligned_stacks: Array of unaligned image stacks
+        all_aligned_stacks: Array of aligned image stacks
+        output_path: Path to save the video .mp4
+        lineage_idx: Index of the lineage to visualize (default: 0)
+        fps: Frames per second for the video (default: 5)
+    """
+    import matplotlib.animation as animation
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+
+    # Set dark theme
+    plt.style.use("dark_background")
+
+    # Get the row for the selected lineage
+    row = top_aligned_cells.iloc[lineage_idx]
+    fov_name = row["fov_name"]
+    track_ids = ast.literal_eval(row["track_ids"])
+    warp_path = ast.literal_eval(row["warp_path"])
+    start_time = int(row["start_timepoint"])
+
+    # Get the selected stacks
+    unaligned_stack = all_unaligned_stacks[lineage_idx]
+    aligned_stack = all_aligned_stacks[lineage_idx]
+
+    # Filter PCA data for the reference lineage
+    reference_fov = "/C/2/001000"  # Based on variables in script
+    reference_track_id = 129  # Based on variables in script
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70] as defined in the script
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Get target lineage PCA data
+    lineage_pca = (
+        embeddings_PCA_df[
+            (embeddings_PCA_df["fov_name"] == fov_name)
+            & (embeddings_PCA_df["track_id"].isin(track_ids))
+        ]
+        .sort_values(by="t")
+        .reset_index(drop=True)
+    )
+
+    # Extract the unaligned window
+    unaligned_pca = lineage_pca.iloc[
+        start_time : start_time + len(reference_pattern)
+    ].reset_index(drop=True)
+
+    # If unaligned_pca is shorter than reference_pattern, pad with last value
+    if len(unaligned_pca) < len(reference_pattern):
+        last_row = unaligned_pca.iloc[-1].copy()
+        for i in range(len(reference_pattern) - len(unaligned_pca)):
+            unaligned_pca = pd.concat(
+                [unaligned_pca, pd.DataFrame([last_row])], ignore_index=True
+            )
+
+    # Create aligned PCA data using the warping path
+    aligned_pca = pd.DataFrame(columns=reference_pca.columns)
+
+    # Map each reference timepoint to the corresponding lineage timepoint
+    for ref_idx, query_idx in warp_path:
+        lineage_idx = int(start_time + query_idx)
+        if 0 <= lineage_idx < len(lineage_pca):
+            # Add a row to aligned_pca at position ref_idx
+            if ref_idx >= len(aligned_pca):
+                # If ref_idx is beyond current length, extend aligned_pca
+                missing_rows = ref_idx - len(aligned_pca)
+                if missing_rows > 0:
+                    # Add empty rows
+                    empty_rows = pd.DataFrame(
+                        [pd.Series(dtype="float64")] * missing_rows,
+                        columns=aligned_pca.columns,
+                    )
+                    aligned_pca = pd.concat(
+                        [aligned_pca, empty_rows], ignore_index=True
+                    )
+                # Add the mapped row
+                aligned_pca = pd.concat(
+                    [aligned_pca, pd.DataFrame([lineage_pca.iloc[lineage_idx]])],
+                    ignore_index=True,
+                )
+            else:
+                # Replace existing row
+                aligned_pca.iloc[ref_idx] = lineage_pca.iloc[lineage_idx]
+
+    # Fill any remaining gaps in aligned_pca with nearest values
+    aligned_pca = aligned_pca.fillna(method="ffill").fillna(method="bfill")
+
+    # Ensure all dataframes have same length as reference pattern
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+    unaligned_pca = unaligned_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+    aligned_pca = aligned_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Create the figure with a 2x5 grid layout
+    fig = plt.figure(figsize=(22, 8), facecolor="black")
+
+    # Define the layout of subplots with reduced spacing and width ratios for rectangular dimension plots
+    gs = fig.add_gridspec(2, 4, wspace=0.05, hspace=0.1, width_ratios=[1, 1, 2, 2])
+
+    # Create the subplots for unaligned row (top row)
+    ax_unaligned_phase = fig.add_subplot(gs[0, 0])  # Phase
+    ax_unaligned_gfp = fig.add_subplot(gs[0, 1])  # GFP
+    ax_unaligned_mcherry = fig.add_subplot(gs[0, 2])  # mCherry
+    ax_pc1 = fig.add_subplot(gs[0, 3])  # PC1 plot
+    ax_pc2 = fig.add_subplot(gs[1, 3])  # PC2 plot
+
+    # Create the subplots for aligned row (bottom row)
+    ax_aligned_phase = fig.add_subplot(gs[1, 0])  # Phase
+    ax_aligned_gfp = fig.add_subplot(gs[1, 1])  # GFP
+    ax_aligned_mcherry = fig.add_subplot(gs[1, 2])  # mCherry
+
+    # Set background color for all axes
+    for ax in [
+        ax_unaligned_phase,
+        ax_unaligned_gfp,
+        ax_unaligned_mcherry,
+        ax_aligned_phase,
+        ax_aligned_gfp,
+        ax_aligned_mcherry,
+        ax_pc1,
+        ax_pc2,
+    ]:
+        ax.set_facecolor("black")
+
+    # Select z-slice for images
+    z_slice = 15
+
+    # Time points for the plots
+    time_points = np.arange(len(reference_pattern))
+
+    # Define contrast limits for each channel
+    phase_limits = (-0.74, 0.4)
+    gfp_limits = (106, 215)
+    mcherry_limits = (106, 190)
+
+    # Get the initial images
+    unaligned_phase_init = unaligned_stack[0, 0, z_slice, :]
+    unaligned_gfp_init = unaligned_stack[0, 1, z_slice, :]
+    unaligned_mcherry_init = unaligned_stack[0, 2, z_slice, :]
+
+    aligned_phase_init = aligned_stack[0, 0, z_slice, :]
+    aligned_gfp_init = aligned_stack[0, 1, z_slice, :]
+    aligned_mcherry_init = aligned_stack[0, 2, z_slice, :]
+
+    # Create normalized data for proper visualization
+    phase_norm = Normalize(vmin=phase_limits[0], vmax=phase_limits[1])
+    gfp_norm = Normalize(vmin=gfp_limits[0], vmax=gfp_limits[1])
+    mcherry_norm = Normalize(vmin=mcherry_limits[0], vmax=mcherry_limits[1])
+
+    # Function to safely normalize values to [0,1] range
+    def safe_norm(norm_func, data):
+        normalized = norm_func(data)
+        return np.clip(normalized, 0, 1)
+
+    # Plot the initial images for phase (grayscale)
+    unaligned_phase_img = ax_unaligned_phase.imshow(
+        unaligned_phase_init, cmap="gray", vmin=phase_limits[0], vmax=phase_limits[1]
+    )
+    ax_unaligned_phase.set_title(f"Unaligned Phase", color="white")
+    ax_unaligned_phase.axis("off")
+
+    aligned_phase_img = ax_aligned_phase.imshow(
+        aligned_phase_init, cmap="gray", vmin=phase_limits[0], vmax=phase_limits[1]
+    )
+    ax_aligned_phase.set_title(f"Aligned Phase", color="white")
+    ax_aligned_phase.axis("off")
+
+    # Create RGB images for GFP (green channel)
+    unaligned_gfp_rgb = np.zeros((*unaligned_gfp_init.shape, 3))
+    unaligned_gfp_rgb[:, :, 1] = safe_norm(
+        gfp_norm, unaligned_gfp_init
+    )  # Green channel
+
+    aligned_gfp_rgb = np.zeros((*aligned_gfp_init.shape, 3))
+    aligned_gfp_rgb[:, :, 1] = safe_norm(gfp_norm, aligned_gfp_init)  # Green channel
+
+    # Create RGB images for mCherry (magenta channel = red + blue)
+    unaligned_mcherry_rgb = np.zeros((*unaligned_mcherry_init.shape, 3))
+    unaligned_mcherry_rgb[:, :, 0] = safe_norm(
+        mcherry_norm, unaligned_mcherry_init
+    )  # Red component
+    unaligned_mcherry_rgb[:, :, 2] = safe_norm(
+        mcherry_norm, unaligned_mcherry_init
+    )  # Blue component
+
+    aligned_mcherry_rgb = np.zeros((*aligned_mcherry_init.shape, 3))
+    aligned_mcherry_rgb[:, :, 0] = safe_norm(
+        mcherry_norm, aligned_mcherry_init
+    )  # Red component
+    aligned_mcherry_rgb[:, :, 2] = safe_norm(
+        mcherry_norm, aligned_mcherry_init
+    )  # Blue component
+
+    # Plot the RGB fluorescence images
+    unaligned_gfp_img = ax_unaligned_gfp.imshow(unaligned_gfp_rgb)
+    ax_unaligned_gfp.set_title(f"Unaligned GFP", color="white")
+    ax_unaligned_gfp.axis("off")
+
+    aligned_gfp_img = ax_aligned_gfp.imshow(aligned_gfp_rgb)
+    ax_aligned_gfp.set_title(f"Aligned GFP", color="white")
+    ax_aligned_gfp.axis("off")
+
+    unaligned_mcherry_img = ax_unaligned_mcherry.imshow(unaligned_mcherry_rgb)
+    ax_unaligned_mcherry.set_title(f"Unaligned mCherry", color="white")
+    ax_unaligned_mcherry.axis("off")
+
+    aligned_mcherry_img = ax_aligned_mcherry.imshow(aligned_mcherry_rgb)
+    ax_aligned_mcherry.set_title(f"Aligned mCherry", color="white")
+    ax_aligned_mcherry.axis("off")
+
+    # Plot all trajectories using PCA
+    ax_pc1.plot(
+        time_points,
+        reference_pca["PCA1"].values,
+        "w-",
+        linewidth=2.5,
+        label="Reference",
+    )
+    ax_pc1.plot(
+        time_points,
+        unaligned_pca["PCA1"].values,
+        "c--",
+        linewidth=1.5,
+        label="Unaligned",
+    )
+    ax_pc1.plot(
+        time_points, aligned_pca["PCA1"].values, "r-", linewidth=1.5, label="Aligned"
+    )
+    ax_pc1.set_title(f"PC1 - Lineage ({fov_name})", color="white")
+    ax_pc1.set_xlabel("Reference Time Point", color="white")
+    ax_pc1.set_ylabel("PC1", color="white")
+    ax_pc1.tick_params(colors="white")
+    ax_pc1.legend(facecolor="black", edgecolor="white")
+    ax_pc1.grid(True, alpha=0.3, color="gray")
+
+    ax_pc2.plot(
+        time_points,
+        reference_pca["PCA2"].values,
+        "w-",
+        linewidth=2.5,
+        label="Reference",
+    )
+    ax_pc2.plot(
+        time_points,
+        unaligned_pca["PCA2"].values,
+        "c--",
+        linewidth=1.5,
+        label="Unaligned",
+    )
+    ax_pc2.plot(
+        time_points, aligned_pca["PCA2"].values, "r-", linewidth=1.5, label="Aligned"
+    )
+    ax_pc2.set_title(f"PC2 - Lineage ({fov_name})", color="white")
+    ax_pc2.set_xlabel("Reference Time Point", color="white")
+    ax_pc2.set_ylabel("PC2", color="white")
+    ax_pc2.tick_params(colors="white")
+    ax_pc2.legend(facecolor="black", edgecolor="white")
+    ax_pc2.grid(True, alpha=0.3, color="gray")
+
+    # Add moving points to the trajectory plots
+    (point_ref_pc1,) = ax_pc1.plot(
+        0, reference_pca["PCA1"].iloc[0], "wo", markersize=10
+    )
+    (point_unaligned_pc1,) = ax_pc1.plot(
+        0, unaligned_pca["PCA1"].iloc[0], "co", markersize=10
+    )
+    (point_aligned_pc1,) = ax_pc1.plot(
+        0, aligned_pca["PCA1"].iloc[0], "ro", markersize=10
+    )
+
+    (point_ref_pc2,) = ax_pc2.plot(
+        0, reference_pca["PCA2"].iloc[0], "wo", markersize=10
+    )
+    (point_unaligned_pc2,) = ax_pc2.plot(
+        0, unaligned_pca["PCA2"].iloc[0], "co", markersize=10
+    )
+    (point_aligned_pc2,) = ax_pc2.plot(
+        0, aligned_pca["PCA2"].iloc[0], "ro", markersize=10
+    )
+
+    # Instead of tight_layout, manually adjust the figure margins
+    fig.subplots_adjust(
+        left=0.02, right=0.98, bottom=0.05, top=0.90, wspace=0.05, hspace=0.3
+    )
+
+    # Create the animation function
+    def animate(frame):
+        # Get current frame's images
+        unaligned_phase = unaligned_stack[frame, 0, z_slice, :]
+        unaligned_gfp = unaligned_stack[frame, 1, z_slice, :]
+        unaligned_mcherry = unaligned_stack[frame, 2, z_slice, :]
+
+        aligned_phase = aligned_stack[frame, 0, z_slice, :]
+        aligned_gfp = aligned_stack[frame, 1, z_slice, :]
+        aligned_mcherry = aligned_stack[frame, 2, z_slice, :]
+
+        # Create RGB images for the current frame
+        # GFP (green channel)
+        unaligned_gfp_rgb = np.zeros((*unaligned_gfp.shape, 3))
+        unaligned_gfp_rgb[:, :, 1] = safe_norm(gfp_norm, unaligned_gfp)  # Green channel
+
+        aligned_gfp_rgb = np.zeros((*aligned_gfp.shape, 3))
+        aligned_gfp_rgb[:, :, 1] = safe_norm(gfp_norm, aligned_gfp)  # Green channel
+
+        # mCherry (magenta channel = red + blue)
+        unaligned_mcherry_rgb = np.zeros((*unaligned_mcherry.shape, 3))
+        unaligned_mcherry_rgb[:, :, 0] = safe_norm(
+            mcherry_norm, unaligned_mcherry
+        )  # Red component
+        unaligned_mcherry_rgb[:, :, 2] = safe_norm(
+            mcherry_norm, unaligned_mcherry
+        )  # Blue component
+
+        aligned_mcherry_rgb = np.zeros((*aligned_mcherry.shape, 3))
+        aligned_mcherry_rgb[:, :, 0] = safe_norm(
+            mcherry_norm, aligned_mcherry
+        )  # Red component
+        aligned_mcherry_rgb[:, :, 2] = safe_norm(
+            mcherry_norm, aligned_mcherry
+        )  # Blue component
+
+        # Update the images
+        unaligned_phase_img.set_array(unaligned_phase)
+        unaligned_gfp_img.set_array(unaligned_gfp_rgb)
+        unaligned_mcherry_img.set_array(unaligned_mcherry_rgb)
+
+        aligned_phase_img.set_array(aligned_phase)
+        aligned_gfp_img.set_array(aligned_gfp_rgb)
+        aligned_mcherry_img.set_array(aligned_mcherry_rgb)
+
+        # Update the trajectory points - must use sequences not single values
+        point_ref_pc1.set_data([frame], [reference_pca["PCA1"].iloc[frame]])
+        point_unaligned_pc1.set_data([frame], [unaligned_pca["PCA1"].iloc[frame]])
+        point_aligned_pc1.set_data([frame], [aligned_pca["PCA1"].iloc[frame]])
+
+        point_ref_pc2.set_data([frame], [reference_pca["PCA2"].iloc[frame]])
+        point_unaligned_pc2.set_data([frame], [unaligned_pca["PCA2"].iloc[frame]])
+        point_aligned_pc2.set_data([frame], [aligned_pca["PCA2"].iloc[frame]])
+
+        # Return all artists that were updated
+        return [
+            unaligned_phase_img,
+            unaligned_gfp_img,
+            unaligned_mcherry_img,
+            aligned_phase_img,
+            aligned_gfp_img,
+            aligned_mcherry_img,
+            point_ref_pc1,
+            point_unaligned_pc1,
+            point_aligned_pc1,
+            point_ref_pc2,
+            point_unaligned_pc2,
+            point_aligned_pc2,
+        ]
+
+    # Create the animation
+    ani = animation.FuncAnimation(
+        fig, animate, frames=len(reference_pattern), interval=1000 / fps, blit=True
+    )
+
+    # Save the animation
+    ani.save(
+        output_path,
+        writer="ffmpeg",
+        fps=fps,
+        dpi=300,
+        extra_args=["-vcodec", "libx264"],
+    )
+
+    logger.info(f"PCA trajectory comparison video saved to {output_path}")
+    return output_path
+
+
+# %%
+# Create PCA trajectory comparison videos
+if len(all_aligned_stacks) > 0 and len(all_unaligned_stacks) > 0:
+    for idx, row in top_n_aligned_cells.reset_index().iterrows():
+        fov_name = row["fov_name"][1:].replace("/", "_")
+        track_ids = row["track_ids"]
+        save_path = output_save_dir / "heterogeneity_vs_alignment_pca"
+        save_path.mkdir(parents=True, exist_ok=True)
+        save_path = (
+            save_path
+            / f"20241107_SEC61B_pca_df_fov_{fov_name}_track_{track_ids[0]}.mp4"
+        )
+
+        video_path = create_pca_trajectory_video(
+            reference_pattern,
+            top_n_aligned_cells,
+            embeddings_PCA_df,
+            all_unaligned_stacks,
+            all_aligned_stacks,
+            output_path=save_path,
+            lineage_idx=idx,
+            fps=5,
+        )
+
+
+# %%
+def create_multiple_lineages_pca_video(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    image_stacks: np.ndarray,  # Either all_unaligned_stacks or all_aligned_stacks
+    output_path: Path,
+    mode: str = "unaligned",  # "unaligned" or "aligned"
+    num_lineages: int = 3,
+    z_slice: int = 15,
+    fps: int = 5,
+    show_title: bool = False,  # Parameter to control title visibility
+):
+    """
+    Create a video showing multiple lineages with phase/GFP/mCherry side by side,
+    followed by PC1 and PC2 plots for either unaligned or aligned trajectories.
+    Uses pre-computed PCA data directly.
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        image_stacks: Array of image stacks (unaligned or aligned)
+        output_path: Path to save the video file
+        mode: "unaligned" or "aligned" to determine which trajectories to display
+        num_lineages: Number of lineages to display (default: 3)
+        z_slice: Z-slice to use for images (default: 15)
+        fps: Frames per second for the video (default: 5)
+        show_title: Whether to show the main title with frame counter (default: False)
+    """
+    import matplotlib.animation as animation
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+
+    # Set dark theme
+    plt.style.use("dark_background")
+
+    # Limit to requested number of lineages
+    num_lineages = min(num_lineages, len(top_aligned_cells), len(image_stacks))
+
+    # Create figure with rows for each lineage
+    fig = plt.figure(figsize=(20, 4 * num_lineages), facecolor="black")
+
+    # Define column ratios - more space for images, increased spacing between images and plots
+    gs = fig.add_gridspec(
+        num_lineages, 5, wspace=0.2, hspace=0.3, width_ratios=[1.5, 1.5, 1.5, 2, 2]
+    )
+
+    # Define contrast limits for each channel
+    phase_limits = (-0.74, 0.4)
+    gfp_limits = (106, 215)
+    mcherry_limits = (106, 190)
+
+    # Function to safely normalize values to [0,1] range
+    def safe_norm(norm_func, data):
+        normalized = norm_func(data)
+        return np.clip(normalized, 0, 1)
+
+    # Create normalizers for each channel
+    phase_norm = Normalize(vmin=phase_limits[0], vmax=phase_limits[1])
+    gfp_norm = Normalize(vmin=gfp_limits[0], vmax=gfp_limits[1])
+    mcherry_norm = Normalize(vmin=mcherry_limits[0], vmax=mcherry_limits[1])
+
+    # Get reference lineage PCA data
+    reference_fov = "/C/2/001000"  # Based on variables in script
+    reference_track_id = 129  # Based on variables in script
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70] as defined in the script
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Collect all trajectory data for visualization
+    all_lineage_data = []
+    max_frames = len(reference_pattern)
+
+    # Process each lineage to get PCA trajectories
+    for i in range(num_lineages):
+        # Get data for this lineage
+        row = top_aligned_cells.iloc[i]
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        start_time = int(row["start_timepoint"])
+        warp_path = ast.literal_eval(row["warp_path"])
+
+        # Get lineage PCA data
+        lineage_pca = (
+            embeddings_PCA_df[
+                (embeddings_PCA_df["fov_name"] == fov_name)
+                & (embeddings_PCA_df["track_id"].isin(track_ids))
+            ]
+            .sort_values(by="t")
+            .reset_index(drop=True)
+        )
+
+        # Create trajectory based on mode
+        if mode == "unaligned":
+            # Extract unaligned window
+            traj_pca = lineage_pca.iloc[
+                start_time : start_time + len(reference_pattern)
+            ].reset_index(drop=True)
+
+            # Pad if needed
+            if len(traj_pca) < len(reference_pattern):
+                last_row = traj_pca.iloc[-1].copy()
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+            # Trim if needed
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+        else:  # aligned mode
+            # Create aligned trajectory using warping path
+            traj_pca = pd.DataFrame(columns=lineage_pca.columns)
+
+            # Map each reference timepoint to the corresponding lineage timepoint
+            for ref_idx, query_idx in warp_path:
+                lineage_idx = int(start_time + query_idx)
+                if 0 <= lineage_idx < len(lineage_pca):
+                    # Add a row to traj_pca at position ref_idx
+                    if ref_idx >= len(traj_pca):
+                        # If ref_idx is beyond current length, extend traj_pca
+                        missing_rows = ref_idx - len(traj_pca)
+                        if missing_rows > 0:
+                            # Add empty rows
+                            empty_rows = pd.DataFrame(
+                                [pd.Series(dtype="float64")] * missing_rows,
+                                columns=traj_pca.columns,
+                            )
+                            traj_pca = pd.concat(
+                                [traj_pca, empty_rows], ignore_index=True
+                            )
+                        # Add the mapped row
+                        traj_pca = pd.concat(
+                            [traj_pca, pd.DataFrame([lineage_pca.iloc[lineage_idx]])],
+                            ignore_index=True,
+                        )
+                    else:
+                        # Replace existing row
+                        traj_pca.iloc[ref_idx] = lineage_pca.iloc[lineage_idx]
+
+            # Fill any remaining gaps with nearest values
+            traj_pca = traj_pca.fillna(method="ffill").fillna(method="bfill")
+
+            # Ensure correct length
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+            # If still too short, pad with last value
+            if len(traj_pca) < len(reference_pattern):
+                last_row = (
+                    traj_pca.iloc[-1].copy()
+                    if not traj_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+        all_lineage_data.append(
+            {"fov_name": fov_name, "track_ids": track_ids, "traj_pca": traj_pca}
+        )
+
+    # Ensure reference has correct length
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Store all axes and image objects for later updating
+    all_axes = []
+    image_objs = []
+    trajectory_points = []
+
+    # Process each lineage for visualization
+    for i in range(num_lineages):
+        lineage_data = all_lineage_data[i]
+        fov_name = lineage_data["fov_name"]
+        track_ids = lineage_data["track_ids"]
+        traj_pca = lineage_data["traj_pca"]
+
+        # Get image stack for this lineage
+        stack = image_stacks[i]
+
+        # Create axes for this lineage's row
+        ax_phase = fig.add_subplot(gs[i, 0])
+        ax_gfp = fig.add_subplot(gs[i, 1])
+        ax_mcherry = fig.add_subplot(gs[i, 2])
+        ax_pc1 = fig.add_subplot(gs[i, 3])
+        ax_pc2 = fig.add_subplot(gs[i, 4])
+
+        all_axes.append([ax_phase, ax_gfp, ax_mcherry, ax_pc1, ax_pc2])
+
+        # Set background color for all axes
+        for ax in [ax_phase, ax_gfp, ax_mcherry, ax_pc1, ax_pc2]:
+            ax.set_facecolor("black")
+
+        # Get the initial images (frame 0)
+        init_phase = stack[0, 0, z_slice, :]
+        init_gfp = stack[0, 1, z_slice, :]
+        init_mcherry = stack[0, 2, z_slice, :]
+
+        # Display phase image (placeholder for animation)
+        phase_img = ax_phase.imshow(
+            init_phase, cmap="gray", vmin=phase_limits[0], vmax=phase_limits[1]
+        )
+        ax_phase.set_title(
+            f"Phase - {fov_name}\nTrack {track_ids[0]}", color="white", fontsize=10
+        )
+        ax_phase.axis("off")
+
+        # Create RGB image for GFP (green channel)
+        init_gfp_rgb = np.zeros((*init_gfp.shape, 3))
+        init_gfp_rgb[:, :, 1] = safe_norm(gfp_norm, init_gfp)  # Green channel
+        gfp_img = ax_gfp.imshow(init_gfp_rgb)
+        ax_gfp.set_title("GFP", color="white")
+        ax_gfp.axis("off")
+
+        # Create RGB image for mCherry (magenta = red + blue)
+        init_mcherry_rgb = np.zeros((*init_mcherry.shape, 3))
+        init_mcherry_rgb[:, :, 0] = safe_norm(
+            mcherry_norm, init_mcherry
+        )  # Red component
+        init_mcherry_rgb[:, :, 2] = safe_norm(
+            mcherry_norm, init_mcherry
+        )  # Blue component
+        mcherry_img = ax_mcherry.imshow(init_mcherry_rgb)
+        ax_mcherry.set_title("mCherry", color="white")
+        ax_mcherry.axis("off")
+
+        # Store image objects for updating in animation
+        image_objs.append([phase_img, gfp_img, mcherry_img])
+
+        # Plot dimension PC1 trajectory
+        time_points = np.arange(len(reference_pattern))
+        ax_pc1.plot(
+            time_points,
+            reference_pca["PCA1"].values,
+            "w-",
+            linewidth=2.5,
+            label="Reference",
+        )
+        ax_pc1.plot(
+            time_points,
+            traj_pca["PCA1"].values,
+            "c--" if mode == "unaligned" else "r-",
+            linewidth=1.5,
+            label=mode.capitalize(),
+        )
+
+        # Add point marker for current position (will be updated in animation)
+        (point_pc1,) = ax_pc1.plot(
+            [0],
+            [traj_pca["PCA1"].iloc[0]],
+            "co" if mode == "unaligned" else "ro",
+            markersize=10,
+        )
+
+        ax_pc1.set_title(f"PC1", color="white")
+        ax_pc1.set_xlabel("Time Point", color="white")
+        ax_pc1.set_ylabel("PC1", color="white")
+        ax_pc1.tick_params(colors="white")
+        ax_pc1.legend(facecolor="black", edgecolor="white")
+        ax_pc1.grid(True, alpha=0.3, color="gray")
+
+        # Plot dimension PC2 trajectory
+        ax_pc2.plot(
+            time_points,
+            reference_pca["PCA2"].values,
+            "w-",
+            linewidth=2.5,
+            label="Reference",
+        )
+        ax_pc2.plot(
+            time_points,
+            traj_pca["PCA2"].values,
+            "c--" if mode == "unaligned" else "r-",
+            linewidth=1.5,
+            label=mode.capitalize(),
+        )
+
+        # Add point marker for current position (will be updated in animation)
+        (point_pc2,) = ax_pc2.plot(
+            [0],
+            [traj_pca["PCA2"].iloc[0]],
+            "co" if mode == "unaligned" else "ro",
+            markersize=10,
+        )
+
+        ax_pc2.set_title(f"PC2", color="white")
+        ax_pc2.set_xlabel("Time Point", color="white")
+        ax_pc2.set_ylabel("PC2", color="white")
+        ax_pc2.tick_params(colors="white")
+        ax_pc2.legend(facecolor="black", edgecolor="white")
+        ax_pc2.grid(True, alpha=0.3, color="gray")
+
+        # Store trajectory point objects for animation updates
+        trajectory_points.append([point_pc1, point_pc2, traj_pca])
+
+    # Add main title with frame counter only if show_title is True
+    title = None
+    if show_title:
+        title = plt.suptitle(
+            f"{mode.capitalize()} Trajectories (PCA) - Multiple Lineages (Frame: 0/{max_frames-1})",
+            fontsize=16,
+            color="white",
+            y=0.98,
+        )
+
+    # Adjust figure margins
+    if show_title:
+        fig.subplots_adjust(
+            left=0.02, right=0.98, bottom=0.05, top=0.95, wspace=0.05, hspace=0.3
+        )
+    else:
+        fig.subplots_adjust(
+            left=0.02, right=0.98, bottom=0.05, top=0.98, wspace=0.05, hspace=0.3
+        )
+
+    # Create the animation function
+    def animate(frame):
+        # Update title with frame number if title is shown
+        updated_artists = []
+        if show_title:
+            title.set_text(
+                f"{mode.capitalize()} Trajectories (PCA) - Multiple Lineages (Frame: {frame}/{max_frames-1})"
+            )
+            updated_artists = [title]
+
+        # Update each lineage's data
+        for i in range(num_lineages):
+            # Get the images for this frame
+            stack = image_stacks[i]
+
+            # Make sure we don't go out of bounds
+            valid_frame = min(frame, stack.shape[0] - 1)
+
+            # Get the current frame's images
+            phase_img = stack[valid_frame, 0, z_slice, :]
+            gfp_img = stack[valid_frame, 1, z_slice, :]
+            mcherry_img = stack[valid_frame, 2, z_slice, :]
+
+            # Create RGB image for GFP
+            gfp_rgb = np.zeros((*gfp_img.shape, 3))
+            gfp_rgb[:, :, 1] = safe_norm(gfp_norm, gfp_img)  # Green channel
+
+            # Create RGB image for mCherry
+            mcherry_rgb = np.zeros((*mcherry_img.shape, 3))
+            mcherry_rgb[:, :, 0] = safe_norm(mcherry_norm, mcherry_img)  # Red component
+            mcherry_rgb[:, :, 2] = safe_norm(
+                mcherry_norm, mcherry_img
+            )  # Blue component
+
+            # Update the images
+            phase_obj, gfp_obj, mcherry_obj = image_objs[i]
+            phase_obj.set_array(phase_img)
+            gfp_obj.set_array(gfp_rgb)
+            mcherry_obj.set_array(mcherry_rgb)
+
+            # Update trajectory points
+            point_pc1, point_pc2, traj_pca = trajectory_points[i]
+            point_pc1.set_data([frame], [traj_pca["PCA1"].iloc[frame]])
+            point_pc2.set_data([frame], [traj_pca["PCA2"].iloc[frame]])
+
+            # Add all updated artists
+            updated_artists.extend(
+                [phase_obj, gfp_obj, mcherry_obj, point_pc1, point_pc2]
+            )
+
+        return updated_artists
+
+    # Create animation
+    ani = animation.FuncAnimation(
+        fig, animate, frames=max_frames, interval=1000 / fps, blit=True
+    )
+
+    # Save the animation
+    ani.save(
+        output_path,
+        writer="ffmpeg",
+        fps=fps,
+        dpi=150,
+        extra_args=["-vcodec", "libx264"],
+    )
+
+    plt.close(fig)
+    logger.info(f"Multiple lineages PCA video saved to {output_path}")
+    return output_path
+
+
+# %%
+# Create PCA multiple lineages videos using pre-computed PCA data
+if len(all_unaligned_stacks) > 0 and len(all_aligned_stacks) > 0:
+    # Create directory for output
+    save_path = output_save_dir / f"multiple_lineages_pca_df_videos"
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Create unaligned PCA video
+    unaligned_pca_video_path = (
+        save_path / f"20241107_SEC61B_unaligned_pca_df_trajectories.mp4"
+    )
+
+    _, _, pca_df = compute_pca(embeddings_dataset, n_components=8)
+    create_multiple_lineages_pca_video(
+        reference_pattern,
+        top_n_aligned_cells,
+        pca_df,
+        output_path=unaligned_pca_video_path,
+        mode="unaligned",
+        num_lineages=3,
+        fps=5,
+        show_title=False,
+    )
+    print(f"Created PCA video file at {unaligned_pca_video_path}")
+
+    # Create aligned PCA video
+    aligned_pca_video_path = (
+        save_path / f"20241107_SEC61B_aligned_pca_df_trajectories.mp4"
+    )
+    create_multiple_lineages_pca_video(
+        reference_pattern,
+        top_n_aligned_cells,
+        pca_df,
+        output_path=aligned_pca_video_path,
+        mode="aligned",
+        num_lineages=3,
+        fps=5,
+        show_title=False,
+    )
+    print(f"Created PCA video file at {aligned_pca_video_path}")
+
+
+# %%
+def plot_pc1_vs_pc2_trajectories(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    output_path: Path,
+    num_lineages: int = 3,
+    plot_aligned: bool = True,
+    plot_unaligned: bool = True,
+):
+    """
+    Create a 2D visualization of PC1 vs PC2 for both aligned and unaligned trajectories.
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        output_path: Path to save the output figure
+        num_lineages: Number of lineages to display (default: 3)
+        plot_aligned: Whether to plot aligned trajectories (default: True)
+        plot_unaligned: Whether to plot unaligned trajectories (default: True)
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import to_rgba
+    import matplotlib.cm as cm
+
+    # Set up figure with dark background
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(12, 10), facecolor="black")
+    ax.set_facecolor("black")
+
+    # Limit to requested number of lineages
+    num_lineages = min(num_lineages, len(top_aligned_cells))
+
+    # Get reference lineage PCA data
+    reference_fov = "/C/2/001000"
+    reference_track_id = 129
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70]
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Ensure reference has correct length
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Plot reference trajectory
+    ref_line = ax.plot(
+        reference_pca["PCA1"],
+        reference_pca["PCA2"],
+        "w-",
+        linewidth=3,
+        label="Reference",
+    )
+    ref_color = to_rgba(ref_line[0].get_color())
+
+    # Create a colormap for trajectory progression
+    cmap = cm.plasma
+
+    # Plot start and end points for reference
+    ax.scatter(
+        reference_pca["PCA1"].iloc[0],
+        reference_pca["PCA2"].iloc[0],
+        s=150,
+        color="white",
+        edgecolor="black",
+        linewidth=1.5,
+        marker="o",
+        label="Start",
+    )
+    ax.scatter(
+        reference_pca["PCA1"].iloc[-1],
+        reference_pca["PCA2"].iloc[-1],
+        s=150,
+        color="white",
+        edgecolor="black",
+        linewidth=1.5,
+        marker="s",
+        label="End",
+    )
+
+    # Add color gradient to reference trajectory
+    for i in range(len(reference_pca) - 1):
+        progress = i / (len(reference_pca) - 1)
+        color = cmap(progress)
+        ax.plot(
+            [reference_pca["PCA1"].iloc[i], reference_pca["PCA1"].iloc[i + 1]],
+            [reference_pca["PCA2"].iloc[i], reference_pca["PCA2"].iloc[i + 1]],
+            color=color,
+            linewidth=5,
+            alpha=0.8,
+        )
+
+    # Define colors for unaligned and aligned
+    unaligned_color = "cyan"
+    aligned_colors = ["red", "orange", "magenta"]
+
+    # Process each lineage
+    for i in range(num_lineages):
+        # Get data for this lineage
+        row = top_aligned_cells.iloc[i]
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        start_time = int(row["start_timepoint"])
+        warp_path = ast.literal_eval(row["warp_path"])
+
+        # Get lineage PCA data
+        lineage_pca = (
+            embeddings_PCA_df[
+                (embeddings_PCA_df["fov_name"] == fov_name)
+                & (embeddings_PCA_df["track_id"].isin(track_ids))
+            ]
+            .sort_values(by="t")
+            .reset_index(drop=True)
+        )
+
+        # Plot unaligned trajectory
+        if plot_unaligned:
+            # Extract unaligned window
+            unaligned_pca = lineage_pca.iloc[
+                start_time : start_time + len(reference_pattern)
+            ].reset_index(drop=True)
+
+            # Pad if needed
+            if len(unaligned_pca) < len(reference_pattern):
+                last_row = unaligned_pca.iloc[-1].copy()
+                for _ in range(len(reference_pattern) - len(unaligned_pca)):
+                    unaligned_pca = pd.concat(
+                        [unaligned_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+            # Trim if needed
+            unaligned_pca = unaligned_pca.iloc[: len(reference_pattern)].reset_index(
+                drop=True
+            )
+
+            # Plot unaligned trajectory
+            un_line = ax.plot(
+                unaligned_pca["PCA1"],
+                unaligned_pca["PCA2"],
+                "--",
+                color=unaligned_color,
+                linewidth=1.5,
+                alpha=0.7,
+                label="Unaligned" if i == 0 else "",
+            )
+
+            # Plot unaligned start and end
+            ax.scatter(
+                unaligned_pca["PCA1"].iloc[0],
+                unaligned_pca["PCA2"].iloc[0],
+                s=80,
+                color=unaligned_color,
+                marker="o",
+                alpha=0.7,
+            )
+            ax.scatter(
+                unaligned_pca["PCA1"].iloc[-1],
+                unaligned_pca["PCA2"].iloc[-1],
+                s=80,
+                color=unaligned_color,
+                marker="s",
+                alpha=0.7,
+            )
+
+            # Add progression points every few steps
+            step = max(1, len(unaligned_pca) // 10)
+            for j in range(0, len(unaligned_pca), step):
+                progress = j / (len(unaligned_pca) - 1) if len(unaligned_pca) > 1 else 0
+                ax.scatter(
+                    unaligned_pca["PCA1"].iloc[j],
+                    unaligned_pca["PCA2"].iloc[j],
+                    s=30,
+                    color=cmap(progress),
+                    alpha=0.7,
+                )
+
+        # Plot aligned trajectory
+        if plot_aligned:
+            # Create aligned trajectory using warping path
+            aligned_pca = pd.DataFrame(columns=lineage_pca.columns)
+
+            # Map each reference timepoint to the corresponding lineage timepoint
+            for ref_idx, query_idx in warp_path:
+                lineage_idx = int(start_time + query_idx)
+                if 0 <= lineage_idx < len(lineage_pca):
+                    # Add a row to aligned_pca at position ref_idx
+                    if ref_idx >= len(aligned_pca):
+                        # If ref_idx is beyond current length, extend aligned_pca
+                        missing_rows = ref_idx - len(aligned_pca)
+                        if missing_rows > 0:
+                            # Add empty rows
+                            empty_rows = pd.DataFrame(
+                                [pd.Series(dtype="float64")] * missing_rows,
+                                columns=aligned_pca.columns,
+                            )
+                            aligned_pca = pd.concat(
+                                [aligned_pca, empty_rows], ignore_index=True
+                            )
+                        # Add the mapped row
+                        aligned_pca = pd.concat(
+                            [
+                                aligned_pca,
+                                pd.DataFrame([lineage_pca.iloc[lineage_idx]]),
+                            ],
+                            ignore_index=True,
+                        )
+                    else:
+                        # Replace existing row
+                        aligned_pca.iloc[ref_idx] = lineage_pca.iloc[lineage_idx]
+
+            # Fill any remaining gaps with nearest values
+            aligned_pca = aligned_pca.fillna(method="ffill").fillna(method="bfill")
+
+            # Ensure correct length
+            aligned_pca = aligned_pca.iloc[: len(reference_pattern)].reset_index(
+                drop=True
+            )
+
+            # If still too short, pad with last value
+            if len(aligned_pca) < len(reference_pattern):
+                last_row = (
+                    aligned_pca.iloc[-1].copy()
+                    if not aligned_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(aligned_pca)):
+                    aligned_pca = pd.concat(
+                        [aligned_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+            # Plot aligned trajectory
+            aligned_color = aligned_colors[i % len(aligned_colors)]
+            al_line = ax.plot(
+                aligned_pca["PCA1"],
+                aligned_pca["PCA2"],
+                "-",
+                color=aligned_color,
+                linewidth=2.5,
+                label=f"Aligned {i+1}",
+            )
+
+            # Plot aligned start and end
+            ax.scatter(
+                aligned_pca["PCA1"].iloc[0],
+                aligned_pca["PCA2"].iloc[0],
+                s=100,
+                color=aligned_color,
+                marker="o",
+            )
+            ax.scatter(
+                aligned_pca["PCA1"].iloc[-1],
+                aligned_pca["PCA2"].iloc[-1],
+                s=100,
+                color=aligned_color,
+                marker="s",
+            )
+
+            # Add progression points every few steps
+            step = max(1, len(aligned_pca) // 10)
+            for j in range(0, len(aligned_pca), step):
+                progress = j / (len(aligned_pca) - 1) if len(aligned_pca) > 1 else 0
+                ax.scatter(
+                    aligned_pca["PCA1"].iloc[j],
+                    aligned_pca["PCA2"].iloc[j],
+                    s=40,
+                    color=cmap(progress),
+                    alpha=0.8,
+                )
+
+    # Add colorbar to show progression
+    sm = plt.cm.ScalarMappable(cmap=cmap)
+    sm.set_array([])
+    cbar = plt.colorbar(sm, ax=ax)
+    cbar.set_label("Temporal Progression", color="white")
+    cbar.ax.yaxis.set_tick_params(color="white")
+    cbar.outline.set_edgecolor("white")
+    plt.setp(plt.getp(cbar.ax, "yticklabels"), color="white")
+
+    # Set labels and title
+    ax.set_xlabel("PC1", color="white")
+    ax.set_ylabel("PC2", color="white")
+    ax.set_title("PC1 vs PC2 Trajectory Alignment", color="white", fontsize=16)
+
+    # Style the plot
+    ax.tick_params(colors="white")
+    ax.grid(True, alpha=0.2, color="gray")
+
+    # Set legend
+    ax.legend(loc="upper right", facecolor="black", edgecolor="white", framealpha=0.7)
+
+    # Save figure
+    plt.tight_layout()
+    # plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    # plt.close()
+
+    logger.info(f"PC1 vs PC2 trajectory plot saved to {output_path}")
+    return output_path
+
+
+# %%
+# Create PC1 vs PC2 trajectory visualizations
+save_path = output_save_dir / "pca_trajectories"
+save_path.mkdir(parents=True, exist_ok=True)
+
+# Plot both aligned and unaligned trajectories together
+plot_pc1_vs_pc2_trajectories(
+    reference_pattern,
+    top_n_aligned_cells,
+    embeddings_PCA_df,
+    output_path=save_path / "20241107_SEC61B_pc1_vs_pc2_trajectories.png",
+    num_lineages=3,
+    plot_aligned=True,
+    plot_unaligned=True,
+)
+
+# Plot only aligned trajectories
+plot_pc1_vs_pc2_trajectories(
+    reference_pattern,
+    top_n_aligned_cells,
+    embeddings_PCA_df,
+    output_path=save_path / "20241107_SEC61B_pc1_vs_pc2_aligned_only.png",
+    num_lineages=3,
+    plot_aligned=True,
+    plot_unaligned=False,
+)
+
+
+# Create an animation of PC1 vs PC2 movement
+def create_pc1_vs_pc2_animation(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    output_path: Path,
+    num_lineages: int = 3,
+    fps: int = 10,
+):
+    """
+    Create an animation of PC1 vs PC2 trajectories with markers moving along the paths.
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        output_path: Path to save the animation
+        num_lineages: Number of lineages to visualize
+        fps: Frames per second for the animation
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+    from matplotlib.colors import to_rgba
+    import matplotlib.cm as cm
+
+    # Set up figure with dark background
+    plt.style.use("dark_background")
+    fig, ax = plt.subplots(figsize=(12, 10), facecolor="black")
+    ax.set_facecolor("black")
+
+    # Limit to requested number of lineages
+    num_lineages = min(num_lineages, len(top_aligned_cells))
+
+    # Get reference lineage PCA data
+    reference_fov = "/C/2/001000"
+    reference_track_id = 129
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70]
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Ensure reference has correct length
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Get unaligned and aligned trajectories for each lineage
+    all_unaligned = []
+    all_aligned = []
+
+    # Process each lineage
+    for i in range(num_lineages):
+        # Get data for this lineage
+        row = top_aligned_cells.iloc[i]
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        start_time = int(row["start_timepoint"])
+        warp_path = ast.literal_eval(row["warp_path"])
+
+        # Get lineage PCA data
+        lineage_pca = (
+            embeddings_PCA_df[
+                (embeddings_PCA_df["fov_name"] == fov_name)
+                & (embeddings_PCA_df["track_id"].isin(track_ids))
+            ]
+            .sort_values(by="t")
+            .reset_index(drop=True)
+        )
+
+        # Extract unaligned window
+        unaligned_pca = lineage_pca.iloc[
+            start_time : start_time + len(reference_pattern)
+        ].reset_index(drop=True)
+
+        # Pad if needed
+        if len(unaligned_pca) < len(reference_pattern):
+            last_row = unaligned_pca.iloc[-1].copy()
+            for _ in range(len(reference_pattern) - len(unaligned_pca)):
+                unaligned_pca = pd.concat(
+                    [unaligned_pca, pd.DataFrame([last_row])], ignore_index=True
+                )
+
+        # Trim if needed
+        unaligned_pca = unaligned_pca.iloc[: len(reference_pattern)].reset_index(
+            drop=True
+        )
+        all_unaligned.append(unaligned_pca)
+
+        # Create aligned trajectory using warping path
+        aligned_pca = pd.DataFrame(columns=lineage_pca.columns)
+
+        # Map each reference timepoint to the corresponding lineage timepoint
+        for ref_idx, query_idx in warp_path:
+            lineage_idx = int(start_time + query_idx)
+            if 0 <= lineage_idx < len(lineage_pca):
+                # Add a row to aligned_pca at position ref_idx
+                if ref_idx >= len(aligned_pca):
+                    # If ref_idx is beyond current length, extend aligned_pca
+                    missing_rows = ref_idx - len(aligned_pca)
+                    if missing_rows > 0:
+                        # Add empty rows
+                        empty_rows = pd.DataFrame(
+                            [pd.Series(dtype="float64")] * missing_rows,
+                            columns=aligned_pca.columns,
+                        )
+                        aligned_pca = pd.concat(
+                            [aligned_pca, empty_rows], ignore_index=True
+                        )
+                    # Add the mapped row
+                    aligned_pca = pd.concat(
+                        [aligned_pca, pd.DataFrame([lineage_pca.iloc[lineage_idx]])],
+                        ignore_index=True,
+                    )
+                else:
+                    # Replace existing row
+                    aligned_pca.iloc[ref_idx] = lineage_pca.iloc[lineage_idx]
+
+        # Fill any remaining gaps with nearest values
+        aligned_pca = aligned_pca.fillna(method="ffill").fillna(method="bfill")
+
+        # Ensure correct length
+        aligned_pca = aligned_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+        # If still too short, pad with last value
+        if len(aligned_pca) < len(reference_pattern):
+            last_row = (
+                aligned_pca.iloc[-1].copy()
+                if not aligned_pca.empty
+                else pd.Series(dtype="float64")
+            )
+            for _ in range(len(reference_pattern) - len(aligned_pca)):
+                aligned_pca = pd.concat(
+                    [aligned_pca, pd.DataFrame([last_row])], ignore_index=True
+                )
+
+        all_aligned.append(aligned_pca)
+
+    # Define colors for unaligned and aligned
+    unaligned_color = "cyan"
+    aligned_colors = ["red", "orange", "magenta"]
+
+    # Plot all trajectories first (static)
+    # Reference
+    ax.plot(
+        reference_pca["PCA1"],
+        reference_pca["PCA2"],
+        "w-",
+        linewidth=2.5,
+        alpha=0.8,
+        label="Reference",
+    )
+
+    # Unaligned
+    for i in range(num_lineages):
+        ax.plot(
+            all_unaligned[i]["PCA1"],
+            all_unaligned[i]["PCA2"],
+            "--",
+            color=unaligned_color,
+            linewidth=1.5,
+            alpha=0.5,
+            label="Unaligned" if i == 0 else "",
+        )
+
+    # Aligned
+    for i in range(num_lineages):
+        aligned_color = aligned_colors[i % len(aligned_colors)]
+        ax.plot(
+            all_aligned[i]["PCA1"],
+            all_aligned[i]["PCA2"],
+            "-",
+            color=aligned_color,
+            linewidth=2,
+            alpha=0.7,
+            label=f"Aligned {i+1}",
+        )
+
+    # Create moving points
+    (ref_point,) = ax.plot([], [], "wo", markersize=12)
+    unaligned_points = [
+        ax.plot([], [], "co", markersize=10)[0] for _ in range(num_lineages)
+    ]
+    aligned_points = [
+        ax.plot(
+            [], [], "o", color=aligned_colors[i % len(aligned_colors)], markersize=10
+        )[0]
+        for i in range(num_lineages)
+    ]
+
+    # Add trails that show recent positions
+    trail_length = 10
+    ref_trail = [ax.plot([], [], "w-", alpha=0.5)[0] for _ in range(trail_length)]
+
+    unaligned_trails = []
+    for _ in range(num_lineages):
+        unaligned_trails.append(
+            [
+                ax.plot([], [], "-", color=unaligned_color, alpha=0.3)[0]
+                for _ in range(trail_length)
+            ]
+        )
+
+    aligned_trails = []
+    for i in range(num_lineages):
+        aligned_trails.append(
+            [
+                ax.plot(
+                    [],
+                    [],
+                    "-",
+                    color=aligned_colors[i % len(aligned_colors)],
+                    alpha=0.3,
+                )[0]
+                for _ in range(trail_length)
+            ]
+        )
+
+    # Set labels and title
+    ax.set_xlabel("PC1", color="white")
+    ax.set_ylabel("PC2", color="white")
+    ax.set_title("PC1 vs PC2 Trajectory Animation", color="white", fontsize=16)
+
+    # Style the plot
+    ax.tick_params(colors="white")
+    ax.grid(True, alpha=0.2, color="gray")
+
+    # Add frame counter
+    frame_text = ax.text(
+        0.02,
+        0.98,
+        "",
+        transform=ax.transAxes,
+        color="white",
+        fontsize=12,
+        verticalalignment="top",
+    )
+
+    # Set legend
+    ax.legend(loc="upper right", facecolor="black", edgecolor="white", framealpha=0.7)
+
+    def update_trail(trail, xs, ys, current_idx):
+        for i, trail_segment in enumerate(trail):
+            if current_idx - i >= 0 and current_idx - i + 1 < len(xs):
+                trail_segment.set_data(
+                    xs[current_idx - i : current_idx - i + 2],
+                    ys[current_idx - i : current_idx - i + 2],
+                )
+            else:
+                trail_segment.set_data([], [])
+
+    def animate(frame):
+        # Update frame counter
+        frame_text.set_text(f"Frame: {frame}/{len(reference_pattern)-1}")
+
+        # Update reference point
+        ref_point.set_data(
+            reference_pca["PCA1"].iloc[frame], reference_pca["PCA2"].iloc[frame]
+        )
+
+        # Update reference trail
+        update_trail(
+            ref_trail, reference_pca["PCA1"].values, reference_pca["PCA2"].values, frame
+        )
+
+        # Update each lineage's points
+        for i in range(num_lineages):
+            # Unaligned
+            unaligned_points[i].set_data(
+                all_unaligned[i]["PCA1"].iloc[frame],
+                all_unaligned[i]["PCA2"].iloc[frame],
+            )
+
+            # Aligned
+            aligned_points[i].set_data(
+                all_aligned[i]["PCA1"].iloc[frame], all_aligned[i]["PCA2"].iloc[frame]
+            )
+
+            # Update trails
+            update_trail(
+                unaligned_trails[i],
+                all_unaligned[i]["PCA1"].values,
+                all_unaligned[i]["PCA2"].values,
+                frame,
+            )
+
+            update_trail(
+                aligned_trails[i],
+                all_aligned[i]["PCA1"].values,
+                all_aligned[i]["PCA2"].values,
+                frame,
+            )
+
+        # Return all artists that were updated
+        artists = [ref_point, frame_text]
+        artists.extend(unaligned_points)
+        artists.extend(aligned_points)
+        artists.extend(ref_trail)
+        for trail in unaligned_trails:
+            artists.extend(trail)
+        for trail in aligned_trails:
+            artists.extend(trail)
+
+        return artists
+
+    # Determine axis limits to include all trajectories
+    all_pc1 = []
+    all_pc2 = []
+
+    all_pc1.extend(reference_pca["PCA1"].values)
+    all_pc2.extend(reference_pca["PCA2"].values)
+
+    for i in range(num_lineages):
+        all_pc1.extend(all_unaligned[i]["PCA1"].values)
+        all_pc2.extend(all_unaligned[i]["PCA2"].values)
+        all_pc1.extend(all_aligned[i]["PCA1"].values)
+        all_pc2.extend(all_aligned[i]["PCA2"].values)
+
+    # Set axis limits with some padding
+    pc1_min, pc1_max = min(all_pc1), max(all_pc1)
+    pc2_min, pc2_max = min(all_pc2), max(all_pc2)
+
+    # Add 10% padding
+    pc1_range = pc1_max - pc1_min
+    pc2_range = pc2_max - pc2_min
+
+    ax.set_xlim(pc1_min - 0.1 * pc1_range, pc1_max + 0.1 * pc1_range)
+    ax.set_ylim(pc2_min - 0.1 * pc2_range, pc2_max + 0.1 * pc2_range)
+
+    # Create animation
+    ani = animation.FuncAnimation(
+        fig, animate, frames=len(reference_pattern), interval=1000 / fps, blit=True
+    )
+
+    # Save animation
+    ani.save(
+        output_path,
+        writer="ffmpeg",
+        fps=fps,
+        dpi=150,
+        extra_args=["-vcodec", "libx264"],
+    )
+
+    plt.close()
+    logger.info(f"PC1 vs PC2 animation saved to {output_path}")
+    return output_path
+
+
+# Create PC1 vs PC2 animation
+create_pc1_vs_pc2_animation(
+    reference_pattern,
+    top_n_aligned_cells,
+    embeddings_PCA_df,
+    output_path=save_path / "20241107_SEC61B_pc1_vs_pc2_animation.mp4",
+    num_lineages=3,
+    fps=10,
+)
+
+
+# %%
+def plot_multiple_lineages_pca(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    image_stacks: np.ndarray,  # Either all_unaligned_stacks or all_aligned_stacks
+    output_path: Path,
+    mode: str = "unaligned",  # "unaligned" or "aligned"
+    pc_columns: list = ["PCA1", "PCA2"],  # PCA components to plot
+    num_lineages: int = 3,
+    z_slice: int = 15,
+    time_point: int = 20,  # Example time point to visualize
+):
+    """
+    Create a plot showing multiple lineages in rows with phase/GFP/mCherry side by side,
+    followed by specified PC components for unaligned or aligned trajectories.
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        image_stacks: Array of image stacks (unaligned or aligned)
+        output_path: Path to save the output figure
+        mode: "unaligned" or "aligned" to determine which trajectories to display
+        pc_columns: List of PC columns to plot (default: ["PCA1", "PCA2"])
+        num_lineages: Number of lineages to display (default: 3)
+        z_slice: Z-slice to use for images (default: 15)
+        time_point: Time point to display in the visualization (default: 20)
+    """
+    import matplotlib.pyplot as plt
+    from matplotlib.colors import Normalize
+
+    # Set dark theme
+    plt.style.use("dark_background")
+
+    # Limit to requested number of lineages
+    num_lineages = min(num_lineages, len(top_aligned_cells), len(image_stacks))
+    num_pcs = len(pc_columns)
+
+    # Create figure with rows for each lineage, columns for images and PCs
+    fig = plt.figure(figsize=(20, 4 * num_lineages), facecolor="black")
+
+    # Define column ratios - equal space for images and PCs
+    column_widths = [1.5, 1.5, 1.5]  # For phase, GFP, mCherry
+    column_widths.extend([2] * num_pcs)  # For each PC plot
+
+    gs = fig.add_gridspec(
+        num_lineages, 3 + num_pcs, wspace=0.2, hspace=0.3, width_ratios=column_widths
+    )
+
+    # Define contrast limits for each channel
+    phase_limits = (-0.74, 0.4)
+    gfp_limits = (106, 215)
+    mcherry_limits = (106, 190)
+
+    # Function to safely normalize values to [0,1] range
+    def safe_norm(norm_func, data):
+        normalized = norm_func(data)
+        return np.clip(normalized, 0, 1)
+
+    # Create normalizers for each channel
+    phase_norm = Normalize(vmin=phase_limits[0], vmax=phase_limits[1])
+    gfp_norm = Normalize(vmin=gfp_limits[0], vmax=gfp_limits[1])
+    mcherry_norm = Normalize(vmin=mcherry_limits[0], vmax=mcherry_limits[1])
+
+    # Get reference lineage PCA data
+    reference_fov = "/C/2/001000"
+    reference_track_id = 129
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70]
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Ensure reference has correct length
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Collect all trajectory data for each lineage
+    lineage_data = []
+    for i in range(num_lineages):
+        # Get data for this lineage
+        row = top_aligned_cells.iloc[i]
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        start_time = int(row["start_timepoint"])
+        warp_path = ast.literal_eval(row["warp_path"])
+
+        # Get lineage PCA data
+        full_pca = (
+            embeddings_PCA_df[
+                (embeddings_PCA_df["fov_name"] == fov_name)
+                & (embeddings_PCA_df["track_id"].isin(track_ids))
+            ]
+            .sort_values(by="t")
+            .reset_index(drop=True)
+        )
+
+        # Extract trajectory based on mode
+        if mode == "unaligned":
+            # Extract unaligned window
+            traj_pca = full_pca.iloc[
+                start_time : start_time + len(reference_pattern)
+            ].reset_index(drop=True)
+
+            # Pad if needed
+            if len(traj_pca) < len(reference_pattern):
+                last_row = (
+                    traj_pca.iloc[-1].copy()
+                    if not traj_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+            # Trim if needed
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+        else:  # aligned mode
+            # Create aligned trajectory using warping path
+            traj_pca = pd.DataFrame(columns=full_pca.columns)
+
+            # Map each reference timepoint to the corresponding lineage timepoint
+            for ref_idx, query_idx in warp_path:
+                lineage_idx = int(start_time + query_idx)
+                if 0 <= lineage_idx < len(full_pca):
+                    # Add a row to traj_pca at position ref_idx
+                    if ref_idx >= len(traj_pca):
+                        # If ref_idx is beyond current length, extend traj_pca
+                        missing_rows = ref_idx - len(traj_pca)
+                        if missing_rows > 0:
+                            # Add empty rows
+                            empty_rows = pd.DataFrame(
+                                [pd.Series(dtype="float64")] * missing_rows,
+                                columns=traj_pca.columns,
+                            )
+                            traj_pca = pd.concat(
+                                [traj_pca, empty_rows], ignore_index=True
+                            )
+                        # Add the mapped row
+                        traj_pca = pd.concat(
+                            [traj_pca, pd.DataFrame([full_pca.iloc[lineage_idx]])],
+                            ignore_index=True,
+                        )
+                    else:
+                        # Replace existing row
+                        traj_pca.iloc[ref_idx] = full_pca.iloc[lineage_idx]
+
+            # Fill any remaining gaps with nearest values
+            traj_pca = traj_pca.fillna(method="ffill").fillna(method="bfill")
+
+            # Ensure correct length
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+            # If still too short, pad with last value
+            if len(traj_pca) < len(reference_pattern):
+                last_row = (
+                    traj_pca.iloc[-1].copy()
+                    if not traj_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+        lineage_data.append(
+            {"fov_name": fov_name, "track_ids": track_ids, "pca_df": traj_pca}
+        )
+
+    # Process each lineage
+    for i in range(num_lineages):
+        data = lineage_data[i]
+        fov_name = data["fov_name"]
+        track_ids = data["track_ids"]
+        pca_df = data["pca_df"]
+
+        # Get image stack for this lineage
+        stack = image_stacks[i]
+
+        # Make sure time_point is valid
+        valid_time_point = min(time_point, stack.shape[0] - 1)
+
+        # Get the images for the selected time point
+        phase_img = stack[valid_time_point, 0, z_slice, :]
+        gfp_img = stack[valid_time_point, 1, z_slice, :]
+        mcherry_img = stack[valid_time_point, 2, z_slice, :]
+
+        # Create axes for images
+        ax_phase = fig.add_subplot(gs[i, 0])
+        ax_gfp = fig.add_subplot(gs[i, 1])
+        ax_mcherry = fig.add_subplot(gs[i, 2])
+
+        # Set background color for all axes
+        ax_phase.set_facecolor("black")
+        ax_gfp.set_facecolor("black")
+        ax_mcherry.set_facecolor("black")
+
+        # Display phase image
+        ax_phase.imshow(
+            phase_img, cmap="gray", vmin=phase_limits[0], vmax=phase_limits[1]
+        )
+        ax_phase.set_title(
+            f"Phase - {fov_name}\nTrack {track_ids[0]}", color="white", fontsize=10
+        )
+        ax_phase.axis("off")
+
+        # Create RGB image for GFP (green channel)
+        gfp_rgb = np.zeros((*gfp_img.shape, 3))
+        gfp_rgb[:, :, 1] = safe_norm(gfp_norm, gfp_img)  # Green channel
+        ax_gfp.imshow(gfp_rgb)
+        ax_gfp.set_title("GFP", color="white")
+        ax_gfp.axis("off")
+
+        # Create RGB image for mCherry (magenta = red + blue)
+        mcherry_rgb = np.zeros((*mcherry_img.shape, 3))
+        mcherry_rgb[:, :, 0] = safe_norm(mcherry_norm, mcherry_img)  # Red component
+        mcherry_rgb[:, :, 2] = safe_norm(mcherry_norm, mcherry_img)  # Blue component
+        ax_mcherry.imshow(mcherry_rgb)
+        ax_mcherry.set_title("mCherry", color="white")
+        ax_mcherry.axis("off")
+
+        # Plot each PC
+        for pc_idx, pc_col in enumerate(pc_columns):
+            ax_pc = fig.add_subplot(gs[i, 3 + pc_idx])
+            ax_pc.set_facecolor("black")
+
+            # Plot time points
+            time_points = np.arange(len(reference_pattern))
+
+            # Plot reference PC
+            ax_pc.plot(
+                time_points,
+                reference_pca[pc_col].values,
+                "w-",
+                linewidth=2.5,
+                label="Reference",
+            )
+
+            # Plot lineage PC
+            ax_pc.plot(
+                time_points,
+                pca_df[pc_col].values,
+                "c--" if mode == "unaligned" else "r-",
+                linewidth=1.5,
+                label=mode.capitalize(),
+            )
+
+            # Highlight current time point
+            if valid_time_point < len(time_points):
+                ax_pc.plot(
+                    valid_time_point,
+                    pca_df[pc_col].iloc[valid_time_point],
+                    "co" if mode == "unaligned" else "ro",
+                    markersize=10,
+                )
+
+            ax_pc.set_title(f"{pc_col}", color="white")
+            ax_pc.set_xlabel("Time Point", color="white")
+            ax_pc.set_ylabel(f"{pc_col}", color="white")
+            ax_pc.tick_params(colors="white")
+            ax_pc.legend(facecolor="black", edgecolor="white")
+            ax_pc.grid(True, alpha=0.3, color="gray")
+
+    # Add main title
+    plt.suptitle(
+        f"{mode.capitalize()} Trajectories - Multiple Lineages (TP:{time_point})",
+        fontsize=16,
+        color="white",
+        y=0.98,
+    )
+
+    # Adjust figure margins
+    fig.subplots_adjust(
+        left=0.02, right=0.98, bottom=0.05, top=0.95, wspace=0.1, hspace=0.3
+    )
+
+    # Save figure
+    plt.savefig(output_path, dpi=300, bbox_inches="tight")
+    plt.close(fig)
+
+    logger.info(f"Multiple lineages PCA plot saved to {output_path}")
+    return output_path
+
+
+# %%
+# Create the comparison plots for unaligned and aligned trajectories with PCs
+if len(all_unaligned_stacks) > 0:
+    # Create directory for output
+    save_path = output_save_dir / "multiple_lineages_pc_plots"
+    save_path.mkdir(parents=True, exist_ok=True)
+
+    # Plot PC1 and PC2 (default)
+    plot_multiple_lineages_pca(
+        reference_pattern,
+        top_n_aligned_cells,
+        pca_df,
+        all_unaligned_stacks,
+        output_path=save_path / "20241107_SEC61B_unaligned_pc1_pc2.png",
+        mode="unaligned",
+        pc_columns=["PCA1", "PCA2"],
+        num_lineages=3,
+        time_point=20,
+    )
+
+    # Plot PC1, PC2, PC3 for unaligned
+    plot_multiple_lineages_pca(
+        reference_pattern,
+        top_n_aligned_cells,
+        pca_df,
+        all_unaligned_stacks,
+        output_path=save_path / "20241107_SEC61B_unaligned_pc1_pc2_pc3.png",
+        mode="unaligned",
+        pc_columns=["PCA1", "PCA2", "PCA3"],
+        num_lineages=3,
+        time_point=20,
+    )
+
+    # Plot PC1 and PC2 for aligned
+    if len(all_aligned_stacks) > 0:
+        plot_multiple_lineages_pca(
+            reference_pattern,
+            top_n_aligned_cells,
+            pca_df,
+            all_aligned_stacks,
+            output_path=save_path / "20241107_SEC61B_aligned_pc1_pc2.png",
+            mode="aligned",
+            pc_columns=["PCA1", "PCA2"],
+            num_lineages=3,
+            time_point=20,
+        )
+
+        # Plot PC1, PC2, PC3, PC4 for aligned
+        plot_multiple_lineages_pca(
+            reference_pattern,
+            top_n_aligned_cells,
+            pca_df,
+            all_aligned_stacks,
+            output_path=save_path / "20241107_SEC61B_aligned_pc1_pc2_pc3_pc4.png",
+            mode="aligned",
+            pc_columns=["PCA1", "PCA2", "PCA3", "PCA4"],
+            num_lineages=3,
+            time_point=20,
+        )
+
+
+# %%
+def create_multiple_lineages_pc_video(
+    reference_pattern: np.ndarray,
+    top_aligned_cells: pd.DataFrame,
+    embeddings_PCA_df: pd.DataFrame,
+    image_stacks: np.ndarray,  # Either all_unaligned_stacks or all_aligned_stacks
+    output_path: Path,
+    mode: str = "unaligned",  # "unaligned" or "aligned"
+    pc_columns: list = ["PCA1", "PCA2"],  # PCA components to plot
+    num_lineages: int = 3,
+    z_slice: int = 15,
+    fps: int = 5,
+    show_title: bool = True,
+):
+    """
+    Create a video showing multiple lineages with phase/GFP/mCherry side by side,
+    followed by PC components plots over time.
+
+    Args:
+        reference_pattern: The reference pattern embeddings
+        top_aligned_cells: DataFrame with alignment information
+        embeddings_PCA_df: DataFrame with pre-computed PCA components
+        image_stacks: Array of image stacks (unaligned or aligned)
+        output_path: Path to save the output video
+        mode: "unaligned" or "aligned" to determine which trajectories to display
+        pc_columns: List of PC columns to plot (default: ["PCA1", "PCA2"])
+        num_lineages: Number of lineages to display (default: 3)
+        z_slice: Z-slice to use for images (default: 15)
+        fps: Frames per second for the video (default: 5)
+        show_title: Whether to show the title in the video (default: True)
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib.animation as animation
+    from matplotlib.colors import Normalize
+    from matplotlib.gridspec import GridSpec
+    import io
+    import cv2
+    from pathlib import Path
+
+    # Set dark theme
+    plt.style.use("dark_background")
+
+    # Limit to requested number of lineages
+    num_lineages = min(num_lineages, len(top_aligned_cells), len(image_stacks))
+    num_pcs = len(pc_columns)
+
+    # Get max number of time points across all stacks
+    max_frames = max([stack.shape[0] for stack in image_stacks[:num_lineages]])
+
+    # Define contrast limits for each channel
+    phase_limits = (-0.74, 0.4)
+    gfp_limits = (106, 215)
+    mcherry_limits = (106, 170)
+
+    # Function to safely normalize values to [0,1] range
+    def safe_norm(norm_func, data):
+        normalized = norm_func(data)
+        return np.clip(normalized, 0, 1)
+
+    # Get reference lineage PCA data
+    reference_fov = "/C/2/001000"
+    reference_track_id = 129
+
+    reference_pca = embeddings_PCA_df[
+        (embeddings_PCA_df["fov_name"] == reference_fov)
+        & (embeddings_PCA_df["track_id"] == reference_track_id)
+    ].sort_values(by="t")
+
+    # Get reference timepoints [8, 70]
+    reference_start = 8
+    reference_end = 70
+    reference_pca = reference_pca[
+        (reference_pca["t"] >= reference_start) & (reference_pca["t"] < reference_end)
+    ].reset_index(drop=True)
+
+    # Ensure reference has correct length
+    reference_pca = reference_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+    # Collect all trajectory data for each lineage
+    lineage_data = []
+    for i in range(num_lineages):
+        # Get data for this lineage
+        row = top_aligned_cells.iloc[i]
+        fov_name = row["fov_name"]
+        track_ids = ast.literal_eval(row["track_ids"])
+        start_time = int(row["start_timepoint"])
+        warp_path = ast.literal_eval(row["warp_path"])
+
+        # Get lineage PCA data
+        full_pca = (
+            embeddings_PCA_df[
+                (embeddings_PCA_df["fov_name"] == fov_name)
+                & (embeddings_PCA_df["track_id"].isin(track_ids))
+            ]
+            .sort_values(by="t")
+            .reset_index(drop=True)
+        )
+
+        # Extract trajectory based on mode
+        if mode == "unaligned":
+            # Extract unaligned window
+            traj_pca = full_pca.iloc[
+                start_time : start_time + len(reference_pattern)
+            ].reset_index(drop=True)
+
+            # Pad if needed
+            if len(traj_pca) < len(reference_pattern):
+                last_row = (
+                    traj_pca.iloc[-1].copy()
+                    if not traj_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+            # Trim if needed
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+        else:  # aligned mode
+            # Create aligned trajectory using warping path
+            traj_pca = pd.DataFrame(columns=full_pca.columns)
+
+            # Map each reference timepoint to the corresponding lineage timepoint
+            for ref_idx, query_idx in warp_path:
+                lineage_idx = int(start_time + query_idx)
+                if 0 <= lineage_idx < len(full_pca):
+                    # Add a row to traj_pca at position ref_idx
+                    if ref_idx >= len(traj_pca):
+                        # If ref_idx is beyond current length, extend traj_pca
+                        missing_rows = ref_idx - len(traj_pca)
+                        if missing_rows > 0:
+                            # Add empty rows
+                            empty_rows = pd.DataFrame(
+                                [pd.Series(dtype="float64")] * missing_rows,
+                                columns=traj_pca.columns,
+                            )
+                            traj_pca = pd.concat(
+                                [traj_pca, empty_rows], ignore_index=True
+                            )
+                        # Add the mapped row
+                        traj_pca = pd.concat(
+                            [traj_pca, pd.DataFrame([full_pca.iloc[lineage_idx]])],
+                            ignore_index=True,
+                        )
+                    else:
+                        # Replace existing row
+                        traj_pca.iloc[ref_idx] = full_pca.iloc[lineage_idx]
+
+            # Fill any remaining gaps with nearest values
+            traj_pca = traj_pca.fillna(method="ffill").fillna(method="bfill")
+
+            # Ensure correct length
+            traj_pca = traj_pca.iloc[: len(reference_pattern)].reset_index(drop=True)
+
+            # If still too short, pad with last value
+            if len(traj_pca) < len(reference_pattern):
+                last_row = (
+                    traj_pca.iloc[-1].copy()
+                    if not traj_pca.empty
+                    else pd.Series(dtype="float64")
+                )
+                for _ in range(len(reference_pattern) - len(traj_pca)):
+                    traj_pca = pd.concat(
+                        [traj_pca, pd.DataFrame([last_row])], ignore_index=True
+                    )
+
+        lineage_data.append(
+            {"fov_name": fov_name, "track_ids": track_ids, "pca_df": traj_pca}
+        )
+
+    # Create figure with rows for each lineage, columns for images and PCs
+    fig = plt.figure(figsize=(20, 4 * num_lineages), facecolor="black")
+
+    # Define column ratios - equal space for images and PCs
+    column_widths = [1.5, 1.5, 1.5]  # For phase, GFP, mCherry
+    column_widths.extend([2] * num_pcs)  # For each PC plot
+
+    gs = fig.add_gridspec(
+        num_lineages, 3 + num_pcs, wspace=0.2, hspace=0.3, width_ratios=column_widths
+    )
+
+    # Create normalizers for each channel
+    phase_norm = Normalize(vmin=phase_limits[0], vmax=phase_limits[1])
+    gfp_norm = Normalize(vmin=gfp_limits[0], vmax=gfp_limits[1])
+    mcherry_norm = Normalize(vmin=mcherry_limits[0], vmax=mcherry_limits[1])
+
+    # Setup for animation
+    axes = {}
+    image_objects = {}
+    line_objects = {}
+    highlight_objects = {}
+    time_text = None
+
+    # Use a list to store the first frame number for each lineage
+    # This ensures we correctly handle lineages that may have gaps
+    first_frame_nums = []
+
+    # Initialize time text at the top
+    if show_title:
+        time_text = fig.text(
+            0.5, 0.98, "", ha="center", va="top", fontsize=16, color="white"
+        )
+
+    # Create axes and initialize plots
+    for i in range(num_lineages):
+        axes[i] = {}
+        image_objects[i] = {}
+        line_objects[i] = {}
+        highlight_objects[i] = {}
+
+        data = lineage_data[i]
+        fov_name = data["fov_name"]
+        track_ids = data["track_ids"]
+
+        # Get image stack for this lineage
+        stack = image_stacks[i]
+
+        # Store the appropriate frame number offset
+        first_frame = 0  # Default offset
+        first_frame_nums.append(first_frame)
+
+        # Create axes for images
+        ax_phase = fig.add_subplot(gs[i, 0])
+        ax_gfp = fig.add_subplot(gs[i, 2])
+        ax_mcherry = fig.add_subplot(gs[i, 1])
+
+        # Set background color for all axes
+        ax_phase.set_facecolor("black")
+        ax_gfp.set_facecolor("black")
+        ax_mcherry.set_facecolor("black")
+
+        # Get images from first frame
+        if stack.shape[0] > 0:
+            phase_img = stack[0, 0, z_slice, :]
+            gfp_img = stack[0, 1, z_slice, :]
+            mcherry_img = stack[0, 2, z_slice, :]
+
+            # Initialize phase image
+            img_phase = ax_phase.imshow(
+                phase_img, cmap="gray", vmin=phase_limits[0], vmax=phase_limits[1]
+            )
+            ax_phase.axis("off")
+
+            # Initialize GFP image (green channel)
+            gfp_rgb = np.zeros((*gfp_img.shape, 3))
+            gfp_rgb[:, :, 1] = safe_norm(gfp_norm, gfp_img)  # Green channel
+            img_gfp = ax_gfp.imshow(gfp_rgb)
+            ax_gfp.axis("off")
+
+            # Initialize mCherry image (magenta = red + blue)
+            mcherry_rgb = np.zeros((*mcherry_img.shape, 3))
+            mcherry_rgb[:, :, 0] = safe_norm(mcherry_norm, mcherry_img)  # Red
+            mcherry_rgb[:, :, 2] = safe_norm(mcherry_norm, mcherry_img)  # Blue
+            img_mcherry = ax_mcherry.imshow(mcherry_rgb)
+            ax_mcherry.axis("off")
+
+            # Store image objects for updating
+            image_objects[i]["phase"] = img_phase
+            image_objects[i]["gfp"] = img_gfp
+            image_objects[i]["mcherry"] = img_mcherry
+
+        # Create PC plots
+        for pc_idx, pc_col in enumerate(pc_columns):
+            ax_pc = fig.add_subplot(gs[i, 3 + pc_idx])
+            ax_pc.set_facecolor("black")
+
+            # Plot time points
+            time_points = np.arange(len(reference_pattern))
+
+            # Plot reference PC
+            ax_pc.plot(
+                time_points,
+                reference_pca[pc_col].values,
+                "w-",
+                linewidth=2.5,
+                label="Reference",
+            )
+
+            # Plot the complete lineage trajectory from the beginning
+            ax_pc.plot(
+                time_points,
+                pca_df[pc_col].values,
+                "c--" if mode == "unaligned" else "r-",
+                linewidth=1.5,
+                alpha=0.6,
+                label=f"{mode.capitalize()} Full Path",
+            )
+
+            # Initialize highlight marker (will be updated in animation)
+            (highlight,) = ax_pc.plot(
+                [], [], "co" if mode == "unaligned" else "ro", markersize=10
+            )
+
+            # Store axes and line objects for updating
+            axes[i][pc_col] = ax_pc
+            highlight_objects[i][pc_col] = highlight
+
+            # Configure axes
+            ax_pc.set_title(f"{pc_col}", color="white")
+            ax_pc.set_xlabel("Time Point", color="white")
+            ax_pc.set_ylabel(f"{pc_col}", color="white")
+            ax_pc.tick_params(colors="white")
+            ax_pc.legend(facecolor="black", edgecolor="white")
+            ax_pc.grid(True, alpha=0.3, color="gray")
+
+            # Set fixed y-axis limits based on all data
+            min_val = min(
+                reference_pca[pc_col].min(),
+                *[d["pca_df"][pc_col].min() for d in lineage_data],
+            )
+            max_val = max(
+                reference_pca[pc_col].max(),
+                *[d["pca_df"][pc_col].max() for d in lineage_data],
+            )
+            buffer = 0.1 * (max_val - min_val)
+            ax_pc.set_ylim(min_val - buffer, max_val + buffer)
+
+            # Set x-axis limit to match reference pattern
+            ax_pc.set_xlim(-1, len(reference_pattern))
+
+    # Define animation function
+    def animate(frame):
+        # Update title with frame number if title is shown
+        if show_title:
+            time_text.set_text(f"{mode.capitalize()} Trajectories - Frame {frame}")
+
+        # Update each lineage
+        for i in range(num_lineages):
+            # Get data for this lineage
+            data = lineage_data[i]
+            pca_df = data["pca_df"]
+
+            # Get image stack for this lineage
+            stack = image_stacks[i]
+
+            # Check if we have enough frames
+            if frame < stack.shape[0]:
+                # Update images
+                if i in image_objects:
+                    phase_img = stack[frame, 0, z_slice, :]
+                    gfp_img = stack[frame, 1, z_slice, :]
+                    mcherry_img = stack[frame, 2, z_slice, :]
+
+                    # Update phase image
+                    image_objects[i]["phase"].set_data(phase_img)
+
+                    # Update GFP image (green channel)
+                    gfp_rgb = np.zeros((*gfp_img.shape, 3))
+                    gfp_rgb[:, :, 1] = safe_norm(gfp_norm, gfp_img)
+                    image_objects[i]["gfp"].set_data(gfp_rgb)
+
+                    # Update mCherry image (magenta = red + blue)
+                    mcherry_rgb = np.zeros((*mcherry_img.shape, 3))
+                    mcherry_rgb[:, :, 0] = safe_norm(mcherry_norm, mcherry_img)
+                    mcherry_rgb[:, :, 2] = safe_norm(mcherry_norm, mcherry_img)
+                    image_objects[i]["mcherry"].set_data(mcherry_rgb)
+
+            # Update PC plots - just move the highlight dot
+            if frame < len(pca_df):
+                for pc_col in pc_columns:
+                    # Get highlight object
+                    highlight = highlight_objects[i][pc_col]
+
+                    # Update highlight marker position
+                    highlight.set_data([frame], [pca_df[pc_col].iloc[frame]])
+
+        # Return all artists that were updated
+        artists = []
+        if show_title:
+            artists.append(time_text)
+        for i in range(num_lineages):
+            if i in image_objects:
+                artists.extend(list(image_objects[i].values()))
+            for pc_col in pc_columns:
+                artists.append(highlight_objects[i][pc_col])
+
+        return artists
+
+    # Create animation
+    ani = animation.FuncAnimation(
+        fig, animate, frames=max_frames, interval=1000 / fps, blit=True
+    )
+
+    # Save animation
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Set up writer
+    writer = animation.FFMpegWriter(fps=fps, metadata=dict(artist="Me"), bitrate=5000)
+
+    # Save animation
+    ani.save(output_path, writer=writer)
+
+    # Close figure
+    plt.close(fig)
+
+    logger.info(f"Multiple lineages PC video saved to {output_path}")
+    return output_path
+
+
+# %%
+# Create PC videos for both unaligned and aligned
+# Create directory for output
+save_path = output_save_dir / "multiple_lineages_pc_videos"
+save_path.mkdir(parents=True, exist_ok=True)
+
+# Create unaligned PC1/PC2 video
+create_multiple_lineages_pc_video(
+    reference_pattern,
+    top_n_aligned_cells,
+    pca_df,
+    all_unaligned_stacks,
+    output_path=save_path / "SEC61B_unaligned_trajectory_pc1_pc2.mp4",
+    mode="unaligned",
+    pc_columns=["PCA1", "PCA2"],
+    num_lineages=3,
+    fps=5,
+)
+
+# Create aligned PC1/PC2 video
+create_multiple_lineages_pc_video(
+    reference_pattern,
+    top_n_aligned_cells,
+    pca_df,
+    all_aligned_stacks,
+    output_path=save_path / "SEC61B_aligned_trajectory_pc1_pc2.mp4",
+    mode="aligned",
+    pc_columns=["PCA1", "PCA2"],
+    num_lineages=3,
+    fps=5,
+    show_title=False,
+)
+
 
 # %%
