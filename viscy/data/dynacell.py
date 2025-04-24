@@ -14,6 +14,7 @@ from viscy.data.typing import DynaCellSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
+
 class DynaCellDataset(TargetPredictionDataset):
     def __init__(
         self,
@@ -28,13 +29,18 @@ class DynaCellDataset(TargetPredictionDataset):
         self.infection_condition = infection_condition
 
     def __getitem__(self, idx) -> DynaCellSample:
-        return super().__getitem__(idx).update(
-            {
-                "cell_type": self.cell_type,
-                "organelle": self.organelle,
-                "infection_condition": self.infection_condition,
-            }
+        return (
+            super()
+            .__getitem__(idx)
+            .update(
+                {
+                    "cell_type": self.cell_type,
+                    "organelle": self.organelle,
+                    "infection_condition": self.infection_condition,
+                }
+            )
         )
+
 
 class DynaCellDataModule(LightningDataModule):
     def __init__(
@@ -63,26 +69,31 @@ class DynaCellDataModule(LightningDataModule):
         self._infection_conditions = infection_conditions
 
     @staticmethod
-    def _validate(database: pd.DataFrame, column: str, provided_values: Sequence | None) -> list:
+    def _validate(
+        database: pd.DataFrame, column: str, provided_values: Sequence | None
+    ) -> list:
         all_columns = database[column].unique().tolist()
 
         if not provided_values:
             return all_columns
-        
+
         if not set(provided_values).issubset(set(all_columns)):
-            raise ValueError(f"Not all of {provided_values} are found in column {column} of the database.")
+            raise ValueError(
+                f"Not all of {provided_values} are found in column {column} of the database."
+            )
 
         return list(provided_values)
-
 
     def setup(self, stage: str) -> None:
         if stage != "test":
             raise NotImplementedError("Only test stage is supported!")
-        
+
         database = pd.read_csv(self.csv_database_path, dtype={"FOV": str})
         self.cell_types = self._validate(database, "Cell type", self._cell_types)
         self.organelles = self._validate(database, "Organelle", self._organelles)
-        self.infection_conditions = self._validate(database, "Infection", self._infection_conditions)
+        self.infection_conditions = self._validate(
+            database, "Infection", self._infection_conditions
+        )
 
         # Select the portion of the database that matches the provided cell types, organelles, and infection conditions
         _database = database[
@@ -117,12 +128,17 @@ class DynaCellDataModule(LightningDataModule):
                     target_z_slice=self.target_z_slice,
                 )
                 for zarr_store_path, cell_type, organelle, infection_condition in zip(
-                    zarr_store_paths[:3], cell_type_per_store, organelle_per_store, infection_per_store # DEBUG
+                    zarr_store_paths[:3],
+                    cell_type_per_store,
+                    organelle_per_store,
+                    infection_per_store,  # DEBUG
                 )
             )
         )
 
     def test_dataloader(self) -> DataLoader:
         return DataLoader(
-            self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers,
+            self.test_dataset,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
         )

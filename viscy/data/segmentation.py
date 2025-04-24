@@ -29,6 +29,7 @@ class TargetPredictionDataset(Dataset):
         img_name (str): The name of the image to retrieve from the datasets. Defaults to "0".
         dtype (np.dtype | None): The data type to cast the images to. Defaults to np.int16.
     """
+
     def __init__(
         self,
         pred_dataset: Plate,
@@ -46,7 +47,9 @@ class TargetPredictionDataset(Dataset):
         self.pred_channel = pred_dataset.get_channel_index(pred_channel)
         self.target_channel = target_dataset.get_channel_index(target_channel)
         self.pred_z_slice = pred_z_slice if pred_z_slice is not None else slice(None)
-        self.target_z_slice = target_z_slice if target_z_slice is not None else slice(None)
+        self.target_z_slice = (
+            target_z_slice if target_z_slice is not None else slice(None)
+        )
         self.img_name = img_name
         self.dtype = dtype
         self._build_indices()

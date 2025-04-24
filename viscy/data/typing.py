@@ -63,6 +63,7 @@ class SegmentationSample(TypedDict):
     position_idx: OneOrSeq[int]
     time_idx: OneOrSeq[int]
 
+
 class DynaCellSample(SegmentationSample):
     """
     DynaCell sample type for mini-batches.
