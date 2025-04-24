@@ -12,18 +12,35 @@ import numpy as np
 import pandas as pd
 from lightning.pytorch.loggers import CSVLogger
 
-from viscy.data.segmentation import TargetPredictionDataModule
+from viscy.data.dynacell import DynaCellDataModule
 from viscy.trainer import Trainer
-from viscy.translation.evaluation import SegmentationMetrics2D
+from viscy.translation.evaluation import SegmentationMetrics
 
+csv_database_path=Path("~/gdrive/publications/dynacell/summary_table/dynacell_summary_table.csv").expanduser()
 
 def main(method: Literal["segmentation2D", "segmentation3D"] = "segmentation2D"):
 
     tmp_path = Path(tempfile.mkdtemp())
 
     if method == "segmentation2D":
-        dm = TargetPredictionDataModule()
-        lm = SegmentationMetrics2D()
+        dm = DynaCellDataModule(
+            csv_database_path=csv_database_path,
+            pred_channel="nuclei_prediction",
+            target_channel="Phase3D",
+            pred_z_slice=16,
+            target_z_slice=16,
+            batch_size=1,
+            num_workers=1,
+            cell_types=["A549"],
+            organelles=["TOMM20"],
+            infection_conditions=["Mock"],
+        )
+        dm.setup(stage="test")
+        
+        sample = next(iter(dm.test_dataloader()))
+
+
+        lm = SegmentationMetrics()
     elif method == "segmentation3D":
         pass
         # dm = Segmentation3DDataModule()
