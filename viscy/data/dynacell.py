@@ -29,17 +29,15 @@ class DynaCellDataset(TargetPredictionDataset):
         self.infection_condition = infection_condition
 
     def __getitem__(self, idx) -> DynaCellSample:
-        return (
-            super()
-            .__getitem__(idx)
-            .update(
-                {
-                    "cell_type": self.cell_type,
-                    "organelle": self.organelle,
-                    "infection_condition": self.infection_condition,
-                }
-            )
+        sample = super().__getitem__(idx)
+        sample.update(
+            {
+                "cell_type": self.cell_type,
+                "organelle": self.organelle,
+                "infection_condition": self.infection_condition,
+            }
         )
+        return sample
 
 
 class DynaCellDataModule(LightningDataModule):
@@ -126,6 +124,7 @@ class DynaCellDataModule(LightningDataModule):
                     target_channel=self.target_channel,
                     pred_z_slice=self.pred_z_slice,
                     target_z_slice=self.target_z_slice,
+                    dtype=None,
                 )
                 for zarr_store_path, cell_type, organelle, infection_condition in zip(
                     zarr_store_paths[:3],
