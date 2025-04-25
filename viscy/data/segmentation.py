@@ -24,8 +24,10 @@ class TargetPredictionDataset(Dataset):
         target_dataset (Plate): The target dataset Plate object.
         pred_channel (str): The channel name in the prediction dataset.
         target_channel (str): The channel name in the target dataset.
-        pred_z_slice (int | slice | None): The z-slice or range of z-slices for the prediction dataset. Defaults to None which is converted to slice(None).
-        target_z_slice (int | slice | None): The z-slice or range of z-slices for the target dataset. Defaults to None which is converted to slice(None).
+        pred_z_slice (int | slice | None): The z-slice or range of z-slices for the 
+            prediction dataset. Defaults to None which is converted to slice(None).
+        target_z_slice (int | slice | None): The z-slice or range of z-slices for the 
+            target dataset. Defaults to None which is converted to slice(None).
         img_name (str): The name of the image to retrieve from the datasets. Defaults to "0".
         dtype (np.dtype | None): The data type to cast the images to. Defaults to np.int16.
     """
