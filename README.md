@@ -14,16 +14,16 @@ VisCy (blend of `vision` and `cyto`) is a deep learning pipeline for training an
 This repository provides a pipeline for the following.
 
 - Image translation
-  - Robust virtual staining of landmark organelles
+  - Robust virtual staining of landmark organelles with Cytoland
 - Image representation learning
-  - Self-supervised learning of the cell state and organelle phenotypes
+  - Self-supervised learning of the cell state and organelle phenotypes with DynaCLR
 - Semantic segmentation
   - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
 
-## Virtual staining
+## Cytoland (robust virtual staining)
 
 ### Demos
 
@@ -111,7 +111,7 @@ The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), 
 
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
-## Image representation learning
+## DynaCLR (Contrastive learning of representations of cell dynamics)
 
 We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations,
 with focus on cell and organelle remodeling due to viral infection.
