@@ -43,9 +43,7 @@ logger.addHandler(console_handler)
 logger.propagate = False
 # %%
 CONDITION_TO_ALIGN = "infection"  # remodelling_no_sensor, remodelling_w_sensor, cell_division, organelle_only ,infection
-CONDITION_EMBEDDINGS = (
-    "phase_n_organelle"  # phase_n_organelle, organelle_only, infection
-)
+CONDITION_EMBEDDINGS = "organelle_only"  # phase_n_organelle, organelle_only, infection
 input_data_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
 )
@@ -372,7 +370,7 @@ fig, ax = plt.subplots(figsize=(2, 2))
 
 # Plot PC1 for each cell
 # TODO change for PC2
-PC_COMPONENT = 2
+PC_COMPONENT = 1
 
 time_points = np.arange(reference_length)
 for i in range(min(n_cells, 3)):
@@ -562,6 +560,10 @@ for row in range(min(3, len(top_n_aligned_cells))):
             img_rgb[:, :, 0] = img_phase + img_mcherry
             img_rgb[:, :, 1] = img_phase
             img_rgb[:, :, 2] = img_phase + img_mcherry
+        elif CONDITION_EMBEDDINGS == "organelle_only":
+            # img_rgb[:, :, 0] = 0
+            img_rgb[:, :, 1] = img_gfp
+            # img_rgb[:, :, 2] = 0
         else:
             img_rgb[:, :, 0] = img_phase
             img_rgb[:, :, 1] = img_phase + img_gfp

@@ -60,21 +60,33 @@ def load_phenotype_annotations(annotation_path: str | Path) -> dict:
 
 
 # %%
+import random
+
+
 def main():
     """Main function to run the visualization app."""
     # Configuration
-    DEBUG = True
+    DEBUG = False
     VIZ_DATASET = "organelle"  # ["organelle", "phenotype", "microglia"]
 
     # Create an output directory for saving clusters
     output_dir = os.path.join(os.getcwd(), "saved_clusters")
-
+    random.seed(42)
     if VIZ_DATASET == "organelle":
         SELECTED_OBSERVED_PHENOTYPE = 2
         annotation_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/phenotype_observations.csv"
         phenotype_dict, unique_fovs = load_phenotype_annotations(annotation_path)
         fov_tracks_dict = phenotype_dict[SELECTED_OBSERVED_PHENOTYPE]
-
+        fov_tracks_dict = {
+            "/C/2/000000": list(random.sample(range(300), 30)),
+            "/C/2/000001": list(random.sample(range(300), 30)),
+            "/C/2/001001": list(random.sample(range(300), 30)),
+            "/C/2/001000": list(random.sample(range(300), 30)),
+            "/B/3/000000": list(random.sample(range(300), 30)),
+            "/B/3/000001": list(random.sample(range(300), 30)),
+            "/B/3/001001": list(random.sample(range(300), 30)),
+            "/B/3/001000": list(random.sample(range(300), 30)),
+        }
         if not DEBUG:
             # Add empty lists for FOVs not in the phenotype
             for fov in unique_fovs:
