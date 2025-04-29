@@ -1,5 +1,9 @@
 # %%
+import sys
 from pathlib import Path
+
+sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
+
 import matplotlib.pyplot as plt
 import numpy as np
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -15,6 +19,7 @@ feature_paths = {
     "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr",
     "56 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_56mins.zarr",
     "91 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_91mins.zarr",
+    "CellAware": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/log_alfi_triplet_time_intervals/prediction/ALFI_cellaware.zarr",
     "Classical": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr",
 }
 
@@ -25,6 +30,7 @@ interval_colors = {
     "28 min interval": "green",
     "56 min interval": "purple",
     "91 min interval": "orange",
+    "CellAware": "cyan",
     "Classical": "gray",
 }
 
@@ -82,13 +88,12 @@ for interval_label, path in feature_paths.items():
         zorder=2,
     )
 
-plt.xlabel("Time Shift (seconds)")
-plt.ylabel("Mean Square Displacement")
-plt.title("MSD vs Time Shift")
+plt.xlabel("Time Shift (seconds)", fontsize=18)
+plt.ylabel("Mean Square Displacement", fontsize=18)
 plt.grid(True, alpha=0.3)
-plt.legend()
+plt.legend(fontsize=16)
 plt.tight_layout()
-plt.show()
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_linear.png", dpi=300)
 
 # %% Plot MSD vs time (log-log scale with slopes)
 plt.figure(figsize=(10, 6))
@@ -140,21 +145,24 @@ for interval_label, path in feature_paths.items():
         log_means,
         color=interval_colors[interval_label],
         s=20,
-        label=f"{interval_label} (α_early={early_slope:.2e}, α_mid={mid_slope:.2e})",
         zorder=2,
+        label=interval_label,
+        # label=f"{interval_label} (α_early={early_slope:.2e}, α_mid={mid_slope:.2e})",
     )
 
 plt.xscale("log")
 plt.yscale("log")
-plt.xlabel("Time Shift (seconds)")
-plt.ylabel("Mean Square Displacement")
-plt.title("MSD vs Time Shift (log-log)")
+plt.xlabel("Time Shift (seconds)", fontsize=18)
+plt.ylabel("Mean Square Displacement", fontsize=18)
 plt.grid(True, alpha=0.3, which="both")
-plt.legend(
-    title="α = slope in log-log space", bbox_to_anchor=(1.05, 1), loc="upper left"
-)
+plt.xticks(fontsize=16)
+plt.yticks(fontsize=16)
+# plt.legend(
+#     title="α = slope in log-log space", bbox_to_anchor=(1.05, 1), loc="upper left"
+# )
+plt.legend(fontsize=16)
 plt.tight_layout()
-plt.show()
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_log.png", dpi=300)
 
 # %% Plot slopes analysis
 early_slopes = []
@@ -197,11 +205,12 @@ width = 0.35
 plt.bar(x - width / 2, early_slopes, width, label="Early slope", alpha=0.7)
 plt.bar(x + width / 2, mid_slopes, width, label="Mid slope", alpha=0.7)
 
-plt.xlabel("Time Interval")
-plt.ylabel("Slope (α)")
-plt.title("MSD Slopes by Time Interval")
-plt.xticks(x, intervals, rotation=45)
-plt.legend()
-plt.show()
+plt.xlabel("Time Interval", fontsize=18)
+plt.ylabel("Slope (α)", fontsize=18)
+plt.xticks(x, intervals, rotation=45, fontsize=16)
+plt.yticks(fontsize=16)
+plt.legend(fontsize=16)
+plt.tight_layout()
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_slopes.png", dpi=300)
 
 # %%

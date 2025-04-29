@@ -14,6 +14,7 @@ import numpy as np
 import seaborn as sns
 from sklearn.decomposition import PCA
 import pandas as pd
+import os
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -339,39 +340,50 @@ features_organelle.to_csv(
     index=False,
 )
 
-correlation_organelle = compute_correlation_and_save_png(features_organelle, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.png")
+correlation_organelle = compute_correlation_and_save_png(features_organelle, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.svg")
+
+# features_organelle = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell_refinedPCA.csv")
 
 # %% plot PCA vs set of computed features for organelle features
+
+# set_features = [
+#     "Fluor Radial Intensity Gradient",
+#     "Phase Interquartile Range",
+#     "Perimeter area ratio",  
+#     "Fluor Zernike Moment Mean",
+#     "Fluor Mean Intensity",
+#     "Phase Entropy",
+#     "Fluor Interquartile Range",
+#     "Fluor Masked Area",
+#     "Fluor Skewness",
+#     "Phase Dissimilarity",
+# ]
 
 set_features = [
     "Fluor Radial Intensity Gradient",
     "Phase Interquartile Range",
-    "Perimeter area ratio",  
-    "Fluor Zernike Moment Mean",
-    "Fluor Mean Intensity",
-    "Phase Entropy",
+    "Perimeter area ratio",
     "Fluor Interquartile Range",
-    "Fluor Masked Area",
-    "Fluor Skewness",
-    "Phase Dissimilarity",
+    "Phase Entropy",
+    "Fluor Zernike Moment Mean",
 ]
 
-plt.figure(figsize=(10, 10))
+plt.figure(figsize=(10, 8))
 sns.heatmap(
-    correlation_organelle.loc[set_features, "PCA1":"PCA8"],
+    correlation_organelle.loc[set_features, "PCA1":"PCA6"],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
-    annot_kws={'size': 18},
+    annot_kws={'size': 24},
     vmin=-1,
     vmax=1,
 )
-plt.xlabel("Computed Features", fontsize=18)
-plt.ylabel("PCA Features", fontsize=18)
-plt.xticks(fontsize=18)  # Increase x-axis tick labels
-plt.yticks(fontsize=18)  # Increase y-axis tick labels
+plt.xlabel("Computed Features", fontsize=24)
+plt.ylabel("PCA Features", fontsize=24)
+plt.xticks(fontsize=24)  # Increase x-axis tick labels
+plt.yticks(fontsize=24)  # Increase y-axis tick labels
 plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_refinedPCA.svg"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_6features.svg"
 )
 
 
@@ -404,46 +416,58 @@ features_sensor.to_csv(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv",
     index=False,
 )
+
+# features_sensor = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv")
 # drop columns 'Nuclear area' and 'Instantaneous velocity'
 features_sensor = features_sensor.drop(columns=["Nuclear Area", "Instantaneous velocity"])
 # take a subset of the dropping 768 features
 feature_columns=[f"feature_{i+1}" for i in range(768)]
 features_subset_sensor = features_sensor.drop(columns=feature_columns)
-correlation_sensor = compute_correlation_and_save_png(features_subset_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.png")
+correlation_sensor = compute_correlation_and_save_png(features_subset_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.svg")
 
 # %% plot PCA vs set of computed features for sensor features
 
+# set_features = [
+#     "Fluor Radial Intensity Gradient",
+#     "Fluor Kurtosis",
+#     "Phase Entropy",
+#     "Phase Std Dev",
+#     "Perimeter area ratio",
+#     "Phase Interquartile Range",
+#     "Phase Skewness",
+#     "Fluor Interquartile Range",
+#     "Fluor Area",
+#     "Perimeter",
+#     "Fluor Texture",
+# ]
+
 set_features = [
     "Fluor Radial Intensity Gradient",
-    "Fluor Kurtosis",
-    "Phase Entropy",
-    "Phase Std Dev",
-    "Perimeter area ratio",
     "Phase Interquartile Range",
-    "Phase Skewness",
+    "Perimeter area ratio",
     "Fluor Interquartile Range",
-    "Fluor Area",
-    "Perimeter",
-    "Fluor Texture",
+    "Phase Entropy",
+    "Fluor Zernike Moment Mean",
 ]
 
-plt.figure(figsize=(8, 10))
+
+plt.figure(figsize=(10, 8))
 sns.heatmap(
     correlation_sensor.loc[set_features, "PCA1":"PCA6"],
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
-    annot_kws={'size': 18},
+    annot_kws={'size': 24},
     vmin=-1,
     vmax=1,
 )
-plt.xlabel("Computed Features", fontsize=18)
-plt.ylabel("PCA Features", fontsize=18)
-plt.xticks(fontsize=18)  # Increase x-axis tick labels
-plt.yticks(fontsize=18)  # Increase y-axis tick labels
+plt.xlabel("Computed Features", fontsize=24)
+plt.ylabel("PCA Features", fontsize=24)
+plt.xticks(fontsize=24)  # Increase x-axis tick labels
+plt.yticks(fontsize=24)  # Increase y-axis tick labels
 
 plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_allset_sensor.svg"
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_allset_sensor_6features.svg"
 )
 
 # plot the PCA1 vs PCA2 map for sensor features
@@ -454,5 +478,129 @@ sns.scatterplot(
     y="PCA2",
     data=features_sensor,
 )
+
+
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+
+
+# %% explore features in organelle model
+
+# plot interactive plotly plot of PCA1 vs PCA2 for organelle features
+
+import plotly.express as px
+
+fig = px.scatter(
+    features_organelle,
+    x="PCA1",
+    y="PCA2",
+    color="fov_name",
+    hover_data=["track_id", "t"],
+)
+fig.show()
+
+
+# %%
+
+def save_patches(fov_name, track_id):
+    data_path = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
+    )
+    tracks_path = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
+    )   
+    source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
+    prediction_dataset = dataset_of_tracks(
+        data_path,
+        tracks_path,
+        [fov_name],
+        [track_id],
+        source_channel=source_channel,
+        z_range=(16, 21),
+        initial_yx_patch_size=(192, 192),
+        final_yx_patch_size=(192, 192),
+    )
+    whole = np.stack([p["anchor"] for p in prediction_dataset])
+    phase = whole[:, 0]
+    fluor = whole[:, 1]
+    out_dir = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/data/organelle/"
+    fov_name_out = fov_name.replace("/", "_")
+    np.save(
+        (os.path.join(out_dir, "phase" + fov_name_out + "_" + str(track_id) + ".npy")),
+        phase,
+    )
+    np.save(
+        (os.path.join(out_dir, "fluor" + fov_name_out + "_" + str(track_id) + ".npy")),
+        fluor,
+    )
+
+
+# PCA2: Perimeter area ratio
+
+twohundred_highest_perimeter_area_ratio = features_organelle.nlargest(200, "Perimeter area ratio").iloc[199]
+print("Row with 200th highest 'Perimeter area ratio':")
+# print(twohundred_highest_perimeter_area_ratio)
+print(
+    f"fov_name: {twohundred_highest_perimeter_area_ratio['fov_name']}, time: {twohundred_highest_perimeter_area_ratio['t']}"
+)
+save_patches(
+    twohundred_highest_perimeter_area_ratio["fov_name"], twohundred_highest_perimeter_area_ratio["track_id"]
+)
+
+
+lowest_perimeter_area_ratio = features_organelle.loc[features_organelle["Perimeter area ratio"].idxmin()]
+print("Row with lowest 'Perimeter area ratio':")
+# print(lowest_perimeter_area_ratio)
+print(
+    f"fov_name: {lowest_perimeter_area_ratio['fov_name']}, time: {lowest_perimeter_area_ratio['t']}"
+)
+save_patches(
+    lowest_perimeter_area_ratio["fov_name"], lowest_perimeter_area_ratio["track_id"]
+)
+
+# PCA1: Flour Radial Intensity Gradient
+highest_fluor_radial_intensity_gradient = features_organelle.loc[features_organelle["Fluor Radial Intensity Gradient"].idxmax()]
+print("Row with highest 'Fluor radial intensity gradient':")
+# print(highest_fluor_radial_intensity_gradient)
+print(
+    f"fov_name: {highest_fluor_radial_intensity_gradient['fov_name']}, time: {highest_fluor_radial_intensity_gradient['t']}"
+)
+save_patches(
+    highest_fluor_radial_intensity_gradient["fov_name"], highest_fluor_radial_intensity_gradient["track_id"]
+)
+
+lowest_fluor_radial_intensity_gradient = features_organelle.loc[features_organelle["Fluor Radial Intensity Gradient"].idxmin()]
+print("Row with lowest 'Fluor radial intensity gradient':")
+# print(lowest_fluor_radial_intensity_gradient)
+print(
+    f"fov_name: {lowest_fluor_radial_intensity_gradient['fov_name']}, time: {lowest_fluor_radial_intensity_gradient['t']}"
+)
+save_patches(
+    lowest_fluor_radial_intensity_gradient["fov_name"], lowest_fluor_radial_intensity_gradient["track_id"]
+)
+
+
+# PCA1: Phase Interquartile Range
+highest_phase_interquartile_range = features_organelle.loc[features_organelle["Phase Interquartile Range"].idxmax()]
+print("Row with highest 'Phase interquartile range':")
+# print(highest_phase_interquartile_range)
+print(
+    f"fov_name: {highest_phase_interquartile_range['fov_name']}, time: {highest_phase_interquartile_range['t']}"
+)
+save_patches(
+    highest_phase_interquartile_range["fov_name"], highest_phase_interquartile_range["track_id"]
+)
+
+hundred_lowest_phase_interquartile_range = features_organelle.nsmallest(100, "Phase Interquartile Range").iloc[99]
+print("Row with 100th lowest 'Phase interquartile range':")
+# print(hundred_lowest_phase_interquartile_range)
+print(
+    f"fov_name: {hundred_lowest_phase_interquartile_range['fov_name']}, time: {hundred_lowest_phase_interquartile_range['t']}"
+)   
+save_patches(
+    hundred_lowest_phase_interquartile_range["fov_name"], hundred_lowest_phase_interquartile_range["track_id"]
+)
+
 
 # %%
