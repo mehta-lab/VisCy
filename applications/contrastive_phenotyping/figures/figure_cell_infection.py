@@ -101,6 +101,24 @@ data = pd.DataFrame(
 feature_columns = pd.DataFrame(feature_npy_filtered, columns=[f"feature_{i+1}" for i in range(768)])
 data = pd.concat([data, feature_columns], axis=1)
 
+# %% plot phatemap of the data
+colormap = {
+    2: 'orange',
+    1: 'steelblue',
+}
+# plot phatemap with infection prediction hue
+fig = plt.figure(figsize=(10, 10))
+plt.scatter(data["PHATE1"], data["PHATE2"], 
+           c=data["infection"].map(colormap), 
+           s=25,  
+           edgecolor='white', linewidth=0.5)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Feb_sensor_infection_phatemap_timeawarentxent.png",
+    format="png",
+    dpi=300,
+    bbox_inches='tight'
+)
+
 # %% compute PCA components
 
 color_map = {
@@ -836,5 +854,3 @@ plt.savefig(
     dpi=300,
 )
 
-
-# %%
