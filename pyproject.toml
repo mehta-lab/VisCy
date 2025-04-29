@@ -6,17 +6,17 @@ build-backend = "setuptools.build_meta"
 name = "viscy"
 description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { file = "LICENSE" }
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
 classifiers = [
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "iohub==0.1.0",
+    "iohub>=0.2.0b0",
     "torch>=2.4.1",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
@@ -27,7 +27,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
-    "pytorch-metric-learning>2.0.0"
+    "pytorch-metric-learning>2.0.0",
 ]
 dynamic = ["version"]
 
@@ -36,7 +36,7 @@ metrics = [
     "cellpose>=3.0.10",
     "scikit-learn>=1.1.3",
     "imbalanced-learn>=0.12.0",
-    "torchmetrics[detection]>=1.3.1",
+    "torchmetrics[detection]>=1.6.3",
     "ptflops>=0.7",
     "umap-learn",
     "captum>=0.7.0",

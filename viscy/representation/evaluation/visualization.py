@@ -2,7 +2,10 @@
 # This is a simple example of an interactive plot using Dash.
 import atexit
 import base64
+import json
 import logging
+import os
+from datetime import datetime
 from io import BytesIO
 from pathlib import Path
 
@@ -38,6 +41,7 @@ class EmbeddingVisualizationApp:
         num_PC_components: int = 3,
         cache_path: str | None = None,
         num_loading_workers: int = 16,
+        output_dir: str | None = None,
     ) -> None:
         self.data_path = Path(data_path)
         self.tracks_path = Path(tracks_path)
@@ -45,6 +49,7 @@ class EmbeddingVisualizationApp:
         self.fov_tracks = fov_tracks
         self.image_cache = {}
         self.cache_path = Path(cache_path) if cache_path else None
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         self.app = None
         self.features_df = None
         self.fig = None
@@ -183,6 +188,19 @@ class EmbeddingVisualizationApp:
                     },
                 ),
                 html.Button(
+                    "Save Clusters (JSON)",
+                    id="save-clusters",
+                    style={
+                        "backgroundColor": "#007bff",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
                     "Clear Selection",
                     id="clear-selection",
                     style={
@@ -193,6 +211,9 @@ class EmbeddingVisualizationApp:
                         "borderRadius": "4px",
                         "cursor": "pointer",
                     },
+                ),
+                html.Div(
+                    id="save-status", style={"marginTop": "5px", "color": "#28a745"}
                 ),
             ],
             style={"marginLeft": "10px", "display": "inline-block"},
@@ -722,6 +743,22 @@ class EmbeddingVisualizationApp:
 
                 return fig, None  # Return new figure and clear selectedData
             return dash.no_update, dash.no_update
+
+        @self.app.callback(
+            dd.Output("save-status", "children"),
+            [
+                dd.Input("save-clusters", "n_clicks"),
+            ],
+            prevent_initial_call=True,
+        )
+        def save_clusters_callback(n_clicks):
+            if n_clicks:
+                try:
+                    filepath = self.save_clusters_to_file()
+                    return f"Clusters saved to {os.path.basename(filepath)}"
+                except Exception as e:
+                    return f"Error saving clusters: {str(e)}"
+            return dash.no_update
 
     def _calculate_equal_aspect_ranges(self, x_data, y_data):
         """Calculate ranges for x and y axes to ensure equal aspect ratio.
@@ -1683,6 +1720,52 @@ class EmbeddingVisualizationApp:
                 ),
             ]
         )
+
+    def save_clusters_to_file(self):
+        """Save cluster data to a JSON file with FOV, track_id, and timepoint.
+
+        Returns
+        -------
+        str
+            Path to the saved JSON file
+        """
+        if not self.clusters:
+            raise ValueError("No clusters to save")
+
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Prepare data in the requested format
+        clusters_data = []
+
+        for cluster_idx, cluster_points in enumerate(self.clusters):
+            cluster_info = {
+                "cluster_id": cluster_idx + 1,
+                "points": [
+                    {
+                        "fov": point["fov_name"],
+                        "track_id": point["track_id"],
+                        "timepoint": point["t"],
+                    }
+                    for point in cluster_points
+                ],
+            }
+            clusters_data.append(cluster_info)
+
+        # Create timestamped filename
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"clusters_{timestamp}.json"
+        filepath = self.output_dir / filename
+
+        # Save to JSON file
+        with open(filepath, "w") as f:
+            json.dump(clusters_data, f, indent=2)
+
+        return str(filepath)
+
+    def save_clusters_to_json(self):
+        """Backward compatibility method that calls save_clusters_to_file"""
+        return self.save_clusters_to_file()
 
     def run(self, debug=False, port=None):
         """Run the Dash server

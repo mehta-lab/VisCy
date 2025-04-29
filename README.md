@@ -7,6 +7,7 @@
 ![GitHub Repo stars](https://img.shields.io/github/stars/mehta-lab/VisCy)
 ![GitHub forks](https://img.shields.io/github/forks/mehta-lab/VisCy)
 [![SPEC 0 — Minimum Supported Dependencies](https://img.shields.io/badge/SPEC-0-green?labelColor=%23004811&color=%235CA038)](https://scientific-python.org/specs/spec-0000/)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.15022186.svg)](https://doi.org/10.5281/zenodo.15022186)
 
 VisCy (blend of `vision` and `cyto`) is a deep learning pipeline for training and deploying computer vision models for image-based phenotyping at single-cell resolution.
 
@@ -19,7 +20,7 @@ This repository provides a pipeline for the following.
 - Semantic segmentation
   - Supervised learning of of cell state (e.g. state of infection)
 
-> **Note:**  
+> **Note:**
 > VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
 
 ## Virtual staining
@@ -149,9 +150,9 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 1. We recommend using a new Conda/virtual environment.
 
     ```sh
-    conda create --name viscy python=3.10
+    conda create --name viscy python=3.11
     # OR specify a custom path since the dependencies are large:
-    # conda create --prefix /path/to/conda/envs/viscy python=3.10
+    # conda create --prefix /path/to/conda/envs/viscy python=3.11
     ```
 
 2. Install a released version of VisCy from PyPI:

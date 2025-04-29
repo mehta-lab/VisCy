@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
 from viscy.data.typing import DictTransform, NormMeta
+from viscy.preprocessing.precompute import _filter_fovs, _filter_wells
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -36,6 +37,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
     batch_size: int
     num_workers: int
     pin_memory: bool
+    prefetch_factor: int | None
 
     def _maybe_sampler(
         self, dataset: Dataset, shuffle: bool
@@ -59,6 +61,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             collate_fn=list_data_collate,
+            prefetch_factor=self.prefetch_factor,
         )
 
     def val_dataloader(self) -> DataLoader:
@@ -74,6 +77,7 @@ class GPUTransformDataModule(ABC, LightningDataModule):
             pin_memory=self.pin_memory,
             drop_last=False,
             collate_fn=list_data_collate,
+            prefetch_factor=self.prefetch_factor,
         )
 
     @property
@@ -169,7 +173,23 @@ class CachedOmeZarrDataset(Dataset):
         return sample
 
 
-class CachedOmeZarrDataModule(GPUTransformDataModule):
+class SelectWell:
+    _include_wells: list[str] | None
+    _exclude_fovs: list[str] | None
+
+    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
+        positions = []
+        for well in _filter_wells(plate, include_wells=self._include_wells):
+            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
+                positions.append(fov)
+        if len(positions) < 2:
+            raise ValueError(
+                "At least 2 FOVs are required for training and validation."
+            )
+        return positions
+
+
+class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
     """Data module for cached OME-Zarr arrays.
 
     Parameters
@@ -197,6 +217,10 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         Use page-locked memory in data-loaders, by default True
     skip_cache : bool, optional
         Skip caching for this dataset, by default False
+    include_wells : list[str], optional
+        List of well names to include in the dataset, by default None (all)
+    include_wells : list[str], optional
+        List of well names to include in the dataset, by default None (all)
     """
 
     def __init__(
@@ -212,6 +236,8 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         val_gpu_transforms: list[DictTransform],
         pin_memory: bool = True,
         skip_cache: bool = False,
+        include_wells: list[str] | None = None,
+        exclude_fovs: list[str] | None = None,
     ):
         super().__init__()
         self.data_path = data_path
@@ -225,6 +251,8 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         self._val_gpu_transforms = Compose(val_gpu_transforms)
         self.pin_memory = pin_memory
         self.skip_cache = skip_cache
+        self._include_wells = include_wells
+        self._exclude_fovs = exclude_fovs
 
     @property
     def train_cpu_transforms(self) -> Compose:
@@ -248,12 +276,30 @@ class CachedOmeZarrDataModule(GPUTransformDataModule):
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions).tolist()
 
+    def _include_well_name(self, name: str) -> bool:
+        if self._include_wells is None:
+            return True
+        else:
+            return name in self._include_wells
+
+    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
+        positions = []
+        for well_name, well in plate.wells():
+            if self._include_well_name(well_name):
+                for _, p in well.positions():
+                    positions.append(p)
+        if len(positions) < 2:
+            raise ValueError(
+                "At least 2 FOVs are required for training and validation."
+            )
+        return positions
+
     def setup(self, stage: Literal["fit", "validate"]) -> None:
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
         cache_map = Manager().dict()
         plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")
-        positions = [p for _, p in plate.positions()]
+        positions = self._filter_fit_fovs(plate)
         shuffled_indices = self._set_fit_global_state(len(positions))
         num_train_fovs = int(len(positions) * self.split_ratio)
         train_fovs = [positions[i] for i in shuffled_indices[:num_train_fovs]]
