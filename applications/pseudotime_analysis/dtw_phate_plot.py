@@ -26,10 +26,17 @@ tracks_path = Path(
 embeddings_dataset = read_embedding_dataset(feature_path)
 feature_df = embeddings_dataset["sample"].to_dataframe().reset_index(drop=True)
 
-cell_division_matching_lineages_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/SEC61B/20241107_SEC61B_cell_division_matching_lineages.csv"
-infection_matching_lineages_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/SEC61B/20241107_SEC61B_infection_matching_lineages.csv"
+features_root = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/figure/SEC61B"
+)
+cell_division_matching_lineages_path = (
+    features_root / "20241107_SEC61B_cell_division_matching_lineages.csv"
+)
+infection_matching_lineages_path = (
+    features_root / "20241107_SEC61B_infection_matching_lineages.csv"
+)
 
-organelle_features_path = "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/SEC61B/20241107_SEC61B_organelle_features.zarr"
+organelle_features_path = features_root / "20241107_SEC61B_organelle_only_features.zarr"
 
 cell_division_df = pd.read_csv(cell_division_matching_lineages_path)
 infection_df = pd.read_csv(infection_matching_lineages_path)
@@ -196,7 +203,7 @@ def plot_synchronized_trajectories(
 division_plot = plot_synchronized_trajectories(
     cell_division_df, feature_df, "Cell Division", cmap_name="viridis"
 )
-division_plot.savefig("./SEC61B/cell_division_trajectories.png", dpi=300)
+division_plot.savefig(features_root / "cell_division_trajectories.png", dpi=300)
 division_plot.show()
 
 # Plot infection alignments
@@ -256,7 +263,7 @@ def plot_comparative_alignments(cell_division_df, infection_df):
     ax.set_ylabel("PHATE2")
     ax.legend()
     plt.tight_layout()
-    fig.savefig("comparative_trajectories.png", dpi=300)
+    fig.savefig(features_root / "comparative_trajectories.png", dpi=300)
     plt.show()
 
 
@@ -427,7 +434,7 @@ def plot_aligned_tracks_side_by_side(
     cbar_inf.set_label("Aligned Time (Infection Ref.)")
 
     fig.savefig(
-        "./SEC61B/aligned_tracks_side_by_side.png", dpi=300, bbox_inches="tight"
+        features_root / "aligned_tracks_side_by_side.png", dpi=300, bbox_inches="tight"
     )
     plt.show()
 
@@ -490,7 +497,7 @@ def create_interactive_phate_plot(feature_df):
 
 # %%
 interactive_plot = create_interactive_phate_plot(feature_df)
-interactive_plot.write_html("./SEC61B/interactive_phate_visualization.html")
+interactive_plot.write_html(features_root / "interactive_phate_visualization.html")
 interactive_plot.show()
 
 # %%
