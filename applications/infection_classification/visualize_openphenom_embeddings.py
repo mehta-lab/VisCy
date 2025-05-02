@@ -22,11 +22,21 @@ from tqdm import tqdm
 from transformers import AutoModel
 
 from viscy.data.triplet import TripletDataModule
+from viscy.representation.evaluation.clustering import (
+    pairwise_distance_matrix,
+    rank_nearest_neighbors,
+)
+from viscy.representation.evaluation.distance import (
+    analyze_and_plot_distances,
+    compute_piece_wise_dissimilarity,
+    pairwise_distance_matrix,
+    rank_nearest_neighbors,
+)
 from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 
-plt.style.use(
-    "/home/eduardo.hirata/repos/viscy/applications/contrastive_phenotyping/figures/figure.mplstyle"
-)
+# plt.style.use(
+#     "/home/eduardo.hirata/repos/viscy/applications/contrastive_phenotyping/figures/figure.mplstyle"
+# )
 
 
 # Function to compute PHATE
@@ -92,9 +102,9 @@ class OpenPhenomWrapper:
         # OpenPhenom expects [B, C, H, W] but our data is [B, C, D, H, W]
         # If 5D input, take middle slice or average across D
         if x.dim() == 5:
-            # Take middle slice
+            # Take middle slice or max project z
             d = x.shape[2]
-            x = x[:, :, d // 2, :, :]
+            x = x.max(dim=2)[0]
 
         # Convert to uint8 as OpenPhenom expects uint8 inputs
         if x.dtype != torch.uint8:
@@ -145,7 +155,7 @@ dm = TripletDataModule(
 )
 dm.prepare_data()
 dm.setup("predict")
-
+# %%
 print("Extracting features...")
 features = []
 indices = []
@@ -505,5 +515,269 @@ save_legend_as_pdf(ax, output_dir / "openphenom_infection_phate_legend.pdf")
 # Save the main figure without legend
 plt.savefig(output_dir / "openphenom_ALFI_phate.pdf", dpi=300, bbox_inches="tight")
 plt.savefig(output_dir / "openphenom_ALFI_phate.png", dpi=300, bbox_inches="tight")
+# %%
+# remove rows with division = -1
+tracks = tracks[tracks["division"] != -1]
 
+# dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
+data_train_val = tracks[
+    tracks["fov_name"].str.contains("/0/0/0")
+    | tracks["fov_name"].str.contains("/0/1/0")
+    | tracks["fov_name"].str.contains("/0/2/0")
+]
+
+data_test = tracks[
+    tracks["fov_name"].str.contains("/0/3/0")
+    | tracks["fov_name"].str.contains("/0/4/0")
+]
+
+x_train = data_train_val.drop(
+    columns=[
+        "division",
+        "fov_name",
+        "t",
+        "track_id",
+        "id",
+        "parent_id",
+        "parent_track_id",
+        "pca_0",
+        "pca_1",
+    ]
+)
+y_train = data_train_val["division"]
+
+# train a logistic regression model
+clf = LogisticRegression(random_state=0).fit(x_train, y_train)
+
+# test the trained classifer on the other half of the data
+
+x_test = data_test.drop(
+    columns=[
+        "division",
+        "fov_name",
+        "t",
+        "track_id",
+        "id",
+        "parent_id",
+        "parent_track_id",
+        "pca_0",
+        "pca_1",
+    ]
+)
+y_test = data_test["division"]
+
+# predict the infection state for the testing set
+y_pred = clf.predict(x_test)
+
+# compute the accuracy of the classifier
+
+accuracy = np.mean(y_pred == y_test)
+# save the accuracy for final ploting
+print(f"Accuracy of model: {accuracy}")
+
+
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
+#
+# %%
+CONDITION = "ALFI"
+EMBEDDING_DIMENSION = 384
+
+if CONDITION == "ALFI":
+    SECONDS_PER_FRAME = 7 * 60  # seconds
+
+    pooled = np.load(output_dir / "pooled_features_ALFI.npy")
+    tracks = pd.read_csv(output_dir / "openphenom_pretrained_features_ALFI.csv")
+elif CONDITION == "OpenPhenom":
+    SECONDS_PER_FRAME = 30 * 60  # seconds
+
+    pooled = np.load(output_dir / "pooled_features_infection_rfp_only.npy")
+    tracks = pd.read_csv(
+        output_dir / "openphenom_pretrained_features_infection_rfp_only.csv"
+    )
+
+for i, feature in enumerate(pooled.T):
+    tracks[f"feature_{i}"] = feature
+
+
+def compute_embedding_distances(
+    embeddings,
+    distance_metric: Literal["cosine", "euclidean", "normalized_euclidean"] = "cosine",
+) -> pd.DataFrame:
+    """
+    Compute and save pairwise distances between embeddings.
+    """
+    feature_columns = [f"feature_{i}" for i in range(EMBEDDING_DIMENSION)]
+    features = embeddings[feature_columns].to_numpy()
+
+    if distance_metric != "euclidean":
+        features = StandardScaler().fit_transform(features)
+
+    # Compute the distance matrix
+    cross_dist = pairwise_distance_matrix(features, metric=distance_metric)
+
+    # Normalize by sqrt of embedding dimension if using euclidean distance
+    if distance_metric == "euclidean":
+        cross_dist /= np.sqrt(features.shape[1])
+
+    rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
+
+    # Create a DataFrame with track information
+    features_df = pd.DataFrame(
+        {
+            "track_id": embeddings["track_id"],
+            "t": embeddings["t"],
+            "fov_name": embeddings["fov_name"],
+        }
+    )
+
+    # Compute piece-wise dissimilarity and rank difference
+    piece_wise_dissimilarity_per_track, _ = compute_piece_wise_dissimilarity(
+        features_df, cross_dist, rank_fractions
+    )
+
+    all_dissimilarity = np.concatenate(piece_wise_dissimilarity_per_track)
+
+    # Random sampling values in the dissimilarity matrix
+    n_samples = len(all_dissimilarity)
+    random_indices = np.random.randint(0, len(cross_dist), size=(n_samples, 2))
+    sampled_values = cross_dist[random_indices[:, 0], random_indices[:, 1]]
+
+    # Create and save DataFrame
+    distributions_df = pd.DataFrame(
+        {
+            "adjacent_frame": pd.Series(all_dissimilarity),
+            "random_sampling": pd.Series(sampled_values),
+        }
+    )
+
+    return distributions_df
+
+
+# Compute distances and metrics
+distance_df = compute_embedding_distances(tracks, distance_metric="cosine")
+metrics = analyze_and_plot_distances(
+    distance_df,
+    output_file_path=Path(output_dir / f"openphenom_{CONDITION}_distance_plot.pdf"),
+    overwrite=True,
+)
+print(f"Pairwise distance adjacent frame: {metrics['dissimilarity_mean']}")
+print(f"Pairwise distance random sampling: {metrics['random_mean']}")
+print(
+    f"Ratio of pairwise distance dynamic range: {metrics['random_mean'] / metrics['dissimilarity_mean']}"
+)
+print(f"Dynamic range: {metrics['dynamic_range']}")
+
+
+# %% MSD slope
+from collections import defaultdict
+from typing import Dict, List
+
+from sklearn.metrics.pairwise import cosine_similarity
+
+from viscy.representation.evaluation.distance import compute_displacement_statistics
+
+
+def compute_displacement(
+    embedding_dataset,
+    distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
+    max_delta_t: int = None,
+) -> Dict[int, List[float]]:
+    """Compute displacements between embeddings at different time differences.
+
+    For each time difference τ, computes distances between embeddings of the same cell
+    separated by τ timepoints. Supports multiple distance metrics.
+
+    Parameters
+    ----------
+    embedding_dataset : xarray.Dataset
+        Dataset containing embeddings and metadata with the following variables:
+        - features: (N, D) array of embeddings
+        - fov_name: (N,) array of field of view names
+        - track_id: (N,) array of cell track IDs
+        - t: (N,) array of timepoints
+    distance_metric : str, optional
+        The metric to use for computing distances between embeddings.
+        Valid options are:
+        - "euclidean_squared": Squared Euclidean distance (default)
+        - "cosine": Cosine similarity
+    max_delta_t : int, optional
+        Maximum time difference τ to compute displacements for.
+        If None, uses the maximum possible time difference in the dataset.
+
+    Returns
+    -------
+    Dict[int, List[float]]
+        Dictionary mapping time difference τ to list of displacements.
+        Each displacement value represents the distance between a pair of
+        embeddings from the same cell separated by τ timepoints.
+    """
+
+    # Get data from dataset
+    fov_names = embedding_dataset["fov_name"].values
+    track_ids = embedding_dataset["track_id"].values
+    timepoints = embedding_dataset["t"].values
+    feature_columns = [f"feature_{i}" for i in range(EMBEDDING_DIMENSION)]
+    embeddings = embedding_dataset[feature_columns].to_numpy()
+
+    # Check if max_delta_t is provided, otherwise use the maximum timepoint
+    if max_delta_t is None:
+        max_delta_t = timepoints.max()
+
+    displacement_per_delta_t = defaultdict(list)
+    # Process each sample
+    for i in tqdm(range(len(fov_names)), desc="Processing FOVs"):
+        fov_name = fov_names[i]
+        track_id = track_ids[i]
+        current_time = timepoints[i]
+        current_embedding = embeddings[i].reshape(1, -1)
+
+        # Compute displacements for each delta t
+        for delta_t in range(1, max_delta_t + 1):
+            future_time = current_time + delta_t
+            matching_indices = np.where(
+                (fov_names == fov_name)
+                & (track_ids == track_id)
+                & (timepoints == future_time)
+            )[0]
+
+            if len(matching_indices) == 1:
+                if distance_metric == "euclidean_squared":
+                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
+                    displacement = np.sum((current_embedding - future_embedding) ** 2)
+                elif distance_metric == "cosine":
+                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
+                    displacement = cosine_similarity(
+                        current_embedding, future_embedding
+                    )
+                displacement_per_delta_t[delta_t].append(displacement)
+    return dict(displacement_per_delta_t)
+
+
+embedding_dimension = tracks.shape[1]
+# Compute displacements
+displacements = compute_displacement(
+    embedding_dataset=tracks,
+    distance_metric="euclidean_squared",
+)
+means, stds = compute_displacement_statistics(displacements)
+# Sort by delta_t for plotting
+delta_t = sorted(means.keys())
+mean_values = [means[delta_t] for delta_t in delta_t]
+std_values = [stds[delta_t] for delta_t in delta_t]
+delta_t_seconds = [i * SECONDS_PER_FRAME for i in delta_t]
+# Filter out non-positive values for log scale
+valid_mask = np.array(mean_values) > 0
+valid_delta_t = np.array(delta_t_seconds)[valid_mask]
+valid_means = np.array(mean_values)[valid_mask]
+
+# Calculate slopes for different regions
+log_delta_t = np.log(valid_delta_t)
+log_means = np.log(valid_means)
+n_points = len(log_delta_t)
+early_end = n_points // 3
+early_slope, _ = np.polyfit(log_delta_t[:early_end], log_means[:early_end], 1)
+early_slope = early_slope / (2 * embedding_dimension)
+print(f"Early slope: {early_slope*1e4}")
 # %%
