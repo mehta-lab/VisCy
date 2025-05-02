@@ -1,8 +1,4 @@
 # %%
-import sys
-from pathlib import Path
-
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -10,7 +6,6 @@ import pandas as pd
 import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks
@@ -118,6 +113,64 @@ plt.savefig(
     dpi=300,
     bbox_inches='tight'
 )
+
+# %% plot phatemap of the data with cell tracks overlayed
+
+infected_fov = '/B/4/9'
+infected_track = 42
+uninfected_fov = '/A/3/9'
+uninfected_track = 19 # or 23
+
+
+cell_uninfected = data[
+    (data["fov_name"] == uninfected_fov) &
+    (data["track_id"] == uninfected_track)
+][["PHATE1", "PHATE2"]].reset_index(drop=True).iloc[::2]
+
+cell_infected = data[
+    (data["fov_name"] == infected_fov) &
+    (data["track_id"] == infected_track)
+][["PHATE1", "PHATE2"]].reset_index(drop=True).iloc[::2]
+
+
+sns.scatterplot(
+    x=data["PHATE1"],
+    y=data["PHATE2"],
+    hue=data["infection"],
+    palette={1: "steelblue", 2: "orange"},
+    s=7,
+    alpha=0.5,
+)
+
+from matplotlib.patches import FancyArrowPatch
+def add_arrows(df, color):
+    for i in range(df.shape[0] - 1):
+        start = df.iloc[i]
+        end = df.iloc[i + 1]
+        arrow = FancyArrowPatch(
+            (start["PHATE1"], start["PHATE2"]),
+            (end["PHATE1"], end["PHATE2"]),
+            color=color,
+            arrowstyle="-",
+            mutation_scale=5,  # reduce the size of arrowhead by half
+            lw=1,
+            shrinkA=0,
+            shrinkB=0,
+        )
+        plt.gca().add_patch(arrow)
+
+# Apply arrows to the trajectories
+add_arrows(cell_uninfected, color="blue")
+add_arrows(cell_infected, color="red")
+
+plt.xticks(fontsize=10)
+plt.yticks(fontsize=10)
+plt.xlabel("PHATE1", fontsize=14)
+plt.ylabel("PHATE2", fontsize=14)
+plt.legend([])
+
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Feb_sensor_infection_phatemap_timeawarentxent_track.png", dpi=300)
+
 
 # %% compute PCA components
 

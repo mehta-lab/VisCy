@@ -111,6 +111,11 @@ embedding_dataset = read_embedding_dataset(
     "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr"
 )
 
+# for time-aware model uncomment the next three lines
+# embedding_dataset = read_embedding_dataset(
+#     "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr"
+# )
+
 PHATE1 = embedding_dataset["PHATE1"].values
 PHATE2 = embedding_dataset["PHATE2"].values
 
@@ -271,4 +276,7 @@ plt.gca().add_patch(daughter2_arrow)
 
 plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/ALFI_div_track_classical.pdf", dpi=300)
 
-# %%
+
+
+
+

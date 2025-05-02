@@ -1,10 +1,6 @@
 """Use pre-trained ImageNet models to extract features from images."""
 
 # %%
-import sys
-from pathlib import Path
-
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
 import pandas as pd
 import seaborn as sns
@@ -46,8 +42,8 @@ def compute_phate(embeddings, n_components=2, knn=15, decay=0.5, **phate_kwargs)
 model = timm.create_model("convnext_tiny", pretrained=True).eval().to("cuda")
 
 # %%
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
 # '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
 
 # for ALFI division dataset
@@ -235,6 +231,126 @@ y_pred = clf.predict(x_test)
 accuracy = np.mean(y_pred == y_test)
 # save the accuracy for final ploting
 print(f"Accuracy of model: {accuracy}")
+
+
+# %% find a parent that divides to two daughter cells for ploting trajectory
+
+track_well = '/0/2/0'
+parent_id = 3   # 11
+daughter1_track = 4  # 12
+daughter2_track = 5  # 13
+
+# %%
+cell_parent = tracks[
+    (tracks["fov_name"] == track_well) &
+    (tracks["track_id"] == parent_id)
+][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+
+cell_daughter1 = tracks[
+    (tracks["fov_name"] == track_well) &
+    (tracks["track_id"] == daughter1_track)
+][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+
+cell_daughter2 = tracks[
+    (tracks["fov_name"] == track_well) &
+    (tracks["track_id"] == daughter2_track)
+][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+
+
+# %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
+
+sns.scatterplot(
+    x=tracks["phate_0"],
+    y=tracks["phate_1"],
+    hue=tracks["division"],
+    palette={0: "steelblue", 1: "orange"},
+    s=7,
+    alpha=0.5,
+)
+plt.xticks(fontsize=10)
+plt.yticks(fontsize=10)
+plt.xlabel("PHATE1", fontsize=14)
+plt.ylabel("PHATE2", fontsize=14)
+plt.legend([])
+
+# sns.lineplot(x=cell_parent["PHATE1"], y=cell_parent["PHATE2"], color="black", linewidth=2)
+# sns.lineplot(
+#     x=cell_daughter1["PHATE1"], y=cell_daughter1["PHATE2"], color="blue", linewidth=2
+# )
+# sns.lineplot(
+#     x=cell_daughter2["PHATE1"], y=cell_daughter2["PHATE2"], color="red", linewidth=2
+# )
+
+from matplotlib.patches import FancyArrowPatch
+parent_arrow = FancyArrowPatch(
+    (cell_parent["phate_0"].values[28], cell_parent["phate_1"].values[28]),
+    (cell_parent["phate_0"].values[35], cell_parent["phate_1"].values[35]),
+    color="black",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(parent_arrow)
+parent_arrow = FancyArrowPatch(
+    (cell_parent["phate_0"].values[35], cell_parent["phate_1"].values[35]),
+    (cell_parent["phate_0"].values[38], cell_parent["phate_1"].values[38]),
+    color="black",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(parent_arrow)
+daughter1_arrow = FancyArrowPatch(
+    (cell_daughter1["phate_0"].values[0], cell_daughter1["phate_1"].values[0]),
+    (cell_daughter1["phate_0"].values[1], cell_daughter1["phate_1"].values[1]),
+    color="blue",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter1_arrow)
+daughter1_arrow = FancyArrowPatch(
+    (cell_daughter1["phate_0"].values[1], cell_daughter1["phate_1"].values[1]),
+    (cell_daughter1["phate_0"].values[10], cell_daughter1["phate_1"].values[10]),
+    color="blue",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter1_arrow)
+daughter2_arrow = FancyArrowPatch(
+    (cell_daughter2["phate_0"].values[0], cell_daughter2["phate_1"].values[0]),
+    (cell_daughter2["phate_0"].values[1], cell_daughter2["phate_1"].values[1]),
+    color="red",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter2_arrow)
+daughter2_arrow = FancyArrowPatch(
+    (cell_daughter2["phate_0"].values[1], cell_daughter2["phate_1"].values[1]),
+    (cell_daughter2["phate_0"].values[10], cell_daughter2["phate_1"].values[10]),
+    color="red",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter2_arrow)
+
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_ALFI_div_track_imageNet.png", dpi=300)
+
 
 
 #   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
@@ -527,13 +643,6 @@ with torch.inference_mode():
 pooled = torch.cat(features).mean(dim=(2, 3)).cpu().numpy()
 tracks = pd.concat([pd.DataFrame(idx) for idx in indices])
 
-# %% save the tracks as csv
-tracks.to_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv", index=False)
-
-# %% load the tracks
-tracks = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv")
-SECONDS_PER_FRAME = 30 * 60  # seconds
-
 # %% PCA and phate computation
 
 scaled_features = StandardScaler().fit_transform(pooled)
@@ -590,6 +699,13 @@ print(f"Number of NaNs in infection column: {tracks['infection'].isna().sum()}")
 
 # remove rows with infection = 0
 tracks = tracks[tracks["infection"] != 0]
+
+# %% save the tracks as csv
+tracks.to_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv", index=False)
+
+# %% load the tracks
+tracks = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv")
+SECONDS_PER_FRAME = 30 * 60  # seconds
 
 # %% plot PCA and phatemaps with annotations
 plt.figure(figsize=(10, 10))
@@ -721,7 +837,77 @@ plt.ylim(-10, 110)
 plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_over_time.svg", dpi=300)
 
 
-# %% save the tracks and pooled as xarray in zarr format
+# %% find an uninfected and infected track and overlay on scatterplot
+
+infected_fov = '/B/4/9'
+infected_track = 42
+uninfected_fov = '/A/3/9'
+uninfected_track = 19 # or 23
+
+# %%
+cell_uninfected = tracks[
+    (tracks["fov_name"] == uninfected_fov) &
+    (tracks["track_id"] == uninfected_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+cell_infected = tracks[
+    (tracks["fov_name"] == infected_fov) &
+    (tracks["track_id"] == infected_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+# %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
+
+sns.scatterplot(
+    x=tracks["phate_0"],
+    y=tracks["phate_1"],
+    hue=tracks["infection"],
+    palette={1: "steelblue", 2: "orange"},
+    s=7,
+    alpha=0.5,
+)
+
+# sns.lineplot(x=cell_parent["PHATE1"], y=cell_parent["PHATE2"], color="black", linewidth=2)
+# sns.lineplot(
+#     x=cell_daughter1["PHATE1"], y=cell_daughter1["PHATE2"], color="blue", linewidth=2
+# )
+# sns.lineplot(
+#     x=cell_daughter2["PHATE1"], y=cell_daughter2["PHATE2"], color="red", linewidth=2
+# )
+
+from matplotlib.patches import FancyArrowPatch
+def add_arrows(df, color):
+    for i in range(df.shape[0] - 1):
+        start = df.iloc[i]
+        end = df.iloc[i + 1]
+        arrow = FancyArrowPatch(
+            (start["phate_0"], start["phate_1"]),
+            (end["phate_0"], end["phate_1"]),
+            color=color,
+            arrowstyle="-",
+            mutation_scale=10,  # reduce the size of arrowhead by half
+            lw=1,
+            shrinkA=0,
+            shrinkB=0,
+        )
+        plt.gca().add_patch(arrow)
+
+# Apply arrows to the trajectories
+add_arrows(cell_uninfected, color="blue")
+add_arrows(cell_infected, color="red")
+
+plt.xticks(fontsize=10)
+plt.yticks(fontsize=10)
+plt.xlabel("PHATE1", fontsize=14)
+plt.ylabel("PHATE2", fontsize=14)
+plt.legend([])
+
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_track.png", dpi=300)
+
+
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+
 
 
 # %% compute metrics (pairwise distance, dynamic range) on embeddings
