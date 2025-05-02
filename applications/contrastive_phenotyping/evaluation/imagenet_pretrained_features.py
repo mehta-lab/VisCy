@@ -24,9 +24,11 @@ from viscy.representation.evaluation.clustering import (
     pairwise_distance_matrix,
     rank_nearest_neighbors,
 )
+
 # from viscy.representation.evaluation.distance import compute_piece_wise_dissimilarity, analyze_and_plot_distances
 
 # %% function to compute phate from embedding values
+
 
 def compute_phate(embeddings, n_components=2, knn=15, decay=0.5, **phate_kwargs):
 
@@ -38,13 +40,14 @@ def compute_phate(embeddings, n_components=2, knn=15, decay=0.5, **phate_kwargs)
 
     return phate_embedding
 
+
 # %%
 model = timm.create_model("convnext_tiny", pretrained=True).eval().to("cuda")
 
 # %%
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 # for ALFI division dataset
 
@@ -106,10 +109,15 @@ for i, feature in enumerate(phate_embedding.T):
     tracks[f"phate_{i}"] = feature
 
 # save the dataframe as csv
-tracks.to_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/code/ALFI/imagenet_pretrained_features.csv", index=False)
+tracks.to_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/code/ALFI/imagenet_pretrained_features.csv",
+    index=False,
+)
 
 # %% load the dataframe
-tracks = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/code/ALFI/imagenet_pretrained_features.csv")
+tracks = pd.read_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/code/ALFI/imagenet_pretrained_features.csv"
+)
 SECONDS_PER_FRAME = 7 * 60  # seconds
 
 # %% load annotations
@@ -120,17 +128,17 @@ ann_root = Path(
 )
 ann_path = ann_root / "test_annotations.csv"
 annotation = pd.read_csv(ann_path)
-annotation["fov_name"] = '/' + annotation["fov ID"]
+annotation["fov_name"] = "/" + annotation["fov ID"]
 
 # Initialize the division column with NaN values
-tracks["division"] = float('nan')
+tracks["division"] = float("nan")
 
 # Populate division values by matching fov_name and track_id and t
 for index, row in annotation.iterrows():
     mask = (
-        (tracks["fov_name"] == row["fov_name"]) & 
-        (tracks["track_id"] == row["track_id"]) &
-        (tracks["t"] == row["t"])
+        (tracks["fov_name"] == row["fov_name"])
+        & (tracks["track_id"] == row["track_id"])
+        & (tracks["t"] == row["t"])
     )
     tracks.loc[mask, "division"] = row["division"]
 
@@ -151,7 +159,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PCA1")
 ax.set_ylabel("PCA2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_PCmap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_PCmap.png",
+    dpi=300,
+)
 
 # add interactive plotly plot
 # import plotly.express as px
@@ -169,7 +180,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PHATE1")
 ax.set_ylabel("PHATE2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_phatemap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_phatemap.png",
+    dpi=300,
+)
 
 # %% compute the accuracy of the model using a linear classifier
 
@@ -190,7 +204,7 @@ data_test = tracks[
 
 x_train = data_train_val.drop(
     columns=[
-         "division",
+        "division",
         "fov_name",
         "t",
         "track_id",
@@ -235,26 +249,35 @@ print(f"Accuracy of model: {accuracy}")
 
 # %% find a parent that divides to two daughter cells for ploting trajectory
 
-track_well = '/0/2/0'
-parent_id = 3   # 11
+track_well = "/0/2/0"
+parent_id = 3  # 11
 daughter1_track = 4  # 12
 daughter2_track = 5  # 13
 
 # %%
-cell_parent = tracks[
-    (tracks["fov_name"] == track_well) &
-    (tracks["track_id"] == parent_id)
-][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+cell_parent = (
+    tracks[(tracks["fov_name"] == track_well) & (tracks["track_id"] == parent_id)][
+        ["phate_0", "phate_1"]
+    ]
+    .reset_index(drop=True)
+    .iloc[::2]
+)
 
-cell_daughter1 = tracks[
-    (tracks["fov_name"] == track_well) &
-    (tracks["track_id"] == daughter1_track)
-][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+cell_daughter1 = (
+    tracks[
+        (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter1_track)
+    ][["phate_0", "phate_1"]]
+    .reset_index(drop=True)
+    .iloc[::2]
+)
 
-cell_daughter2 = tracks[
-    (tracks["fov_name"] == track_well) &
-    (tracks["track_id"] == daughter2_track)
-][["phate_0", "phate_1"]].reset_index(drop=True).iloc[::2]
+cell_daughter2 = (
+    tracks[
+        (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter2_track)
+    ][["phate_0", "phate_1"]]
+    .reset_index(drop=True)
+    .iloc[::2]
+)
 
 
 # %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
@@ -282,6 +305,7 @@ plt.legend([])
 # )
 
 from matplotlib.patches import FancyArrowPatch
+
 parent_arrow = FancyArrowPatch(
     (cell_parent["phate_0"].values[28], cell_parent["phate_1"].values[28]),
     (cell_parent["phate_0"].values[35], cell_parent["phate_1"].values[35]),
@@ -349,13 +373,15 @@ daughter2_arrow = FancyArrowPatch(
 )
 plt.gca().add_patch(daughter2_arrow)
 
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_ALFI_div_track_imageNet.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_ALFI_div_track_imageNet.png",
+    dpi=300,
+)
 
 
-
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 
 # %% for sensor infection dataset with phase and rfp
@@ -366,7 +392,7 @@ dm = TripletDataModule(
     source_channel=["Phase3D", "RFP"],
     batch_size=128,
     num_workers=8,
-    z_range=(24,29),
+    z_range=(24, 29),
     initial_yx_patch_size=(128, 128),
     final_yx_patch_size=(128, 128),
     normalizations=[
@@ -374,7 +400,7 @@ dm = TripletDataModule(
             keys=["RFP"], lower=50, upper=99, b_min=0.0, b_max=1.0
         ),
         NormalizeSampled(
-            keys=["Phase3D"], level='fov_statistics', subtrahend='mean', divisor='std'
+            keys=["Phase3D"], level="fov_statistics", subtrahend="mean", divisor="std"
         ),
     ],
 )
@@ -394,12 +420,17 @@ with torch.inference_mode():
         rfp = rfp.max(dim=1)[0]  # Max project z: [batch, h, w]
 
         # Create RGB image using phase for all channels and adding RFP to red channel
-        rgb_image = torch.stack([
-            phase + rfp,  # Red channel: phase + RFP
-            phase,        # Green channel: phase only
-            phase,        # Blue channel: phase only
-        ], dim=1).to("cuda")  # Final shape: [batch, 3, h, w]
-        
+        rgb_image = torch.stack(
+            [
+                phase + rfp,  # Red channel: phase + RFP
+                phase,  # Green channel: phase only
+                phase,  # Blue channel: phase only
+            ],
+            dim=1,
+        ).to(
+            "cuda"
+        )  # Final shape: [batch, 3, h, w]
+
         features.append(model.forward_features(rgb_image))
         indices.append(batch["index"])
 
@@ -447,14 +478,14 @@ annotation = pd.read_csv(ann_path)
 annotation["fov_name"] = "/" + annotation["fov_name"]
 
 # Initialize the infection column with NaN values
-tracks["infection"] = float('nan')
+tracks["infection"] = float("nan")
 
 # Populate infection values by matching fov_name and track_id
 for index, row in tracks.iterrows():
     matching_annotations = annotation.loc[
-        (annotation["fov_name"] == row["fov_name"]) & 
-        (annotation["track_id"] == row["track_id"]), 
-        "infection_state"
+        (annotation["fov_name"] == row["fov_name"])
+        & (annotation["track_id"] == row["track_id"]),
+        "infection_state",
     ]
     if len(matching_annotations) > 0:
         tracks.loc[index, "infection"] = matching_annotations.iloc[0]
@@ -476,7 +507,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PCA1")
 ax.set_ylabel("PCA2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_PCmap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_PCmap.png",
+    dpi=300,
+)
 
 # phatemap with annotations
 plt.figure(figsize=(10, 10))
@@ -489,7 +523,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PHATE1")
 ax.set_ylabel("PHATE2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_phatemap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_phatemap.png",
+    dpi=300,
+)
 
 # %% compute the accuracy of the model using a linear classifier
 
@@ -508,7 +545,7 @@ data_test = tracks[
 
 x_train = data_train_val.drop(
     columns=[
-         "infection",
+        "infection",
         "fov_name",
         "t",
         "track_id",
@@ -592,11 +629,10 @@ plt.plot(
     linestyle="--",
 )
 plt.ylim(0, 100)
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_over_time.svg", dpi=300)
-
-
-
-
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_over_time.svg",
+    dpi=300,
+)
 
 
 # %% for sensor infection dataset with rfp only
@@ -607,7 +643,7 @@ dm = TripletDataModule(
     source_channel=["RFP"],
     batch_size=128,
     num_workers=8,
-    z_range=(24,29),
+    z_range=(24, 29),
     initial_yx_patch_size=(128, 128),
     final_yx_patch_size=(128, 128),
     normalizations=[
@@ -630,12 +666,17 @@ with torch.inference_mode():
         rfp = rfp.max(dim=1)[0]  # Max project z: [batch, h, w]
 
         # Create RGB image using phase for all channels and adding RFP to red channel
-        rgb_image = torch.stack([
-            rfp,        # Red channel: RFP
-            rfp,        # Green channel: RFP
-            rfp,        # Blue channel: RFP
-        ], dim=1).to("cuda")  # Final shape: [batch, 3, h, w]
-        
+        rgb_image = torch.stack(
+            [
+                rfp,  # Red channel: RFP
+                rfp,  # Green channel: RFP
+                rfp,  # Blue channel: RFP
+            ],
+            dim=1,
+        ).to(
+            "cuda"
+        )  # Final shape: [batch, 3, h, w]
+
         features.append(model.forward_features(rgb_image))
         indices.append(batch["index"])
 
@@ -683,14 +724,14 @@ annotation = pd.read_csv(ann_path)
 annotation["fov_name"] = "/" + annotation["fov_name"]
 
 # Initialize the infection column with NaN values
-tracks["infection"] = float('nan')
+tracks["infection"] = float("nan")
 
 # Populate infection values by matching fov_name and track_id
 for index, row in annotation.iterrows():
     mask = (
-        (tracks["fov_name"] == row["fov_name"]) & 
-        (tracks["track_id"] == row["track_id"]) &
-        (tracks["t"] == row["t"])
+        (tracks["fov_name"] == row["fov_name"])
+        & (tracks["track_id"] == row["track_id"])
+        & (tracks["t"] == row["t"])
     )
     tracks.loc[mask, "infection"] = row["infection_state"]
 
@@ -701,10 +742,15 @@ print(f"Number of NaNs in infection column: {tracks['infection'].isna().sum()}")
 tracks = tracks[tracks["infection"] != 0]
 
 # %% save the tracks as csv
-tracks.to_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv", index=False)
+tracks.to_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv",
+    index=False,
+)
 
 # %% load the tracks
-tracks = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv")
+tracks = pd.read_csv(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infected_features.csv"
+)
 SECONDS_PER_FRAME = 30 * 60  # seconds
 
 # %% plot PCA and phatemaps with annotations
@@ -718,7 +764,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PCA1")
 ax.set_ylabel("PCA2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_PCmap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_PCmap.png",
+    dpi=300,
+)
 
 # phatemap with annotations
 plt.figure(figsize=(10, 10))
@@ -731,7 +780,10 @@ ax = sns.scatterplot(
 )
 ax.set_xlabel("PHATE1")
 ax.set_ylabel("PHATE2")
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_phatemap.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_phatemap.png",
+    dpi=300,
+)
 
 # %% compute the accuracy of the model using a linear classifier
 
@@ -750,7 +802,7 @@ data_test = tracks[
 
 x_train = data_train_val.drop(
     columns=[
-         "infection",
+        "infection",
         "fov_name",
         "t",
         "track_id",
@@ -834,25 +886,26 @@ plt.plot(
     linestyle="--",
 )
 plt.ylim(-10, 110)
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_over_time.svg", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_over_time.svg",
+    dpi=300,
+)
 
 
 # %% find an uninfected and infected track and overlay on scatterplot
 
-infected_fov = '/B/4/9'
+infected_fov = "/B/4/9"
 infected_track = 42
-uninfected_fov = '/A/3/9'
-uninfected_track = 19 # or 23
+uninfected_fov = "/A/3/9"
+uninfected_track = 19  # or 23
 
 # %%
 cell_uninfected = tracks[
-    (tracks["fov_name"] == uninfected_fov) &
-    (tracks["track_id"] == uninfected_track)
+    (tracks["fov_name"] == uninfected_fov) & (tracks["track_id"] == uninfected_track)
 ][["phate_0", "phate_1"]].reset_index(drop=True)
 
 cell_infected = tracks[
-    (tracks["fov_name"] == infected_fov) &
-    (tracks["track_id"] == infected_track)
+    (tracks["fov_name"] == infected_fov) & (tracks["track_id"] == infected_track)
 ][["phate_0", "phate_1"]].reset_index(drop=True)
 
 # %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
@@ -875,6 +928,8 @@ sns.scatterplot(
 # )
 
 from matplotlib.patches import FancyArrowPatch
+
+
 def add_arrows(df, color):
     for i in range(df.shape[0] - 1):
         start = df.iloc[i]
@@ -891,6 +946,7 @@ def add_arrows(df, color):
         )
         plt.gca().add_patch(arrow)
 
+
 # Apply arrows to the trajectories
 add_arrows(cell_uninfected, color="blue")
 add_arrows(cell_infected, color="red")
@@ -901,21 +957,24 @@ plt.xlabel("PHATE1", fontsize=14)
 plt.ylabel("PHATE2", fontsize=14)
 plt.legend([])
 
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_track.png", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/imagenet_pretrained_infection_track.png",
+    dpi=300,
+)
 
 
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
-
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 
 # %% compute metrics (pairwise distance, dynamic range) on embeddings
 
 from viscy.representation.evaluation.distance import (
     compute_piece_wise_dissimilarity,
-    analyze_and_plot_distances
+    analyze_and_plot_distances,
 )
+
 
 def compute_embedding_distances(
     embeddings,
@@ -924,7 +983,7 @@ def compute_embedding_distances(
     """
     Compute and save pairwise distances between embeddings.
     """
-    feature_columns = [f'feature_{i}' for i in range(768)]
+    feature_columns = [f"feature_{i}" for i in range(768)]
     features = embeddings[feature_columns].to_numpy()
 
     if distance_metric != "euclidean":
@@ -940,15 +999,17 @@ def compute_embedding_distances(
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
     # Create a DataFrame with track information
-    features_df = pd.DataFrame({
-        'track_id': embeddings['track_id'],
-        't': embeddings['t'],
-        'fov_name': embeddings['fov_name']
-    })
+    features_df = pd.DataFrame(
+        {
+            "track_id": embeddings["track_id"],
+            "t": embeddings["t"],
+            "fov_name": embeddings["fov_name"],
+        }
+    )
 
     # Compute piece-wise dissimilarity and rank difference
-    piece_wise_dissimilarity_per_track, _ = (
-        compute_piece_wise_dissimilarity(features_df, cross_dist, rank_fractions)
+    piece_wise_dissimilarity_per_track, _ = compute_piece_wise_dissimilarity(
+        features_df, cross_dist, rank_fractions
     )
 
     all_dissimilarity = np.concatenate(piece_wise_dissimilarity_per_track)
@@ -968,16 +1029,21 @@ def compute_embedding_distances(
 
     return distributions_df
 
+
 # Compute distances and metrics
 distance_df = compute_embedding_distances(tracks, distance_metric="cosine")
 metrics = analyze_and_plot_distances(
     distance_df,
-    output_file_path=Path("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_distance_plot.pdf"),
+    output_file_path=Path(
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_distance_plot.pdf"
+    ),
     overwrite=True,
 )
 print(f"Pairwise distance adjacent frame: {metrics['dissimilarity_mean']}")
 print(f"Pairwise distance random sampling: {metrics['random_mean']}")
-print(f"Ratio of pairwise distance dynamic range: {metrics['random_mean'] / metrics['dissimilarity_mean']}")
+print(
+    f"Ratio of pairwise distance dynamic range: {metrics['random_mean'] / metrics['dissimilarity_mean']}"
+)
 print(f"Dynamic range: {metrics['dynamic_range']}")
 
 
@@ -986,6 +1052,8 @@ from collections import defaultdict
 from sklearn.metrics.pairwise import cosine_similarity
 from typing import Dict, List
 from viscy.representation.evaluation.distance import compute_displacement_statistics
+
+
 def compute_displacement(
     embedding_dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
@@ -1025,7 +1093,7 @@ def compute_displacement(
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
-    feature_columns = [f'feature_{i}' for i in range(768)]
+    feature_columns = [f"feature_{i}" for i in range(768)]
     embeddings = embedding_dataset[feature_columns].to_numpy()
 
     # Check if max_delta_t is provided, otherwise use the maximum timepoint
@@ -1060,6 +1128,7 @@ def compute_displacement(
                     )
                 displacement_per_delta_t[delta_t].append(displacement)
     return dict(displacement_per_delta_t)
+
 
 embedding_dimension = tracks.shape[1]
 # Compute displacements

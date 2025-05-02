@@ -21,6 +21,7 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation import dataset_of_tracks
 from viscy.representation.evaluation.feature import CellFeatures
 
+
 # %% function to read the embedding dataset and return the features
 def compute_PCA(features_path: Path):
     """
@@ -45,56 +46,74 @@ def compute_PCA(features_path: Path):
         .assign_coords(PCA6=("sample", pca_features[:, 5]))
         .assign_coords(PCA7=("sample", pca_features[:, 6]))
         .assign_coords(PCA8=("sample", pca_features[:, 7]))
-        .set_index(sample=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"], append=True)
+        .set_index(
+            sample=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"],
+            append=True,
+        )
     )
 
     return features
 
-def compute_features(features_path: Path, data_path: Path, tracks_path: Path, source_channel: list, seg_channel: list, z_range: tuple, fov_list: list):
+
+def compute_features(
+    features_path: Path,
+    data_path: Path,
+    tracks_path: Path,
+    source_channel: list,
+    seg_channel: list,
+    z_range: tuple,
+    fov_list: list,
+):
 
     embedding_dataset = compute_PCA(features_path)
     features_npy = embedding_dataset["features"].values
 
     # convert the xarray to dataframe structure and add columns for computed features
     embedding_df = embedding_dataset["sample"].to_dataframe().reset_index(drop=True)
-    feature_columns = pd.DataFrame(features_npy, columns=[f"feature_{i+1}" for i in range(768)])
-    
+    feature_columns = pd.DataFrame(
+        features_npy, columns=[f"feature_{i+1}" for i in range(768)]
+    )
+
     embedding_df = pd.concat([embedding_df, feature_columns], axis=1)
     embedding_df = embedding_df.drop(columns=["sample", "UMAP1", "UMAP2"])
 
     # Filter features based on FOV names that start with any of the items in fov_list
-    embedding_df = embedding_df[embedding_df["fov_name"].apply(lambda x: any(x.startswith(fov) for fov in fov_list))]
+    embedding_df = embedding_df[
+        embedding_df["fov_name"].apply(
+            lambda x: any(x.startswith(fov) for fov in fov_list)
+        )
+    ]
 
     # Define feature categories and their corresponding column names
     feature_columns = {
-        'basic_features': [
-            ('Mean Intensity', ['Phase', 'Fluor']),
-            ('Std Dev', ['Phase', 'Fluor']),
-            ('Kurtosis', ['Phase', 'Fluor']),
-            ('Skewness', ['Phase', 'Fluor']),
-            ('Entropy', ['Phase', 'Fluor']),
-            ('Interquartile Range', ['Phase', 'Fluor']),
-            ('Dissimilarity', ['Phase', 'Fluor']),
-            ('Contrast', ['Phase', 'Fluor']),
-            ('Texture', ['Phase', 'Fluor']),
-            ('Weighted Intensity Gradient', ['Phase', 'Fluor']),
-            ('Radial Intensity Gradient', ['Phase', 'Fluor']),
-            ('Zernike Moment Std', ['Phase', 'Fluor']),
-            ('Zernike Moment Mean', ['Phase', 'Fluor']),
-            ('Intensity Localization', ['Phase','Fluor']),
+        "basic_features": [
+            ("Mean Intensity", ["Phase", "Fluor"]),
+            ("Std Dev", ["Phase", "Fluor"]),
+            ("Kurtosis", ["Phase", "Fluor"]),
+            ("Skewness", ["Phase", "Fluor"]),
+            ("Entropy", ["Phase", "Fluor"]),
+            ("Interquartile Range", ["Phase", "Fluor"]),
+            ("Dissimilarity", ["Phase", "Fluor"]),
+            ("Contrast", ["Phase", "Fluor"]),
+            ("Texture", ["Phase", "Fluor"]),
+            ("Weighted Intensity Gradient", ["Phase", "Fluor"]),
+            ("Radial Intensity Gradient", ["Phase", "Fluor"]),
+            ("Zernike Moment Std", ["Phase", "Fluor"]),
+            ("Zernike Moment Mean", ["Phase", "Fluor"]),
+            ("Intensity Localization", ["Phase", "Fluor"]),
         ],
-        'organelle_features': [
-            'Fluor Area',
-            'Fluor Masked Intensity',
+        "organelle_features": [
+            "Fluor Area",
+            "Fluor Masked Intensity",
         ],
-        'nuclear_features': [
-            'Nuclear Area',
-            'Perimeter',
-            'Perimeter area ratio',
-            'Nucleus eccentricity',
+        "nuclear_features": [
+            "Nuclear Area",
+            "Perimeter",
+            "Perimeter area ratio",
+            "Nucleus eccentricity",
         ],
-        'dynamic_features': [
-            'Instantaneous velocity',
+        "dynamic_features": [
+            "Instantaneous velocity",
         ],
     }
 
@@ -119,16 +138,21 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
         csv_files = list((Path(str(tracks_path) + str(fov_name))).glob("*.csv"))
         tracks_df = pd.read_csv(str(csv_files[0]))
 
-        unique_track_ids = embedding_df[embedding_df["fov_name"] == fov_name]["track_id"].unique()
+        unique_track_ids = embedding_df[embedding_df["fov_name"] == fov_name][
+            "track_id"
+        ].unique()
         unique_track_ids = list(set(unique_track_ids))
 
         # iteration_count = 0
 
         for track_id in unique_track_ids:
-            if not embedding_df[(embedding_df["fov_name"] == fov_name) & (embedding_df["track_id"] == track_id)].empty:
-                
+            if not embedding_df[
+                (embedding_df["fov_name"] == fov_name)
+                & (embedding_df["track_id"] == track_id)
+            ].empty:
+
                 track_subdf = tracks_df[tracks_df["track_id"] == track_id]
-                    
+
                 prediction_dataset = dataset_of_tracks(
                     data_path,
                     tracks_path,
@@ -142,7 +166,7 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
                     tracks_path,
                     [fov_name],
                     [track_id],
-                    z_range=(0,1),
+                    z_range=(0, 1),
                     source_channel=seg_channel,
                 )
 
@@ -158,7 +182,12 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
 
                 # find the minimum time point
                 t_min_track = np.min(track_subdf["t"])
-                for i, t in enumerate(embedding_df[(embedding_df["fov_name"] == fov_name) & (embedding_df["track_id"] == track_id)]["t"]):
+                for i, t in enumerate(
+                    embedding_df[
+                        (embedding_df["fov_name"] == fov_name)
+                        & (embedding_df["track_id"] == track_id)
+                    ]["t"]
+                ):
 
                     # Basic statistical features for both channels
                     phase_features = CellFeatures(phase[i], nucl_mask[i])
@@ -166,55 +195,59 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
 
                     # Get all basic statistical measures at once
                     phase_stats = {
-                        'Mean Intensity': PF['mean_intensity'],
-                        'Std Dev': PF['std_dev'],
-                        'Kurtosis': PF['kurtosis'],
-                        'Skewness': PF['skewness'],
-                        'Interquartile Range': PF['iqr'],
-                        'Entropy': PF['spectral_entropy'],
-                        'Dissimilarity': PF['dissimilarity'],
-                        'Contrast': PF['contrast'],
-                        'Texture': PF['texture'],
-                        'Zernike Moment Std': PF['zernike_std'],
-                        'Zernike Moment Mean': PF['zernike_mean'],
-                        'Radial Intensity Gradient': PF['radial_intensity_gradient'],
-                        'Weighted Intensity Gradient': PF['weighted_intensity_gradient'],
-                        'Intensity Localization': PF['intensity_localization'],
+                        "Mean Intensity": PF["mean_intensity"],
+                        "Std Dev": PF["std_dev"],
+                        "Kurtosis": PF["kurtosis"],
+                        "Skewness": PF["skewness"],
+                        "Interquartile Range": PF["iqr"],
+                        "Entropy": PF["spectral_entropy"],
+                        "Dissimilarity": PF["dissimilarity"],
+                        "Contrast": PF["contrast"],
+                        "Texture": PF["texture"],
+                        "Zernike Moment Std": PF["zernike_std"],
+                        "Zernike Moment Mean": PF["zernike_mean"],
+                        "Radial Intensity Gradient": PF["radial_intensity_gradient"],
+                        "Weighted Intensity Gradient": PF[
+                            "weighted_intensity_gradient"
+                        ],
+                        "Intensity Localization": PF["intensity_localization"],
                     }
 
                     fluor_cell_features = CellFeatures(fluor[i], nucl_mask[i])
-        
+
                     FF = fluor_cell_features.compute_all_features()
 
                     fluor_stats = {
-                        'Mean Intensity': FF['mean_intensity'],
-                        'Std Dev': FF['std_dev'],
-                        'Kurtosis': FF['kurtosis'],
-                        'Skewness': FF['skewness'],
-                        'Interquartile Range': FF['iqr'],
-                        'Entropy': FF['spectral_entropy'],
-                        'Contrast': FF['contrast'],
-                        'Dissimilarity': FF['dissimilarity'],
-                        'Texture': FF['texture'],
-                        'Masked Area': FF['masked_area'],
-                        'Masked Intensity': FF['masked_intensity'],
-                        'Weighted Intensity Gradient': FF['weighted_intensity_gradient'],
-                        'Radial Intensity Gradient': FF['radial_intensity_gradient'],
-                        'Zernike Moment Std': FF['zernike_std'],
-                        'Zernike Moment Mean': FF['zernike_mean'],
-                        'Intensity Localization': FF['intensity_localization'],
-                        'Masked Intensity': FF['masked_intensity'],
-                        'Area': FF['area'],
+                        "Mean Intensity": FF["mean_intensity"],
+                        "Std Dev": FF["std_dev"],
+                        "Kurtosis": FF["kurtosis"],
+                        "Skewness": FF["skewness"],
+                        "Interquartile Range": FF["iqr"],
+                        "Entropy": FF["spectral_entropy"],
+                        "Contrast": FF["contrast"],
+                        "Dissimilarity": FF["dissimilarity"],
+                        "Texture": FF["texture"],
+                        "Masked Area": FF["masked_area"],
+                        "Masked Intensity": FF["masked_intensity"],
+                        "Weighted Intensity Gradient": FF[
+                            "weighted_intensity_gradient"
+                        ],
+                        "Radial Intensity Gradient": FF["radial_intensity_gradient"],
+                        "Zernike Moment Std": FF["zernike_std"],
+                        "Zernike Moment Mean": FF["zernike_mean"],
+                        "Intensity Localization": FF["intensity_localization"],
+                        "Masked Intensity": FF["masked_intensity"],
+                        "Area": FF["area"],
                     }
 
                     mask_features = CellFeatures(nucl_mask[i], nucl_mask[i])
                     MF = mask_features.compute_all_features()
 
                     mask_stats = {
-                        'perimeter': MF['perimeter'],
-                        'area': MF['area'],
-                        'eccentricity': MF['eccentricity'],
-                        'perimeter_area_ratio': MF['perimeter_area_ratio'],
+                        "perimeter": MF["perimeter"],
+                        "area": MF["area"],
+                        "eccentricity": MF["eccentricity"],
+                        "perimeter_area_ratio": MF["perimeter_area_ratio"],
                     }
 
                     # dynamic_features = DynamicFeatures(tracks_df)
@@ -225,20 +258,20 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
 
                     # Create dictionaries for each feature category
                     phase_feature_mapping = {
-                        f"Phase {k.replace('_', ' ').title()}": v 
-                        for k, v in phase_stats.items() 
+                        f"Phase {k.replace('_', ' ').title()}": v
+                        for k, v in phase_stats.items()
                     }
-                    
+
                     fluor_feature_mapping = {
-                        f"Fluor {k.replace('_', ' ').title()}": v 
-                        for k, v in fluor_stats.items() 
+                        f"Fluor {k.replace('_', ' ').title()}": v
+                        for k, v in fluor_stats.items()
                     }
-                    
+
                     mask_feature_mapping = {
-                        "Nuclear area": mask_stats['area'],
-                        "Perimeter": mask_stats['perimeter'],
-                        "Perimeter area ratio": mask_stats['perimeter_area_ratio'],
-                        "Nucleus eccentricity": mask_stats['eccentricity']
+                        "Nuclear area": mask_stats["area"],
+                        "Perimeter": mask_stats["perimeter"],
+                        "Perimeter area ratio": mask_stats["perimeter_area_ratio"],
+                        "Nucleus eccentricity": mask_stats["eccentricity"],
                     }
 
                     # Combine all feature dictionaries
@@ -251,16 +284,17 @@ def compute_features(features_path: Path, data_path: Path, tracks_path: Path, so
                     # update the features dataframe
                     for feature_name, value in feature_values.items():
                         embedding_df.loc[
-                            (embedding_df["fov_name"] == fov_name) & 
-                            (embedding_df["track_id"] == track_id) & 
-                            (embedding_df["t"] == t),
-                            feature_name
+                            (embedding_df["fov_name"] == fov_name)
+                            & (embedding_df["track_id"] == track_id)
+                            & (embedding_df["t"] == t),
+                            feature_name,
                         ] = value[0]
 
                 # iteration_count += 1
                 print(f"Processed {fov_name}+{track_id}")
 
     return embedding_df
+
 
 # %% save all feature dataframe to png file
 def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
@@ -279,38 +313,38 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
 
     plt.figure(figsize=(30, 10))
     sns.heatmap(
-        correlation.drop(columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"]).loc[
-            "PCA1":"PCA8", :
-        ],
+        correlation.drop(
+            columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"]
+        ).loc["PCA1":"PCA8", :],
         annot=True,
         cmap="coolwarm",
         fmt=".2f",
-        annot_kws={'size': 18},
-        cbar=False
+        annot_kws={"size": 18},
+        cbar=False,
     )
     plt.title("Correlation between PCA features and computed features", fontsize=12)
     plt.xlabel("Computed Features", fontsize=18)
     plt.ylabel("PCA Features", fontsize=18)
-    plt.xticks(fontsize=18, rotation=45, ha='right')  # Rotate labels and align them
+    plt.xticks(fontsize=18, rotation=45, ha="right")  # Rotate labels and align them
     plt.yticks(fontsize=18)
-    
+
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
-    
+
     plt.savefig(
         filename,
         dpi=300,
-        bbox_inches='tight',
-        pad_inches=0.5  # Add padding around the figure
+        bbox_inches="tight",
+        pad_inches=0.5,  # Add padding around the figure
     )
     plt.close()
 
     return correlation
 
 
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 # %% for organelle features
 
@@ -332,7 +366,15 @@ fov_list = ["/B/2/000000", "/B/3/000000", "/C/2/000000"]
 # fov_name = "/B/2/000000"
 # track_id = 24
 
-features_organelle = compute_features(features_path, data_path, tracks_path, source_channel, seg_channel, z_range, fov_list)
+features_organelle = compute_features(
+    features_path,
+    data_path,
+    tracks_path,
+    source_channel,
+    seg_channel,
+    z_range,
+    fov_list,
+)
 
 # Save the features dataframe to a CSV file
 features_organelle.to_csv(
@@ -340,7 +382,10 @@ features_organelle.to_csv(
     index=False,
 )
 
-correlation_organelle = compute_correlation_and_save_png(features_organelle, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.svg")
+correlation_organelle = compute_correlation_and_save_png(
+    features_organelle,
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.svg",
+)
 
 # features_organelle = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell_refinedPCA.csv")
 
@@ -349,7 +394,7 @@ correlation_organelle = compute_correlation_and_save_png(features_organelle, "/h
 # set_features = [
 #     "Fluor Radial Intensity Gradient",
 #     "Phase Interquartile Range",
-#     "Perimeter area ratio",  
+#     "Perimeter area ratio",
 #     "Fluor Zernike Moment Mean",
 #     "Fluor Mean Intensity",
 #     "Phase Entropy",
@@ -374,7 +419,7 @@ sns.heatmap(
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
-    annot_kws={'size': 24},
+    annot_kws={"size": 24},
     vmin=-1,
     vmax=1,
 )
@@ -387,9 +432,9 @@ plt.savefig(
 )
 
 
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 # %% for sensor features
 
@@ -406,11 +451,19 @@ tracks_path = Path(
 source_channel = ["Phase3D", "RFP"]
 seg_channel = ["Nuclei_prediction_labels"]
 z_range = (28, 43)
-fov_list = ["/A/3","/B/3","/B/4"]
+fov_list = ["/A/3", "/B/3", "/B/4"]
 # fov_name = "/B/4/5"
 # track_id = 11
 
-features_sensor = compute_features(features_path, data_path, tracks_path, source_channel, seg_channel, z_range, fov_list)
+features_sensor = compute_features(
+    features_path,
+    data_path,
+    tracks_path,
+    source_channel,
+    seg_channel,
+    z_range,
+    fov_list,
+)
 
 features_sensor.to_csv(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv",
@@ -419,11 +472,16 @@ features_sensor.to_csv(
 
 # features_sensor = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv")
 # drop columns 'Nuclear area' and 'Instantaneous velocity'
-features_sensor = features_sensor.drop(columns=["Nuclear Area", "Instantaneous velocity"])
+features_sensor = features_sensor.drop(
+    columns=["Nuclear Area", "Instantaneous velocity"]
+)
 # take a subset of the dropping 768 features
-feature_columns=[f"feature_{i+1}" for i in range(768)]
+feature_columns = [f"feature_{i+1}" for i in range(768)]
 features_subset_sensor = features_sensor.drop(columns=feature_columns)
-correlation_sensor = compute_correlation_and_save_png(features_subset_sensor, "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.svg")
+correlation_sensor = compute_correlation_and_save_png(
+    features_subset_sensor,
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.svg",
+)
 
 # %% plot PCA vs set of computed features for sensor features
 
@@ -457,7 +515,7 @@ sns.heatmap(
     annot=True,
     cmap="coolwarm",
     fmt=".2f",
-    annot_kws={'size': 24},
+    annot_kws={"size": 24},
     vmin=-1,
     vmax=1,
 )
@@ -480,9 +538,9 @@ sns.scatterplot(
 )
 
 
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-. 
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ 
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'    
+#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
+#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
+# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
 
 
 # %% explore features in organelle model
@@ -503,13 +561,14 @@ fig.show()
 
 # %%
 
+
 def save_patches(fov_name, track_id):
     data_path = Path(
         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
     )
     tracks_path = Path(
         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
-    )   
+    )
     source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
     prediction_dataset = dataset_of_tracks(
         data_path,
@@ -538,18 +597,23 @@ def save_patches(fov_name, track_id):
 
 # PCA2: Perimeter area ratio
 
-twohundred_highest_perimeter_area_ratio = features_organelle.nlargest(200, "Perimeter area ratio").iloc[199]
+twohundred_highest_perimeter_area_ratio = features_organelle.nlargest(
+    200, "Perimeter area ratio"
+).iloc[199]
 print("Row with 200th highest 'Perimeter area ratio':")
 # print(twohundred_highest_perimeter_area_ratio)
 print(
     f"fov_name: {twohundred_highest_perimeter_area_ratio['fov_name']}, time: {twohundred_highest_perimeter_area_ratio['t']}"
 )
 save_patches(
-    twohundred_highest_perimeter_area_ratio["fov_name"], twohundred_highest_perimeter_area_ratio["track_id"]
+    twohundred_highest_perimeter_area_ratio["fov_name"],
+    twohundred_highest_perimeter_area_ratio["track_id"],
 )
 
 
-lowest_perimeter_area_ratio = features_organelle.loc[features_organelle["Perimeter area ratio"].idxmin()]
+lowest_perimeter_area_ratio = features_organelle.loc[
+    features_organelle["Perimeter area ratio"].idxmin()
+]
 print("Row with lowest 'Perimeter area ratio':")
 # print(lowest_perimeter_area_ratio)
 print(
@@ -560,46 +624,58 @@ save_patches(
 )
 
 # PCA1: Flour Radial Intensity Gradient
-highest_fluor_radial_intensity_gradient = features_organelle.loc[features_organelle["Fluor Radial Intensity Gradient"].idxmax()]
+highest_fluor_radial_intensity_gradient = features_organelle.loc[
+    features_organelle["Fluor Radial Intensity Gradient"].idxmax()
+]
 print("Row with highest 'Fluor radial intensity gradient':")
 # print(highest_fluor_radial_intensity_gradient)
 print(
     f"fov_name: {highest_fluor_radial_intensity_gradient['fov_name']}, time: {highest_fluor_radial_intensity_gradient['t']}"
 )
 save_patches(
-    highest_fluor_radial_intensity_gradient["fov_name"], highest_fluor_radial_intensity_gradient["track_id"]
+    highest_fluor_radial_intensity_gradient["fov_name"],
+    highest_fluor_radial_intensity_gradient["track_id"],
 )
 
-lowest_fluor_radial_intensity_gradient = features_organelle.loc[features_organelle["Fluor Radial Intensity Gradient"].idxmin()]
+lowest_fluor_radial_intensity_gradient = features_organelle.loc[
+    features_organelle["Fluor Radial Intensity Gradient"].idxmin()
+]
 print("Row with lowest 'Fluor radial intensity gradient':")
 # print(lowest_fluor_radial_intensity_gradient)
 print(
     f"fov_name: {lowest_fluor_radial_intensity_gradient['fov_name']}, time: {lowest_fluor_radial_intensity_gradient['t']}"
 )
 save_patches(
-    lowest_fluor_radial_intensity_gradient["fov_name"], lowest_fluor_radial_intensity_gradient["track_id"]
+    lowest_fluor_radial_intensity_gradient["fov_name"],
+    lowest_fluor_radial_intensity_gradient["track_id"],
 )
 
 
 # PCA1: Phase Interquartile Range
-highest_phase_interquartile_range = features_organelle.loc[features_organelle["Phase Interquartile Range"].idxmax()]
+highest_phase_interquartile_range = features_organelle.loc[
+    features_organelle["Phase Interquartile Range"].idxmax()
+]
 print("Row with highest 'Phase interquartile range':")
 # print(highest_phase_interquartile_range)
 print(
     f"fov_name: {highest_phase_interquartile_range['fov_name']}, time: {highest_phase_interquartile_range['t']}"
 )
 save_patches(
-    highest_phase_interquartile_range["fov_name"], highest_phase_interquartile_range["track_id"]
+    highest_phase_interquartile_range["fov_name"],
+    highest_phase_interquartile_range["track_id"],
 )
 
-hundred_lowest_phase_interquartile_range = features_organelle.nsmallest(100, "Phase Interquartile Range").iloc[99]
+hundred_lowest_phase_interquartile_range = features_organelle.nsmallest(
+    100, "Phase Interquartile Range"
+).iloc[99]
 print("Row with 100th lowest 'Phase interquartile range':")
 # print(hundred_lowest_phase_interquartile_range)
 print(
     f"fov_name: {hundred_lowest_phase_interquartile_range['fov_name']}, time: {hundred_lowest_phase_interquartile_range['t']}"
-)   
+)
 save_patches(
-    hundred_lowest_phase_interquartile_range["fov_name"], hundred_lowest_phase_interquartile_range["track_id"]
+    hundred_lowest_phase_interquartile_range["fov_name"],
+    hundred_lowest_phase_interquartile_range["track_id"],
 )
 
 
