@@ -255,29 +255,17 @@ daughter1_track = 4  # 12
 daughter2_track = 5  # 13
 
 # %%
-cell_parent = (
-    tracks[(tracks["fov_name"] == track_well) & (tracks["track_id"] == parent_id)][
-        ["phate_0", "phate_1"]
-    ]
-    .reset_index(drop=True)
-    .iloc[::2]
-)
+cell_parent = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == parent_id)
+][["phate_0", "phate_1"]].reset_index(drop=True)
 
-cell_daughter1 = (
-    tracks[
-        (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter1_track)
-    ][["phate_0", "phate_1"]]
-    .reset_index(drop=True)
-    .iloc[::2]
-)
+cell_daughter1 = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter1_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
 
-cell_daughter2 = (
-    tracks[
-        (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter2_track)
-    ][["phate_0", "phate_1"]]
-    .reset_index(drop=True)
-    .iloc[::2]
-)
+cell_daughter2 = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter2_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
 
 
 # %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE

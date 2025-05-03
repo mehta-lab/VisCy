@@ -13,6 +13,7 @@ import phate
 import seaborn as sns
 import torch
 import xarray as xr
+from matplotlib.patches import FancyArrowPatch
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
@@ -34,9 +35,25 @@ from viscy.representation.evaluation.distance import (
 )
 from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 
+
 # plt.style.use(
 #     "/home/eduardo.hirata/repos/viscy/applications/contrastive_phenotyping/figures/figure.mplstyle"
 # )
+def add_arrows(df, color):
+    for i in range(df.shape[0] - 1):
+        start = df.iloc[i]
+        end = df.iloc[i + 1]
+        arrow = FancyArrowPatch(
+            (start["phate_0"], start["phate_1"]),
+            (end["phate_0"], end["phate_1"]),
+            color=color,
+            arrowstyle="-",
+            mutation_scale=10,  # reduce the size of arrowhead by half
+            lw=1,
+            shrinkA=0,
+            shrinkB=0,
+        )
+        plt.gca().add_patch(arrow)
 
 
 # Function to compute PHATE
@@ -254,6 +271,7 @@ plt.savefig(
 )
 
 # %%
+
 # Visualize PHATE of original features
 plt.figure(figsize=(10, 10))
 ax = sns.scatterplot(
@@ -263,10 +281,33 @@ ax = sns.scatterplot(
     palette={1: "steelblue", 2: "orange"},
     legend="brief",
     rasterized=True,
-    s=20,  # Point size
+    s=7,
+    alpha=0.5,
 )
 ax.set_xlabel("PHATE1")
 ax.set_ylabel("PHATE2")
+
+infected_fov = "/B/4/9"
+infected_track = 42
+uninfected_fov = "/A/3/9"
+uninfected_track = 19  # or 23
+
+cell_uninfected = tracks[
+    (tracks["fov_name"] == uninfected_fov) & (tracks["track_id"] == uninfected_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+cell_infected = tracks[
+    (tracks["fov_name"] == infected_fov) & (tracks["track_id"] == infected_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+# Apply arrows to the trajectories
+add_arrows(cell_uninfected, color="blue")
+add_arrows(cell_infected, color="red")
+
+plt.xticks(fontsize=10)
+plt.yticks(fontsize=10)
+plt.xlabel("PHATE1", fontsize=14)
+plt.ylabel("PHATE2", fontsize=14)
 
 # Save legend separately
 save_legend_as_pdf(ax, output_dir / "openphenom_infection_rfp_only_phate_legend.pdf")
@@ -504,11 +545,94 @@ ax = sns.scatterplot(
     palette={0: "steelblue", 1: "orange"},
     legend="brief",
     rasterized=True,
-    s=20,  # Point size
+    s=14,
+    alpha=0.5,
 )
 ax.set_xlabel("PHATE1")
 ax.set_ylabel("PHATE2")
 
+# Select the division track
+track_well = "/0/2/0"
+parent_id = 3  # 11
+daughter1_track = 4  # 12
+daughter2_track = 5  # 13
+cell_parent = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == parent_id)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+cell_daughter1 = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter1_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+
+cell_daughter2 = tracks[
+    (tracks["fov_name"] == track_well) & (tracks["track_id"] == daughter2_track)
+][["phate_0", "phate_1"]].reset_index(drop=True)
+parent_arrow = FancyArrowPatch(
+    (cell_parent["phate_0"].values[28], cell_parent["phate_1"].values[28]),
+    (cell_parent["phate_0"].values[35], cell_parent["phate_1"].values[35]),
+    color="black",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(parent_arrow)
+parent_arrow = FancyArrowPatch(
+    (cell_parent["phate_0"].values[35], cell_parent["phate_1"].values[35]),
+    (cell_parent["phate_0"].values[38], cell_parent["phate_1"].values[38]),
+    color="black",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(parent_arrow)
+daughter1_arrow = FancyArrowPatch(
+    (cell_daughter1["phate_0"].values[0], cell_daughter1["phate_1"].values[0]),
+    (cell_daughter1["phate_0"].values[1], cell_daughter1["phate_1"].values[1]),
+    color="blue",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter1_arrow)
+daughter1_arrow = FancyArrowPatch(
+    (cell_daughter1["phate_0"].values[1], cell_daughter1["phate_1"].values[1]),
+    (cell_daughter1["phate_0"].values[10], cell_daughter1["phate_1"].values[10]),
+    color="blue",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter1_arrow)
+daughter2_arrow = FancyArrowPatch(
+    (cell_daughter2["phate_0"].values[0], cell_daughter2["phate_1"].values[0]),
+    (cell_daughter2["phate_0"].values[1], cell_daughter2["phate_1"].values[1]),
+    color="red",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter2_arrow)
+daughter2_arrow = FancyArrowPatch(
+    (cell_daughter2["phate_0"].values[1], cell_daughter2["phate_1"].values[1]),
+    (cell_daughter2["phate_0"].values[10], cell_daughter2["phate_1"].values[10]),
+    color="red",
+    arrowstyle="->",
+    mutation_scale=20,  # reduce the size of arrowhead by half
+    lw=2,
+    shrinkA=0,
+    shrinkB=0,
+)
+plt.gca().add_patch(daughter2_arrow)
 # Save legend separately
 save_legend_as_pdf(ax, output_dir / "openphenom_infection_phate_legend.pdf")
 
