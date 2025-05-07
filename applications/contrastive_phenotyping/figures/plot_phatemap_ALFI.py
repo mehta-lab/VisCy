@@ -95,10 +95,6 @@ fig.legend(handles=legend_elements, loc='center right', fontsize=18)
 plt.tight_layout()
 plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/phatemap_timeinterval_ALFI.pdf", dpi=300)
 
-
-
-
-
 # %% plot the joint embedding from time aware and classical models
 
 train_data_timeaware = read_embedding_dataset(

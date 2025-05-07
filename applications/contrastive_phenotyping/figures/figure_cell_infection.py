@@ -153,13 +153,13 @@ cell_infected = (
     .iloc[::2]
 )
 
-
+plt.figure(figsize=(10, 10))
 sns.scatterplot(
     x=data["PHATE1"],
     y=data["PHATE2"],
     hue=data["infection"],
     palette={1: "steelblue", 2: "orange"},
-    s=7,
+    s=14,
     alpha=0.5,
 )
 
