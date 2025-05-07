@@ -1135,6 +1135,34 @@ valid_mask = np.array(mean_values) > 0
 valid_delta_t = np.array(delta_t_seconds)[valid_mask]
 valid_means = np.array(mean_values)[valid_mask]
 
+plt.figure(figsize=(10, 6))
+plt.plot(
+    delta_t_seconds,
+    mean_values,
+    "-",
+    color="orange",
+    alpha=0.5,
+    zorder=1,
+)
+plt.scatter(
+    delta_t_seconds,
+    mean_values,
+    color="orange",
+    s=20,
+    label="imagenet",
+    zorder=2,
+)
+plt.xlabel("Time Shift (seconds)", fontsize=18)
+plt.ylabel("Mean Square Displacement", fontsize=18)
+plt.ylim(0, 900)
+plt.grid(True, alpha=0.3)
+plt.legend(fontsize=16, frameon=False)
+plt.tight_layout()
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_msd_linear.svg",
+    dpi=300,
+)
+
 # Calculate slopes for different regions
 log_delta_t = np.log(valid_delta_t)
 log_means = np.log(valid_means)
@@ -1143,5 +1171,39 @@ early_end = n_points // 3
 early_slope, _ = np.polyfit(log_delta_t[:early_end], log_means[:early_end], 1)
 early_slope = early_slope / (2 * embedding_dimension)
 print(f"Early slope: {early_slope}")
+
+#  Plot MSD vs time (log-log scale with slopes)
+plt.figure(figsize=(10, 6))
+plt.plot(
+    log_delta_t,
+    log_means,
+    "-",
+    color="orange",
+    alpha=0.5,
+    zorder=1,
+)
+plt.scatter(
+    log_delta_t,
+    log_means,
+    color="orange",
+    s=20,
+    zorder=2,
+    label="imagenet",
+    # label=f"{interval_label} (α_early={early_slope:.2e}, α_mid={mid_slope:.2e})",
+)
+plt.xscale("log")
+plt.yscale("log")
+plt.xlabel("log of Time Shift (seconds)", fontsize=18)
+plt.ylabel("log of Mean Square Displacement", fontsize=18)
+plt.ylim(2, 7)
+plt.grid(True, alpha=0.3, which="both")
+plt.xticks(fontsize=16)
+plt.yticks(fontsize=16)
+plt.legend(fontsize=16, frameon=False)
+plt.tight_layout()
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/imagenet_pretrained_msd_log.svg",
+    dpi=300,
+)
 
 # %%
