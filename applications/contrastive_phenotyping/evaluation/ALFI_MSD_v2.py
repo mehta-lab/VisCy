@@ -90,10 +90,11 @@ for interval_label, path in feature_paths.items():
 
 plt.xlabel("Time Shift (seconds)", fontsize=18)
 plt.ylabel("Mean Square Displacement", fontsize=18)
+plt.ylim(0, 900)
 plt.grid(True, alpha=0.3)
-plt.legend(fontsize=16)
+plt.legend(fontsize=16, frameon=False)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_linear.png", dpi=300)
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_linear.svg", dpi=300)
 
 # %% Plot MSD vs time (log-log scale with slopes)
 plt.figure(figsize=(10, 6))
@@ -154,15 +155,16 @@ plt.xscale("log")
 plt.yscale("log")
 plt.xlabel("Time Shift (seconds)", fontsize=18)
 plt.ylabel("Mean Square Displacement", fontsize=18)
+plt.ylim(2, 7)
 plt.grid(True, alpha=0.3, which="both")
 plt.xticks(fontsize=16)
 plt.yticks(fontsize=16)
 # plt.legend(
 #     title="α = slope in log-log space", bbox_to_anchor=(1.05, 1), loc="upper left"
 # )
-plt.legend(fontsize=16)
+plt.legend(fontsize=16, frameon=False)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_log.png", dpi=300)
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_log.svg", dpi=300)
 
 # %% Plot slopes analysis
 early_slopes = []
@@ -211,6 +213,6 @@ plt.xticks(x, intervals, rotation=45, fontsize=16)
 plt.yticks(fontsize=16)
 plt.legend(fontsize=16)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_slopes.png", dpi=300)
+plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_slopes.svg", dpi=300)
 
 # %%
