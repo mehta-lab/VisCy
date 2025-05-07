@@ -209,3 +209,14 @@ The virtually stained images is not affected by this issue and can robustly labe
 In the above example, we demonstrated how to use the VSCyto3D model
 for virtual staining of cell nuclei and plasma membranes, which can rescue missing labels.
 """
+
+# %% [markdown]
+"""
+## Responsible Use
+
+We are committed to advancing the responsible development and use of artificial intelligence.
+Please follow our [Acceptable Use Policy](https://virtualcellmodels.cziscience.com/acceptable-use-policy) when engaging with our services.
+
+Should you have any security or privacy issues or questions related to the services,
+please reach out to our team at [security@chanzuckerberg.com](mailto:security@chanzuckerberg.com) or [privacy@chanzuckerberg.com](mailto:privacy@chanzuckerberg.com) respectively.
+"""
