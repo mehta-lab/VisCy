@@ -12,7 +12,7 @@
 * Download the VSCyto3D model and an example dataset containing HEK293T cell images.
 * Pre-compute normalization statistics for the images using the `viscy preprocess` command line interface (CLI).
 * Run inference for joint virtual staining of cell nuclei and plasma membrane via the `viscy predict` CLI.
-* Visualize and compare virtually and experimentally stained cells.
+* Compare virtually and experimentally stained cells and see how virtual staining can rescue missing labels.
 """
 
 # %% [markdown]
@@ -29,9 +29,9 @@ Python>=3.11
 See the [model card](https://virtualcellmodels.cziscience.com/paper/cytoland2025)
 for more details about the Cytoland models. 
 
-VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells.
+VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells using the Cytoland approach.
 This model enables users to jointly stain cell nuclei and plasma membranes from 3D label-free images
-for downstream analysis such as cell segmentation and tracking.
+for downstream analysis such as cell segmentation and tracking without the need for human annotation of volumetric data
 """
 
 # %% [markdown]
@@ -93,7 +93,7 @@ if "get_ipython" in globals():
 
 The HEK293T example dataset used in this quick-start guide contains
 quantitative phase and paired fluorescence images of cell nuclei and plasma membrane.
-It is a subset (one cropped region of interest) a test set used to evaluate the VSCyto3D model.
+It is a subset (one cropped region of interest) from a test set used to evaluate the VSCyto3D model.
 The full dataset can be downloaded from the
 [BioImage Archive](https://www.ebi.ac.uk/biostudies/BioImages/studies/S-BIAD1702).
 
@@ -207,5 +207,5 @@ The virtually stained images is not affected by this issue and can robustly labe
 # Summary
 
 In the above example, we demonstrated how to use the VSCyto3D model
-for virtual staining of cell nuclei and plasma membranes.
+for virtual staining of cell nuclei and plasma membranes, which can rescue missing labels.
 """
