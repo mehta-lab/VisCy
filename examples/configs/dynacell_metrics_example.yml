@@ -1,0 +1,34 @@
+# Example configuration for DynaCell metrics computation
+
+# Required parameters
+target_database: /path/to/target_database.csv
+pred_database: /path/to/prediction_database.csv
+output_dir: ./metrics_output
+method: intensity  # Options: 'intensity' or 'segmentation2D'
+
+# Target dataset parameters
+target_channel: Organelle
+# Z-slice can be a single integer (e.g., 16) or a range specified as a list of two integers [start, end] (e.g., [15, 17])
+target_z_slice: 16  # Use -1 for all slices, or a list like [15, 17] for a range
+target_cell_types: 
+  - HEK293T
+target_organelles:
+  - HIST2H2BE  
+target_infection_conditions:
+  - Mock
+
+# Prediction dataset parameters
+pred_channel: Organelle
+# Z-slice can be a single integer (e.g., 16) or a range specified as a list of two integers [start, end] (e.g., [15, 17])
+pred_z_slice: 16  # Use -1 for all slices, or a list like [15, 17] for a range
+pred_cell_types:
+  - HEK293T
+pred_organelles: 
+  - HIST2H2BE
+pred_infection_conditions:
+  - Mock
+
+# Processing parameters
+batch_size: 1
+num_workers: 0
+version: "1"

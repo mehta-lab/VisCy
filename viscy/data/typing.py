@@ -64,6 +64,16 @@ class SegmentationSample(TypedDict):
     time_idx: OneOrSeq[int]
 
 
+class DynaCellSample(SegmentationSample):
+    """
+    DynaCell sample type for mini-batches.
+    """
+
+    cell_type: str
+    organelle: str
+    infection: str
+
+
 class ChannelMap(TypedDict):
     """Source channel names."""
 
