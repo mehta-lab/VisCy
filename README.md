@@ -26,11 +26,10 @@ Please use the stable release from PyPI for virtual staining.
 
 ## Cytoland (robust virtual staining)
 
-### Demos
+### Online demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
 
-- [Interactive 2D virtual staining demo of cell nuclei and membrane from label-free images 🤗](https://compmicro-czb-virtualstaining.hf.space)
-
-[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
+Try the 2D virtual staining demo of cell nuclei and membrane from label-free images on
+[Hugging Face](https://huggingface.co/spaces/compmicro-czb/VirtualStaining).
 
 <p align="center">
 <a href="https://compmicro-czb-virtualstaining.hf.space" target="_blank" rel="noopener noreferrer">
