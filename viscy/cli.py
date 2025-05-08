@@ -2,6 +2,7 @@ import logging
 import os
 import sys
 from datetime import datetime
+from pathlib import Path
 
 import torch
 from jsonargparse import lazy_instance
@@ -22,6 +23,7 @@ class VisCyCLI(LightningCLI):
         subcommands["preprocess"] = subcommand_base_args
         subcommands["export"] = subcommand_base_args
         subcommands["precompute"] = subcommand_base_args
+        subcommands["compute_dynacell_metrics"] = subcommand_base_args
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
@@ -51,8 +53,15 @@ def main() -> None:
     Set default random seed to 42.
     """
     _setup_environment()
-    require_model = {"preprocess", "precompute"}.isdisjoint(sys.argv)
-    require_data = {"preprocess", "precompute", "export"}.isdisjoint(sys.argv)
+    require_model = {"preprocess", "precompute", "compute_dynacell_metrics"}.isdisjoint(
+        sys.argv
+    )
+    require_data = {
+        "preprocess",
+        "precompute",
+        "export",
+        "compute_dynacell_metrics",
+    }.isdisjoint(sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
         datamodule_class=LightningDataModule if require_data else None,
