@@ -28,7 +28,7 @@ Please use the stable release from PyPI for virtual staining.
 
 ### Demos
 
-- [Interactive 2D virtual staining demo of cell nuclei and membrane from labelfree data 🤗](https://compmicro-czb-virtualstaining.hf.space)
+- [Interactive 2D virtual staining demo of cell nuclei and membrane from label-free images 🤗](https://compmicro-czb-virtualstaining.hf.space)
 
 [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
 
