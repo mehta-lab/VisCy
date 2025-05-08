@@ -35,12 +35,6 @@ from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
 from viscy.utils.log_images import detach_sample, render_images
 
-try:
-    from cellpose.models import CellposeModel
-except ImportError:
-    CellposeModel = None
-
-
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "UNeXt2": UNeXt2,
@@ -409,22 +403,19 @@ class VSUNet(LightningModule):
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
-        if CellposeModel is None:
-            # raise ImportError(
-            #     "CellPose not installed. "
-            #     "Please install the metrics dependency with "
-            #     '`pip install viscy".[metrics]"`'
-            # )
-            _logger.warning(
-                "CellPose not installed. "
-                "Please install the metrics dependency with "
-                '`pip install viscy"[metrics]"`'
-            )
-
         if self.test_cellpose_model_path is not None:
-            self.cellpose_model = CellposeModel(
-                model_type=self.test_cellpose_model_path, device=self.device
-            )
+            try:
+                from cellpose.models import CellposeModel
+
+                self.cellpose_model = CellposeModel(
+                    model_type=self.test_cellpose_model_path, device=self.device
+                )
+            except ImportError:
+                raise ImportError(
+                    "CellPose not installed. "
+                    "Please install the metrics dependency with "
+                    '`pip install viscy"[metrics]"`'
+                )
 
     def on_predict_start(self):
         """Pad the input shape to be divisible by the downsampling factor.
