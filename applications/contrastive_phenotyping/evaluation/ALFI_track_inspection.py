@@ -107,39 +107,23 @@ plt.savefig(
 
 # %% Task B: plot the phate map and overlay the dividing cell trajectory
 
-# for time-aware model uncomment the next three lines
-# embedding_dataset = read_embedding_dataset(
-#     "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr"
-# )
+feature_paths = {
+    "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_7mins.zarr",
+    "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr",
+    "Classical": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr",
+}
 
-# for classical model uncomment the next three line
-embedding_dataset = read_embedding_dataset(
-    "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_classical.zarr"
-)
-
-# for time-aware model uncomment the next three lines
-# embedding_dataset = read_embedding_dataset(
-#     "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr"
-# )
-
-PHATE1 = embedding_dataset["PHATE1"].values
-PHATE2 = embedding_dataset["PHATE2"].values
-
-# %% plot PHATE map based on the embedding dataset time points
-
-sns.scatterplot(
-    x=embedding_dataset["PHATE1"],
-    y=embedding_dataset["PHATE2"],
-    hue=embedding_dataset["t"],
-    s=7,
-    alpha=0.8,
+ann_root = Path(
+    "/hpc/projects/organelle_phenotyping/ALFI_models_data/datasets/zarr_datasets"
 )
 
 # %% color using human annotation for cell cycle state
 
-
 def load_annotation(da, path, name, exclude, categories: dict | None = None):
 
+    '''
+    Load the annotation and return the selected annotation values for which PHATE1 and PHATE2 are not excluded
+    '''
     PHATE1 = da["PHATE1"].values
     PHATE2 = da["PHATE2"].values
 
@@ -160,137 +144,128 @@ def load_annotation(da, path, name, exclude, categories: dict | None = None):
 
     return selected, PHATE1, PHATE2
 
+# %% find a parent that divides to two daughter cells for ploting trajectory over phatemap
 
-# %% load the cell cycle state annotation
+for label, path in feature_paths.items():
+    embedding_dataset = read_embedding_dataset(path)
 
-ann_root = Path(
-    "/hpc/projects/organelle_phenotyping/ALFI_models_data/datasets/zarr_datasets"
-)
+    division, PHATE1, PHATE2 = load_annotation(
+        embedding_dataset,
+        ann_root / "test_annotations.csv",
+        "division",
+        -1,
+        {0: "interphase", 1: "mitosis"},
+    )
 
-division, PHATE1, PHATE2 = load_annotation(
-    embedding_dataset,
-    ann_root / "test_annotations.csv",
-    "division",
-    -1,
-    {0: "interphase", 1: "mitosis"},
-)
+    cell_parent = embedding_dataset.where(
+        embedding_dataset["fov_name"] == track_well, drop=True
+    ).where(embedding_dataset["track_id"] == parent_id, drop=True)
+    cell_parent = cell_parent["PHATE1"].values, cell_parent["PHATE2"].values
+    cell_parent = pd.DataFrame(np.column_stack(cell_parent), columns=["PHATE1", "PHATE2"])
 
-# %% find a parent that divides to two daughter cells for ploting trajectory
+    cell_daughter1 = embedding_dataset.where(
+        embedding_dataset["fov_name"] == track_well, drop=True
+    ).where(embedding_dataset["track_id"] == daughter1_track, drop=True)
+    cell_daughter1 = cell_daughter1["PHATE1"].values, cell_daughter1["PHATE2"].values
+    cell_daughter1 = pd.DataFrame(
+        np.column_stack(cell_daughter1), columns=["PHATE1", "PHATE2"]
+    )
 
-cell_parent = embedding_dataset.where(
-    embedding_dataset["fov_name"] == track_well, drop=True
-).where(embedding_dataset["track_id"] == parent_id, drop=True)
-cell_parent = cell_parent["PHATE1"].values, cell_parent["PHATE2"].values
-cell_parent = pd.DataFrame(np.column_stack(cell_parent), columns=["PHATE1", "PHATE2"])
+    cell_daughter2 = embedding_dataset.where(
+        embedding_dataset["fov_name"] == track_well, drop=True
+    ).where(embedding_dataset["track_id"] == daughter2_track, drop=True)
+    cell_daughter2 = cell_daughter2["PHATE1"].values, cell_daughter2["PHATE2"].values
+    cell_daughter2 = pd.DataFrame(
+        np.column_stack(cell_daughter2), columns=["PHATE1", "PHATE2"]
+    )
 
-cell_daughter1 = embedding_dataset.where(
-    embedding_dataset["fov_name"] == track_well, drop=True
-).where(embedding_dataset["track_id"] == daughter1_track, drop=True)
-cell_daughter1 = cell_daughter1["PHATE1"].values, cell_daughter1["PHATE2"].values
-cell_daughter1 = pd.DataFrame(
-    np.column_stack(cell_daughter1), columns=["PHATE1", "PHATE2"]
-)
+    # Plot: display one arrow at end of trajectory of cell overlayed on PHATE
 
-cell_daughter2 = embedding_dataset.where(
-    embedding_dataset["fov_name"] == track_well, drop=True
-).where(embedding_dataset["track_id"] == daughter2_track, drop=True)
-cell_daughter2 = cell_daughter2["PHATE1"].values, cell_daughter2["PHATE2"].values
-cell_daughter2 = pd.DataFrame(
-    np.column_stack(cell_daughter2), columns=["PHATE1", "PHATE2"]
-)
+    plt.figure(figsize=(10, 10))
+    sns.scatterplot(
+        x=PHATE1,
+        y=PHATE2,
+        hue=division,
+        palette={"interphase": "steelblue", "mitosis": "orangered", -1: "orangered"},
+        s=14,
+        alpha=1,
+    )
+    plt.xticks(fontsize=10)
+    plt.yticks(fontsize=10)
+    plt.xlabel("PHATE1", fontsize=14)
+    plt.ylabel("PHATE2", fontsize=14)
+    plt.legend([], [], frameon=False)
 
-# %% Plot: display one arrow at end of trajectory of cell overlayed on PHATE
+    parent_arrow = FancyArrowPatch(
+        (cell_parent["PHATE1"].values[28], cell_parent["PHATE2"].values[28]),
+        (cell_parent["PHATE1"].values[35], cell_parent["PHATE2"].values[35]),
+        color="black",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(parent_arrow)
+    parent_arrow = FancyArrowPatch(
+        (cell_parent["PHATE1"].values[35], cell_parent["PHATE2"].values[35]),
+        (cell_parent["PHATE1"].values[38], cell_parent["PHATE2"].values[38]),
+        color="black",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(parent_arrow)
+    daughter1_arrow = FancyArrowPatch(
+        (cell_daughter1["PHATE1"].values[0], cell_daughter1["PHATE2"].values[0]),
+        (cell_daughter1["PHATE1"].values[1], cell_daughter1["PHATE2"].values[1]),
+        color="blue",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(daughter1_arrow)
+    daughter1_arrow = FancyArrowPatch(
+        (cell_daughter1["PHATE1"].values[1], cell_daughter1["PHATE2"].values[1]),
+        (cell_daughter1["PHATE1"].values[10], cell_daughter1["PHATE2"].values[10]),
+        color="blue",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(daughter1_arrow)
+    daughter2_arrow = FancyArrowPatch(
+        (cell_daughter2["PHATE1"].values[0], cell_daughter2["PHATE2"].values[0]),
+        (cell_daughter2["PHATE1"].values[1], cell_daughter2["PHATE2"].values[1]),
+        color="red",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(daughter2_arrow)
+    daughter2_arrow = FancyArrowPatch(
+        (cell_daughter2["PHATE1"].values[1], cell_daughter2["PHATE2"].values[1]),
+        (cell_daughter2["PHATE1"].values[10], cell_daughter2["PHATE2"].values[10]),
+        color="red",
+        arrowstyle="->",
+        mutation_scale=20,  # reduce the size of arrowhead by half
+        lw=2,
+        shrinkA=0,
+        shrinkB=0,
+    )
+    plt.gca().add_patch(daughter2_arrow)
 
-sns.scatterplot(
-    x=PHATE1,
-    y=PHATE2,
-    hue=division,
-    palette={"interphase": "steelblue", "mitosis": "orangered", -1: "orangered"},
-    s=7,
-    alpha=0.5,
-)
-plt.xticks(fontsize=10)
-plt.yticks(fontsize=10)
-plt.xlabel("PHATE1", fontsize=14)
-plt.ylabel("PHATE2", fontsize=14)
-plt.legend(fontsize=12)
+    plt.savefig(
+        f"/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/ALFI_div_track_{label}.png",
+        dpi=300,
+    )
 
-# sns.lineplot(x=cell_parent["PHATE1"], y=cell_parent["PHATE2"], color="black", linewidth=2)
-# sns.lineplot(
-#     x=cell_daughter1["PHATE1"], y=cell_daughter1["PHATE2"], color="blue", linewidth=2
-# )
-# sns.lineplot(
-#     x=cell_daughter2["PHATE1"], y=cell_daughter2["PHATE2"], color="red", linewidth=2
-# )
-
-parent_arrow = FancyArrowPatch(
-    (cell_parent["PHATE1"].values[28], cell_parent["PHATE2"].values[28]),
-    (cell_parent["PHATE1"].values[35], cell_parent["PHATE2"].values[35]),
-    color="black",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(parent_arrow)
-parent_arrow = FancyArrowPatch(
-    (cell_parent["PHATE1"].values[35], cell_parent["PHATE2"].values[35]),
-    (cell_parent["PHATE1"].values[38], cell_parent["PHATE2"].values[38]),
-    color="black",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(parent_arrow)
-daughter1_arrow = FancyArrowPatch(
-    (cell_daughter1["PHATE1"].values[0], cell_daughter1["PHATE2"].values[0]),
-    (cell_daughter1["PHATE1"].values[1], cell_daughter1["PHATE2"].values[1]),
-    color="blue",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(daughter1_arrow)
-daughter1_arrow = FancyArrowPatch(
-    (cell_daughter1["PHATE1"].values[1], cell_daughter1["PHATE2"].values[1]),
-    (cell_daughter1["PHATE1"].values[10], cell_daughter1["PHATE2"].values[10]),
-    color="blue",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(daughter1_arrow)
-daughter2_arrow = FancyArrowPatch(
-    (cell_daughter2["PHATE1"].values[0], cell_daughter2["PHATE2"].values[0]),
-    (cell_daughter2["PHATE1"].values[1], cell_daughter2["PHATE2"].values[1]),
-    color="red",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(daughter2_arrow)
-daughter2_arrow = FancyArrowPatch(
-    (cell_daughter2["PHATE1"].values[1], cell_daughter2["PHATE2"].values[1]),
-    (cell_daughter2["PHATE1"].values[10], cell_daughter2["PHATE2"].values[10]),
-    color="red",
-    arrowstyle="->",
-    mutation_scale=20,  # reduce the size of arrowhead by half
-    lw=2,
-    shrinkA=0,
-    shrinkB=0,
-)
-plt.gca().add_patch(daughter2_arrow)
-
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/ALFI_div_track_classical.pdf",
-    dpi=300,
-)
+# %%

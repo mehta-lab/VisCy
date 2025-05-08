@@ -35,7 +35,6 @@ phate_embedding = compute_phate(
 
 # %% OVERLAY INFECTION ANNOTATION
 
-
 # load the infection state annotation
 def load_annotation(da, path, name, categories: dict | None = None):
     annotation = pd.read_csv(path)
@@ -255,7 +254,7 @@ plt.savefig(
     dpi=300,
 )
 
-# %% manually data the dataset into training and testing set by well name
+# %% split the dataset into training and testing set by well name
 
 # dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
 data_train_val = data[
@@ -316,7 +315,7 @@ y_test = data_test["infection"]
 y_pred = clf.predict(x_test)
 data_pred = clf.predict(x_data)
 
-# %% use the trained classifier to perform prediction on the entire dataset
+# %% use the trained classifier to perform prediction on the entire dataset and record the percentage of infected cells over time
 
 data_test["predicted_infection"] = y_pred
 data["predicted_infection"] = data_pred
@@ -522,6 +521,80 @@ plt.legend()
 plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/infected_percentage_withmantis.svg",
     format="svg",
+)
+
+# %% plot phatemaps for Feb data with infection prediction hue
+colormap = {1: "blue", 2: "red"}
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(1, 1, 1)
+ax.scatter(
+    data["PHATE1"],
+    data["PHATE2"],
+    c=data["predicted_infection"].map(colormap),
+    s=25,
+    edgecolor="white",
+    linewidth=0.5,
+)
+# Add legend to group points
+legend_elements = [
+    plt.Line2D(
+        [0],
+        [0],
+        marker="o",
+        color="w",
+        markerfacecolor=color,
+        label=label,
+        markersize=10,
+        markeredgecolor="white",
+        markeredgewidth=0.5,
+    )
+    for label, color in color_map.items()
+]
+ax.legend([])
+ax.set_xlabel("PHATE1")
+ax.set_ylabel("PHATE2")
+
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Feb_sensor_infection.png",
+    format="png",
+    dpi=300,
+)
+
+# %% plot phatemaps for 10-minute mantis data with infection prediction hue
+
+fig = plt.figure(figsize=(10, 8))
+ax = fig.add_subplot(1, 1, 1)
+ax.scatter(
+    mantis_data["PHATE1"],
+    mantis_data["PHATE2"],
+    c=mantis_data["predicted_infection"].map(colormap),
+    s=25,
+    edgecolor="white",
+    linewidth=0.5,
+)
+# Add legend to group points
+legend_elements = [
+    plt.Line2D(
+        [0],
+        [0],
+        marker="o",
+        color="w",
+        markerfacecolor=color,
+        label=label,
+        markersize=10,
+        markeredgecolor="white",
+        markeredgewidth=0.5,
+    )
+    for label, color in color_map.items()
+]
+ax.legend([])
+ax.set_xlabel("PHATE1")
+ax.set_ylabel("PHATE2")
+
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Mantis_infection.png",
+    format="png",
+    dpi=300,
 )
 
 # %% appendix video for infection dynamics phatemap, Feb test data, colored by human revised annotation
@@ -956,76 +1029,4 @@ for time in range(len(time_points_mantis)):
     )
     plt.close()
 
-# %% plot phatemaps for Feb data and mantis 10 minute data with infection prediction hue
-colormap = {1: "blue", 2: "red"}
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(1, 1, 1)
-ax.scatter(
-    data["PHATE1"],
-    data["PHATE2"],
-    c=data["predicted_infection"].map(colormap),
-    s=25,
-    edgecolor="white",
-    linewidth=0.5,
-)
-# Add legend to group points
-legend_elements = [
-    plt.Line2D(
-        [0],
-        [0],
-        marker="o",
-        color="w",
-        markerfacecolor=color,
-        label=label,
-        markersize=10,
-        markeredgecolor="white",
-        markeredgewidth=0.5,
-    )
-    for label, color in color_map.items()
-]
-ax.legend([])
-ax.set_xlabel("PHATE1")
-ax.set_ylabel("PHATE2")
-
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Feb_sensor_infection.png",
-    format="png",
-    dpi=300,
-)
-
-# %% plot phatemaps for mantis data with infection prediction hue
-
-fig = plt.figure(figsize=(10, 8))
-ax = fig.add_subplot(1, 1, 1)
-ax.scatter(
-    mantis_data["PHATE1"],
-    mantis_data["PHATE2"],
-    c=mantis_data["predicted_infection"].map(colormap),
-    s=25,
-    edgecolor="white",
-    linewidth=0.5,
-)
-# Add legend to group points
-legend_elements = [
-    plt.Line2D(
-        [0],
-        [0],
-        marker="o",
-        color="w",
-        markerfacecolor=color,
-        label=label,
-        markersize=10,
-        markeredgecolor="white",
-        markeredgewidth=0.5,
-    )
-    for label, color in color_map.items()
-]
-ax.legend([])
-ax.set_xlabel("PHATE1")
-ax.set_ylabel("PHATE2")
-
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/infection/Phate_Mantis_infection.png",
-    format="png",
-    dpi=300,
-)
+# %%
