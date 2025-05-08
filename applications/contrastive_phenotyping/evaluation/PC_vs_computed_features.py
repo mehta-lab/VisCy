@@ -4,11 +4,7 @@
 """
 
 # %%
-import sys
 from pathlib import Path
-
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
-
 import matplotlib.pyplot as plt
 import seaborn as sns
 from utils import compute_features, compute_correlation_and_save_png
@@ -166,4 +162,4 @@ plt.savefig(
     "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_6features.svg"
 )
 
-# %% 
+# %%

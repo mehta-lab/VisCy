@@ -1,9 +1,8 @@
 # %%
-import sys
 from pathlib import Path
 
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
-
+import matplotlib.pyplot as plt
+import numpy as np
 import matplotlib.pyplot as plt
 import numpy as np
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -94,7 +93,10 @@ plt.ylim(0, 900)
 plt.grid(True, alpha=0.3)
 plt.legend(fontsize=16, frameon=False)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_linear.svg", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_linear.svg",
+    dpi=300,
+)
 
 # %% Plot MSD vs time (log-log scale with slopes)
 plt.figure(figsize=(10, 6))
@@ -164,7 +166,10 @@ plt.yticks(fontsize=16)
 # )
 plt.legend(fontsize=16, frameon=False)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_log.svg", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_log.svg",
+    dpi=300,
+)
 
 # %% Plot slopes analysis
 early_slopes = []
@@ -213,6 +218,9 @@ plt.xticks(x, intervals, rotation=45, fontsize=16)
 plt.yticks(fontsize=16)
 plt.legend(fontsize=16)
 plt.tight_layout()
-plt.savefig("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_slopes.svg", dpi=300)
+plt.savefig(
+    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/arXiv_rev2/ALFI/appendix_alfi_msd_slopes.svg",
+    dpi=300,
+)
 
 # %%

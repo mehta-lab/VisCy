@@ -119,11 +119,11 @@ ann_root = Path(
 
 # %% color using human annotation for cell cycle state
 
-def load_annotation(da, path, name, exclude, categories: dict | None = None):
 
-    '''
+def load_annotation(da, path, name, exclude, categories: dict | None = None):
+    """
     Load the annotation and return the selected annotation values for which PHATE1 and PHATE2 are not excluded
-    '''
+    """
     PHATE1 = da["PHATE1"].values
     PHATE2 = da["PHATE2"].values
 
@@ -144,6 +144,7 @@ def load_annotation(da, path, name, exclude, categories: dict | None = None):
 
     return selected, PHATE1, PHATE2
 
+
 # %% find a parent that divides to two daughter cells for ploting trajectory over phatemap
 
 for label, path in feature_paths.items():
@@ -161,7 +162,9 @@ for label, path in feature_paths.items():
         embedding_dataset["fov_name"] == track_well, drop=True
     ).where(embedding_dataset["track_id"] == parent_id, drop=True)
     cell_parent = cell_parent["PHATE1"].values, cell_parent["PHATE2"].values
-    cell_parent = pd.DataFrame(np.column_stack(cell_parent), columns=["PHATE1", "PHATE2"])
+    cell_parent = pd.DataFrame(
+        np.column_stack(cell_parent), columns=["PHATE1", "PHATE2"]
+    )
 
     cell_daughter1 = embedding_dataset.where(
         embedding_dataset["fov_name"] == track_well, drop=True

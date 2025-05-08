@@ -1,7 +1,5 @@
 # %%
 from pathlib import Path
-import sys
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 import matplotlib.pyplot as plt
 from tqdm import tqdm
 import pandas as pd

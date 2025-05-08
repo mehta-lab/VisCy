@@ -1,10 +1,7 @@
 """Use pre-trained ImageNet models to extract features from images."""
 
 # %%
-import sys
 from pathlib import Path
-
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 import pandas as pd
 import seaborn as sns
 import timm

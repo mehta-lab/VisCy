@@ -35,6 +35,7 @@ phate_embedding = compute_phate(
 
 # %% OVERLAY INFECTION ANNOTATION
 
+
 # load the infection state annotation
 def load_annotation(da, path, name, categories: dict | None = None):
     annotation = pd.read_csv(path)

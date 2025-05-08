@@ -4,11 +4,8 @@
 """
 
 # %%
-import sys
+
 from pathlib import Path
-
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
-
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns

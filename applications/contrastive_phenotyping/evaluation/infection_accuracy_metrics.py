@@ -12,11 +12,11 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 accuracies = []
 
 features_paths = {
-    'timeAware triplet': '/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_102ckpt_timeAware_triplet.zarr',
-    'cellAware triplet': '/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_101ckpt_cellAware_triplet.zarr',
-    'classical triplet': '/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_101ckpt_classical_triplet.zarr',
-    'timeAware ntxent': '/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr',
-    'classical ntxent': '/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_100ckpt_classical_ntxent.zarr',
+    "timeAware triplet": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_102ckpt_timeAware_triplet.zarr",
+    "cellAware triplet": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_101ckpt_cellAware_triplet.zarr",
+    "classical triplet": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_101ckpt_classical_triplet.zarr",
+    "timeAware ntxent": "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr",
+    "classical ntxent": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/10-phenotyping/predictions/2chan_192patch_100ckpt_classical_ntxent.zarr",
 }
 
 for model_name, path in features_paths.items():
@@ -61,7 +61,6 @@ for model_name, path in features_paths.items():
     time_npy = features["t"].values
     time_npy_filtered = time_npy[infection_npy != 0]
 
-
     fov_name_list = features["fov_name"].values
     fov_name_list_filtered = fov_name_list[infection_npy != 0]
 
@@ -73,7 +72,9 @@ for model_name, path in features_paths.items():
         }
     )
     # Add all 768 features to the dataframe
-    feature_columns = pd.DataFrame(feature_npy_filtered, columns=[f"feature_{i+1}" for i in range(768)])
+    feature_columns = pd.DataFrame(
+        feature_npy_filtered, columns=[f"feature_{i+1}" for i in range(768)]
+    )
     data = pd.concat([data, feature_columns], axis=1)
 
     # dataframe for training set, fov names starts with "/B/4/6" or "/B/4/7" or "/A/3/"
@@ -117,7 +118,7 @@ for model_name, path in features_paths.items():
 
     # compute the accuracy of the classifier
 
-    accuracy = np.mean(y_pred == y_test)*100
+    accuracy = np.mean(y_pred == y_test) * 100
     # save the accuracy for final ploting
     print(f"Accuracy of model trained on {model_name} data: {accuracy}")
     accuracies.append(accuracy)
@@ -126,7 +127,7 @@ for model_name, path in features_paths.items():
 
 plt.figure(figsize=(10, 7))
 plt.bar(features_paths.keys(), accuracies)
-plt.xticks(rotation=45, ha='right', fontsize=22)
+plt.xticks(rotation=45, ha="right", fontsize=22)
 plt.yticks(fontsize=22)
 plt.ylabel("Accuracy (%)", fontsize=24)
 plt.ylim(90, 100)
