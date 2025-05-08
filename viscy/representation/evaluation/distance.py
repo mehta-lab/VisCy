@@ -1,6 +1,6 @@
 from collections import defaultdict
 from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Dict, List, Literal, Optional, Tuple, Union
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -130,7 +130,11 @@ def compute_displacement(
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
-    embeddings = embedding_dataset["features"].values
+    if embedding_dataset is xr.Dataset:
+        embeddings = embedding_dataset["features"].values
+    elif embedding_dataset is pd.DataFrame:
+        feature_columns = [f"feature_{i}" for i in range(768)]
+    embeddings = embedding_dataset[feature_columns].to_numpy()
 
     # Check if max_delta_t is provided, otherwise use the maximum timepoint
     if max_delta_t is None:
@@ -302,8 +306,8 @@ def compute_piece_wise_dissimilarity(
 
 
 def compute_embedding_distances(
-    prediction_path: Path,
-    output_path: Path,
+    prediction_path: Union[Path, pd.DataFrame],
+    output_path: Optional[Path] = None,
     distance_metric: Literal["cosine", "euclidean", "normalized_euclidean"] = "cosine",
 ) -> pd.DataFrame:
     """
@@ -311,10 +315,11 @@ def compute_embedding_distances(
 
     Parameters
     ----------
-    prediction_path : Path
-        Path to the embedding dataset
-    output_path : Path
-        name of saved CSV file
+    prediction_path : Union[Path, pd.DataFrame]
+        Either a path to the embedding dataset or a pandas DataFrame containing the embeddings.
+        If DataFrame, it should have columns for features and metadata.
+    output_path : Optional[Path]
+        Path to save the output files. If None, no files will be saved.
     distance_metric : str, optional
         Distance metric to use for computing distances between embeddings
 
@@ -323,12 +328,22 @@ def compute_embedding_distances(
     pd.DataFrame
         DataFrame containing the adjacent frame and random sampling distances
     """
-    # Read the dataset
-    embeddings = read_embedding_dataset(prediction_path)
-    features = embeddings["features"]
+    # Read the dataset or use provided DataFrame
+    if isinstance(prediction_path, (str, Path)):
+        embeddings = read_embedding_dataset(prediction_path)
+        features = embeddings["features"].values
+        base_name = Path(prediction_path).stem
+    else:
+        # Assume DataFrame input
+        embeddings = prediction_path
+        feature_columns = [
+            col for col in embeddings.columns if col.startswith("feature_")
+        ]
+        features = embeddings[feature_columns].to_numpy()
+        base_name = "embeddings"
 
     if distance_metric != "euclidean":
-        features = StandardScaler().fit_transform(features.values)
+        features = StandardScaler().fit_transform(features)
 
     # Compute the distance matrix
     cross_dist = pairwise_distance_matrix(features, metric=distance_metric)
@@ -337,21 +352,33 @@ def compute_embedding_distances(
     if distance_metric == "euclidean":
         cross_dist /= np.sqrt(features.shape[1])
 
-    # Plot the distance matrix
-    plt.figure(figsize=(10, 10))
-    plt.imshow(cross_dist, cmap="viridis")
-    plt.colorbar(label=f"{distance_metric.capitalize()} Distance")
-    plt.title(f"{distance_metric.capitalize()} Distance Matrix")
-    plt.tight_layout()
-    base_name = prediction_path.stem
-    plt.savefig(output_path / f"{base_name}_distance_matrix.png", dpi=600)
-    plt.close()
+    # Plot and save the distance matrix if output_path is provided
+    if output_path is not None:
+        plt.figure(figsize=(10, 10))
+        plt.imshow(cross_dist, cmap="viridis")
+        plt.colorbar(label=f"{distance_metric.capitalize()} Distance")
+        plt.title(f"{distance_metric.capitalize()} Distance Matrix")
+        plt.tight_layout()
+        plt.savefig(output_path / f"{base_name}_distance_matrix.png", dpi=600)
+        plt.close()
+
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
     # Compute piece-wise dissimilarity and rank difference
-    features_df = features["sample"].to_dataframe().reset_index(drop=True)
-    piece_wise_dissimilarity_per_track, piece_wise_rank_difference_per_track = (
-        compute_piece_wise_dissimilarity(features_df, cross_dist, rank_fractions)
+    if isinstance(prediction_path, (str, Path)):
+        features_df = features["sample"].to_dataframe().reset_index(drop=True)
+    else:
+        # For DataFrame input, create features_df from the input DataFrame
+        features_df = pd.DataFrame(
+            {
+                "track_id": embeddings["track_id"],
+                "t": embeddings["t"],
+                "fov_name": embeddings["fov_name"],
+            }
+        )
+
+    piece_wise_dissimilarity_per_track, _ = compute_piece_wise_dissimilarity(
+        features_df, cross_dist, rank_fractions
     )
 
     all_dissimilarity = np.concatenate(piece_wise_dissimilarity_per_track)
@@ -361,7 +388,7 @@ def compute_embedding_distances(
     random_indices = np.random.randint(0, len(cross_dist), size=(n_samples, 2))
     sampled_values = cross_dist[random_indices[:, 0], random_indices[:, 1]]
 
-    # Create and save DataFrame
+    # Create DataFrame
     distributions_df = pd.DataFrame(
         {
             "adjacent_frame": pd.Series(all_dissimilarity),
@@ -369,8 +396,10 @@ def compute_embedding_distances(
         }
     )
 
-    csv_path = output_path
-    distributions_df.to_csv(csv_path, index=False)
+    # Save to CSV if output_path is provided
+    if output_path is not None:
+        csv_path = output_path / f"{base_name}_distance_distribution.csv"
+        distributions_df.to_csv(csv_path, index=False)
 
     return distributions_df
 

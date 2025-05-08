@@ -1,5 +1,7 @@
 # %%
 from pathlib import Path
+import sys
+sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 
 import matplotlib.pyplot as plt
 from tqdm import tqdm
@@ -11,6 +13,8 @@ from viscy.representation.evaluation.distance import (
 
 plt.style.use("../evaluation/figure.mplstyle")
 
+
+# %%
 if __name__ == "__main__":
     # Define models as a dictionary with meaningful keys
     prediction_paths = {
@@ -18,13 +22,13 @@ if __name__ == "__main__":
             "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_98ckpt_rev6_2.zarr"
         ),
         "triplet_sensor_phase": Path(
-            "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev5_sensorPhase_infection/2chan_160patch_97ckpt_rev5_2.zarr"
+            "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/log_alfi_triplet_time_intervals/prediction/ALFI_cellaware.zarr"
         ),
     }
 
     # output_folder to save the distributions as .csv
     output_folder = Path(
-        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/cosine_dissimilarity_distributions"
+        "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/cosine_dissimilarity_distributions_alfi"
     )
     output_folder.mkdir(parents=True, exist_ok=True)
 
@@ -37,9 +41,8 @@ if __name__ == "__main__":
         # Compute and save distributions
         distributions_df = compute_embedding_distances(
             prediction_path=prediction_path,
-            output_folder=output_folder,
+            output_path=output_folder,
             distance_metric="cosine",
-            verbose=True,
         )
 
         # Analyze distributions and create plots
