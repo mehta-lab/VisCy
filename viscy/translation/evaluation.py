@@ -86,26 +86,36 @@ class SegmentationMetrics(LightningModule):
         """Compute and log metrics for 2D segmentation."""
         coco_metrics = mean_average_precision(pred, target)
         _logger.debug(coco_metrics)
-        self.logger.log_metrics(
-            {
-                "position": batch["position_idx"][0],
-                "time": batch["time_idx"][0],
-                "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
-                "dice": (
-                    dice_score(
-                        pred_binary.long()[None],
-                        target_binary.long()[None],
-                        num_classes=2,
-                        input_format="index",
-                    )
-                ),
-                "jaccard": (jaccard_index(pred_binary, target_binary, task="binary")),
-                "mAP": coco_metrics["map"],
-                "mAP_50": coco_metrics["map_50"],
-                "mAP_75": coco_metrics["map_75"],
-                "mAR_100": coco_metrics["mar_100"],
-            }
-        )
+
+        # Create metrics dictionary
+        metrics_dict = {
+            "position": batch["position_idx"][0],
+            "time": batch["time_idx"][0],
+            "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
+            "dice": (
+                dice_score(
+                    pred_binary.long()[None],
+                    target_binary.long()[None],
+                    num_classes=2,
+                    input_format="index",
+                )
+            ),
+            "jaccard": (jaccard_index(pred_binary, target_binary, task="binary")),
+            "mAP": coco_metrics["map"],
+            "mAP_50": coco_metrics["map_50"],
+            "mAP_75": coco_metrics["map_75"],
+            "mAR_100": coco_metrics["mar_100"],
+        }
+
+        # Add metadata if available
+        if "cell_type" in batch:
+            metrics_dict["cell_type"] = batch["cell_type"]
+        if "organelle" in batch:
+            metrics_dict["organelle"] = batch["organelle"]
+        if "infection_condition" in batch:
+            metrics_dict["infection_condition"] = batch["infection_condition"]
+
+        self.logger.log_metrics(metrics_dict)
 
     def _compute_3d_metrics(self, pred, target, pred_binary, target_binary, batch):
         """Compute and log metrics for 3D segmentation."""
@@ -128,15 +138,24 @@ class SegmentationMetrics(LightningModule):
         result = result.to_dict()
         _logger.debug(result)
 
-        self.logger.log_metrics(
-            {
-                "position": batch["position_idx"][0],
-                "time": batch["time_idx"][0],
-                "target_instances": unique_instances_target,
-                "pred_instances": unique_instances_pred,
-                **result,
-            }
-        )
+        # Create metrics dictionary
+        metrics_dict = {
+            "position": batch["position_idx"][0],
+            "time": batch["time_idx"][0],
+            "target_instances": unique_instances_target,
+            "pred_instances": unique_instances_pred,
+            **result,
+        }
+
+        # Add metadata if available
+        if "cell_type" in batch:
+            metrics_dict["cell_type"] = batch["cell_type"]
+        if "organelle" in batch:
+            metrics_dict["organelle"] = batch["organelle"]
+        if "infection_condition" in batch:
+            metrics_dict["infection_condition"] = batch["infection_condition"]
+
+        self.logger.log_metrics(metrics_dict)
 
 
 class BiologicalMetrics(LightningModule):
@@ -148,7 +167,7 @@ class BiologicalMetrics(LightningModule):
 
     def test_step(self, batch: SegmentationSample, batch_idx: int) -> None:
         # TODO: Implement biological metrics (i.e regionprops logic)
-        NotImplementedError("Biological metrics not implemented")
+        raise NotImplementedError("Biological metrics not implemented")
 
 
 class IntensityMetrics(LightningModule):
@@ -199,6 +218,14 @@ class IntensityMetrics(LightningModule):
             "position": batch["position_idx"][0] if "position_idx" in batch else -1,
             "time": batch["time_idx"][0] if "time_idx" in batch else -1,
         }
+
+        # Add metadata if available
+        if "cell_type" in batch:
+            metrics_dict["cell_type"] = batch["cell_type"]
+        if "organelle" in batch:
+            metrics_dict["organelle"] = batch["organelle"]
+        if "infection_condition" in batch:
+            metrics_dict["infection_condition"] = batch["infection_condition"]
 
         # Compute metrics
         for metric in self.metrics:
