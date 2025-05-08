@@ -37,6 +37,19 @@ Try the 2D virtual staining demo of cell nuclei and membrane from label-free ima
 </a>
 </p>
 
+### Virtual Cell Models
+
+Cytoland models are part of the virtual cell models.
+Notebooks are available as pre-rendered pages or on Colab:
+
+- [Model card](https://virtualcellmodels.cziscience.com/model/01961244-1970-7851-a4b9-fdbfa2fba9b2)
+- [Quick-start (VSCyto2D)](https://virtualcellmodels.cziscience.com/quickstart/cytoland-quickstart)
+- CLI tutorials:
+  - VSCyto3D
+  - VSNeuromast
+
+### Tutorials
+
 - [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/main/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
 Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course and uses UNeXt2 architecture.
 
