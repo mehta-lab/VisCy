@@ -31,7 +31,7 @@ for more details about the Cytoland models.
 
 VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells using the Cytoland approach.
 This model enables users to jointly stain cell nuclei and plasma membranes from 3D label-free images
-for downstream analysis such as cell segmentation and tracking without the need for human annotation of volumetric data
+for downstream analysis such as cell segmentation and tracking without the need for human annotation of volumetric data.
 """
 
 # %% [markdown]
@@ -208,4 +208,15 @@ The virtually stained images is not affected by this issue and can robustly labe
 
 In the above example, we demonstrated how to use the VSCyto3D model
 for virtual staining of cell nuclei and plasma membranes, which can rescue missing labels.
+"""
+
+# %% [markdown]
+"""
+## Responsible Use
+
+We are committed to advancing the responsible development and use of artificial intelligence.
+Please follow our [Acceptable Use Policy](https://virtualcellmodels.cziscience.com/acceptable-use-policy) when engaging with our services.
+
+Should you have any security or privacy issues or questions related to the services,
+please reach out to our team at [security@chanzuckerberg.com](mailto:security@chanzuckerberg.com) or [privacy@chanzuckerberg.com](mailto:privacy@chanzuckerberg.com) respectively.
 """
