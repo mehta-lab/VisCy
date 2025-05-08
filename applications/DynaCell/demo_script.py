@@ -9,11 +9,15 @@ from pathlib import Path
 from typing import Literal
 
 import pandas as pd
+import torch
 from lightning.pytorch.loggers import CSVLogger
 
 from viscy.data.dynacell import DynaCellDataBase, DynaCellDataModule
 from viscy.trainer import Trainer
 from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
+
+# Set float32 matmul precision for better performance on Tensor Cores
+torch.set_float32_matmul_precision("high")
 
 csv_database_path = Path(
     "/home/eduardo.hirata/repos/viscy/applications/DynaCell/dynacell_summary_table.csv"
@@ -70,20 +74,25 @@ def main(
         lm = SegmentationMetrics()
         # Use the method name and timestamp for unique identification
         name = f"segmentation_{timestamp}"
-        # Set up output directory
+        version = "1"
+
         output_dir = tmp_path / "segmentation"
         output_dir.mkdir(exist_ok=True)
 
         # Use the CSVLogger without version (we'll use our own naming)
-        logger = CSVLogger(save_dir=output_dir, name=name)
+        logger = CSVLogger(save_dir=output_dir, name=name, version=version)
         trainer = Trainer(logger=logger)
         trainer.test(lm, datamodule=dm)
 
-        # Find the metrics file - this should be in output_dir/name/metrics.csv
-        metrics_file = list(output_dir.glob(f"{name}/metrics.csv"))[0]
-        metrics = pd.read_csv(metrics_file)
-        print(f"Segmentation metrics saved to: {metrics_file}")
-        print(f"Segmentation metrics columns: {metrics.columns.tolist()}")
+        # Find the metrics file - use the correct relative pattern
+        metrics_file = output_dir / name / version / "metrics.csv"
+        if metrics_file.exists():
+            metrics = pd.read_csv(metrics_file)
+            print(f"Segmentation metrics saved to: {metrics_file}")
+            print(f"Segmentation metrics columns: {metrics.columns.tolist()}")
+        else:
+            print(f"Warning: Metrics file not found at {metrics_file}")
+            metrics = None
 
         return metrics
 
@@ -119,22 +128,26 @@ def main(
 
         # Run intensity metrics
         lm = IntensityMetrics()
-        # Use the method name and timestamp for unique identification
         name = f"intensity_{timestamp}"
-        # Set up output directory
+        version = "1"
+
         output_dir = tmp_path / "intensity"
         output_dir.mkdir(exist_ok=True)
 
         # Use the CSVLogger without version (we'll use our own naming)
-        logger = CSVLogger(save_dir=output_dir, name=name)
+        logger = CSVLogger(save_dir=output_dir, name=name, version=version)
         trainer = Trainer(logger=logger)
         trainer.test(lm, datamodule=dm)
 
-        # Find the metrics file - this should be in output_dir/name/metrics.csv
-        metrics_file = list(output_dir.glob(f"{name}/metrics.csv"))[0]
-        metrics = pd.read_csv(metrics_file)
-        print(f"Intensity metrics saved to: {metrics_file}")
-        print(f"Intensity metrics columns: {metrics.columns.tolist()}")
+        # Find the metrics file - use the correct relative pattern
+        metrics_file = output_dir / name / version / "metrics.csv"
+        if metrics_file.exists():
+            metrics = pd.read_csv(metrics_file)
+            print(f"Intensity metrics saved to: {metrics_file}")
+            print(f"Intensity metrics columns: {metrics.columns.tolist()}")
+        else:
+            print(f"Warning: Metrics file not found at {metrics_file}")
+            metrics = None
 
         return metrics
     else:
