@@ -8,7 +8,8 @@ method: intensity  # Options: 'intensity' or 'segmentation2D'
 
 # Target dataset parameters
 target_channel: Organelle
-target_z_slice: 16  # Use -1 for all slices
+# Z-slice can be a single integer (e.g., 16) or a range specified as a list of two integers [start, end] (e.g., [15, 17])
+target_z_slice: 16  # Use -1 for all slices, or a list like [15, 17] for a range
 target_cell_types: 
   - HEK293T
 target_organelles:
@@ -18,7 +19,8 @@ target_infection_conditions:
 
 # Prediction dataset parameters
 pred_channel: Organelle
-pred_z_slice: 16
+# Z-slice can be a single integer (e.g., 16) or a range specified as a list of two integers [start, end] (e.g., [15, 17])
+pred_z_slice: 16  # Use -1 for all slices, or a list like [15, 17] for a range
 pred_cell_types:
   - HEK293T
 pred_organelles: 

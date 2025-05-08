@@ -142,8 +142,8 @@ class VisCyTrainer(Trainer):
         method: str = "intensity",
         target_channel: str = "Organelle",
         pred_channel: str = "Organelle",
-        target_z_slice: int = 16,
-        pred_z_slice: int = 16,
+        target_z_slice: int | list[int] = 16,
+        pred_z_slice: int | list[int] = 16,
         target_cell_types: list[str] = None,
         target_organelles: list[str] = None,
         target_infection_conditions: list[str] = None,
@@ -172,9 +172,9 @@ class VisCyTrainer(Trainer):
             Channel name for target dataset, by default "Organelle"
         pred_channel : str, optional
             Channel name for prediction dataset, by default "Organelle"
-        target_z_slice : int, optional
+        target_z_slice : int | list[int], optional
             Z-slice to use for target dataset, by default 16
-        pred_z_slice : int, optional
+        pred_z_slice : int | list[int], optional
             Z-slice to use for prediction dataset, by default 16
         target_cell_types : list[str], optional
             Cell types to include for target dataset, by default None (all available)
@@ -215,8 +215,29 @@ class VisCyTrainer(Trainer):
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
         # Handle z_slice values (-1 means all slices)
-        target_z_slice_value = slice(None) if target_z_slice == -1 else target_z_slice
-        pred_z_slice_value = slice(None) if pred_z_slice == -1 else pred_z_slice
+        if isinstance(target_z_slice, list) and len(target_z_slice) == 2:
+            # Use the list as a range [start, stop] for the slice
+            if target_z_slice[1] - target_z_slice[0] == 1:
+                # If range length is 1, just use the single integer
+                target_z_slice_value = int(target_z_slice[0])
+            else:
+                target_z_slice_value = slice(target_z_slice[0], target_z_slice[1])
+        else:
+            target_z_slice_value = (
+                slice(None) if target_z_slice == -1 else int(target_z_slice)
+            )
+
+        if isinstance(pred_z_slice, list) and len(pred_z_slice) == 2:
+            # Use the list as a range [start, stop] for the slice
+            if pred_z_slice[1] - pred_z_slice[0] == 1:
+                # If range length is 1, just use the single integer
+                pred_z_slice_value = int(pred_z_slice[0])
+            else:
+                pred_z_slice_value = slice(pred_z_slice[0], pred_z_slice[1])
+        else:
+            pred_z_slice_value = (
+                slice(None) if pred_z_slice == -1 else int(pred_z_slice)
+            )
 
         # Default to all available values if not specified for target database
         if (

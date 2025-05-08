@@ -28,10 +28,23 @@ tmp_path.mkdir(parents=True, exist_ok=True)
 
 def main(
     method: Literal["segmentation2D", "segmentation3D", "intensity"] = "intensity",
+    use_z_slice_range: bool = False,
 ):
+    """
+    Run DynaCell metrics computation.
 
+    Parameters
+    ----------
+    method : Literal["segmentation2D", "segmentation3D", "intensity"], optional
+        Type of metrics to compute, by default "intensity"
+    use_z_slice_range : bool, optional
+        Whether to use a z-slice range instead of a single slice, by default False
+    """
     # Generate timestamp for unique versioning
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    # Set z_slice based on whether to use range or single slice
+    z_slice_value = slice(15, 17) if use_z_slice_range else 16
 
     # Create target database
     target_db = DynaCellDataBase(
@@ -40,7 +53,7 @@ def main(
         organelles=["HIST2H2BE"],
         infection_conditions=["Mock"],
         channel_name="Organelle",
-        z_slice=16,
+        z_slice=z_slice_value,
     )
 
     if method == "segmentation2D":
@@ -51,7 +64,7 @@ def main(
             organelles=["HIST2H2BE"],
             infection_conditions=["Mock"],
             channel_name="Organelle",
-            z_slice=16,
+            z_slice=z_slice_value,
         )
 
         # Create data module with both databases
@@ -107,7 +120,7 @@ def main(
             organelles=["HIST2H2BE"],
             infection_conditions=["Mock"],
             channel_name="Organelle",
-            z_slice=16,
+            z_slice=z_slice_value,
         )
 
         # Create data module with both databases
@@ -128,7 +141,9 @@ def main(
 
         # Run intensity metrics
         lm = IntensityMetrics()
-        name = f"intensity_{timestamp}"
+        # Indicate whether z-slice range was used in the name
+        range_suffix = "_range" if use_z_slice_range else ""
+        name = f"intensity{range_suffix}_{timestamp}"
         version = "1"
 
         output_dir = tmp_path / "intensity"
@@ -156,5 +171,8 @@ def main(
 
 # %%
 if __name__ == "__main__":
-    print("Running intensity metrics...")
-    intensity_metrics = main("intensity")
+    # print("Running intensity metrics with single z-slice...")
+    # intensity_metrics = main("intensity", use_z_slice_range=False)
+
+    print("\nRunning intensity metrics with z-slice range...")
+    intensity_metrics_range = main("intensity", use_z_slice_range=True)

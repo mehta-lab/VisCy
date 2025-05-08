@@ -107,8 +107,15 @@ method: intensity  # Options: 'intensity' or 'segmentation2D'
 # Optional parameters
 target_channel: Organelle
 pred_channel: Organelle
-target_z_slice: 16  # Use -1 for all slices
+# Z-slice options:
+# - Single integer (e.g., 16): Use specific z-slice
+# - List of two integers [start, end] (e.g., [15, 17]): Use range of z-slices
+# - -1: Use all available z-slices
+target_z_slice: 16  
 pred_z_slice: 16
+# You can also specify a range of z-slices:
+# target_z_slice: [15, 17]  # Use z-slices from 15 to 16 (exclusive of 17)
+# pred_z_slice: [15, 17]    # Use z-slices from 15 to 16 (exclusive of 17)
 target_cell_types: [HEK293T]  # or leave empty [] for all available
 target_organelles: [HIST2H2BE]
 target_infection_conditions: [Mock]
@@ -121,3 +128,5 @@ version: "1"
 ```
 
 If cell types, organelles, or infection conditions are not specified or left empty, all available values from the respective database will be used.
+
+Using a z-slice range (e.g., `[15, 17]`) can be particularly useful for computing metrics on multiple consecutive z-slices, which is beneficial for 3D analysis or when working with volumes where the structures of interest span multiple z-slices.
