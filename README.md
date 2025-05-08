@@ -56,7 +56,7 @@ Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto
 - [Image translation demo](https://github.com/mehta-lab/VisCy/blob/main/examples/virtual_staining/img2img_translation/solution.ipynb): Fluorescence images can be predicted from label-free images. Can we predict label-free image from fluorescence? Find out using this notebook.
 
 - [Training Virtual Staining Models via CLI](https://github.com/mehta-lab/VisCy/wiki/virtual-staining-instructions):
-Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
+Instructions for how to train and run inference on VisCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
 
 ### Gallery
 
