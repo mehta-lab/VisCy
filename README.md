@@ -21,7 +21,8 @@ This repository provides a pipeline for the following.
   - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**
-> VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
+VisCy is under active development and frequent breaking changes are expected in the main branch.
+Please use the stable release from PyPI for virtual staining.
 
 ## Cytoland (robust virtual staining)
 
