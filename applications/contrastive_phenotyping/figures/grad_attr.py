@@ -29,8 +29,8 @@ track = 44
 
 # %%
 dm = TripletDataModule(
-    data_path="/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr",
-    tracks_path="/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr",
+    data_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr",
+    tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr",
     source_channel=["Phase3D", "RFP"],
     z_range=[25, 40],
     batch_size=48,
@@ -76,10 +76,10 @@ path_division_embedding = Path(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/time_sampling_strategies/time_interval/predict/feb_test_time_interval_1_epoch_178_gt_tracks.zarr"
 )
 path_annotations_infection = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv"
 )
 path_annotations_division = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt/cell_division_state_test_set.csv"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt/cell_division_state_test_set.csv"
 )
 
 infection_dataset = read_embedding_dataset(path_infection_embedding)
@@ -145,7 +145,7 @@ assembled_classifier_division = (
 # %%
 # load infection annotations
 infection = pd.read_csv(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv",
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv",
 )
 track_classes_infection = infection[infection["fov_name"] == fov[1:]]
 track_classes_infection = track_classes_infection[
@@ -155,7 +155,7 @@ track_classes_infection = track_classes_infection[
 # %%
 # load division annotations
 division = pd.read_csv(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt/cell_division_state_test_set.csv",
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/9-lineage-cell-division/lineages_gt/cell_division_state_test_set.csv",
 )
 track_classes_division = division[division["fov_name"] == fov[1:]]
 track_classes_division = track_classes_division[
@@ -258,7 +258,8 @@ cbar.set_label("occlusion attribution")
 # %%
 f.savefig(
     Path.home()
-    / "gdrive/publications/learning_impacts_of_infection/fig_manuscript/fig_explanation/fig_explanation_patch12_stride4.pdf",
+    / "mydata"
+    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_occlusion_analysis/figure_parts/fig_explanation_patch12_stride4.pdf",
     dpi=300,
 )
 

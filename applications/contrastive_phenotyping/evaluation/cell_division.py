@@ -1,7 +1,5 @@
 # %% figures for visualizing the results of cell division
-import sys
 
-sys.path.append("/hpc/mydata/soorya.pradeep/scratch/viscy_infection_phenotyping/VisCy")
 from pathlib import Path
 
 import matplotlib.pyplot as plt
