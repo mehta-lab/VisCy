@@ -46,7 +46,6 @@ output_dir.mkdir(parents=True, exist_ok=True)
 # We'll use a pre-trained ConvNext model to extract features from our cell images
 
 
-# %%
 def imagenet_prediction(
     data_path,
     tracks_path,
@@ -121,9 +120,8 @@ def imagenet_prediction(
 
 # %%
 source_channel = ["RFP"]
-z_range = (16, 21)
-initial_yx_patch_size = (192, 192)
-final_yx_patch_size = (192, 192)
+z_range = (24, 29)
+patch_size = (128, 128)
 
 print("Computing ImageNet features...")
 pooled, imagenet_pred_df = imagenet_prediction(
@@ -131,8 +129,8 @@ pooled, imagenet_pred_df = imagenet_prediction(
     tracks_path=tracks_path,
     source_channel=source_channel,
     z_range=z_range,
-    initial_yx_patch_size=initial_yx_patch_size,
-    final_yx_patch_size=final_yx_patch_size,
+    initial_yx_patch_size=patch_size,
+    final_yx_patch_size=patch_size,
     path_to_save=output_dir / "imagenet_tracks_phate.csv",
 )
 print("ImageNet features saved to:", output_dir / "imagenet_tracks_phate.csv")
@@ -207,8 +205,6 @@ fov_name_mock = "/B/3/9"
 track_id_mock = [100]
 fov_name_inf = "/B/4/9"
 track_id_inf = [44]
-z_range = (24, 29)
-yx_patch_size = (128, 128)
 channels_to_display = ["Phase3D", "RFP"]
 
 fov_name_mock_list = [fov_name_mock] * len(track_id_mock)
