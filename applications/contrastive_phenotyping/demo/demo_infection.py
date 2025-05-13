@@ -1,98 +1,49 @@
+#!/usr/bin/env python3
+# Demo: Comparing ImageNet vs DynaCLR for Cell Infection Analysis
+
+# %% [markdown]
+# # Cell Infection Analysis: ImageNet vs DynaCLR
+#
+# This tutorial demonstrates how to:
+# 1. Use ImageNet pre-trained features for analyzing cell infection
+# 2. Compare with DynaCLR learned features
+# 3. Visualize the differences between approaches
+
+# %% [markdown]
+# ## Setup and Imports
+
 # %%
-import os
 from pathlib import Path
-from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import phate
-import seaborn as sns
 import timm
 import torch
-import xarray as xr
-from matplotlib.lines import Line2D
-from matplotlib.patches import FancyArrowPatch
-from matplotlib.widgets import Slider
-from sklearn.decomposition import PCA
-from sklearn.linear_model import LogisticRegression
-from sklearn.preprocessing import StandardScaler
+from skimage.exposure import rescale_intensity
 from tqdm import tqdm
-from xarray import Dataset
 
+from utils import create_combined_visualization, create_plotly_visualization
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation import dataset_of_tracks
-from viscy.representation.evaluation.clustering import (
-    pairwise_distance_matrix,
-    rank_nearest_neighbors,
-)
-from viscy.representation.evaluation.dimensionality_reduction import (
-    compute_pca,
-    compute_phate,
-)
-from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
+from viscy.representation.evaluation.dimensionality_reduction import compute_phate
+from viscy.transforms import ScaleIntensityRangePercentilesd
+
+# %% [markdown]
+# ## Set Data Paths
 
 # %%
-# Set the style for the plots
-DARK_MODE = False
-plt.style.use("dark_background" if DARK_MODE else "default")
-plt.style.use(
-    "/home/eduardo.hirata/repos/viscy/applications/contrastive_phenotyping/figures/figure.mplstyle"
-)
-# Define different colors based on dark mode
-if DARK_MODE:
-    annotation_colors = {"uinfected": "blue", "infected": "red"}
-    text_color = "white"
-else:
-    annotation_colors = {"uinfected": "blue", "infected": "red"}
-    text_color = "black"
-# %%
-
 input_data_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
 tracks_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
 dynaclr_features_path = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
 
-imagenet_features_path = ""
-
 output_dir = Path("./imagenet_vs_dynaclr/infection")
 output_dir.mkdir(parents=True, exist_ok=True)
 
-
-def add_arrows(df, color):
-    for i in range(df.shape[0] - 1):
-        start = df.iloc[i]
-        end = df.iloc[i + 1]
-        arrow = FancyArrowPatch(
-            (start["phate_0"], start["phate_1"]),
-            (end["phate_0"], end["phate_1"]),
-            color=color,
-            arrowstyle="-",
-            mutation_scale=10,  # reduce the size of arrowhead by half
-            lw=1,
-            shrinkA=0,
-            shrinkB=0,
-        )
-        plt.gca().add_patch(arrow)
-
-
-def add_phate_arrows(df, color):
-    from matplotlib.patches import FancyArrowPatch
-
-    for i in range(df.shape[0] - 1):
-        start = df.iloc[i]
-        end = df.iloc[i + 1]
-        arrow = FancyArrowPatch(
-            (start["PHATE1"], start["PHATE2"]),
-            (end["PHATE1"], end["PHATE2"]),
-            color=color,
-            arrowstyle="-",
-            mutation_scale=10,  # reduce the size of arrowhead by half
-            lw=1,
-            shrinkA=0,
-            shrinkB=0,
-        )
-        plt.gca().add_patch(arrow)
+# %% [markdown]
+# ## Step 1: Compute ImageNet Features
+#
+# We'll use a pre-trained ConvNext model to extract features from our cell images
 
 
 # %%
@@ -105,11 +56,9 @@ def imagenet_prediction(
     final_yx_patch_size=(192, 192),
     path_to_save=None,
 ):
-    # Load the ImageNet pretrained model
     model = timm.create_model("convnext_tiny", pretrained=True).eval().to("cuda")
     model.eval()
 
-    # Setup Data Loader
     dm = TripletDataModule(
         data_path=input_data_path,
         tracks_path=tracks_path,
@@ -132,21 +81,17 @@ def imagenet_prediction(
 
     with torch.inference_mode():
         for batch in tqdm(dm.predict_dataloader()):
-            # Get both channels and handle dimensions properly
-            rfp = batch["anchor"][:, 0]  # Shape: [batch, z, h, w]
-            rfp = rfp.max(dim=1)[0]  # Max project z: [batch, h, w]
+            rfp = batch["anchor"][:, 0]
+            rfp = rfp.max(dim=1)[0]
 
-            # Create RGB image using phase for all channels and adding RFP to red channel
             rgb_image = torch.stack(
                 [
-                    rfp,  # Red channel: RFP
-                    rfp,  # Green channel: RFP
-                    rfp,  # Blue channel: RFP
+                    rfp,
+                    rfp,
+                    rfp,
                 ],
                 dim=1,
-            ).to(
-                "cuda"
-            )  # Final shape: [batch, 3, h, w]
+            ).to("cuda")
 
             features.append(model.forward_features(rgb_image))
             indices.append(batch["index"])
@@ -171,19 +116,31 @@ def imagenet_prediction(
     return pooled, tracks_df
 
 
+# %% [markdown]
+# ### Run ImageNet Feature Extraction
+
+# %%
 source_channel = ["RFP"]
 z_range = (16, 21)
 initial_yx_patch_size = (192, 192)
 final_yx_patch_size = (192, 192)
-# pooled, imagenet_pred_df = imagenet_prediction(
-#     data_path=input_data_path,
-#     tracks_path=tracks_path,
-#     source_channel=source_channel,
-#     z_range=z_range,
-#     initial_yx_patch_size=initial_yx_patch_size,
-#     final_yx_patch_size=final_yx_patch_size,
-#     path_to_save=output_dir / "imagenet_tracks_phate.csv",
-# )
+
+print("Computing ImageNet features...")
+pooled, imagenet_pred_df = imagenet_prediction(
+    data_path=input_data_path,
+    tracks_path=tracks_path,
+    source_channel=source_channel,
+    z_range=z_range,
+    initial_yx_patch_size=initial_yx_patch_size,
+    final_yx_patch_size=final_yx_patch_size,
+    path_to_save=output_dir / "imagenet_tracks_phate.csv",
+)
+print("ImageNet features saved to:", output_dir / "imagenet_tracks_phate.csv")
+
+# %% [markdown]
+# ## Step 2: Load Infection Annotations
+#
+# Now we'll load the infection state annotations and merge them with our features
 
 # %%
 imagenet_pred_df = pd.read_csv(output_dir / "imagenet_tracks_phate.csv")
@@ -195,10 +152,8 @@ ann_path = ann_root / "extracted_inf_state.csv"
 annotation = pd.read_csv(ann_path)
 annotation["fov_name"] = "/" + annotation["fov_name"]
 
-# Initialize the infection column with NaN values
 imagenet_pred_df["infection"] = float("nan")
 
-# Populate infection values by matching fov_name and track_id
 for index, row in annotation.iterrows():
     mask = (
         (imagenet_pred_df["fov_name"] == row["fov_name"])
@@ -207,26 +162,23 @@ for index, row in annotation.iterrows():
     )
     imagenet_pred_df.loc[mask, "infection"] = row["infection_state"]
 
-
-# find number of NaNs in infection column
 print(
     f"Number of NaNs in infection column: {imagenet_pred_df['infection'].isna().sum()}"
 )
-
-# remove rows with infection = 0
 imagenet_pred_df = imagenet_pred_df[imagenet_pred_df["infection"] != 0]
-# %%
-# Import utility functions
-from utils import create_plotly_visualization
+print(f"Number of rows after filtering: {len(imagenet_pred_df)}")
 
-# Selected tracks to highlight
+# %% [markdown]
+# ## Step 3: Visualize ImageNet Features
+#
+# Create an interactive visualization of the ImageNet embeddings with time slider
+
+# %%
 infected_fov = "/B/4/9"
 infected_track = 42
 uninfected_fov = "/A/3/9"
 uninfected_track = 19
 
-
-# Create an interactive Plotly visualization with time slider
 fig = create_plotly_visualization(
     imagenet_pred_df,
     highlight_tracks={
@@ -243,10 +195,14 @@ fig = create_plotly_visualization(
     plot_size_xy=(500, 500),
 )
 fig.show()
-# %%
-from skimage.exposure import rescale_intensity
 
-# Cache the images
+# %% [markdown]
+# ## Step 4: Cache Sample Images for Visualization
+#
+# We'll cache representative images of infected and uninfected cells
+
+# %%
+print("Caching sample images...")
 fov_name_mock = "/B/3/9"
 track_id_mock = [100]
 fov_name_inf = "/B/4/9"
@@ -285,7 +241,6 @@ for condition, condition_data in conditions_to_compare.items():
     )
     dm.setup("predict")
 
-    # Cache the condition
     condition_key = f"{condition}_cache"
     image_cache[condition_key] = {
         "fov_name": None,
@@ -299,69 +254,44 @@ for condition, condition_data in conditions_to_compare.items():
         images = patch["anchor"].numpy()[0]
         t = int(patch["index"]["t"][0])
 
-        # Store metadata if first time
         if image_cache[condition_key]["fov_name"] is None:
             image_cache[condition_key]["fov_name"] = fov_name
             image_cache[condition_key]["track_id"] = track_id
 
         z_idx = images.shape[1] // 2
         C, Z, Y, X = images.shape
-        # CYX
         image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
         for c_idx, channel in enumerate(channels_to_display):
             if channel in ["Phase3D", "DIC", "BF"]:
                 image_out[c_idx] = images[c_idx, z_idx]
-                # Normalize 0-mean, unit variance
                 image_out[c_idx] = (
                     image_out[c_idx] - image_out[c_idx].mean()
                 ) / image_out[c_idx].std()
-                # rescale intensity
                 image_out[c_idx] = rescale_intensity(image_out[c_idx], out_range=(0, 1))
             else:
-                # For fluoresnce max projection and then normalize
                 image_out[c_idx] = np.max(images[c_idx], axis=0)
-                # Percentile normalization
                 lower, upper = np.percentile(image_out[c_idx], (50, 99))
                 image_out[c_idx] = (image_out[c_idx] - lower) / (upper - lower)
-                # Rescale intensity
                 image_out[c_idx] = rescale_intensity(image_out[c_idx], out_range=(0, 1))
 
-        # Store by timepoint
         image_cache[condition_key]["images_by_timepoint"][t] = image_out
 
     print(
         f"Cached {condition_key} with {len(image_cache[condition_key]['images_by_timepoint'])} timepoints"
     )
 
-# %%
-# Plotly visualization of the Phase and RFP images
-from utils import create_image_visualization
-
-# Create the visualization using our utility function
-fig = create_image_visualization(
-    image_cache=image_cache,
-    subplot_titles=[
-        "Uinfected Phase",
-        "Uinfected Viral Sensor",
-        "Infected Phase",
-        "Infected Viral Sensor",
-    ],
-    condition_keys=["uinfected_cache", "infected_cache"],
-    channel_colormaps=["gray", "magma"],
-    plot_size_xy=(800, 800),
-    # horizontal_spacing=0.05,
-    # vertical_spacing=0.1,
-)
-
-# Show the figure
-fig.show()
+# %% [markdown]
+# ## Step 5: Load and Process DynaCLR Features
+#
+# Now we'll load the features from our specialized DynaCLR model
 
 # %%
-# Load the DyaCLR embeddings
+print("Loading DynaCLR features...")
 dynaclr_embeddings = read_embedding_dataset(dynaclr_features_path)
 dynaclr_features = dynaclr_embeddings["features"]
 dynaclr_features_df = dynaclr_features["sample"].to_dataframe().reset_index(drop=True)
-# Compute PHATE embedding
+
+print("Computing PHATE embedding for DynaCLR features...")
 _, phate_embedding = compute_phate(
     embedding_dataset=dynaclr_features,
     n_components=2,
@@ -371,11 +301,13 @@ _, phate_embedding = compute_phate(
 )
 for i, feature in enumerate(phate_embedding.T):
     dynaclr_features_df[f"PHATE{i+1}"] = feature
+
+# %% [markdown]
+# ### Add Infection Annotations to DynaCLR Features
+
 # %%
-# Initialize the infection column with NaN values
 dynaclr_features_df["infection"] = float("nan")
 
-# Populate infection values by matching fov_name and track_id
 for index, row in annotation.iterrows():
     mask = (
         (dynaclr_features_df["fov_name"] == row["fov_name"])
@@ -384,35 +316,19 @@ for index, row in annotation.iterrows():
     )
     dynaclr_features_df.loc[mask, "infection"] = row["infection_state"]
 
-
-# find number of NaNs in infection column
 print(
     f"Number of NaNs in infection column: {dynaclr_features_df['infection'].isna().sum()}"
 )
-
-# remove rows with infection = 0
 dynaclr_features_df = dynaclr_features_df[dynaclr_features_df["infection"] != 0]
-# %%
-# Create an interactive Plotly visualization with time slider
-fig = create_plotly_visualization(
-    dynaclr_features_df,
-    highlight_tracks={
-        1: [("/A/3/9", 19)],  # Uninfected tracks
-        2: [("/B/4/9", 42)],  # Infected tracks
-    },
-    df_coordinates=["PHATE1", "PHATE2"],
-    time_column="t",
-    category_column="infection",
-    category_labels={1: "Uninfected", 2: "Infected"},
-    category_colors={1: "cornflowerblue", 2: "salmon"},
-    highlight_colors={1: "blue", 2: "red"},
-    title_prefix="DynaCLR PHATE Embedding",
-    plot_size_xy=(500, 500),
-)
-fig.show()
+print(f"Number of rows after filtering: {len(dynaclr_features_df)}")
 
+# %% [markdown]
+# ## Step 6: Create Combined Visualization
+#
+# Finally, we'll create a combined visualization comparing ImageNet and DynaCLR approaches
 
 # %%
+print("Creating combined visualization...")
 create_combined_visualization(
     image_cache,
     imagenet_pred_df,
@@ -422,8 +338,8 @@ create_combined_visualization(
         2: [("/B/4/9", 42)],  # Infected tracks
     },
     subplot_titles=[
-        "Uinfected Phase",
-        "Uinfected Viral Sensor",
+        "Uninfected Phase",
+        "Uninfected Viral Sensor",
         "Infected Phase",
         "Infected Viral Sensor",
     ],
@@ -432,7 +348,15 @@ create_combined_visualization(
     category_colors={1: "cornflowerblue", 2: "salmon"},
     highlight_colors={1: "blue", 2: "red"},
     category_labels={1: "Uninfected", 2: "Infected"},
-    plot_size_xy=(1800, 600),
+    plot_size_xy=(1200, 600),
+    title_location="top",
 )
+
+# %% [markdown]
+# ## Conclusion
+#
+# This tutorial demonstrated the comparison between general purpose ImageNet features and
+# specialized DynaCLR features for analyzing cell infection states. The visualizations
+# show how each approach groups infected vs. uninfected cells in feature space.
 
 # %%

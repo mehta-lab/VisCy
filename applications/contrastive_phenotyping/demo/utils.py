@@ -848,6 +848,7 @@ def create_combined_visualization(
     highlight_colors={1: "blue", 2: "red"},
     category_labels={1: "Uninfected", 2: "Infected"},
     plot_size_xy=(1800, 600),
+    title_location="inside",
 ):
     """
     Creates a combined visualization with cell images and PHATE embeddings with a shared time slider.
@@ -873,6 +874,8 @@ def create_combined_visualization(
         Visual configuration for PHATE plots
     plot_size_xy : tuple
         Width and height of the plot
+    title_location : str
+        Location of subplot titles. Either "inside" (default) or "top"
 
     Returns
     -------
@@ -1066,7 +1069,7 @@ def create_combined_visualization(
         rows=1,
         cols=3,
         column_widths=[0.33, 0.33, 0.33],
-        subplot_titles=["Cell Images", "ImageNet PHATE", "DynaCLR PHATE"],
+        subplot_titles=["", "ImageNet PHATE", "DynaCLR PHATE"],
         specs=[[{"type": "xy"}, {"type": "xy"}, {"type": "xy"}]],
     )
 
@@ -1125,8 +1128,19 @@ def create_combined_visualization(
     for i, title in enumerate(subplot_titles):
         row = i // 2
         col = i % 2
-        x_pos = col * 0.5 + 0.22  # Center of each quadrant
-        y_pos = 1 - row * 0.5 - 0.05  # Top of each quadrant
+
+        if title_location == "top":
+            # Position titles above the images
+            x_pos = col * 0.5 + 0.22  # Center of each quadrant
+            y_pos = 1 - row * 0.5  # Top of each quadrant
+            yanchor = "bottom"
+            font_color = "black"  # Always use dark text for titles at the top
+        else:
+            # Position titles inside the images (default)
+            x_pos = col * 0.5 + 0.22  # Center of each quadrant
+            y_pos = 1 - row * 0.5 - 0.05  # Top of each quadrant with offset
+            yanchor = "top"
+            font_color = "white"  # Use white for better contrast inside images
 
         main_fig.add_annotation(
             x=x_pos,
@@ -1136,8 +1150,8 @@ def create_combined_visualization(
             xref="x",
             yref="y",
             xanchor="center",
-            yanchor="top",
-            font=dict(size=10),
+            yanchor=yanchor,
+            font=dict(size=10, color=font_color),
             row=1,
             col=1,
         )
