@@ -7,6 +7,7 @@ import importlib
 import logging
 import os
 from pathlib import Path
+from typing import Dict, List, Literal, Optional
 
 import click
 import torch
@@ -20,9 +21,29 @@ from viscy.trainer import VisCyTrainer
 
 
 class OpenPhenomModule(LightningModule):
-    def __init__(self):
+    def __init__(
+        self,
+        channel_reduction_methods: Optional[
+            Dict[str, Literal["middle_slice", "mean", "max"]]
+        ] = None,
+        channel_names: Optional[List[str]] = None,
+    ):
+        """Initialize the OpenPhenom module.
+
+        Args:
+            channel_reduction_methods: Dict mapping channel names to reduction methods:
+                - "middle_slice": Take the middle slice along the depth dimension
+                - "mean": Average across the depth dimension
+                - "max": Take the maximum value across the depth dimension
+            channel_names: List of channel names corresponding to the input channels
+        """
         super().__init__()
+
+        self.channel_reduction_methods = channel_reduction_methods or {}
+        self.channel_names = channel_names or []
+
         try:
+            torch.set_float32_matmul_precision("high")
             self.model = AutoModel.from_pretrained(
                 "recursionpharma/OpenPhenom", trust_remote_code=True
             )
@@ -37,6 +58,41 @@ class OpenPhenomModule(LightningModule):
         # Move model to GPU when prediction starts
         self.model.to(self.device)
 
+    def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
+        """Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
+
+        Args:
+            x: 5D input tensor
+
+        Returns:
+            4D tensor after applying reduction methods
+        """
+        if x.dim() != 5:
+            return x
+
+        B, C, D, H, W = x.shape
+        result = torch.zeros((B, C, H, W), device=x.device)
+
+        # Apply reduction method for each channel
+        for c in range(C):
+            channel_name = (
+                self.channel_names[c] if c < len(self.channel_names) else f"channel_{c}"
+            )
+            # Default to middle slice if not specified
+            method = self.channel_reduction_methods.get(channel_name, "middle_slice")
+
+            if method == "middle_slice":
+                result[:, c] = x[:, c, D // 2]
+            elif method == "mean":
+                result[:, c] = x[:, c].mean(dim=1)
+            elif method == "max":
+                result[:, c] = x[:, c].max(dim=1)[0]
+            else:
+                # Fallback to middle slice for unknown methods
+                result[:, c] = x[:, c, D // 2]
+
+        return result
+
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """Extract features from the input images.
 
@@ -46,9 +102,9 @@ class OpenPhenomModule(LightningModule):
         x = batch["anchor"]
 
         # OpenPhenom expects [B, C, H, W] but our data might be [B, C, D, H, W]
-        # If 5D input, take middle slice or average across D
+        # If 5D input, handle according to specified reduction methods
         if x.dim() == 5:
-            x = x[:, :, x.shape[2] // 2, :, :]
+            x = self._reduce_5d_input(x)
 
         # Convert to uint8 as OpenPhenom expects uint8 inputs
         if x.dtype != torch.uint8:
@@ -166,25 +222,41 @@ def main(config):
     logger.info("Setting up data module")
     dm = TripletDataModule(**dm_params)
 
-    # Initialize OpenPhenom model
+    # Get model parameters for handling 5D inputs
+    channel_reduction_methods = {}
+
+    if "model" in cfg and "channel_reduction_methods" in cfg["model"]:
+        channel_reduction_methods = cfg["model"]["channel_reduction_methods"]
+
+    # Initialize OpenPhenom model with reduction settings
     logger.info("Loading OpenPhenom model")
-    model = OpenPhenomModule()
+    model = OpenPhenomModule(
+        channel_reduction_methods=channel_reduction_methods,
+        channel_names=dm_params.get("source_channel", []),
+    )
 
     # Get dimensionality reduction parameters from config
-    phate_kwargs = None
-    umap_kwargs = None
-    pca_kwargs = None
+    PHATE_kwargs = None
+    UMAP_kwargs = None
+    PCA_kwargs = None
     reductions = None
 
     if "embedding" in cfg:
-        if "phate_kwargs" in cfg["embedding"]:
-            phate_kwargs = cfg["embedding"]["phate_kwargs"]
-        if "umap_kwargs" in cfg["embedding"]:
-            umap_kwargs = cfg["embedding"]["umap_kwargs"]
-        if "pca_kwargs" in cfg["embedding"]:
-            pca_kwargs = cfg["embedding"]["pca_kwargs"]
+        if "PHATE_kwargs" in cfg["embedding"]:
+            PHATE_kwargs = cfg["embedding"]["PHATE_kwargs"]
+        if "UMAP_kwargs" in cfg["embedding"]:
+            UMAP_kwargs = cfg["embedding"]["UMAP_kwargs"]
+        if "PCA_kwargs" in cfg["embedding"]:
+            PCA_kwargs = cfg["embedding"]["PCA_kwargs"]
         if "reductions" in cfg["embedding"]:
             reductions = cfg["embedding"]["reductions"]
+            # Ensure all reduction names are uppercase as expected by EmbeddingWriter
+            normalized_reductions = []
+            for r in reductions:
+                r_upper = r.upper()
+                if r_upper in ["PHATE", "UMAP", "PCA"]:
+                    normalized_reductions.append(r_upper)
+            reductions = normalized_reductions if normalized_reductions else reductions
 
     # Check if output path exists and should be overwritten
     if "output_path" not in cfg["paths"]:
@@ -206,9 +278,9 @@ def main(config):
     # Set up EmbeddingWriter callback
     embedding_writer = EmbeddingWriter(
         output_path=output_path,
-        phate_kwargs=phate_kwargs,
-        umap_kwargs=umap_kwargs,
-        pca_kwargs=pca_kwargs,
+        PHATE_kwargs=PHATE_kwargs,
+        UMAP_kwargs=UMAP_kwargs,
+        PCA_kwargs=PCA_kwargs,
         reductions=reductions,
     )
 
