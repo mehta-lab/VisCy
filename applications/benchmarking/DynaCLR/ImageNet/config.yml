@@ -1,42 +1,58 @@
 datamodule:
   batch_size: 32
+  final_yx_patch_size:
+  - 192
+  - 192
+  include_fov_names: null
+  include_track_ids: null
+  initial_yx_patch_size:
+  - 192
+  - 192
   normalizations:
   - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
     init_args:
       b_max: 1.0
       b_min: 0.0
       keys:
-      - RFP
+      - Phase3D
+      lower: 50
+      upper: 99
+  - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+    init_args:
+      b_max: 1.0
+      b_min: 0.0
+      keys:
+      - raw GFP EX488 EM525-45
       lower: 50
       upper: 99
   num_workers: 10
-  patch_size:
-  - 128
-  - 128
   source_channel:
-  - RFP
+  - Phase3D
+  - raw GFP EX488 EM525-45
   z_range:
-  - 24
-  - 29
+  - 25
+  - 40
 embedding:
   PCA_kwargs:
     n_components: 8
   PHATE_kwargs:
     decay: 40
-    k: 5
+    knn: 5
     n_components: 2
-    n_jobs: 15
+    n_jobs: -1
+    random_state: 42
   reductions:
-  - PCA
   - PHATE
+  - PCA
 execution:
   overwrite: true
   save_config: true
   show_config: true
 model:
   channel_reduction_methods:
-    RFP: max
+    Phase3D: middle_slice
+    raw GFP EX488 EM525-45: max
 paths:
-  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr
-  output_path: /home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/imagenet_infection_embeddings_3.zarr
-  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr
+  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr
+  output_path: /home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/SEC61_n_phase_imagenet.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr

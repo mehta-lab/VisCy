@@ -110,6 +110,24 @@ class ImageNetModule(LightningModule):
         if x.shape[1] == 1:
             x = x.repeat(1, 3, 1, 1)
 
+        # If we have 2-channel input but model expects 3 channels, blend them into RGB
+        if x.shape[1] == 2:
+            # Create a new tensor with 3 channels
+            x_3ch = torch.zeros(
+                (x.shape[0], 3, x.shape[2], x.shape[3]), device=x.device, dtype=x.dtype
+            )
+
+            # Channel 0 (R): First channel with some influence from second channel
+            x_3ch[:, 0] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
+
+            # Channel 1 (G): Equal blend of both channels
+            x_3ch[:, 1] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
+
+            # Channel 2 (B): Second channel with some influence from first channel
+            x_3ch[:, 2] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
+
+            x = x_3ch
+
         # Normalize to 0-1 range if needed
         if x.max() > 1.0 or x.min() < 0.0:
             x = (x - x.min()) / (x.max() - x.min())
