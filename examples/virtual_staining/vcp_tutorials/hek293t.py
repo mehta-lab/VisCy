@@ -212,6 +212,10 @@ for virtual staining of cell nuclei and plasma membranes, which can rescue missi
 
 # %% [markdown]
 """
+## Contact & Feedback
+
+For issues or feedback about this tutorial please contact Ziwen Liu at [ziwen.liu@czbiohub.org](mailto:ziwen.liu@czbiohub.org).
+
 ## Responsible Use
 
 We are committed to advancing the responsible development and use of artificial intelligence.
