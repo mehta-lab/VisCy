@@ -16,6 +16,7 @@ import xarray as xr
 from matplotlib.patches import FancyArrowPatch
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import f1_score
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
@@ -376,8 +377,10 @@ y_pred = clf.predict(x_test)
 # compute the accuracy of the classifier
 
 accuracy = np.mean(y_pred == y_test)
+f1 = f1_score(y_test, y_pred, average="weighted")
 # save the accuracy for final ploting
 print(f"Accuracy of model: {accuracy}")
+print(f"F1 score of model: {f1}")
 
 # %% plot the infection state over time
 # plot the predicted infection state over time for /B/3 well and /B/4 well
