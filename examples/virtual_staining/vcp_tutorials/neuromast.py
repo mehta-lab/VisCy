@@ -157,6 +157,7 @@ import numpy as np
 from iohub import open_ome_zarr
 from numpy.typing import NDArray
 
+
 # %%
 def highlight_intensity_normalized(fov_path: str, channel_name: str) -> list[float]:
     """
@@ -183,9 +184,12 @@ def highlight_intensity_normalized(fov_path: str, channel_name: str) -> list[flo
             highlights.append(np.percentile(volume.compute(), 99))
         return [h / highlights[0] for h in highlights]
 
+
 # %%
-mean_fl = highlight_intensity_normalized('input.ome.zarr/0/3/0', 'mScarlett')
-mean_vs = highlight_intensity_normalized('prediction.ome.zarr/0/3/0', 'membrane_prediction')
+mean_fl = highlight_intensity_normalized("input.ome.zarr/0/3/0", "mScarlett")
+mean_vs = highlight_intensity_normalized(
+    "prediction.ome.zarr/0/3/0", "membrane_prediction"
+)
 time = np.arange(0, 100, 30)
 
 plt.plot(time, mean_fl, label="membrane fluorescence")
@@ -193,3 +197,34 @@ plt.plot(time, mean_vs, label="membrane virtual staining")
 plt.xlabel("time / min")
 plt.ylabel("normalized highlight intensity")
 plt.legend()
+
+# %% [markdown]
+"""
+Here the highlight intensity of the fluorescence images decreases over time,
+following a exponential decay pattern, indicating photobleaching.
+The virtual staining is not affected by this issue.
+"""
+
+# %% [markdown]
+"""
+# Summary
+
+In the above example, we demonstrated how to use the VSNeuromast model
+for virtual staining of cell nuclei and plasma membranes of the zebrafish neuromast _in vivo_,
+which can alleviate photobleaching in long-term live imaging.
+"""
+
+# %% [markdown]
+"""
+## Contact & Feedback
+
+For issues or feedback about this tutorial please contact Ziwen Liu at [ziwen.liu@czbiohub.org](mailto:ziwen.liu@czbiohub.org).
+
+## Responsible Use
+
+We are committed to advancing the responsible development and use of artificial intelligence.
+Please follow our [Acceptable Use Policy](https://virtualcellmodels.cziscience.com/acceptable-use-policy) when engaging with our services.
+
+Should you have any security or privacy issues or questions related to the services,
+please reach out to our team at [security@chanzuckerberg.com](mailto:security@chanzuckerberg.com) or [privacy@chanzuckerberg.com](mailto:privacy@chanzuckerberg.com) respectively.
+"""
