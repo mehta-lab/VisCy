@@ -1,8 +1,5 @@
-#!/usr/bin/env python3
-# Demo: Comparing ImageNet vs DynaCLR for Cell Infection Analysis
-
 # %% [markdown]
-# # Cell Infection Analysis: ImageNet vs DynaCLR
+# # Demo: Comparing ImageNet vs DynaCLR for Cell Infection Analysis
 #
 # This tutorial demonstrates how to:
 # 1. Use ImageNet pre-trained features for analyzing cell infection
@@ -44,6 +41,7 @@ output_dir.mkdir(parents=True, exist_ok=True)
 # ## Step 1: Compute ImageNet Features
 #
 # We'll use a pre-trained ConvNext model to extract features from our cell images
+# %%
 
 
 def imagenet_prediction(
@@ -121,7 +119,7 @@ def imagenet_prediction(
 # %%
 source_channel = ["RFP"]
 z_range = (24, 29)
-patch_size = (128, 128)
+yx_patch_size = (128, 128)
 
 print("Computing ImageNet features...")
 pooled, imagenet_pred_df = imagenet_prediction(
@@ -129,8 +127,8 @@ pooled, imagenet_pred_df = imagenet_prediction(
     tracks_path=tracks_path,
     source_channel=source_channel,
     z_range=z_range,
-    initial_yx_patch_size=patch_size,
-    final_yx_patch_size=patch_size,
+    initial_yx_patch_size=yx_patch_size,
+    final_yx_patch_size=yx_patch_size,
     path_to_save=output_dir / "imagenet_tracks_phate.csv",
 )
 print("ImageNet features saved to:", output_dir / "imagenet_tracks_phate.csv")
