@@ -150,3 +150,46 @@ and the inference step takes about **2 minutes** (T4 GPU).
 Measure photobleaching in the fluorescence images
 and how virtual staining can mitigate this issue.
 """
+
+# %%
+import matplotlib.pyplot as plt
+import numpy as np
+from iohub import open_ome_zarr
+from numpy.typing import NDArray
+
+# %%
+def highlight_intensity_normalized(fov_path: str, channel_name: str) -> list[float]:
+    """
+    Compute highlight (99th percentile) intensity of each timepoint,
+    normalized to the first timepoint.
+
+    Parameters
+    ----------
+    fov_path : str
+        Path to the field of view (FOV).
+    channel_name : str
+        Name of the channel to compute highlight intensity for.
+
+    Returns
+    -------
+    NDArray
+        List of intensity values.
+    """
+    with open_ome_zarr(fov_path) as fov:
+        channel_index = fov.get_channel_index(channel_name)
+        channel = fov["0"].dask_array()[:, channel_index]
+        highlights = []
+        for t, volume in enumerate(channel):
+            highlights.append(np.percentile(volume.compute(), 99))
+        return [h / highlights[0] for h in highlights]
+
+# %%
+mean_fl = highlight_intensity_normalized('input.ome.zarr/0/3/0', 'mScarlett')
+mean_vs = highlight_intensity_normalized('prediction.ome.zarr/0/3/0', 'membrane_prediction')
+time = np.arange(0, 100, 30)
+
+plt.plot(time, mean_fl, label="membrane fluorescence")
+plt.plot(time, mean_vs, label="membrane virtual staining")
+plt.xlabel("time / min")
+plt.ylabel("normalized highlight intensity")
+plt.legend()
