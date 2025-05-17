@@ -1,37 +1,28 @@
 datamodule:
   batch_size: 32
   final_yx_patch_size:
-  - 192
-  - 192
+  - 160
+  - 160
   include_fov_names: null
   include_track_ids: null
   initial_yx_patch_size:
-  - 192
-  - 192
+  - 160
+  - 160
   normalizations:
   - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
     init_args:
       b_max: 1.0
       b_min: 0.0
       keys:
-      - Phase3D
+      - RFP
       lower: 50
       upper: 99
-  - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
-    init_args:
-      b_max: 1.0
-      b_min: 0.0
-      keys:
-      - raw GFP EX488 EM525-45
-      lower: 50
-      upper: 99
-  num_workers: 10
+  num_workers: 60
   source_channel:
-  - Phase3D
-  - raw GFP EX488 EM525-45
+  - RFP
   z_range:
-  - 25
-  - 40
+  - 15
+  - 45
 embedding:
   PCA_kwargs:
     n_components: 8
@@ -50,9 +41,8 @@ execution:
   show_config: true
 model:
   channel_reduction_methods:
-    Phase3D: middle_slice
-    raw GFP EX488 EM525-45: max
+    RFP: max
 paths:
-  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr
-  output_path: /home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/SEC61_n_phase_imagenet.zarr
-  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr
+  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr
+  output_path: /home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr

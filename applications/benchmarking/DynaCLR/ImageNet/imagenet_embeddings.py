@@ -52,9 +52,6 @@ class ImageNetModule(LightningModule):
         except ImportError:
             raise ImportError("Please install the timm library: " "pip install timm")
 
-    def on_predict_start(self):
-        self.model.to(self.device)
-
     def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
         """Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
 
@@ -70,35 +67,92 @@ class ImageNetModule(LightningModule):
         B, C, D, H, W = x.shape
         result = torch.zeros((B, C, H, W), device=x.device)
 
-        # Apply reduction method for each channel
+        # Process all channels at once for each reduction method to minimize loops
+        middle_slice_indices = []
+        mean_indices = []
+        max_indices = []
+
+        # Group channels by reduction method
         for c in range(C):
             channel_name = (
                 self.channel_names[c] if c < len(self.channel_names) else f"channel_{c}"
             )
-            # Default to middle slice if not specified
             method = self.channel_reduction_methods.get(channel_name, "middle_slice")
 
-            if method == "middle_slice":
-                logger.info(f"Using middle slice for {channel_name}")
-                result[:, c] = x[:, c, D // 2]
-            elif method == "mean":
-                logger.info(f"Using mean for {channel_name}")
-                result[:, c] = x[:, c].mean(dim=1)
+            if method == "mean":
+                mean_indices.append(c)
             elif method == "max":
-                logger.info(f"Using max for {channel_name}")
-                result[:, c] = x[:, c].max(dim=1)[0]
-            else:
-                # Fallback to middle slice for unknown methods
-                logger.info(f"Using middle slice for {channel_name}")
-                result[:, c] = x[:, c, D // 2]
+                max_indices.append(c)
+            else:  # Default to middle_slice for any unknown method
+                middle_slice_indices.append(c)
+
+        # Apply middle_slice reduction to all relevant channels at once
+        if middle_slice_indices:
+            indices = torch.tensor(middle_slice_indices, device=x.device)
+            result[:, indices] = x[:, indices, D // 2]
+
+        # Apply mean reduction to all relevant channels at once
+        if mean_indices:
+            indices = torch.tensor(mean_indices, device=x.device)
+            result[:, indices] = x[:, indices].mean(dim=2)
+
+        # Apply max reduction to all relevant channels at once
+        if max_indices:
+            indices = torch.tensor(max_indices, device=x.device)
+            result[:, indices] = x[:, indices].max(dim=2)[0]
 
         return result
+
+    def _convert_to_rgb(self, x: torch.Tensor) -> torch.Tensor:
+        """Convert input tensor to 3-channel RGB format as needed.
+
+        Args:
+            x: Input tensor with 1, 2, or 3+ channels
+
+        Returns:
+            3-channel tensor suitable for ImageNet models
+        """
+        if x.shape[1] == 3:
+            return x
+        elif x.shape[1] == 1:
+            # Convert to RGB by repeating the channel 3 times
+            return x.repeat(1, 3, 1, 1)
+        elif x.shape[1] == 2:
+            # Normalize each channel independently to handle different scales
+            B, _, H, W = x.shape
+            x_3ch = torch.zeros((B, 3, H, W), device=x.device, dtype=x.dtype)
+
+            # Normalize each channel to 0-1 range
+            ch0 = x[:, 0:1]
+            ch1 = x[:, 1:2]
+
+            ch0_min = ch0.reshape(B, -1).min(dim=1, keepdim=True)[0].reshape(B, 1, 1, 1)
+            ch0_max = ch0.reshape(B, -1).max(dim=1, keepdim=True)[0].reshape(B, 1, 1, 1)
+            ch0_range = ch0_max - ch0_min + 1e-7  # Add epsilon for numerical stability
+            ch0_norm = (ch0 - ch0_min) / ch0_range
+
+            ch1_min = ch1.reshape(B, -1).min(dim=1, keepdim=True)[0].reshape(B, 1, 1, 1)
+            ch1_max = ch1.reshape(B, -1).max(dim=1, keepdim=True)[0].reshape(B, 1, 1, 1)
+            ch1_range = ch1_max - ch1_min + 1e-7  # Add epsilon for numerical stability
+            ch1_norm = (ch1 - ch1_min) / ch1_range
+
+            # Create blended RGB channels - map each normalized channel to different colors
+            x_3ch[:, 0] = ch0_norm.squeeze(1)  # R channel from first input
+            x_3ch[:, 1] = ch1_norm.squeeze(1)  # G channel from second input
+            x_3ch[:, 2] = 0.5 * (
+                ch0_norm.squeeze(1) + ch1_norm.squeeze(1)
+            )  # B channel as blend
+
+            return x_3ch
+        else:
+            # For more than 3 channels, use the first 3
+            return x[:, :3]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
         """Extract features from the input images.
 
         Returns:
-            Dictionary with features, projections (None), and index information
+            Dictionary with features, properly shaped empty projections tensor, and index information
         """
         x = batch["anchor"]
 
@@ -106,31 +160,8 @@ class ImageNetModule(LightningModule):
         if x.dim() == 5:
             x = self._reduce_5d_input(x)
 
-        # Convert to RGB by repeating the channel 3 times if needed
-        if x.shape[1] == 1:
-            x = x.repeat(1, 3, 1, 1)
-
-        # If we have 2-channel input but model expects 3 channels, blend them into RGB
-        if x.shape[1] == 2:
-            # Create a new tensor with 3 channels
-            x_3ch = torch.zeros(
-                (x.shape[0], 3, x.shape[2], x.shape[3]), device=x.device, dtype=x.dtype
-            )
-
-            # Channel 0 (R): First channel with some influence from second channel
-            x_3ch[:, 0] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
-
-            # Channel 1 (G): Equal blend of both channels
-            x_3ch[:, 1] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
-
-            # Channel 2 (B): Second channel with some influence from first channel
-            x_3ch[:, 2] = 0.5 * x[:, 0] + 0.5 * x[:, 1]
-
-            x = x_3ch
-
-        # Normalize to 0-1 range if needed
-        if x.max() > 1.0 or x.min() < 0.0:
-            x = (x - x.min()) / (x.max() - x.min())
+        # Convert input to RGB format
+        x = self._convert_to_rgb(x)
 
         # Get embeddings
         with torch.no_grad():
@@ -140,12 +171,10 @@ class ImageNetModule(LightningModule):
             if features.dim() > 2:
                 features = features.mean(dim=[2, 3])
 
-            # Create empty projections tensor with same batch size as features
-            projections = torch.zeros((features.shape[0], 0), device=features.device)
-
+        # Return features and empty projections with correct batch dimension
         return {
             "features": features,
-            "projections": projections,
+            "projections": torch.zeros((features.shape[0], 0), device=features.device),
             "index": batch["index"],
         }
 
