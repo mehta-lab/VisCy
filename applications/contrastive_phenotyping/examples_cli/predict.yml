@@ -9,11 +9,12 @@ trainer:
     - class_path: viscy.representation.embedding_writer.EmbeddingWriter
       init_args:
         output_path: "/path/to/output.zarr"
-        phate_kwargs:
+        PHATE_kwargs:
           n_components: 2
-          knn: 10
-          decay: 50
-          gamma: 1
+          knn: 5
+          decay: 40
+        PCA_kwargs:
+          n_components: 8
     # edit the following lines to specify logging path
     # - class_path: lightning.pytorch.loggers.TensorBoardLogger
     #   init_args:

@@ -14,7 +14,17 @@ from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
-INDEX_COLUMNS = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+INDEX_COLUMNS = [
+    "fov_name",
+    "track_id",
+    "t",
+    "id",
+    "parent_track_id",
+    "parent_id",
+    "z",
+    "y",
+    "x",
+]
 
 
 def _scatter_channels(
@@ -272,7 +282,16 @@ class TripletDataset(Dataset):
             else:
                 sample.update({"positive": positive_patch})
         else:
-            sample.update({"index": anchor_row[INDEX_COLUMNS].to_dict()})
+            # For new predictions, ensure all INDEX_COLUMNS are included
+            index_dict = {}
+            for col in INDEX_COLUMNS:
+                if col in anchor_row.index:
+                    index_dict[col] = anchor_row[col]
+                else:
+                    # Skip y and x for legacy data - they weren't part of INDEX_COLUMNS
+                    if col not in ["y", "x", "z"]:
+                        raise KeyError(f"Required column '{col}' not found in data")
+            sample.update({"index": index_dict})
         return sample
 
 
