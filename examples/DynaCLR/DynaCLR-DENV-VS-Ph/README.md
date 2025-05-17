@@ -21,6 +21,7 @@ This will:
     - Cell tracks for the dataset
     - Human-annotations of cell state (0-uinfected , 1-infected)
     - Test dataset
+    - DynaCLR-DENV-VS+Ph weights
 
 ```bash
 bash setup.sh
@@ -75,25 +76,48 @@ The script will generate interactive visualizations showing:
 - PHATE embeddings from both ImageNet and DynaCLR features
 - Highlighted trajectories for sample infected and uninfected cells
 
-## Customization
 
-The demo allows for customization:
-- Select specific tracks and FOVs for visualization
-- Adjust visualization parameters like colors and plot sizes
-- Choose different cells to highlight in the embedding space
+## (OPTIONAL) Generating DynaCLR-DENV-VS+PH Features
 
-Example of customizing track selection:
-```python
-fov_name_mock = "/A/3/9"
-track_id_mock = [19]  # Uninfected track
-fov_name_inf = "/B/4/9"
-track_id_inf = [42]   # Infected track
+1. Open the `dynaclr_denv-vs-ph_test_data.yml` and modify the following to point to your download:
+
+- Replace where you want to save the output xarray `.zarr` with the embeddings.
+```yaml
+    callbacks:
+    - class_path: viscy.representation.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: '/TODO_REPLACE_TO_OUTPUT_PATH.zarr'  #Select the path to save
 ```
 
-## Utilities
+- Point to the downloaded checkpoint for DynaCLR-DENV-VS+Ph
+ ```yaml
+ ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
+ ```
 
-The demo leverages utility functions from `utils.py`:
-- `create_plotly_visualization`: Creates interactive embeddings with time slider
-- `create_combined_visualization`: Generates side-by-side comparisons of approaches
-- `create_image_visualization`: Prepares cell images for display
-- Various trajectory visualization and image processing helpers
+2. Run the following CLI to run inference
+```bash
+viscy predict -c dynaclr_denv-vs-ph_test_data.yml
+```
+
+## (OPTIONAL) Generating ImageNet Features
+
+To generate ImageNet features for your own data, you can use the `imagenet_embeddings.py` script:
+
+1. Modify the `infection_example_config.yml` lines:
+
+```yaml
+paths:
+  data_path: /path/to/downloaded/registered_test.zarr
+  tracks_path: /path/to/downloaded/track_test.zarr
+  output_path: /path/to/output.zarr
+```
+
+2. You can run the python script:
+
+```bash
+# Navigate to the ImageNet scripts directory
+cd ../../applications/benchmarking/DynaCLR/ImageNet
+
+# Run the script with the example config
+python imagenet_embeddings.py -c infection_example_config.yml
+```
