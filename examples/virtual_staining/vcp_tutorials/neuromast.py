@@ -34,7 +34,8 @@ is often limited by photobleaching and phototoxicity.
 Also, engineering fish lines with a combination of landmark fluorescent labels
 (e.g. nuclei and plasma membrane) and functional reporters increases experimental complexity.
 \
-VSNeuromast is a 3D UNeXt2 model that has been trained zebrafish neuromasts using the Cytoland approach.
+VSNeuromast is a 3D UNeXt2 model that has been trained on images of
+zebrafish neuromasts using the Cytoland approach.
 (See the [model card](https://virtualcellmodels.cziscience.com/paper/cytoland2025)
 for more details about the Cytoland models.)
 This model enables users to jointly stain cell nuclei and plasma membranes from 3D label-free images
