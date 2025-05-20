@@ -125,7 +125,7 @@ Specifically, the `data.init_args.data_path` field should be updated:
 ```
 
 The image may need to be resampled to roughly match the voxel size of the example dataset
-(0.2x0.1x0.1 µm, ZYX).
+(0.25x0.108x0.108 µm, ZYX).
 """
 
 # %% [markdown]
