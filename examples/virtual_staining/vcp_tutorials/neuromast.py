@@ -101,7 +101,9 @@ if "get_ipython" in globals():
 
 The neuromast example dataset used in this tutorial contains
 quantitative phase and paired fluorescence images of cell nuclei and plasma membrane.
-It is a subsampled time-lapse from a test set used to evaluate the VSNeuromast model.
+\
+**It is a subsampled time-lapse from a test set used to evaluate the VSNeuromast model.**
+\
 The full dataset can be downloaded from the
 [BioImage Archive](https://www.ebi.ac.uk/biostudies/BioImages/studies/S-BIAD1702).
 
