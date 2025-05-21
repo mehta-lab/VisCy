@@ -40,25 +40,33 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 # %% [markdown]
 # ## Set Data Paths
 #
-# The data, tracks and annotations can be downloaded from [here](https://drive.google.com/drive/folders/1-_0000000000000000000000000000000000000000)
-# You can load the precomputed features from [here](https://drive.google.com/drive/folders/1-_0000000000000000000000000000000000000000)
+# The data, tracks, annotations and precomputed embeddings can be downloaded from [here](https://drive.google.com/drive/u/0/folders/1qCt8Zhk193Q9L-GV8fOoivOPiwepcjZL)
 #
 # ## Note:
 #
-# Alternatively, you can run the CLI to compute the features yourself following the instructions in the [README.md](https://github.com/viscy-ai/viscy/tree/main/examples/DynaCLR/smooth_embeddings)
+# Alternatively, you can run the CLI to compute the features yourself following the instructions in the [README.md](./README.md)
 
 # %%
 # TODO: Update the paths to the downloaded data
 # Point to the *.zarr files
-input_data_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"  # Replace with path to registered_test.zarr
-tracks_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"  # Replace with path to  track_test.zarr
-ann_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv"  # Replace with path to extracted_inf_state.csv
-)
+download_root = Path("/path/to/downloaded/data")
+input_data_path = (
+    download_root / "registered_test.zarr"
+)  # Replace with path to registered_test.zarr
+tracks_path = download_root / "track_test.zarr"  # Replace with path to  track_test.zarr
+ann_path = (
+    download_root / "extracted_inf_state.csv"
+)  # Replace with path to extracted_inf_state.csv
 
 # TODO: Update the path to the DynaCL and ImageNet features
-dynaclr_features_path = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2_phate.zarr"
-imagenet_features_path = "/home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
+# Point to the precomputed embeddings
+dynaclr_features_path = (
+    download_root
+    / "/precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
+)
+imagenet_features_path = (
+    download_root / "20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
+)
 
 # %% [markdown]
 # ## Load the embeddings and annotations
@@ -165,6 +173,7 @@ for condition, condition_data in conditions_to_compare.items():
         z_idx = images.shape[1] // 2
         C, Z, Y, X = images.shape
         image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
+        # NOTE: here we are using the default percentile range for the RFP channel, change if using different channels or this threshold does not work
         for c_idx, channel in enumerate(channels_to_display):
             if channel in ["Phase3D", "DIC", "BF"]:
                 image_out[c_idx] = images[c_idx, z_idx]

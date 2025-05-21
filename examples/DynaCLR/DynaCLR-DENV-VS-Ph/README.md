@@ -6,46 +6,9 @@ This demo compares different feature extraction methods for analyzing infected v
 
 The `demo_infection.py` script demonstrates:
 
-1. Using ImageNet pre-trained models for feature extraction from cell images
-2. Comparing with DynaCLR (Dynamic Contrastive Learning) specialized features
-3. Visualizing how each approach distinguishes infected from uninfected cells
-
-## Setup
-
-This will:
-- Create a `dynaclr` conda environment with all required dependencies
-- Install the VISCY library
-- Set up the Python kernel for Jupyter notebooks
-- Download the following data (~30GB)
-    - Pre-computed features for DynaCLR-DENV-VS+Ph and ImageNet
-    - Cell tracks for the dataset
-    - Human-annotations of cell state (0-uinfected , 1-infected)
-    - Test dataset
-    - DynaCLR-DENV-VS+Ph weights
-
-```bash
-bash setup.sh
-```
-
-## Data
-
-The demo uses cellular imaging data with the following components:
-- Cell images with Phase and RFP (viral sensor) channels
-- Cell tracking data
-- Infection state annotations
-
-You can download the data from the provided Google Drive links in the script or use your own data by updating the paths:
-
-```python
-# Update these paths to your data
-input_data_path = "/path/to/registered_test.zarr"
-tracks_path = "/path/to/track_test.zarr"
-ann_path = "/path/to/extracted_inf_state.csv"
-
-# Update paths to features 
-dynaclr_features_path = "/path/to/dynaclr_features.zarr"
-imagenet_features_path = "/path/to/imagenet_features.zarr"
-```
+  - PHATE plots from the embeddings generated from  DynaCLR and ImageNet 
+  - Show the infection progression in cells via Phase and RFP (viral sensor) channels
+  - Highlighted trajectories for sample infected and uninfected cells over time
 
 ## Key Features
 
@@ -54,6 +17,16 @@ imagenet_features_path = "/path/to/imagenet_features.zarr"
 - **Side-by-Side Comparison**: Directly compare cell images and PHATE embeddings
 - **Trajectory Analysis**: Visualize and track cell trajectories over time
 - **Infection State Analysis**: See how different models capture infection dynamics
+
+
+
+## Setup
+
+1. Download the data in [README.md](/examples/DynaCLR/README.md)
+2. Activate the environment
+```bash
+conda activate dynaclr
+```
 
 ## Usage
 
@@ -71,10 +44,17 @@ conda activate dynaclr
 jupyter notebook demo_infection.ipynb
 ```
 
-The script will generate interactive visualizations showing:
-- Cell images with Phase and RFP (viral sensor) channels
-- PHATE embeddings from both ImageNet and DynaCLR features
-- Highlighted trajectories for sample infected and uninfected cells
+For both of these you will need to ensure to point to the path to the downloaded data:
+```python
+# Update these paths to your data
+input_data_path = "/path/to/registered_test.zarr"
+tracks_path = "/path/to/track_test.zarr"
+ann_path = "/path/to/extracted_inf_state.csv"
+
+# Update paths to features 
+dynaclr_features_path = "/path/to/dynaclr_features.zarr"
+imagenet_features_path = "/path/to/imagenet_features.zarr"
+```
 
 
 ## (OPTIONAL) Generating DynaCLR-DENV-VS+PH Features
