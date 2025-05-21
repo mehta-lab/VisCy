@@ -61,7 +61,7 @@ def main():
     """Main function to run the visualization app."""
     # Configuration
     DEBUG = True
-    VIZ_DATASET = "microglia"  # ["organelle", "phenotype", "microglia"]
+    VIZ_DATASET = "test"  # ["organelle", "phenotype", "microglia","test"]
 
     if VIZ_DATASET == "organelle":
         SELECTED_OBSERVED_PHENOTYPE = 2
@@ -105,6 +105,19 @@ def main():
                 "/B/2/0": list(range(50)),
             },
             "yx_patch_size": (128, 128),
+            "num_PC_components": 8,
+        }
+    elif VIZ_DATASET == "test":
+        viz_config = {
+            "data_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr",  # TODO add path to data
+            "tracks_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr",  # TODO add path to tracks
+            "features_path": "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2_phate.zarr",  # TODO add path to features
+            "channels_to_display": ["Phase3D", "RFP"],
+            "fov_tracks": {
+                "/A/3/9": list(range(50)),
+                "/B/4/9": list(range(50)),
+            },
+            "yx_patch_size": (160, 160),
             "num_PC_components": 8,
         }
 

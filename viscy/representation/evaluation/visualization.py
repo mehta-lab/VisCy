@@ -1716,7 +1716,7 @@ class EmbeddingVisualizationApp:
 
         try:
             logger.info(f"Starting server on port {port}")
-            self.app.run_server(
+            self.app.run(
                 debug=debug,
                 port=port,
                 use_reloader=False,  # Disable reloader to prevent multiple instances
