@@ -8,6 +8,7 @@ This repository contains examples and demos for using DynaCLR with viscy.
 - [Embedding visualization](examples/DynaCLR/embedding-web-visualization)
 
 ## Demos' Setup
+
 This will:
 - Create a `dynaclr` conda environment with all required dependencies
 - Install the VISCY library
@@ -23,6 +24,13 @@ Navigate to the folder you want to download the data and run:
 ```bash
 bash setup.sh
 ```
+> **Note**:
+> The full functionality is tested on Linux `x86_64` with NVIDIA Ampere/Hopper GPUs (CUDA 12.4).
+> The CTC example configs are also tested on macOS with Apple M1 Pro SoCs (macOS 14.7).
+> Apple Silicon users need to make sure that they use
+> the `arm64` build of Python to use MPS acceleration.
+> Tested to work on Linux on the High Performance cluster, and may not work in other environments.
+> The commands below assume a Unix-like system.
 
 ## To Generate the DynaCLR embeddings:
 Alternatively to the pre-computed shared embeddings, one can run the model following these instructions using `DynaCLR-DENV-VS-Ph` model as an example.
