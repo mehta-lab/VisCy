@@ -114,7 +114,8 @@ about how the dataset and model were generated.
 
 The model only requires label-free images for inference.
 To run inference on your own data,
-convert them into the OME-Zarr data format using iohub or other
+convert them into the [OME-Zarr](https://ngff.openmicroscopy.org/)
+data format using iohub or other
 [tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
 and edit the `predict.yml` file to specify the input data path.
 Specifically, the `data.init_args.data_path` field should be updated:
