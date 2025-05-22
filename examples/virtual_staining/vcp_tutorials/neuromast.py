@@ -264,6 +264,7 @@ def highlight_intensity_normalized(fov_path: str, channel_name: str) -> list[flo
 
 
 # %%
+# Plot intensity over time
 mean_fl = highlight_intensity_normalized("input.ome.zarr/0/3/0", "mScarlett")
 mean_vs = highlight_intensity_normalized(
     "prediction.ome.zarr/0/3/0", "membrane_prediction"
