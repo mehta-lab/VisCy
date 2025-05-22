@@ -291,7 +291,7 @@ The virtual staining is not affected by this issue.
 
 In the above example, we demonstrated how to use the VSNeuromast model
 for virtual staining of cell nuclei and plasma membranes of the zebrafish neuromast _in vivo_,
-which can alleviate photobleaching in long-term live imaging.
+which can avoid photobleaching in long-term live imaging.
 """
 
 # %% [markdown]
