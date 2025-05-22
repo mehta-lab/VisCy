@@ -282,6 +282,7 @@ plt.legend()
 Here the highlight intensity of the fluorescence images decreases over time,
 following a exponential decay pattern, indicating photobleaching.
 The virtual staining is not affected by this issue.
+(The object drifts slightly over time, so some inherent noise is expected.)
 """
 
 # %% [markdown]
