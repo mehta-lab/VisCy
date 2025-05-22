@@ -100,7 +100,7 @@ if "get_ipython" in globals():
 ## Example Dataset
 
 The neuromast example dataset used in this tutorial contains
-quantitative phase and paired fluorescence images of cell nuclei and plasma membrane.
+quantitative phase and paired fluorescence images of the cell nuclei and the plasma membrane.
 \
 **It is a subsampled time-lapse from a test set used to evaluate the VSNeuromast model.**
 \
