@@ -157,6 +157,7 @@ and how virtual staining can mitigate this issue.
 """
 
 # %%
+# imports
 import matplotlib.pyplot as plt
 import numpy as np
 from cmap import Colormap
@@ -166,6 +167,20 @@ from skimage.exposure import rescale_intensity
 
 
 def render_rgb(image: np.ndarray, colormap: Colormap) -> NDArray:
+    """Render a 2D grayscale image as RGB using a colormap.
+
+    Parameters
+    ----------
+    image : np.ndarray
+        intensity image
+    colormap : Colormap
+        colormap
+
+    Returns
+    -------
+    NDArray
+        rendered RGB image
+    """
     image = rescale_intensity(image, out_range=(0, 1))
     image = colormap(image)
     return image
