@@ -9,7 +9,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "BSD-3-Clause"
 license-files = ["LICENSE"]
-authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
+authors = [{ name = "DynaCLR authors", email = "program-charis@neurips.cc" }]
 classifiers = [
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

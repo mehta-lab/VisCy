@@ -1,10 +1,33 @@
 # DynaCLR
 
-Implementation for NeurIPS 2025 submission:
-Contrastive learning of cell state dynamics in response to perturbations.
+DynaCLR: Contrastive Learning of Cellular Dynamics with Temporal Regularization
 
-## Installation
+# DynaCLR Demos
 
+This repository contains examples and demos for using DynaCLR with viscy.
+
+## Available Demos
+
+- [ImageNet vs DynaCLR embeddings (cell infection)](examples/DynaCLR/DynaCLR-DENV-VS-Ph)
+- [Embedding visualization](examples/DynaCLR/embedding-web-visualization)
+
+## Demos' Setup
+
+This will:
+- Create a `dynaclr` conda environment with all required dependencies
+- Install the VISCY library
+- Set up the Python kernel for Jupyter notebooks
+- Download the following data (~50GB)
+    - Pre-computed features for DynaCLR-DENV-VS+Ph and ImageNet
+    - Cell tracks for the dataset
+    - Human-annotations of cell state (0-background, 1-uinfected , 2-infected)
+    - Test dataset of several FOVs ([A/3/*]-uinfected,[A/4/*]-infected)
+    - DynaCLR-DENV-VS+Ph weights
+
+Navigate to the folder you want to download the data and run:
+```bash
+bash setup.sh
+```
 > **Note**:
 > The full functionality is tested on Linux `x86_64` with NVIDIA Ampere/Hopper GPUs (CUDA 12.4).
 > The CTC example configs are also tested on macOS with Apple M1 Pro SoCs (macOS 14.7).
@@ -13,30 +36,30 @@ Contrastive learning of cell state dynamics in response to perturbations.
 > Tested to work on Linux on the High Performance cluster, and may not work in other environments.
 > The commands below assume a Unix-like system.
 
-This can be done via the `setup.sh` in the `/examples/DynaCLR/`. Follow instructions in the [examples README.md](/examples/DynaCLR/README.md)
+## To Generate the DynaCLR embeddings:
+Alternatively to the pre-computed shared embeddings, one can run the model following these instructions using `DynaCLR-DENV-VS-Ph` model as an example.
 
+### Modify the config file
+Open the `dynaclr_denv-vs-ph_test_data.yml` and modify the following to point to your download:
 
-Alternatively, the pacakge can be installed via the following instructions:
+Replace where you want to save the output xarray `.zarr` with the embeddings.
 
-1. We recommend using a new Conda/virtual environment.
+```yaml
+    callbacks:
+    - class_path: viscy.representation.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: '/TODO_REPLACE_TO_OUTPUT_PATH.zarr'  #Select the path to save
+```
 
-    ```sh
-    conda create --name dynaclr python=3.11
-    ```
+Point to the downloaded checkpoint for desired model (i.e `DynaCLR-DENV-VS+Ph`)
 
-2. Install the package with `pip`:
+ ```yaml
+ ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
+ ```
+### Run inference via CLI
 
-    ```sh
-    conda activate dynaclr
-    # in the project root directory
-    # i.e. where this README is located
-    pip install -e ".[visual,metrics]"
-    ```
+Run the following CLI to run inference:
+```bash
+viscy predict -c dynaclr_denv-vs-ph_test_data.yml
+```
 
-3. Verify installation by accessing the CLI help message:
-
-    ```sh
-    viscy --help
-    ```
-
-For development installation, see [the contributing guide](./CONTRIBUTING.md).
