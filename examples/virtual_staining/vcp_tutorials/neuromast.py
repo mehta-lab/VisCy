@@ -154,6 +154,9 @@ and the inference step takes about **2 minutes** (T4 GPU).
 1. Visualize predicted images over time and compare with the fluorescence images.
 2. Measure photobleaching in the fluorescence images
 and how virtual staining can mitigate this issue.
+Since most pixels in the images are background,
+we will use the 99th percentile (brightest 1%)
+of the intensity distribution as a proxy for foreground signal.
 """
 
 # %%
