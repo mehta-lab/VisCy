@@ -166,7 +166,9 @@ from numpy.typing import NDArray
 from skimage.exposure import rescale_intensity
 
 
-def render_rgb(image: np.ndarray, colormap: Colormap) -> NDArray:
+def render_rgb(
+    image: np.ndarray, colormap: Colormap
+) -> tuple[NDArray, plt.cm.ScalarMappable]:
     """Render a 2D grayscale image as RGB using a colormap.
 
     Parameters
@@ -178,12 +180,15 @@ def render_rgb(image: np.ndarray, colormap: Colormap) -> NDArray:
 
     Returns
     -------
-    NDArray
-        rendered RGB image
+    tuple[NDArray, plt.cm.ScalarMappable]
+        rendered RGB image and the color mapping
     """
     image = rescale_intensity(image, out_range=(0, 1))
     image = colormap(image)
-    return image
+    mappable = plt.cm.ScalarMappable(
+        norm=plt.Normalize(0, 1), cmap=colormap.to_matplotlib()
+    )
+    return image, mappable
 
 
 # %%
@@ -194,22 +199,24 @@ with open_ome_zarr("input.ome.zarr/0/3/0") as fluor_store:
     fluor_nucleus = fluor_store[0][:, 1, z_slice]
     fluor_membrane = fluor_store[0][:, 0, z_slice]
 
-with open_ome_zarr("prediction.ome.zarr/0/3/0") as vs_store:
-    vs_nucleus = vs_store[0][:, 0, z_slice]
-    vs_membrane = vs_store[0][:, 1, z_slice]
+with open_ome_zarr("input.ome.zarr/0/3/0") as vs_store:
+    vs_nucleus = vs_store[0][:, 1, z_slice]
+    vs_membrane = vs_store[0][:, 0, z_slice]
 
 
 # Render the images as RGB in false colors
-vs_nucleus_rgb = render_rgb(vs_nucleus, Colormap("bop_blue"))
-vs_membrane_rgb = render_rgb(vs_membrane, Colormap("bop_orange"))
+vs_nucleus_rgb, vs_nucleus_mappable = render_rgb(vs_nucleus, Colormap("bop_blue"))
+vs_membrane_rgb, vs_membrane_mappable = render_rgb(vs_membrane, Colormap("bop_orange"))
 merged_vs = (vs_nucleus_rgb + vs_membrane_rgb).clip(0, 1)
 
-fluor_nucleus_rgb = render_rgb(fluor_nucleus, Colormap("green"))
-fluor_membrane_rgb = render_rgb(fluor_membrane, Colormap("magenta"))
+fluor_nucleus_rgb, fluor_nucleus_mappable = render_rgb(fluor_nucleus, Colormap("green"))
+fluor_membrane_rgb, fluor_membrane_mappable = render_rgb(
+    fluor_membrane, Colormap("magenta")
+)
 merged_fluor = (fluor_nucleus_rgb + fluor_membrane_rgb).clip(0, 1)
 
 # Plot
-fig = plt.figure(figsize=(12, 7))
+fig = plt.figure(figsize=(12, 7), layout="constrained")
 
 images = {"fluorescence": merged_fluor, "virtual staining": merged_vs}
 
@@ -217,14 +224,23 @@ for row, (subfig, (name, img)) in enumerate(
     zip(fig.subfigures(nrows=2, ncols=1), images.items())
 ):
     subfig.suptitle(name)
+    cax_nuc = subfig.add_axes([1, 0.55, 0.02, 0.3])
+    cax_mem = subfig.add_axes([1, 0.15, 0.02, 0.3])
     axes = subfig.subplots(ncols=len(merged_vs))
     for t, ax in enumerate(axes):
-        ax.imshow(img[t])
         if row == 1:
             ax.set_title(f"{t * 30} min", y=-0.1)
+        ax.imshow(img[t])
         ax.axis("off")
+    if row == 0:
+        subfig.colorbar(fluor_nucleus_mappable, cax=cax_nuc, label="Nuclei (GFP)")
+        subfig.colorbar(
+            fluor_membrane_mappable, cax=cax_mem, label="Membrane (mScarlett)"
+        )
+    elif row == 1:
+        subfig.colorbar(vs_nucleus_mappable, cax=cax_nuc, label="Nuclei (VS)")
+        subfig.colorbar(vs_membrane_mappable, cax=cax_mem, label="Membrane (VS)")
 
-fig.tight_layout()
 plt.show()
 
 # %% [markdown]
