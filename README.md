@@ -45,7 +45,7 @@ Notebooks are available as pre-rendered pages or on Colab:
 - [Model card](https://virtualcellmodels.cziscience.com/model/01961244-1970-7851-a4b9-fdbfa2fba9b2)
 - [Quick-start (VSCyto2D)](https://virtualcellmodels.cziscience.com/quickstart/cytoland-quickstart)
 - CLI tutorials:
-  - VSCyto3D
+  - [VSCyto3D](https://virtualcellmodels.cziscience.com/tutorial/cytoland-tutorial)
   - VSNeuromast
 
 ### Tutorials
