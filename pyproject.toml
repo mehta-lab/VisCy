@@ -28,6 +28,7 @@ dependencies = [
     "numpy",
     "xarray",
     "pytorch-metric-learning>2.0.0",
+    "transformers>=4.51.3",
 ]
 dynamic = ["version"]
 
@@ -51,6 +52,7 @@ visual = [
     "plotly",
     "nbformat",
     "cmap",
+    "dash",
 ]
 dev = [
     "viscy[metrics,examples,visual]",
