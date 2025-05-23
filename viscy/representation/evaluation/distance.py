@@ -99,7 +99,7 @@ def compute_displacement(
 
 
 def compute_displacement_statistics(
-    displacement_per_tau: Dict[int, List[float]]
+    displacement_per_tau: Dict[int, List[float]],
 ) -> Tuple[Dict[int, float], Dict[int, float]]:
     """Compute mean and standard deviation of displacements for each tau.
 
