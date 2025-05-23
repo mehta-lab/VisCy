@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Dict, List, Literal, Tuple, Union, Optional
+from typing import Literal
 
 import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
@@ -24,7 +24,7 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
 def compute_displacement(
     embedding_dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
-) -> Dict[int, List[float]]:
+) -> dict[int, list[float]]:
     """Compute the displacement or mean square displacement (MSD) of embeddings.
 
     For each time difference τ, computes either:
@@ -46,7 +46,7 @@ def compute_displacement(
 
     Returns
     -------
-    Dict[int, List[float]]
+    dict[int, list[float]]
         Dictionary mapping τ to list of displacements for all particles and initial times
     """
     # Get data from dataset
@@ -99,18 +99,18 @@ def compute_displacement(
 
 
 def compute_displacement_statistics(
-    displacement_per_tau: Dict[int, List[float]],
-) -> Tuple[Dict[int, float], Dict[int, float]]:
+    displacement_per_tau: dict[int, list[float]],
+) -> tuple[dict[int, float], dict[int, float]]:
     """Compute mean and standard deviation of displacements for each tau.
 
     Parameters
     ----------
-    displacement_per_tau : Dict[int, List[float]]
+    displacement_per_tau : dict[int, list[float]]
         Dictionary mapping τ to list of displacements
 
     Returns
     -------
-    Tuple[Dict[int, float], Dict[int, float]]
+    tuple[dict[int, float], dict[int, float]]
         Tuple of (mean_displacements, std_displacements) where each is a
         dictionary mapping τ to the statistic
     """
