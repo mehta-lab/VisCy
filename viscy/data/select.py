@@ -1,6 +1,22 @@
-from iohub.ngff import Plate, Position
+from typing import Generator
 
-from viscy.preprocessing.precompute import _filter_fovs, _filter_wells
+from iohub.ngff import Plate, Position, Well
+
+
+def _filter_wells(
+    plate: Plate, include_wells: list[str] | None
+) -> Generator[Well, None, None]:
+    for well_name, well in plate.wells():
+        if include_wells is None or well_name in include_wells:
+            yield well
+
+
+def _filter_fovs(
+    well: Well, exclude_fovs: list[str] | None
+) -> Generator[Position, None, None]:
+    for fov_name, fov in well.positions():
+        if exclude_fovs is None or fov_name not in exclude_fovs:
+            yield fov
 
 
 class SelectWell:
