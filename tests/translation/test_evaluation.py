@@ -4,14 +4,14 @@ import pytest
 from lightning.pytorch.loggers import CSVLogger
 from numpy.testing import assert_array_equal
 
-from viscy.data.segmentation import SegmentationDataModule
+from viscy.data.segmentation import TargetPredictionDataModule
 from viscy.trainer import Trainer
 from viscy.translation.evaluation import SegmentationMetrics2D
 
 
 @pytest.mark.parametrize("pred_channel", ["DAPI", "GFP"])
 def test_segmentation_metrics_2d(pred_channel, labels_hcs_dataset, tmp_path) -> None:
-    dm = SegmentationDataModule(
+    dm = TargetPredictionDataModule(
         pred_dataset=labels_hcs_dataset,
         target_dataset=labels_hcs_dataset,
         target_channel="DAPI",
