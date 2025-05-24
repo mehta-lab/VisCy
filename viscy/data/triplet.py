@@ -10,6 +10,7 @@ from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
+from viscy.data.select import _filter_fovs, _filter_wells
 from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -310,6 +311,8 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
+        fit_include_wells: list[str] | None = None,
+        fit_exclude_fovs: list[str] | None = None,
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
@@ -344,6 +347,10 @@ class TripletDataModule(HCSDataModule):
             Augmentation transforms, by default []
         caching : bool, optional
             Whether to cache the dataset, by default False
+        fit_include_wells : list[str], optional
+            Only include these wells for fitting, by default None
+        fit_exclude_fovs : list[str], optional
+            Exclude these FOVs for fitting, by default None
         predict_cells : bool, optional
             Only predict for selected cells, by default False
         include_fov_names : list[str] | None, optional
@@ -376,6 +383,8 @@ class TripletDataModule(HCSDataModule):
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
+        self._include_wells = fit_include_wells
+        self._exclude_fovs = fit_exclude_fovs
         self.predict_cells = predict_cells
         self.include_fov_names = include_fov_names
         self.include_track_ids = include_track_ids
@@ -396,12 +405,13 @@ class TripletDataModule(HCSDataModule):
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
-        for fov_name, _ in open_ome_zarr(self.tracks_path).positions():
-            positions.append(images_plate[fov_name])
-            tracks_df = pd.read_csv(
-                next((self.tracks_path / fov_name).glob("*.csv"))
-            ).astype(int)
-            tracks_tables.append(tracks_df)
+        for well in _filter_wells(images_plate, include_wells=self._include_wells):
+            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
+                positions.append(fov)
+                tracks_df = pd.read_csv(
+                    next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))
+                ).astype(int)
+                tracks_tables.append(tracks_df)
 
         return positions, tracks_tables
 
