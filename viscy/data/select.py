@@ -1,6 +1,6 @@
 from typing import Generator
 
-from iohub.ngff import Plate, Position, Well
+from iohub.ngff.nodes import Plate, Position, Well
 
 
 def _filter_wells(
