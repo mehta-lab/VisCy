@@ -187,12 +187,13 @@ vs_nucleus, vs_membrane = split_and_rescale_channels(prediction_image[0])
 # Click on the numbered buttons to toggle the channels
 stackview.switch(
     # the 0, 1, 2, 3, 4 buttons will correspond to these 5 channels
-    images=[phase, fluor_nucleus, fluor_membrane, vs_nucleus, vs_membrane],
+    # We apply a gamma adjustment to the phase channel to improve visibility in the overlay
+    images=[phase**2.5, fluor_nucleus, fluor_membrane, vs_nucleus, vs_membrane],
     colormap=["gray", "pure_green", "pure_magenta", "pure_blue", "pure_yellow"],
     toggleable=True,
     zoom_factor=0.5,
     display_min=0.0,
-    display_max=1.0,
+    display_max=0.9,
 )
 
 # %% [markdown]
