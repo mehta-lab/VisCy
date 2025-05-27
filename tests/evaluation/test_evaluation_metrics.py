@@ -103,7 +103,7 @@ def test_labels_to_detection(labels_tensor: torch.ShortTensor):
 
 # TODO: unskip when upstream PR is merged
 @pytest.mark.skipif(
-    os.environ.get("GITHUB_ACTIONS") == "true" and sys.version_info[:2] == (3, 13),
+    bool(os.environ.get("GITHUB_ACTIONS", False)) and sys.version_info[:2] == (3, 13),
     reason="https://github.com/ppwwyyxx/cocoapi/pull/27",
 )
 def test_mean_average_precision(labels_tensor: torch.ShortTensor):
