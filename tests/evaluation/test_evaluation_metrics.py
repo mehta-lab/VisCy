@@ -1,3 +1,6 @@
+import os
+import sys
+
 import numpy as np
 import pytest
 import torch
@@ -98,6 +101,11 @@ def test_labels_to_detection(labels_tensor: torch.ShortTensor):
         assert detection["masks"].device == labels.device
 
 
+# TODO: unskip when upstream PR is merged
+@pytest.mark.skipif(
+    os.environ.get("GITHUB_ACTIONS") == "true" and sys.version_info[:2] == (3, 13),
+    reason="https://github.com/ppwwyyxx/cocoapi/pull/27",
+)
 def test_mean_average_precision(labels_tensor: torch.ShortTensor):
     for labels in labels_tensor:
         coco_metrics = mean_average_precision(labels, labels)
