@@ -21,8 +21,11 @@ This repository provides a pipeline for the following.
   - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**
-VisCy is under active development and frequent breaking changes are expected in the main branch.
-Please use the stable release from PyPI for virtual staining.
+VisCy is under active development.
+While we strive to maintain stability,
+the main branch may occasionally be updated with break-incompatible changes
+which are subsequently shipped in releases following [semantic versioning](https://semver.org/).
+Please choose a stable release from PyPI for production use.
 
 ## Cytoland (robust virtual staining)
 
