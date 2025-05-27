@@ -25,7 +25,7 @@ mkdir -p "$output_dir"/data/06_image_translation/pretrained_models
 
 # Change to the target directory
 cd ~/data/06_image_translation/training
-Download the OME-Zarr dataset recursively
+# Download the OME-Zarr dataset recursively
 wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/training/a549_hoechst_cellmask_train_val.zarr/"
 cd ~/data/06_image_translation/test
 wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto2D/test/a549_hoechst_cellmask_test.zarr/"
