@@ -10,16 +10,16 @@
 # Learning Goals
 
 * Download the VSCyto3D model and an example dataset containing HEK293T cell images.
-* Pre-compute normalization statistics the images using the `viscy preprocess` command line interface (CLI).
+* Pre-compute normalization statistics for the images using the `viscy preprocess` command line interface (CLI).
 * Run inference for joint virtual staining of cell nuclei and plasma membrane via the `viscy predict` CLI.
-* Visualize and compare virtually and experimentally stained cells.
+* Compare virtually and experimentally stained cells and see how virtual staining can rescue missing labels.
 """
 
 # %% [markdown]
 """
 # Prerequisites
 
-Python>=3.10
+Python>=3.11
 """
 
 # %% [markdown]
@@ -29,9 +29,9 @@ Python>=3.10
 See the [model card](https://virtualcellmodels.cziscience.com/paper/cytoland2025)
 for more details about the Cytoland models. 
 
-VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells.
+VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells using the Cytoland approach.
 This model enables users to jointly stain cell nuclei and plasma membranes from 3D label-free images
-to for downstream analysis such as cell segmentation and tracking.
+for downstream analysis such as cell segmentation and tracking without the need for human annotation of volumetric data.
 """
 
 # %% [markdown]
@@ -39,7 +39,7 @@ to for downstream analysis such as cell segmentation and tracking.
 # Setup
 
 The commands below will install the required packages and download the example dataset and model checkpoint.
-It may take a few minutes to download all the files.
+It may take a **few minutes** to download all the files.
 
 ## Setup Google Colab
 
@@ -58,10 +58,12 @@ On Windows, the files can be downloaded manually from the URLs.
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
 # Here stackview and ipycanvas are installed for visualization
-# !pip install -U "viscy[metrics,visual]==0.3.0rc3" stackview ipycanvas==0.11
+# !pip install -U "viscy[metrics,visual]==0.3.0" stackview ipycanvas==0.11
 
 # %%
-# restart kernel if running in Google Colab
+# Restart kernel if running in Google Colab
+# This is required to use the packages installed above
+# The 'kernel crashed' message is expected here
 if "get_ipython" in globals():
     session = get_ipython()
     if "google.colab" in str(session):
@@ -73,7 +75,7 @@ if "get_ipython" in globals():
 # !wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/VS_datasets/VSCyto3D/test/HEK293T-Phase3D-H2B-CAAX-example.zarr/"
 
 # %%
-# Rename the downloaded dataset to what the prediction coinfig expects
+# Rename the downloaded dataset to what the example prediction config expects (`input.ome.zarr`)
 # And validate the OME-Zarr metadata with iohub
 # !mv HEK293T-Phase3D-H2B-CAAX-example.zarr input.ome.zarr
 # !iohub info -v input.ome.zarr
@@ -91,7 +93,7 @@ if "get_ipython" in globals():
 
 The HEK293T example dataset used in this quick-start guide contains
 quantitative phase and paired fluorescence images of cell nuclei and plasma membrane.
-It is a subset (one cropped region of interest) a test set used to evaluate the VSCyto3D model.
+It is a subset (one cropped region of interest) from a test set used to evaluate the VSCyto3D model.
 The full dataset can be downloaded from the
 [BioImage Archive](https://www.ebi.ac.uk/biostudies/BioImages/studies/S-BIAD1702).
 
@@ -105,21 +107,33 @@ To run inference on your own data,
 convert them into the OME-Zarr data format using iohub or other
 [tools](https://ngff.openmicroscopy.org/tools/index.html#file-conversion),
 and edit the `predict.yml` file to specify the input data path.
-The image may need to be resampled to roughly match the voxel size of the example dataset.
+Specifically, the `data.init_args.data_path` field should be updated:
+
+```diff
+-     data_path: input.ome.zarr
++     data_path: /path/to/your.ome.zarr
+```
+
+The image may need to be resampled to roughly match the voxel size of the example dataset
+(0.2x0.1x0.1 µm, ZYX).
 """
 
 # %% [markdown]
 """
 # Run Model Inference
+
+On Google Colab, the preprocessing step takes about **1 minute**,
+and the inference step takes about **2 minutes** (T4 GPU).
 """
 
 # %%
 # Run the CLI command to pre-compute normalization statistics
+# This includes the median and interquartile range (IQR)
+# Used to shift and scale the intensity distribution of the input images
 # !viscy preprocess --data_path=input.ome.zarr
 
 # %%
 # Run the CLI command to run inference
-# This will take about 2 minutes on Google Colab (T4 GPU)
 # !viscy predict -c predict.yml
 
 # %% [markdown]
@@ -131,11 +145,11 @@ Visualize the experimental and virtually stained images using the `stackview` pa
 
 # %% [markdown]
 """
-Visualizing large 3D multichannel images in a Jupyter notebook is prone to performance issues
-and may crash the notebook if the images are too large
+Visualizing large 3D multichannel images in a Jupyter notebook
+**is prone to performance issues and may crash the notebook** if the images are too large
 (the free Colab instances have limited CPU cores and memory).
 The visualization code below is only intended for demonstration.
-We strongly recommend downloading the images
+We strongly recommend downloading the images (from the 'files' bar in Colab)
 and using a standalone viewer such as [napari](https://napari.org/).
 """
 
@@ -172,6 +186,7 @@ vs_nucleus, vs_membrane = split_and_rescale_channels(prediction_image[0])
 # Drag the slider to start rendering
 # Click on the numbered buttons to toggle the channels
 stackview.switch(
+    # the 0, 1, 2, 3, 4 buttons will correspond to these 5 channels
     images=[phase, fluor_nucleus, fluor_membrane, vs_nucleus, vs_membrane],
     colormap=["gray", "pure_green", "pure_magenta", "pure_blue", "pure_yellow"],
     toggleable=True,
@@ -182,10 +197,30 @@ stackview.switch(
 
 # %% [markdown]
 """
-# Summary
-
-In the above example, we demonstrated how to use the VSCyto3D model to stain cell nuclei and plasma membranes.
 Note how the experimental fluorescence is missing for a subset of cells.
 This is due to loss of genetic labeling.
 The virtually stained images is not affected by this issue and can robustly label all cells.
+"""
+
+# %% [markdown]
+"""
+# Summary
+
+In the above example, we demonstrated how to use the VSCyto3D model
+for virtual staining of cell nuclei and plasma membranes, which can rescue missing labels.
+"""
+
+# %% [markdown]
+"""
+## Contact & Feedback
+
+For issues or feedback about this tutorial please contact Ziwen Liu at [ziwen.liu@czbiohub.org](mailto:ziwen.liu@czbiohub.org).
+
+## Responsible Use
+
+We are committed to advancing the responsible development and use of artificial intelligence.
+Please follow our [Acceptable Use Policy](https://virtualcellmodels.cziscience.com/acceptable-use-policy) when engaging with our services.
+
+Should you have any security or privacy issues or questions related to the services,
+please reach out to our team at [security@chanzuckerberg.com](mailto:security@chanzuckerberg.com) or [privacy@chanzuckerberg.com](mailto:privacy@chanzuckerberg.com) respectively.
 """

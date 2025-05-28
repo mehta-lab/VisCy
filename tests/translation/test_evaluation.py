@@ -1,3 +1,6 @@
+import os
+import sys
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -9,6 +12,11 @@ from viscy.trainer import Trainer
 from viscy.translation.evaluation import SegmentationMetrics2D
 
 
+# TODO: unskip when upstream PR is merged
+@pytest.mark.skipif(
+    bool(os.environ.get("GITHUB_ACTIONS", False)) and sys.version_info[:2] == (3, 13),
+    reason="https://github.com/ppwwyyxx/cocoapi/pull/27",
+)
 @pytest.mark.parametrize("pred_channel", ["DAPI", "GFP"])
 def test_segmentation_metrics_2d(pred_channel, labels_hcs_dataset, tmp_path) -> None:
     dm = SegmentationDataModule(
