@@ -23,11 +23,7 @@ conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets
 python -m ipykernel install --user --name dynaclr --display-name "Python (dynaclr)"
 
 # Install viscy and its dependencies using pip
-pip install gdown
-pip install "git+https://github.com/mehta-lab/viscy.git@dynaclr_v2#egg=viscy[visual,metrics]"
-
-# Deactivate the environment
-conda deactivate
+pip install "viscy[visual,metrics]>=0.3.0"
 
 # Change back to the starting directory
 cd $START_DIR

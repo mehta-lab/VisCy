@@ -40,25 +40,33 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 # %% [markdown]
 # ## Set Data Paths
 #
-# The data, tracks and annotations can be downloaded from [here](https://drive.google.com/drive/folders/1-_0000000000000000000000000000000000000000)
-# You can load the precomputed features from [here](https://drive.google.com/drive/folders/1-_0000000000000000000000000000000000000000)
+# The data, tracks, annotations and precomputed embeddings can be downloaded from [here](https://drive.google.com/drive/u/0/folders/1qCt8Zhk193Q9L-GV8fOoivOPiwepcjZL)
 #
 # ## Note:
 #
-# Alternatively, you can run the CLI to compute the features yourself following the instructions in the [README.md](https://github.com/viscy-ai/viscy/tree/main/examples/DynaCLR/smooth_embeddings)
+# Alternatively, you can run the CLI to compute the features yourself by following the instructions in the [README.md](./README.md)
 
 # %%
 # TODO: Update the paths to the downloaded data
 # Point to the *.zarr files
-input_data_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"  # Replace with path to registered_test.zarr
-tracks_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"  # Replace with path to  track_test.zarr
-ann_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred/extracted_inf_state.csv"  # Replace with path to extracted_inf_state.csv
-)
+download_root = Path.home() / "data/dynaclr/demo"
+input_data_path = (
+    download_root / "registered_test.zarr"
+)  # Replace with path to registered_test.zarr
+tracks_path = download_root / "track_test.zarr"  # Replace with path to  track_test.zarr
+ann_path = (
+    download_root / "extracted_inf_state.csv"
+)  # Replace with path to extracted_inf_state.csv
 
-# TODO: Update the path to the DynaCL and ImageNet features
-dynaclr_features_path = "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2_phate.zarr"
-imagenet_features_path = "/home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
+# TODO: Update the path to the DynaCLR and ImageNet features
+# Point to the precomputed embeddings
+dynaclr_features_path = (
+    download_root / "precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
+)
+imagenet_features_path = (
+    download_root
+    / "precomputed_embeddings/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
+)
 
 # %% [markdown]
 # ## Load the embeddings and annotations
@@ -99,7 +107,7 @@ imagenet_features_df = imagenet_features_df[imagenet_features_df["infection"] !=
 dynaclr_features_df = dynaclr_features_df[dynaclr_features_df["infection"] != 0]
 
 # %% [markdown]
-# ## Choosing a representative track for visualization
+# ## Choose a representative track for visualization
 
 # %%
 # NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
@@ -109,7 +117,6 @@ fov_name_inf = "/B/4/9"
 track_id_inf = [42]
 
 # Default parameters for the test dataset
-z_range = (0, 1)
 z_range = (24, 29)
 yx_patch_size = (160, 160)
 
@@ -118,7 +125,7 @@ fov_name_mock_list = [fov_name_mock] * len(track_id_mock)
 fov_name_inf_list = [fov_name_inf] * len(track_id_inf)
 
 conditions_to_compare = {
-    "uinfected": {
+    "uninfected": {
         "fov_name_list": fov_name_mock_list,
         "track_id_list": track_id_mock,
     },
@@ -165,6 +172,7 @@ for condition, condition_data in conditions_to_compare.items():
         z_idx = images.shape[1] // 2
         C, Z, Y, X = images.shape
         image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
+        # NOTE: here we are using the default percentile range for the RFP channel, change if using different channels or this threshold does not work
         for c_idx, channel in enumerate(channels_to_display):
             if channel in ["Phase3D", "DIC", "BF"]:
                 image_out[c_idx] = images[c_idx, z_idx]
@@ -200,7 +208,7 @@ create_combined_visualization(
         "Infected Phase",
         "Infected Viral Sensor",
     ],
-    condition_keys=["uinfected_cache", "infected_cache"],
+    condition_keys=["uninfected_cache", "infected_cache"],
     channel_colormaps=["gray", "magma"],
     category_colors={1: "cornflowerblue", 2: "salmon"},
     highlight_colors={1: "blue", 2: "red"},

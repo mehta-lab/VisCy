@@ -2,34 +2,17 @@
 
 START_DIR=$(pwd)
 
-# Initialize conda for the shell
-eval "$(conda shell.bash hook)"
-conda deactivate
+# Create the directory structure
+output_dir=~/
+mkdir -p "$output_dir"/data/dynaclr/demo
 
-# Check if environment exists
-if ! conda env list | grep -q "dynaclr"; then
-    echo "Creating new dynaclr environment..."
-    conda config --add channels defaults
-    conda create -y --name dynaclr python=3.11
-else
-    echo "Environment already exists. Updating packages..."
-fi
+# Change to the target directory if you want to download the data to a specific directory
+cd ~/data/dynaclr/demo
 
-# Activate the environment
-conda activate dynaclr
+# Download the data
+wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/"
 
-# Install/update conda packages
-conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets
-python -m ipykernel install --user --name dynaclr --display-name "Python (dynaclr)"
-
-# Install viscy and its dependencies using pip
-pip install gdown
-pip install "git+https://github.com/mehta-lab/viscy.git@dynaclr_v2#egg=viscy[visual,metrics]"
-
-# Deactivate the environment
-conda deactivate
+echo "Data downloaded successfully."
 
 # Change back to the starting directory
 cd $START_DIR
-
-echo "DynaClr environment setup complete."
