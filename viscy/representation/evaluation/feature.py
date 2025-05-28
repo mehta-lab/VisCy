@@ -6,11 +6,11 @@ import pandas as pd
 import scipy.stats
 from numpy import fft
 from numpy.typing import ArrayLike
+from scipy.ndimage import distance_transform_edt
+from scipy.stats import linregress
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from skimage.measure import regionprops
-from scipy.ndimage import distance_transform_edt
-from scipy.stats import linregress
 
 
 def normalize_image(image: ArrayLike) -> ArrayLike:
