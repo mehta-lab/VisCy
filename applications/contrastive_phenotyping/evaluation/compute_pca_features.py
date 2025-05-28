@@ -1,9 +1,10 @@
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+import pandas as pd
 import seaborn as sns
 from sklearn.decomposition import PCA
-import pandas as pd
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -173,11 +174,8 @@ def compute_features(
 
     fov_names_list = embedding_df["fov_name"].unique()
     unique_fov_names = sorted(list(set(fov_names_list)))
-    # max_iterations = 50
 
     for fov_name in unique_fov_names:
-        csv_files = list((Path(str(tracks_path) + str(fov_name))).glob("*.csv"))
-        tracks_df = pd.read_csv(str(csv_files[0]))
 
         unique_track_ids = embedding_df[embedding_df["fov_name"] == fov_name][
             "track_id"
@@ -191,8 +189,6 @@ def compute_features(
                 (embedding_df["fov_name"] == fov_name)
                 & (embedding_df["track_id"] == track_id)
             ].empty:
-
-                track_subdf = tracks_df[tracks_df["track_id"] == track_id]
 
                 prediction_dataset = dataset_of_tracks(
                     data_path,
@@ -221,8 +217,6 @@ def compute_features(
                 # fluor = ((fluor - fluor.min()) / (fluor.max() - fluor.min()) * 255).astype(np.uint8)
                 nucl_mask = seg_mask[:, 0, 0]
 
-                # find the minimum time point
-                t_min_track = np.min(track_subdf["t"])
                 for i, t in enumerate(
                     embedding_df[
                         (embedding_df["fov_name"] == fov_name)
@@ -277,7 +271,6 @@ def compute_features(
                         "Zernike Moment Std": FF["zernike_std"],
                         "Zernike Moment Mean": FF["zernike_mean"],
                         "Intensity Localization": FF["intensity_localization"],
-                        "Masked Intensity": FF["masked_intensity"],
                         "Area": FF["area"],
                     }
 
