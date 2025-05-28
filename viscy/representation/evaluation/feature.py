@@ -129,7 +129,7 @@ class CellFeatures:
         Computed symmetry features.
     """
 
-    def __init__(self, image: ArrayLike, segmentation_mask: ArrayLike = None):
+    def __init__(self, image: ArrayLike, segmentation_mask: ArrayLike | None = None):
         self.image = image
         self.segmentation_mask = segmentation_mask
         self.intensity_features = None
