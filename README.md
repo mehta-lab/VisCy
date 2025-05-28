@@ -21,15 +21,18 @@ This repository provides a pipeline for the following.
   - Supervised learning of of cell state (e.g. state of infection)
 
 > **Note:**
-> VisCy has been extensively tested for the image translation task. The code for other tasks is under active development. Frequent breaking changes are expected in the main branch as we unify the codebase for above tasks. If you are looking for a well-tested version for virtual staining, please use release `0.2.1` from PyPI.
+VisCy is under active development.
+While we strive to maintain stability,
+the main branch may occasionally be updated with break-incompatible changes
+which are subsequently shipped in releases following [semantic versioning](https://semver.org/).
+Please choose a stable release from PyPI for production use.
 
 ## Cytoland (robust virtual staining)
 
-### Demos
+### Online demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
 
-- [Interactive 2D virtual staining demo of cell nuclei and membrane from labelfree data 🤗](https://compmicro-czb-virtualstaining.hf.space)
-
-[![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
+Try the 2D virtual staining demo of cell nuclei and membrane from label-free images on
+[Hugging Face](https://huggingface.co/spaces/compmicro-czb/VirtualStaining).
 
 <p align="center">
 <a href="https://compmicro-czb-virtualstaining.hf.space" target="_blank" rel="noopener noreferrer">
@@ -37,13 +40,26 @@ This repository provides a pipeline for the following.
 </a>
 </p>
 
-- [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/46beba4ecc8c4f312fda0b04d5229631a41b6cb5/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
+### Virtual Cell Models
+
+Cytoland models are part of the virtual cell models.
+Notebooks are available as pre-rendered pages or on Colab:
+
+- [Model card](https://virtualcellmodels.cziscience.com/model/01961244-1970-7851-a4b9-fdbfa2fba9b2)
+- [Quick-start (VSCyto2D)](https://virtualcellmodels.cziscience.com/quickstart/cytoland-quickstart)
+- CLI tutorials:
+  - [VSCyto3D](https://virtualcellmodels.cziscience.com/tutorial/cytoland-tutorial)
+  - VSNeuromast
+
+### Tutorials
+
+- [Virtual staining exercise](https://github.com/mehta-lab/VisCy/blob/main/examples/virtual_staining/dlmbl_exercise/solution.ipynb):
 Notebook illustrating how to use VisCy to train, predict and evaluate the VSCyto2D model. This notebook was developed for the [DL@MBL2024](https://github.com/dlmbl/DL-MBL-2024) course and uses UNeXt2 architecture.
 
-- [Image translation demo](https://github.com/mehta-lab/VisCy/blob/92215bc1387316f3af49c83c321b9d134d871116/examples/virtual_staining/img2img_translation/solution.ipynb): Fluorescence images can be predicted from label-free images. Can we predict label-free image from fluorescence? Find out using this notebook.
+- [Image translation demo](https://github.com/mehta-lab/VisCy/blob/main/examples/virtual_staining/img2img_translation/solution.ipynb): Fluorescence images can be predicted from label-free images. Can we predict label-free image from fluorescence? Find out using this notebook.
 
 - [Training Virtual Staining Models via CLI](https://github.com/mehta-lab/VisCy/wiki/virtual-staining-instructions):
-Instructions for how to train and run inference on ViSCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
+Instructions for how to train and run inference on VisCy's virtual staining models (*VSCyto3D*, *VSCyto2D* and *VSNeuromast*).
 
 ### Gallery
 
