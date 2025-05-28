@@ -425,7 +425,7 @@ class CellFeatures:
 
         Parameters
         ----------
-        sigma : float, optional
+        sigma : float
             Gaussian blur standard deviation. Increasing this value increases the blur,
             by default 0.6
 
