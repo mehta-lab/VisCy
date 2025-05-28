@@ -17,9 +17,8 @@ def main():
     """Main function to run the visualization app."""
 
     # Config for the visualization app
-    # TODO: Update the paths to the downloaded data
-    # NOTE: selecting random FOVs for the demo
-    download_root = Path("/path/to/downloaded/data")
+    # TODO: Update the paths to the downloaded data. By default the data is downloaded to ~/data/dynaclr/demo
+    download_root = Path.home() / "data/dynaclr/demo"
     viz_config = {
         "data_path": download_root / "registered_test.zarr",  # TODO add path to data
         "tracks_path": download_root / "track_test.zarr",  # TODO add path to tracks
@@ -31,6 +30,7 @@ def main():
             "/B/4/9": list(range(50)),
         },
         "yx_patch_size": (160, 160),
+        "z_range": (24, 29),
         "num_PC_components": 8,
     }
 

@@ -18,23 +18,12 @@ fi
 # Activate the environment
 conda activate dynaclr
 
-
 # Install/update conda packages
 conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets
 python -m ipykernel install --user --name dynaclr --display-name "Python (dynaclr)"
 
 # Install viscy and its dependencies using pip
-pip install "viscy[visual,metrics] @ ./viscy-dynaclr_v2.zip"
-pip install gdown
-
-# Download data from Google Drive
-gdown    -O dynaclr_demo_data.tar.gz
-
-# Unzip the data tar.gz file
-tar -xzf dynaclr_demo_data.tar.gz -C ./dynaclr_demo_data
-
-# Deactivate the environment
-conda deactivate
+pip install "viscy[visual,metrics]>=0.3.0"
 
 # Change back to the starting directory
 cd $START_DIR

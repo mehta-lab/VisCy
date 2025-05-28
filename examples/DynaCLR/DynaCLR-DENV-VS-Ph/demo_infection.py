@@ -44,12 +44,12 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 #
 # ## Note:
 #
-# Alternatively, you can run the CLI to compute the features yourself following the instructions in the [README.md](./README.md)
+# Alternatively, you can run the CLI to compute the features yourself by following the instructions in the [README.md](./README.md)
 
 # %%
 # TODO: Update the paths to the downloaded data
 # Point to the *.zarr files
-download_root = Path("/path/to/downloaded/data")
+download_root = Path.home() / "data/dynaclr/demo"
 input_data_path = (
     download_root / "registered_test.zarr"
 )  # Replace with path to registered_test.zarr
@@ -58,14 +58,14 @@ ann_path = (
     download_root / "extracted_inf_state.csv"
 )  # Replace with path to extracted_inf_state.csv
 
-# TODO: Update the path to the DynaCL and ImageNet features
+# TODO: Update the path to the DynaCLR and ImageNet features
 # Point to the precomputed embeddings
 dynaclr_features_path = (
-    download_root
-    / "/precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
+    download_root / "precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
 )
 imagenet_features_path = (
-    download_root / "20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
+    download_root
+    / "precomputed_embeddings/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
 )
 
 # %% [markdown]
@@ -107,7 +107,7 @@ imagenet_features_df = imagenet_features_df[imagenet_features_df["infection"] !=
 dynaclr_features_df = dynaclr_features_df[dynaclr_features_df["infection"] != 0]
 
 # %% [markdown]
-# ## Choosing a representative track for visualization
+# ## Choose a representative track for visualization
 
 # %%
 # NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
@@ -117,7 +117,6 @@ fov_name_inf = "/B/4/9"
 track_id_inf = [42]
 
 # Default parameters for the test dataset
-z_range = (0, 1)
 z_range = (24, 29)
 yx_patch_size = (160, 160)
 
@@ -126,7 +125,7 @@ fov_name_mock_list = [fov_name_mock] * len(track_id_mock)
 fov_name_inf_list = [fov_name_inf] * len(track_id_inf)
 
 conditions_to_compare = {
-    "uinfected": {
+    "uninfected": {
         "fov_name_list": fov_name_mock_list,
         "track_id_list": track_id_mock,
     },
@@ -209,7 +208,7 @@ create_combined_visualization(
         "Infected Phase",
         "Infected Viral Sensor",
     ],
-    condition_keys=["uinfected_cache", "infected_cache"],
+    condition_keys=["uninfected_cache", "infected_cache"],
     channel_colormaps=["gray", "magma"],
     category_colors={1: "cornflowerblue", 2: "salmon"},
     highlight_colors={1: "blue", 2: "red"},
