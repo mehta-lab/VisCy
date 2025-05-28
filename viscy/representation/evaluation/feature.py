@@ -30,29 +30,7 @@ def normalize_image(image: ArrayLike) -> ArrayLike:
 
 
 class IntensityFeatures(TypedDict):
-    """Intensity-based features extracted from a single cell.
-
-    Attributes
-    ----------
-    mean_intensity : float
-        Mean pixel intensity of the cell.
-    std_dev : float
-        Standard deviation of pixel intensities.
-    min_intensity : float
-        Minimum pixel intensity.
-    max_intensity : float
-        Maximum pixel intensity.
-    kurtosis : float
-        Kurtosis of the intensity distribution.
-    skewness : float
-        Skewness of the intensity distribution.
-    spectral_entropy : float
-        Entropy of the power spectrum.
-    iqr : float
-        Interquartile range of pixel intensities.
-    weighted_intensity_gradient : float
-        Slope of the weighted radial intensity gradient.
-    """
+    """Intensity-based features extracted from a single cell."""
 
     mean_intensity: float
     std_dev: float
@@ -66,23 +44,7 @@ class IntensityFeatures(TypedDict):
 
 
 class TextureFeatures(TypedDict):
-    """Texture-based features extracted from a single cell.
-
-    Attributes
-    ----------
-    spectral_entropy : float
-        Entropy of the power spectrum.
-    contrast : float
-        GLCM contrast feature.
-    entropy : float
-        GLCM entropy feature.
-    homogeneity : float
-        GLCM homogeneity feature.
-    dissimilarity : float
-        GLCM dissimilarity feature.
-    texture : float
-        Haralick texture features.
-    """
+    """Texture-based features extracted from a single cell."""
 
     spectral_entropy: float
     contrast: float
@@ -93,25 +55,7 @@ class TextureFeatures(TypedDict):
 
 
 class MorphologyFeatures(TypedDict):
-    """Morphological features extracted from a single cell.
-
-    Attributes
-    ----------
-    area : float
-        Area of the cell in pixels.
-    perimeter : float
-        Perimeter length of the cell.
-    perimeter_area_ratio : float
-        Ratio of perimeter to area.
-    eccentricity : float
-        Eccentricity of the cell shape.
-    intensity_localization : float
-        Measure of intensity distribution within the cell.
-    masked_intensity : float
-        Mean intensity within the segmentation mask.
-    masked_area : float
-        Area of the segmentation mask.
-    """
+    """Morphological features extracted from a single cell."""
 
     area: float
     perimeter: float
@@ -123,17 +67,7 @@ class MorphologyFeatures(TypedDict):
 
 
 class SymmetryDescriptor(TypedDict):
-    """Symmetry-based features extracted from a single cell.
-
-    Attributes
-    ----------
-    zernike_std : float
-        Standard deviation of Zernike moments.
-    zernike_mean : float
-        Mean of Zernike moments.
-    radial_intensity_gradient : float
-        Radial gradient of intensity distribution.
-    """
+    """Symmetry-based features extracted from a single cell."""
 
     zernike_std: float
     zernike_mean: float
@@ -151,17 +85,7 @@ class TrackFeatures(TypedDict):
 
 
 class DisplacementFeatures(TypedDict):
-    """Displacement-based features extracted from a single track.
-
-    Attributes
-    ----------
-    total_distance : float
-        Total distance traveled by the cell.
-    net_displacement : float
-        Net displacement from start to end position.
-    directional_persistence : float
-        Ratio of net displacement to total distance.
-    """
+    """Displacement-based features extracted from a single track."""
 
     total_distance: float
     net_displacement: float
@@ -218,7 +142,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        kurtosis: float
             Kurtosis of the normalized image intensity distribution.
         """
         normalized_image = normalize_image(self.image)
@@ -230,7 +154,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        skewness: float
             Skewness of the normalized image intensity distribution.
         """
         normalized_image = normalize_image(self.image)
@@ -246,7 +170,7 @@ class CellFeatures:
 
         Returns
         -------
-        tuple
+        contrast, dissimilarity, homogeneity: tuple
             Tuple containing:
             - contrast : float
                 GLCM contrast feature
@@ -282,7 +206,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        iqr: float
             Interquartile range of pixel intensities.
         """
         # Compute the interquartile range of pixel intensities
@@ -299,7 +223,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        slope: float
             Slope of the weighted radial intensity gradient profile.
         """
         # Get image dimensions
@@ -356,7 +280,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        entropy: float
             Spectral entropy of the image.
         """
         # Compute the 2D Fourier Transform
@@ -382,7 +306,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        texture_features: float
             Mean of the texture features.
         """
         # rescale image to 0 to 255 and convert to uint8
@@ -402,10 +326,10 @@ class CellFeatures:
 
         Returns
         -------
-        tuple
+        average_perimeter, average_area, ratio: tuple
             Tuple containing:
             - average_perimeter : float
-                Average perimeter of all regions
+                Average perimeter of all regions in the patch
             - average_area : float
                 Average area of all regions
             - ratio : float
@@ -439,7 +363,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        eccentricity: float
             Eccentricity of the nucleus (0 to 1).
         """
         # Use regionprops to analyze each labeled region
@@ -461,7 +385,7 @@ class CellFeatures:
 
         Returns
         -------
-        ndarray
+        dist_transform: ndarray
             Distance transform of the segmentation mask.
         """
         # Ensure the image is binary
@@ -483,7 +407,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        intensity_weighted_center: float
             Intensity-weighted center of the fluor.
         """
         # compute EDT of mask
@@ -507,7 +431,7 @@ class CellFeatures:
 
         Returns
         -------
-        tuple
+        masked_intensity, masked_area: tuple
             Tuple containing:
             - masked_intensity : float
                 Mean intensity inside the sensor area
@@ -536,7 +460,7 @@ class CellFeatures:
 
         Returns
         -------
-        np.ndarray
+        zernike_moments: np.ndarray
             Zernike moments of the image.
         """
         zernike_moments = mh.features.zernike_moments(self.image, 32)
@@ -550,7 +474,7 @@ class CellFeatures:
 
         Returns
         -------
-        float
+        radial_intensity_gradient: float
             Radial intensity gradient of the image.
         """
         # get the slope radial_intensity_values
@@ -702,35 +626,10 @@ class CellFeatures:
         -------
         pd.DataFrame
             DataFrame containing all computed features with the following columns:
-            - Intensity features (if computed):
-                - mean_intensity : float
-                - std_dev : float
-                - min_intensity : float
-                - max_intensity : float
-                - kurtosis : float
-                - skewness : float
-                - spectral_entropy : float
-                - iqr : float
-                - weighted_intensity_gradient : float
-            - Texture features (if computed):
-                - spectral_entropy : float
-                - contrast : float
-                - entropy : float
-                - homogeneity : float
-                - dissimilarity : float
-                - texture : float
-            - Morphology features (if computed):
-                - area : float
-                - perimeter : float
-                - perimeter_area_ratio : float
-                - eccentricity : float
-                - intensity_localization : float
-                - masked_intensity : float
-                - masked_area : float
-            - Symmetry descriptor (if computed):
-                - zernike_std : float
-                - zernike_mean : float
-                - radial_intensity_gradient : float
+            - Intensity features (if computed)
+            - Texture features (if computed)
+            - Morphology features (if computed)
+            - Symmetry descriptor (if computed)
 
         Notes
         -----
@@ -760,15 +659,7 @@ class DynamicFeatures:
     Parameters
     ----------
     tracking_df : pandas.DataFrame
-        DataFrame containing cell tracking data with the following required columns:
-        - track_id : str
-            Unique identifier for each track
-        - t : float
-            Time point of the measurement
-        - x : float
-            x-coordinate of the cell position
-        - y : float
-            y-coordinate of the cell position
+        DataFrame containing cell tracking data with track_id, t, x, y columns
 
     Attributes
     ----------
@@ -808,11 +699,15 @@ class DynamicFeatures:
     def _compute_instantaneous_velocity(self, track_id: str) -> np.ndarray:
         """Compute the instantaneous velocity for all timepoints in a track.
 
-        Args:
-            track_id: ID of the track to compute velocities for
+        Parameters
+        ----------
+        track_id : str
+            ID of the track to compute velocities for
 
-        Returns:
-            np.ndarray: Array of instantaneous velocities for each timepoint
+        Returns
+        -------
+        velocities : np.ndarray
+            Array of instantaneous velocities for each timepoint
         """
         # Get track data sorted by time
         track_data = self.tracking_df[
@@ -852,7 +747,7 @@ class DynamicFeatures:
 
         Returns
         -------
-        tuple
+        total_distance, net_displacement, directional_persistence: tuple
             Tuple containing:
             - total_distance : float
                 Total distance traveled by the cell along its path
@@ -861,11 +756,6 @@ class DynamicFeatures:
             - directional_persistence : float
                 Ratio of net displacement to total distance (0 to 1),
                 where 1 indicates perfectly straight movement
-
-        Notes
-        -----
-        Returns (0.0, 0.0, 0.0) if the track has fewer than 2 points, as at least
-        2 points are needed to compute displacement.
         """
         track_data = self.tracking_df[
             self.tracking_df["track_id"] == track_id
@@ -907,19 +797,11 @@ class DynamicFeatures:
 
         Returns
         -------
-        tuple
+        mean_angular_velocity, max_angular_velocity, std_angular_velocity: tuple
             Tuple containing:
-            - mean_angular_velocity : float
-                Mean angular velocity over the track
-            - max_angular_velocity : float
-                Maximum angular velocity observed
-            - std_angular_velocity : float
-                Standard deviation of angular velocity
-
-        Notes
-        -----
-        Returns (0.0, 0.0, 0.0) if the track has fewer than 3 points, as at least
-        3 points are needed to compute angle changes.
+            - mean_angular_velocity
+            - max_angular_velocity
+            - std_angular_velocity
         """
         track_data = self.tracking_df[
             self.tracking_df["track_id"] == track_id
@@ -971,13 +853,6 @@ class DynamicFeatures:
             - Velocity features: instantaneous, mean, max, min velocities and std
             - Displacement features: total distance, net displacement, persistence
             - Angular features: mean, max, and std of angular velocities
-
-        Notes
-        -----
-        This function computes features in the following order:
-        1. Velocity features using _compute_instantaneous_velocity
-        2. Displacement features using _compute_displacement
-        3. Angular features using _compute_angular_velocity
         """
         # Compute velocity features
         velocities = self._compute_instantaneous_velocity(track_id)
@@ -1019,26 +894,9 @@ class DynamicFeatures:
         -------
         pd.DataFrame
             DataFrame containing all computed features with the following columns:
-            - Velocity features (if computed):
-                - instantaneous_velocity : list[float]
-                - mean_velocity : float
-                - max_velocity : float
-                - min_velocity : float
-                - std_velocity : float
-            - Displacement features (if computed):
-                - total_distance : float
-                - net_displacement : float
-                - directional_persistence : float
-            - Angular features (if computed):
-                - mean_angular_velocity : float
-                - max_angular_velocity : float
-                - std_angular_velocity : float
-
-        Notes
-        -----
-        Only features that have been computed (non-None) will be included
-        in the output DataFrame. The DataFrame will have a single row
-        containing all the features.
+            - Velocity features
+            - Displacement features
+            - Angular features
         """
         features_dict = {}
         if self.velocity_features:

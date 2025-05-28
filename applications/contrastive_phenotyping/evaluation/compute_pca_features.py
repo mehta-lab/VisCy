@@ -27,17 +27,8 @@ def compute_PCA(features_path: Path):
 
     Returns
     -------
-    xarray.Dataset
-        Dataset containing:
-        - Original features (768 dimensions)
-        - 8 PCA components (PCA1-PCA8)
-        - Sample coordinates with PCA components as multi-index
+    features: xarray dataset with PCA components as new coordinates
 
-    Notes
-    -----
-    - Features are standardized using StandardScaler before PCA computation
-    - PCA components are computed using sklearn's PCA implementation
-    - The output maintains the original feature vectors while adding PCA components
     """
     embedding_dataset = read_embedding_dataset(features_path)
     embedding_dataset
@@ -340,20 +331,12 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
         - Computed features (morphological, intensity-based, etc.)
         - Tracking metadata (fov_name, track_id, t, etc.)
     filename : str
-        Path where the correlation heatmap will be saved as a PNG file.
+        Path where the correlation heatmap will be saved as a PNG or SVG file.
 
     Returns
     -------
     pandas.DataFrame
         The correlation matrix between all features.
-
-    Notes
-    -----
-    - Rows with missing values are dropped before correlation computation
-    - Uses Spearman correlation for robustness to non-linear relationships
-    - The heatmap is saved with high resolution (300 DPI)
-    - The plot includes annotations with correlation values
-    - Uses 'coolwarm' colormap for better visualization of positive/negative correlations
     """
     # remove the rows with missing values
     features = features.dropna()
