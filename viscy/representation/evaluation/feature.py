@@ -413,7 +413,7 @@ class CellFeatures:
             masked_intensity=masked_intensity,
             masked_area=masked_area,
         )
-    
+
     def compute_symmetry_descriptor(self):
         """Compute the symmetry descriptor of the image"""
         self.symmetry_descriptor = SymmetryDescriptor(
