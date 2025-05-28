@@ -7,7 +7,7 @@
 from pathlib import Path
 import matplotlib.pyplot as plt
 import seaborn as sns
-from utils import compute_features, compute_correlation_and_save_png
+from compute_pca_features import compute_features, compute_correlation_and_save_png
 
 # %% for sensor features
 
