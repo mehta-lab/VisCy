@@ -142,19 +142,6 @@ class SymmetryDescriptor(TypedDict):
 
 class TrackFeatures(TypedDict):
     """Velocity-based features extracted from a single track.
-
-    Attributes
-    ----------
-    instantaneous_velocity : list[float]
-        Array of velocities at each timepoint.
-    mean_velocity : float
-        Mean velocity over the track.
-    max_velocity : float
-        Maximum velocity observed.
-    min_velocity : float
-        Minimum velocity observed.
-    std_velocity : float
-        Standard deviation of velocity.
     """
 
     instantaneous_velocity: list[float]  # Array of velocities at each timepoint

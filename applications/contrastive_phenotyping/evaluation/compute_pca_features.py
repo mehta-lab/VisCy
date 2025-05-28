@@ -1,30 +1,9 @@
-"""Script to compute and analyze correlations between PCA/UMAP features and computed features.
-
-This script performs correlation analysis between dimensionality-reduced features (PCA/UMAP)
-and computed morphological/intensity features from cell tracking data. It identifies which
-computed features best represent the PCA and UMAP components and visualizes these
-relationships through correlation heatmaps.
-
-Functions
----------
-compute_PCA : Compute PCA components from embedding features
-compute_features : Compute various cell features and combine with PCA features
-compute_correlation_and_save_png : Generate and save correlation heatmaps
-
-Notes
------
-- Uses Spearman correlation for robustness to non-linear relationships
-- Generates high-resolution heatmaps with correlation values
-- Processes data track by track to manage memory efficiently
-"""
-
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
 from sklearn.decomposition import PCA
 import pandas as pd
-import os
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
