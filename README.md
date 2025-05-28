@@ -111,10 +111,9 @@ The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), 
 
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
-## DynaCLR (Contrastive learning of representations of cell dynamics)
+## DynaCLR: Contrastive Learning of Cellular Dynamics with Temporal Regularization
 
-We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations,
-with focus on cell and organelle remodeling due to viral infection.
+DynaCLR is a self-supervised method for learning robust and temporally-aware representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks—including cell state annotation, division detection, and response alignment with minimal human supervision, leveraging both fluorescence and label-free imaging channels.
 
 See our recent work on temporally regularized contrastive sampling method
 for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
@@ -143,7 +142,7 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 - See tutorial on exploration of learned embeddings with napari-iohub
 [here](https://github.com/czbiohub-sf/napari-iohub/wiki/View-tracked-cells-and-their-associated-predictions/).
 
-![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
+![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
 ## Installation
 
