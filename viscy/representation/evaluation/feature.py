@@ -141,8 +141,7 @@ class SymmetryDescriptor(TypedDict):
 
 
 class TrackFeatures(TypedDict):
-    """Velocity-based features extracted from a single track.
-    """
+    """Velocity-based features extracted from a single track."""
 
     instantaneous_velocity: list[float]  # Array of velocities at each timepoint
     mean_velocity: float

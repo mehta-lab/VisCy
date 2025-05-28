@@ -404,4 +404,3 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
     plt.close()
 
     return correlation
-
