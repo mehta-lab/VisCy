@@ -3,8 +3,6 @@
 * outputs a heatmap of the correlation between PCA and UMAP features and computed features
 """
 
-# %%
-
 from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
@@ -19,10 +17,32 @@ from viscy.representation.evaluation import dataset_of_tracks
 from viscy.representation.evaluation.feature import CellFeatures
 
 
-# %% function to read the embedding dataset and return the features
+## function to read the embedding dataset and return the features
 def compute_PCA(features_path: Path):
-    """
-    Read the embedding dataset and return the features and 8 PCA components
+    """Compute PCA components from embedding features and combine with original features.
+
+    This function reads an embedding dataset, standardizes the features, and computes
+    8 principal components. The PCA components are then combined with the original
+    features in an xarray dataset structure.
+
+    Parameters
+    ----------
+    features_path : Path
+        Path to the embedding dataset containing the feature vectors.
+
+    Returns
+    -------
+    xarray.Dataset
+        Dataset containing:
+        - Original features (768 dimensions)
+        - 8 PCA components (PCA1-PCA8)
+        - Sample coordinates with PCA components as multi-index
+
+    Notes
+    -----
+    - Features are standardized using StandardScaler before PCA computation
+    - PCA components are computed using sklearn's PCA implementation
+    - The output maintains the original feature vectors while adding PCA components
     """
     embedding_dataset = read_embedding_dataset(features_path)
     embedding_dataset
@@ -61,6 +81,39 @@ def compute_features(
     z_range: tuple,
     fov_list: list,
 ):
+    """Compute various cell features and combine them with PCA features.
+
+    This function processes cell tracking data to compute various morphological and
+    intensity-based features for both phase and fluorescence channels, and combines
+    them with PCA features from an embedding dataset.
+
+    Parameters
+    ----------
+    features_path : Path
+        Path to the embedding dataset containing PCA features.
+    data_path : Path
+        Path to the raw data directory containing image data.
+    tracks_path : Path
+        Path to the directory containing tracking data in CSV format.
+    source_channel : list
+        List of source channels to process from the data.
+    seg_channel : list
+        List of segmentation channels to process from the data.
+    z_range : tuple
+        Tuple specifying the z-range to process (min_z, max_z).
+    fov_list : list
+        List of field of view names to process.
+
+    Returns
+    -------
+    pandas.DataFrame
+        DataFrame containing all computed features including:
+        - Basic features (mean intensity, std dev, kurtosis, etc.) for both Phase and Fluor channels
+        - Organelle features (area, masked intensity)
+        - Nuclear features (area, perimeter, eccentricity)
+        - PCA components (PCA1-PCA8)
+        - Original tracking information (fov_name, track_id, time points)
+    """
 
     embedding_dataset = compute_PCA(features_path)
     features_npy = embedding_dataset["features"].values
@@ -284,8 +337,37 @@ def compute_features(
     return embedding_df
 
 
-# %% save all feature dataframe to png file
+## save all feature dataframe to png file
 def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
+    """Compute correlation between PCA features and computed features, and save as heatmap.
+
+    This function calculates the Spearman correlation between PCA components and all
+    computed features, then visualizes the results as a heatmap. The heatmap focuses
+    on the correlation between PCA components (PCA1-PCA8) and all other computed features.
+
+    Parameters
+    ----------
+    features : pandas.DataFrame
+        DataFrame containing all features including:
+        - PCA components (PCA1-PCA8)
+        - Computed features (morphological, intensity-based, etc.)
+        - Tracking metadata (fov_name, track_id, t, etc.)
+    filename : str
+        Path where the correlation heatmap will be saved as a PNG file.
+
+    Returns
+    -------
+    pandas.DataFrame
+        The correlation matrix between all features.
+
+    Notes
+    -----
+    - Rows with missing values are dropped before correlation computation
+    - Uses Spearman correlation for robustness to non-linear relationships
+    - The heatmap is saved with high resolution (300 DPI)
+    - The plot includes annotations with correlation values
+    - Uses 'coolwarm' colormap for better visualization of positive/negative correlations
+    """
     # remove the rows with missing values
     features = features.dropna()
 
@@ -329,5 +411,3 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
 
     return correlation
 
-
-# %%
