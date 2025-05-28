@@ -1,6 +1,21 @@
-""" Script to compute the correlation between PCA and UMAP features and computed features
-* finds the computed features best representing the PCA and UMAP components
-* outputs a heatmap of the correlation between PCA and UMAP features and computed features
+"""Script to compute and analyze correlations between PCA/UMAP features and computed features.
+
+This script performs correlation analysis between dimensionality-reduced features (PCA/UMAP)
+and computed morphological/intensity features from cell tracking data. It identifies which
+computed features best represent the PCA and UMAP components and visualizes these
+relationships through correlation heatmaps.
+
+Functions
+---------
+compute_PCA : Compute PCA components from embedding features
+compute_features : Compute various cell features and combine with PCA features
+compute_correlation_and_save_png : Generate and save correlation heatmaps
+
+Notes
+-----
+- Uses Spearman correlation for robustness to non-linear relationships
+- Generates high-resolution heatmaps with correlation values
+- Processes data track by track to manage memory efficiently
 """
 
 from pathlib import Path
