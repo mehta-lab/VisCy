@@ -14,7 +14,8 @@ def _filter_wells(
 def _filter_fovs(
     well: Well, exclude_fovs: list[str] | None
 ) -> Generator[Position, None, None]:
-    for fov_name, fov in well.positions():
+    for _, fov in well.positions():
+        fov_name = fov.zgroup.name.strip("/")
         if exclude_fovs is None or fov_name not in exclude_fovs:
             yield fov
 
