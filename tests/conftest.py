@@ -29,7 +29,7 @@ def _build_hcs(
     )
     for row in ("A", "B"):
         for col in ("1", "2"):
-            for fov in ("0", "1"):
+            for fov in ("0", "1", "2", "3"):
                 pos = dataset.create_position(row, col, fov)
                 pos.create_image(
                     "0",
