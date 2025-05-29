@@ -21,3 +21,10 @@ def test_select_well(include_wells, exclude_fovs, preprocessed_hcs_dataset):
     if exclude_fovs is not None:
         total_fovs -= len(exclude_fovs)
     assert len(filtered_positions) == total_fovs
+    for position in filtered_positions:
+        fov_name = position.zgroup.name.strip("/")
+        well_name, _ = fov_name.rsplit("/", 1)
+        if include_wells is not None:
+            assert well_name in include_wells
+        if exclude_fovs is not None:
+            assert fov_name not in exclude_fovs

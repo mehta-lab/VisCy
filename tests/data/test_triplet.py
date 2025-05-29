@@ -1,3 +1,4 @@
+import pandas as pd
 from iohub import open_ome_zarr
 from pytest import mark
 
@@ -43,6 +44,15 @@ def test_datamodule_setup_fit(
     dm.setup(stage="fit")
     assert len(dm.train_dataset) == len_train
     assert len(dm.val_dataset) == len_val
+    all_tracks = pd.concat([dm.train_dataset.tracks, dm.val_dataset.tracks])
+    filtered_fov_names = all_tracks["fov_name"].str[1:].unique()
+    for fov_name in filtered_fov_names:
+        well_name, _ = fov_name.rsplit("/", 1)
+        if include_wells is not None:
+            assert well_name in include_wells
+        if exclude_fovs is not None:
+            assert fov_name not in exclude_fovs
+    assert len(all_tracks) == len_total
     for batch in dm.train_dataloader():
         assert batch["anchor"].shape == (
             batch_size,
