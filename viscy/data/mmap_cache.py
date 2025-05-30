@@ -16,8 +16,9 @@ from torch import Tensor
 from torch.multiprocessing import Manager
 from torch.utils.data import Dataset
 
-from viscy.data.gpu_aug import GPUTransformDataModule, SelectWell
+from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
+from viscy.data.select import SelectWell
 from viscy.data.typing import DictTransform, NormMeta
 
 if TYPE_CHECKING:
