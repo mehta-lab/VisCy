@@ -8,25 +8,10 @@ from numpy import fft
 from numpy.typing import ArrayLike
 from scipy.ndimage import distance_transform_edt
 from scipy.stats import linregress
+from skimage.exposure import rescale_intensity
 from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from skimage.measure import regionprops
-
-
-def normalize_image(image: ArrayLike) -> ArrayLike:
-    """Normalize image values to 0-255 range.
-
-    Parameters
-    ----------
-    image : ArrayLike
-        Input image array to be normalized.
-
-    Returns
-    -------
-    ArrayLike
-        Normalized image with values scaled to 0-255 range.
-    """
-    return (image - image.min()) / (image.max() - image.min()) * 255
 
 
 class IntensityFeatures(TypedDict):
@@ -132,6 +117,9 @@ class CellFeatures:
     def __init__(self, image: ArrayLike, segmentation_mask: ArrayLike | None = None):
         self.image = image
         self.segmentation_mask = segmentation_mask
+        self.image_normalized = rescale_intensity(self.image, out_range=(0, 1))
+
+        # Initialize feature containers
         self.intensity_features = None
         self.texture_features = None
         self.morphology_features = None
@@ -143,10 +131,10 @@ class CellFeatures:
         Returns
         -------
         kurtosis: float
-            Kurtosis of the normalized image intensity distribution.
+            Kurtosis of the image intensity distribution (scale-invariant).
+            May return nan or inf for degenerate cases (constant arrays).
         """
-        normalized_image = normalize_image(self.image)
-        kurtosis = scipy.stats.kurtosis(normalized_image, fisher=True, axis=None)
+        kurtosis = scipy.stats.kurtosis(self.image, fisher=True, axis=None)
         return kurtosis
 
     def _compute_skewness(self):
@@ -155,43 +143,22 @@ class CellFeatures:
         Returns
         -------
         skewness: float
-            Skewness of the normalized image intensity distribution.
+            Skewness of the image intensity distribution (scale-invariant).
+            May return nan or inf for degenerate cases (constant arrays).
         """
-        normalized_image = normalize_image(self.image)
-        skewness = scipy.stats.skew(normalized_image, axis=None)
+        skewness = scipy.stats.skew(self.image, axis=None)
         return skewness
 
     def _compute_glcm_features(self):
         """Compute GLCM-based texture features from the image.
 
-        Computes contrast, dissimilarity, and homogeneity features using
-        Gray Level Co-occurrence Matrix (GLCM) analysis. These features
-        are sensitive to texture changes in both sensor and phase images.
-
-        Returns
-        -------
-        contrast, dissimilarity, homogeneity: tuple
-            Tuple containing:
-            - contrast : float
-                GLCM contrast feature
-            - dissimilarity : float
-                GLCM dissimilarity feature
-            - homogeneity : float
-                GLCM homogeneity feature
+        Converts normalized image to uint8 for GLCM computation.
         """
-        # Normalize the input image from 0 to 255
-        image = (self.image - np.min(self.image)) * (
-            255 / (np.max(self.image) - np.min(self.image))
-        )
-        image = image.astype(np.uint8)
+        # Convert 0-1 normalized image to uint8 (0-255)
+        image_uint8 = (self.image_normalized * 255).astype(np.uint8)
 
-        # Compute the GLCM
-        distances = [1]  # Distance between pixels
-        angles = [45]  # Angle in radians
+        glcm = graycomatrix(image_uint8, [1], [45], symmetric=True, normed=True)
 
-        glcm = graycomatrix(image, distances, angles, symmetric=True, normed=True)
-
-        # Compute GLCM properties - average across all angles
         contrast = graycoprops(glcm, "contrast")[0, 0]
         dissimilarity = graycoprops(glcm, "dissimilarity")[0, 0]
         homogeneity = graycoprops(glcm, "homogeneity")[0, 0]
@@ -209,7 +176,6 @@ class CellFeatures:
         iqr: float
             Interquartile range of pixel intensities.
         """
-        # Compute the interquartile range of pixel intensities
         iqr = np.percentile(self.image, 75) - np.percentile(self.image, 25)
 
         return iqr
@@ -301,21 +267,11 @@ class CellFeatures:
     def _compute_texture_features(self):
         """Compute Haralick texture features from the image.
 
-        Computes a set of texture features using Mahotas' implementation
-        of Haralick features, which capture various aspects of image texture.
-
-        Returns
-        -------
-        texture_features: float
-            Mean of the texture features.
+        Converts normalized image to uint8 for Haralick computation.
         """
-        # rescale image to 0 to 255 and convert to uint8
-        image_rescaled = (
-            (self.image - self.image.min())
-            / (self.image.max() - self.image.min())
-            * 255
-        )
-        texture_features = mh.features.haralick(image_rescaled.astype("uint8")).ptp(0)
+        # Convert 0-1 normalized image to uint8 (0-255)
+        image_uint8 = (self.image_normalized * 255).astype(np.uint8)
+        texture_features = mh.features.haralick(image_uint8).ptp(0)
         return np.mean(texture_features)
 
     def _compute_perimeter_area_ratio(self):
@@ -469,27 +425,15 @@ class CellFeatures:
     def _compute_radial_intensity_gradient(self):
         """Compute the radial intensity gradient of the image.
 
-        The sensor relocalizes inside the nucleus, which is center of the image when cells are infected
-        Expected negative gradient when infected and zero to positive gradient when not infected
-
-        Returns
-        -------
-        radial_intensity_gradient: float
-            Radial intensity gradient of the image.
+        Uses 0-1 normalized image directly for gradient calculation.
         """
-        # get the slope radial_intensity_values
-
-        # normalize the image
-        normalized_image = (self.image - np.min(self.image)) / (
-            np.max(self.image) - np.min(self.image)
-        )
-
-        # compute the intensity gradient from center to periphery
-        y, x = np.indices(normalized_image.shape)
-        center = np.array(normalized_image.shape) / 2
+        # Use 0-1 normalized image directly
+        y, x = np.indices(self.image_normalized.shape)
+        center = np.array(self.image_normalized.shape) / 2
         r = np.sqrt((x - center[1]) ** 2 + (y - center[0]) ** 2)
         r = r.astype(int)
-        tbin = np.bincount(r.ravel(), normalized_image.ravel())
+
+        tbin = np.bincount(r.ravel(), self.image_normalized.ravel())
         nr = np.bincount(r.ravel())
         radial_intensity_values = tbin / nr
 
