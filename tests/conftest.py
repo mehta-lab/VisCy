@@ -63,6 +63,16 @@ def small_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
 
 
 @fixture(scope="function")
+def small_hcs_labels(tmp_path_factory: TempPathFactory) -> Path:
+    """Provides a small, not preprocessed HCS OME-Zarr dataset with labels."""
+    dataset_path = tmp_path_factory.mktemp("small_with_labels.zarr")
+    _build_hcs(
+        dataset_path, ["nuclei_labels", "membrane_labels"], (12, 64, 64), np.uint16, 50
+    )
+    return dataset_path
+
+
+@fixture(scope="function")
 def labels_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     """Provides a small, not preprocessed HCS OME-Zarr dataset."""
     dataset_path = tmp_path_factory.mktemp("labels.zarr")
