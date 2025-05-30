@@ -1,26 +1,22 @@
 # See help here on how to configure hyper-parameters with config files:
 # https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+
+# TODO: point to the path to save the embeddings
+# TODO: point to the path to the data
+# TODO: point to the path to the tracks
+
 seed_everything: 42
 trainer:
   accelerator: gpu
-  strategy: auto
-  devices: 1
+  strategy: ddp
+  devices: 4
   num_nodes: 1
   precision: 32-true
   logger:
     class_path: lightning.pytorch.loggers.TensorBoardLogger
-    # Nesting the logger config like this is equivalent to
-    # supplying the following argument to `lightning.pytorch.Trainer`:
-    # logger=TensorBoardLogger(
-    #     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/contrastive_tune_augmentations",
-    #     log_graph=True,
-    #     version="vanilla",
-    # )
     init_args:
-      save_dir: /Users/ziwen.liu/Projects/test-time
-      # this is the name of the experiment.
-      # The logs will be saved in `save_dir/lightning_logs/version`
-      version: time_interval_1
+      save_dir: #TODO point to the path to save the logs
+      version: #TODO point to the version name
       log_graph: True
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
@@ -38,9 +34,6 @@ trainer:
   enable_checkpointing: true
   inference_mode: true
   use_distributed_sampler: true
-  # synchronize batchnorm parameters across multiple GPUs.
-  # important for contrastive learning to normalize the tensors across the whole batch.
-  sync_batchnorm: true
 model:
   class_path: viscy.representation.engine.ContrastiveModule
   init_args:
@@ -48,10 +41,10 @@ model:
       class_path: viscy.representation.contrastive.ContrastiveEncoder
       init_args:
         backbone: convnext_tiny
-        in_channels: 1
-        in_stack_depth: 1
-        stem_kernel_size: [1, 4, 4]
-        stem_stride: [1, 4, 4]
+        in_channels: 2
+        in_stack_depth: 30
+        stem_kernel_size: [5, 4, 4]
+        stem_stride: [5, 4, 4]
         embedding_dim: 768
         projection_dim: 32
         drop_path_rate: 0.0
@@ -59,34 +52,42 @@ model:
       class_path: torch.nn.TripletMarginLoss
       init_args:
         margin: 0.5
-    lr: 0.0002
+    lr: 0.00002
     log_batches_per_epoch: 3
-    log_samples_per_batch: 2
-    example_input_array_shape: [1, 1, 1, 128, 128]
+    log_samples_per_batch: 3
+    example_input_array_shape: [1, 2, 30, 256, 256]
 data:
   class_path: viscy.data.triplet.TripletDataModule
   init_args:
-    data_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
-    tracks_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
+    data_path: #TODO point to the path to the data (e.g. /2024_10_16_A549_SEC61_sensor_train.zarr)
+    tracks_path: #TODO point to the path to the corresponding tracks (e.g. /track_trainVal.zarr)
     source_channel:
-      - DIC
-    z_range: [0, 1]
-    batch_size: 16
-    num_workers: 4
-    initial_yx_patch_size: [256, 256]
-    final_yx_patch_size: [128, 128]
+      - Phase3D
+      - raw mCherry EX561 EM600-37
+    z_range: [15, 45]
+    batch_size: 64
+    num_workers: 12
+    initial_yx_patch_size: [384, 384]
+    final_yx_patch_size: [160, 160]
     time_interval: 1
     normalizations:
       - class_path: viscy.transforms.NormalizeSampled
         init_args:
-          keys: [DIC]
+          keys: [Phase3D]
           level: fov_statistics
           subtrahend: mean
           divisor: std
+      - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [raw mCherry EX561 EM600-37]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
     augmentations:
       - class_path: viscy.transforms.RandAffined
         init_args:
-          keys: [DIC]
+          keys: [Phase3D, raw mCherry EX561 EM600-37]
           prob: 0.8
           scale_range: [0, 0.2, 0.2]
           rotate_range: [3.14, 0.0, 0.0]
@@ -94,24 +95,40 @@ data:
           padding_mode: zeros
       - class_path: viscy.transforms.RandAdjustContrastd
         init_args:
-          keys: [DIC]
+          keys: [raw mCherry EX561 EM600-37]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy.transforms.RandAdjustContrastd
+        init_args:
+          keys: [Phase3D]
           prob: 0.5
           gamma: [0.8, 1.2]
       - class_path: viscy.transforms.RandScaleIntensityd
         init_args:
-          keys: [DIC]
+          keys: [raw mCherry EX561 EM600-37]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy.transforms.RandScaleIntensityd
+        init_args:
+          keys: [Phase3D]
           prob: 0.5
           factors: 0.5
       - class_path: viscy.transforms.RandGaussianSmoothd
         init_args:
-          keys: [DIC]
+          keys: [Phase3D, raw mCherry EX561 EM600-37]
           prob: 0.5
           sigma_x: [0.25, 0.75]
           sigma_y: [0.25, 0.75]
           sigma_z: [0.0, 0.0]
       - class_path: viscy.transforms.RandGaussianNoised
         init_args:
-          keys: [DIC]
+          keys: [raw mCherry EX561 EM600-37]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [Phase3D]
           prob: 0.5
           mean: 0.0
           std: 0.2

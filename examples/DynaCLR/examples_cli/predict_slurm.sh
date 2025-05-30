@@ -9,13 +9,14 @@
 #SBATCH --mem-per-cpu=7G
 #SBATCH --time=0-01:00:00
 
-module load anaconda/2022.05
+module load anaconda/latest
 # Update to use the actual prefix
-conda activate $MYDATA/envs/viscy
+conda activate dynaclr
 
 scontrol show job $SLURM_JOB_ID
 
 # use absolute path in production
 config=./predict.yml
 cat $config
-srun python -m viscy.cli.contrastive_triplet predict -c $config
+
+viscy predict -c $config
