@@ -13,6 +13,8 @@ from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from skimage.measure import regionprops
 
+eps = 1e-10
+
 
 class IntensityFeatures(TypedDict):
     """Intensity-based features extracted from a single cell."""
@@ -132,10 +134,11 @@ class CellFeatures:
         -------
         kurtosis: float
             Kurtosis of the image intensity distribution (scale-invariant).
-            May return nan or inf for degenerate cases (constant arrays).
+            Returns nan for constant arrays.
         """
-        kurtosis = scipy.stats.kurtosis(self.image, fisher=True, axis=None)
-        return kurtosis
+        if np.std(self.image) == 0:
+            return np.nan
+        return scipy.stats.kurtosis(self.image, fisher=True, axis=None)
 
     def _compute_skewness(self):
         """Compute the skewness of the image.
@@ -144,10 +147,11 @@ class CellFeatures:
         -------
         skewness: float
             Skewness of the image intensity distribution (scale-invariant).
-            May return nan or inf for degenerate cases (constant arrays).
+            Returns nan for constant arrays.
         """
-        skewness = scipy.stats.skew(self.image, axis=None)
-        return skewness
+        if np.std(self.image) == 0:
+            return np.nan
+        return scipy.stats.skew(self.image, axis=None)
 
     def _compute_glcm_features(self):
         """Compute GLCM-based texture features from the image.
@@ -369,7 +373,7 @@ class CellFeatures:
         # compute EDT of mask
         edt = self._compute_Eucledian_distance_transform()
         # compute the intensity weighted center of the fluor
-        intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + 1e-10)
+        intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + eps)
         return intensity_weighted_center
 
     def _compute_area(self, sigma=0.6):
@@ -500,8 +504,17 @@ class CellFeatures:
         -------
         MorphologyFeatures
             Dictionary containing all computed morphology features.
+
+        Raises
+        ------
+        AssertionError
+            If segmentation mask is None or empty
         """
-        assert self.segmentation_mask is not None, "Segmentation mask is required"
+        if self.segmentation_mask is None:
+            raise AssertionError("Segmentation mask is required")
+
+        if np.sum(self.segmentation_mask) == 0:
+            raise AssertionError("Segmentation mask is empty")
 
         masked_intensity, masked_area = self._compute_area()
         perimeter, area, ratio = self._compute_perimeter_area_ratio()
@@ -636,9 +649,12 @@ class DynamicFeatures:
         required_cols = ["track_id", "t", "x", "y"]
         missing_cols = [col for col in required_cols if col not in tracking_df.columns]
         if missing_cols:
-            raise ValueError(
-                f"Missing required columns: {missing_cols}. Check tracking_df"
-            )
+            raise ValueError(f"Missing required columns: {missing_cols}")
+
+        # Verify numeric types for coordinates
+        for col in ["t", "x", "y"]:
+            if not np.issubdtype(tracking_df[col].dtype, np.number):
+                raise ValueError(f"Column {col} must be numeric")
 
     def _compute_instantaneous_velocity(self, track_id: str) -> np.ndarray:
         """Compute the instantaneous velocity for all timepoints in a track.
@@ -672,7 +688,7 @@ class DynamicFeatures:
 
         # Compute velocities (avoid division by zero)
         velocities = np.zeros(len(track_data))
-        velocities[1:] = distances / np.maximum(dt, 1e-6)
+        velocities[1:] = distances / np.maximum(dt, eps)
 
         return velocities
 
@@ -770,7 +786,7 @@ class DynamicFeatures:
             angles[i] = np.arccos(np.clip(cos_angle, -1.0, 1.0))
 
         # Compute angular velocities (change in angle over time)
-        angular_velocities = angles / (dt[1:] + 1e-10)
+        angular_velocities = angles / (dt[1:] + eps)
 
         return (
             float(np.mean(angular_velocities)),
