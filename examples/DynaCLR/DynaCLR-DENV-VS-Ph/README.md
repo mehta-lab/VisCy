@@ -20,17 +20,10 @@ The `demo_infection.py` script demonstrates:
 - **Trajectory Analysis**: Visualize and track cell trajectories over time
 - **Infection State Analysis**: See how different models capture infection dynamics
 
-## Setup
-
-1. Download the data in [README.md](/examples/DynaCLR/README.md)
-2. Activate the environment
-```bash
-conda activate dynaclr
-```
 
 ## Usage
 
-After setting up the environment, activate it and run the demo script:
+After [setting up the environment and downloading the data](/examples/DynaCLR/README.md#setup), activate it and run the demo script:
 
 ```bash
 conda activate dynaclr
@@ -79,7 +72,7 @@ viscy predict -c dynaclr_denv-vs-ph_test_data.yml
 
 ## (OPTIONAL) Generating ImageNet Features
 
-To generate ImageNet features for your own data, you can use the `imagenet_embeddings.py` script:
+To generate ImageNet features for your own data, you can use the `imagenet_embeddings.py` script [here](../../../applications/benchmarking/DynaCLR/ImageNet/config.yml):
 
 1. Modify the `infection_example_config.yml` lines:
 

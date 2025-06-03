@@ -49,9 +49,7 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 # %%
 # TODO: Update the paths to the downloaded data
 # Point to the *.zarr files
-download_root = Path(
-    "/hpc/projects/organelle_phenotyping/models/public/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse"
-)
+download_root = Path.home() / "data/dynaclr/demo"
 input_data_path = (
     download_root / "registered_test.zarr"
 )  # Replace with path to registered_test.zarr

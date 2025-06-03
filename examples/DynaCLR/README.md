@@ -1,6 +1,6 @@
 # DynaCLR Demos
 
-This repository contains examples and demos for using DynaCLR with VisCy.
+This repository contains examples and demos to embed cellular dynamics using DynaCLR.
 
 ## Available Demos
 
@@ -21,9 +21,13 @@ bash setup.sh
 bash download_data.sh
 ```
 
-## To Generate DynaCLR Embeddings
+## Generate DynaCLR Embeddings
 
-Alternatively to the pre-computed shared embeddings, you can run the model following these instructions using the `DynaCLR-DENV-VS-Ph` model as an example.
+For this demo, we will use the `DynaCLR-DENV-VS-Ph` model as an example.
+
+The datasets and config files for the models can be found: 
+-  [Test datasets](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/)
+-  [Models](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/)  
 
 ### Modify the Config File
 
