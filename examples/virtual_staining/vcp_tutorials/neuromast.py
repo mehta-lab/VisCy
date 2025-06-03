@@ -203,8 +203,8 @@ with open_ome_zarr("input.ome.zarr/0/3/0") as fluor_store:
     fluor_membrane = fluor_store[0][:, 0, z_slice]
 
 with open_ome_zarr("prediction.ome.zarr/0/3/0") as vs_store:
-    vs_nucleus = vs_store[0][:, 1, z_slice]
-    vs_membrane = vs_store[0][:, 0, z_slice]
+    vs_nucleus = vs_store[0][:, 0, z_slice]
+    vs_membrane = vs_store[0][:, 1, z_slice]
 
 
 # Render the images as RGB in false colors
