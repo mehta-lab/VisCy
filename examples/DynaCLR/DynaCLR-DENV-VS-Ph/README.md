@@ -1,6 +1,8 @@
 # Cell Infection Analysis Demo: ImageNet vs DynaCLR-DENV-VS+Ph model
 
-This demo compares different feature extraction methods for analyzing infected vs uninfected cells using microscopy images.
+This demo compares different feature extraction methods for analyzing infected vs uninfected cells using microscopy images. 
+
+As the cells get infected, the red fluorescence protein (RFP) translocates from the cytoplasm into the nucleus.
 
 ## Overview
 
@@ -19,29 +21,13 @@ The `demo_infection.py` script demonstrates:
 - **Infection State Analysis**: See how different models capture infection dynamics
 
 
-
-## Setup
-
-1. Download the data in [README.md](/examples/DynaCLR/README.md)
-2. Activate the environment
-```bash
-conda activate dynaclr
-```
-
 ## Usage
 
-After setting up the environment, activate it and run the demo script:
+After [setting up the environment and downloading the data](/examples/DynaCLR/README.md#setup), activate it and run the demo script:
 
 ```bash
 conda activate dynaclr
 python demo_infection.py
-```
-
-You can also use the included Jupyter notebook version:
-
-```bash
-conda activate dynaclr
-jupyter notebook demo_infection.ipynb
 ```
 
 For both of these you will need to ensure to point to the path to the downloaded data:
@@ -56,6 +42,11 @@ dynaclr_features_path = "/path/to/dynaclr_features.zarr"
 imagenet_features_path = "/path/to/imagenet_features.zarr"
 ```
 
+Check out the demo's output visualization : 
+
+<a href="https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/cell_infection_visualization.html" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Open the demo's output</a>
+ 
+Note: You may need to press pause/play for the image to show
 
 ## (OPTIONAL) Generating DynaCLR-DENV-VS+PH Features
 
@@ -81,7 +72,7 @@ viscy predict -c dynaclr_denv-vs-ph_test_data.yml
 
 ## (OPTIONAL) Generating ImageNet Features
 
-To generate ImageNet features for your own data, you can use the `imagenet_embeddings.py` script:
+To generate ImageNet features for your own data, you can use the `imagenet_embeddings.py` script [here](../../../applications/benchmarking/DynaCLR/ImageNet/config.yml):
 
 1. Modify the `infection_example_config.yml` lines:
 

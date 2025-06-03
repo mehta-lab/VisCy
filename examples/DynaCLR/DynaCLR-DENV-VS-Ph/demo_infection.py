@@ -40,7 +40,7 @@ from viscy.representation.embedding_writer import read_embedding_dataset
 # %% [markdown]
 # ## Set Data Paths
 #
-# The data, tracks, annotations and precomputed embeddings can be downloaded from [here](https://drive.google.com/drive/u/0/folders/1qCt8Zhk193Q9L-GV8fOoivOPiwepcjZL)
+# The data, tracks, annotations and precomputed embeddings can be downloaded from [here]()
 #
 # ## Note:
 #
@@ -216,6 +216,39 @@ create_combined_visualization(
     plot_size_xy=(1200, 600),
     title_location="top",
 )
+
+# Save the visualization as an interactive HTML file
+fig = create_combined_visualization(
+    image_cache,
+    imagenet_features_df,
+    dynaclr_features_df,
+    highlight_tracks={
+        1: [(fov_name_mock, track_id_mock[0])],  # Uninfected tracks
+        2: [(fov_name_inf, track_id_inf[0])],  # Infected tracks
+    },
+    subplot_titles=[
+        "Uninfected Phase",
+        "Uninfected Viral Sensor",
+        "Infected Phase",
+        "Infected Viral Sensor",
+    ],
+    condition_keys=["uninfected_cache", "infected_cache"],
+    channel_colormaps=["gray", "magma"],
+    category_colors={1: "cornflowerblue", 2: "salmon"},
+    highlight_colors={1: "blue", 2: "red"},
+    category_labels={1: "Uninfected", 2: "Infected"},
+    plot_size_xy=(1200, 600),
+    title_location="top",
+)
+
+# Create output directory if it doesn't exist
+output_dir = Path("output")
+output_dir.mkdir(exist_ok=True)
+
+# Save the interactive visualization
+output_path = output_dir / "cell_infection_visualization.html"
+fig.write_html(str(output_path))
+print(f"Saved interactive visualization to: {output_path}")
 
 # %% [markdown]
 # ## Conclusion
