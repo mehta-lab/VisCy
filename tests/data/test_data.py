@@ -5,7 +5,7 @@ from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
 
 from viscy.data.hcs import HCSDataModule
-from viscy.light.trainer import VSTrainer
+from viscy.trainer import VisCyTrainer
 
 
 @mark.parametrize("default_channels", [True, False])
@@ -16,7 +16,7 @@ def test_preprocess(small_hcs_dataset: Path, default_channels: bool):
     else:
         with open_ome_zarr(data_path) as dataset:
             channel_names = dataset.channel_names
-    trainer = VSTrainer(accelerator="cpu")
+    trainer = VisCyTrainer(accelerator="cpu")
     trainer.preprocess(data_path, channel_names=channel_names, num_workers=2)
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names
@@ -58,7 +58,7 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
         batch_size=batch_size,
         num_workers=0,
         augmentations=transforms,
-        architecture="3D",
+        target_2d=False,
         split_ratio=split_ratio,
         yx_patch_size=yx_patch_size,
     )
@@ -78,9 +78,9 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
         )
 
 
-def test_datamodule_setup_predict(preprocessed_hcs_dataset):
+@mark.parametrize("z_window_size", [1, 5])
+def test_datamodule_setup_predict(preprocessed_hcs_dataset, z_window_size):
     data_path = preprocessed_hcs_dataset
-    z_window_size = 5
     channel_split = 2
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names
@@ -91,6 +91,7 @@ def test_datamodule_setup_predict(preprocessed_hcs_dataset):
         source_channel=channel_names[:channel_split],
         target_channel=channel_names[channel_split:],
         z_window_size=z_window_size,
+        target_2d=bool(z_window_size == 1),
         batch_size=2,
         num_workers=0,
     )

@@ -1,0 +1,48 @@
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy.representation.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: /Users/ziwen.liu/Projects/test-time/predict/time_interval_1.zarr
+  inference_mode: true
+model:
+  class_path: viscy.representation.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy.representation.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 1
+        stem_kernel_size: [1, 4, 4]
+        stem_stride: [1, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    example_input_array_shape: [1, 1, 1, 128, 128]
+data:
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
+    tracks_path: /Users/ziwen.liu/Downloads/Hela_CTC.zarr
+    source_channel: DIC
+    z_range: [0, 1]
+    batch_size: 16
+    num_workers: 4
+    initial_yx_patch_size: [128, 128]
+    final_yx_patch_size: [128, 128]
+    time_interval: 1
+    normalizations:
+      - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [DIC]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+return_predictions: false
+ckpt_path: /Users/ziwen.liu/Projects/test-time/lightning_logs/time_interval_1/checkpoints/last.ckpt

@@ -6,20 +6,28 @@ build-backend = "setuptools.build_meta"
 name = "viscy"
 description = "computer vision for image-based phenotyping of single cells"
 readme = "README.md"
-requires-python = ">=3.10"
-license = { file = "LICENSE" }
+requires-python = ">=3.11"
+license = "BSD-3-Clause"
+license-files = ["LICENSE"]
 authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
 dependencies = [
-    "iohub==0.1.0",
-    "torch>=2.1.2",
+    "iohub>=0.2.0b0",
+    "torch>=2.4.1",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
     "lightning>=2.3.0",
-    "monai>=1.3.1",
+    "monai>=1.4.0",
     "jsonargparse[signatures]>=4.20.1",
     "scikit-image",
     "matplotlib>=3.9.0",
-    "numpy<2",
+    "numpy",
+    "xarray",
+    "pytorch-metric-learning>2.0.0",
 ]
 dynamic = ["version"]
 
@@ -27,11 +35,25 @@ dynamic = ["version"]
 metrics = [
     "cellpose>=3.0.10",
     "scikit-learn>=1.1.3",
-    "torchmetrics[detection]>=1.3.1",
+    "imbalanced-learn>=0.12.0",
+    "torchmetrics[detection]>=1.6.3",
     "ptflops>=0.7",
+    "umap-learn",
+    "captum>=0.7.0",
+    "phate",
 ]
-visual = ["ipykernel", "graphviz", "torchview"]
+examples = ["napari", "jupyter", "jupytext"]
+visual = [
+    "ipykernel",
+    "graphviz",
+    "torchview",
+    "seaborn",
+    "plotly",
+    "nbformat",
+    "cmap",
+]
 dev = [
+    "viscy[metrics,examples,visual]",
     "pytest",
     "pytest-cov",
     "hypothesis",
@@ -42,7 +64,7 @@ dev = [
 ]
 
 [project.scripts]
-viscy = "viscy.cli.cli:main"
+viscy = "viscy.cli:main"
 
 [tool.setuptools]
 packages = ["viscy"]

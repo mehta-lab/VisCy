@@ -145,6 +145,12 @@ class SlidingWindowDataset(Dataset):
             img_arr: ImageArray = fov[str(self.pyramid_resolution)]
             ts = img_arr.frames
             zs = img_arr.slices - self.z_window_size + 1
+            if zs < 1:
+                raise IndexError(
+                    f"Z window size {self.z_window_size} "
+                    f"is larger than the number of Z slices ({img_arr.slices}) "
+                    f"for FOV {fov.name}."
+                )
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
@@ -233,7 +239,7 @@ class SlidingWindowDataset(Dataset):
 class MaskTestDataset(SlidingWindowDataset):
     """Torch dataset where each element is a window of
     (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
-    This a testing stage version of :py:class:`viscy.light.data.SlidingWindowDataset`,
+    This a testing stage version of :py:class:`viscy.data.hcs.SlidingWindowDataset`,
     and can only be used with batch size 1 for efficiency (no padding for collation),
     since the mask is not available for each stack.
 
@@ -278,33 +284,52 @@ class MaskTestDataset(SlidingWindowDataset):
 
 
 class HCSDataModule(LightningDataModule):
-    """Lightning data module for a preprocessed HCS NGFF Store.
+    """
+    Lightning data module for a preprocessed HCS NGFF Store.
 
-    :param str data_path: path to the data store
-    :param str | Sequence[str] source_channel: name(s) of the source channel,
-        e.g. ``'Phase'``
-    :param str | Sequence[str] target_channel: name(s) of the target channel,
-        e.g. ``['Nuclei', 'Membrane']``
-    :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param float split_ratio: split ratio of the training subset in the fit stage,
-        e.g. 0.8 means a 80/20 split between training/validation,
-        by default 0.8
-    :param int batch_size: batch size, defaults to 16
-    :param int num_workers: number of data-loading workers, defaults to 8
-    :param Literal["2D", "UNeXt2", "2.5D", "3D"] architecture: U-Net architecture,
-        defaults to "2.5D"
-    :param tuple[int, int] yx_patch_size: patch size in (Y, X),
-        defaults to (256, 256)
-    :param list[MapTransform] normalizations: MONAI dictionary transforms
-        applied to selected channels, defaults to [] (no normalization)
-    :param list[MapTransform] augmentations: MONAI dictionary transforms
-        applied to the training set, defaults to [] (no augmentation)
-    :param bool caching: whether to decompress all the images and cache the result,
-        will store in ``/tmp/$SLURM_JOB_ID/`` if available,
-        defaults to False
-    :param Path | None ground_truth_masks: path to the ground truth masks,
+    Parameters
+    ----------
+    data_path : str
+        Path to the data store.
+    source_channel : str or Sequence[str]
+        Name(s) of the source channel, e.g. 'Phase'.
+    target_channel : str or Sequence[str]
+        Name(s) of the target channel, e.g. ['Nuclei', 'Membrane'].
+    z_window_size : int
+        Z window size of the 2.5D U-Net, 1 for 2D.
+    split_ratio : float, optional
+        Split ratio of the training subset in the fit stage,
+        e.g. 0.8 means an 80/20 split between training/validation,
+        by default 0.8.
+    batch_size : int, optional
+        Batch size, defaults to 16.
+    num_workers : int, optional
+        Number of data-loading workers, defaults to 8.
+    target_2d : bool, optional
+        Whether the target is 2D (e.g. in a 2.5D model),
+        defaults to False.
+    yx_patch_size : tuple[int, int], optional
+        Patch size in (Y, X), defaults to (256, 256).
+    normalizations : list of MapTransform, optional
+        MONAI dictionary transforms applied to selected channels,
+        defaults to ``[]`` (no normalization).
+    augmentations : list of MapTransform, optional
+        MONAI dictionary transforms applied to the training set,
+        defaults to ``[]`` (no augmentation).
+    caching : bool, optional
+        Whether to decompress all the images and cache the result,
+        will store in `/tmp/$SLURM_JOB_ID/` if available,
+        defaults to False.
+    ground_truth_masks : Path or None, optional
+        Path to the ground truth masks,
         used in the test stage to compute segmentation metrics,
-        defaults to None
+        defaults to None.
+    persistent_workers : bool, optional
+        Whether to keep the workers alive between fitting epochs,
+        defaults to False.
+    prefetch_factor : int or None, optional
+        Number of samples loaded in advance by each worker during fitting,
+        defaults to None (2 per PyTorch default).
     :param str pyramid_resolution: pyramid resolution level.
         defaults to 0 (full resolution)
     """
@@ -318,12 +343,14 @@ class HCSDataModule(LightningDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae"] = "2.5D",
+        target_2d: bool = False,
         yx_patch_size: tuple[int, int] = (256, 256),
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
         ground_truth_masks: Path | None = None,
+        persistent_workers=False,
+        prefetch_factor=None,
         pyramid_resolution: str = "0",
     ):
         super().__init__()
@@ -332,7 +359,7 @@ class HCSDataModule(LightningDataModule):
         self.target_channel = _ensure_channel_list(target_channel)
         self.batch_size = batch_size
         self.num_workers = num_workers
-        self.target_2d = False if architecture in ["UNeXt2", "3D", "fcmae"] else True
+        self.target_2d = target_2d
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
@@ -341,6 +368,8 @@ class HCSDataModule(LightningDataModule):
         self.caching = caching
         self.ground_truth_masks = ground_truth_masks
         self.prepare_data_per_node = True
+        self.persistent_workers = persistent_workers
+        self.prefetch_factor = prefetch_factor
         self.pyramid_resolution = pyramid_resolution
 
     @property
@@ -530,8 +559,8 @@ class HCSDataModule(LightningDataModule):
             batch_size=self.batch_size // self.train_patches_per_stack,
             num_workers=self.num_workers,
             shuffle=True,
-            persistent_workers=bool(self.num_workers),
-            prefetch_factor=4 if self.num_workers else None,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
             collate_fn=_collate_samples,
             drop_last=True,
         )
@@ -542,8 +571,8 @@ class HCSDataModule(LightningDataModule):
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
-            prefetch_factor=4 if self.num_workers else None,
-            persistent_workers=bool(self.num_workers),
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
         )
 
     def test_dataloader(self):
@@ -611,7 +640,8 @@ class HCSDataModule(LightningDataModule):
         else:
             self.augmentations = []
         if z_scale_range is not None:
-            if isinstance(z_scale_range, float):
+            if isinstance(z_scale_range, (float, int)):
+                z_scale_range = float(z_scale_range)
                 z_scale_range = (-z_scale_range, z_scale_range)
             if z_scale_range[0] > 0 or z_scale_range[1] < 0:
                 raise ValueError(f"Invalid scaling range: {z_scale_range}")

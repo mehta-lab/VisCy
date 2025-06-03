@@ -40,28 +40,33 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 model:
-  architecture: null
-  model_config: {}
-  loss_function: null
-  lr: 0.001
-  schedule: Constant
-  log_num_samples: 8
-  test_cellpose_model_path: null
-  test_cellpose_diameter: null
-  test_evaluate_cellpose: false
+  class_path: viscy.translation.engine.VSUNet
+  init_args:
+    architecture: null
+    model_config: {}
+    loss_function: null
+    lr: 0.001
+    schedule: Constant
+    log_num_samples: 8
+    test_cellpose_model_path: null
+    test_cellpose_diameter: null
+    test_evaluate_cellpose: false
 data:
-  data_path: null
-  source_channel: null
-  target_channel: null
-  z_window_size: null
-  split_ratio: 0.8
-  batch_size: 16
-  num_workers: 8
-  yx_patch_size:
-  - 256
-  - 256
-  caching: false
-  ground_truth_masks: null
+  class_path: viscy.data.hcs.HCSDataModule
+  init_args:
+    data_path: null
+    source_channel: null
+    target_channel: null
+    z_window_size: null
+    split_ratio: 0.8
+    batch_size: 16
+    num_workers: 8
+    yx_patch_size:
+      - 256
+      - 256
+    caching: false
+    ground_truth_masks: null
   pyramid_resolution: "0"
 ckpt_path: null
 verbose: true
+a
