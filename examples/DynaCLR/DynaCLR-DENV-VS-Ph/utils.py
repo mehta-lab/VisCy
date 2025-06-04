@@ -747,40 +747,6 @@ def create_image_visualization(
         title=f"Cell Images - Time: {t_initial}",
         height=plot_size_xy[1],
         width=plot_size_xy[0],
-        updatemenus=[
-            {
-                "type": "buttons",
-                "direction": "right",
-                "x": 0.15,
-                "y": 0,
-                "buttons": [
-                    {
-                        "label": "Play",
-                        "method": "animate",
-                        "args": [
-                            None,
-                            {
-                                "frame": {"duration": 500, "redraw": True},
-                                "fromcurrent": True,
-                                "transition": {"duration": 0},
-                            },
-                        ],
-                    },
-                    {
-                        "label": "Pause",
-                        "method": "animate",
-                        "args": [
-                            [None],
-                            {
-                                "frame": {"duration": 0, "redraw": False},
-                                "mode": "immediate",
-                                "transition": {"duration": 0},
-                            },
-                        ],
-                    },
-                ],
-            }
-        ],
         sliders=[
             {
                 "active": 0,
@@ -1062,7 +1028,7 @@ def create_combined_visualization(
     # Initial timepoint
     t_initial = all_timepoints[0]
 
-    # Create a figure with 3 columns
+    # Create the figure with 3 columns
     main_fig = make_subplots(
         rows=1,
         cols=3,
@@ -1112,10 +1078,11 @@ def create_combined_visualization(
 
         return traces
 
-    # Add cell images and PHATE traces to the main figure
+    # Add initial cell images
     for trace in create_cell_image_traces(t_initial):
         main_fig.add_trace(trace, row=1, col=1)
 
+    # Add initial PHATE traces
     for trace in create_phate_traces(imagenet_df, t_initial, ["PHATE1", "PHATE2"]):
         main_fig.add_trace(trace, row=1, col=2)
 
@@ -1128,17 +1095,15 @@ def create_combined_visualization(
         col = i % 2
 
         if title_location == "top":
-            # Position titles above the images
-            x_pos = col * 0.5 + 0.22  # Center of each quadrant
-            y_pos = 1 - row * 0.5  # Top of each quadrant
+            x_pos = col * 0.5 + 0.22
+            y_pos = 1 - row * 0.5
             yanchor = "bottom"
-            font_color = "black"  # Always use dark text for titles at the top
+            font_color = "black"
         else:
-            # Position titles inside the images (default)
-            x_pos = col * 0.5 + 0.22  # Center of each quadrant
-            y_pos = 1 - row * 0.5 - 0.05  # Top of each quadrant with offset
+            x_pos = col * 0.5 + 0.22
+            y_pos = 1 - row * 0.5 - 0.05
             yanchor = "top"
-            font_color = "white"  # Use white for better contrast inside images
+            font_color = "white"
 
         main_fig.add_annotation(
             x=x_pos,
@@ -1182,66 +1147,14 @@ def create_combined_visualization(
         col=3,
     )
 
-    # Create frames for animation
-    frames = []
-    for t in all_timepoints:
-        frame_data = []
-
-        # Add image traces for this timepoint
-        frame_data.extend(create_cell_image_traces(t))
-
-        # Add PHATE traces for this timepoint
-        frame_data.extend(create_phate_traces(imagenet_df, t, ["PHATE1", "PHATE2"]))
-        frame_data.extend(create_phate_traces(dynaclr_df, t, ["PHATE1", "PHATE2"]))
-
-        # Create a frame with all traces
-        frames.append(
-            go.Frame(data=frame_data, name=str(t), traces=list(range(len(frame_data))))
-        )
-
-    # Update layout and add frames to the main figure
-    main_fig.frames = frames
+    # Update layout
     main_fig.update_layout(
         title=f"Cell Images and PHATE Embeddings",
         width=plot_size_xy[0],
         height=plot_size_xy[1],
-        updatemenus=[
-            {
-                "type": "buttons",
-                "direction": "right",
-                "x": 0.15,
-                "y": 0,
-                "buttons": [
-                    {
-                        "label": "Play",
-                        "method": "animate",
-                        "args": [
-                            None,
-                            {
-                                "frame": {"duration": 500, "redraw": True},
-                                "fromcurrent": True,
-                                "transition": {"duration": 0},
-                            },
-                        ],
-                    },
-                    {
-                        "label": "Pause",
-                        "method": "animate",
-                        "args": [
-                            [None],
-                            {
-                                "frame": {"duration": 0, "redraw": False},
-                                "mode": "immediate",
-                                "transition": {"duration": 0},
-                            },
-                        ],
-                    },
-                ],
-            }
-        ],
         sliders=[
             {
-                "active": 0,
+                "active": 1,
                 "yanchor": "top",
                 "xanchor": "left",
                 "currentvalue": {
@@ -1263,6 +1176,7 @@ def create_combined_visualization(
                                 "frame": {"duration": 0, "redraw": True},
                                 "mode": "immediate",
                                 "transition": {"duration": 0},
+                                "fromcurrent": False,
                             },
                         ],
                         "label": str(t),
@@ -1272,6 +1186,27 @@ def create_combined_visualization(
                 ],
             }
         ],
+    )
+
+    # Create frames for the slider
+    frames = []
+    for t in all_timepoints:
+        frame_data = []
+
+        # Add image traces for this timepoint
+        frame_data.extend(create_cell_image_traces(t))
+
+        # Add PHATE traces for this timepoint
+        frame_data.extend(create_phate_traces(imagenet_df, t, ["PHATE1", "PHATE2"]))
+        frame_data.extend(create_phate_traces(dynaclr_df, t, ["PHATE1", "PHATE2"]))
+
+        frames.append(go.Frame(data=frame_data, name=str(t)))
+
+    main_fig.frames = frames
+
+    # Remove all animation-related settings
+    main_fig.update_layout(
+        transition={"duration": 0}, updatemenus=[]  # Remove any animation buttons
     )
 
     return main_fig
