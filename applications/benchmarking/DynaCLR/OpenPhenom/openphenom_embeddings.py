@@ -30,12 +30,19 @@ class OpenPhenomModule(LightningModule):
     ):
         """Initialize the OpenPhenom module.
 
-        Args:
-            channel_reduction_methods: Dict mapping channel names to reduction methods:
-                - "middle_slice": Take the middle slice along the depth dimension
-                - "mean": Average across the depth dimension
-                - "max": Take the maximum value across the depth dimension
-            channel_names: List of channel names corresponding to the input channels
+        Parameters
+        ----------
+        channel_reduction_methods : dict, optional
+            Dictionary mapping channel names to reduction methods:
+            - "middle_slice": Take the middle slice along the depth dimension
+            - "mean": Average across the depth dimension
+            - "max": Take the maximum value across the depth dimension
+        channel_names : list of str, optional
+            List of channel names corresponding to the input channels
+
+        Notes
+        -----
+        The module uses the OpenPhenom model from HuggingFace for generating embeddings.
         """
         super().__init__()
 
@@ -116,11 +123,10 @@ class OpenPhenomModule(LightningModule):
 
         # Get embeddings
         self.model.return_channelwise_embeddings = False
-        with torch.no_grad():
-            features = self.model.predict(x)
-            # Create empty projections tensor with same batch size as features
-            # This ensures the EmbeddingWriter can process it
-            projections = torch.zeros((features.shape[0], 0), device=features.device)
+        features = self.model.predict(x)
+        # Create empty projections tensor with same batch size as features
+        # This ensures the EmbeddingWriter can process it
+        projections = torch.zeros((features.shape[0], 0), device=features.device)
 
         return {
             "features": features,
