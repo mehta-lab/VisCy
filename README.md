@@ -127,7 +127,7 @@ The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), 
 
 A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
 
-## DynaCLR: Contrastive Learning of Cellular Dynamics with Temporal Regularization
+## DynaCLR (Cell Dynamics via Contrastive Learning of Representations)
 
 DynaCLR is a self-supervised method for learning robust and temporally-aware representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks—including cell state annotation, division detection, and response alignment with minimal human supervision, leveraging both fluorescence and label-free imaging channels.
 
