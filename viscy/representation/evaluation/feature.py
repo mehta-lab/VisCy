@@ -13,8 +13,6 @@ from skimage.feature import graycomatrix, graycoprops
 from skimage.filters import gaussian, threshold_otsu
 from skimage.measure import regionprops
 
-eps = 1e-10
-
 
 class IntensityFeatures(TypedDict):
     """Intensity-based features extracted from a single cell."""
@@ -64,7 +62,7 @@ class SymmetryDescriptor(TypedDict):
 class TrackFeatures(TypedDict):
     """Velocity-based features extracted from a single track."""
 
-    instantaneous_velocity: list[float]  # Array of velocities at each timepoint
+    instantaneous_velocity: list[float]
     mean_velocity: float
     max_velocity: float
     min_velocity: float
@@ -126,6 +124,8 @@ class CellFeatures:
         self.texture_features = None
         self.morphology_features = None
         self.symmetry_descriptor = None
+
+        self._eps = 1e-10
 
     def _compute_kurtosis(self):
         """Compute the kurtosis of the image.
@@ -373,7 +373,7 @@ class CellFeatures:
         # compute EDT of mask
         edt = self._compute_Eucledian_distance_transform()
         # compute the intensity weighted center of the fluor
-        intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + eps)
+        intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + self._eps)
         return intensity_weighted_center
 
     def _compute_area(self, sigma=0.6):
@@ -645,6 +645,7 @@ class DynamicFeatures:
         self.displacement_features = None
         self.angular_features = None
 
+        self._eps = 1e-10
         # Verify required columns exist
         required_cols = ["track_id", "t", "x", "y"]
         missing_cols = [col for col in required_cols if col not in tracking_df.columns]
@@ -688,7 +689,7 @@ class DynamicFeatures:
 
         # Compute velocities (avoid division by zero)
         velocities = np.zeros(len(track_data))
-        velocities[1:] = distances / np.maximum(dt, eps)
+        velocities[1:] = distances / np.maximum(dt, self._eps)
 
         return velocities
 
@@ -786,7 +787,7 @@ class DynamicFeatures:
             angles[i] = np.arccos(np.clip(cos_angle, -1.0, 1.0))
 
         # Compute angular velocities (change in angle over time)
-        angular_velocities = angles / (dt[1:] + eps)
+        angular_velocities = angles / (dt[1:] + self._eps)
 
         return (
             float(np.mean(angular_velocities)),
