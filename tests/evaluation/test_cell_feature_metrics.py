@@ -8,34 +8,21 @@ from viscy.representation.evaluation.feature import CellFeatures, DynamicFeature
 
 @pytest.fixture
 def simple_image():
-    """Create a simple test image with known properties."""
-    # Create a 5x5 image with a known pattern
-    image = np.array(
-        [
-            [0.0, 0.2, 0.4, 0.2, 0.0],
-            [0.2, 0.4, 0.6, 0.4, 0.2],
-            [0.4, 0.6, 0.8, 0.6, 0.4],
-            [0.2, 0.4, 0.6, 0.4, 0.2],
-            [0.0, 0.2, 0.4, 0.2, 0.0],
-        ]
-    )
+    """Create a simple test image with a known pattern"""
+    axis = [0.0, 0.2, 0.4, 0.2, 0.0]
+    x, y = np.meshgrid(axis, axis)
+
+    image = x + y
+
     return image
 
 
 @pytest.fixture
 def simple_mask():
     """Create a simple binary mask."""
-    # Create a 5x5 binary mask
-    mask = np.array(
-        [
-            [0, 0, 1, 0, 0],
-            [0, 1, 1, 1, 0],
-            [1, 1, 1, 1, 1],
-            [0, 1, 1, 1, 0],
-            [0, 0, 1, 0, 0],
-        ],
-        dtype=bool,
-    )
+    from skimage.morphology import disk
+
+    mask = disk(2)
     return mask
 
 
