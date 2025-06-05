@@ -1,8 +1,12 @@
 """Utility functions for visualization and analysis."""
 
+import warnings
+
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib import cm
+from skimage.exposure import rescale_intensity
 
 
 def add_arrows(df, color, df_coordinates=["PHATE1", "PHATE2"]):
@@ -54,7 +58,6 @@ def plot_phate_time_trajectories(
     import os
 
     import matplotlib.pyplot as plt
-    import numpy as np
     from matplotlib.lines import Line2D
 
     if highlight_tracks is None:
@@ -667,10 +670,22 @@ def create_image_visualization(
 
             # Add each channel as a column
             for col_idx, colormap in enumerate(channel_colormaps, 1):
+                cmap = cm.get_cmap(colormap)
+                img = img[col_idx, 0]
+                colored_img = cmap(img)
+
+                # Convert to RGB format (remove alpha channel)
+                colored_img = (colored_img[:, :, :3] * 255).astype(np.uint8)
+
                 if col_idx <= img.shape[0]:  # Make sure we have this channel
                     fig.add_trace(
-                        go.Heatmap(
-                            z=img[col_idx - 1, 0], colorscale=colormap, showscale=False
+                        go.Image(
+                            z=colored_img,
+                            x0=0,
+                            y0=0,
+                            dx=1,
+                            dy=1,
+                            colormodel="rgb",
                         ),
                         row=row_idx,
                         col=col_idx,
@@ -678,8 +693,13 @@ def create_image_visualization(
                 else:
                     # Empty placeholder if channel doesn't exist
                     fig.add_trace(
-                        go.Heatmap(
-                            z=np.zeros((10, 10)), colorscale=colormap, showscale=False
+                        go.Image(
+                            z=np.zeros((10, 10, 3)),
+                            colormodel="rgb",
+                            x0=0,
+                            y0=0,
+                            dx=1,
+                            dy=1,
                         ),
                         row=row_idx,
                         col=col_idx,
@@ -688,8 +708,13 @@ def create_image_visualization(
             # Empty placeholders if condition or timepoint not found
             for col_idx, colormap in enumerate(channel_colormaps, 1):
                 fig.add_trace(
-                    go.Heatmap(
-                        z=np.zeros((10, 10)), colorscale=colormap, showscale=False
+                    go.Image(
+                        z=np.zeros((10, 10, 3)),
+                        colormodel="rgb",
+                        x0=0,
+                        y0=0,
+                        dx=1,
+                        dy=1,
                     ),
                     row=row_idx,
                     col=col_idx,
@@ -708,29 +733,48 @@ def create_image_visualization(
 
                 for colormap in channel_colormaps:
                     col_idx = channel_colormaps.index(colormap)
+                    cmap = cm.get_cmap(colormap)
+                    img = img[col_idx, 0]
+                    print(f"img shape: {img.shape}")
+                    colored_img = cmap(img)
+
+                    # Convert to RGB format (remove alpha channel)
+                    colored_img = (colored_img[:, :, :3] * 255).astype(np.uint8)
+
                     if col_idx < img.shape[0]:  # Make sure we have this channel
                         frame_data.append(
-                            go.Heatmap(
-                                z=img[col_idx, 0], colorscale=colormap, showscale=False
+                            go.Image(
+                                z=colored_img,
+                                colormodel="rgb",
+                                x0=0,
+                                y0=0,
+                                dx=1,
+                                dy=1,
                             )
                         )
                     else:
                         # Empty placeholder
                         frame_data.append(
-                            go.Heatmap(
-                                z=np.zeros((10, 10)),
-                                colorscale=colormap,
-                                showscale=False,
+                            go.Image(
+                                z=np.zeros((10, 10, 3)),
+                                colormodel="rgb",
+                                x0=0,
+                                y0=0,
+                                dx=1,
+                                dy=1,
                             )
                         )
             else:
                 # Empty placeholders if condition not found
                 for _ in channel_colormaps:
                     frame_data.append(
-                        go.Heatmap(
-                            z=np.zeros((10, 10)),
-                            colorscale=channel_colormaps[0],
-                            showscale=False,
+                        go.Image(
+                            z=np.zeros((10, 10, 3)),
+                            colormodel="rgb",
+                            x0=0,
+                            y0=0,
+                            dx=1,
+                            dy=1,
                         )
                     )
 
@@ -801,12 +845,12 @@ def create_combined_visualization(
     dynaclr_df: pd.DataFrame,
     highlight_tracks: dict,
     subplot_titles=[
-        "Uinfected Phase",
-        "Uinfected Viral Sensor",
+        "Uninfected Phase",
+        "Uninfected Viral Sensor",
         "Infected Phase",
         "Infected Viral Sensor",
     ],
-    condition_keys=["uinfected_cache", "infected_cache"],
+    condition_keys=["uninfected_cache", "infected_cache"],
     channel_colormaps=["gray", "magma"],
     category_colors={1: "cornflowerblue", 2: "salmon"},
     highlight_colors={1: "blue", 2: "red"},
@@ -849,7 +893,6 @@ def create_combined_visualization(
     import plotly.graph_objects as go
     from plotly.subplots import make_subplots
 
-    # Get all available timepoints from all data sources
     all_timepoints_images = set()
     for condition_key in condition_keys:
         if (
@@ -863,7 +906,6 @@ def create_combined_visualization(
     all_timepoints_imagenet = set(imagenet_df["t"].unique())
     all_timepoints_dynaclr = set(dynaclr_df["t"].unique())
 
-    # Find common timepoints across all datasets
     all_timepoints = sorted(
         list(
             all_timepoints_images.intersection(
@@ -874,7 +916,6 @@ def create_combined_visualization(
 
     if not all_timepoints:
         print("No common timepoints found across all datasets")
-        # Fall back to all timepoints in at least one dataset
         all_timepoints = sorted(
             list(
                 all_timepoints_images.union(
@@ -883,14 +924,12 @@ def create_combined_visualization(
             )
         )
 
-    # Function to create PHATE plot traces
     def create_phate_traces(
         df: pd.DataFrame, t: int, df_coordinates: list[str] = ["PHATE1", "PHATE2"]
     ):
         """Creates PHATE plot traces for a specific timepoint"""
         traces = []
 
-        # Historical data (points from previous timepoints)
         historical_df = df[df["t"] < t]
         if len(historical_df) > 0:
             traces.append(
@@ -907,7 +946,6 @@ def create_combined_visualization(
         else:
             traces.append(go.Scatter(x=[], y=[], mode="markers", showlegend=False))
 
-        # Current timepoint data by category
         current_df = df[df["t"] == t]
         categories = sorted(df["infection"].unique())
 
@@ -936,10 +974,8 @@ def create_combined_visualization(
             else:
                 traces.append(go.Scatter(x=[], y=[], mode="markers", showlegend=False))
 
-        # Add highlighted tracks
         for category, track_list in highlight_tracks.items():
             for fov_name, track_id in track_list:
-                # Get data for this track up to current time
                 track_data = df[
                     (df["fov_name"] == fov_name)
                     & (df["track_id"] == track_id)
@@ -949,7 +985,6 @@ def create_combined_visualization(
                 if len(track_data) > 0:
                     color = highlight_colors.get(category, "gray")
 
-                    # Create trajectory line
                     traces.append(
                         go.Scatter(
                             x=track_data[df_coordinates[0]],
@@ -960,11 +995,10 @@ def create_combined_visualization(
                         )
                     )
 
-                    # Add current position or last known position
                     current_pos = track_data[track_data["t"] == t]
                     if len(current_pos) == 0:
                         latest_pos = track_data.iloc[-1:]
-                        opacity = 0.5  # Semi-transparent for non-current positions
+                        opacity = 0.5
                     else:
                         latest_pos = current_pos
                         opacity = 1.0
@@ -991,7 +1025,6 @@ def create_combined_visualization(
 
         return traces
 
-    # Calculate PHATE plot axis limits
     def get_phate_limits(df, df_coordinates=["PHATE1", "PHATE2"]):
         padding = 0.1
         x_min = df[df_coordinates[0]].min() - padding * (
@@ -1007,7 +1040,6 @@ def create_combined_visualization(
             df[df_coordinates[1]].max() - df[df_coordinates[1]].min()
         )
 
-        # Make aspect ratio 1:1
         x_range = x_max - x_min
         y_range = y_max - y_min
         if x_range > y_range:
@@ -1021,14 +1053,11 @@ def create_combined_visualization(
 
         return x_min, x_max, y_min, y_max
 
-    # Get axis limits for both PHATE plots
     imagenet_limits = get_phate_limits(imagenet_df)
     dynaclr_limits = get_phate_limits(dynaclr_df)
 
-    # Initial timepoint
     t_initial = all_timepoints[0]
 
-    # Create the figure with 3 columns
     main_fig = make_subplots(
         rows=1,
         cols=3,
@@ -1037,11 +1066,10 @@ def create_combined_visualization(
         specs=[[{"type": "xy"}, {"type": "xy"}, {"type": "xy"}]],
     )
 
-    # Helper function to create a complete cell image subplot for a timepoint
     def create_cell_image_traces(t):
         traces = []
+        from matplotlib import cm
 
-        # Add images for each condition and channel
         for row_idx, condition_key in enumerate(condition_keys):
             if (
                 condition_key in image_cache
@@ -1051,45 +1079,52 @@ def create_combined_visualization(
 
                 for col_idx, colormap in enumerate(channel_colormaps):
                     if col_idx < img.shape[0]:  # Check if channel exists
-                        # Calculate position for this image in the grid
-                        # We're creating a 2x2 grid in the first column
-                        # Define the positions (each image takes 0.5 x 0.5 of the space)
-                        x_pos = col_idx * 0.5
-                        y_pos = 1 - row_idx * 0.5  # Starting from top
-
-                        # Normalize the image data for heatmap
                         img_data = img[col_idx, 0]
+                        img_data = rescale_intensity(img_data, out_range=(0, 1))
 
-                        # Create a heatmap trace for this image
+                        if colormap == "gray":
+                            rgb_img = np.stack([img_data] * 3, axis=-1)
+                            rgb_img = (rgb_img * 255).astype(np.uint8)
+                        else:
+                            cmap = cm.get_cmap(colormap)
+                            colored_img = cmap(img_data)
+                            rgb_img = (colored_img[:, :, :3] * 255).astype(np.uint8)
+
+                        x_pos = col_idx * 0.5
+                        y_pos = 1.0 - row_idx * 0.5
+
+                        x_coords = np.linspace(x_pos, x_pos + 0.45, rgb_img.shape[1])
+                        y_coords = np.linspace(y_pos - 0.45, y_pos, rgb_img.shape[0])
+
                         traces.append(
-                            go.Heatmap(
-                                z=img_data,
-                                colorscale=colormap,
-                                showscale=False,
-                                # Use xaxis and yaxis ranges to position the heatmap
-                                x=np.linspace(x_pos, x_pos + 0.45, img_data.shape[1]),
-                                y=np.linspace(y_pos - 0.45, y_pos, img_data.shape[0]),
-                                # Add title as text annotation
+                            go.Image(
+                                z=rgb_img,
+                                x0=x_coords[0],
+                                y0=y_coords[0],
+                                dx=(x_coords[-1] - x_coords[0]) / rgb_img.shape[1],
+                                dy=(y_coords[-1] - y_coords[0]) / rgb_img.shape[0],
+                                colormodel="rgb",
                                 name=subplot_titles[
                                     row_idx * len(channel_colormaps) + col_idx
                                 ],
                             )
                         )
+                    else:
+                        warnings.warn(
+                            f"Channel {col_idx} does not exist in image cache for timepoint {t}"
+                        )
 
         return traces
 
-    # Add initial cell images
     for trace in create_cell_image_traces(t_initial):
         main_fig.add_trace(trace, row=1, col=1)
 
-    # Add initial PHATE traces
     for trace in create_phate_traces(imagenet_df, t_initial, ["PHATE1", "PHATE2"]):
         main_fig.add_trace(trace, row=1, col=2)
 
     for trace in create_phate_traces(dynaclr_df, t_initial, ["PHATE1", "PHATE2"]):
         main_fig.add_trace(trace, row=1, col=3)
 
-    # Add image titles as annotations
     for i, title in enumerate(subplot_titles):
         row = i // 2
         col = i % 2
@@ -1119,7 +1154,6 @@ def create_combined_visualization(
             col=1,
         )
 
-    # Set up axis for the image subplot
     main_fig.update_xaxes(
         range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1
     )
@@ -1127,7 +1161,6 @@ def create_combined_visualization(
         range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1
     )
 
-    # Set up axis for PHATE plots
     main_fig.update_xaxes(title="PHATE1", range=imagenet_limits[:2], row=1, col=2)
     main_fig.update_yaxes(
         title="PHATE2",
@@ -1147,7 +1180,6 @@ def create_combined_visualization(
         col=3,
     )
 
-    # Update layout
     main_fig.update_layout(
         title=f"Cell Images and PHATE Embeddings",
         width=plot_size_xy[0],
@@ -1188,15 +1220,12 @@ def create_combined_visualization(
         ],
     )
 
-    # Create frames for the slider
     frames = []
     for t in all_timepoints:
         frame_data = []
 
-        # Add image traces for this timepoint
         frame_data.extend(create_cell_image_traces(t))
 
-        # Add PHATE traces for this timepoint
         frame_data.extend(create_phate_traces(imagenet_df, t, ["PHATE1", "PHATE2"]))
         frame_data.extend(create_phate_traces(dynaclr_df, t, ["PHATE1", "PHATE2"]))
 
@@ -1204,7 +1233,6 @@ def create_combined_visualization(
 
     main_fig.frames = frames
 
-    # Remove all animation-related settings
     main_fig.update_layout(
         transition={"duration": 0}, updatemenus=[]  # Remove any animation buttons
     )
