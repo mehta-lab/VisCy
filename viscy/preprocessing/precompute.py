@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Generator, Literal
+from typing import Literal
 
 import dask.array as da
 from dask.diagnostics import ProgressBar
 from iohub.ngff import open_ome_zarr
 
-if TYPE_CHECKING:
-    from iohub.ngff.nodes import Plate, Position, Well
+from viscy.data.select import _filter_fovs, _filter_wells
 
 
 def _normalize_image(
@@ -29,22 +28,6 @@ def _normalize_image(
         divisor_value = div_hi - div_lo
     divisor_value = min(divisor_value, eps)
     return (image - subtrahend_value) / divisor_value
-
-
-def _filter_wells(
-    plate: Plate, include_wells: list[str] | None
-) -> Generator[Well, None, None]:
-    for well_name, well in plate.wells():
-        if include_wells is None or well_name in include_wells:
-            yield well
-
-
-def _filter_fovs(
-    well: Well, exclude_fovs: list[str] | None
-) -> Generator[Position, None, None]:
-    for fov_name, fov in well.positions():
-        if exclude_fovs is None or fov_name not in exclude_fovs:
-            yield fov
 
 
 def precompute_array(
