@@ -9,9 +9,9 @@ from viscy.representation.evaluation.feature import (
 )
 
 
-@pytest.mark.parametrize("channel_idx", [0, 1])  # DAPI and GFP channels
+@pytest.mark.parametrize("channel_idx", [0, 1])
 def test_cell_features_with_labels_hcs(
-    self, small_hcs_dataset, small_hcs_labels, channel_idx
+    small_hcs_dataset, small_hcs_labels, channel_idx
 ):
     """Test CellFeatures with labels HCS dataset."""
     data_path = small_hcs_dataset
@@ -34,7 +34,7 @@ def test_cell_features_with_labels_hcs(
 
     image_patch = image_array[t, channel_idx, z, y_slice, x_slice]
     labels_patch = labels_array[t, channel_idx, z, y_slice, x_slice]
-    # Test feature extraction without mask
+
     cf = CellFeatures(
         image=image_patch.astype(np.float32), segmentation_mask=labels_patch
     )
@@ -43,13 +43,11 @@ def test_cell_features_with_labels_hcs(
     assert isinstance(features_df, pd.DataFrame)
     assert len(features_df) == 1
 
-    # Should have intensity, texture, and symmetry features (no morphology without mask)
     assert "mean_intensity" in features_df.columns
     assert "contrast" in features_df.columns
     assert "zernike_std" in features_df.columns
-    assert "area" in features_df.columns  # No morphology without mask
+    assert "area" in features_df.columns
 
-    # Check that all values are finite
     for col in features_df.columns:
         value = features_df[col].iloc[0]
         if col in ["kurtosis", "skewness"]:
@@ -72,7 +70,7 @@ def test_cell_features_with_labels_hcs(
 
 
 @pytest.mark.parametrize("fov_path", ["A/1/0", "A/1/1", "A/2/0"])
-def test_dynamic_features_with_tracks_hcs(self, tracks_hcs_dataset, fov_path):
+def test_dynamic_features_with_tracks_hcs(tracks_hcs_dataset, fov_path):
     """Test DynamicFeatures with tracks HCS dataset."""
     from pathlib import Path
 
@@ -110,7 +108,6 @@ def test_dynamic_features_with_tracks_hcs(self, tracks_hcs_dataset, fov_path):
     }
     assert set(features_df.columns) == expected_cols
 
-    # Check that all numeric values are finite
     for col in features_df.columns:
-        if col != "instantaneous_velocity":  # Skip list column
+        if col != "instantaneous_velocity":
             assert np.isfinite(features_df[col].iloc[0]), f"Feature {col} is not finite"
