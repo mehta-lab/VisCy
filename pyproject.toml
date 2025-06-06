@@ -42,6 +42,7 @@ metrics = [
     "umap-learn",
     "captum>=0.7.0",
     "phate",
+    "mahotas",
 ]
 examples = ["napari", "jupyter", "jupytext"]
 visual = [
