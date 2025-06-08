@@ -123,32 +123,17 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
 
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
-### Pipeline
 
-A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
+## DynaCLR (Embedding Cell Dynamics via Contrastive Learning of Representations)
 
-## DynaCLR (Cell Dynamics via Contrastive Learning of Representations)
+DynaCLR is a self-supervised method for learning robust and temporally-regularized representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks -- including cell state classification with efficient human annotations, knowledge distillation across fluorescence and label-free imaging channels, and alignment of cell state dynamics.
 
-DynaCLR is a self-supervised method for learning robust and temporally-aware representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks—including cell state annotation, division detection, and response alignment with minimal human supervision, leveraging both fluorescence and label-free imaging channels.
+### Preprint
+[DynaCLR on arXiv](https://arxiv.org/abs/2410.11281):
 
-See our recent work on temporally regularized contrastive sampling method
-for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
+![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
-<details>
- <summary> Pradeep, Imran, Liu et al., 2024 </summary>
 
-  <pre><code>
-@misc{pradeep_contrastive_2024,
-      title={Contrastive learning of cell state dynamics in response to perturbations},
-      author={Soorya Pradeep and Alishba Imran and Ziwen Liu and Taylla Milena Theodoro and Eduardo Hirata-Miyasaki and Ivan Ivanov and Madhura Bhave and Sudip Khadka and Hunter Woosley and Carolina Arias and Shalin B. Mehta},
-      year={2024},
-      eprint={2410.11281},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2410.11281},
-}
-    </code></pre>
-  </details>
 
 ### Workflow demo
 
@@ -158,7 +143,6 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 - See tutorial on exploration of learned embeddings with napari-iohub
 [here](https://github.com/czbiohub-sf/napari-iohub/wiki/View-tracked-cells-and-their-associated-predictions/).
 
-![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
 ## Installation
 
