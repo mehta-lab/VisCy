@@ -29,7 +29,7 @@ Please choose a stable release from PyPI for production use.
 
 ## Cytoland (robust virtual staining)
 
-### Online demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
+### Demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/compmicro-czb/VirtualStaining)
 
 Try the 2D virtual staining demo of cell nuclei and membrane from label-free images on
 [Hugging Face](https://huggingface.co/spaces/compmicro-czb/VirtualStaining).
@@ -70,7 +70,7 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 |:---:|:---:|:---:|
 | [![HEK293T](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_1.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755) | [![Neuromast](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_3.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/4cef8333-895c-486c-b260-167debb7fd64) | [![A549](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_5.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/287737dd-6b74-4ce3-8ee5-25fbf8be0018) |
 
-### Reference
+### References
 
 The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
 
@@ -134,8 +134,8 @@ DynaCLR is a self-supervised method for learning robust and temporally-regulariz
 ![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
 
-
-### Workflow demo
+### Demo
+- [DynaCLR demos](examples/DynaCLR/README.md)
 
 - Example test dataset, model checkpoint, and predictions can be found
 [here](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_demo/).
