@@ -9,9 +9,9 @@ from tqdm import tqdm
 
 # %% create training and validation dataset
 # TODO: Modify path to the input data
-input_data_path = "/hpc/projects/comp.micro/mantis/2023_11_08_Opencell_infection/12-phenotyping/train-test-split/figure_5_train.zarr"
+input_data_path = "/training_data.zarr"
 # TODO: Modify path to the output data
-track_data_path = "/track.zarr"
+track_data_path = "/training_data_tracks.zarr"
 
 # TODO: Modify the channel name to the one you are using for the segmentation mask
 segmentation_channel_name = "Nucl_mask"
