@@ -77,6 +77,7 @@ class TrackingIndex(TypedDict):
 
     fov_name: OneOrSeq[str]
     id: OneOrSeq[int]
+    t: OneOrSeq[int]
 
 
 class TripletSample(TypedDict):
@@ -88,3 +89,6 @@ class TripletSample(TypedDict):
     anchor: Tensor
     positive: NotRequired[Tensor]
     negative: NotRequired[Tensor]
+    anchor_metadata: NotRequired[TrackingIndex]
+    positive_metadata: NotRequired[TrackingIndex]
+    negative_metadata: NotRequired[TrackingIndex]
