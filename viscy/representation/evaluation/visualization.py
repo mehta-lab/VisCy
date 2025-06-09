@@ -30,12 +30,45 @@ class EmbeddingVisualizationApp:
         features_path: str,
         channels_to_display: list[str] | str,
         fov_tracks: dict[str, list[int] | str],
-        z_range: tuple[int, int] | list[int] = (0, 1),
+        z_range: tuple[int, int] | list[int, int] = (0, 1),
         yx_patch_size: tuple[int, int] | list[int] = (128, 128),
         num_PC_components: int = 3,
         cache_path: str | None = None,
         num_loading_workers: int = 16,
     ) -> None:
+        """
+        Initialize a Dash application for visualizing the DynaCLR embeddings.
+
+        This class provides a visualization tool for visualizing the DynaCLR embeddings into a 2D space (e.g. PCA, UMAP, PHATE).
+        It allows users to interactively explore and analyze trajectories, visualize clusters, and explore the embedding space.
+
+        Parameters
+        ----------
+        data_path: str
+            Path to the data directory.
+        tracks_path: str
+            Path to the tracks directory.
+        features_path: str
+            Path to the features directory.
+        channels_to_display: list[str] | str
+            List of channels to display.
+        fov_tracks: dict[str, list[int] | str]
+            Dictionary of FOV names and track IDs.
+        z_range: tuple[int, int] | list[int,int]
+            Range of z-slices to display.
+        yx_patch_size: tuple[int, int] | list[int,int]
+            Size of the yx-patch to display.
+        num_PC_components: int
+            Number of PCA components to use.
+        cache_path: str | None
+            Path to the cache directory.
+        num_loading_workers: int
+            Number of workers to use for loading data.
+        Returns
+        -------
+        None
+            Initializes the visualization app.
+        """
         self.data_path = Path(data_path)
         self.tracks_path = Path(tracks_path)
         self.features_path = Path(features_path)
