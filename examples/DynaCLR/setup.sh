@@ -28,4 +28,4 @@ pip install "viscy[visual,metrics]>=0.3.0"
 # Change back to the starting directory
 cd $START_DIR
 
-echo "DynaClr environment setup complete."
+echo "DynaCLR environment setup complete."
