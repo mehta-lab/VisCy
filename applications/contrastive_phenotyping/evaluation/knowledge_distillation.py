@@ -95,7 +95,7 @@ metrics_long = metrics_df.melt(
 )
 
 with sns.axes_style("ticks"):
-    plt.style.use("./figure.mplstyle")
+    plt.style.use("../figures/figure.mplstyle")
     g = sns.catplot(
         data=metrics_long,
         x="stage",
@@ -107,14 +107,15 @@ with sns.axes_style("ticks"):
     )
     g.set_axis_labels("HPI", "accuracy")
     sns.move_legend(g, "upper left", bbox_to_anchor=(0.35, 1.1))
-    g.figure.set_size_inches(3.5, 2)
+    g.figure.set_size_inches(3.5, 1.5)
+    g.set(xlim=(-1, 7), ylim=(0.6, 1.0))
     plt.show()
 
 
 # %%
 g.figure.savefig(
     Path.home()
-    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/metrics_points.pdf",
+    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/accuracy_students.pdf",
     dpi=300,
 )
 
