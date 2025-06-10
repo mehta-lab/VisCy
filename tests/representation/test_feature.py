@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -51,17 +53,17 @@ def test_cell_features_with_labels_hcs(
     for col in features_df.columns:
         value = features_df[col].iloc[0]
         if col in ["kurtosis", "skewness"]:
-            if not np.isfinite(value):
-                print(f"Warning: {col} is {value} for channel {channel_idx}")
-                patch_std = np.std(image_patch)
-                print(f"Image patch std: {patch_std}")
-                if patch_std < 1e-10:
-                    continue
-                else:
-                    pytest.fail(
-                        f"Feature {col} is {value} but image has std {patch_std}"
-                    )
-            if np.isfinite(value):
+            patch_std = np.std(image_patch)
+            if patch_std < 1e-10:
+                # For constant images, kurtosis and skewness should be NaN
+                assert np.isnan(
+                    value
+                ), f"Feature {col} should be NaN for constant image (std={patch_std})"
+            else:
+                # For non-constant images, values should be finite and reasonable
+                assert np.isfinite(
+                    value
+                ), f"Feature {col} is not finite for non-constant image (std={patch_std})"
                 assert (
                     -10 < value < 10
                 ), f"Feature {col} = {value} seems unreasonable for random data"
@@ -72,7 +74,6 @@ def test_cell_features_with_labels_hcs(
 @pytest.mark.parametrize("fov_path", ["A/1/0", "A/1/1", "A/2/0"])
 def test_dynamic_features_with_tracks_hcs(tracks_hcs_dataset, fov_path):
     """Test DynamicFeatures with tracks HCS dataset."""
-    from pathlib import Path
 
     tracks_path = Path(tracks_hcs_dataset) / fov_path / "tracks.csv"
     if not tracks_path.exists():
