@@ -14,14 +14,13 @@ trainer:
     - class_path: viscy.representation.embedding_writer.EmbeddingWriter
       init_args:
         output_path: #TODO point to the path to save the embeddings
-        PHATE_kwargs:
-          n_components: 2
+        PHATE_kwargs: #TODO modify default parameters. Set to null to skip PHATE computation.
           knn: 5
           decay: 40
-          PCA_kwargs:
-        reductions:
-        - PHATE
-        - PCA
+          n_jobs: -1
+          random_state: 42
+        PCA_kwargs: #TODO modify default parameters. Set to null to skip PCA computation.
+          n_components: 8
   inference_mode: true
 model:
   class_path: viscy.representation.engine.ContrastiveModule

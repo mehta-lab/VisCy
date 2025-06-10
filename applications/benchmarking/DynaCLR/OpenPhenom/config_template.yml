@@ -58,9 +58,6 @@ embedding:
     random_state: 42
   PCA_kwargs:
     n_components: 2
-  reductions:
-    - PHATE
-    - PCA
 
 # Execution configuration
 execution:

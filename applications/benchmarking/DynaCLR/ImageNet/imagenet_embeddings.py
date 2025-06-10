@@ -295,9 +295,7 @@ def main(config, model):
 
     # Get dimensionality reduction parameters from config
     PHATE_kwargs = None
-    UMAP_kwargs = None
     PCA_kwargs = None
-    reductions = None
 
     if "embedding" in cfg:
         # Check for both capitalization variants and normalize
@@ -309,16 +307,6 @@ def main(config, model):
 
         if "PCA_kwargs" in cfg["embedding"]:
             PCA_kwargs = cfg["embedding"]["PCA_kwargs"]
-
-        if "reductions" in cfg["embedding"]:
-            reductions = cfg["embedding"]["reductions"]
-            # Ensure all reduction names are uppercase as expected by EmbeddingWriter
-            normalized_reductions = []
-            for r in reductions:
-                r_upper = r.upper()
-                if r_upper in ["PHATE", "UMAP", "PCA"]:
-                    normalized_reductions.append(r_upper)
-            reductions = normalized_reductions if normalized_reductions else reductions
 
     # Check if output path exists and should be overwritten
     if "output_path" not in cfg["paths"]:
@@ -341,9 +329,8 @@ def main(config, model):
     embedding_writer = EmbeddingWriter(
         output_path=output_path,
         PHATE_kwargs=PHATE_kwargs,
-        UMAP_kwargs=UMAP_kwargs,
         PCA_kwargs=PCA_kwargs,
-        reductions=reductions,
+        overwrite=overwrite,
     )
 
     # Set up and run VisCy trainer

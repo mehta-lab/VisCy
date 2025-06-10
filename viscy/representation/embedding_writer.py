@@ -64,13 +64,9 @@ def write_embedding_dataset(
     features: np.ndarray,
     index_df: pd.DataFrame,
     projections: Optional[np.ndarray] = None,
-    PHATE_kwargs: Optional[Dict[str, Any]] = None,
     UMAP_kwargs: Optional[Dict[str, Any]] = None,
+    PHATE_kwargs: Optional[Dict[str, Any]] = None,
     PCA_kwargs: Optional[Dict[str, Any]] = None,
-    reductions: Optional[list[Literal["PHATE", "UMAP", "PCA"]]] = [
-        "PHATE",
-        "PCA",
-    ],
     overwrite: bool = False,
 ) -> None:
     """
@@ -86,29 +82,26 @@ def write_embedding_dataset(
         DataFrame containing the index information for each embedding.
     projections : np.ndarray, optional
         Array of shape (n_samples, n_projections) containing projection values, by default None.
+    UMAP_kwargs : Dict[str, Any], optional
+        Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed)
+        Common parameters include:
+        - n_components: int, dimensions for projection (default: 2)
+        - n_neighbors: int, number of nearest neighbors (default: 15)
+        - min_dist: float, minimum distance between points (default: 0.1)
+        - metric: str, distance metric (default: 'euclidean')
     PHATE_kwargs : Dict[str, Any], optional
-        Keyword arguments passed to PHATE, by default None.
+        Keyword arguments passed to PHATE, by default None (i.e. PHATE is not computed)
         Common parameters include:
         - knn: int, number of nearest neighbors (default: 5)
         - decay: int, decay rate for kernel (default: 40)
         - n_jobs: int, number of jobs for parallel processing
         - t: int, number of diffusion steps
         - potential_method: str, potential method to use
-    UMAP_kwargs : Dict[str, Any], optional
-        Keyword arguments passed to UMAP, by default None.
-        Common parameters include:
-        - n_components: int, dimensions for projection (default: 2)
-        - n_neighbors: int, number of neighbors (default: 15)
-        - min_dist: float, minimum distance between points (default: 0.1)
-        - metric: str, distance metric (default: 'euclidean')
     PCA_kwargs : Dict[str, Any], optional
-        Keyword arguments passed to PCA, by default None.
+        Keyword arguments passed to PCA, by default None (i.e. PCA is not computed)
         Common parameters include:
         - n_components: int, dimensions for projection (default: 2)
         - whiten: bool, whether to whiten (default: False)
-    reductions : List[Literal["phate", "umap", "pca"]], optional
-        List of dimensionality reduction methods to compute. Default is ["phate", "umap", "pca"].
-        Pass an empty list to skip all dimensionality reductions.
     overwrite : bool, optional
         Whether to overwrite existing zarr store, by default False.
 
@@ -123,80 +116,52 @@ def write_embedding_dataset(
     if output_path.exists() and not overwrite:
         raise FileExistsError(f"Output path {output_path} already exists.")
 
-    # Set default reduction methods if not specified
-    if reductions is None:
-        reductions = ["PHATE", "UMAP", "PCA"]
-
     # Create a copy of the index DataFrame to avoid modifying the original
     ultrack_indices = index_df.copy()
+    n_samples = len(features)
 
-    # Compute dimensionality reductions if any are requested
-    if reductions:
-        n_samples = len(features)
-        _logger.info(
-            f"Computing dimensionality reductions: {', '.join(reductions)} for {n_samples} samples."
-        )
-
-        # Set up default kwargs for each method
-        default_PHATE_kwargs = {
-            "n_components": 2,
-            "knn": 5,
-            "decay": 40,
-            "n_jobs": -1,
-            "random_state": 42,
-        }
-        default_UMAP_kwargs = {
-            "n_components": 2,
-            "normalize": True,
-        }
-        default_PCA_kwargs = {
-            "n_components": min(2, n_samples - 1),
-        }
-
-        # Update with user-provided kwargs
-        if PHATE_kwargs:
-            default_PHATE_kwargs.update(PHATE_kwargs)
-        if UMAP_kwargs:
-            default_UMAP_kwargs.update(UMAP_kwargs)
-        if PCA_kwargs:
-            default_PCA_kwargs.update(PCA_kwargs)
-
-        # Ensure knn is appropriate for dataset size for PHATE
-        if "PHATE" in reductions and default_PHATE_kwargs["knn"] >= n_samples:
+    # Set up default kwargs for each method
+    if UMAP_kwargs:
+        if UMAP_kwargs["n_neighbors"] >= n_samples:
             _logger.warning(
-                f"Reducing knn from {default_PHATE_kwargs['knn']} to {max(2, n_samples // 2)} due to small dataset size"
+                f"Reducing n_neighbors from {UMAP_kwargs['n_neighbors']} to {min(15, n_samples // 2)} due to small dataset size"
             )
-            default_PHATE_kwargs["knn"] = max(2, n_samples // 2)
+            UMAP_kwargs["n_neighbors"] = min(15, n_samples // 2)
 
-        # Compute UMAP if requested
-        if "UMAP" in reductions:
-            try:
-                _logger.debug("Computing UMAP")
-                _, UMAP = _fit_transform_umap(features, **default_UMAP_kwargs)
-                for i in range(UMAP.shape[1]):
-                    ultrack_indices[f"UMAP{i+1}"] = UMAP[:, i]
-            except Exception as e:
-                _logger.warning(f"UMAP computation failed: {str(e)}")
+        _logger.debug(f"Using UMAP kwargs: {UMAP_kwargs}")
+        _, UMAP = _fit_transform_umap(features, **UMAP_kwargs)
+        for i in range(UMAP.shape[1]):
+            ultrack_indices[f"UMAP{i+1}"] = UMAP[:, i]
 
-        # Compute PHATE if requested
-        if "PHATE" in reductions:
-            try:
-                _logger.debug("Computing PHATE")
-                _, PHATE = compute_phate(features, **default_PHATE_kwargs)
-                for i in range(PHATE.shape[1]):
-                    ultrack_indices[f"PHATE{i+1}"] = PHATE[:, i]
-            except Exception as e:
-                _logger.warning(f"PHATE computation failed: {str(e)}")
+    if PHATE_kwargs:
+        # Update with user-provided kwargs
+        _logger.debug(f"Using PHATE kwargs: {PHATE_kwargs}")
+        # Ensure knn is appropriate for dataset size for PHATE
+        if PHATE_kwargs["knn"] >= n_samples:
+            _logger.warning(
+                f"Reducing knn from {PHATE_kwargs['knn']} to {max(2, n_samples // 2)} due to small dataset size"
+            )
+            PHATE_kwargs["knn"] = max(2, n_samples // 2)
 
-        # Compute PCA if requested
-        if "PCA" in reductions:
-            try:
-                _logger.debug("Computing PCA")
-                PCA_features, _ = compute_pca(features, **default_PCA_kwargs)
-                for i in range(PCA_features.shape[1]):
-                    ultrack_indices[f"PCA{i+1}"] = PCA_features[:, i]
-            except Exception as e:
-                _logger.warning(f"PCA computation failed: {str(e)}")
+        # Compute PHATE
+        try:
+            _logger.debug("Computing PHATE")
+            _, PHATE = compute_phate(features, **PHATE_kwargs)
+            for i in range(PHATE.shape[1]):
+                ultrack_indices[f"PHATE{i+1}"] = PHATE[:, i]
+        except Exception as e:
+            _logger.warning(f"PHATE computation failed: {str(e)}")
+
+    if PCA_kwargs:
+        # Update with user-provided kwargs
+        _logger.debug(f"Using PCA kwargs: {PCA_kwargs}")
+        try:
+            _logger.debug("Computing PCA")
+            PCA_features, _ = compute_pca(features, **PCA_kwargs)
+            for i in range(PCA_features.shape[1]):
+                ultrack_indices[f"PCA{i+1}"] = PCA_features[:, i]
+        except Exception as e:
+            _logger.warning(f"PCA computation failed: {str(e)}")
 
     # Create multi-index and dataset
     index = pd.MultiIndex.from_frame(ultrack_indices)
@@ -226,31 +191,34 @@ class EmbeddingWriter(BasePredictionWriter):
         Path to the zarr store.
     write_interval : Literal["batch", "epoch", "batch_and_epoch"], optional
         When to write the embeddings, by default 'epoch'.
-    PHATE_kwargs : dict, optional
-        Keyword arguments passed to PHATE, by default None.
     UMAP_kwargs : dict, optional
-        Keyword arguments passed to UMAP, by default None.
+        Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed).
+    PHATE_kwargs : dict, optional
+        Keyword arguments passed to PHATE, by default PHATE is computed with default parameters.
     PCA_kwargs : dict, optional
-        Keyword arguments passed to PCA, by default None.
-    reductions : List[Literal["PHATE", "UMAP", "PCA"]], optional
-        List of dimensionality reduction methods to compute, by default all available methods.
+        Keyword arguments passed to PCA, by default PCA is computed with default parameters.
     """
 
     def __init__(
         self,
         output_path: Path,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "epoch",
-        PHATE_kwargs: dict | None = None,
         UMAP_kwargs: dict | None = None,
-        PCA_kwargs: dict | None = None,
-        reductions: list[Literal["PHATE", "UMAP", "PCA"]] | None = ["PHATE", "PCA"],
+        PHATE_kwargs: dict | None = {
+            "knn": 5,
+            "decay": 40,
+            "n_jobs": -1,
+            "random_state": 42,
+        },
+        PCA_kwargs: dict | None = {"n_components": 8},
+        overwrite: bool = False,
     ):
         super().__init__(write_interval)
         self.output_path = Path(output_path)
-        self.PHATE_kwargs = PHATE_kwargs
         self.UMAP_kwargs = UMAP_kwargs
+        self.PHATE_kwargs = PHATE_kwargs
         self.PCA_kwargs = PCA_kwargs
-        self.reductions = reductions
+        self.overwrite = overwrite
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         if self.output_path.exists():
@@ -286,9 +254,8 @@ class EmbeddingWriter(BasePredictionWriter):
             features=features,
             index_df=ultrack_indices,
             projections=projections,
-            PHATE_kwargs=self.PHATE_kwargs,
             UMAP_kwargs=self.UMAP_kwargs,
+            PHATE_kwargs=self.PHATE_kwargs,
             PCA_kwargs=self.PCA_kwargs,
-            reductions=self.reductions,
-            overwrite=True,
+            overwrite=self.overwrite,
         )
