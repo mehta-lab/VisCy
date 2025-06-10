@@ -345,6 +345,7 @@ class HCSDataModule(LightningDataModule):
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
         prefetch_factor=None,
+        pin_memory=False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -363,6 +364,7 @@ class HCSDataModule(LightningDataModule):
         self.prepare_data_per_node = True
         self.persistent_workers = persistent_workers
         self.prefetch_factor = prefetch_factor
+        self.pin_memory = pin_memory
 
     @property
     def cache_path(self):
@@ -554,6 +556,7 @@ class HCSDataModule(LightningDataModule):
             persistent_workers=self.persistent_workers,
             collate_fn=_collate_samples,
             drop_last=True,
+            pin_memory=self.pin_memory,
         )
 
     def val_dataloader(self):
@@ -564,6 +567,7 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
             persistent_workers=self.persistent_workers,
+            pin_memory=self.pin_memory,
         )
 
     def test_dataloader(self):

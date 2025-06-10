@@ -318,6 +318,9 @@ class TripletDataModule(HCSDataModule):
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
+        persistent_workers: bool = False,
+        prefetch_factor: int | None = None,
+        pin_memory: bool = False,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -365,6 +368,12 @@ class TripletDataModule(HCSDataModule):
             Whether to return the negative sample during the fit stage
             (can be set to False when using a loss function like NT-Xent),
             by default True
+        persistent_workers : bool, optional
+            Whether to keep worker processes alive between iterations, by default False
+        prefetch_factor : int | None, optional
+            Number of batches loaded in advance by each worker, by default None
+        pin_memory : bool, optional
+            Whether to pin memory in CPU for faster GPU transfer, by default False
         """
         super().__init__(
             data_path=data_path,
@@ -379,6 +388,9 @@ class TripletDataModule(HCSDataModule):
             normalizations=normalizations,
             augmentations=augmentations,
             caching=caching,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
+            pin_memory=pin_memory,
         )
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
