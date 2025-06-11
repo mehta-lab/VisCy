@@ -50,9 +50,20 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs = []
         self.log_embeddings = log_embeddings
 
-    def forward(self, x: Tensor) -> Tensor:
-        "Only return projected embeddings for training and validation."
-        return self.model(x)[1]
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """Return both features and projections.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Tuple of (features, projections)
+        """
+        return self.model(x)
 
     def log_feature_statistics(self, embeddings: Tensor, prefix: str):
         mean = torch.mean(embeddings, dim=0).detach().cpu().numpy()
@@ -137,8 +148,8 @@ class ContrastiveModule(LightningModule):
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
-        anchor_projection = self(anchor_img)
-        positive_projection = self(pos_img)
+        anchor_features, anchor_projection = self(anchor_img)
+        positive_features, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
@@ -151,7 +162,7 @@ class ContrastiveModule(LightningModule):
             self._log_step_samples(batch_idx, (anchor_img, pos_img), "train")
         else:
             neg_img = batch["negative"]
-            negative_projection = self(neg_img)
+            _, negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
@@ -180,8 +191,8 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
         anchor = batch["anchor"]
         pos_img = batch["positive"]
-        anchor_projection = self(anchor)
-        positive_projection = self(pos_img)
+        anchor_features, anchor_projection = self(anchor)
+        positive_features, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
@@ -194,7 +205,7 @@ class ContrastiveModule(LightningModule):
             self._log_step_samples(batch_idx, (anchor, pos_img), "val")
         else:
             neg_img = batch["negative"]
-            negative_projection = self(neg_img)
+            _, negative_projection = self(neg_img)
             loss = self.loss_function(
                 anchor_projection, positive_projection, negative_projection
             )
