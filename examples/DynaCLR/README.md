@@ -55,3 +55,11 @@ ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
 To train DynaCLR models using the classical triplet sampling, you need to generate pseudo-tracking data from 2D segmentation masks. 
 
 These pseudo-tracks are used to run the same. For more information: [README.md](./DynaCLR-classical-sampling/README.md)
+
+### Exporting DynaCLR models
+
+To export DynaCLR models to ONNX run:
+
+`viscy export -c config.yml`
+
+The `config.yml` is similar to the `fit.yml` which describes the model. An example can be found [here](./examples_cli/dynaclr_microglia_onnx.yml).
