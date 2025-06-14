@@ -148,8 +148,8 @@ class ContrastiveModule(LightningModule):
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
-        anchor_features, anchor_projection = self(anchor_img)
-        positive_features, positive_projection = self(pos_img)
+        _, anchor_projection = self(anchor_img)
+        _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
@@ -191,8 +191,8 @@ class ContrastiveModule(LightningModule):
         """Validation step of the model."""
         anchor = batch["anchor"]
         pos_img = batch["positive"]
-        anchor_features, anchor_projection = self(anchor)
-        positive_features, positive_projection = self(pos_img)
+        _, anchor_projection = self(anchor)
+        _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
             indices = torch.arange(
