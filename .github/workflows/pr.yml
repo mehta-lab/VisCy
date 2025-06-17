@@ -11,7 +11,7 @@ jobs:
       - uses: astral-sh/ruff-action@v3
         with:
           src: "viscy"
-      - run: ruff format --check
+      - run: ruff format --check viscy tests
 
   test:
     name: Test
