@@ -66,7 +66,7 @@ def add_channel(
         "except in the inferred channel dimension: "
         f"array shape: {position.data.shape}, "
         "expected channel shape: "
-        f"{(position.data.shape[0], ) + position.data.shape[2:]}, "
+        f"{(position.data.shape[0],) + position.data.shape[2:]}, "
         f"received channel shape: {new_channel_array.shape}"
     )
     # determine whether to overwrite or append
@@ -146,7 +146,7 @@ def create_and_write_mask(
             else:
                 # print progress update
                 if verbose:
-                    time_progress = f"time {time_index+1}/{shape[0]}"
+                    time_progress = f"time {time_index + 1}/{shape[0]}"
                     channel_progress = f"chan {channel_index}/{channel_indices}"
                     position_progress = f"pos {position.zgroup.name}"
                     p = (
