@@ -58,7 +58,6 @@ dev = [
     "pytest-cov",
     "hypothesis",
     "ruff",
-    "black",
     "profilehooks",
     "onnxruntime",
 ]
@@ -72,10 +71,8 @@ packages = ["viscy"]
 [tool.setuptools_scm]
 write_to = "viscy/_version.py"
 
-[tool.black]
-line-length = 88
-
 [tool.ruff]
 src = ["viscy", "tests"]
+line-length = 88
 lint.extend-select = ["I001"]
 lint.isort.known-first-party = ["viscy"]
