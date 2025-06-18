@@ -706,6 +706,7 @@ class EmbeddingVisualizationApp:
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
                 dd.Output("cluster-name-modal", "style"),
                 dd.Output("cluster-name-input", "value"),
+                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
             ],
             [
                 dd.Input("assign-cluster", "n_clicks"),
@@ -748,6 +749,7 @@ class EmbeddingVisualizationApp:
                     dash.no_update,
                     dash.no_update,
                     dash.no_update,
+                    dash.no_update,
                 )
 
             button_id = ctx.triggered[0]["prop_id"].split(".")[0]
@@ -784,9 +786,11 @@ class EmbeddingVisualizationApp:
                         dash.no_update,
                         modal_style,
                         current_name,
+                        dash.no_update,  # Don't change selection
                     )
                 except Exception:
                     return (
+                        dash.no_update,
                         dash.no_update,
                         dash.no_update,
                         dash.no_update,
@@ -843,6 +847,7 @@ class EmbeddingVisualizationApp:
                         dash.no_update,  # Don't update figure yet
                         modal_style,  # Show modal
                         "",  # Clear input
+                        None,  # Clear selection
                     )
 
             elif button_id == "save-cluster-name" and cluster_name:
@@ -872,6 +877,7 @@ class EmbeddingVisualizationApp:
                         fig,
                         modal_style,  # Hide modal
                         "",  # Clear input
+                        None,  # Clear selection
                     )
 
             elif button_id == "cancel-cluster-name":
@@ -909,6 +915,7 @@ class EmbeddingVisualizationApp:
                         fig,
                         modal_style,  # Hide modal
                         "",  # Clear input
+                        None,  # Clear selection
                     )
 
             elif button_id == "clear-clusters":
@@ -921,17 +928,26 @@ class EmbeddingVisualizationApp:
                     x_axis,
                     y_axis,
                 )
-                # Ensure the dragmode is set based on selection_mode
+                # Reset UI state completely to ensure clean slate
                 fig.update_layout(
                     dragmode="lasso",
                     clickmode="event+select",
-                    uirevision="true",  # Keep the UI state
+                    uirevision=None,  # Reset UI state completely
                     selectdirection="any",
                 )
                 modal_style = {"display": "none"}
-                return {"display": "none"}, None, "timeline-tab", fig, modal_style, ""
+                return (
+                    {"display": "none"},
+                    None,
+                    "timeline-tab",
+                    fig,
+                    modal_style,
+                    "",
+                    None,
+                )  # Clear selection
 
             return (
+                dash.no_update,
                 dash.no_update,
                 dash.no_update,
                 dash.no_update,
@@ -1211,28 +1227,36 @@ class EmbeddingVisualizationApp:
                 opacities = [1.0] * len(track_data)
 
             # Add points using Scattergl for better performance
-            fig.add_trace(
-                go.Scattergl(
-                    x=track_data[x_axis],
-                    y=track_data[y_axis],
-                    mode="markers",
-                    marker=dict(
-                        size=10,  # Reduced size
-                        color=colors,
-                        line=dict(width=1, color="black"),
-                        opacity=opacities,
-                    ),
-                    name=f"Track {track_id}",
-                    text=[
-                        f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
-                        for t, fov in zip(track_data["t"], track_data["fov_name"])
-                    ],
-                    hoverinfo="text",
-                    unselected=dict(marker=dict(opacity=0.3, size=10)),  # Reduced size
-                    selected=dict(marker=dict(size=12, opacity=1.0)),  # Reduced size
-                    hoverlabel=dict(namelength=-1),  # Show full text in hover
+            scatter_kwargs = {
+                "x": track_data[x_axis],
+                "y": track_data[y_axis],
+                "mode": "markers",
+                "marker": dict(
+                    size=10,  # Reduced size
+                    color=colors,
+                    line=dict(width=1, color="black"),
+                    opacity=opacities,
+                ),
+                "name": f"Track {track_id}",
+                "text": [
+                    f"Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
+                    for t, fov in zip(track_data["t"], track_data["fov_name"])
+                ],
+                "hoverinfo": "text",
+                "hoverlabel": dict(namelength=-1),  # Show full text in hover
+            }
+
+            # Only apply selection properties if there are clusters
+            # This prevents opacity conflicts when no clusters exist
+            if self.clusters:
+                scatter_kwargs.update(
+                    {
+                        "unselected": dict(marker=dict(opacity=0.3, size=10)),
+                        "selected": dict(marker=dict(size=12, opacity=1.0)),
+                    }
                 )
-            )
+
+            fig.add_trace(go.Scattergl(**scatter_kwargs))
 
             # Add trajectory lines and arrows if requested
             if show_arrows and len(track_data) > 1:
