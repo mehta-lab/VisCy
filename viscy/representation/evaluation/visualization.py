@@ -36,6 +36,7 @@ class EmbeddingVisualizationApp:
         num_PC_components: int = 3,
         cache_path: str | None = None,
         num_loading_workers: int = 16,
+        output_dir: str | None = None,
     ) -> None:
         """
         Initialize a Dash application for visualizing the DynaCLR embeddings.
@@ -65,6 +66,8 @@ class EmbeddingVisualizationApp:
             Path to the cache directory.
         num_loading_workers: int
             Number of workers to use for loading data.
+        output_dir: str | None, optional
+            Directory to save CSV files and other outputs. If None, uses current working directory.
         Returns
         -------
         None
@@ -76,6 +79,7 @@ class EmbeddingVisualizationApp:
         self.fov_tracks = fov_tracks
         self.image_cache = {}
         self.cache_path = Path(cache_path) if cache_path else None
+        self.output_dir = Path(output_dir) if output_dir else Path.cwd()
         self.app = None
         self.features_df = None
         self.fig = None
@@ -1830,10 +1834,62 @@ class EmbeddingVisualizationApp:
             ]
         )
 
+    def _get_output_info_display(self) -> html.Div:
+        """
+        Create a display component showing the output directory information.
+
+        Returns
+        -------
+        html.Div
+            HTML component displaying output directory info
+        """
+        return html.Div(
+            [
+                html.H4(
+                    "Output Directory",
+                    style={"marginBottom": "10px", "fontSize": "16px"},
+                ),
+                html.Div(
+                    [
+                        html.Span("📁 ", style={"fontSize": "14px"}),
+                        html.Span(
+                            str(self.output_dir),
+                            style={
+                                "fontFamily": "monospace",
+                                "backgroundColor": "#f8f9fa",
+                                "padding": "4px 8px",
+                                "borderRadius": "4px",
+                                "border": "1px solid #dee2e6",
+                                "fontSize": "12px",
+                            },
+                        ),
+                    ],
+                    style={"marginBottom": "10px"},
+                ),
+                html.Div(
+                    "CSV files will be saved to this directory with timestamped names.",
+                    style={
+                        "fontSize": "12px",
+                        "color": "#6c757d",
+                        "fontStyle": "italic",
+                    },
+                ),
+            ],
+            style={
+                "backgroundColor": "#e9ecef",
+                "padding": "10px",
+                "borderRadius": "6px",
+                "marginBottom": "15px",
+                "border": "1px solid #ced4da",
+            },
+        )
+
     def _get_cluster_images(self):
         """Display images for all clusters in a grid layout"""
         if not self.clusters:
-            return html.Div("No clusters created yet")
+            return html.Div(
+                [self._get_output_info_display(), html.Div("No clusters created yet")]
+            )
 
         # Create cluster colors once
         cluster_colors = [
@@ -2014,6 +2070,7 @@ class EmbeddingVisualizationApp:
                         "color": "#2c3e50",
                     },
                 ),
+                self._get_output_info_display(),
                 html.Div(
                     rows,
                     style={
@@ -2024,6 +2081,17 @@ class EmbeddingVisualizationApp:
                 ),
             ]
         )
+
+    def get_output_dir(self) -> Path:
+        """
+        Get the output directory for saving files.
+
+        Returns
+        -------
+        Path
+            The output directory path
+        """
+        return self.output_dir
 
     def save_clusters_to_csv(self, output_path: str | None = None) -> str:
         """
@@ -2036,7 +2104,7 @@ class EmbeddingVisualizationApp:
         ----------
         output_path : str | None, optional
             Path to save the CSV file. If None, generates a timestamped filename
-            in the current directory, by default None
+            in the output directory, by default None
 
         Returns
         -------
@@ -2080,13 +2148,16 @@ class EmbeddingVisualizationApp:
         df = pd.DataFrame(csv_data)
 
         if output_path is None:
-            # Generate timestamped filename
+            # Generate timestamped filename in output directory
             from datetime import datetime
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            output_path = f"clusters_{timestamp}.csv"
-
-        output_path = Path(output_path)
+            output_path = self.output_dir / f"clusters_{timestamp}.csv"
+        else:
+            output_path = Path(output_path)
+            # If only filename is provided, use output directory
+            if not output_path.parent.name:
+                output_path = self.output_dir / output_path.name
 
         try:
             # Create parent directory if it doesn't exist
