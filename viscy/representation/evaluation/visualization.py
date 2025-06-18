@@ -3,6 +3,7 @@ import base64
 import logging
 from io import BytesIO
 from pathlib import Path
+import json
 
 import dash
 import dash.dependencies as dd
@@ -88,6 +89,8 @@ class EmbeddingVisualizationApp:
         # Initialize cluster storage before preparing data and creating figure
         self.clusters = []  # List to store all clusters
         self.cluster_points = set()  # Set to track all points in clusters
+        self.cluster_names = {}  # Dictionary to store cluster names
+        self.next_cluster_id = 1  # Counter for cluster IDs
         # Initialize data
         self._prepare_data()
         self._create_figure()
@@ -213,6 +216,19 @@ class EmbeddingVisualizationApp:
                     },
                 ),
                 html.Button(
+                    "Save Clusters to CSV",
+                    id="save-clusters-csv",
+                    style={
+                        "backgroundColor": "#17a2b8",
+                        "color": "white",
+                        "border": "none",
+                        "padding": "5px 10px",
+                        "borderRadius": "4px",
+                        "cursor": "pointer",
+                        "marginRight": "10px",
+                    },
+                ),
+                html.Button(
                     "Clear Selection",
                     id="clear-selection",
                     style={
@@ -265,6 +281,76 @@ class EmbeddingVisualizationApp:
                 ),
             ],
             style={"marginTop": "20px"},
+        )
+
+        # Add modal for cluster naming
+        cluster_name_modal = html.Div(
+            id="cluster-name-modal",
+            children=[
+                html.Div(
+                    [
+                        html.H3("Name Your Cluster", style={"marginBottom": "20px"}),
+                        html.Label("Cluster Name:"),
+                        dcc.Input(
+                            id="cluster-name-input",
+                            type="text",
+                            placeholder="Enter cluster name...",
+                            style={"width": "100%", "marginBottom": "20px"},
+                        ),
+                        html.Div(
+                            [
+                                html.Button(
+                                    "Save",
+                                    id="save-cluster-name",
+                                    style={
+                                        "backgroundColor": "#28a745",
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "8px 16px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                        "marginRight": "10px",
+                                    },
+                                ),
+                                html.Button(
+                                    "Cancel",
+                                    id="cancel-cluster-name",
+                                    style={
+                                        "backgroundColor": "#6c757d",
+                                        "color": "white",
+                                        "border": "none",
+                                        "padding": "8px 16px",
+                                        "borderRadius": "4px",
+                                        "cursor": "pointer",
+                                    },
+                                ),
+                            ],
+                            style={"textAlign": "right"},
+                        ),
+                    ],
+                    style={
+                        "backgroundColor": "white",
+                        "padding": "30px",
+                        "borderRadius": "8px",
+                        "maxWidth": "400px",
+                        "margin": "auto",
+                        "boxShadow": "0 4px 6px rgba(0, 0, 0, 0.1)",
+                        "border": "1px solid #ddd",
+                    },
+                )
+            ],
+            style={
+                "display": "none",
+                "position": "fixed",
+                "top": "0",
+                "left": "0",
+                "width": "100%",
+                "height": "100%",
+                "backgroundColor": "rgba(0, 0, 0, 0.5)",
+                "zIndex": "1000",
+                "justifyContent": "center",
+                "alignItems": "center",
+            },
         )
 
         # Update layout to use tabs
@@ -398,6 +484,7 @@ class EmbeddingVisualizationApp:
                     type="default",
                 ),
                 tabs,
+                cluster_name_modal,
             ],
         )
 
@@ -606,17 +693,22 @@ class EmbeddingVisualizationApp:
                 ]
             )
 
-        # Add callback to show/hide clusters tab
+        # Add callback to show/hide clusters tab and handle modal
         @self.app.callback(
             [
                 dd.Output("clusters-tab", "style"),
                 dd.Output("cluster-container", "children"),
                 dd.Output("view-tabs", "value"),
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
+                dd.Output("cluster-name-modal", "style"),
+                dd.Output("cluster-name-input", "value"),
             ],
             [
                 dd.Input("assign-cluster", "n_clicks"),
                 dd.Input("clear-clusters", "n_clicks"),
+                dd.Input("save-cluster-name", "n_clicks"),
+                dd.Input("cancel-cluster-name", "n_clicks"),
+                dd.Input({"type": "edit-cluster-name", "index": dash.ALL}, "n_clicks"),
             ],
             [
                 dd.State("scatter-plot", "selectedData"),
@@ -625,24 +717,79 @@ class EmbeddingVisualizationApp:
                 dd.State("show-arrows", "value"),
                 dd.State("x-axis", "value"),
                 dd.State("y-axis", "value"),
+                dd.State("cluster-name-input", "value"),
             ],
             prevent_initial_call=True,
         )
         def update_clusters_tab(
             assign_clicks,
             clear_clicks,
+            save_name_clicks,
+            cancel_name_clicks,
+            edit_name_clicks,
             selected_data,
             current_figure,
             color_mode,
             show_arrows,
             x_axis,
             y_axis,
+            cluster_name,
         ):
             ctx = dash.callback_context
             if not ctx.triggered:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return (
+                    dash.no_update,
+                    dash.no_update,
+                    dash.no_update,
+                    dash.no_update,
+                    dash.no_update,
+                    dash.no_update,
+                )
 
             button_id = ctx.triggered[0]["prop_id"].split(".")[0]
+
+            # Handle edit cluster name button clicks
+            if button_id.startswith('{"type":"edit-cluster-name"'):
+                try:
+                    id_dict = json.loads(button_id)
+                    cluster_idx = id_dict["index"]
+
+                    # Get current cluster name
+                    current_name = self.cluster_names.get(
+                        cluster_idx, f"Cluster {cluster_idx + 1}"
+                    )
+
+                    # Show modal
+                    modal_style = {
+                        "display": "flex",
+                        "position": "fixed",
+                        "top": "0",
+                        "left": "0",
+                        "width": "100%",
+                        "height": "100%",
+                        "backgroundColor": "rgba(0, 0, 0, 0.5)",
+                        "zIndex": "1000",
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                    }
+
+                    return (
+                        {"display": "block"},
+                        self._get_cluster_images(),
+                        "clusters-tab",
+                        dash.no_update,
+                        modal_style,
+                        current_name,
+                    )
+                except Exception:
+                    return (
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                    )
 
             if (
                 button_id == "assign-cluster"
@@ -670,7 +817,36 @@ class EmbeddingVisualizationApp:
                         self.cluster_points.add(cache_key)
 
                 if new_cluster:
+                    # Add cluster to list but don't assign name yet
                     self.clusters.append(new_cluster)
+                    # Open modal for naming
+                    modal_style = {
+                        "display": "flex",
+                        "position": "fixed",
+                        "top": "0",
+                        "left": "0",
+                        "width": "100%",
+                        "height": "100%",
+                        "backgroundColor": "rgba(0, 0, 0, 0.5)",
+                        "zIndex": "1000",
+                        "justifyContent": "center",
+                        "alignItems": "center",
+                    }
+                    return (
+                        {"display": "block"},
+                        self._get_cluster_images(),
+                        "clusters-tab",
+                        dash.no_update,  # Don't update figure yet
+                        modal_style,  # Show modal
+                        "",  # Clear input
+                    )
+
+            elif button_id == "save-cluster-name" and cluster_name:
+                # Assign name to the most recently created cluster
+                if self.clusters:
+                    cluster_id = len(self.clusters) - 1
+                    self.cluster_names[cluster_id] = cluster_name.strip()
+
                     # Create new figure with updated colors
                     fig = self._create_track_colored_figure(
                         len(show_arrows or []) > 0,
@@ -684,16 +860,57 @@ class EmbeddingVisualizationApp:
                         uirevision="true",  # Keep the UI state
                         selectdirection="any",
                     )
+                    modal_style = {"display": "none"}
                     return (
                         {"display": "block"},
                         self._get_cluster_images(),
                         "clusters-tab",
                         fig,
+                        modal_style,  # Hide modal
+                        "",  # Clear input
+                    )
+
+            elif button_id == "cancel-cluster-name":
+                # Remove the cluster that was just created
+                if self.clusters:
+                    # Remove points from cluster_points set
+                    for point in self.clusters[-1]:
+                        cache_key = (point["fov_name"], point["track_id"], point["t"])
+                        self.cluster_points.discard(cache_key)
+                    # Remove the cluster
+                    self.clusters.pop()
+
+                    # Create new figure with updated colors
+                    fig = self._create_track_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+                    # Ensure the dragmode is set based on selection_mode
+                    fig.update_layout(
+                        dragmode="lasso",
+                        clickmode="event+select",
+                        uirevision="true",  # Keep the UI state
+                        selectdirection="any",
+                    )
+                    modal_style = {"display": "none"}
+                    return (
+                        (
+                            {"display": "none"}
+                            if not self.clusters
+                            else {"display": "block"}
+                        ),
+                        self._get_cluster_images() if self.clusters else None,
+                        "timeline-tab" if not self.clusters else "clusters-tab",
+                        fig,
+                        modal_style,  # Hide modal
+                        "",  # Clear input
                     )
 
             elif button_id == "clear-clusters":
                 self.clusters = []
                 self.cluster_points.clear()
+                self.cluster_names.clear()
                 # Restore original coloring
                 fig = self._create_track_colored_figure(
                     len(show_arrows or []) > 0,
@@ -707,9 +924,82 @@ class EmbeddingVisualizationApp:
                     uirevision="true",  # Keep the UI state
                     selectdirection="any",
                 )
-                return {"display": "none"}, None, "timeline-tab", fig
+                modal_style = {"display": "none"}
+                return {"display": "none"}, None, "timeline-tab", fig, modal_style, ""
 
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+            )
+
+        # Add callback for saving clusters to CSV
+        @self.app.callback(
+            dd.Output("cluster-container", "children", allow_duplicate=True),
+            [dd.Input("save-clusters-csv", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def save_clusters_csv(n_clicks):
+            """Callback to save clusters to CSV file"""
+            if n_clicks and self.clusters:
+                try:
+                    output_path = self.save_clusters_to_csv()
+                    return html.Div(
+                        [
+                            html.H3("Clusters", style={"marginBottom": "20px"}),
+                            html.Div(
+                                f"✅ Successfully saved {len(self.clusters)} clusters to: {output_path}",
+                                style={
+                                    "backgroundColor": "#d4edda",
+                                    "color": "#155724",
+                                    "padding": "10px",
+                                    "borderRadius": "4px",
+                                    "marginBottom": "20px",
+                                    "border": "1px solid #c3e6cb",
+                                },
+                            ),
+                            self._get_cluster_images(),
+                        ]
+                    )
+                except Exception as e:
+                    return html.Div(
+                        [
+                            html.H3("Clusters", style={"marginBottom": "20px"}),
+                            html.Div(
+                                f"❌ Error saving clusters: {str(e)}",
+                                style={
+                                    "backgroundColor": "#f8d7da",
+                                    "color": "#721c24",
+                                    "padding": "10px",
+                                    "borderRadius": "4px",
+                                    "marginBottom": "20px",
+                                    "border": "1px solid #f5c6cb",
+                                },
+                            ),
+                            self._get_cluster_images(),
+                        ]
+                    )
+            elif n_clicks and not self.clusters:
+                return html.Div(
+                    [
+                        html.H3("Clusters", style={"marginBottom": "20px"}),
+                        html.Div(
+                            "⚠️ No clusters to save. Create clusters first by selecting points and clicking 'Assign to New Cluster'.",
+                            style={
+                                "backgroundColor": "#fff3cd",
+                                "color": "#856404",
+                                "padding": "10px",
+                                "borderRadius": "4px",
+                                "marginBottom": "20px",
+                                "border": "1px solid #ffeaa7",
+                            },
+                        ),
+                    ]
+                )
+            return dash.no_update
 
         @self.app.callback(
             [
@@ -1554,6 +1844,11 @@ class EmbeddingVisualizationApp:
         # Create individual cluster panels
         cluster_panels = []
         for cluster_idx, cluster_points in enumerate(self.clusters):
+            # Get cluster name or use default
+            cluster_name = self.cluster_names.get(
+                cluster_idx, f"Cluster {cluster_idx + 1}"
+            )
+
             # Create a single scrollable container for all channels
             all_channel_images = []
             for channel in self.channels_to_display:
@@ -1624,7 +1919,7 @@ class EmbeddingVisualizationApp:
                             html.Div(
                                 [
                                     html.Span(
-                                        f"Cluster {cluster_idx + 1}",
+                                        cluster_name,
                                         style={
                                             "color": cluster_colors[cluster_idx],
                                             "fontWeight": "bold",
@@ -1637,6 +1932,22 @@ class EmbeddingVisualizationApp:
                                             "color": "#2c3e50",
                                             "fontSize": "14px",
                                         },
+                                    ),
+                                    html.Button(
+                                        "✏️",
+                                        id={
+                                            "type": "edit-cluster-name",
+                                            "index": cluster_idx,
+                                        },
+                                        style={
+                                            "backgroundColor": "transparent",
+                                            "border": "none",
+                                            "cursor": "pointer",
+                                            "fontSize": "12px",
+                                            "marginLeft": "5px",
+                                            "color": "#6c757d",
+                                        },
+                                        title="Edit cluster name",
                                     ),
                                 ],
                                 style={
@@ -1713,6 +2024,81 @@ class EmbeddingVisualizationApp:
                 ),
             ]
         )
+
+    def save_clusters_to_csv(self, output_path: str | None = None) -> str:
+        """
+        Save cluster information to CSV file.
+
+        This method exports all cluster data including track_id, time, FOV,
+        cluster assignment, and cluster names to a CSV file for further analysis.
+
+        Parameters
+        ----------
+        output_path : str | None, optional
+            Path to save the CSV file. If None, generates a timestamped filename
+            in the current directory, by default None
+
+        Returns
+        -------
+        str
+            Path to the saved CSV file
+
+        Notes
+        -----
+        The CSV will contain columns:
+        - cluster_id: The cluster number (1-indexed)
+        - cluster_name: The custom name assigned to the cluster
+        - track_id: The track identifier
+        - time: The timepoint
+        - fov_name: The field of view name
+        - cluster_size: Number of points in the cluster
+        """
+        if not self.clusters:
+            logger.warning("No clusters to save")
+            return ""
+
+        # Prepare data for CSV export
+        csv_data = []
+        for cluster_idx, cluster in enumerate(self.clusters):
+            cluster_id = cluster_idx + 1  # 1-indexed for user-friendly output
+            cluster_size = len(cluster)
+            cluster_name = self.cluster_names.get(cluster_idx, f"Cluster {cluster_id}")
+
+            for point in cluster:
+                csv_data.append(
+                    {
+                        "cluster_id": cluster_id,
+                        "cluster_name": cluster_name,
+                        "track_id": point["track_id"],
+                        "time": point["t"],
+                        "fov_name": point["fov_name"],
+                        "cluster_size": cluster_size,
+                    }
+                )
+
+        # Create DataFrame and save to CSV
+        df = pd.DataFrame(csv_data)
+
+        if output_path is None:
+            # Generate timestamped filename
+            from datetime import datetime
+
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = f"clusters_{timestamp}.csv"
+
+        output_path = Path(output_path)
+
+        try:
+            # Create parent directory if it doesn't exist
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            df.to_csv(output_path, index=False)
+            logger.info(f"Successfully saved {len(df)} cluster points to {output_path}")
+            return str(output_path)
+
+        except Exception as e:
+            logger.error(f"Error saving clusters to CSV: {e}")
+            raise
 
     def run(self, debug=False, port=None):
         """Run the Dash server
