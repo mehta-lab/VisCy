@@ -1,18 +1,3 @@
-# ---
-# jupyter:
-#   jupytext:
-#     cell_metadata_filter: all
-#     text_representation:
-#       extension: .py
-#       format_name: percent
-#       format_version: '1.3'
-#       jupytext_version: 1.16.7
-#   kernelspec:
-#     display_name: Python (dynaclr)
-#     language: python
-#     name: dynaclr
-# ---
-
 # %% [markdown]
 # # Demo: Comparing DynaCLR vs ImageNet Embeddings for Cell Infection Analysis
 #

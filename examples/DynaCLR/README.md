@@ -4,8 +4,8 @@ This repository contains examples and demos to embed cellular dynamics using Dyn
 
 ## Available Demos
 
-- [ImageNet vs DynaCLR embeddings (cell infection)](examples/DynaCLR/DynaCLR-DENV-VS-Ph)
-- [Embedding visualization](examples/DynaCLR/embedding-web-visualization)
+- [ImageNet vs DynaCLR embeddings (cell infection)](/examples/DynaCLR/DynaCLR-DENV-VS-Ph/README.md)
+- [Embedding visualization](/examples/DynaCLR/embedding-web-visualization/README.md)
 
 ## Setup
 

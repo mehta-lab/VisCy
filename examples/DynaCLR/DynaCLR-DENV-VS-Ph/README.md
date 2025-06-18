@@ -42,9 +42,9 @@ dynaclr_features_path = "/path/to/dynaclr_features.zarr"
 imagenet_features_path = "/path/to/imagenet_features.zarr"
 ```
 
-Check out the demo's output visualization : 
+Check out the demo's output visualization:
 
-<a href="https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/cell_infection_visualization.html" style="display: inline-block; background-color: #007bff; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px; font-weight: bold;">Open the demo's output</a>
+- [Open Visualization](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/cell_infection_visualization.html)
  
 Note: You may need to press pause/play for the image to show
 
@@ -52,7 +52,7 @@ Note: You may need to press pause/play for the image to show
 
 1. Open the `dynaclr_denv-vs-ph_test_data.yml` and modify the following to point to your download:
 
-- Replace where you want to save the output xarray `.zarr` with the embeddings.
+- Replace with the output path (`.zarr`) for the embeddings.
 ```yaml
     callbacks:
     - class_path: viscy.representation.embedding_writer.EmbeddingWriter
@@ -61,7 +61,7 @@ Note: You may need to press pause/play for the image to show
 ```
 
 - Point to the downloaded checkpoint for DynaCLR-DENV-VS+Ph
- ```yaml
+```yaml
  ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
  ```
 
