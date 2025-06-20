@@ -1,7 +1,6 @@
 """PCA and UMAP dimensionality reduction."""
 
 import pandas as pd
-import phate
 import umap
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
@@ -16,7 +15,7 @@ def compute_phate(
     decay: int = 40,
     update_dataset: bool = False,
     **phate_kwargs,
-) -> tuple[phate.PHATE, NDArray]:
+) -> tuple[object, NDArray]:
     """
     Compute PHATE embeddings for features and optionally update dataset.
 
@@ -38,10 +37,20 @@ def compute_phate(
 
     Returns
     -------
-    phate.PHATE, NDArray
+    tuple[object, NDArray]
         PHATE model and PHATE embeddings
+
+    Raises
+    ------
+    ImportError
+        If PHATE is not installed. Install with: pip install viscy[phate]
     """
-    import phate
+    try:
+        import phate
+    except ImportError:
+        raise ImportError(
+            "PHATE is not available. Install with: pip install viscy[phate]"
+        )
 
     # Get embeddings from dataset if needed
     embeddings = (

@@ -23,7 +23,7 @@ conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets
 python -m ipykernel install --user --name dynaclr --display-name "Python (dynaclr)"
 
 # Install viscy and its dependencies using pip
-pip install "viscy[visual,metrics]>=0.3.0"
+pip install "viscy[visual,metrics,phate,examples]>=0.4.0a1"
 
 # Change back to the starting directory
 cd $START_DIR

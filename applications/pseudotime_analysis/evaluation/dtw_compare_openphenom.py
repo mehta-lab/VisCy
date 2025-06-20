@@ -1,17 +1,9 @@
 # %%
-import sys
 from pathlib import Path
-from typing import Literal
 
-import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
-import phate
-import seaborn as sns
 import torch
-import xarray as xr
 from sklearn.decomposition import PCA
-from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
@@ -19,17 +11,8 @@ from tqdm import tqdm
 from transformers import AutoModel
 
 from viscy.data.triplet import TripletDataModule
-from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
-
-
-# %% function to compute phate from embedding values
-def compute_phate(embeddings, n_components=2, knn=15, decay=0.5, **phate_kwargs):
-    # Compute PHATE embeddings
-    phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
-    )
-    phate_embedding = phate_model.fit_transform(embeddings)
-    return phate_embedding
+from viscy.representation.evaluation.dimensionality_reduction import compute_phate
+from viscy.transforms import ScaleIntensityRangePercentilesd
 
 
 # %% OpenPhenom Wrapper
