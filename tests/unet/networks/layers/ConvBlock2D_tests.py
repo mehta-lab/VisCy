@@ -172,9 +172,7 @@ class TestConvBlock2D(unittest.TestCase):
                 try:
                     out_shapes = np.array(out_shapes, dtype=object)
                     exp_out_shapes = np.array(exp_out_shapes, dtype=object)
-                    fail_message = (
-                        f"'Passing' input tests failed on config {i+1} \n args: {args}"
-                    )
+                    fail_message = f"'Passing' input tests failed on config {i + 1} \n args: {args}"
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
                     )
@@ -192,7 +190,7 @@ class TestConvBlock2D(unittest.TestCase):
                     out_shapes = np.array(out_shapes, dtype=object)
                     exp_out_shapes = np.array(exp_out_shapes, dtype=object)
                     fail_message = (
-                        f"\t'Failing' tests failed on config {i+1} \n args: {args}"
+                        f"\t'Failing' tests failed on config {i + 1} \n args: {args}"
                     )
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
@@ -206,7 +204,7 @@ class TestConvBlock2D(unittest.TestCase):
                 if args[resid_index] == False:
                     params, resid_params = self._get_residual_params(args, resid_index)
                     try:
-                        fail_message = f"\t Residual params tests failed on config {i+1} \n args: {args}"
+                        fail_message = f"\t Residual params tests failed on config {i + 1} \n args: {args}"
                         np.testing.assert_equal(
                             len(list(params)), len(list(resid_params)), fail_message
                         )
@@ -218,7 +216,7 @@ class TestConvBlock2D(unittest.TestCase):
 
         if verbose:
             print(
-                f"Testing complete! {len(configs_list)-len(failed_tests)}/{len(configs_list)} passed."
+                f"Testing complete! {len(configs_list) - len(failed_tests)}/{len(configs_list)} passed."
             )
             if len(failed_tests) > 0:
                 print(f"Failed messages:")

@@ -73,7 +73,9 @@ total_bytes_transferred = 0  # Track the total number of bytes transferred
 for i in range(num_epochs):
     # Train dataloader
     train_dataloader = data_module.train_dataloader()
-    train_dataloader = tqdm(train_dataloader, desc=f"Epoch {i+1}/{num_epochs} - Train")
+    train_dataloader = tqdm(
+        train_dataloader, desc=f"Epoch {i + 1}/{num_epochs} - Train"
+    )
     for batch in train_dataloader:
         anchor_batch = batch["anchor"]
         positive_batch = batch["positive"]
@@ -87,7 +89,9 @@ for i in range(num_epochs):
 
     # Validation dataloader
     val_dataloader = data_module.val_dataloader()
-    val_dataloader = tqdm(val_dataloader, desc=f"Epoch {i+1}/{num_epochs} - Validation")
+    val_dataloader = tqdm(
+        val_dataloader, desc=f"Epoch {i + 1}/{num_epochs} - Validation"
+    )
     for batch in val_dataloader:
         anchor_batch = batch["anchor"]
         positive_batch = batch["positive"]
@@ -110,7 +114,7 @@ print("Positive batch shape:", positive_batch.shape)
 print("Negative batch shape:", negative_batch.shape)
 
 print(f"Elapsed time for {num_epochs} iterations: {elapsed_time} seconds")
-print(f"Average time per iteration: {elapsed_time/num_epochs} seconds")
+print(f"Average time per iteration: {elapsed_time / num_epochs} seconds")
 print(f"Data transfer speed: {data_transfer_speed} MBPS")
 
 # %%

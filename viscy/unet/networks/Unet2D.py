@@ -186,8 +186,7 @@ class Unet2d(nn.Module):
         if validate_input:
             assert x.shape[-1] == x.shape[-2], "Input must be square in xy"
             assert x.shape[-3] == self.in_channels, (
-                f"Input channels must equal network"
-                f" input channels: {self.in_channels}"
+                f"Input channels must equal network input channels: {self.in_channels}"
             )
         x = x.squeeze(2)
         # encoder

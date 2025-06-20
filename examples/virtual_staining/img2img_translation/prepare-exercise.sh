@@ -1,5 +1,5 @@
-# Run black on .py files
-# black solution.py
+# Run ruff format on .py files
+# ruff format solution.py
 
 # Convert .py to ipynb
 

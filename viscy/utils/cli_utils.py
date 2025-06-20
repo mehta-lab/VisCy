@@ -98,7 +98,7 @@ def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
         data = data.detach().cpu().numpy()
     elif not isinstance(data, np.ndarray):
         raise AttributeError(
-            f"'data' of type {type(data)} must be torch tensor" " or numpy array."
+            f"'data' of type {type(data)} must be torch tensor or numpy array."
         )
     if vmax == 0:
         vmax = np.max(data)
