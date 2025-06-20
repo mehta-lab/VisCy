@@ -84,3 +84,49 @@ requires an exclusive node on HPC OR a non-distributed system (e.g. a PC).
 with a valid `config.yaml` in order to be initialized.
 This can be "hacked" by locating the config in a directory
 called `checkpoints` beneath a valid config's directory.
+
+## DynaCell Metrics
+
+Compute metrics on DynaCell datasets using the `compute_dynacell_metrics` command:
+
+```sh
+viscy compute_dynacell_metrics -c config.yaml
+```
+
+### Configuration File Format
+
+Example configuration file:
+
+```yaml
+# Required parameters
+target_database: /path/to/target_database.csv
+pred_database: /path/to/prediction_database.csv
+output_dir: ./metrics_output
+method: intensity  # Options: 'intensity' or 'segmentation2D'
+
+# Optional parameters
+target_channel: Organelle
+pred_channel: Organelle
+# Z-slice options:
+# - Single integer (e.g., 16): Use specific z-slice
+# - List of two integers [start, end] (e.g., [15, 17]): Use range of z-slices
+# - -1: Use all available z-slices
+target_z_slice: 16  
+pred_z_slice: 16
+# You can also specify a range of z-slices:
+# target_z_slice: [15, 17]  # Use z-slices from 15 to 16 (exclusive of 17)
+# pred_z_slice: [15, 17]    # Use z-slices from 15 to 16 (exclusive of 17)
+target_cell_types: [HEK293T]  # or leave empty [] for all available
+target_organelles: [HIST2H2BE]
+target_infection_conditions: [Mock]
+pred_cell_types: [HEK293T]
+pred_organelles: [HIST2H2BE]
+pred_infection_conditions: [Mock]
+batch_size: 1
+num_workers: 0
+version: "1"
+```
+
+If cell types, organelles, or infection conditions are not specified or left empty, all available values from the respective database will be used.
+
+Using a z-slice range (e.g., `[15, 17]`) can be particularly useful for computing metrics on multiple consecutive z-slices, which is beneficial for 3D analysis or when working with volumes where the structures of interest span multiple z-slices.

@@ -1,14 +1,19 @@
+import datetime
 import logging
 from pathlib import Path
 from typing import Literal
 
+import pandas as pd
 import torch
 from iohub import open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
+from viscy.data.dynacell import DynaCellDataBase, DynaCellDataModule
 from viscy.preprocessing.precompute import precompute_array
+from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
 from viscy.utils.meta_utils import generate_normalization_metadata
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -128,3 +133,240 @@ class VisCyTrainer(Trainer):
             include_wells=include_wells,
             exclude_fovs=exclude_fovs,
         )
+
+    def compute_dynacell_metrics(
+        self,
+        target_database: Path,
+        pred_database: Path,
+        output_dir: Path,
+        method: str = "intensity",
+        target_channel: str = "Organelle",
+        pred_channel: str = "Organelle",
+        target_z_slice: int | list[int] = 16,
+        pred_z_slice: int | list[int] = 16,
+        target_cell_types: list[str] = None,
+        target_organelles: list[str] = None,
+        target_infection_conditions: list[str] = None,
+        pred_cell_types: list[str] = None,
+        pred_organelles: list[str] = None,
+        pred_infection_conditions: list[str] = None,
+        batch_size: int = 1,
+        num_workers: int = 0,
+        version: str = "1",
+        model: LightningModule | None = None,
+    ):
+        """
+        Compute metrics for DynaCell datasets.
+
+        Parameters
+        ----------
+        target_database : Path
+            Path to the target DynaCell database file
+        pred_database : Path
+            Path to the prediction DynaCell database file
+        output_dir : Path
+            Directory to save output metrics
+        method : str, optional
+            Type of metrics to compute ('intensity' or 'segmentation2D'), by default "intensity"
+        target_channel : str, optional
+            Channel name for target dataset, by default "Organelle"
+        pred_channel : str, optional
+            Channel name for prediction dataset, by default "Organelle"
+        target_z_slice : int | list[int], optional
+            Z-slice to use for target dataset, by default 16
+        pred_z_slice : int | list[int], optional
+            Z-slice to use for prediction dataset, by default 16
+        target_cell_types : list[str], optional
+            Cell types to include for target dataset, by default None (all available)
+        target_organelles : list[str], optional
+            Organelles to include for target dataset, by default None (all available)
+        target_infection_conditions : list[str], optional
+            Infection conditions to include for target dataset, by default None (all available)
+        pred_cell_types : list[str], optional
+            Cell types to include for prediction dataset, by default None (all available)
+        pred_organelles : list[str], optional
+            Organelles to include for prediction dataset, by default None (all available)
+        pred_infection_conditions : list[str], optional
+            Infection conditions to include for prediction dataset, by default None (all available)
+        batch_size : int, optional
+            Batch size for processing, by default 1
+        num_workers : int, optional
+            Number of workers for data loading, by default 0
+        version : str, optional
+            Version string for output directory, by default "1"
+        model : LightningModule | None, optional
+            Ignored placeholder, by default None
+        """
+        if model is not None:
+            _logger.warning("Ignoring model configuration for DynaCell metrics.")
+
+        # Set default empty lists for filters
+        target_cell_types = target_cell_types or []
+        target_organelles = target_organelles or []
+        target_infection_conditions = target_infection_conditions or []
+        pred_cell_types = pred_cell_types or []
+        pred_organelles = pred_organelles or []
+        pred_infection_conditions = pred_infection_conditions or []
+
+        # Create output directory
+        output_dir.mkdir(parents=True, exist_ok=True)
+
+        # Generate timestamp for unique versioning
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        # Handle z_slice values (-1 means all slices)
+        if isinstance(target_z_slice, list) and len(target_z_slice) == 2:
+            # Use the list as a range [start, stop] for the slice
+            if target_z_slice[1] - target_z_slice[0] == 1:
+                # If range length is 1, just use the single integer
+                target_z_slice_value = int(target_z_slice[0])
+            else:
+                target_z_slice_value = slice(target_z_slice[0], target_z_slice[1])
+        else:
+            target_z_slice_value = (
+                slice(None) if target_z_slice == -1 else int(target_z_slice)
+            )
+
+        if isinstance(pred_z_slice, list) and len(pred_z_slice) == 2:
+            # Use the list as a range [start, stop] for the slice
+            if pred_z_slice[1] - pred_z_slice[0] == 1:
+                # If range length is 1, just use the single integer
+                pred_z_slice_value = int(pred_z_slice[0])
+            else:
+                pred_z_slice_value = slice(pred_z_slice[0], pred_z_slice[1])
+        else:
+            pred_z_slice_value = (
+                slice(None) if pred_z_slice == -1 else int(pred_z_slice)
+            )
+
+        # Default to all available values if not specified for target database
+        if (
+            not target_cell_types
+            or not target_organelles
+            or not target_infection_conditions
+        ):
+            _logger.info("Loading target database to get available values...")
+            df = pd.read_csv(target_database, dtype={"FOV": str})
+
+            if not target_cell_types:
+                target_cell_types = df["Cell type"].unique().tolist()
+                _logger.info(
+                    f"Using all available target cell types: {target_cell_types}"
+                )
+
+            if not target_organelles:
+                target_organelles = df["Organelle"].unique().tolist()
+                _logger.info(
+                    f"Using all available target organelles: {target_organelles}"
+                )
+
+            if not target_infection_conditions:
+                target_infection_conditions = df["Infection"].unique().tolist()
+                _logger.info(
+                    f"Using all available target infection conditions: {target_infection_conditions}"
+                )
+
+        # Default to all available values if not specified for prediction database
+        if not pred_cell_types or not pred_organelles or not pred_infection_conditions:
+            _logger.info("Loading prediction database to get available values...")
+            df = pd.read_csv(pred_database, dtype={"FOV": str})
+
+            if not pred_cell_types:
+                pred_cell_types = df["Cell type"].unique().tolist()
+                _logger.info(
+                    f"Using all available prediction cell types: {pred_cell_types}"
+                )
+
+            if not pred_organelles:
+                pred_organelles = df["Organelle"].unique().tolist()
+                _logger.info(
+                    f"Using all available prediction organelles: {pred_organelles}"
+                )
+
+            if not pred_infection_conditions:
+                pred_infection_conditions = df["Infection"].unique().tolist()
+                _logger.info(
+                    f"Using all available prediction infection conditions: {pred_infection_conditions}"
+                )
+
+        # Create target database
+        _logger.info(
+            f"Creating target database from {target_database} with channel '{target_channel}'"
+        )
+        target_db = DynaCellDataBase(
+            database_path=target_database,
+            cell_types=target_cell_types,
+            organelles=target_organelles,
+            infection_conditions=target_infection_conditions,
+            channel_name=target_channel,
+            z_slice=target_z_slice_value,
+        )
+
+        # Create prediction database
+        _logger.info(
+            f"Creating prediction database from {pred_database} with channel '{pred_channel}'"
+        )
+        pred_db = DynaCellDataBase(
+            database_path=pred_database,
+            cell_types=pred_cell_types,
+            organelles=pred_organelles,
+            infection_conditions=pred_infection_conditions,
+            channel_name=pred_channel,
+            z_slice=pred_z_slice_value,
+        )
+
+        # Create datamodule
+        _logger.info("Creating DynaCellDataModule...")
+        dm = DynaCellDataModule(
+            target_database=target_db,
+            pred_database=pred_db,
+            batch_size=batch_size,
+            num_workers=num_workers,
+        )
+
+        # Setup datamodule
+        dm.setup(stage="test")
+
+        # Determine run-specific output paths
+        method_dir = output_dir / method
+        method_dir.mkdir(exist_ok=True)
+
+        # Unique name based on method and timestamp
+        run_name = f"{method}_{timestamp}"
+
+        # Create logger
+        _logger.info(f"Creating logger for run '{run_name}' with version '{version}'")
+        logger = CSVLogger(save_dir=method_dir, name=run_name, version=version)
+
+        # Create trainer
+        trainer = Trainer(logger=logger)
+
+        # Select and run appropriate metrics
+        if method == "segmentation2D":
+            _logger.info("Running segmentation metrics...")
+            metrics_module = SegmentationMetrics()
+        else:  # intensity
+            _logger.info("Running intensity metrics...")
+            metrics_module = IntensityMetrics()
+
+        # Run the metrics computation
+        trainer.test(metrics_module, datamodule=dm)
+
+        # Find the metrics file
+        metrics_file = method_dir / run_name / version / "metrics.csv"
+
+        if metrics_file.exists():
+            metrics_df = pd.read_csv(metrics_file)
+            _logger.info(f"Metrics saved to: {metrics_file}")
+            _logger.info(f"Computed {len(metrics_df)} metric rows")
+
+            # Display columns in the metrics
+            _logger.info(f"Metrics columns: {metrics_df.columns.tolist()}")
+
+            # Display a preview of the metrics
+            if not metrics_df.empty:
+                _logger.info(f"Metrics preview:\n{metrics_df.head().to_string()}")
+        else:
+            _logger.warning(f"No metrics file found at {metrics_file}")
+
+        return metrics_file if metrics_file.exists() else None
