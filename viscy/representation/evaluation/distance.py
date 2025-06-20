@@ -49,19 +49,24 @@ def compute_displacement(
     dict[int, list[float]]
         Dictionary mapping τ to list of displacements for all particles and initial times
     """
+    # Get unique tracks efficiently using pandas operations
+    unique_tracks_df = (
+        embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
+    )
+
     # Get data from dataset
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
     timepoints = embedding_dataset["t"].values
     embeddings = embedding_dataset["features"].values
-    # Get unique tracks
-    unique_tracks = set(zip(fov_names, track_ids))
 
     # Initialize results dictionary with empty lists
     displacement_per_tau = defaultdict(list)
 
     # Process each track
-    for fov_name, track_id in unique_tracks:
+    for fov_name, track_id in zip(
+        unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
+    ):
         # Get sorted track data
         mask = (fov_names == fov_name) & (track_ids == track_id)
         times = timepoints[mask]
