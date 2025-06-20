@@ -1,9 +1,9 @@
 import atexit
 import base64
+import json
 import logging
 from io import BytesIO
 from pathlib import Path
-import json
 
 import dash
 import dash.dependencies as dd
