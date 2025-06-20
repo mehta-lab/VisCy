@@ -242,14 +242,14 @@ def main(config):
     )
 
     # Get dimensionality reduction parameters from config
-    PHATE_kwargs = None
-    PCA_kwargs = None
+    phate_kwargs = None
+    pca_kwargs = None
 
     if "embedding" in cfg:
-        if "PHATE_kwargs" in cfg["embedding"]:
-            PHATE_kwargs = cfg["embedding"]["PHATE_kwargs"]
-        if "PCA_kwargs" in cfg["embedding"]:
-            PCA_kwargs = cfg["embedding"]["PCA_kwargs"]
+        if "phate_kwargs" in cfg["embedding"]:
+            phate_kwargs = cfg["embedding"]["phate_kwargs"]
+        if "pca_kwargs" in cfg["embedding"]:
+            pca_kwargs = cfg["embedding"]["pca_kwargs"]
     # Check if output path exists and should be overwritten
     if "output_path" not in cfg["paths"]:
         raise ValueError(
@@ -270,8 +270,8 @@ def main(config):
     # Set up EmbeddingWriter callback
     embedding_writer = EmbeddingWriter(
         output_path=output_path,
-        PHATE_kwargs=PHATE_kwargs,
-        PCA_kwargs=PCA_kwargs,
+        phate_kwargs=phate_kwargs,
+        pca_kwargs=pca_kwargs,
         overwrite=overwrite,
     )
 

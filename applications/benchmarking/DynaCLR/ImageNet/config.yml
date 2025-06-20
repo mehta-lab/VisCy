@@ -24,9 +24,9 @@ datamodule:
   - 15
   - 45
 embedding:
-  PCA_kwargs:
+  pca_kwargs:
     n_components: 8
-  PHATE_kwargs:
+  phate_kwargs:
     decay: 40
     knn: 5
     n_components: 2
