@@ -1,0 +1,58 @@
+# lightning.pytorch==2.4.0
+
+# TODO: Check the TODO's and change the paths to the correct ones
+
+seed_everything: 42
+trainer:
+  accelerator: auto
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks: []
+model:
+  class_path: viscy.representation.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy.representation.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 1
+        stem_kernel_size:
+        - 1
+        - 4
+        - 4
+        stem_stride:
+        - 1
+        - 4
+        - 4
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    loss_function:
+      class_path: pytorch_metric_learning.losses.NTXentLoss
+      init_args:
+        temperature: 0.2
+        embedding_regularizer: null
+        embedding_reg_weight: 1
+        reducer: null
+        distance: null
+        collect_stats: null
+    lr: 2.0e-05
+    schedule: Constant
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    log_embeddings: false
+    example_input_array_shape:
+    - 1
+    - 1
+    - 1
+    - 256
+    - 256
+ckpt_path: /epoch=19-step=12960.ckpt #TODO: change to the checkpoint path
+format: onnx
+export_path: dynaclr_microglia.onnx #TODO: change to the export path
+
+
+

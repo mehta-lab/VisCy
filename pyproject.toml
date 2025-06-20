@@ -27,8 +27,7 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
-    "pytorch-metric-learning>2.0.0",
-]
+    "pytorch-metric-learning>2.0.0"]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -41,8 +40,9 @@ metrics = [
     "umap-learn",
     "captum>=0.7.0",
     "phate",
+    "mahotas",
 ]
-examples = ["napari", "jupyter", "jupytext"]
+examples = ["napari", "jupyter", "jupytext", "transformers>=4.51.3"]
 visual = [
     "ipykernel",
     "graphviz",
@@ -51,6 +51,7 @@ visual = [
     "plotly",
     "nbformat",
     "cmap",
+    "dash",
 ]
 dev = [
     "viscy[metrics,examples,visual]",

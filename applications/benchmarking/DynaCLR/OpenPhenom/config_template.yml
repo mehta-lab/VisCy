@@ -1,0 +1,66 @@
+# OpenPhenom Embeddings Configuration
+
+# Paths section
+paths:
+  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr
+  output_path: "/home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/OpenPhenom/openphenom_sec61b_n_phase_3.zarr"
+
+# Model configuration
+model:
+  # Channel-specific 5D input handling methods
+  # Options: "middle_slice", "mean", "max"
+  # Default is "middle_slice" if not specified
+  channel_reduction_methods:
+    "Phase3D": "middle_slice"  # For phase contrast, middle slice often works well
+    "raw GFP EX488 EM525-45": "max"    
+
+# Data module configuration
+datamodule:
+  source_channel: 
+    - Phase3D
+    - "raw GFP EX488 EM525-45"
+  z_range: [25, 40]
+  batch_size: 32
+  num_workers: 10
+  initial_yx_patch_size: [192, 192]
+  final_yx_patch_size: [192, 192]
+  predict_cells: true
+  include_fov_names:
+    - "/C/2/000000"
+    - "/C/2/000000"
+    - "/C/2/000000"
+    - "/C/2/000000"
+  include_track_ids: [33,60,57,65]
+  normalizations:
+    - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+      init_args:
+        keys: ["Phase3D"]
+        lower: 50
+        upper: 99
+        b_min: 0.0
+        b_max: 1.0
+    - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+      init_args:
+        keys: ["raw GFP EX488 EM525-45"]
+        lower: 50
+        upper: 99
+        b_min: 0.0
+        b_max: 1.0
+
+# Embedding parameters
+embedding:
+  phate_kwargs:
+    n_components: 2
+    knn: 5
+    decay: 40
+    n_jobs: -1
+    random_state: 42
+  pca_kwargs:
+    n_components: 2
+
+# Execution configuration
+execution:
+  overwrite: false
+  save_config: true
+  show_config: true

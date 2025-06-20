@@ -1,0 +1,68 @@
+# TODO: point to the path to save the embeddings
+# TODO: point to the path to the data
+# TODO: point to the path to the tracks
+# TODO: point to the path to the checkpoint
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy.representation.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: #TODO point to the path to save the embeddings
+        phate_kwargs: #TODO modify default parameters. Set to null to skip PHATE computation.
+          knn: 5
+          decay: 40
+          n_jobs: -1
+          random_state: 42
+        pca_kwargs: #TODO modify default parameters. Set to null to skip PCA computation.
+          n_components: 8
+  inference_mode: true
+model:
+  class_path: viscy.representation.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy.representation.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 2
+        in_stack_depth: 30
+        stem_kernel_size: [5, 4, 4]
+        stem_stride: [5, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    example_input_array_shape: [1, 2, 30, 256, 256]
+data:
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: #TODO point to the path to the data (e.g. /registered_test.zarr)
+    tracks_path: #TODO point to the path to the tracks (e.g. /track_test.zarr)
+    source_channel:
+      - Phase3D
+      - RFP
+    z_range: [15, 45]
+    batch_size: 32
+    num_workers: 30
+    initial_yx_patch_size: [160, 160]
+    final_yx_patch_size: [160, 160]
+    normalizations:
+      - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [RFP]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+return_predictions: false
+ckpt_path: #TODO point to the path to the checkpoint (e.g. /checkpoints/epoch=94-step=2375.ckpt)
