@@ -19,6 +19,7 @@ def main():
     # Config for the visualization app
     # TODO: Update the paths to the downloaded data. By default the data is downloaded to ~/data/dynaclr/demo
     download_root = Path.home() / "data/dynaclr/demo"
+    output_path = Path.home() / "data/dynaclr/demo/embedding-web-visualization"
     viz_config = {
         "data_path": download_root / "registered_test.zarr",  # TODO add path to data
         "tracks_path": download_root / "track_test.zarr",  # TODO add path to tracks
@@ -32,6 +33,7 @@ def main():
         "yx_patch_size": (160, 160),
         "z_range": (24, 29),
         "num_PC_components": 8,
+        "output_dir": output_path,
     }
 
     # Create and run the visualization app
