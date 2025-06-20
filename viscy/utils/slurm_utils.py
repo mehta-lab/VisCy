@@ -7,8 +7,8 @@ def calculate_dataloader_settings(
     sample_memory_mb: float,
     available_ram_gb: float | None = None,
     available_cpu_cores: int | None = None,
-    target_ram_usage_percent: float = 0.25,
-    target_vram_usage_percent: float = 0.1,
+    target_ram_usage: float = 0.25,
+    target_vram_usage: float = 0.1,
     available_vram_gb: float | None = None,
     use_gpu: bool = True,
 ) -> dict:
@@ -25,9 +25,9 @@ def calculate_dataloader_settings(
         Available RAM in GB. If None, will use system RAM
     available_cpu_cores: int, optional
         Number of CPU cores. If None, will use system cores
-    target_ram_usage_percent: float, optional
+    target_ram_usage: float, optional
         Target fraction of RAM to use for prefetching. If None, will use 0.25 of RAM.
-    target_vram_usage_percent: float, optional
+    target_vram_usage: float, optional
         Target fraction of VRAM to use for prefetching. If None, will use 0.1 of VRAM.
     available_vram_gb: float, optional
         Available VRAM in GB. If None, will use system VRAM.
@@ -48,7 +48,7 @@ def calculate_dataloader_settings(
     batch_memory_mb = batch_size * sample_memory_mb
 
     # Calculate maximum prefetch factor based on RAM
-    max_prefetch_memory_mb = (available_ram_gb * 1024) * target_ram_usage_percent
+    max_prefetch_memory_mb = (available_ram_gb * 1024) * target_ram_usage
     max_prefetch_factor_ram = int(
         max_prefetch_memory_mb / (batch_memory_mb * available_cpu_cores)
     )
@@ -66,9 +66,7 @@ def calculate_dataloader_settings(
                     "use_gpu is True but no VRAM specified and CUDA is not available"
                 )
 
-        max_prefetch_memory_mb_vram = (
-            available_vram_gb * 1024
-        ) * target_vram_usage_percent
+        max_prefetch_memory_mb_vram = (available_vram_gb * 1024) * target_vram_usage
         max_prefetch_factor_vram = int(
             max_prefetch_memory_mb_vram / (batch_memory_mb * available_cpu_cores)
         )
