@@ -131,7 +131,7 @@ def write_embedding_dataset(
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
         _, UMAP = _fit_transform_umap(features, **umap_kwargs)
         for i in range(UMAP.shape[1]):
-            ultrack_indices[f"UMAP{i+1}"] = UMAP[:, i]
+            ultrack_indices[f"UMAP{i + 1}"] = UMAP[:, i]
 
     if phate_kwargs:
         # Update with user-provided kwargs
@@ -148,7 +148,7 @@ def write_embedding_dataset(
             _logger.debug("Computing PHATE")
             _, PHATE = compute_phate(features, **phate_kwargs)
             for i in range(PHATE.shape[1]):
-                ultrack_indices[f"PHATE{i+1}"] = PHATE[:, i]
+                ultrack_indices[f"PHATE{i + 1}"] = PHATE[:, i]
         except Exception as e:
             _logger.warning(f"PHATE computation failed: {str(e)}")
 
@@ -159,7 +159,7 @@ def write_embedding_dataset(
             _logger.debug("Computing PCA")
             PCA_features, _ = compute_pca(features, **pca_kwargs)
             for i in range(PCA_features.shape[1]):
-                ultrack_indices[f"PCA{i+1}"] = PCA_features[:, i]
+                ultrack_indices[f"PCA{i + 1}"] = PCA_features[:, i]
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
 

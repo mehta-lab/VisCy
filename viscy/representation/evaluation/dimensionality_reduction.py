@@ -122,7 +122,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
 
     # Add PCA components for features
     for i in range(pc_features.shape[1]):
-        pca_dict[f"PCA{i+1}"] = pc_features[:, i]
+        pca_dict[f"PCA{i + 1}"] = pc_features[:, i]
 
     # Create DataFrame with all components
     pca_df = pd.DataFrame(pca_dict)

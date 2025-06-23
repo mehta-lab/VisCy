@@ -120,18 +120,18 @@ class EmbeddingVisualizationApp:
 
             # Add PCA coordinates to the features dataframe
             for i in range(self.num_PC_components):
-                self.features_df[f"PCA{i+1}"] = pca_coords[:, i]
+                self.features_df[f"PCA{i + 1}"] = pca_coords[:, i]
 
             # Store explained variance for PCA
             self.pca_explained_variance = [
-                f"PC{i+1} ({var:.1f}%)"
+                f"PC{i + 1} ({var:.1f}%)"
                 for i, var in enumerate(pca.explained_variance_ratio_ * 100)
             ]
 
             # Add PCA options
             for i, pc_label in enumerate(self.pca_explained_variance):
-                dim_options.append({"label": pc_label, "value": f"PCA{i+1}"})
-                existing_dims.append(f"PCA{i+1}")
+                dim_options.append({"label": pc_label, "value": f"PCA{i + 1}"})
+                existing_dims.append(f"PCA{i + 1}")
 
         # Check for UMAP coordinates
         umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
@@ -1121,7 +1121,7 @@ class EmbeddingVisualizationApp:
         unique_tracks = self.filtered_features_df["track_id"].unique()
         cmap = plt.cm.tab20
         track_colors = {
-            track_id: f"rgb{tuple(int(x*255) for x in cmap(i % 20)[:3])}"
+            track_id: f"rgb{tuple(int(x * 255) for x in cmap(i % 20)[:3])}"
             for i, track_id in enumerate(unique_tracks)
         }
 
@@ -1206,7 +1206,7 @@ class EmbeddingVisualizationApp:
             opacities = []
             if self.clusters:
                 cluster_colors = [
-                    f"rgb{tuple(int(x*255) for x in plt.cm.Set2(i % 8)[:3])}"
+                    f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}"
                     for i in range(len(self.clusters))
                 ]
                 point_to_cluster = {}
@@ -1917,7 +1917,7 @@ class EmbeddingVisualizationApp:
 
         # Create cluster colors once
         cluster_colors = [
-            f"rgb{tuple(int(x*255) for x in plt.cm.Set2(i % 8)[:3])}"
+            f"rgb{tuple(int(x * 255) for x in plt.cm.Set2(i % 8)[:3])}"
             for i in range(len(self.clusters))
         ]
 
