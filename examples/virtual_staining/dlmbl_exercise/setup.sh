@@ -7,7 +7,7 @@ conda deactivate
 conda create -y --name 06_image_translation python=3.11
 
 # Install ipykernel in the environment.
-conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name 06_image_translation
+conda install -y ipykernel nbformat nbconvert ruff jupytext ipywidgets --name 06_image_translation
 # Specifying the environment explicitly.
 # conda activate sometimes doesn't work from within shell scripts.
 

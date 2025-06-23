@@ -70,7 +70,7 @@ def compute_phate(
         for i in range(
             min(2, phate_embedding.shape[1])
         ):  # Only update PHATE1 and PHATE2
-            embedding_dataset[f"PHATE{i+1}"].values = phate_embedding[:, i]
+            embedding_dataset[f"PHATE{i + 1}"].values = phate_embedding[:, i]
 
     return phate_model, phate_embedding
 

@@ -8,13 +8,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: psf/black@stable
+      - uses: astral-sh/ruff-action@v3
         with:
-          src: "viscy"
-          options: "--check --verbose"
-      - uses: chartboost/ruff-action@v1
-        with:
-          src: "viscy"
+          src: viscy
+          args: check --verbose
+      - run: ruff format --check viscy tests
 
   test:
     name: Test

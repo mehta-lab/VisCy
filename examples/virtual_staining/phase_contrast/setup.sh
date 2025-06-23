@@ -7,7 +7,7 @@ conda deactivate
 conda create -y --name vs_Phc python=3.11
 
 # Install ipykernel in the environment.
-conda install -y ipykernel nbformat nbconvert black jupytext ipywidgets --name vs_Phc
+conda install -y ipykernel nbformat nbconvert ruff jupytext ipywidgets --name vs_Phc
 # Specifying the environment explicitly.
 # conda activate sometimes doesn't work from within shell scripts.
 
