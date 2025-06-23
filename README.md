@@ -42,14 +42,14 @@ Try the 2D virtual staining demo of cell nuclei and membrane from label-free ima
 
 ### Cytoland @ Virtual Cells Platform
 
-Cytoland models are accessible via the Chan Zuckerberg Initiative's Virtual Cells Platform
+Cytoland models are accessible via the Chan Zuckerberg Initiative's Virtual Cells Platform.
+Notebooks are available as pre-rendered pages or on Colab:
 
 - [Model card](https://virtualcellmodels.cziscience.com/model/01961244-1970-7851-a4b9-fdbfa2fba9b2)
 - [Quick-start (VSCyto2D)](https://virtualcellmodels.cziscience.com/quickstart/cytoland-quickstart)
 - CLI tutorials:
   - [VSCyto3D](https://virtualcellmodels.cziscience.com/tutorial/cytoland-tutorial)
   - [VSNeuromast](https://virtualcellmodels.cziscience.com/tutorial/cytoland-neuromast)
-Notebooks are available as pre-rendered pages or on Colab:
 
 ### Tutorials
 
