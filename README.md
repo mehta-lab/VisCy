@@ -29,7 +29,7 @@ Please choose a stable release from PyPI for production use.
 
 ## Cytoland (robust virtual staining)
 
-### Online demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/chanzuckerberg/Cytoland)
+### Demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/chanzuckerberg/Cytoland)
 
 Try the 2D virtual staining demo of cell nuclei and membrane from label-free images on
 [Hugging Face](https://huggingface.co/spaces/chanzuckerberg/Cytoland).
@@ -70,7 +70,7 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 |:---:|:---:|:---:|
 | [![HEK293T](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_1.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/d53a81eb-eb37-44f3-b522-8bd7bddc7755) | [![Neuromast](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_3.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/4cef8333-895c-486c-b260-167debb7fd64) | [![A549](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/figures/svideo_5.png?raw=true)](https://github.com/mehta-lab/VisCy/assets/67518483/287737dd-6b74-4ce3-8ee5-25fbf8be0018) |
 
-### Reference
+### References
 
 The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
 
@@ -123,35 +123,19 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
 
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
-### Pipeline
 
-A full illustration of the virtual staining pipeline can be found [here](https://github.com/mehta-lab/VisCy/blob/dde3e27482e58a30f7c202e56d89378031180c75/docs/virtual_staining.md).
+## DynaCLR (Embedding Cell Dynamics via Contrastive Learning of Representations)
 
-## DynaCLR (Contrastive learning of representations of cell dynamics)
+DynaCLR is a self-supervised method for learning robust and temporally-regularized representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks -- including cell state classification with efficient human annotations, knowledge distillation across fluorescence and label-free imaging channels, and alignment of cell state dynamics.
 
-We are currently developing self-supervised representation learning to map cell state dynamics in response to perturbations,
-with focus on cell and organelle remodeling due to viral infection.
+### Preprint
+[DynaCLR on arXiv](https://arxiv.org/abs/2410.11281):
 
-See our recent work on temporally regularized contrastive sampling method
-for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
+![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
-<details>
- <summary> Pradeep, Imran, Liu et al., 2024 </summary>
 
-  <pre><code>
-@misc{pradeep_contrastive_2024,
-      title={Contrastive learning of cell state dynamics in response to perturbations},
-      author={Soorya Pradeep and Alishba Imran and Ziwen Liu and Taylla Milena Theodoro and Eduardo Hirata-Miyasaki and Ivan Ivanov and Madhura Bhave and Sudip Khadka and Hunter Woosley and Carolina Arias and Shalin B. Mehta},
-      year={2024},
-      eprint={2410.11281},
-      archivePrefix={arXiv},
-      primaryClass={cs.CV},
-      url={https://arxiv.org/abs/2410.11281},
-}
-    </code></pre>
-  </details>
-
-### Workflow demo
+### Demo
+- [DynaCLR demos](examples/DynaCLR/README.md)
 
 - Example test dataset, model checkpoint, and predictions can be found
 [here](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_demo/).
@@ -159,7 +143,6 @@ for representation learning on [arXiv](https://arxiv.org/abs/2410.11281).
 - See tutorial on exploration of learned embeddings with napari-iohub
 [here](https://github.com/czbiohub-sf/napari-iohub/wiki/View-tracked-cells-and-their-associated-predictions/).
 
-![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/9eaab7eca50d684d8a473ad9da089aeab0e8f6a0/docs/figures/dynaCLR_schematic.png?raw=true)
 
 ## Installation
 
