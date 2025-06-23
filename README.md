@@ -27,7 +27,7 @@ the main branch may occasionally be updated with break-incompatible changes
 which are subsequently shipped in releases following [semantic versioning](https://semver.org/).
 Please choose a stable release from PyPI for production use.
 
-## Cytoland (robust virtual staining)
+## Cytoland (Robust Virtual Staining)
 
 ### Demo [![Open in Spaces](https://huggingface.co/datasets/huggingface/badges/resolve/main/open-in-hf-spaces-sm-dark.svg)](https://huggingface.co/spaces/chanzuckerberg/Cytoland)
 
@@ -125,7 +125,7 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
     </code></pre>
   </details>
 
-### Library of virtual staining (VS) models
+### Library of Virtual Staining (VS) Models
 
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
 
