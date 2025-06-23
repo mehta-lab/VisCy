@@ -56,17 +56,17 @@ def test_cell_features_with_labels_hcs(
             patch_std = np.std(image_patch)
             if patch_std < 1e-10:
                 # For constant images, kurtosis and skewness should be NaN
-                assert np.isnan(
-                    value
-                ), f"Feature {col} should be NaN for constant image (std={patch_std})"
+                assert np.isnan(value), (
+                    f"Feature {col} should be NaN for constant image (std={patch_std})"
+                )
             else:
                 # For non-constant images, values should be finite and reasonable
-                assert np.isfinite(
-                    value
-                ), f"Feature {col} is not finite for non-constant image (std={patch_std})"
-                assert (
-                    -10 < value < 10
-                ), f"Feature {col} = {value} seems unreasonable for random data"
+                assert np.isfinite(value), (
+                    f"Feature {col} is not finite for non-constant image (std={patch_std})"
+                )
+                assert -10 < value < 10, (
+                    f"Feature {col} = {value} seems unreasonable for random data"
+                )
         else:
             assert np.isfinite(value), f"Feature {col} is not finite: {value}"
 
