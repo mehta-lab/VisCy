@@ -96,7 +96,6 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
 	year = {2025},
 	note = {Publisher: Nature Publishing Group},
 	pages = {1--15},
-	file = {Full Text PDF:/Users/shalin.mehta/Zotero/storage/XCXBDJ5N/Liu et al. - 2025 - Robust virtual staining of landmark organelles wit.pdf:application/pdf},
 }
 </code></pre>
 </details>
