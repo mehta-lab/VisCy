@@ -40,16 +40,16 @@ Try the 2D virtual staining demo of cell nuclei and membrane from label-free ima
 </a>
 </p>
 
-### Virtual Cell Models
+### Cytoland @ Virtual Cells Platform
 
-Cytoland models are part of the virtual cell models.
-Notebooks are available as pre-rendered pages or on Colab:
+Cytoland models are accessible via the Chan Zuckerberg Initiative's Virtual Cells Platform
 
 - [Model card](https://virtualcellmodels.cziscience.com/model/01961244-1970-7851-a4b9-fdbfa2fba9b2)
 - [Quick-start (VSCyto2D)](https://virtualcellmodels.cziscience.com/quickstart/cytoland-quickstart)
 - CLI tutorials:
   - [VSCyto3D](https://virtualcellmodels.cziscience.com/tutorial/cytoland-tutorial)
-  - VSNeuromast
+  - [VSNeuromast](https://virtualcellmodels.cziscience.com/tutorial/cytoland-neuromast)
+Notebooks are available as pre-rendered pages or on Colab:
 
 ### Tutorials
 
@@ -72,25 +72,32 @@ See the full gallery [here](https://github.com/mehta-lab/VisCy/wiki/Gallery).
 
 ### References
 
-The virtual staining models and training protocols are reported in our recent [preprint on robust virtual staining](https://www.biorxiv.org/content/10.1101/2024.05.31.596901).
+The Cytoland models and training protocols are reported in our recent [paper on robust virtual staining in Nature Machine Intelligence]([https://www.biorxiv.org/content/10.1101/2024.05.31.596901](https://www.nature.com/articles/s42256-025-01046-2)).
 
-This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020](https://elifesciences.org/articles/55502).
+This package evolved from the [TensorFlow version of virtual staining pipeline](https://github.com/mehta-lab/microDL), which we reported in [this paper in 2020 in eLife](https://elifesciences.org/articles/55502).
 
 <details>
-  <summary>Liu, Hirata-Miyasaki et al., 2024</summary>
+  <summary>Liu, Hirata-Miyasaki et al., 2025</summary>
 
   <pre><code>
-  @article {Liu2024.05.31.596901,
-          author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna and Foley, Christian and Chandler, Talon and Ivanov, Ivan and Woosley, Hunter and Lao, Tiger and Balasubramanian, Akilandeswari and Liu, Chad and Leonetti, Manu and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
-          title = {Robust virtual staining of landmark organelles},
-          elocation-id = {2024.05.31.596901},
-          year = {2024},
-          doi = {10.1101/2024.05.31.596901},
-          publisher = {Cold Spring Harbor Laboratory},
-          URL = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901},
-          eprint = {https://www.biorxiv.org/content/early/2024/06/03/2024.05.31.596901.full.pdf},
-          journal = {bioRxiv}
-      }
+ 
+@article{liu_robust_2025,
+	title = {Robust virtual staining of landmark organelles with {Cytoland}},
+	copyright = {2025 The Author(s)},
+	issn = {2522-5839},
+	url = {https://www.nature.com/articles/s42256-025-01046-2},
+	doi = {10.1038/s42256-025-01046-2},
+	abstract = {Correlative live-cell imaging of landmark organelles—such as nuclei, nucleoli, cell membranes, nuclear envelope and lipid droplets—is critical for systems cell biology and drug discovery. However, achieving this with molecular labels alone remains challenging. Virtual staining of multiple organelles and cell states from label-free images with deep neural networks is an emerging solution. Virtual staining frees the light spectrum for imaging molecular sensors, photomanipulation or other tasks. Current methods for virtual staining of landmark organelles often fail in the presence of nuisance variations in imaging, culture conditions and cell types. Here we address this with Cytoland, a collection of models for robust virtual staining of landmark organelles across diverse imaging parameters, cell states and types. These models were trained with self-supervised and supervised pre-training using a flexible convolutional architecture (UNeXt2) and augmentations inspired by image formation of light microscopes. Cytoland models enable virtual staining of nuclei and membranes across multiple cell types—including human cell lines, zebrafish neuromasts, induced pluripotent stem cells (iPSCs) and iPSC-derived neurons—under a range of imaging conditions. We assess models using intensity, segmentation and application-specific measurements obtained from virtually and experimentally stained nuclei and membranes. These models rescue missing labels, correct non-uniform labelling and mitigate photobleaching. We share multiple pre-trained models, open-source software (VisCy) for training, inference and deployment, and the datasets.},
+	language = {en},
+	urldate = {2025-06-23},
+	journal = {Nature Machine Intelligence},
+	author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna V. and Foley, Christian and Chandler, Talon and Ivanov, Ivan E. and Woosley, Hunter O. and Lee, See-Chi and Khadka, Sudip and Lao, Tiger and Balasubramanian, Akilandeswari and Marreiros, Rita and Liu, Chad and Januel, Camille and Leonetti, Manuel D. and Aviner, Ranen and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+	month = jun,
+	year = {2025},
+	note = {Publisher: Nature Publishing Group},
+	pages = {1--15},
+	file = {Full Text PDF:/Users/shalin.mehta/Zotero/storage/XCXBDJ5N/Liu et al. - 2025 - Robust virtual staining of landmark organelles wit.pdf:application/pdf},
+}
 </code></pre>
 </details>
 
