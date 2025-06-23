@@ -80,28 +80,27 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
   <summary>Liu, Hirata-Miyasaki et al., 2025</summary>
 
   <pre><code>
- 
-@article{liu_robust_2025,
-	title = {Robust virtual staining of landmark organelles with {Cytoland}},
-	copyright = {2025 The Author(s)},
-	issn = {2522-5839},
-	url = {https://www.nature.com/articles/s42256-025-01046-2},
-	doi = {10.1038/s42256-025-01046-2},
-	abstract = {Correlative live-cell imaging of landmark organelles—such as nuclei, nucleoli, cell membranes, nuclear envelope and lipid droplets—is critical for systems cell biology and drug discovery. However, achieving this with molecular labels alone remains challenging. Virtual staining of multiple organelles and cell states from label-free images with deep neural networks is an emerging solution. Virtual staining frees the light spectrum for imaging molecular sensors, photomanipulation or other tasks. Current methods for virtual staining of landmark organelles often fail in the presence of nuisance variations in imaging, culture conditions and cell types. Here we address this with Cytoland, a collection of models for robust virtual staining of landmark organelles across diverse imaging parameters, cell states and types. These models were trained with self-supervised and supervised pre-training using a flexible convolutional architecture (UNeXt2) and augmentations inspired by image formation of light microscopes. Cytoland models enable virtual staining of nuclei and membranes across multiple cell types—including human cell lines, zebrafish neuromasts, induced pluripotent stem cells (iPSCs) and iPSC-derived neurons—under a range of imaging conditions. We assess models using intensity, segmentation and application-specific measurements obtained from virtually and experimentally stained nuclei and membranes. These models rescue missing labels, correct non-uniform labelling and mitigate photobleaching. We share multiple pre-trained models, open-source software (VisCy) for training, inference and deployment, and the datasets.},
-	language = {en},
-	urldate = {2025-06-23},
-	journal = {Nature Machine Intelligence},
-	author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna V. and Foley, Christian and Chandler, Talon and Ivanov, Ivan E. and Woosley, Hunter O. and Lee, See-Chi and Khadka, Sudip and Lao, Tiger and Balasubramanian, Akilandeswari and Marreiros, Rita and Liu, Chad and Januel, Camille and Leonetti, Manuel D. and Aviner, Ranen and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
-	month = jun,
-	year = {2025},
-	note = {Publisher: Nature Publishing Group},
-	pages = {1--15},
-}
-</code></pre>
+  @article{liu_robust_2025,
+      title = {Robust virtual staining of landmark organelles with {Cytoland}},
+      copyright = {2025 The Author(s)},
+      issn = {2522-5839},
+      url = {https://www.nature.com/articles/s42256-025-01046-2},
+      doi = {10.1038/s42256-025-01046-2},
+      abstract = {Correlative live-cell imaging of landmark organelles—such as nuclei, nucleoli, cell membranes, nuclear envelope and lipid droplets—is critical for systems cell biology and drug discovery. However, achieving this with molecular labels alone remains challenging. Virtual staining of multiple organelles and cell states from label-free images with deep neural networks is an emerging solution. Virtual staining frees the light spectrum for imaging molecular sensors, photomanipulation or other tasks. Current methods for virtual staining of landmark organelles often fail in the presence of nuisance variations in imaging, culture conditions and cell types. Here we address this with Cytoland, a collection of models for robust virtual staining of landmark organelles across diverse imaging parameters, cell states and types. These models were trained with self-supervised and supervised pre-training using a flexible convolutional architecture (UNeXt2) and augmentations inspired by image formation of light microscopes. Cytoland models enable virtual staining of nuclei and membranes across multiple cell types—including human cell lines, zebrafish neuromasts, induced pluripotent stem cells (iPSCs) and iPSC-derived neurons—under a range of imaging conditions. We assess models using intensity, segmentation and application-specific measurements obtained from virtually and experimentally stained nuclei and membranes. These models rescue missing labels, correct non-uniform labelling and mitigate photobleaching. We share multiple pre-trained models, open-source software (VisCy) for training, inference and deployment, and the datasets.},
+      language = {en},
+      urldate = {2025-06-23},
+      journal = {Nature Machine Intelligence},
+      author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Rahm, Johanna V. and Foley, Christian and Chandler, Talon and Ivanov, Ivan E. and Woosley, Hunter O. and Lee, See-Chi and Khadka, Sudip and Lao, Tiger and Balasubramanian, Akilandeswari and Marreiros, Rita and Liu, Chad and Januel, Camille and Leonetti, Manuel D. and Aviner, Ranen and Arias, Carolina and Jacobo, Adrian and Mehta, Shalin B.},
+      month = jun,
+      year = {2025},
+      note = {Publisher: Nature Publishing Group},
+      pages = {1--15},
+      }
+  </code></pre>
 </details>
 
 <details>
- <summary>Guo, Yeh, Folkesson et al., 2020</summary>
+  <summary>Guo, Yeh, Folkesson et al., 2020</summary>
 
   <pre><code>
   @article {10.7554/eLife.55502,
@@ -122,25 +121,25 @@ This package evolved from the [TensorFlow version of virtual staining pipeline](
       issn = {2050-084X},
       publisher = {eLife Sciences Publications, Ltd},
       }
-    </code></pre>
-  </details>
+  </code></pre>
+</details>
 
 ### Library of Virtual Staining (VS) Models
 
 The robust virtual staining models (i.e *VSCyto2D*, *VSCyto3D*, *VSNeuromast*), and fine-tuned models can be found [here](https://github.com/mehta-lab/VisCy/wiki/Library-of-virtual-staining-(VS)-Models)
-
 
 ## DynaCLR (Embedding Cell Dynamics via Contrastive Learning of Representations)
 
 DynaCLR is a self-supervised method for learning robust and temporally-regularized representations of cell and organelle dynamics from time-lapse microscopy using contrastive learning. It supports diverse downstream biological tasks -- including cell state classification with efficient human annotations, knowledge distillation across fluorescence and label-free imaging channels, and alignment of cell state dynamics.
 
 ### Preprint
+
 [DynaCLR on arXiv](https://arxiv.org/abs/2410.11281):
 
 ![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
 
-
 ### Demo
+
 - [DynaCLR demos](examples/DynaCLR/README.md)
 
 - Example test dataset, model checkpoint, and predictions can be found
@@ -148,7 +147,6 @@ DynaCLR is a self-supervised method for learning robust and temporally-regulariz
 
 - See tutorial on exploration of learned embeddings with napari-iohub
 [here](https://github.com/czbiohub-sf/napari-iohub/wiki/View-tracked-cells-and-their-associated-predictions/).
-
 
 ## Installation
 
