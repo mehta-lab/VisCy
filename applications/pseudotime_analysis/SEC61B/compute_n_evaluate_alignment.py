@@ -35,11 +35,14 @@ annotations_path = Path(
 data_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr"
 )
+tracks_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/2-assemble/tracking.zarr"
+)
 dynaclr_features_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/4-phenotyping/prediction_infection/2chan_192patch_100ckpt_timeAware_ntxent_rerun.zarr"
 )
 openphenom_features_path = Path(
-    "/home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/OpenPhenom/openphenom_sec61b_n_phase_all.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/4-phenotyping/dtw_evaluation/OpenPhenom/20241107_sensor_n_phase_openphenom_2.zarr"
 )
 
 output_root = Path(
@@ -430,10 +433,20 @@ for model_name, match_positions_df in alignment_results.items():
             f"shape={aligned_embeddings_sequence.shape}, "
             f"timepoints={len(aligned_embeddings_sequence)}"
         )
+# %%
+# Plot the aligned PHATE vs time for each model
+for model_name, lineages in aligned_embeddings.items():
+    base_name = model_name.split("_")[0]
+    plt.figure(figsize=(10, 6))
+    for lineage_key, lineage_data in lineages.items():
+        phate_embeddings = lineage_data["aligned_phate_embeddings"]
+        plt.plot(phate_embeddings)
+
+    plt.show()
 
 
 # %%
-def measure_alignment_accuracy(lineages_dict, output_dir):
+def measure_alignment_accuracy(lineages_dict, output_dir, reference_lineage_key=None):
     """
     Measure how well sequences are aligned by comparing variance at each timepoint.
     Uses full embeddings for alignment accuracy measurement, with separate analysis
@@ -446,6 +459,9 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
     Returns:
         dict: Alignment metrics including mean and std per timepoint for PC/PHATE components
     """
+    from sklearn.metrics import r2_score
+    from sklearn.metrics.pairwise import cosine_similarity
+
     logger.info("measuring the alignment accuracy of the aligned embeddings")
     alignment_metrics = {}
 
@@ -454,6 +470,21 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
     aligned_pc_sequences = []
     aligned_phate_sequences = []
     sequence_info = []
+
+    reference_pc = None
+    reference_phate = None
+    if reference_lineage_key is not None and reference_lineage_key in lineages_dict:
+        reference_pc = lineages_dict[reference_lineage_key].get("aligned_pc_embeddings")
+        reference_phate = lineages_dict[reference_lineage_key].get(
+            "aligned_phate_embeddings"
+        )
+        logger.info(
+            f"Using reference lineage '{reference_lineage_key}' for similarity metrics."
+        )
+    else:
+        logger.warning(
+            f"Reference lineage key '{reference_lineage_key}' not found — skipping R²/cosine similarity."
+        )
 
     for lineage_key, lineage_data in lineages_dict.items():
         embeddings = lineage_data["aligned_embeddings"]
@@ -497,6 +528,29 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
     pc_std_per_timepoint = np.std(
         pc_sequences_array, axis=0
     )  # Shape: (timepoints, n_pc_components)
+    r2_pc_scores = []
+    cosine_pc_scores = []
+    if reference_pc is not None:
+        for seq in truncated_pc_sequences:
+            min_len = min(len(seq), len(reference_pc))
+            if min_len > 1 and seq.shape[1] == reference_pc.shape[1]:
+                r2_pc_scores.append(
+                    r2_score(
+                        reference_pc[:min_len],
+                        seq[:min_len],
+                        multioutput="variance_weighted",
+                    )
+                )
+                cosine_pc_scores.append(
+                    np.mean(
+                        [
+                            cosine_similarity(reference_pc[i : i + 1], seq[i : i + 1])[
+                                0, 0
+                            ]
+                            for i in range(min_len)
+                        ]
+                    )
+                )
 
     # Store plotting data for each PC component
     for pc_idx in range(pc_mean_per_timepoint.shape[1]):
@@ -541,6 +595,38 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
             f"PHATE component {phate_idx+1} std: {phate_stats[f'PHATE{phate_idx+1}']['std']}"
         )
 
+    r2_phate_scores, cosine_phate_scores = [], []
+    if reference_phate is not None:
+        for seq in truncated_phate_sequences:
+            if (
+                seq.ndim == 2
+                and reference_phate.ndim == 2
+                and seq.shape[1] == reference_phate.shape[1]
+            ):
+                min_len = min(seq.shape[0], reference_phate.shape[0])
+                if min_len > 1:
+                    r2 = r2_score(
+                        reference_phate[:min_len],
+                        seq[:min_len],
+                        multioutput="variance_weighted",
+                    )
+                    cos_sim = np.mean(
+                        [
+                            cosine_similarity(
+                                reference_phate[i : i + 1], seq[i : i + 1]
+                            )[0, 0]
+                            for i in range(min_len)
+                        ]
+                    )
+                    r2_phate_scores.append(r2)
+                    cosine_phate_scores.append(cos_sim)
+                else:
+                    logger.warning(f"Skipping {lineage_key} due to too-short overlap.")
+            else:
+                logger.warning(
+                    f"Shape mismatch — {lineage_key}: {seq.shape} vs {reference_phate.shape}"
+                )
+
     # Store metrics
     alignment_metrics = {
         "pc_stats": pc_stats,
@@ -548,6 +634,10 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
         "num_sequences": len(aligned_sequences),
         "common_length": min_length,
         "dimensions": aligned_sequences[0].shape[1],
+        "r2_pc_scores": r2_pc_scores,
+        "cosine_pc_scores": cosine_pc_scores,
+        "r2_phate_scores": r2_phate_scores,
+        "cosine_phate_scores": cosine_phate_scores,
     }
 
     # save the alignment metrics to a pickle file
@@ -557,14 +647,32 @@ def measure_alignment_accuracy(lineages_dict, output_dir):
     return alignment_metrics
 
 
+# %%
 # Run alignment accuracy measurement
 alignment_metrics = {}
 for model_name, lineages in aligned_embeddings.items():
     base_name = model_name.split("_")[0]
     output_metrics_path = output_root / f"{base_name}"
     output_metrics_path.mkdir(parents=True, exist_ok=True)
+
+    # FIXME there is probably a better way to do this
+    reference_key = "lineage_C_2_000001_138"
     alignment_metrics[model_name] = measure_alignment_accuracy(
-        lineages, output_metrics_path
+        lineages,
+        output_metrics_path,
+        reference_lineage_key=reference_key,
+    )
+
+for model_name, metrics in alignment_metrics.items():
+    logger.info(f"Model: {model_name}")
+    base_name = model_name.split("_")[0]
+    logger.info(f"Mean R² (PHATE): {np.mean(metrics['r2_phate_scores']):.4f}")
+    logger.info(
+        f"Mean cosine similarity (PHATE): {np.mean(metrics['cosine_phate_scores']):.4f}"
+    )
+    logger.info(f"Mean R² (PC): {np.mean(metrics['r2_pc_scores']):.4f}")
+    logger.info(
+        f"Mean cosine similarity (PC): {np.mean(metrics['cosine_pc_scores']):.4f}"
     )
 
 
@@ -613,8 +721,161 @@ for model_name, lineages in alignment_metrics.items():
     phate_stats = lineages["phate_stats"]
     plot_alignment_metrics(phate_stats, output_root / f"{base_name}", delta_t=10)
     logger.debug(f"PHATE stats: {phate_stats}")
+# %%
+# Plot the PC and PHATE components for each model side by side
+dynaclr_phate_stats = alignment_metrics["dynaclr_lineages"]["phate_stats"]
+dynaclr_pc_stats = alignment_metrics["dynaclr_lineages"]["pc_stats"]
+openphenom_phate_stats = alignment_metrics["openphenom_lineages"]["phate_stats"]
+openphenom_pc_stats = alignment_metrics["openphenom_lineages"]["pc_stats"]
+
+# Plot dynaclr vs openphenom phate components side by side
+for phate_idx in range(len(dynaclr_phate_stats.keys())):
+    plt.figure(figsize=(10, 6))
+    plt.plot(
+        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
+        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"],
+        "b-",
+        linewidth=2,
+        label=f"dynaclr PHATE{phate_idx+1} Mean",
+    )
+    plt.fill_between(
+        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
+        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
+        - dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["std"],
+        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
+        + dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["std"],
+        alpha=0.3,
+        color="blue",
+        label=f"dynaclr PHATE{phate_idx+1} ±1σ",
+    )
+    plt.plot(
+        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
+        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"],
+        "r-",
+        linewidth=2,
+        label=f"openphenom PHATE{phate_idx+1} Mean",
+    )
+    plt.fill_between(
+        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
+        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
+        - openphenom_phate_stats[f"PHATE{phate_idx+1}"]["std"],
+        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
+        + openphenom_phate_stats[f"PHATE{phate_idx+1}"]["std"],
+        alpha=0.3,
+        color="red",
+        label=f"openphenom PHATE{phate_idx+1} ±1σ",
+    )
+    plt.legend()
+    plt.savefig(output_root / f"dynaclr_vs_openphenom_phate{phate_idx+1}.png")
+    plt.show()
+    plt.close()
+
+# Plot dynaclr vs openphenom pc components side by side
+for pc_idx in range(len(dynaclr_pc_stats.keys())):
+    fig, ax = plt.subplots(1, 2, figsize=(10, 6))
+    ax[0].plot(
+        dynaclr_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
+        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"],
+        "b-",
+        linewidth=2,
+        label=f"dynaclr PC{pc_idx+1} Mean",
+    )
+    ax[0].fill_between(
+        dynaclr_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
+        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"]
+        - dynaclr_pc_stats[f"PC{pc_idx+1}"]["std"],
+        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"]
+        + dynaclr_pc_stats[f"PC{pc_idx+1}"]["std"],
+        alpha=0.3,
+        color="blue",
+        label=f"dynaclr PC{pc_idx+1} ±1σ",
+    )
+    ax[1].plot(
+        openphenom_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
+        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"],
+        "r-",
+        linewidth=2,
+        label=f"openphenom PC{pc_idx+1} Mean",
+    )
+    ax[1].fill_between(
+        openphenom_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
+        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"]
+        - openphenom_pc_stats[f"PC{pc_idx+1}"]["std"],
+        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"]
+        + openphenom_pc_stats[f"PC{pc_idx+1}"]["std"],
+        alpha=0.3,
+        color="red",
+        label=f"openphenom PC{pc_idx+1} ±1σ",
+    )
+    ax[0].legend()
+    ax[0].set_xlabel("Time (min)")
+    ax[1].legend()
+    ax[1].set_xlabel("Time (min)")
+    plt.savefig(output_root / f"dynaclr_vs_openphenom_pc{pc_idx+1}.png")
+    plt.show()
+    plt.close()
 
 # %%
+# PHATE
+avg_std_dynaclr = np.mean(
+    [v["std"] for v in alignment_metrics["dynaclr_lineages"]["phate_stats"].values()]
+)
+avg_std_openphenom = np.mean(
+    [v["std"] for v in alignment_metrics["openphenom_lineages"]["phate_stats"].values()]
+)
 
+logger.info(f"Average std of dynaclr: {avg_std_dynaclr}")
+logger.info(f"Average std of openphenom: {avg_std_openphenom}")
+
+# %%
+# Display the top alignments for each model in napari
+# Cach
+import os
+import napari
+from viscy.data.triplet import TripletDataModule
+
+os.environ["DISPLAY"] = ":1"
+
+
+YX_PATCH_SIZE = 128
+z_range = (0, 1)
+channels_to_display = ["Phase3D", "DIC", "BF"]
+
+top_n_aligned_cells = 1
+
+image_cache = {}
+for i, row in top_n_aligned_cells.iterrows():
+    data_module = TripletDataModule(
+        data_path=data_path,
+        tracks_path=tracks_path,
+        include_fov_names=[fov_name] * len(track_ids),
+        include_track_ids=track_ids,
+        source_channel=channels_to_display,
+        z_range=z_range,
+        initial_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
+        final_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
+        batch_size=1,
+        num_workers=16,
+        normalizations=[],
+        predict_cells=True,
+    )
+    data_module.setup("predict")
+    img_tczyx = []
+    for batch in data_module.predict_dataloader():
+        images = batch["anchor"].numpy()[0]
+        indices = batch["index"]
+        t_idx = indices["t"].tolist()
+        # Take the middle z-slice
+        z_idx = images.shape[1] // 2
+        C, Z, Y, X = images.shape
+        image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
+        for c_idx, channel in enumerate(channels_to_display):
+            if channel in ["Phase3D", "DIC", "BF"]:
+                image_out[c_idx] = images[c_idx, z_idx]
+            else:
+                image_out[c_idx] = np.max(images[c_idx], axis=0)
+        img_tczyx.append(image_out)
+    img_tczyx = np.array(img_tczyx)
+    image_cache[f"{fov_name[1:].replace('/', '_')}_track_{track_ids[0]}"] = img_tczyx
 
 # %%
