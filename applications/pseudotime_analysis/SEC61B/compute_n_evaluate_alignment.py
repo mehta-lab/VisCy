@@ -4,13 +4,14 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-
+import pickle
+import matplotlib.pyplot as plt
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.dtw import find_pattern_matches, identify_lineages
 
 # Create a custom logger for just this script
 logger = logging.getLogger("viscy")
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 # Remove any existing handlers
 for handler in logger.handlers[:]:
@@ -18,7 +19,7 @@ for handler in logger.handlers[:]:
 
 # Add a console handler specifically for this logger
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.INFO)
+console_handler.setLevel(logging.DEBUG)
 formatter = logging.Formatter("%(message)s")  # Simplified format
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
@@ -63,12 +64,12 @@ annotations_fov_id = "/C/2/000001"
 # TODO: A bit clunky since some functions take xarray and others take dataframes
 features_dict = {
     "dynaclr": dynaclr_feature_df,
-    # "openphenom": openphenom_feature_df,
+    "openphenom": openphenom_feature_df,
 }
 
 embeddings_dict = {
     "dynaclr": dynaclr_features_dataset,
-    # "openphenom": openphenom_features_dataset,
+    "openphenom": openphenom_features_dataset,
 }
 lineages = {}
 
@@ -190,21 +191,6 @@ for base_name, pattern in reference_patterns.items():
             f"{base_name} reference pattern should be 2D (timepoints, features), got shape {pattern.shape}"
         )
 
-# Debug: Check embedding dimensions from both datasets
-logger.info(f"DynaCLR feature dimension: {dynaclr_features_dataset.features.shape}")
-logger.info(
-    f"OpenPhenom feature dimension: {openphenom_features_dataset.features.shape}"
-)
-
-# Check if the datasets have different feature dimensions
-if (
-    dynaclr_features_dataset.features.shape[-1]
-    != openphenom_features_dataset.features.shape[-1]
-):
-    logger.warning(
-        f"Feature dimension mismatch: DynaCLR={dynaclr_features_dataset.features.shape[-1]}, OpenPhenom={openphenom_features_dataset.features.shape[-1]}"
-    )
-
 # %%
 METRIC = "cosine"
 alignment_results = {}
@@ -218,9 +204,417 @@ for name, lineages in filtered_lineages.items():
             lineages,
             embeddings,
             window_step_fraction=0.1,
-            num_candidates=4,
+            num_candidates=20,
             method="bernd_clifford",
             save_path=str(output_root / f"{name}_matching_lineages_{METRIC}.csv"),
             metric=METRIC,
         )
         alignment_results[name] = all_match_positions
+
+# %%
+# Align the lineages to the reference pattern
+# Extract aligned embeddings for each model
+aligned_embeddings = {}
+for model_name, match_positions_df in alignment_results.items():
+    base_name = model_name.split("_")[0]
+    embeddings_dataset = embeddings_dict[base_name]
+
+    # Initialize the model's dictionary if it doesn't exist
+    if model_name not in aligned_embeddings:
+        aligned_embeddings[model_name] = {}
+
+    # Process each row in the DataFrame
+    for idx, row in match_positions_df.iterrows():
+        logger.debug(f"Processing lineage {idx}")
+        logger.debug(f"Lineage data: {row.to_dict()}")
+        warp_path = row["warp_path"]
+        start_time = int(row["start_timepoint"])
+        end_time = int(row["end_timepoint"])
+        fov_name = row.get("fov_name")
+        track_ids = row.get("track_ids")
+
+        # Extract embeddings for this lineage
+        lineage_embeddings_list = []
+        lineage_pc_embeddings_list = []
+        lineage_phate_embeddings_list = []
+
+        for track_id in track_ids:
+            try:
+                # Extract the full track data
+                track_data = embeddings_dataset.sel(sample=(fov_name, track_id))
+
+                # Use full embeddings for alignment (as before)
+                track_embeddings = track_data.features.values
+
+                # Extract PC and PHATE components separately for analysis
+                pc_features = []
+                phate_features = []
+
+                # Add all available PCA components dynamically
+                pc_components = [
+                    str(col) for col in track_data.coords if str(col).startswith("PCA")
+                ]
+                pc_components.sort(key=lambda x: int(x[3:]))  # Sort by PCA number
+
+                for pc_col in pc_components:
+                    pc_values = track_data[pc_col].values
+                    pc_features.append(pc_values)
+
+                # add and process dynamically PHATE components
+                phate_components = [
+                    str(col)
+                    for col in track_data.coords
+                    if str(col).startswith("PHATE")
+                ]
+                phate_components.sort(key=lambda x: int(x[5:]))  # Sort by PHATE number
+
+                for phate_col in phate_components:
+                    phate_values = track_data[phate_col].values
+                    phate_features.append(phate_values)
+
+                # Stack PC and PHATE features separately
+                track_pc_embeddings = (
+                    np.column_stack(pc_features)
+                    if pc_features
+                    else np.empty((len(track_data.t), 0))
+                )
+                track_phate_embeddings = (
+                    np.column_stack(phate_features)
+                    if phate_features
+                    else np.empty((len(track_data.t), 0))
+                )
+
+                lineage_embeddings_list.append(track_embeddings)
+                lineage_pc_embeddings_list.append(track_pc_embeddings)
+                lineage_phate_embeddings_list.append(track_phate_embeddings)
+
+                logger.debug(
+                    f"Extracted {track_embeddings.shape} full embeddings for track {track_id}"
+                )
+                logger.debug(f"  PC components: {track_pc_embeddings.shape}")
+                logger.debug(f"  PHATE components: {track_phate_embeddings.shape}")
+
+            except Exception as e:
+                logger.warning(
+                    f"Could not extract embeddings for {fov_id}, {track_id}: {e}"
+                )
+                continue
+        # Concatenate all track embeddings for this lineage
+        lineage_embeddings = np.concatenate(lineage_embeddings_list, axis=0)
+        lineage_pc_embeddings = (
+            np.concatenate(lineage_pc_embeddings_list, axis=0)
+            if lineage_pc_embeddings_list
+            else np.empty((0, 0))
+        )
+        lineage_phate_embeddings = (
+            np.concatenate(lineage_phate_embeddings_list, axis=0)
+            if lineage_phate_embeddings_list
+            else np.empty((0, 0))
+        )
+
+        # Extract the query sequence using the time range
+        # Add bounds checking
+        if (
+            start_time < 0
+            or end_time > len(lineage_embeddings)
+            or start_time >= end_time
+        ):
+            logger.warning(
+                f"Invalid time range for lineage {idx}: start={start_time}, end={end_time}, length={len(lineage_embeddings)}"
+            )
+            continue
+        # Get the query sequences of the embeddings and projections
+        query_sequence = lineage_embeddings[start_time:end_time]
+        query_pc_sequence = lineage_pc_embeddings[start_time:end_time]
+        query_phate_sequence = lineage_phate_embeddings[start_time:end_time]
+
+        logger.debug(f"Query sequence shape: {query_sequence.shape}")
+        logger.debug(f"Query PC sequence shape: {query_pc_sequence.shape}")
+        logger.debug(f"Query PHATE sequence shape: {query_phate_sequence.shape}")
+
+        # Apply warp path to align embeddings
+        aligned_embeddings_sequence = []
+        aligned_pc_embeddings_sequence = []
+        aligned_phate_embeddings_sequence = []
+        reference_timepoints_aligned = []
+        query_timepoints_aligned = []
+
+        # Debug: Print warp path structure
+        logger.debug(
+            f"Warp path type: {type(warp_path)}, length: {len(warp_path) if hasattr(warp_path, '__len__') else 'N/A'}"
+        )
+        logger.debug(
+            f"First few warp path entries: {warp_path[:3] if hasattr(warp_path, '__len__') else warp_path}"
+        )
+
+        for ref_idx, query_idx in warp_path:
+            # Debug: Print indices
+            logger.debug(
+                f"Processing warp path entry: ref_idx={ref_idx}, query_idx={query_idx}"
+            )
+
+            # Get the embedding at the query timepoint
+            if query_idx < len(query_sequence):
+                aligned_embeddings_sequence.append(query_sequence[query_idx])
+
+                # Get PC embeddings if available
+                if query_pc_sequence.size > 0 and query_idx < len(query_pc_sequence):
+                    aligned_pc_embeddings_sequence.append(query_pc_sequence[query_idx])
+                elif query_pc_sequence.size > 0:
+                    # Pad with zeros if index out of bounds
+                    aligned_pc_embeddings_sequence.append(
+                        np.zeros(query_pc_sequence.shape[1])
+                    )
+
+                # Get PHATE embeddings if available
+                if query_phate_sequence.size > 0 and query_idx < len(
+                    query_phate_sequence
+                ):
+                    aligned_phate_embeddings_sequence.append(
+                        query_phate_sequence[query_idx]
+                    )
+                elif query_phate_sequence.size > 0:
+                    # Pad with zeros if index out of bounds
+                    aligned_phate_embeddings_sequence.append(
+                        np.zeros(query_phate_sequence.shape[1])
+                    )
+
+                # Calculate actual timepoints
+                ref_t = reference_timepoints[0] + ref_idx
+                query_t = start_time + query_idx
+
+                reference_timepoints_aligned.append(ref_t)
+                query_timepoints_aligned.append(query_t)
+            else:
+                logger.warning(
+                    f"Query index {query_idx} out of bounds for sequence length {len(query_sequence)}"
+                )
+
+        # Convert to numpy arrays
+        aligned_embeddings_sequence = np.array(aligned_embeddings_sequence)
+        reference_timepoints_aligned = np.array(reference_timepoints_aligned)
+        query_timepoints_aligned = np.array(query_timepoints_aligned)
+
+        # Convert PC and PHATE sequences to arrays
+        if aligned_pc_embeddings_sequence:
+            aligned_pc_embeddings_sequence = np.array(aligned_pc_embeddings_sequence)
+        else:
+            aligned_pc_embeddings_sequence = np.empty((0, 0))
+
+        if aligned_phate_embeddings_sequence:
+            aligned_phate_embeddings_sequence = np.array(
+                aligned_phate_embeddings_sequence
+            )
+        else:
+            aligned_phate_embeddings_sequence = np.empty((0, 0))
+
+        # Store results
+        _fov_name = fov_id.replace("/", "_")
+
+        lineage_key = f"lineage{_fov_name}_{track_ids[0]}"
+        aligned_embeddings[model_name][lineage_key] = {
+            "aligned_embeddings": aligned_embeddings_sequence,
+            "aligned_pc_embeddings": aligned_pc_embeddings_sequence,
+            "aligned_phate_embeddings": aligned_phate_embeddings_sequence,
+            "reference_timepoints": reference_timepoints_aligned,
+            "query_timepoints": query_timepoints_aligned,
+            "warp_path": warp_path,
+            "fov_id": fov_id,
+            "track_ids": track_ids,
+            "original_start_time": start_time,
+            "original_end_time": end_time,
+        }
+
+        logger.info(
+            f"Aligned {model_name} lineage {lineage_key}: "
+            f"shape={aligned_embeddings_sequence.shape}, "
+            f"timepoints={len(aligned_embeddings_sequence)}"
+        )
+
+
+# %%
+def measure_alignment_accuracy(lineages_dict, output_dir):
+    """
+    Measure how well sequences are aligned by comparing variance at each timepoint.
+    Uses full embeddings for alignment accuracy measurement, with separate analysis
+    of PC and PHATE components for detailed comparison.
+
+    Parameters:
+        aligned_embeddings_dict (dict): Dictionary of aligned embeddings
+        output_dir (str): Directory to save the alignment metrics
+
+    Returns:
+        dict: Alignment metrics including mean and std per timepoint for PC/PHATE components
+    """
+    logger.info("measuring the alignment accuracy of the aligned embeddings")
+    alignment_metrics = {}
+
+    # Collect all aligned sequences for this model
+    aligned_sequences = []
+    aligned_pc_sequences = []
+    aligned_phate_sequences = []
+    sequence_info = []
+
+    for lineage_key, lineage_data in lineages_dict.items():
+        embeddings = lineage_data["aligned_embeddings"]
+        pc_embeddings = lineage_data.get("aligned_pc_embeddings", np.empty((0, 0)))
+        phate_embeddings = lineage_data.get(
+            "aligned_phate_embeddings", np.empty((0, 0))
+        )
+
+        if len(embeddings) > 0:
+            aligned_sequences.append(embeddings)
+            if pc_embeddings.size > 0:
+                aligned_pc_sequences.append(pc_embeddings)
+            if phate_embeddings.size > 0:
+                aligned_phate_sequences.append(phate_embeddings)
+
+            sequence_info.append(
+                {
+                    "lineage_key": lineage_key,
+                    "length": len(embeddings),
+                    "dimensions": embeddings.shape[1],
+                    "pc_dimensions": (
+                        pc_embeddings.shape[1] if pc_embeddings.size > 0 else 0
+                    ),
+                    "phate_dimensions": (
+                        phate_embeddings.shape[1] if phate_embeddings.size > 0 else 0
+                    ),
+                }
+            )
+    min_length = min(len(seq) for seq in aligned_sequences)
+
+    pc_stats = {}  # For plotting: mean and std per timepoint per PC component
+    truncated_pc_sequences = [seq[:min_length] for seq in aligned_pc_sequences]
+
+    # Calculate mean and std per timepoint for each PC component
+    pc_sequences_array = np.array(
+        truncated_pc_sequences
+    )  # Shape: (n_sequences, timepoints, n_pc_components)
+    pc_mean_per_timepoint = np.mean(
+        pc_sequences_array, axis=0
+    )  # Shape: (timepoints, n_pc_components)
+    pc_std_per_timepoint = np.std(
+        pc_sequences_array, axis=0
+    )  # Shape: (timepoints, n_pc_components)
+
+    # Store plotting data for each PC component
+    for pc_idx in range(pc_mean_per_timepoint.shape[1]):
+        logger.info(
+            f"PC component {pc_idx+1} shape: {pc_mean_per_timepoint[:, pc_idx].shape}"
+        )
+        pc_stats[f"PC{pc_idx+1}"] = {
+            "timepoints": np.arange(min_length),
+            "mean": pc_mean_per_timepoint[:, pc_idx],
+            "std": pc_std_per_timepoint[:, pc_idx],
+        }
+
+    # Analyze PHATE components separately if available
+    phate_stats = {}
+    min_phate_length = min(len(seq) for seq in aligned_phate_sequences)
+    truncated_phate_sequences = [
+        seq[:min_phate_length] for seq in aligned_phate_sequences
+    ]
+
+    # Calculate mean and std per timepoint for each PHATE component
+    phate_sequences_array = np.array(
+        truncated_phate_sequences
+    )  # Shape: (n_sequences, timepoints, n_phate_components)
+    phate_mean_per_timepoint = np.mean(
+        phate_sequences_array, axis=0
+    )  # Shape: (timepoints, n_phate_components)
+    phate_std_per_timepoint = np.std(
+        phate_sequences_array, axis=0
+    )  # Shape: (timepoints, n_phate_components)
+
+    # Store plotting data for each PHATE component
+    for phate_idx in range(phate_mean_per_timepoint.shape[1]):
+        phate_stats[f"PHATE{phate_idx+1}"] = {
+            "timepoints": np.arange(min_phate_length),
+            "mean": phate_mean_per_timepoint[:, phate_idx],
+            "std": phate_std_per_timepoint[:, phate_idx],
+        }
+        logger.info(
+            f"PHATE component {phate_idx+1} mean: {phate_stats[f'PHATE{phate_idx+1}']['mean']}"
+        )
+        logger.info(
+            f"PHATE component {phate_idx+1} std: {phate_stats[f'PHATE{phate_idx+1}']['std']}"
+        )
+
+    # Store metrics
+    alignment_metrics = {
+        "pc_stats": pc_stats,
+        "phate_stats": phate_stats,
+        "num_sequences": len(aligned_sequences),
+        "common_length": min_length,
+        "dimensions": aligned_sequences[0].shape[1],
+    }
+
+    # save the alignment metrics to a pickle file
+    with open(output_dir / "alignment_metrics.pkl", "wb") as f:
+        pickle.dump(alignment_metrics, f)
+
+    return alignment_metrics
+
+
+# Run alignment accuracy measurement
+alignment_metrics = {}
+for model_name, lineages in aligned_embeddings.items():
+    base_name = model_name.split("_")[0]
+    output_metrics_path = output_root / f"{base_name}"
+    output_metrics_path.mkdir(parents=True, exist_ok=True)
+    alignment_metrics[model_name] = measure_alignment_accuracy(
+        lineages, output_metrics_path
+    )
+
+
+# %%
+# Plot the alignment metrics with standard deviation bands
+def plot_alignment_metrics(phate_stats, output_dir, delta_t=1):
+    for element in phate_stats.keys():
+        logger.info(f"Plotting {element} with std bands")
+        plt.figure(figsize=(10, 6))
+
+        timepoints = phate_stats[element]["timepoints"] * delta_t
+        mean_values = phate_stats[element]["mean"]
+        std_values = phate_stats[element]["std"]
+
+        # Plot mean line
+        plt.plot(timepoints, mean_values, "b-", linewidth=2, label=f"{element} Mean")
+
+        # Add std bands (mean ± std)
+        plt.fill_between(
+            timepoints,
+            mean_values - std_values,
+            mean_values + std_values,
+            alpha=0.3,
+            color="blue",
+            label=f"{element} ±1σ",
+        )
+
+        plt.xlabel("Time (min)")
+        plt.ylabel(f"{element} Component Value")
+        plt.title(f"{element} alignment over time")
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        plt.tight_layout()
+        plt.savefig(output_dir / f"{element}.png")
+        plt.close()
+
+
+# %%
+# Plot the alignment metrics with standard deviation bands
+for model_name, lineages in alignment_metrics.items():
+    logger.info(f"Model: {model_name}")
+    base_name = model_name.split("_")[0]
+    pc_stats = lineages["pc_stats"]
+    plot_alignment_metrics(pc_stats, output_root / f"{base_name}", delta_t=10)
+    logger.debug(f"PC stats: {pc_stats}")
+    phate_stats = lineages["phate_stats"]
+    plot_alignment_metrics(phate_stats, output_root / f"{base_name}", delta_t=10)
+    logger.debug(f"PHATE stats: {phate_stats}")
+
+# %%
+
+
+# %%
