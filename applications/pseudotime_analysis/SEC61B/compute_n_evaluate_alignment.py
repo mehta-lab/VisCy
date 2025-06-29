@@ -8,10 +8,11 @@ import pickle
 import matplotlib.pyplot as plt
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.dtw import find_pattern_matches, identify_lineages
+from glob import glob
 
 # Create a custom logger for just this script
 logger = logging.getLogger("viscy")
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 # Remove any existing handlers
 for handler in logger.handlers[:]:
@@ -19,7 +20,7 @@ for handler in logger.handlers[:]:
 
 # Add a console handler specifically for this logger
 console_handler = logging.StreamHandler()
-console_handler.setLevel(logging.DEBUG)
+console_handler.setLevel(logging.INFO)
 formatter = logging.Formatter("%(message)s")  # Simplified format
 console_handler.setFormatter(formatter)
 logger.addHandler(console_handler)
@@ -62,7 +63,8 @@ openphenom_feature_df = (
 )
 
 input_annotations_df = pd.read_csv(annotations_path)
-annotations_fov_id = "/C/2/000001"
+# annotations_fov_id = "/C/2/000001"
+annotations_fov_id = None
 
 # TODO: A bit clunky since some functions take xarray and others take dataframes
 features_dict = {
@@ -74,27 +76,32 @@ embeddings_dict = {
     "dynaclr": dynaclr_features_dataset,
     "openphenom": openphenom_features_dataset,
 }
-lineages = {}
+lineages_dict = {}
 
-min_timepoints = 20
+min_timepoints = 30
 for name, embeddings_dataset in embeddings_dict.items():
-    lineages[f"{name}_lineages"] = identify_lineages(
+    lineages_dict[f"{name}_lineages"] = identify_lineages(
         embeddings_dataset, min_timepoints=min_timepoints
     )
     logger.info(
-        f"Found {len(lineages[f'{name}_lineages'])} {name} lineages with at least {min_timepoints} timepoints"
+        f"Found {len(lineages_dict[f'{name}_lineages'])} {name} lineages with at least {min_timepoints} timepoints"
     )
 
 # Filter lineages to only include those from the annotations fov
 filtered_lineages = {}
-for name, lineages in lineages.items():
+
+
+for name, lineages in lineages_dict.items():
     filtered_lineages[name] = []
     for fov_id, track_ids in lineages:
         if fov_id == annotations_fov_id:
             filtered_lineages[name].append((fov_id, track_ids))
+        elif annotations_fov_id is None and fov_id.startswith("/C/2"):
+            filtered_lineages[name].append((fov_id, track_ids))
     logger.info(
         f"Found {len(filtered_lineages[name])} {name} lineages from the annotations fov"
     )
+
 
 # %%
 # Condition to align:
@@ -112,6 +119,7 @@ elif CONDITION_TO_ALIGN == "cell_division":
 
 # Get the reference pattern for each model
 reference_patterns = {}
+
 for name, lineages in filtered_lineages.items():
     base_name = name.split("_")[0]
     embeddings_dataset = embeddings_dict[base_name]
@@ -206,11 +214,13 @@ for name, lineages in filtered_lineages.items():
             reference_patterns[base_name],
             lineages,
             embeddings,
-            window_step_fraction=0.1,
-            num_candidates=20,
+            window_step=2,
+            num_candidates=55,
             method="bernd_clifford",
             save_path=str(output_root / f"{name}_matching_lineages_{METRIC}.csv"),
             metric=METRIC,
+            n_jobs=15,
+            show_inner_progress=True,
         )
         alignment_results[name] = all_match_positions
 
@@ -424,8 +434,8 @@ for model_name, match_positions_df in alignment_results.items():
             "warp_path": warp_path,
             "fov_id": fov_id,
             "track_ids": track_ids,
-            "original_start_time": start_time,
-            "original_end_time": end_time,
+            "start_time": start_time,
+            "end_time": end_time,
         }
 
         logger.info(
@@ -473,10 +483,14 @@ def measure_alignment_accuracy(lineages_dict, output_dir, reference_lineage_key=
 
     reference_pc = None
     reference_phate = None
+    reference_embeddings = None
     if reference_lineage_key is not None and reference_lineage_key in lineages_dict:
         reference_pc = lineages_dict[reference_lineage_key].get("aligned_pc_embeddings")
         reference_phate = lineages_dict[reference_lineage_key].get(
             "aligned_phate_embeddings"
+        )
+        reference_embeddings = lineages_dict[reference_lineage_key].get(
+            "aligned_embeddings"
         )
         logger.info(
             f"Using reference lineage '{reference_lineage_key}' for similarity metrics."
@@ -515,6 +529,26 @@ def measure_alignment_accuracy(lineages_dict, output_dir, reference_lineage_key=
             )
     min_length = min(len(seq) for seq in aligned_sequences)
 
+    # R2 and cosine for the embeddings
+    r2_embeddings_scores = []
+    cosine_embeddings_scores = []
+    if reference_embeddings is not None:
+        for seq in aligned_sequences:
+            r2_embeddings_scores.append(
+                r2_score(reference_embeddings, seq, multioutput="variance_weighted")
+            )
+            cosine_embeddings_scores.append(
+                np.mean(
+                    [
+                        cosine_similarity(
+                            reference_embeddings[i : i + 1], seq[i : i + 1]
+                        )[0, 0]
+                        for i in range(len(seq))
+                    ]
+                )
+            )
+
+    # PC
     pc_stats = {}  # For plotting: mean and std per timepoint per PC component
     truncated_pc_sequences = [seq[:min_length] for seq in aligned_pc_sequences]
 
@@ -829,53 +863,203 @@ logger.info(f"Average std of openphenom: {avg_std_openphenom}")
 
 # %%
 # Display the top alignments for each model in napari
-# Cach
+# Cache
 import os
 import napari
 from viscy.data.triplet import TripletDataModule
+from tqdm import tqdm
 
 os.environ["DISPLAY"] = ":1"
-
+viewer = napari.Viewer()
+# %%
 
 YX_PATCH_SIZE = 128
+TOP_N_ALIGNED_CELLS = 10
 z_range = (0, 1)
-channels_to_display = ["Phase3D", "DIC", "BF"]
+channels_to_display = ["Phase3D", "raw mCherry EX561 EM600-37"]
+all_lineage_images = {}
 
-top_n_aligned_cells = 1
+# Cache the unaligned images first for each model
+for model_name, lineages in alignment_results.items():
+    model_name = model_name.split("_")[0]
+    top_n_aligned_cells = lineages[:TOP_N_ALIGNED_CELLS]
+    all_lineage_images[model_name] = []
+    for idx, row in tqdm(
+        top_n_aligned_cells.iterrows(), total=len(top_n_aligned_cells)
+    ):
+        fov_name = row["fov_name"]
+        track_ids = row["track_ids"]
 
-image_cache = {}
-for i, row in top_n_aligned_cells.iterrows():
-    data_module = TripletDataModule(
-        data_path=data_path,
-        tracks_path=tracks_path,
-        include_fov_names=[fov_name] * len(track_ids),
-        include_track_ids=track_ids,
-        source_channel=channels_to_display,
-        z_range=z_range,
-        initial_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
-        final_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
-        batch_size=1,
-        num_workers=16,
-        normalizations=[],
-        predict_cells=True,
-    )
-    data_module.setup("predict")
-    img_tczyx = []
-    for batch in data_module.predict_dataloader():
-        images = batch["anchor"].numpy()[0]
-        indices = batch["index"]
-        t_idx = indices["t"].tolist()
-        # Take the middle z-slice
-        z_idx = images.shape[1] // 2
-        C, Z, Y, X = images.shape
-        image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
-        for c_idx, channel in enumerate(channels_to_display):
-            if channel in ["Phase3D", "DIC", "BF"]:
-                image_out[c_idx] = images[c_idx, z_idx]
+        data_module = TripletDataModule(
+            data_path=str(data_path),  # Convert Path to string
+            tracks_path=str(tracks_path),  # Convert Path to string
+            include_fov_names=[fov_name] * len(track_ids),
+            include_track_ids=track_ids,
+            source_channel=channels_to_display,
+            z_range=z_range,
+            initial_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
+            final_yx_patch_size=(YX_PATCH_SIZE, YX_PATCH_SIZE),
+            batch_size=1,
+            num_workers=16,
+            normalizations=[],
+            predict_cells=True,
+        )
+        data_module.setup("predict")
+        img_tczyx = []
+        for batch in data_module.predict_dataloader():
+            images = batch["anchor"].numpy()[0]
+            indices = batch["index"]
+            t_idx = indices["t"].tolist()
+            # Take the middle z-slice
+            z_idx = images.shape[1] // 2
+            C, Z, Y, X = images.shape
+            image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
+            for c_idx, channel in enumerate(channels_to_display):
+                if channel in ["Phase3D", "DIC", "BF"]:
+                    image_out[c_idx] = images[c_idx, z_idx]
+                else:
+                    image_out[c_idx] = np.max(images[c_idx], axis=0)
+            img_tczyx.append(image_out)
+        img_tczyx = np.array(img_tczyx)
+        all_lineage_images[model_name].append(img_tczyx)
+
+# Save the unaligned images
+with open(output_root / "all_unaligned_images.pkl", "wb") as f:
+    pickle.dump(all_lineage_images, f)
+
+# %%
+aligned_images = {}
+unaligned_images = {}
+unaligned_wrt_startpoint_images = {}
+# Align the images to the corresponding warps (dynaclr and openphenom)
+for model_name, lineages in alignment_results.items():
+    model_name = model_name.split("_")[0]
+    reference_pattern = reference_patterns[model_name]
+    reference_pattern_length = len(reference_pattern)
+    top_n_aligned_cells = lineages[:TOP_N_ALIGNED_CELLS]
+
+    logger.info(f"Aligning {model_name} with {len(top_n_aligned_cells)} cells")
+
+    # Initialize the model_name key as an empty dictionary
+    aligned_images[model_name] = []
+    unaligned_images[model_name] = []
+    unaligned_wrt_startpoint_images[model_name] = []
+
+    for idx, (_, row) in enumerate(top_n_aligned_cells.iterrows()):
+        fov_name = row["fov_name"]
+        track_ids = row["track_ids"]
+        warp_path = row["warp_path"]
+        start_time = row["start_timepoint"]
+        unaligned_stack = all_lineage_images[model_name][idx]
+
+        _aligned_stack = np.zeros(
+            (reference_pattern_length, *unaligned_stack.shape[1:])
+        )
+        _unaligned_stack = np.zeros(
+            (reference_pattern_length, *unaligned_stack.shape[1:])
+        )
+        _unaligned_wrt_startpoint_stack = np.zeros(
+            (reference_pattern_length, *unaligned_stack.shape[1:])
+        )
+        for ref_idx in range(reference_pattern_length):
+            matches = [(i, q) for i, q in warp_path if i == ref_idx]
+            ref_startpoint = int(ref_idx + start_time)
+            _unaligned_stack[ref_idx] = unaligned_stack[ref_idx]
+            _unaligned_wrt_startpoint_stack[ref_idx] = unaligned_stack[ref_startpoint]
+            if matches:
+                match = matches[0]
+                query_idx = match[1]
+                lineage_idx = int(start_time + query_idx)
+                if 0 <= lineage_idx < unaligned_stack.shape[0]:
+                    _aligned_stack[ref_idx] = unaligned_stack[lineage_idx]
+                else:
+                    # Find nearest valid timepoint if out of bounds
+                    nearest_idx = min(max(0, lineage_idx), len(unaligned_stack) - 1)
+                    _aligned_stack[ref_idx] = unaligned_stack[nearest_idx]
             else:
-                image_out[c_idx] = np.max(images[c_idx], axis=0)
-        img_tczyx.append(image_out)
-    img_tczyx = np.array(img_tczyx)
-    image_cache[f"{fov_name[1:].replace('/', '_')}_track_{track_ids[0]}"] = img_tczyx
+                # If no direct match, find closest reference timepoint in warping path
+                logger.warning(f"No match found for ref idx: {ref_idx}")
+                all_ref_indices = [i for i, _ in warp_path]
+                if all_ref_indices:
+                    closest_ref_idx = min(
+                        all_ref_indices, key=lambda x: abs(x - ref_idx)
+                    )
+                    closest_matches = [
+                        (i, q) for i, q in warp_path if i == closest_ref_idx
+                    ]
+                    if closest_matches:
+                        closest_query_idx = closest_matches[0][1]
+                        lineage_idx = int(start_time + closest_query_idx)
+                        if 0 <= lineage_idx < unaligned_stack.shape[0]:
+                            _aligned_stack[ref_idx] = unaligned_stack[lineage_idx]
+                        else:
+                            # Bound to valid range
+                            nearest_idx = min(
+                                max(0, lineage_idx), len(unaligned_stack) - 1
+                            )
+                            _aligned_stack[ref_idx] = unaligned_stack[nearest_idx]
 
+        # Convert to numpy array after collecting all aligned images for this model
+        aligned_images[model_name].append(_aligned_stack)
+        unaligned_images[model_name].append(_unaligned_stack)
+        unaligned_wrt_startpoint_images[model_name].append(
+            _unaligned_wrt_startpoint_stack
+        )
+# Save the aligned images for each model
+with open(output_root / "aligned_images.pkl", "wb") as f:
+    pickle.dump(aligned_images, f)
+with open(output_root / "unaligned_images.pkl", "wb") as f:
+    pickle.dump(unaligned_images, f)
+with open(output_root / "unaligned_wrt_startpoint_images.pkl", "wb") as f:
+    pickle.dump(unaligned_wrt_startpoint_images, f)
+# %%
+# Load the unaligned images
+with open(output_root / "unaligned_images.pkl", "rb") as f:
+    unaligned_images = pickle.load(f)
+# Load the aligned images
+with open(output_root / "aligned_images.pkl", "rb") as f:
+    aligned_images = pickle.load(f)
+
+# %%
+clims_mcherry = (104, 164)
+viewer.grid.shape = (-1, TOP_N_ALIGNED_CELLS)
+viewer.grid.stride = 1
+viewer.grid.enabled = True
+
+for idx, aligned_img in enumerate(aligned_images["dynaclr"]):
+    viewer.add_image(
+        aligned_img[:, 1],
+        name=f"dynaclr_aligned_{idx}",
+        colormap="magenta",
+        contrast_limits=clims_mcherry,
+    )
+
+for idx, unaligned_img in enumerate(unaligned_images["dynaclr"]):
+    viewer.add_image(
+        unaligned_img[:, 1],
+        name=f"dynaclr_unaligned_{idx}",
+        colormap="magenta",
+        contrast_limits=clims_mcherry,
+    )
+viewer.reset_view()
+
+# %%
+# openphenom
+viewer.layers.clear()
+
+for idx, aligned_img in enumerate(aligned_images["openphenom"]):
+    viewer.add_image(
+        aligned_img[:, 1],
+        name=f"openphenom_aligned_{idx}",
+        colormap="magenta",
+        contrast_limits=clims_mcherry,
+    )
+
+for idx, unaligned_img in enumerate(unaligned_images["openphenom"]):
+    viewer.add_image(
+        unaligned_img[:, 1],
+        name=f"openphenom_unaligned_{idx}",
+        colormap="magenta",
+        contrast_limits=clims_mcherry,
+    )
 # %%
