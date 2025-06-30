@@ -248,8 +248,8 @@ for model_name, match_positions_df in alignment_results.items():
 
         # Extract embeddings for this lineage
         lineage_embeddings_list = []
-        lineage_pc_embeddings_list = []
-        lineage_phate_embeddings_list = []
+        lineage_pc_components_list = []  # Changed: store individual PC components
+        lineage_phate_components_list = []  # Changed: store individual PHATE components
 
         for track_id in track_ids:
             try:
@@ -260,20 +260,22 @@ for model_name, match_positions_df in alignment_results.items():
                 track_embeddings = track_data.features.values
 
                 # Extract PC and PHATE components separately for analysis
-                pc_features = []
-                phate_features = []
+                track_pc_components = {}  # Changed: store as dictionary
+                track_phate_components = {}  # Changed: store as dictionary
 
                 # Add all available PCA components dynamically
                 pc_components = [
-                    str(col) for col in track_data.coords if str(col).startswith("PCA")
+                    str(col) for col in track_data.coords if str(col).startswith("PC")
                 ]
                 pc_components.sort(key=lambda x: int(x[3:]))  # Sort by PCA number
 
                 for pc_col in pc_components:
                     pc_values = track_data[pc_col].values
-                    pc_features.append(pc_values)
+                    track_pc_components[pc_col] = (
+                        pc_values  # Changed: store individually
+                    )
 
-                # add and process dynamically PHATE components
+                # Add and process dynamically PHATE components
                 phate_components = [
                     str(col)
                     for col in track_data.coords
@@ -283,47 +285,72 @@ for model_name, match_positions_df in alignment_results.items():
 
                 for phate_col in phate_components:
                     phate_values = track_data[phate_col].values
-                    phate_features.append(phate_values)
-
-                # Stack PC and PHATE features separately
-                track_pc_embeddings = (
-                    np.column_stack(pc_features)
-                    if pc_features
-                    else np.empty((len(track_data.t), 0))
-                )
-                track_phate_embeddings = (
-                    np.column_stack(phate_features)
-                    if phate_features
-                    else np.empty((len(track_data.t), 0))
-                )
+                    track_phate_components[phate_col] = (
+                        phate_values  # Changed: store individually
+                    )
 
                 lineage_embeddings_list.append(track_embeddings)
-                lineage_pc_embeddings_list.append(track_pc_embeddings)
-                lineage_phate_embeddings_list.append(track_phate_embeddings)
+                lineage_pc_components_list.append(track_pc_components)
+                lineage_phate_components_list.append(track_phate_components)
 
                 logger.debug(
                     f"Extracted {track_embeddings.shape} full embeddings for track {track_id}"
                 )
-                logger.debug(f"  PC components: {track_pc_embeddings.shape}")
-                logger.debug(f"  PHATE components: {track_phate_embeddings.shape}")
+                logger.debug(f"  PC components: {list(track_pc_components.keys())}")
+                logger.debug(
+                    f"  PHATE components: {list(track_phate_components.keys())}"
+                )
 
             except Exception as e:
                 logger.warning(
-                    f"Could not extract embeddings for {fov_id}, {track_id}: {e}"
+                    f"Could not extract embeddings for {fov_name}, {track_id}: {e}"
                 )
                 continue
+
         # Concatenate all track embeddings for this lineage
         lineage_embeddings = np.concatenate(lineage_embeddings_list, axis=0)
-        lineage_pc_embeddings = (
-            np.concatenate(lineage_pc_embeddings_list, axis=0)
-            if lineage_pc_embeddings_list
-            else np.empty((0, 0))
-        )
-        lineage_phate_embeddings = (
-            np.concatenate(lineage_phate_embeddings_list, axis=0)
-            if lineage_phate_embeddings_list
-            else np.empty((0, 0))
-        )
+
+        # Changed: Combine PC and PHATE components across tracks
+        lineage_pc_components = {}
+        lineage_phate_components = {}
+
+        # Get all unique PC component names
+        all_pc_names = set()
+        for track_components in lineage_pc_components_list:
+            all_pc_names.update(track_components.keys())
+
+        # Concatenate each PC component separately
+        for pc_name in sorted(all_pc_names):
+            pc_values_list = []
+            for track_components in lineage_pc_components_list:
+                if pc_name in track_components:
+                    pc_values_list.append(track_components[pc_name])
+                else:
+                    # If this track doesn't have this PC component, pad with zeros
+                    pc_values_list.append(
+                        np.zeros_like(lineage_embeddings_list[0][:, 0])
+                    )
+            lineage_pc_components[pc_name] = np.concatenate(pc_values_list, axis=0)
+
+        # Get all unique PHATE component names
+        all_phate_names = set()
+        for track_components in lineage_phate_components_list:
+            all_phate_names.update(track_components.keys())
+
+        # Concatenate each PHATE component separately
+        for phate_name in sorted(all_phate_names):
+            phate_values_list = []
+            for track_components in lineage_phate_components_list:
+                if phate_name in track_components:
+                    phate_values_list.append(track_components[phate_name])
+                else:
+                    # If this track doesn't have this PHATE component, pad with zeros
+                    phate_values_list.append(
+                        np.zeros_like(lineage_embeddings_list[0][:, 0])
+                    )
+            lineage_phate_components[phate_name] = np.concatenate(
+                phate_values_list, axis=0
+            )
 
         # Extract the query sequence using the time range
         # Add bounds checking
@@ -336,61 +363,56 @@ for model_name, match_positions_df in alignment_results.items():
                 f"Invalid time range for lineage {idx}: start={start_time}, end={end_time}, length={len(lineage_embeddings)}"
             )
             continue
+
         # Get the query sequences of the embeddings and projections
         query_sequence = lineage_embeddings[start_time:end_time]
-        query_pc_sequence = lineage_pc_embeddings[start_time:end_time]
-        query_phate_sequence = lineage_phate_embeddings[start_time:end_time]
+
+        # Changed: Extract query sequences for each PC/PHATE component separately
+        query_pc_components = {}
+        for pc_name, pc_values in lineage_pc_components.items():
+            query_pc_components[pc_name] = pc_values[start_time:end_time]
+
+        query_phate_components = {}
+        for phate_name, phate_values in lineage_phate_components.items():
+            query_phate_components[phate_name] = phate_values[start_time:end_time]
 
         logger.debug(f"Query sequence shape: {query_sequence.shape}")
-        logger.debug(f"Query PC sequence shape: {query_pc_sequence.shape}")
-        logger.debug(f"Query PHATE sequence shape: {query_phate_sequence.shape}")
+        logger.debug(f"Query PC components: {list(query_pc_components.keys())}")
+        logger.debug(f"Query PHATE components: {list(query_phate_components.keys())}")
 
         # Apply warp path to align embeddings
         aligned_embeddings_sequence = []
-        aligned_pc_embeddings_sequence = []
-        aligned_phate_embeddings_sequence = []
+        aligned_pc_components = {
+            name: [] for name in query_pc_components.keys()
+        }  # Changed
+        aligned_phate_components = {
+            name: [] for name in query_phate_components.keys()
+        }  # Changed
         reference_timepoints_aligned = []
         query_timepoints_aligned = []
 
-        # Debug: Print warp path structure
-        logger.debug(
-            f"Warp path type: {type(warp_path)}, length: {len(warp_path) if hasattr(warp_path, '__len__') else 'N/A'}"
-        )
-        logger.debug(
-            f"First few warp path entries: {warp_path[:3] if hasattr(warp_path, '__len__') else warp_path}"
-        )
-
         for ref_idx, query_idx in warp_path:
-            # Debug: Print indices
-            logger.debug(
-                f"Processing warp path entry: ref_idx={ref_idx}, query_idx={query_idx}"
-            )
-
             # Get the embedding at the query timepoint
             if query_idx < len(query_sequence):
                 aligned_embeddings_sequence.append(query_sequence[query_idx])
 
-                # Get PC embeddings if available
-                if query_pc_sequence.size > 0 and query_idx < len(query_pc_sequence):
-                    aligned_pc_embeddings_sequence.append(query_pc_sequence[query_idx])
-                elif query_pc_sequence.size > 0:
-                    # Pad with zeros if index out of bounds
-                    aligned_pc_embeddings_sequence.append(
-                        np.zeros(query_pc_sequence.shape[1])
-                    )
+                # Get PC components if available
+                for pc_name, pc_sequence in query_pc_components.items():
+                    if query_idx < len(pc_sequence):
+                        aligned_pc_components[pc_name].append(pc_sequence[query_idx])
+                    else:
+                        # Pad with zeros if index out of bounds
+                        aligned_pc_components[pc_name].append(0.0)
 
-                # Get PHATE embeddings if available
-                if query_phate_sequence.size > 0 and query_idx < len(
-                    query_phate_sequence
-                ):
-                    aligned_phate_embeddings_sequence.append(
-                        query_phate_sequence[query_idx]
-                    )
-                elif query_phate_sequence.size > 0:
-                    # Pad with zeros if index out of bounds
-                    aligned_phate_embeddings_sequence.append(
-                        np.zeros(query_phate_sequence.shape[1])
-                    )
+                # Get PHATE components if available
+                for phate_name, phate_sequence in query_phate_components.items():
+                    if query_idx < len(phate_sequence):
+                        aligned_phate_components[phate_name].append(
+                            phate_sequence[query_idx]
+                        )
+                    else:
+                        # Pad with zeros if index out of bounds
+                        aligned_phate_components[phate_name].append(0.0)
 
                 # Calculate actual timepoints
                 ref_t = reference_timepoints[0] + ref_idx
@@ -408,31 +430,27 @@ for model_name, match_positions_df in alignment_results.items():
         reference_timepoints_aligned = np.array(reference_timepoints_aligned)
         query_timepoints_aligned = np.array(query_timepoints_aligned)
 
-        # Convert PC and PHATE sequences to arrays
-        if aligned_pc_embeddings_sequence:
-            aligned_pc_embeddings_sequence = np.array(aligned_pc_embeddings_sequence)
-        else:
-            aligned_pc_embeddings_sequence = np.empty((0, 0))
+        # Convert PC and PHATE sequences to arrays (keeping them separate)
+        aligned_pc_components_arrays = {}
+        for pc_name, pc_sequence in aligned_pc_components.items():
+            aligned_pc_components_arrays[pc_name] = np.array(pc_sequence)
 
-        if aligned_phate_embeddings_sequence:
-            aligned_phate_embeddings_sequence = np.array(
-                aligned_phate_embeddings_sequence
-            )
-        else:
-            aligned_phate_embeddings_sequence = np.empty((0, 0))
+        aligned_phate_components_arrays = {}
+        for phate_name, phate_sequence in aligned_phate_components.items():
+            aligned_phate_components_arrays[phate_name] = np.array(phate_sequence)
 
         # Store results
-        _fov_name = fov_id.replace("/", "_")
+        _fov_name = fov_name.replace("/", "_")
 
         lineage_key = f"lineage{_fov_name}_{track_ids[0]}"
         aligned_embeddings[model_name][lineage_key] = {
             "aligned_embeddings": aligned_embeddings_sequence,
-            "aligned_pc_embeddings": aligned_pc_embeddings_sequence,
-            "aligned_phate_embeddings": aligned_phate_embeddings_sequence,
+            "aligned_pc_components": aligned_pc_components_arrays,  # Changed: individual components
+            "aligned_phate_components": aligned_phate_components_arrays,  # Changed: individual components
             "reference_timepoints": reference_timepoints_aligned,
             "query_timepoints": query_timepoints_aligned,
             "warp_path": warp_path,
-            "fov_id": fov_id,
+            "fov_id": fov_name,
             "track_ids": track_ids,
             "start_time": start_time,
             "end_time": end_time,
@@ -441,425 +459,118 @@ for model_name, match_positions_df in alignment_results.items():
         logger.info(
             f"Aligned {model_name} lineage {lineage_key}: "
             f"shape={aligned_embeddings_sequence.shape}, "
+            f"PC components={list(aligned_pc_components_arrays.keys())}, "
+            f"PHATE components={list(aligned_phate_components_arrays.keys())}, "
             f"timepoints={len(aligned_embeddings_sequence)}"
         )
-# %%
-# Plot the aligned PHATE vs time for each model
-for model_name, lineages in aligned_embeddings.items():
-    base_name = model_name.split("_")[0]
-    plt.figure(figsize=(10, 6))
-    for lineage_key, lineage_data in lineages.items():
-        phate_embeddings = lineage_data["aligned_phate_embeddings"]
-        plt.plot(phate_embeddings)
-
-    plt.show()
 
 
 # %%
-def measure_alignment_accuracy(lineages_dict, output_dir, reference_lineage_key=None):
+# %%
+def extract_individual_components_from_existing_data(aligned_embeddings_dict):
     """
-    Measure how well sequences are aligned by comparing variance at each timepoint.
-    Uses full embeddings for alignment accuracy measurement, with separate analysis
-    of PC and PHATE components for detailed comparison.
-
-    Parameters:
-        aligned_embeddings_dict (dict): Dictionary of aligned embeddings
-        output_dir (str): Directory to save the alignment metrics
-
-    Returns:
-        dict: Alignment metrics including mean and std per timepoint for PC/PHATE components
+    Extract individual PC and PHATE components from the existing concatenated structure.
+    This is a workaround if the data wasn't re-processed with the new structure.
     """
-    from sklearn.metrics import r2_score
-    from sklearn.metrics.pairwise import cosine_similarity
+    updated_aligned_embeddings = {}
 
-    logger.info("measuring the alignment accuracy of the aligned embeddings")
-    alignment_metrics = {}
+    for model_name, lineages_dict in aligned_embeddings_dict.items():
+        updated_aligned_embeddings[model_name] = {}
 
-    # Collect all aligned sequences for this model
-    aligned_sequences = []
-    aligned_pc_sequences = []
-    aligned_phate_sequences = []
-    sequence_info = []
+        for lineage_key, lineage_data in lineages_dict.items():
+            updated_lineage_data = lineage_data.copy()
 
-    reference_pc = None
-    reference_phate = None
-    reference_embeddings = None
-    if reference_lineage_key is not None and reference_lineage_key in lineages_dict:
-        reference_pc = lineages_dict[reference_lineage_key].get("aligned_pc_embeddings")
-        reference_phate = lineages_dict[reference_lineage_key].get(
-            "aligned_phate_embeddings"
-        )
-        reference_embeddings = lineages_dict[reference_lineage_key].get(
-            "aligned_embeddings"
-        )
-        logger.info(
-            f"Using reference lineage '{reference_lineage_key}' for similarity metrics."
-        )
-    else:
-        logger.warning(
-            f"Reference lineage key '{reference_lineage_key}' not found — skipping R²/cosine similarity."
-        )
-
-    for lineage_key, lineage_data in lineages_dict.items():
-        embeddings = lineage_data["aligned_embeddings"]
-        pc_embeddings = lineage_data.get("aligned_pc_embeddings", np.empty((0, 0)))
-        phate_embeddings = lineage_data.get(
-            "aligned_phate_embeddings", np.empty((0, 0))
-        )
-
-        if len(embeddings) > 0:
-            aligned_sequences.append(embeddings)
-            if pc_embeddings.size > 0:
-                aligned_pc_sequences.append(pc_embeddings)
-            if phate_embeddings.size > 0:
-                aligned_phate_sequences.append(phate_embeddings)
-
-            sequence_info.append(
-                {
-                    "lineage_key": lineage_key,
-                    "length": len(embeddings),
-                    "dimensions": embeddings.shape[1],
-                    "pc_dimensions": (
-                        pc_embeddings.shape[1] if pc_embeddings.size > 0 else 0
-                    ),
-                    "phate_dimensions": (
-                        phate_embeddings.shape[1] if phate_embeddings.size > 0 else 0
-                    ),
-                }
-            )
-    min_length = min(len(seq) for seq in aligned_sequences)
-
-    # R2 and cosine for the embeddings
-    r2_embeddings_scores = []
-    cosine_embeddings_scores = []
-    if reference_embeddings is not None:
-        for seq in aligned_sequences:
-            r2_embeddings_scores.append(
-                r2_score(reference_embeddings, seq, multioutput="variance_weighted")
-            )
-            cosine_embeddings_scores.append(
-                np.mean(
-                    [
-                        cosine_similarity(
-                            reference_embeddings[i : i + 1], seq[i : i + 1]
-                        )[0, 0]
-                        for i in range(len(seq))
-                    ]
-                )
-            )
-
-    # PC
-    pc_stats = {}  # For plotting: mean and std per timepoint per PC component
-    truncated_pc_sequences = [seq[:min_length] for seq in aligned_pc_sequences]
-
-    # Calculate mean and std per timepoint for each PC component
-    pc_sequences_array = np.array(
-        truncated_pc_sequences
-    )  # Shape: (n_sequences, timepoints, n_pc_components)
-    pc_mean_per_timepoint = np.mean(
-        pc_sequences_array, axis=0
-    )  # Shape: (timepoints, n_pc_components)
-    pc_std_per_timepoint = np.std(
-        pc_sequences_array, axis=0
-    )  # Shape: (timepoints, n_pc_components)
-    r2_pc_scores = []
-    cosine_pc_scores = []
-    if reference_pc is not None:
-        for seq in truncated_pc_sequences:
-            min_len = min(len(seq), len(reference_pc))
-            if min_len > 1 and seq.shape[1] == reference_pc.shape[1]:
-                r2_pc_scores.append(
-                    r2_score(
-                        reference_pc[:min_len],
-                        seq[:min_len],
-                        multioutput="variance_weighted",
+            # Extract individual PC components if they exist as concatenated array
+            if "aligned_pc_embeddings" in lineage_data:
+                pc_embeddings = lineage_data["aligned_pc_embeddings"]
+                if pc_embeddings.size > 0 and len(pc_embeddings.shape) == 2:
+                    # Assume each column is a different PC component
+                    pc_components = {}
+                    for i in range(pc_embeddings.shape[1]):
+                        pc_components[f"PCA{i+1}"] = pc_embeddings[:, i]
+                    updated_lineage_data["aligned_pc_components"] = pc_components
+                    print(
+                        f"Extracted {len(pc_components)} PC components for {lineage_key}"
                     )
-                )
-                cosine_pc_scores.append(
-                    np.mean(
-                        [
-                            cosine_similarity(reference_pc[i : i + 1], seq[i : i + 1])[
-                                0, 0
-                            ]
-                            for i in range(min_len)
-                        ]
+
+            # Extract individual PHATE components if they exist as concatenated array
+            if "aligned_phate_embeddings" in lineage_data:
+                phate_embeddings = lineage_data["aligned_phate_embeddings"]
+                if phate_embeddings.size > 0 and len(phate_embeddings.shape) == 2:
+                    # Assume each column is a different PHATE component
+                    phate_components = {}
+                    for i in range(phate_embeddings.shape[1]):
+                        phate_components[f"PHATE{i+1}"] = phate_embeddings[:, i]
+                    updated_lineage_data["aligned_phate_components"] = phate_components
+                    print(
+                        f"Extracted {len(phate_components)} PHATE components for {lineage_key}"
                     )
-                )
 
-    # Store plotting data for each PC component
-    for pc_idx in range(pc_mean_per_timepoint.shape[1]):
-        logger.info(
-            f"PC component {pc_idx+1} shape: {pc_mean_per_timepoint[:, pc_idx].shape}"
-        )
-        pc_stats[f"PC{pc_idx+1}"] = {
-            "timepoints": np.arange(min_length),
-            "mean": pc_mean_per_timepoint[:, pc_idx],
-            "std": pc_std_per_timepoint[:, pc_idx],
-        }
+            updated_aligned_embeddings[model_name][lineage_key] = updated_lineage_data
 
-    # Analyze PHATE components separately if available
-    phate_stats = {}
-    min_phate_length = min(len(seq) for seq in aligned_phate_sequences)
-    truncated_phate_sequences = [
-        seq[:min_phate_length] for seq in aligned_phate_sequences
-    ]
-
-    # Calculate mean and std per timepoint for each PHATE component
-    phate_sequences_array = np.array(
-        truncated_phate_sequences
-    )  # Shape: (n_sequences, timepoints, n_phate_components)
-    phate_mean_per_timepoint = np.mean(
-        phate_sequences_array, axis=0
-    )  # Shape: (timepoints, n_phate_components)
-    phate_std_per_timepoint = np.std(
-        phate_sequences_array, axis=0
-    )  # Shape: (timepoints, n_phate_components)
-
-    # Store plotting data for each PHATE component
-    for phate_idx in range(phate_mean_per_timepoint.shape[1]):
-        phate_stats[f"PHATE{phate_idx+1}"] = {
-            "timepoints": np.arange(min_phate_length),
-            "mean": phate_mean_per_timepoint[:, phate_idx],
-            "std": phate_std_per_timepoint[:, phate_idx],
-        }
-        logger.info(
-            f"PHATE component {phate_idx+1} mean: {phate_stats[f'PHATE{phate_idx+1}']['mean']}"
-        )
-        logger.info(
-            f"PHATE component {phate_idx+1} std: {phate_stats[f'PHATE{phate_idx+1}']['std']}"
-        )
-
-    r2_phate_scores, cosine_phate_scores = [], []
-    if reference_phate is not None:
-        for seq in truncated_phate_sequences:
-            if (
-                seq.ndim == 2
-                and reference_phate.ndim == 2
-                and seq.shape[1] == reference_phate.shape[1]
-            ):
-                min_len = min(seq.shape[0], reference_phate.shape[0])
-                if min_len > 1:
-                    r2 = r2_score(
-                        reference_phate[:min_len],
-                        seq[:min_len],
-                        multioutput="variance_weighted",
-                    )
-                    cos_sim = np.mean(
-                        [
-                            cosine_similarity(
-                                reference_phate[i : i + 1], seq[i : i + 1]
-                            )[0, 0]
-                            for i in range(min_len)
-                        ]
-                    )
-                    r2_phate_scores.append(r2)
-                    cosine_phate_scores.append(cos_sim)
-                else:
-                    logger.warning(f"Skipping {lineage_key} due to too-short overlap.")
-            else:
-                logger.warning(
-                    f"Shape mismatch — {lineage_key}: {seq.shape} vs {reference_phate.shape}"
-                )
-
-    # Store metrics
-    alignment_metrics = {
-        "pc_stats": pc_stats,
-        "phate_stats": phate_stats,
-        "num_sequences": len(aligned_sequences),
-        "common_length": min_length,
-        "dimensions": aligned_sequences[0].shape[1],
-        "r2_pc_scores": r2_pc_scores,
-        "cosine_pc_scores": cosine_pc_scores,
-        "r2_phate_scores": r2_phate_scores,
-        "cosine_phate_scores": cosine_phate_scores,
-    }
-
-    # save the alignment metrics to a pickle file
-    with open(output_dir / "alignment_metrics.pkl", "wb") as f:
-        pickle.dump(alignment_metrics, f)
-
-    return alignment_metrics
+    return updated_aligned_embeddings
 
 
-# %%
-# Run alignment accuracy measurement
-alignment_metrics = {}
-for model_name, lineages in aligned_embeddings.items():
-    base_name = model_name.split("_")[0]
-    output_metrics_path = output_root / f"{base_name}"
-    output_metrics_path.mkdir(parents=True, exist_ok=True)
-
-    # FIXME there is probably a better way to do this
-    reference_key = "lineage_C_2_000001_138"
-    alignment_metrics[model_name] = measure_alignment_accuracy(
-        lineages,
-        output_metrics_path,
-        reference_lineage_key=reference_key,
-    )
-
-for model_name, metrics in alignment_metrics.items():
-    logger.info(f"Model: {model_name}")
-    base_name = model_name.split("_")[0]
-    logger.info(f"Mean R² (PHATE): {np.mean(metrics['r2_phate_scores']):.4f}")
-    logger.info(
-        f"Mean cosine similarity (PHATE): {np.mean(metrics['cosine_phate_scores']):.4f}"
-    )
-    logger.info(f"Mean R² (PC): {np.mean(metrics['r2_pc_scores']):.4f}")
-    logger.info(
-        f"Mean cosine similarity (PC): {np.mean(metrics['cosine_pc_scores']):.4f}"
-    )
-
-
-# %%
-# Plot the alignment metrics with standard deviation bands
-def plot_alignment_metrics(phate_stats, output_dir, delta_t=1):
-    for element in phate_stats.keys():
-        logger.info(f"Plotting {element} with std bands")
-        plt.figure(figsize=(10, 6))
-
-        timepoints = phate_stats[element]["timepoints"] * delta_t
-        mean_values = phate_stats[element]["mean"]
-        std_values = phate_stats[element]["std"]
-
-        # Plot mean line
-        plt.plot(timepoints, mean_values, "b-", linewidth=2, label=f"{element} Mean")
-
-        # Add std bands (mean ± std)
-        plt.fill_between(
-            timepoints,
-            mean_values - std_values,
-            mean_values + std_values,
-            alpha=0.3,
-            color="blue",
-            label=f"{element} ±1σ",
-        )
-
-        plt.xlabel("Time (min)")
-        plt.ylabel(f"{element} Component Value")
-        plt.title(f"{element} alignment over time")
-        plt.legend()
-        plt.grid(True, alpha=0.3)
-        plt.tight_layout()
-        plt.savefig(output_dir / f"{element}.png")
-        plt.close()
-
-
-# %%
-# Plot the alignment metrics with standard deviation bands
-for model_name, lineages in alignment_metrics.items():
-    logger.info(f"Model: {model_name}")
-    base_name = model_name.split("_")[0]
-    pc_stats = lineages["pc_stats"]
-    plot_alignment_metrics(pc_stats, output_root / f"{base_name}", delta_t=10)
-    logger.debug(f"PC stats: {pc_stats}")
-    phate_stats = lineages["phate_stats"]
-    plot_alignment_metrics(phate_stats, output_root / f"{base_name}", delta_t=10)
-    logger.debug(f"PHATE stats: {phate_stats}")
-# %%
-# Plot the PC and PHATE components for each model side by side
-dynaclr_phate_stats = alignment_metrics["dynaclr_lineages"]["phate_stats"]
-dynaclr_pc_stats = alignment_metrics["dynaclr_lineages"]["pc_stats"]
-openphenom_phate_stats = alignment_metrics["openphenom_lineages"]["phate_stats"]
-openphenom_pc_stats = alignment_metrics["openphenom_lineages"]["pc_stats"]
-
-# Plot dynaclr vs openphenom phate components side by side
-for phate_idx in range(len(dynaclr_phate_stats.keys())):
-    plt.figure(figsize=(10, 6))
-    plt.plot(
-        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
-        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"],
-        "b-",
-        linewidth=2,
-        label=f"dynaclr PHATE{phate_idx+1} Mean",
-    )
-    plt.fill_between(
-        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
-        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
-        - dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["std"],
-        dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
-        + dynaclr_phate_stats[f"PHATE{phate_idx+1}"]["std"],
-        alpha=0.3,
-        color="blue",
-        label=f"dynaclr PHATE{phate_idx+1} ±1σ",
-    )
-    plt.plot(
-        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
-        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"],
-        "r-",
-        linewidth=2,
-        label=f"openphenom PHATE{phate_idx+1} Mean",
-    )
-    plt.fill_between(
-        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["timepoints"],
-        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
-        - openphenom_phate_stats[f"PHATE{phate_idx+1}"]["std"],
-        openphenom_phate_stats[f"PHATE{phate_idx+1}"]["mean"]
-        + openphenom_phate_stats[f"PHATE{phate_idx+1}"]["std"],
-        alpha=0.3,
-        color="red",
-        label=f"openphenom PHATE{phate_idx+1} ±1σ",
-    )
-    plt.legend()
-    plt.savefig(output_root / f"dynaclr_vs_openphenom_phate{phate_idx+1}.png")
-    plt.show()
-    plt.close()
-
-# Plot dynaclr vs openphenom pc components side by side
-for pc_idx in range(len(dynaclr_pc_stats.keys())):
-    fig, ax = plt.subplots(1, 2, figsize=(10, 6))
-    ax[0].plot(
-        dynaclr_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
-        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"],
-        "b-",
-        linewidth=2,
-        label=f"dynaclr PC{pc_idx+1} Mean",
-    )
-    ax[0].fill_between(
-        dynaclr_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
-        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"]
-        - dynaclr_pc_stats[f"PC{pc_idx+1}"]["std"],
-        dynaclr_pc_stats[f"PC{pc_idx+1}"]["mean"]
-        + dynaclr_pc_stats[f"PC{pc_idx+1}"]["std"],
-        alpha=0.3,
-        color="blue",
-        label=f"dynaclr PC{pc_idx+1} ±1σ",
-    )
-    ax[1].plot(
-        openphenom_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
-        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"],
-        "r-",
-        linewidth=2,
-        label=f"openphenom PC{pc_idx+1} Mean",
-    )
-    ax[1].fill_between(
-        openphenom_pc_stats[f"PC{pc_idx+1}"]["timepoints"],
-        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"]
-        - openphenom_pc_stats[f"PC{pc_idx+1}"]["std"],
-        openphenom_pc_stats[f"PC{pc_idx+1}"]["mean"]
-        + openphenom_pc_stats[f"PC{pc_idx+1}"]["std"],
-        alpha=0.3,
-        color="red",
-        label=f"openphenom PC{pc_idx+1} ±1σ",
-    )
-    ax[0].legend()
-    ax[0].set_xlabel("Time (min)")
-    ax[1].legend()
-    ax[1].set_xlabel("Time (min)")
-    plt.savefig(output_root / f"dynaclr_vs_openphenom_pc{pc_idx+1}.png")
-    plt.show()
-    plt.close()
-
-# %%
-# PHATE
-avg_std_dynaclr = np.mean(
-    [v["std"] for v in alignment_metrics["dynaclr_lineages"]["phate_stats"].values()]
-)
-avg_std_openphenom = np.mean(
-    [v["std"] for v in alignment_metrics["openphenom_lineages"]["phate_stats"].values()]
+# Apply the extraction to your existing data
+aligned_embeddings = extract_individual_components_from_existing_data(
+    aligned_embeddings
 )
 
-logger.info(f"Average std of dynaclr: {avg_std_dynaclr}")
-logger.info(f"Average std of openphenom: {avg_std_openphenom}")
+# Now you can plot individual components
+for model_name, lineages in aligned_embeddings.items():
+    base_name = model_name.split("_")[0]
+    plt.figure(figsize=(15, 10))
+
+    # Check what components are available
+    sample_lineage = next(iter(lineages.values()))
+    available_pc_components = list(
+        sample_lineage.get("aligned_pc_components", {}).keys()
+    )
+    available_phate_components = list(
+        sample_lineage.get("aligned_phate_components", {}).keys()
+    )
+
+    print(f"\n{model_name} - Available PC components: {available_pc_components}")
+    print(f"{model_name} - Available PHATE components: {available_phate_components}")
+
+    # Plot PC components
+    if available_pc_components:
+        n_pc = len(available_pc_components)
+        for i, pc_name in enumerate(
+            available_pc_components[:4]
+        ):  # Plot first 4 PC components
+            plt.subplot(2, 4, i + 1)
+            for lineage_key, lineage_data in lineages.items():
+                if (
+                    "aligned_pc_components" in lineage_data
+                    and pc_name in lineage_data["aligned_pc_components"]
+                ):
+                    pc_values = lineage_data["aligned_pc_components"][pc_name]
+                    plt.plot(pc_values, alpha=0.7)
+            plt.title(f"{model_name} - {pc_name}")
+            plt.xlabel("Aligned Time")
+            plt.ylabel(f"{pc_name} Value")
+
+    # Plot PHATE components
+    if available_phate_components:
+        n_phate = len(available_phate_components)
+        for i, phate_name in enumerate(
+            available_phate_components[:4]
+        ):  # Plot first 4 PHATE components
+            plt.subplot(2, 4, i + 5)
+            for lineage_key, lineage_data in lineages.items():
+                if (
+                    "aligned_phate_components" in lineage_data
+                    and phate_name in lineage_data["aligned_phate_components"]
+                ):
+                    phate_values = lineage_data["aligned_phate_components"][phate_name]
+                    plt.plot(phate_values, alpha=0.7)
+            plt.title(f"{model_name} - {phate_name}")
+            plt.xlabel("Aligned Time")
+            plt.ylabel(f"{phate_name} Value")
+
+    plt.tight_layout()
+    plt.show()
 
 # %%
 # Display the top alignments for each model in napari
@@ -874,9 +585,10 @@ viewer = napari.Viewer()
 # %%
 
 YX_PATCH_SIZE = 128
-TOP_N_ALIGNED_CELLS = 10
+TOP_N_ALIGNED_CELLS = 20
 z_range = (0, 1)
 channels_to_display = ["Phase3D", "raw mCherry EX561 EM600-37"]
+# %%
 all_lineage_images = {}
 
 # Cache the unaligned images first for each model
@@ -1021,45 +733,482 @@ with open(output_root / "aligned_images.pkl", "rb") as f:
     aligned_images = pickle.load(f)
 
 # %%
+TOP_N_ALIGNED_CELLS = 5
 clims_mcherry = (104, 164)
 viewer.grid.shape = (-1, TOP_N_ALIGNED_CELLS)
 viewer.grid.stride = 1
 viewer.grid.enabled = True
+screen_frames = [0, 20, 59]
+output_path = output_root / "movies" / "screenshots"
+output_path.mkdir(parents=True, exist_ok=True)
 
+# %%
+viewer.layers.clear()
 for idx, aligned_img in enumerate(aligned_images["dynaclr"]):
-    viewer.add_image(
-        aligned_img[:, 1],
-        name=f"dynaclr_aligned_{idx}",
-        colormap="magenta",
-        contrast_limits=clims_mcherry,
-    )
-
+    if idx < TOP_N_ALIGNED_CELLS:
+        viewer.add_image(
+            aligned_img[:, 1],
+            name=f"dynaclr_aligned_{idx}",
+            colormap="magenta",
+            contrast_limits=clims_mcherry,
+        )
 for idx, unaligned_img in enumerate(unaligned_images["dynaclr"]):
-    viewer.add_image(
-        unaligned_img[:, 1],
-        name=f"dynaclr_unaligned_{idx}",
-        colormap="magenta",
-        contrast_limits=clims_mcherry,
-    )
+    if idx < TOP_N_ALIGNED_CELLS:
+        viewer.add_image(
+            unaligned_img[:, 1],
+            name=f"dynaclr_unaligned_{idx}",
+            colormap="magenta",
+            contrast_limits=clims_mcherry,
+        )
 viewer.reset_view()
+
+
+for frame in screen_frames:
+    viewer.dims.current_step = (frame, 0, 0, 0)
+    viewer.screenshot(
+        str(
+            output_path
+            / f"dynaclr_alignment_comparison_{frame}_top_{TOP_N_ALIGNED_CELLS}.png"
+        )
+    )
 
 # %%
 # openphenom
 viewer.layers.clear()
 
 for idx, aligned_img in enumerate(aligned_images["openphenom"]):
-    viewer.add_image(
-        aligned_img[:, 1],
-        name=f"openphenom_aligned_{idx}",
-        colormap="magenta",
-        contrast_limits=clims_mcherry,
-    )
+    if idx < TOP_N_ALIGNED_CELLS:
+        viewer.add_image(
+            aligned_img[:, 1],
+            name=f"openphenom_aligned_{idx}",
+            colormap="magenta",
+            contrast_limits=clims_mcherry,
+        )
 
 for idx, unaligned_img in enumerate(unaligned_images["openphenom"]):
-    viewer.add_image(
-        unaligned_img[:, 1],
-        name=f"openphenom_unaligned_{idx}",
-        colormap="magenta",
-        contrast_limits=clims_mcherry,
+    if idx < TOP_N_ALIGNED_CELLS:
+        viewer.add_image(
+            unaligned_img[:, 1],
+            name=f"openphenom_unaligned_{idx}",
+            colormap="magenta",
+            contrast_limits=clims_mcherry,
+        )
+viewer.reset_view()
+for frame in screen_frames:
+    viewer.dims.current_step = (frame, 0, 0, 0)
+    viewer.screenshot(
+        str(
+            output_path
+            / f"openphenom_alignment_comparison_{frame}_top_{TOP_N_ALIGNED_CELLS}.png"
+        )
     )
+
+
+# %%
+def plot_component_trajectories(
+    aligned_embeddings,
+    alignment_results,
+    delta_t=1,
+    component_type="aligned_pc_components",
+    components_to_plot=["PC1", "PC2", "PC3", "PC4"],
+    top_n=5,
+    figsize=None,
+    title_prefix="",
+    output_path=None,
+):
+    """
+    Modular function to plot specific components (PC or PHATE) for top N aligned cells.
+    Layout automatically adapts: up to 4 components per row, creates new rows as needed.
+
+    Parameters:
+    -----------
+    aligned_embeddings : dict
+        Dictionary containing aligned embeddings for each model
+    alignment_results : dict
+        Dictionary containing DTW alignment results
+    delta_t : int
+        Time step between frames to plot
+    component_type : str
+        Either "aligned_pc_components" or "aligned_phate_components"
+    components_to_plot : list
+        List of component names to plot (e.g., ["PC1", "PC2", "PC3", "PC4"])
+    top_n : int
+        Number of top-aligned cells to plot
+    figsize : tuple or None
+        Figure size, if None will auto-calculate based on layout
+    title_prefix : str
+        Prefix for plot titles
+    output_path : str or None
+        Path to save the plots. If None, plots are only displayed.
+    """
+
+    for model_name, lineages in aligned_embeddings.items():
+
+        dtw_results = alignment_results[model_name]
+        top_alignments = dtw_results.nsmallest(top_n, "distance")
+
+        # Get lineage keys for top aligned cells
+        lineage_keys_to_plot = []
+        for idx, row in top_alignments.iterrows():
+            fov_name = row.get("fov_name", "")
+            track_ids = row.get("track_ids", [])
+            if track_ids:
+                _fov_name = fov_name.replace("/", "_")
+                lineage_key = f"lineage{_fov_name}_{track_ids[0]}"
+                if lineage_key in lineages:
+                    lineage_keys_to_plot.append(lineage_key)
+
+        print(
+            f"Found {len(lineage_keys_to_plot)} matching lineages to plot for {model_name}"
+        )
+
+        if not lineage_keys_to_plot:
+            print(f"No matching lineages found for {model_name}")
+            continue
+
+        # Check what components are available
+        sample_lineage = lineages[lineage_keys_to_plot[0]]
+        available_components = list(sample_lineage.get(component_type, {}).keys())
+
+        print(f"{model_name} - Available {component_type}: {available_components}")
+
+        # Filter components to plot based on availability
+        components_to_plot_filtered = [
+            comp for comp in components_to_plot if comp in available_components
+        ]
+
+        if not components_to_plot_filtered:
+            print(f"No requested components found in {model_name}")
+            continue
+
+        # Auto-calculate layout: max 4 components per row
+        n_components = len(components_to_plot_filtered)
+        n_cols = min(4, n_components)
+        n_rows = (n_components + 3) // 4  # Ceiling division
+
+        if figsize is None:
+            figsize = (4 * n_cols, 4 * n_rows)
+
+        # Create figure
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+
+        # Handle different subplot configurations
+        if n_rows == 1 and n_cols == 1:
+            axes = [axes]
+        elif n_rows == 1 or n_cols == 1:
+            axes = axes.flatten()
+        else:
+            axes = axes.flatten()
+
+        # Define colors for the top N cells
+        colors = plt.cm.tab10(np.linspace(0, 1, top_n))
+
+        # Plot each component
+        for i, component_name in enumerate(components_to_plot_filtered):
+            ax = axes[i]
+
+            for j, lineage_key in enumerate(lineage_keys_to_plot):
+                lineage_data = lineages[lineage_key]
+                if (
+                    component_type in lineage_data
+                    and component_name in lineage_data[component_type]
+                ):
+
+                    component_values = lineage_data[component_type][component_name]
+                    timepoints = np.arange(0, len(component_values) * delta_t, delta_t)
+                    ax.plot(
+                        timepoints,
+                        component_values,
+                        alpha=0.8,
+                        color=colors[j],
+                        linewidth=2,
+                        label=f"Cell {j+1}",
+                    )
+
+            ax.set_title(f"{component_name}")
+            ax.set_xlabel("Aligned Time")
+            ax.set_ylabel(f"{component_name} Value")
+            ax.grid(True, alpha=0.3)
+
+            # Add legend only to first subplot
+            if i == 0:
+                ax.legend(bbox_to_anchor=(1.05, 1), loc="upper left", fontsize=8)
+
+        # Hide unused subplots if any
+        for i in range(n_components, len(axes)):
+            axes[i].set_visible(False)
+
+        # Set main title
+        component_type_display = (
+            component_type.replace("aligned_", "").replace("_components", "").upper()
+        )
+        plt.suptitle(
+            f"{model_name.upper()} - {component_type_display} Components\n"
+            f"Top {top_n} Best Aligned Cells {title_prefix}",
+            fontsize=14,
+            y=0.98,
+        )
+
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.90)
+
+        # Save plot if output_path is provided
+        if output_path is not None:
+            import os
+
+            os.makedirs(output_path, exist_ok=True)
+
+            # Create filename
+            component_type_short = component_type.replace("aligned_", "").replace(
+                "_components", ""
+            )
+            components_str = "_".join(components_to_plot_filtered)
+            filename = f"{model_name}_{component_type_short}_{components_str}_top{top_n}_individual.pdf"
+            filepath = os.path.join(output_path, filename)
+
+            plt.savefig(filepath, dpi=300, bbox_inches="tight")
+            print(f"Saved plot to: {filepath}")
+
+        plt.show()
+
+
+def plot_component_trajectories_with_stats(
+    aligned_embeddings,
+    alignment_results,
+    component_type="aligned_pc_components",
+    components_to_plot=["PC1", "PC2", "PC3", "PC4"],
+    top_n=5,
+    figsize=None,
+    title_prefix="",
+    output_path=None,
+    colors=None,
+):
+    """
+    Modular function to plot mean ± std for specific components for top N aligned cells.
+    Layout automatically adapts: up to 4 components per row, creates new rows as needed.
+    Uses different colors for different models.
+
+    Parameters:
+    -----------
+    aligned_embeddings : dict
+        Dictionary containing aligned embeddings for each model
+    alignment_results : dict
+        Dictionary containing DTW alignment results
+    component_type : str
+        Either "aligned_pc_components" or "aligned_phate_components"
+    components_to_plot : list
+        List of component names to plot (e.g., ["PC1", "PC2", "PC3", "PC4"])
+    top_n : int
+        Number of top-aligned cells to plot
+    figsize : tuple or None
+        Figure size, if None will auto-calculate based on layout
+    title_prefix : str
+        Prefix for plot titles
+    output_path : str or None
+        Path to save the plots. If None, plots are only displayed.
+    colors : list or None
+        List of colors, one for each model in the same order as aligned_embeddings.
+        If None, uses default colors: ['steelblue', 'crimson', 'forestgreen', 'orange', 'purple', 'brown', 'pink', 'gray']
+        Examples: ['blue', 'red'], ['#1f77b4', '#ff7f0e'], [(0.2, 0.4, 0.8), (0.8, 0.2, 0.2)]
+    """
+
+    # Default colors if none provided
+    if colors is None:
+        default_colors = [
+            "steelblue",
+            "crimson",
+            "forestgreen",
+            "orange",
+            "purple",
+            "brown",
+            "pink",
+            "gray",
+        ]
+    else:
+        default_colors = colors
+
+    # Get model names in order
+    model_names = list(aligned_embeddings.keys())
+
+    for i, (model_name, lineages) in enumerate(aligned_embeddings.items()):
+
+        # Assign color for this model
+        plot_color = default_colors[
+            i % len(default_colors)
+        ]  # Cycle through colors if more models than colors
+
+        print(
+            f"Using color '{plot_color}' for {model_name} (model {i+1}/{len(model_names)})"
+        )
+
+        dtw_results = alignment_results[model_name]
+        top_alignments = dtw_results.nsmallest(top_n, "distance")
+
+        # Get lineage keys for top aligned cells
+        lineage_keys_to_plot = []
+        for idx, row in top_alignments.iterrows():
+            fov_name = row.get("fov_name", "")
+            track_ids = row.get("track_ids", [])
+            if track_ids:
+                _fov_name = fov_name.replace("/", "_")
+                lineage_key = f"lineage{_fov_name}_{track_ids[0]}"
+                if lineage_key in lineages:
+                    lineage_keys_to_plot.append(lineage_key)
+
+        if not lineage_keys_to_plot:
+            continue
+
+        # Check available components
+        sample_lineage = lineages[lineage_keys_to_plot[0]]
+        available_components = list(sample_lineage.get(component_type, {}).keys())
+        components_to_plot_filtered = [
+            comp for comp in components_to_plot if comp in available_components
+        ]
+
+        if not components_to_plot_filtered:
+            continue
+
+        # Auto-calculate layout: max 4 components per row
+        n_components = len(components_to_plot_filtered)
+        n_cols = min(4, n_components)
+        n_rows = (n_components + 3) // 4  # Ceiling division
+
+        if figsize is None:
+            figsize = (4 * n_cols, 4 * n_rows)
+
+        # Create figure
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=figsize)
+
+        # Handle different subplot configurations
+        if n_rows == 1 and n_cols == 1:
+            axes = [axes]
+        elif n_rows == 1 or n_cols == 1:
+            axes = axes.flatten()
+        else:
+            axes = axes.flatten()
+
+        # Plot each component with mean ± std
+        for j, component_name in enumerate(components_to_plot_filtered):
+            ax = axes[j]
+
+            # Collect values for this component across top N cells
+            component_values_list = []
+            for lineage_key in lineage_keys_to_plot:
+                lineage_data = lineages[lineage_key]
+                if (
+                    component_type in lineage_data
+                    and component_name in lineage_data[component_type]
+                ):
+                    component_values = lineage_data[component_type][component_name]
+                    component_values_list.append(component_values)
+
+            if component_values_list:
+                # Find common length and calculate statistics
+                min_length = min(len(vals) for vals in component_values_list)
+                truncated_values = [vals[:min_length] for vals in component_values_list]
+                values_array = np.array(truncated_values)
+
+                mean_values = np.mean(values_array, axis=0)
+                std_values = np.std(values_array, axis=0)
+                timepoints = np.arange(min_length)
+
+                # Plot mean line with std band using assigned color
+                ax.plot(
+                    timepoints,
+                    mean_values,
+                    "-",
+                    color=plot_color,
+                    linewidth=2,
+                    label=f"{component_name} Mean",
+                )
+                ax.fill_between(
+                    timepoints,
+                    mean_values - std_values,
+                    mean_values + std_values,
+                    alpha=0.3,
+                    color=plot_color,
+                    label=f"{component_name} ±1σ",
+                )
+
+            ax.set_title(f"{component_name}")
+            ax.set_xlabel("Aligned Time")
+            ax.set_ylabel(f"{component_name} Value")
+            ax.grid(True, alpha=0.3)
+            ax.legend(fontsize=8)
+
+        # Hide unused subplots if any
+        for j in range(n_components, len(axes)):
+            axes[j].set_visible(False)
+
+        # Set main title
+        component_type_display = (
+            component_type.replace("aligned_", "").replace("_components", "").upper()
+        )
+        plt.suptitle(
+            f"{model_name.upper()} - {component_type_display} Components (Mean ± Std)\n"
+            f"Top {top_n} Best Aligned Cells {title_prefix}",
+            fontsize=14,
+            y=0.98,
+        )
+
+        plt.tight_layout()
+        plt.subplots_adjust(top=0.90)
+
+        # Save plot if output_path is provided
+        if output_path is not None:
+            import os
+
+            os.makedirs(output_path, exist_ok=True)
+
+            # Create filename
+            component_type_short = component_type.replace("aligned_", "").replace(
+                "_components", ""
+            )
+            components_str = "_".join(components_to_plot_filtered)
+            filename = f"{model_name}_{component_type_short}_{components_str}_top{top_n}_stats.pdf"
+            filepath = os.path.join(output_path, filename)
+
+            plt.savefig(filepath, dpi=300, bbox_inches="tight")
+            print(f"Saved plot to: {filepath}")
+
+        plt.show()
+
+
+# Usage examples with different color schemes:
+print("Using default colors (steelblue for DynaCLR, crimson for OpenPhenom)...")
+plot_component_trajectories(
+    aligned_embeddings,
+    alignment_results,
+    component_type="aligned_pc_components",
+    components_to_plot=["PCA1", "PCA2", "PCA3", "PCA4"],
+    top_n=5,
+    title_prefix="(Mean ± Std)",
+    output_path=output_root / "plots",
+)
+
+print("Using custom colors...")
+plot_component_trajectories_with_stats(
+    aligned_embeddings,
+    alignment_results,
+    component_type="aligned_pc_components",
+    components_to_plot=["PCA1", "PCA2", "PCA3", "PCA4"],
+    top_n=30,
+    title_prefix="(Mean ± Std)",
+    output_path=output_root / "plots",
+    colors=["blue", "red"],  # Custom colors for each model
+)
+
+print("Using hex colors...")
+plot_component_trajectories_with_stats(
+    aligned_embeddings,
+    alignment_results,
+    component_type="aligned_phate_components",
+    components_to_plot=["PHATE1", "PHATE2"],
+    top_n=50,
+    title_prefix="(Mean ± Std)",
+    output_path=output_root / "plots",
+    colors=["#1f77b4", "#ff7f0e"],  # Matplotlib default blue and orange
+)
+
+
 # %%
