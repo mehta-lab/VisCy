@@ -116,7 +116,7 @@ class OpenPhenomModule(LightningModule):
         # Convert to uint8 as OpenPhenom expects uint8 inputs
         if x.dtype != torch.uint8:
             x = (
-                ((x - x.min()) / (x.max() - x.min()) * 255)
+                ((x - x.min()) / (x.max() - x.min() + 1e-10) * 255)
                 .clamp(0, 255)
                 .to(torch.uint8)
             )
