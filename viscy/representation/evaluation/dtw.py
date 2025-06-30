@@ -5,8 +5,12 @@ import torch
 from scipy.spatial.distance import cdist
 from viscy.data.triplet import INDEX_COLUMNS
 from warnings import warn
-
+from concurrent.futures import ProcessPoolExecutor, as_completed
+from functools import partial
+import multiprocessing as mp
+from typing import Literal, cast
 import logging
+from tqdm import tqdm
 
 logger = logging.getLogger(__name__)
 
@@ -250,6 +254,7 @@ def find_best_match_dtw(
     max_distance: float = float("inf"),
     max_skew: float = 0.8,
     normalize: bool = True,
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     """
     Find the best matches in a lineage using DTW with dtaidistance.
@@ -267,6 +272,8 @@ def find_best_match_dtw(
     max_distance : float, optional
         Maximum distance threshold to consider a match.
         max_skew: Maximum allowed path skewness (0-1).
+    show_progress : bool, optional
+        Whether to show progress bar for window sliding (default: False).
 
     Returns
     -------
@@ -279,9 +286,16 @@ def find_best_match_dtw(
     n_windows = len(lineage) - len(reference_pattern) + 1
 
     if n_windows <= 0:
-        return pd.DataFrame(columns=["position", "path", "distance", "skewness"])
+        return pd.DataFrame(
+            {"position": [], "path": [], "distance": [], "skewness": []}
+        )
 
-    for i in range(0, n_windows, window_step):
+    # Create iterator with optional progress bar
+    window_range = range(0, n_windows, window_step)
+    if show_progress and n_windows > 100:  # Only show for large numbers of windows
+        window_range = tqdm(window_range, desc="DTW window sliding", leave=False)
+
+    for i in window_range:
         window = lineage[i : i + len(reference_pattern)]
         path, dist = warping_path(
             reference_pattern,
@@ -319,7 +333,8 @@ def find_best_match_dtw_bernd_clifford(
     normalize: bool = True,
     max_distance: float = float("inf"),
     max_skew: float = 0.8,
-    metric: str = "cosine",
+    metric: Literal["cosine", "euclidean"] = "cosine",
+    show_progress: bool = False,
 ) -> pd.DataFrame:
     """
     Find the best matches in a lineage using DTW with the utils.py implementation.
@@ -337,6 +352,8 @@ def find_best_match_dtw_bernd_clifford(
     max_distance : float, optional
         Maximum distance threshold to consider a match.
     max_skew: Maximum allowed path skewness (0-1).
+    show_progress : bool, optional
+        Whether to show progress bar for window sliding (default: False).
 
     Returns
     -------
@@ -348,9 +365,16 @@ def find_best_match_dtw_bernd_clifford(
     n_windows = len(lineage) - len(reference_pattern) + 1
 
     if n_windows <= 0:
-        return pd.DataFrame(columns=["position", "path", "distance", "skewness"])
+        return pd.DataFrame(
+            {"position": [], "path": [], "distance": [], "skewness": []}
+        )
 
-    for i in range(0, n_windows, window_step):
+    # Create iterator with optional progress bar
+    window_range = range(0, n_windows, window_step)
+    if show_progress and n_windows > 100:  # Only show for large numbers of windows
+        window_range = tqdm(window_range, desc="DTW window sliding", leave=False)
+
+    for i in window_range:
         window = lineage[i : i + len(reference_pattern)]
 
         # Create distance matrix
@@ -388,135 +412,337 @@ def find_best_match_dtw_bernd_clifford(
     return results_df
 
 
+def _process_lineage_dtw(
+    lineage_embeddings: np.ndarray,
+    reference_pattern: np.ndarray,
+    method: str,
+    num_candidates: int,
+    window_step: int,
+    max_distance: float,
+    max_skew: float,
+    normalize: bool,
+    metric: str,
+    show_inner_progress: bool,
+) -> dict | None:
+    """
+    Shared function to process DTW matching for a single lineage.
+
+    Returns the best match information or None if no matches found.
+    """
+    # Find best matches using the selected DTW method
+    if method == "bernd_clifford":
+        # Ensure metric is valid for bernd_clifford method
+        valid_metric = cast(
+            Literal["cosine", "euclidean"],
+            metric if metric in ["cosine", "euclidean"] else "cosine",
+        )
+        matches_df = find_best_match_dtw_bernd_clifford(
+            lineage_embeddings,
+            reference_pattern=reference_pattern,
+            num_candidates=num_candidates,
+            window_step=window_step,
+            max_distance=max_distance,
+            max_skew=max_skew,
+            normalize=normalize,
+            metric=valid_metric,
+            show_progress=show_inner_progress,
+        )
+    else:
+        matches_df = find_best_match_dtw(
+            lineage_embeddings,
+            reference_pattern=reference_pattern,
+            num_candidates=num_candidates,
+            window_step=window_step,
+            max_distance=max_distance,
+            max_skew=max_skew,
+            normalize=normalize,
+            show_progress=show_inner_progress,
+        )
+
+    if not matches_df.empty:
+        # Get the best match (first row of the sorted DataFrame)
+        best_match = matches_df.iloc[0]
+        return {
+            "distance": best_match["distance"],
+            "skewness": best_match["skewness"],
+            "warp_path": best_match["path"],
+            "start_timepoint": best_match["position"],
+            "end_timepoint": best_match["position"] + len(reference_pattern),
+        }
+    else:
+        return None
+
+
+def _process_single_lineage_parallel(lineage_data: tuple, **kwargs) -> dict:
+    """
+    Worker function for parallel processing.
+
+    Extracts lineage data and calls the shared processing function.
+    """
+    fov_name, track_ids, lineage_embeddings = lineage_data
+
+    try:
+        result = _process_lineage_dtw(lineage_embeddings, **kwargs)
+
+        if result:
+            result.update(
+                {
+                    "fov_name": fov_name,
+                    "track_ids": track_ids,
+                }
+            )
+        else:
+            result = {
+                "fov_name": fov_name,
+                "track_ids": track_ids,
+                "distance": None,
+                "skewness": None,
+                "warp_path": None,
+                "start_timepoint": None,
+                "end_timepoint": None,
+            }
+        return result
+
+    except Exception as e:
+        logger.error(f"Error processing lineage {fov_name}, {track_ids}: {e}")
+        return {
+            "fov_name": fov_name,
+            "track_ids": track_ids,
+            "distance": None,
+            "skewness": None,
+            "warp_path": None,
+            "start_timepoint": None,
+            "end_timepoint": None,
+        }
+
+
 def find_pattern_matches(
     reference_pattern: np.ndarray,
     filtered_lineages: list[tuple[str, list[int]]],
     embeddings_dataset: xr.Dataset,
-    window_step_fraction: float = 0.25,
+    window_step: int = 1,
     num_candidates: int = 3,
     max_distance: float = float("inf"),
-    max_skew: float = 0.8,  # Add skewness parameter
+    max_skew: float = 0.8,
     save_path: str | None = None,
     method: str = "bernd_clifford",
     normalize: bool = True,
     metric: str = "cosine",
+    n_jobs: int = 1,
+    show_inner_progress: bool = False,
 ) -> pd.DataFrame:
     """
     Find the best matches of a reference pattern in multiple lineages using DTW.
 
-    Args:
-        reference_pattern: The reference pattern embeddings
-        filtered_lineages: List of lineages to search in (fov_name, track_ids)
-        embeddings_dataset: Dataset containing embeddings
-        window_step_fraction: Fraction of reference pattern length to use as window step
-        num_candidates: Number of best candidates to consider per lineage
-        max_distance: Maximum distance threshold to consider a match
-        max_skew: Maximum allowed path skewness (0-1, where 0=perfect diagonal)
-        save_path: Optional path to save the results CSV
-        method: DTW method to use - 'bernd_clifford' or 'dtaidistance'
+    Parameters
+    ----------
+    reference_pattern : np.ndarray
+        The reference pattern embeddings
+    filtered_lineages : list[tuple[str, list[int]]]
+        List of lineages to search in (fov_name, track_ids)
+    embeddings_dataset : xr.Dataset
+        Dataset containing embeddings
+    window_step : int, optional
+        Step size for the window (default: 1)
+    num_candidates : int, optional
+        Number of best candidates to consider per lineage (default: 3)
+    max_distance : float, optional
+        Maximum distance threshold to consider a match (default: inf)
+    max_skew : float, optional
+        Maximum allowed path skewness (0-1, where 0=perfect diagonal) (default: 0.8)
+    save_path : str or None, optional
+        Optional path to save the results CSV (default: None)
+    method : str, optional
+        DTW method to use - 'bernd_clifford' or 'dtaidistance' (default: 'bernd_clifford')
+    normalize : bool, optional
+        Whether to normalize DTW distance by path length (default: True)
+    metric : str, optional
+        Distance metric for embeddings comparison (default: 'cosine')
+    n_jobs : int, optional
+        Number of parallel jobs. If 1, runs sequentially. If >1, runs in parallel (default: 1)
+    show_inner_progress : bool, optional
+        Whether to show detailed progress bars for DTW window sliding (default: False)
 
-    Returns:
+    Returns
+    -------
+    pd.DataFrame
         DataFrame with match positions and distances
-    """
-    from tqdm import tqdm
 
+    Notes
+    -----
+    When n_jobs > 1, uses multiprocessing for faster computation on multi-core systems.
+    The DTW algorithm (Sakoe & Chiba, 1978) is applied for time series alignment.
+    """
     # FIXME: Check if we can pass other metrics to dtaidistance
-    if metric != "euclidian" and method != "bernd_clifford":
+    if metric != "euclidean" and method != "bernd_clifford":
         warn("dtaidistance only supports euclidean distance for now")
 
-    # Calculate window step based on reference pattern length
-    window_step = max(1, int(len(reference_pattern) * window_step_fraction))
-
-    all_match_positions = {
-        "fov_name": [],
-        "track_ids": [],
-        "distance": [],
-        "skewness": [],  # Add skewness to results
-        "warp_path": [],
-        "start_timepoint": [],
-        "end_timepoint": [],
+    # Prepare shared processing parameters
+    processing_kwargs = {
+        "reference_pattern": reference_pattern,
+        "method": method,
+        "num_candidates": num_candidates,
+        "window_step": window_step,
+        "max_distance": max_distance,
+        "max_skew": max_skew,
+        "normalize": normalize,
+        "metric": metric,
+        "show_inner_progress": show_inner_progress,
     }
 
-    for i, (fov_name, track_ids) in tqdm(
-        enumerate(filtered_lineages),
-        total=len(filtered_lineages),
+    # Use parallel processing if n_jobs > 1
+    if n_jobs > 1:
+        return _find_pattern_matches_parallel(
+            filtered_lineages=filtered_lineages,
+            embeddings_dataset=embeddings_dataset,
+            n_jobs=n_jobs,
+            save_path=save_path,
+            **processing_kwargs,
+        )
+
+    # Sequential implementation
+    all_match_positions = []
+
+    for fov_name, track_ids in tqdm(
+        filtered_lineages,
         desc="Finding pattern matches",
     ):
-        print(f"Finding pattern matches for {fov_name} with track ids: {track_ids}")
+        logger.info(
+            f"Finding pattern matches for {fov_name} with track ids: {track_ids}"
+        )
+
         # Reconstruct the concatenated lineage
         lineages = []
-        track_offsets = (
-            {}
-        )  # To keep track of where each track starts in the concatenated array
-        current_offset = 0
-
         for track_id in track_ids:
             track_embeddings = embeddings_dataset.sel(
                 sample=(fov_name, track_id)
             ).features.values
-            track_offsets[track_id] = current_offset
-            current_offset += len(track_embeddings)
             lineages.append(track_embeddings)
 
         lineage_embeddings = np.concatenate(lineages, axis=0)
 
-        # Find best matches using the selected DTW method
-        if method == "bernd_clifford":
-            matches_df = find_best_match_dtw_bernd_clifford(
-                lineage_embeddings,
-                reference_pattern=reference_pattern,
-                num_candidates=num_candidates,
-                window_step=window_step,
-                max_distance=max_distance,
-                max_skew=max_skew,
-                normalize=normalize,
-                metric=metric,
+        # Process this lineage using shared function
+        result = _process_lineage_dtw(lineage_embeddings, **processing_kwargs)
+
+        if result:
+            result.update(
+                {
+                    "fov_name": fov_name,
+                    "track_ids": track_ids,
+                }
             )
         else:
-            matches_df = find_best_match_dtw(
-                lineage_embeddings,
-                reference_pattern=reference_pattern,
-                num_candidates=num_candidates,
-                window_step=window_step,
-                max_distance=max_distance,
-                max_skew=max_skew,
-                normalize=normalize,
-            )
+            result = {
+                "fov_name": fov_name,
+                "track_ids": track_ids,
+                "distance": None,
+                "skewness": None,
+                "warp_path": None,
+                "start_timepoint": None,
+                "end_timepoint": None,
+            }
 
-        if not matches_df.empty:
-            # Get the best match (first row of the sorted DataFrame)
-            best_match = matches_df.iloc[0]
-            best_pos = best_match["position"]
-            best_path = best_match["path"]
-            best_dist = best_match["distance"]
-            best_skew = best_match["skewness"]
-
-            all_match_positions["fov_name"].append(fov_name)
-            all_match_positions["track_ids"].append(track_ids)
-            all_match_positions["distance"].append(best_dist)
-            all_match_positions["skewness"].append(best_skew)
-            all_match_positions["warp_path"].append(best_path)
-            all_match_positions["start_timepoint"].append(best_pos)
-            all_match_positions["end_timepoint"].append(
-                best_pos + len(reference_pattern)
-            )
-        else:
-            all_match_positions["fov_name"].append(fov_name)
-            all_match_positions["track_ids"].append(track_ids)
-            all_match_positions["distance"].append(None)
-            all_match_positions["skewness"].append(None)
-            all_match_positions["warp_path"].append(None)
-            all_match_positions["start_timepoint"].append(None)
-            all_match_positions["end_timepoint"].append(None)
+        all_match_positions.append(result)
 
     # Convert to DataFrame and drop rows with no matches
     all_match_positions = pd.DataFrame(all_match_positions)
     all_match_positions = all_match_positions.dropna()
 
     # Sort by distance (primary) and skewness (secondary)
-    all_match_positions = all_match_positions.sort_values(
-        by=["distance", "skewness"], ascending=[True, True]
+    if not all_match_positions.empty:
+        all_match_positions = all_match_positions.sort_values(
+            by=["distance", "skewness"], ascending=[True, True]
+        )
+
+    # Save to CSV if path is provided
+    if save_path:
+        all_match_positions.to_csv(save_path, index=False)
+
+    return all_match_positions
+
+
+def _find_pattern_matches_parallel(
+    filtered_lineages: list[tuple[str, list[int]]],
+    embeddings_dataset: xr.Dataset,
+    n_jobs: int,
+    save_path: str | None = None,
+    **processing_kwargs,
+) -> pd.DataFrame:
+    """
+    Internal parallel implementation of find_pattern_matches.
+    """
+    logger.info(f"Using {n_jobs} parallel workers for pattern matching")
+
+    # Prepare lineage data by extracting embeddings beforehand
+    lineage_data_list = []
+
+    logger.info("Preparing lineage data for parallel processing...")
+    for fov_name, track_ids in tqdm(
+        filtered_lineages, desc="Extracting lineage embeddings"
+    ):
+        # Reconstruct the concatenated lineage
+        lineages = []
+        for track_id in track_ids:
+            track_embeddings = embeddings_dataset.sel(
+                sample=(fov_name, track_id)
+            ).features.values
+            lineages.append(track_embeddings)
+
+        lineage_embeddings = np.concatenate(lineages, axis=0)
+        lineage_data_list.append((fov_name, track_ids, lineage_embeddings))
+
+    # Create partial function with fixed parameters
+    worker_func = partial(_process_single_lineage_parallel, **processing_kwargs)
+
+    # Process lineages in parallel
+    results = []
+    logger.info(
+        f"Processing {n_jobs} / {len(lineage_data_list)} lineages in parallel..."
     )
+
+    with ProcessPoolExecutor(max_workers=n_jobs) as executor:
+        # Submit all tasks
+        future_to_lineage = {
+            executor.submit(worker_func, lineage_data): lineage_data[0:2]
+            for lineage_data in lineage_data_list
+        }
+
+        # Collect results with progress bar
+        for future in tqdm(
+            as_completed(future_to_lineage),
+            total=len(future_to_lineage),
+            desc="Finding pattern matches",
+        ):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                fov_name, track_ids = future_to_lineage[future]
+                logger.error(f"Error processing lineage {fov_name}, {track_ids}: {e}")
+                # Add empty result for failed lineages
+                results.append(
+                    {
+                        "fov_name": fov_name,
+                        "track_ids": track_ids,
+                        "distance": None,
+                        "skewness": None,
+                        "warp_path": None,
+                        "start_timepoint": None,
+                        "end_timepoint": None,
+                    }
+                )
+
+    # Convert results to DataFrame
+    all_match_positions = pd.DataFrame(results)
+
+    # Drop rows with no matches
+    all_match_positions = all_match_positions.dropna()
+
+    # Sort by distance (primary) and skewness (secondary)
+    if not all_match_positions.empty:
+        all_match_positions = all_match_positions.sort_values(
+            by=["distance", "skewness"], ascending=[True, True]
+        )
 
     # Save to CSV if path is provided
     if save_path:
