@@ -5,6 +5,8 @@ import re
 import numpy as np
 import torch
 from PIL import Image
+from pathlib import Path
+import yaml
 
 
 def unique_tags(directory):
@@ -117,3 +119,55 @@ def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
         im = Image.fromarray(data).convert("L")
         im.info["size"] = data.shape
         im.save(os.path.join(save_folder, name + ext))
+
+
+def yaml_to_model(yaml_path: Path, model):
+    """
+    Load model settings from a YAML file and create a model instance.
+
+    Borrowing from recOrder==0.4.0
+
+    Parameters
+    ----------
+    yaml_path : Path
+        The path to the YAML file containing the model settings.
+    model : class
+        The model class used to create an instance with the loaded settings.
+
+    Returns
+    -------
+    object
+        An instance of the model class with the loaded settings.
+
+    Raises
+    ------
+    TypeError
+        If the provided model is not a class or does not have a callable constructor.
+    FileNotFoundError
+        If the YAML file specified by `yaml_path` does not exist.
+
+    Notes
+    -----
+    This function loads model settings from a YAML file using `yaml.safe_load()`.
+    It then creates an instance of the provided `model` class using the loaded settings.
+
+    Examples
+    --------
+    >>> from my_model import MyModel
+    >>> model = yaml_to_model('model.yaml', MyModel)
+
+    """
+    yaml_path = Path(yaml_path)
+
+    if not callable(getattr(model, "__init__", None)):
+        raise TypeError(
+            "The provided model must be a class with a callable constructor."
+        )
+
+    try:
+        with open(yaml_path, "r") as file:
+            raw_settings = yaml.safe_load(file)
+    except FileNotFoundError:
+        raise FileNotFoundError(f"The YAML file '{yaml_path}' does not exist.")
+
+    return model(**raw_settings)
