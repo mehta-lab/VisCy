@@ -69,7 +69,7 @@ class EmbeddingVisualizationApp:
 
         # Store datasets for per-dataset access
         self.datasets = viz_config.get_datasets()
-        self._DEFAULT_MARKER_SIZE = 15
+        self._DEFAULT_MARKER_SIZE = 13
 
         # Initialize data
         self._prepare_data()
@@ -601,6 +601,19 @@ class EmbeddingVisualizationApp:
                 ),
                 tabs,
                 cluster_name_modal,
+                html.Div(
+                    id="dummy-output", style={"display": "none"}
+                ),  # Hidden dummy output
+                html.Div(
+                    id="notification-area",
+                    style={
+                        "position": "fixed",
+                        "top": "20px",
+                        "right": "20px",
+                        "zIndex": "2000",
+                        "maxWidth": "300px",
+                    },
+                ),
             ],
         )
 
@@ -1016,14 +1029,137 @@ class EmbeddingVisualizationApp:
                         dash.no_update,
                     )
 
-                # Extract selected point indices
-                selected_indices = [
-                    point.get("pointIndex") for point in selected_data["points"]
-                ]
-                selected_indices = [idx for idx in selected_indices if idx is not None]
+                selected_points_list = []
 
-                if not selected_indices:
-                    logger.warning("No valid point indices found in selection")
+                # Determine if we're in cluster mode by checking if clusters exist
+                is_cluster_mode = len(self.cluster_manager.clusters) > 0
+
+                # Get information about each selected point
+                for point in selected_data["points"]:
+                    curve_number = point.get("curveNumber", 0)
+                    point_index = point.get("pointIndex")
+
+                    if point_index is None:
+                        continue
+
+                    if is_cluster_mode:
+                        # Handle cluster-colored figure
+                        # Structure: [unclustered_trace, cluster1_trace, cluster2_trace, ...]
+
+                        if curve_number == 0:
+                            # This is an unclustered point
+                            # Get the DataFrame row from the unclustered points
+                            df_cache_keys = [
+                                (
+                                    row["dataset"],
+                                    row["fov_name"],
+                                    row["track_id"],
+                                    row["t"],
+                                )
+                                for _, row in self.filtered_features_df.iterrows()
+                            ]
+
+                            clustered_cache_keys = set()
+                            for cluster in self.cluster_manager.clusters:
+                                clustered_cache_keys.update(cluster.cache_keys)
+
+                            unclustered_mask = [
+                                cache_key not in clustered_cache_keys
+                                for cache_key in df_cache_keys
+                            ]
+
+                            if any(unclustered_mask):
+                                unclustered_df = self.filtered_features_df[
+                                    unclustered_mask
+                                ]
+                                if point_index < len(unclustered_df):
+                                    selected_point = unclustered_df.iloc[point_index]
+                                    selected_points_list.append(
+                                        {
+                                            "track_id": selected_point["track_id"],
+                                            "t": selected_point["t"],
+                                            "fov_name": selected_point["fov_name"],
+                                            "dataset": selected_point["dataset"],
+                                        }
+                                    )
+                        else:
+                            # This is a point from an existing cluster
+                            cluster_index = curve_number - 1
+                            if cluster_index < len(self.cluster_manager.clusters):
+                                cluster = self.cluster_manager.clusters[cluster_index]
+
+                                # Get the DataFrame rows for this cluster
+                                df_cache_keys = [
+                                    (
+                                        row["dataset"],
+                                        row["fov_name"],
+                                        row["track_id"],
+                                        row["t"],
+                                    )
+                                    for _, row in self.filtered_features_df.iterrows()
+                                ]
+
+                                cluster_mask = [
+                                    cache_key in cluster.cache_keys
+                                    for cache_key in df_cache_keys
+                                ]
+
+                                if any(cluster_mask):
+                                    cluster_df = self.filtered_features_df[cluster_mask]
+                                    if point_index < len(cluster_df):
+                                        selected_point = cluster_df.iloc[point_index]
+                                        selected_points_list.append(
+                                            {
+                                                "track_id": selected_point["track_id"],
+                                                "t": selected_point["t"],
+                                                "fov_name": selected_point["fov_name"],
+                                                "dataset": selected_point["dataset"],
+                                            }
+                                        )
+                    else:
+                        # Handle track-colored figure (original logic)
+                        # Skip background points (curve 0 if background exists)
+                        background_offset = (
+                            1 if not self.background_features_df.empty else 0
+                        )
+
+                        if curve_number < background_offset:
+                            # This is a background point, skip it
+                            continue
+
+                        # Find which track this point belongs to
+                        track_curve_index = curve_number - background_offset
+
+                        # Map to the actual track
+                        if track_curve_index < len(self.valid_combinations):
+                            dataset_name, fov_name, track_id = self.valid_combinations[
+                                track_curve_index
+                            ]
+
+                            # Get the track data
+                            track_data = self.filtered_features_df[
+                                (self.filtered_features_df["dataset"] == dataset_name)
+                                & (self.filtered_features_df["fov_name"] == fov_name)
+                                & (
+                                    self.filtered_features_df["track_id"]
+                                    == int(track_id)
+                                )
+                            ].sort_values("t")
+
+                            # Get the specific point within this track
+                            if point_index < len(track_data):
+                                selected_point = track_data.iloc[point_index]
+                                selected_points_list.append(
+                                    {
+                                        "track_id": selected_point["track_id"],
+                                        "t": selected_point["t"],
+                                        "fov_name": selected_point["fov_name"],
+                                        "dataset": selected_point["dataset"],
+                                    }
+                                )
+
+                if not selected_points_list:
+                    logger.warning("No valid points found in selection")
                     return (
                         dash.no_update,
                         dash.no_update,
@@ -1033,29 +1169,13 @@ class EmbeddingVisualizationApp:
                         dash.no_update,
                         dash.no_update,
                     )
-
-                # Get the selected data points from filtered_features_df
-                if len(selected_indices) > len(self.filtered_features_df):
-                    logger.error("Selected indices exceed dataframe size")
-                    return (
-                        dash.no_update,
-                        dash.no_update,
-                        dash.no_update,
-                        dash.no_update,
-                        dash.no_update,
-                        dash.no_update,
-                        dash.no_update,
-                    )
-
-                # Create cluster from selected points
-                selected_points_df = self.filtered_features_df.iloc[
-                    selected_indices
-                ].copy()
 
                 # Create a new cluster using the cluster manager
-                cluster_id = self.cluster_manager.create_cluster(selected_points_df)
+                cluster_id = self.cluster_manager.create_cluster_from_points(
+                    selected_points_list
+                )
                 logger.info(
-                    f"Created cluster {cluster_id} with {len(selected_points_df)} points"
+                    f"Created cluster {cluster_id} with {len(selected_points_list)} points"
                 )
 
                 # Show modal for naming the cluster
@@ -1155,6 +1275,197 @@ class EmbeddingVisualizationApp:
                     empty_timeline,
                 )  # Clear figure selection, selectedData, and timeline
             return dash.no_update, dash.no_update, dash.no_update
+
+        @self.app.callback(
+            [
+                dd.Output("dummy-output", "children"),
+                dd.Output("notification-area", "children"),
+            ],
+            [dd.Input("save-clusters-csv", "n_clicks")],
+            prevent_initial_call=True,
+        )
+        def save_clusters_to_csv(n_clicks):
+            """Save all clusters to CSV files"""
+            notification = ""
+
+            if n_clicks and self.cluster_manager.clusters:
+                try:
+                    # Create output directory if it doesn't exist
+                    self.output_dir.mkdir(parents=True, exist_ok=True)
+
+                    saved_files = []
+
+                    # Save each cluster to a separate CSV file
+                    for i, cluster in enumerate(self.cluster_manager.clusters):
+                        cluster_name = cluster.name or f"Cluster_{i+1}"
+                        # Clean the cluster name for filename
+                        safe_name = "".join(
+                            c
+                            for c in cluster_name
+                            if c.isalnum() or c in (" ", "-", "_")
+                        ).rstrip()
+                        safe_name = safe_name.replace(" ", "_")
+
+                        # Create DataFrame from cluster points
+                        cluster_data = []
+                        for point in cluster.points:
+                            # Get the full row data for this point
+                            point_row = self.filtered_features_df[
+                                (self.filtered_features_df["dataset"] == point.dataset)
+                                & (
+                                    self.filtered_features_df["fov_name"]
+                                    == point.fov_name
+                                )
+                                & (
+                                    self.filtered_features_df["track_id"]
+                                    == point.track_id
+                                )
+                                & (self.filtered_features_df["t"] == point.t)
+                            ]
+
+                            if not point_row.empty:
+                                cluster_data.append(point_row.iloc[0])
+
+                        if cluster_data:
+                            cluster_df = pd.DataFrame(cluster_data)
+
+                            # Add cluster information
+                            cluster_df["cluster_id"] = cluster.id
+                            cluster_df["cluster_name"] = (
+                                cluster.name or f"Cluster {i+1}"
+                            )
+                            cluster_df["cluster_size"] = len(cluster.points)
+
+                            # Save to CSV
+                            csv_path = self.output_dir / f"{safe_name}.csv"
+                            cluster_df.to_csv(csv_path, index=False)
+                            saved_files.append(csv_path.name)
+                            logger.info(f"Saved cluster '{cluster.name}' to {csv_path}")
+
+                    # Also save a summary CSV with all clusters
+                    if self.cluster_manager.clusters:
+                        all_cluster_data = []
+                        for i, cluster in enumerate(self.cluster_manager.clusters):
+                            for point in cluster.points:
+                                point_row = self.filtered_features_df[
+                                    (
+                                        self.filtered_features_df["dataset"]
+                                        == point.dataset
+                                    )
+                                    & (
+                                        self.filtered_features_df["fov_name"]
+                                        == point.fov_name
+                                    )
+                                    & (
+                                        self.filtered_features_df["track_id"]
+                                        == point.track_id
+                                    )
+                                    & (self.filtered_features_df["t"] == point.t)
+                                ]
+
+                                if not point_row.empty:
+                                    row_data = point_row.iloc[0].to_dict()
+                                    row_data["cluster_id"] = cluster.id
+                                    row_data["cluster_name"] = (
+                                        cluster.name or f"Cluster {i+1}"
+                                    )
+                                    row_data["cluster_index"] = i
+                                    all_cluster_data.append(row_data)
+
+                        if all_cluster_data:
+                            summary_df = pd.DataFrame(all_cluster_data)
+                            summary_path = self.output_dir / "all_clusters_summary.csv"
+                            summary_df.to_csv(summary_path, index=False)
+                            saved_files.append(summary_path.name)
+                            logger.info(
+                                f"Saved summary of all clusters to {summary_path}"
+                            )
+
+                            # Log summary statistics
+                            logger.info(
+                                f"Exported {len(self.cluster_manager.clusters)} clusters with {len(all_cluster_data)} total points"
+                            )
+
+                    # Create success notification
+                    notification = html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Strong("✅ Clusters Saved Successfully!"),
+                                    html.Br(),
+                                    html.Small(
+                                        f"Saved {len(saved_files)} files to {self.output_dir}"
+                                    ),
+                                    html.Br(),
+                                    html.Small(
+                                        f"Files: {', '.join(saved_files[:3])}"
+                                        + ("..." if len(saved_files) > 3 else "")
+                                    ),
+                                ],
+                                style={
+                                    "backgroundColor": "#d4edda",
+                                    "color": "#155724",
+                                    "border": "1px solid #c3e6cb",
+                                    "borderRadius": "4px",
+                                    "padding": "10px",
+                                    "marginBottom": "10px",
+                                    "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                                },
+                            )
+                        ],
+                        id="success-notification",
+                    )
+
+                except Exception as e:
+                    logger.error(f"Error saving clusters to CSV: {e}")
+                    # Create error notification
+                    notification = html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Strong("❌ Error Saving Clusters"),
+                                    html.Br(),
+                                    html.Small(f"Error: {str(e)}"),
+                                ],
+                                style={
+                                    "backgroundColor": "#f8d7da",
+                                    "color": "#721c24",
+                                    "border": "1px solid #f5c6cb",
+                                    "borderRadius": "4px",
+                                    "padding": "10px",
+                                    "marginBottom": "10px",
+                                    "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                                },
+                            )
+                        ],
+                        id="error-notification",
+                    )
+
+            elif n_clicks and not self.cluster_manager.clusters:
+                # No clusters to save
+                notification = html.Div(
+                    [
+                        html.Div(
+                            [
+                                html.Strong("ℹ️ No Clusters to Save"),
+                                html.Br(),
+                                html.Small("Create some clusters first before saving."),
+                            ],
+                            style={
+                                "backgroundColor": "#d1ecf1",
+                                "color": "#0c5460",
+                                "border": "1px solid #bee5eb",
+                                "borderRadius": "4px",
+                                "padding": "10px",
+                                "marginBottom": "10px",
+                                "boxShadow": "0 2px 4px rgba(0,0,0,0.1)",
+                            },
+                        )
+                    ],
+                    id="info-notification",
+                )
+
+            return "", notification
 
     def _create_track_colored_figure(
         self,
@@ -1267,7 +1578,7 @@ class EmbeddingVisualizationApp:
                         marker=dict(opacity=0.6, size=self._DEFAULT_MARKER_SIZE)
                     ),
                     selected=dict(
-                        marker=dict(size=self._DEFAULT_MARKER_SIZE * 1.5, opacity=1.0)
+                        marker=dict(size=self._DEFAULT_MARKER_SIZE * 2, opacity=1.0)
                     ),
                     hoverlabel=dict(namelength=-1),
                 )
@@ -1495,27 +1806,27 @@ class EmbeddingVisualizationApp:
         fig.update_xaxes(showgrid=False)
         fig.update_yaxes(showgrid=False)
 
-        # Create cluster colors
-        cluster_colors = [
-            "red",
-            "blue",
-            "green",
-            "orange",
-            "purple",
-            "brown",
-            "pink",
-            "gray",
-            "olive",
-            "cyan",
+        # Use cluster manager's color scheme
+        cluster_colors = self.cluster_manager.get_cluster_colors_by_index()
+
+        # Get all clustered cache keys
+        clustered_cache_keys = set()
+        for cluster in self.cluster_manager.clusters:
+            clustered_cache_keys.update(cluster.cache_keys)
+
+        # Create a mask for unclustered points
+        # Map DataFrame rows to cache keys and check if they're in any cluster
+        df_cache_keys = [
+            (row["dataset"], row["fov_name"], row["track_id"], row["t"])
+            for _, row in self.filtered_features_df.iterrows()
+        ]
+
+        unclustered_mask = [
+            cache_key not in clustered_cache_keys for cache_key in df_cache_keys
         ]
 
         # Add unclustered points (background)
-        clustered_indices = set()
-        for cluster in self.cluster_manager.clusters:
-            clustered_indices.update(cluster.point_indices)
-
-        unclustered_mask = ~self.filtered_features_df.index.isin(clustered_indices)
-        if unclustered_mask.any():
+        if any(unclustered_mask):
             unclustered_df = self.filtered_features_df[unclustered_mask]
 
             fig.add_trace(
@@ -1538,27 +1849,34 @@ class EmbeddingVisualizationApp:
 
         # Add each cluster as a separate trace
         for i, cluster in enumerate(self.cluster_manager.clusters):
-            cluster_df = self.filtered_features_df.loc[cluster.point_indices]
-            color = cluster_colors[i % len(cluster_colors)]
+            # Create a mask for points in this cluster
+            cluster_mask = [
+                cache_key in cluster.cache_keys for cache_key in df_cache_keys
+            ]
 
-            fig.add_trace(
-                go.Scatter(
-                    x=cluster_df[x_axis],
-                    y=cluster_df[y_axis],
-                    mode="markers",
-                    marker=dict(
-                        size=self._DEFAULT_MARKER_SIZE,
-                        color=color,
-                        line=dict(width=0.5, color="black"),
-                        opacity=0.8,
-                    ),
-                    name=cluster.name or f"Cluster {i+1}",
-                    hovertemplate=f"<b>{cluster.name or f'Cluster {i+1}'}</b><br>"
-                    + f"{x_axis}: %{{x}}<br>"
-                    + f"{y_axis}: %{{y}}<br>"
-                    + "<extra></extra>",
+            if any(cluster_mask):
+                cluster_df = self.filtered_features_df[cluster_mask]
+                # Use the color from cluster manager (consistent with tabs)
+                color = cluster_colors[i] if i < len(cluster_colors) else "gray"
+
+                fig.add_trace(
+                    go.Scatter(
+                        x=cluster_df[x_axis],
+                        y=cluster_df[y_axis],
+                        mode="markers",
+                        marker=dict(
+                            size=self._DEFAULT_MARKER_SIZE,
+                            color=color,
+                            line=dict(width=0.5, color="black"),
+                            opacity=0.8,
+                        ),
+                        name=cluster.name or f"Cluster {i+1}",
+                        hovertemplate=f"<b>{cluster.name or f'Cluster {i+1}'}</b><br>"
+                        + f"{x_axis}: %{{x}}<br>"
+                        + f"{y_axis}: %{{y}}<br>"
+                        + "<extra></extra>",
+                    )
                 )
-            )
 
         return fig
 
@@ -1572,88 +1890,147 @@ class EmbeddingVisualizationApp:
         if not self.cluster_manager.clusters:
             return html.Div("No clusters created yet")
 
-        # Create cluster colors once
-        cmap = plt.cm.get_cmap("tab20")
-        cluster_colors = [
-            f"rgb{tuple(int(x*255) for x in cmap(i % 20)[:3])}"
-            for i in range(len(self.cluster_manager.clusters))
-        ]
+        # Debug information
+        logger.info(f"Image cache size: {len(self.image_cache)}")
+        logger.info(f"Number of clusters: {len(self.cluster_manager.clusters)}")
 
-        # Get all channels from any dataset (they should be the same)
-        channels_to_display = []
-        for dataset_config in self.datasets.values():
-            if hasattr(dataset_config, "channels_to_display"):
-                channels_to_display = dataset_config.channels_to_display
-                break
+        # Use cluster manager's color scheme (consistent with scatter plot)
+        cluster_colors = self.cluster_manager.get_cluster_colors_by_index()
+
+        # Collect all unique channels across all datasets in the cluster points
+        all_channels_in_cluster = set()
+        for cluster in self.cluster_manager.clusters:
+            for point in cluster.points:
+                # Get channels for this specific dataset
+                if point.dataset in self.datasets:
+                    dataset_channels = self.datasets[point.dataset].channels_to_display
+                    all_channels_in_cluster.update(dataset_channels)
+
+        logger.info(f"All channels found in clusters: {all_channels_in_cluster}")
 
         # Create individual cluster panels
         cluster_panels = []
         for cluster_idx, cluster in enumerate(self.cluster_manager.clusters):
-            # Create a single scrollable container for all channels
-            all_channel_images = []
-            for channel in channels_to_display:
-                images = []
-                for point in cluster.points:
-                    cache_key = (point.dataset, point.fov_name, point.track_id, point.t)
+            logger.info(
+                f"Processing cluster {cluster_idx} with {len(cluster.points)} points"
+            )
 
-                    if (
-                        cache_key in self.image_cache
-                        and channel in self.image_cache[cache_key]
-                    ):
-                        images.append(
-                            html.Div(
-                                [
-                                    html.Img(
-                                        src=self.image_cache[cache_key][channel],
-                                        style={
-                                            "width": "100px",
-                                            "height": "100px",
-                                            "margin": "2px",
-                                            "border": f"2px solid {cluster_colors[cluster_idx]}",
-                                            "borderRadius": "4px",
-                                        },
-                                    ),
-                                    html.Div(
-                                        f"Track {point.track_id}, t={point.t}",
-                                        style={
-                                            "textAlign": "center",
-                                            "fontSize": "10px",
-                                        },
-                                    ),
-                                ],
-                                style={
-                                    "display": "inline-block",
-                                    "margin": "2px",
-                                    "verticalAlign": "top",
-                                },
-                            )
+            # Group points by dataset to handle different channels
+            points_by_dataset = {}
+            for point in cluster.points:
+                if point.dataset not in points_by_dataset:
+                    points_by_dataset[point.dataset] = []
+                points_by_dataset[point.dataset].append(point)
+
+            # Create images organized by dataset and then by channel
+            all_channel_images = []
+            images_found = 0
+
+            for dataset_name, dataset_points in points_by_dataset.items():
+                if dataset_name not in self.datasets:
+                    continue
+
+                dataset_channels = self.datasets[dataset_name].channels_to_display
+
+                # Add dataset header if there are multiple datasets
+                if len(points_by_dataset) > 1:
+                    all_channel_images.append(
+                        html.H5(
+                            f"Dataset: {dataset_name}",
+                            style={
+                                "margin": "10px 5px 5px 5px",
+                                "fontSize": "14px",
+                                "fontWeight": "bold",
+                                "color": "#2c3e50",
+                                "borderBottom": "1px solid #dee2e6",
+                                "paddingBottom": "5px",
+                            },
+                        )
+                    )
+
+                for channel in dataset_channels:
+                    images = []
+                    for point in dataset_points:
+                        cache_key = (
+                            point.dataset,
+                            point.fov_name,
+                            point.track_id,
+                            point.t,
                         )
 
-                if images:
-                    all_channel_images.extend(
-                        [
-                            html.H6(
-                                f"{channel}",
-                                style={
-                                    "margin": "5px",
-                                    "fontSize": "12px",
-                                    "fontWeight": "bold",
-                                    "position": "sticky",
-                                    "left": "0",
-                                    "backgroundColor": "#f8f9fa",
-                                    "zIndex": "1",
-                                    "paddingLeft": "5px",
-                                },
-                            ),
-                            html.Div(
-                                images,
-                                style={
-                                    "whiteSpace": "nowrap",
-                                    "marginBottom": "10px",
-                                },
-                            ),
-                        ]
-                    )
+                        # Debug: Check if cache key exists
+                        if cache_key in self.image_cache:
+                            if channel in self.image_cache[cache_key]:
+                                images_found += 1
+                                images.append(
+                                    html.Div(
+                                        [
+                                            html.Img(
+                                                src=self.image_cache[cache_key][
+                                                    channel
+                                                ],
+                                                style={
+                                                    "width": "100px",
+                                                    "height": "100px",
+                                                    "margin": "2px",
+                                                    "border": f"2px solid {cluster_colors[cluster_idx]}",
+                                                    "borderRadius": "4px",
+                                                },
+                                            ),
+                                            html.Div(
+                                                f"{dataset_name}:T{point.track_id}:t{point.t}",
+                                                style={
+                                                    "textAlign": "center",
+                                                    "fontSize": "9px",
+                                                    "maxWidth": "100px",
+                                                    "overflow": "hidden",
+                                                    "textOverflow": "ellipsis",
+                                                },
+                                            ),
+                                        ],
+                                        style={
+                                            "display": "inline-block",
+                                            "margin": "2px",
+                                            "verticalAlign": "top",
+                                        },
+                                    )
+                                )
+                            else:
+                                logger.debug(
+                                    f"Channel {channel} not found for cache key {cache_key}"
+                                )
+                        else:
+                            logger.debug(
+                                f"Cache key {cache_key} not found in image cache"
+                            )
+
+                    if images:
+                        all_channel_images.extend(
+                            [
+                                html.H6(
+                                    f"{channel}",
+                                    style={
+                                        "margin": "5px",
+                                        "fontSize": "12px",
+                                        "fontWeight": "bold",
+                                        "position": "sticky",
+                                        "left": "0",
+                                        "backgroundColor": "#f8f9fa",
+                                        "zIndex": "1",
+                                        "paddingLeft": "5px",
+                                    },
+                                ),
+                                html.Div(
+                                    images,
+                                    style={
+                                        "whiteSpace": "nowrap",
+                                        "marginBottom": "10px",
+                                    },
+                                ),
+                            ]
+                        )
+
+            logger.info(f"Cluster {cluster_idx}: Found {images_found} images")
 
             if all_channel_images:
                 # Create a panel for this cluster with synchronized scrolling
@@ -1728,6 +2105,108 @@ class EmbeddingVisualizationApp:
                         },
                     )
                 )
+            else:
+                # Show a message if no images were found for this cluster
+                cluster_name = (
+                    cluster.name if cluster.name else f"Cluster {cluster_idx + 1}"
+                )
+                cluster_panels.append(
+                    html.Div(
+                        [
+                            html.Div(
+                                [
+                                    html.Span(
+                                        cluster_name,
+                                        style={
+                                            "color": cluster_colors[cluster_idx],
+                                            "fontWeight": "bold",
+                                            "fontSize": "16px",
+                                        },
+                                    ),
+                                    html.Span(
+                                        f" ({len(cluster.points)} points)",
+                                        style={
+                                            "color": "#2c3e50",
+                                            "fontSize": "14px",
+                                        },
+                                    ),
+                                ],
+                                style={
+                                    "marginBottom": "10px",
+                                    "borderBottom": f"2px solid {cluster_colors[cluster_idx]}",
+                                    "paddingBottom": "5px",
+                                },
+                            ),
+                            html.Div(
+                                [
+                                    html.P("No images available for this cluster."),
+                                    html.P("This might be because:"),
+                                    html.Ul(
+                                        [
+                                            html.Li("Images haven't been preloaded"),
+                                            html.Li(
+                                                "Cache keys don't match the cluster points"
+                                            ),
+                                            html.Li(
+                                                "Channels are not configured correctly"
+                                            ),
+                                        ]
+                                    ),
+                                    html.P(
+                                        f"Debug info: {len(cluster.points)} points in cluster"
+                                    ),
+                                ],
+                                style={
+                                    "padding": "20px",
+                                    "backgroundColor": "#f8f9fa",
+                                    "borderRadius": "8px",
+                                    "textAlign": "center",
+                                    "color": "#6c757d",
+                                },
+                            ),
+                        ],
+                        style={
+                            "width": "24%",
+                            "display": "inline-block",
+                            "verticalAlign": "top",
+                            "padding": "5px",
+                            "boxSizing": "border-box",
+                        },
+                    )
+                )
+
+        # If no cluster panels were created, show a debug message
+        if not cluster_panels:
+            return html.Div(
+                [
+                    html.H2("Clusters", style={"marginBottom": "20px"}),
+                    html.Div(
+                        [
+                            html.P("No cluster images could be displayed."),
+                            html.P(f"Debug information:"),
+                            html.Ul(
+                                [
+                                    html.Li(
+                                        f"Number of clusters: {len(self.cluster_manager.clusters)}"
+                                    ),
+                                    html.Li(
+                                        f"Image cache size: {len(self.image_cache)}"
+                                    ),
+                                    html.Li(
+                                        f"Channels to display: {all_channels_in_cluster}"
+                                    ),
+                                ]
+                            ),
+                        ],
+                        style={
+                            "padding": "20px",
+                            "backgroundColor": "#f8f9fa",
+                            "borderRadius": "8px",
+                            "margin": "20px",
+                        },
+                    ),
+                ]
+            )
 
         # Create rows of 4 panels each
         rows = []
