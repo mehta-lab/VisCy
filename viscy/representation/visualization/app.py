@@ -1,10 +1,8 @@
-import atexit
-import base64
 import json
 import logging
-from io import BytesIO
 from pathlib import Path
 from typing import Union
+import atexit
 
 import dash
 import dash.dependencies as dd
@@ -13,7 +11,6 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
-from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
@@ -72,6 +69,7 @@ class EmbeddingVisualizationApp:
 
         # Store datasets for per-dataset access
         self.datasets = viz_config.get_datasets()
+        self._DEFAULT_MARKER_SIZE = 15
 
         # Initialize data
         self._prepare_data()
@@ -664,23 +662,34 @@ class EmbeddingVisualizationApp:
             return fig, selected_data
 
         @self.app.callback(
-            dd.Output("track-timeline", "children"),
+            [
+                dd.Output("track-timeline", "children"),
+                dd.Output("scatter-plot", "figure", allow_duplicate=True),
+            ],
             [dd.Input("scatter-plot", "clickData")],
+            [
+                dd.State("color-mode", "value"),
+                dd.State("show-arrows", "value"),
+                dd.State("x-axis", "value"),
+                dd.State("y-axis", "value"),
+            ],
             prevent_initial_call=True,
         )
-        def update_track_timeline(clickData):
+        def update_track_timeline(clickData, color_mode, show_arrows, x_axis, y_axis):
             """Update the track timeline based on the clicked point"""
             if clickData is None or self.features_df is None:
-                return html.Div("Click on a point to see the track timeline")
+                return (
+                    html.Div("Click on a point to see the track timeline"),
+                    dash.no_update,
+                )
 
             # Parse the hover text to get dataset, track_id, time and fov_name
             hover_text = clickData["points"][0]["text"]
             lines = hover_text.split("<br>")
             dataset_name = lines[0].split(": ")[1]
-            track_id = lines[1].split(": ")[1]
+            track_id = int(lines[1].split(": ")[1])
             clicked_time = int(lines[2].split(": ")[1])
             fov_name = lines[3].split(": ")[1]
-
             # Get channels specific to this dataset
             channels_to_display = self.datasets[dataset_name].channels_to_display
 
@@ -688,17 +697,19 @@ class EmbeddingVisualizationApp:
             track_data = self.features_df[
                 (self.features_df["dataset"] == dataset_name)
                 & (self.features_df["fov_name"] == fov_name)
-                & (self.features_df["track_id"] == track_id)
+                & (self.features_df["track_id"] == int(track_id))
             ]
 
             if track_data.empty:
-                return html.Div(
-                    f"No data found for track {track_id} in dataset {dataset_name}"
+                return (
+                    html.Div(
+                        f"No data found for track {track_id} in dataset {dataset_name}"
+                    ),
+                    dash.no_update,
                 )
 
             # Sort by time
-            if hasattr(track_data, "sort_values"):
-                track_data = track_data.sort_values("t")
+            track_data = track_data.sort_values("t")
             timepoints = track_data["t"].unique()
 
             # Create a list to store all timepoint columns
@@ -712,6 +723,7 @@ class EmbeddingVisualizationApp:
                     "width": "150px",
                     "textAlign": "center",
                     "padding": "5px",
+                    "fontSize": "20px" if is_clicked else "14px",
                     "fontWeight": "bold" if is_clicked else "normal",
                     "color": "#007bff" if is_clicked else "black",
                 }
@@ -736,7 +748,7 @@ class EmbeddingVisualizationApp:
                 channel_images = []
                 for t in timepoints:
                     # Use correct 4-tuple cache key format
-                    cache_key = (dataset_name, fov_name, track_id, t)
+                    cache_key = (dataset_name, fov_name, int(track_id), int(t))
 
                     if (
                         cache_key in self.image_cache
@@ -793,8 +805,8 @@ class EmbeddingVisualizationApp:
                         )
                     )
 
-            # Create the main container with synchronized scrolling
-            return html.Div(
+            # Create the main container
+            timeline_content = html.Div(
                 [
                     html.H4(
                         f"Track {track_id} (FOV: {fov_name})",
@@ -820,6 +832,15 @@ class EmbeddingVisualizationApp:
                     ),
                 ]
             )
+
+            # Create updated figure with highlighted clicked point
+            show_arrows = len(show_arrows or []) > 0
+            if color_mode == "track":
+                fig = self._create_track_colored_figure(show_arrows, x_axis, y_axis)
+            else:
+                fig = self._create_time_colored_figure(show_arrows, x_axis, y_axis)
+
+            return timeline_content, dash.no_update
 
         # Add callback to show/hide clusters tab and handle modal
         @self.app.callback(
@@ -981,6 +1002,89 @@ class EmbeddingVisualizationApp:
                     dash.no_update,
                 )
 
+            # Handle assign cluster button
+            elif button_id == "assign-cluster" and assign_clicks and selected_data:
+                if not selected_data or not selected_data.get("points"):
+                    logger.warning("No points selected for clustering")
+                    return (
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                    )
+
+                # Extract selected point indices
+                selected_indices = [
+                    point.get("pointIndex") for point in selected_data["points"]
+                ]
+                selected_indices = [idx for idx in selected_indices if idx is not None]
+
+                if not selected_indices:
+                    logger.warning("No valid point indices found in selection")
+                    return (
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                    )
+
+                # Get the selected data points from filtered_features_df
+                if len(selected_indices) > len(self.filtered_features_df):
+                    logger.error("Selected indices exceed dataframe size")
+                    return (
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                        dash.no_update,
+                    )
+
+                # Create cluster from selected points
+                selected_points_df = self.filtered_features_df.iloc[
+                    selected_indices
+                ].copy()
+
+                # Create a new cluster using the cluster manager
+                cluster_id = self.cluster_manager.create_cluster(selected_points_df)
+                logger.info(
+                    f"Created cluster {cluster_id} with {len(selected_points_df)} points"
+                )
+
+                # Show modal for naming the cluster
+                modal_style = {
+                    "display": "flex",
+                    "position": "fixed",
+                    "top": "0",
+                    "left": "0",
+                    "width": "100%",
+                    "height": "100%",
+                    "backgroundColor": "rgba(0, 0, 0, 0.5)",
+                    "zIndex": "1000",
+                    "justifyContent": "center",
+                    "alignItems": "center",
+                }
+
+                # Update figure to show cluster coloring
+                fig = self._create_cluster_colored_figure(show_arrows, x_axis, y_axis)
+
+                return (
+                    {"display": "block"},  # Show clusters tab
+                    self._get_cluster_images(),
+                    "clusters-tab",  # Switch to clusters tab
+                    fig,  # Updated figure with cluster colors
+                    modal_style,  # Show naming modal
+                    f"Cluster {len(self.cluster_manager.clusters)}",  # Default name
+                    None,  # Clear selection
+                )
+
             # Default return (no updates)
             return (
                 dash.no_update,
@@ -992,6 +1096,66 @@ class EmbeddingVisualizationApp:
                 dash.no_update,
             )
 
+        @self.app.callback(
+            [
+                dd.Output("scatter-plot", "figure", allow_duplicate=True),
+                dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
+                dd.Output("track-timeline", "children", allow_duplicate=True),
+            ],
+            [dd.Input("clear-selection", "n_clicks")],
+            [
+                dd.State("color-mode", "value"),
+                dd.State("show-arrows", "value"),
+                dd.State("x-axis", "value"),
+                dd.State("y-axis", "value"),
+            ],
+            prevent_initial_call=True,
+        )
+        def clear_selection(n_clicks, color_mode, show_arrows, x_axis, y_axis):
+            """Callback to clear the selection and restore original opacity"""
+            if n_clicks:
+
+                # Create a new figure with no selections
+                if color_mode == "track":
+                    fig = self._create_track_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+                else:
+                    fig = self._create_time_colored_figure(
+                        len(show_arrows or []) > 0,
+                        x_axis,
+                        y_axis,
+                    )
+
+                # Update layout to maintain lasso mode but clear selections
+                fig.update_layout(
+                    dragmode="lasso",
+                    clickmode="event+select",
+                    uirevision=None,  # Reset UI state to clear selections
+                    selectdirection="any",
+                )
+
+                # Clear the track timeline as well
+                empty_timeline = html.Div(
+                    "Click on a point to see the track timeline",
+                    style={
+                        "textAlign": "center",
+                        "color": "#666",
+                        "fontSize": "16px",
+                        "padding": "40px",
+                        "fontStyle": "italic",
+                    },
+                )
+
+                return (
+                    fig,
+                    None,
+                    empty_timeline,
+                )  # Clear figure selection, selectedData, and timeline
+            return dash.no_update, dash.no_update, dash.no_update
+
     def _create_track_colored_figure(
         self,
         show_arrows=False,
@@ -999,8 +1163,7 @@ class EmbeddingVisualizationApp:
         y_axis=None,
     ):
         """Create scatter plot with track-based coloring"""
-        if self.features_df is None:
-            logger.error("features_df is None, cannot create figure")
+        if self.filtered_features_df is None or self.filtered_features_df.empty:
             return go.Figure()
 
         x_axis = x_axis or self.default_x
@@ -1045,7 +1208,7 @@ class EmbeddingVisualizationApp:
                     x=self.background_features_df[x_axis],
                     y=self.background_features_df[y_axis],
                     mode="markers",
-                    marker=dict(size=8, color="lightgray", opacity=0.3),
+                    marker=dict(size=8, color="lightgray", opacity=0.4),
                     name=f"Other tracks ({len(self.background_features_df)} points)",
                     text=[
                         f"Dataset: {dataset}<br>Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
@@ -1082,38 +1245,6 @@ class EmbeddingVisualizationApp:
                 track_data = track_data.sort_values("t")
             timepoints = track_data["t"].unique()
 
-            # Determine colors based on cluster membership
-            colors = []
-            opacities = []
-            if self.cluster_manager.clusters:
-                cmap_cluster = plt.cm.get_cmap("tab20")
-                cluster_colors = [
-                    f"rgb{tuple(int(x * 255) for x in cmap_cluster(i % 20)[:3])}"
-                    for i in range(len(self.cluster_manager.clusters))
-                ]
-
-                # Create point to cluster mapping
-                point_to_cluster = {}
-                for cluster_idx, cluster in enumerate(self.cluster_manager.clusters):
-                    for point in cluster.points:
-                        point_to_cluster[point.cache_key] = cluster_idx
-
-                # Assign colors based on cluster membership
-                for _, row in track_data.iterrows():
-                    cache_key = (dataset_name, fov_name, str(row["track_id"]), row["t"])
-                    if cache_key in point_to_cluster:
-                        colors.append(cluster_colors[point_to_cluster[cache_key]])
-                        opacities.append(1.0)
-                    else:
-                        colors.append("lightgray")
-                        opacities.append(0.3)
-            else:
-                track_key = (dataset_name, fov_name, track_id)
-                colors = [self.track_colors[(dataset_name, fov_name, track_id)]] * len(
-                    track_data
-                )
-                opacities = [1.0] * len(track_data)
-
             # Add track points
             fig.add_trace(
                 go.Scattergl(
@@ -1121,10 +1252,10 @@ class EmbeddingVisualizationApp:
                     y=track_data[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=10,
-                        color=colors,
-                        line=dict(width=1, color="black"),
-                        opacity=opacities,
+                        size=self._DEFAULT_MARKER_SIZE,  # Use variable sizes
+                        color=self.track_colors[(dataset_name, fov_name, track_id)],
+                        opacity=1.0,
+                        line=dict(width=0.5, color="black"),
                     ),
                     name=f"{dataset_name}:{track_id}",
                     text=[
@@ -1132,8 +1263,12 @@ class EmbeddingVisualizationApp:
                         for t, fov in zip(track_data["t"], track_data["fov_name"])
                     ],
                     hoverinfo="text",
-                    unselected=dict(marker=dict(opacity=0.3, size=10)),
-                    selected=dict(marker=dict(size=12, opacity=1.0)),
+                    unselected=dict(
+                        marker=dict(opacity=0.6, size=self._DEFAULT_MARKER_SIZE)
+                    ),
+                    selected=dict(
+                        marker=dict(size=self._DEFAULT_MARKER_SIZE * 1.5, opacity=1.0)
+                    ),
                     hoverlabel=dict(namelength=-1),
                 )
             )
@@ -1194,8 +1329,7 @@ class EmbeddingVisualizationApp:
         y_axis=None,
     ):
         """Create scatter plot with time-based coloring"""
-        if self.features_df is None:
-            logger.error("features_df is None, cannot create figure")
+        if self.filtered_features_df is None or self.filtered_features_df.empty:
             return go.Figure()
 
         x_axis = x_axis or self.default_x
@@ -1254,7 +1388,6 @@ class EmbeddingVisualizationApp:
                     hoverlabel=dict(namelength=-1),
                 )
             )
-
         # Add time-colored points
         if not filtered_features_df.empty:
             fig.add_trace(
@@ -1263,7 +1396,7 @@ class EmbeddingVisualizationApp:
                     y=filtered_features_df[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=10,
+                        size=self._DEFAULT_MARKER_SIZE,  # Use variable sizes
                         color=filtered_features_df["t"],
                         colorscale="Viridis",
                         colorbar=dict(title="Time"),
@@ -1336,6 +1469,99 @@ class EmbeddingVisualizationApp:
 
         return fig
 
+    def _create_cluster_colored_figure(
+        self,
+        show_arrows=False,
+        x_axis=None,
+        y_axis=None,
+    ):
+        """Create scatter plot with cluster-based coloring"""
+        if self.filtered_features_df is None or self.filtered_features_df.empty:
+            return go.Figure()
+
+        x_axis = x_axis or self.default_x
+        y_axis = y_axis or self.default_y
+
+        fig = go.Figure()
+
+        # Set initial layout
+        fig.update_layout(
+            dragmode="lasso",
+            showlegend=True,
+            height=700,
+            xaxis=dict(scaleanchor="y", scaleratio=1),  # Square plot
+            yaxis=dict(scaleanchor="x", scaleratio=1),
+        )
+        fig.update_xaxes(showgrid=False)
+        fig.update_yaxes(showgrid=False)
+
+        # Create cluster colors
+        cluster_colors = [
+            "red",
+            "blue",
+            "green",
+            "orange",
+            "purple",
+            "brown",
+            "pink",
+            "gray",
+            "olive",
+            "cyan",
+        ]
+
+        # Add unclustered points (background)
+        clustered_indices = set()
+        for cluster in self.cluster_manager.clusters:
+            clustered_indices.update(cluster.point_indices)
+
+        unclustered_mask = ~self.filtered_features_df.index.isin(clustered_indices)
+        if unclustered_mask.any():
+            unclustered_df = self.filtered_features_df[unclustered_mask]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=unclustered_df[x_axis],
+                    y=unclustered_df[y_axis],
+                    mode="markers",
+                    marker=dict(
+                        size=8,
+                        color="lightgray",
+                        opacity=0.6,
+                    ),
+                    name="Unclustered",
+                    hovertemplate="<b>Unclustered</b><br>"
+                    + f"{x_axis}: %{{x}}<br>"
+                    + f"{y_axis}: %{{y}}<br>"
+                    + "<extra></extra>",
+                )
+            )
+
+        # Add each cluster as a separate trace
+        for i, cluster in enumerate(self.cluster_manager.clusters):
+            cluster_df = self.filtered_features_df.loc[cluster.point_indices]
+            color = cluster_colors[i % len(cluster_colors)]
+
+            fig.add_trace(
+                go.Scatter(
+                    x=cluster_df[x_axis],
+                    y=cluster_df[y_axis],
+                    mode="markers",
+                    marker=dict(
+                        size=self._DEFAULT_MARKER_SIZE,
+                        color=color,
+                        line=dict(width=0.5, color="black"),
+                        opacity=0.8,
+                    ),
+                    name=cluster.name or f"Cluster {i+1}",
+                    hovertemplate=f"<b>{cluster.name or f'Cluster {i+1}'}</b><br>"
+                    + f"{x_axis}: %{{x}}<br>"
+                    + f"{y_axis}: %{{y}}<br>"
+                    + "<extra></extra>",
+                )
+            )
+
+        return fig
+
     def _cleanup_cache(self):
         """Clear the image cache when the program exits"""
         logging.info("Cleaning up image cache...")
@@ -1368,9 +1594,7 @@ class EmbeddingVisualizationApp:
             for channel in channels_to_display:
                 images = []
                 for point in cluster.points:
-                    cache_key = (
-                        point.cache_key
-                    )  # This is the 4-tuple (dataset, fov_name, track_id, t)
+                    cache_key = (point.dataset, point.fov_name, point.track_id, point.t)
 
                     if (
                         cache_key in self.image_cache
@@ -1560,9 +1784,10 @@ class EmbeddingVisualizationApp:
     @staticmethod
     def _numpy_to_base64(img_array):
         """Convert numpy array to base64 string with compression"""
-        from PIL import Image
-        from io import BytesIO
         import base64
+        from io import BytesIO
+
+        from PIL import Image
 
         if img_array.dtype != np.uint8:
             img_array = img_array.astype(np.uint8)
@@ -1643,8 +1868,8 @@ class EmbeddingVisualizationApp:
                             t = indices["t"].tolist()
 
                             img = np.stack(images)
-                            # ✅ Use 4-tuple cache key format with dataset
-                            cache_key = (dataset_name, fov_name, track_id[0], t[0])
+
+                            cache_key = (dataset_name, fov_name, track_id, t)
 
                             logger.debug(f"Processing cache key: {cache_key}")
 
