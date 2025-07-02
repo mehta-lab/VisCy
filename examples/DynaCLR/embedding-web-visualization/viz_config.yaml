@@ -36,13 +36,17 @@ datasets:
 
 # Global settings
 num_PC_components: 8
-phate_kwargs:
-  n_components: 4     # Number of PHATE components
-  knn: 5              # Number of nearest neighbors for KNN graph
-  decay: 40           # Decay parameter for Markov operator  
-  n_jobs: -1          # Number of parallel jobs (-1 uses all cores)
-  random_state: 42    # Random seed for reproducibility
-  # gamma: 1.0        # Informational scale parameter (optional)
-  # t: "auto"         # Number of diffusion steps (optional, auto-selects optimal)
-  # a: 1              # Alpha parameter for alpha-decay kernel (optional)
-  # verbose: 0        # Verbosity level (optional)
+# phate_kwargs:
+#   n_components: 4     # Number of PHATE components
+#   knn: 5              # Number of nearest neighbors for KNN graph
+#   decay: 40           # Decay parameter for Markov operator  
+#   n_jobs: -1          # Number of parallel jobs (-1 uses all cores)
+#   random_state: 42    # Random seed for reproducibility
+#   # gamma: 1.0        # Informational scale parameter (optional)
+#   # t: "auto"         # Number of diffusion steps (optional, auto-selects optimal)
+#   # a: 1              # Alpha parameter for alpha-decay kernel (optional)
+#   # verbose: 0        # Verbosity level (optional)
+
+# File system paths
+output_dir: "./output"  # Directory to save CSV files and other outputs
+cache_path: "/home/eduardo.hirata/mydata/tmp/pcviewer/cache/image_cache1.pkl"  # Path to save/load image cache

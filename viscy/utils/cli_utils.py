@@ -1,12 +1,12 @@
 import collections
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 import torch
-from PIL import Image
-from pathlib import Path
 import yaml
+from PIL import Image
 
 
 def unique_tags(directory):

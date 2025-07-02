@@ -27,18 +27,20 @@ def main(config_filepath):
     # Load and validate configuration from YAML file
     viz_config = yaml_to_model(yaml_path=config_filepath, model=VizConfig)
 
-    output_dir = Path(__file__).parent / "output"
-    cache_path = (
-        Path("/home/eduardo.hirata/mydata/tmp/pcviewer") / "cache" / "image_cache.pkl"
-    )
+    # Use configured paths, with fallbacks to current defaults if not specified
+    output_dir = viz_config.output_dir or str(Path(__file__).parent / "output")
+    cache_path = viz_config.cache_path
+
+    logger.info(f"Using output directory: {output_dir}")
+    logger.info(f"Using cache path: {cache_path}")
 
     # Create and run the visualization app
     try:
         app = EmbeddingVisualizationApp(
             viz_config=viz_config,
-            cache_path=str(cache_path),
+            cache_path=cache_path,
             num_loading_workers=16,
-            output_dir=str(output_dir),
+            output_dir=output_dir,
         )
         app.preload_images()
         app.run(debug=True)

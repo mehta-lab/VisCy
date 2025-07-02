@@ -234,7 +234,7 @@ class EmbeddingVisualizationApp:
                             (dataset_name, fov_name, track_id)
                         )
 
-        logger.info(f"Total valid combinations: {len(self.valid_combinations)}")
+        logger.debug(f"Total valid filtered tracks: {len(self.valid_combinations)}")
 
         # Create a MultiIndex for efficient filtering
         if self.valid_combinations:
@@ -842,13 +842,6 @@ class EmbeddingVisualizationApp:
                     ),
                 ]
             )
-
-            # Create updated figure with highlighted clicked point
-            show_arrows = len(show_arrows or []) > 0
-            if color_mode == "track":
-                fig = self._create_track_colored_figure(show_arrows, x_axis, y_axis)
-            else:
-                fig = self._create_time_colored_figure(show_arrows, x_axis, y_axis)
 
             return timeline_content, dash.no_update
 
@@ -2224,7 +2217,7 @@ class EmbeddingVisualizationApp:
                     html.Div(
                         [
                             html.P("No cluster images could be displayed."),
-                            html.P(f"Debug information:"),
+                            html.P("Debug information:"),
                             html.Ul(
                                 [
                                     html.Li(
@@ -2325,10 +2318,10 @@ class EmbeddingVisualizationApp:
 
         # Try to load from cache first
         if self.cache_path and self.load_cache():
+            logger.info("Preloading images into cache...")
             return
 
-        logger.info("Preloading images into cache...")
-
+        logger.info("Cache not found, preloading and caching images...")
         # Process each dataset
         for dataset_name, dataset_config in self.datasets.items():
             logger.info(f"Processing dataset: {dataset_name}")
@@ -2340,10 +2333,11 @@ class EmbeddingVisualizationApp:
                 logger.info(f"Skipping dataset {dataset_name} as it has no FOV tracks")
                 continue
 
-            # Get tracks for this dataset
+            # Process each FOV and resolve track IDs
+            fov_track_mapping = {}
             for fov_name, tracks in dataset_config.fov_tracks.items():
                 if isinstance(tracks, list):
-                    track_ids = tracks
+                    fov_track_mapping[fov_name] = tracks
                 elif tracks == "all":
                     # Get all tracks for this FOV from features
                     if self.features_df is not None:
@@ -2351,17 +2345,34 @@ class EmbeddingVisualizationApp:
                             (self.features_df["dataset"] == dataset_name)
                             & (self.features_df["fov_name"] == fov_name)
                         ]["track_id"]
-                        track_ids = fov_tracks_series.unique().tolist()
+                        fov_track_mapping[fov_name] = (
+                            fov_tracks_series.unique().tolist()
+                        )
+                        logger.info(
+                            f"Resolved 'all' tracks for FOV {fov_name}: {len(fov_track_mapping[fov_name])} tracks"
+                        )
+                    else:
+                        logger.warning(
+                            f"Cannot resolve 'all' tracks for FOV {fov_name}: features_df is None"
+                        )
+                        fov_track_mapping[fov_name] = []
+                else:
+                    logger.warning(
+                        f"Unknown track specification for FOV {fov_name}: {tracks}"
+                    )
+                    fov_track_mapping[fov_name] = []
 
-            logger.info(f"FOVs to process for {dataset_name}: {list(track_ids)}")
+            logger.debug(f"FOV-track mapping for {dataset_name}: {fov_track_mapping}")
 
-            # Process each FOV and its tracks
-            for fov_name, track_ids in dataset_config.fov_tracks.items():
+            # Process each FOV and its resolved tracks
+            for fov_name, track_ids in fov_track_mapping.items():
                 if not track_ids:  # Skip FOVs with no tracks
-                    logger.info(f"Skipping FOV {fov_name} as it has no tracks")
+                    logger.debug(f"Skipping FOV {fov_name} as it has no tracks")
                     continue
 
-                logger.info(f"Processing FOV {fov_name} with tracks {track_ids}")
+                logger.debug(
+                    f"Processing FOV {fov_name} with {len(track_ids)} tracks: {track_ids}"
+                )
 
                 try:
                     data_module = TripletDataModule(
@@ -2375,7 +2386,7 @@ class EmbeddingVisualizationApp:
                         final_yx_patch_size=dataset_config.yx_patch_size,
                         batch_size=1,
                         num_workers=self.num_loading_workers,
-                        normalizations=[],  # Use empty list instead of None
+                        normalizations=[],
                         predict_cells=True,
                     )
                     data_module.setup("predict")
@@ -2384,8 +2395,8 @@ class EmbeddingVisualizationApp:
                         try:
                             images = batch["anchor"].numpy()
                             indices = batch["index"]
-                            track_id = indices["track_id"].tolist()
-                            t = indices["t"].tolist()
+                            track_id = indices["track_id"].item()
+                            t = indices["t"].item()
 
                             img = np.stack(images)
 
@@ -2443,14 +2454,13 @@ class EmbeddingVisualizationApp:
                     )
                     continue
 
-        logger.info(f"Successfully cached {len(self.image_cache)} images")
         # Log some statistics about the cache
         cached_datasets = set(key[0] for key in self.image_cache.keys())
         cached_fovs = set((key[0], key[1]) for key in self.image_cache.keys())
         cached_tracks = set((key[0], key[1], key[2]) for key in self.image_cache.keys())
         logger.info(f"Cached datasets: {cached_datasets}")
-        logger.info(f"Cached dataset-FOV combinations: {len(cached_fovs)}")
-        logger.info(
+        logger.debug(f"Cached dataset-FOV combinations: {len(cached_fovs)}")
+        logger.debug(
             f"Number of unique dataset-FOV-track combinations: {len(cached_tracks)}"
         )
 
@@ -2499,7 +2509,6 @@ class EmbeddingVisualizationApp:
             logger.info(f"Saving image cache to {cache_path}")
             with open(cache_path, "wb") as f:
                 pickle.dump((cache_metadata, self.image_cache), f)
-            logger.info(f"Successfully saved cache with {len(self.image_cache)} images")
         except Exception as e:
             logger.error(f"Error saving cache: {e}")
 

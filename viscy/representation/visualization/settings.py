@@ -35,6 +35,27 @@ class VizConfig(BaseModel):
         description="PHATE parameters. If None, PHATE will not be computed.",
     )
 
+    # File system paths
+    output_dir: Optional[str] = Field(
+        default=None,
+        description="Directory to save CSV files and other outputs. If None, uses current working directory.",
+    )
+    cache_path: Optional[str] = Field(
+        default=None,
+        description="Path to save/load image cache. If None, images will not be cached to disk.",
+    )
+
+    @field_validator("output_dir", "cache_path")
+    @classmethod
+    def validate_optional_paths(cls, v):
+        if v is not None:
+            # Create parent directory if it doesn't exist
+            path = Path(v)
+            if not path.parent.exists():
+                logging.info(f"Creating parent directory for: {v}")
+                path.parent.mkdir(parents=True, exist_ok=True)
+        return v
+
     def get_datasets(self) -> Dict[str, DatasetConfig]:
         """Get the datasets configuration."""
         return self.datasets
