@@ -1,8 +1,8 @@
+import atexit
 import json
 import logging
 from pathlib import Path
 from typing import Union
-import atexit
 
 import dash
 import dash.dependencies as dd
@@ -69,7 +69,7 @@ class EmbeddingVisualizationApp:
 
         # Store datasets for per-dataset access
         self.datasets = viz_config.get_datasets()
-        self._DEFAULT_MARKER_SIZE = 13
+        self._DEFAULT_MARKER_SIZE = 15
 
         # Initialize data
         self._prepare_data()
@@ -192,7 +192,7 @@ class EmbeddingVisualizationApp:
             except Exception as e:
                 logger.warning(f"PHATE computation failed: {str(e)}")
 
-        # Check for existing UMAP coordinates (if they exist in the original data)
+        # Check for existing UMAP coordinates (if they exist in the data)
         umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
         if umap_dims:
             for dim in umap_dims:
@@ -1117,7 +1117,7 @@ class EmbeddingVisualizationApp:
                                             }
                                         )
                     else:
-                        # Handle track-colored figure (original logic)
+                        # Handle track-colored figure
                         # Skip background points (curve 0 if background exists)
                         background_offset = (
                             1 if not self.background_features_df.empty else 0
@@ -1329,12 +1329,24 @@ class EmbeddingVisualizationApp:
                         if cluster_data:
                             cluster_df = pd.DataFrame(cluster_data)
 
-                            # Add cluster information
-                            cluster_df["cluster_id"] = cluster.id
+                            # Add cluster information (dataset is already in the dataframe)
                             cluster_df["cluster_name"] = (
                                 cluster.name or f"Cluster {i+1}"
                             )
                             cluster_df["cluster_size"] = len(cluster.points)
+
+                            # Reorder columns to put dataset and cluster info at the front
+                            cols = cluster_df.columns.tolist()
+                            priority_cols = [
+                                "dataset",
+                                "cluster_id",
+                                "cluster_name",
+                                "cluster_size",
+                            ]
+                            other_cols = [
+                                col for col in cols if col not in priority_cols
+                            ]
+                            cluster_df = cluster_df[priority_cols + other_cols]
 
                             # Save to CSV
                             csv_path = self.output_dir / f"{safe_name}.csv"
@@ -1374,6 +1386,20 @@ class EmbeddingVisualizationApp:
 
                         if all_cluster_data:
                             summary_df = pd.DataFrame(all_cluster_data)
+
+                            # Reorder columns to put dataset and cluster info at the front
+                            cols = summary_df.columns.tolist()
+                            priority_cols = [
+                                "dataset",
+                                "cluster_id",
+                                "cluster_name",
+                                "cluster_index",
+                            ]
+                            other_cols = [
+                                col for col in cols if col not in priority_cols
+                            ]
+                            summary_df = summary_df[priority_cols + other_cols]
+
                             summary_path = self.output_dir / "all_clusters_summary.csv"
                             summary_df.to_csv(summary_path, index=False)
                             saved_files.append(summary_path.name)
@@ -1382,8 +1408,12 @@ class EmbeddingVisualizationApp:
                             )
 
                             # Log summary statistics
+                            dataset_counts = summary_df["dataset"].value_counts()
                             logger.info(
                                 f"Exported {len(self.cluster_manager.clusters)} clusters with {len(all_cluster_data)} total points"
+                            )
+                            logger.info(
+                                f"Points per dataset: {dataset_counts.to_dict()}"
                             )
 
                     # Create success notification
@@ -1513,13 +1543,16 @@ class EmbeddingVisualizationApp:
         filtered_features_df = self.filtered_features_df
 
         # Add background points using pre-computed background data
+        # Make them non-interactive and render behind main points
         if not self.background_features_df.empty:
             fig.add_trace(
                 go.Scattergl(
                     x=self.background_features_df[x_axis],
                     y=self.background_features_df[y_axis],
                     mode="markers",
-                    marker=dict(size=8, color="lightgray", opacity=0.4),
+                    marker=dict(
+                        size=12, color="lightgray", opacity=0.3
+                    ),  # Smaller and more transparent
                     name=f"Other tracks ({len(self.background_features_df)} points)",
                     text=[
                         f"Dataset: {dataset}<br>Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
@@ -1533,6 +1566,9 @@ class EmbeddingVisualizationApp:
                     hoverinfo="text",
                     showlegend=True,
                     hoverlabel=dict(namelength=-1),
+                    selectedpoints=False,
+                    unselected=dict(marker=dict(opacity=0.3)),
+                    selected=dict(marker=dict(opacity=0.3)),
                 )
             )
 
@@ -1554,7 +1590,6 @@ class EmbeddingVisualizationApp:
             # Sort by time
             if hasattr(track_data, "sort_values"):
                 track_data = track_data.sort_values("t")
-            timepoints = track_data["t"].unique()
 
             # Add track points
             fig.add_trace(
@@ -1563,7 +1598,7 @@ class EmbeddingVisualizationApp:
                     y=track_data[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=self._DEFAULT_MARKER_SIZE,  # Use variable sizes
+                        size=self._DEFAULT_MARKER_SIZE,
                         color=self.track_colors[(dataset_name, fov_name, track_id)],
                         opacity=1.0,
                         line=dict(width=0.5, color="black"),
@@ -1578,7 +1613,7 @@ class EmbeddingVisualizationApp:
                         marker=dict(opacity=0.6, size=self._DEFAULT_MARKER_SIZE)
                     ),
                     selected=dict(
-                        marker=dict(size=self._DEFAULT_MARKER_SIZE * 2, opacity=1.0)
+                        marker=dict(size=self._DEFAULT_MARKER_SIZE * 2.0, opacity=1.0)
                     ),
                     hoverlabel=dict(namelength=-1),
                 )
@@ -1598,11 +1633,12 @@ class EmbeddingVisualizationApp:
                         mode="lines",
                         line=dict(
                             color=self.track_colors[track_key],
-                            width=1,
+                            width=3,
                             dash="dot",
                         ),
                         showlegend=False,
                         hoverinfo="skip",
+                        selectedpoints=False,
                     )
                 )
 
@@ -1678,13 +1714,16 @@ class EmbeddingVisualizationApp:
         filtered_features_df = self.filtered_features_df
 
         # Add background points using pre-computed background data
+        # Make them non-interactive and render behind main points
         if not self.background_features_df.empty:
             fig.add_trace(
                 go.Scattergl(
                     x=self.background_features_df[x_axis],
                     y=self.background_features_df[y_axis],
                     mode="markers",
-                    marker=dict(size=8, color="lightgray", opacity=0.3),
+                    marker=dict(
+                        size=12, color="lightgray", opacity=0.3
+                    ),  # Smaller and more transparent
                     name=f"Other points ({len(self.background_features_df)} points)",
                     text=[
                         f"Dataset: {dataset}<br>Track: {track_id}<br>Time: {t}<br>FOV: {fov}"
@@ -1697,8 +1736,12 @@ class EmbeddingVisualizationApp:
                     ],
                     hoverinfo="text",
                     hoverlabel=dict(namelength=-1),
+                    selectedpoints=False,
+                    unselected=dict(marker=dict(opacity=0.3)),
+                    selected=dict(marker=dict(opacity=0.3)),
                 )
             )
+
         # Add time-colored points
         if not filtered_features_df.empty:
             fig.add_trace(
@@ -1707,7 +1750,7 @@ class EmbeddingVisualizationApp:
                     y=filtered_features_df[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=self._DEFAULT_MARKER_SIZE,  # Use variable sizes
+                        size=self._DEFAULT_MARKER_SIZE,
                         color=filtered_features_df["t"],
                         colorscale="Viridis",
                         colorbar=dict(title="Time"),
@@ -1727,7 +1770,7 @@ class EmbeddingVisualizationApp:
                 )
             )
 
-        # Add arrows if requested
+        # Add arrows if requested (same as before, but make them non-selectable)
         if show_arrows and not filtered_features_df.empty:
             for dataset_name, fov_name, track_id in filtered_features_df.apply(
                 lambda row: (row["dataset"], row["fov_name"], str(row["track_id"])),
@@ -1775,6 +1818,7 @@ class EmbeddingVisualizationApp:
                             ),
                             showlegend=False,
                             hoverinfo="skip",
+                            selectedpoints=False,
                         )
                     )
 
@@ -1825,7 +1869,7 @@ class EmbeddingVisualizationApp:
             cache_key not in clustered_cache_keys for cache_key in df_cache_keys
         ]
 
-        # Add unclustered points (background)
+        # Add unclustered points (background) - make them non-interactive
         if any(unclustered_mask):
             unclustered_df = self.filtered_features_df[unclustered_mask]
 
@@ -1835,15 +1879,18 @@ class EmbeddingVisualizationApp:
                     y=unclustered_df[y_axis],
                     mode="markers",
                     marker=dict(
-                        size=8,
+                        size=12,
                         color="lightgray",
-                        opacity=0.6,
+                        opacity=0.6,  # More transparent
                     ),
                     name="Unclustered",
                     hovertemplate="<b>Unclustered</b><br>"
                     + f"{x_axis}: %{{x}}<br>"
                     + f"{y_axis}: %{{y}}<br>"
                     + "<extra></extra>",
+                    selectedpoints=False,
+                    unselected=dict(marker=dict(opacity=0.3)),
+                    selected=dict(marker=dict(opacity=0.3)),
                 )
             )
 
@@ -2530,7 +2577,7 @@ class EmbeddingVisualizationApp:
                 self.app.run(
                     debug=debug,
                     port=port,
-                    use_reloader=False,  # Disable reloader to prevent multiple instances
+                    use_reloader=False,
                 )
         except KeyboardInterrupt:
             logger.info("Server shutdown requested...")
