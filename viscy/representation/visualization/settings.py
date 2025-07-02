@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -30,9 +30,10 @@ class VizConfig(BaseModel):
     datasets: Dict[str, DatasetConfig] = Field(default_factory=dict)
 
     num_PC_components: int = Field(default=8, ge=1, le=10)
-    num_phate_components: Optional[int] = None
-    phate_knn: int = Field(default=5, ge=1)
-    phate_decay: int = Field(default=40, ge=1)
+    phate_kwargs: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="PHATE parameters. If None, PHATE will not be computed.",
+    )
 
     def get_datasets(self) -> Dict[str, DatasetConfig]:
         """Get the datasets configuration."""

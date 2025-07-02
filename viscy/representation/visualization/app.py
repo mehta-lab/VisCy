@@ -153,9 +153,9 @@ class EmbeddingVisualizationApp:
                 existing_dims.append(f"PCA{i + 1}")
 
         # Compute PHATE if specified in config
-        if self.viz_config.num_phate_components is not None:
+        if self.viz_config.phate_kwargs is not None:
             logger.info(
-                f"Computing PHATE with {self.viz_config.num_phate_components} components on combined embeddings"
+                f"Computing PHATE with {self.viz_config.phate_kwargs['n_components']} components on combined embeddings"
             )
 
             try:
@@ -163,18 +163,15 @@ class EmbeddingVisualizationApp:
                     compute_phate,
                 )
 
-                # Use the compute_phate function
-                # TODO: make knn and decay configurable and the gamma parameter
+                # Use the compute_phate function with configurable parameters
+                logger.info(f"Using PHATE parameters: {self.viz_config.phate_kwargs}")
+
                 phate_model, phate_coords = compute_phate(
-                    combined_embeddings,
-                    n_components=self.viz_config.num_phate_components,
-                    knn=5,  # Default parameters - could be made configurable
-                    decay=40,
-                    random_state=42,
+                    combined_embeddings, **self.viz_config.phate_kwargs
                 )
 
                 # Add PHATE coordinates to the features dataframe
-                for i in range(self.viz_config.num_phate_components):
+                for i in range(self.viz_config.phate_kwargs["n_components"]):
                     self.features_df[f"PHATE{i + 1}"] = phate_coords[:, i]
                     dim_options.append(
                         {"label": f"PHATE{i + 1}", "value": f"PHATE{i + 1}"}
@@ -182,7 +179,7 @@ class EmbeddingVisualizationApp:
                     existing_dims.append(f"PHATE{i + 1}")
 
                 logger.info(
-                    f"Successfully computed PHATE with {self.viz_config.num_phate_components} components"
+                    f"Successfully computed PHATE with {self.viz_config.phate_kwargs['n_components']} components"
                 )
 
             except ImportError:
@@ -1339,7 +1336,6 @@ class EmbeddingVisualizationApp:
                             cols = cluster_df.columns.tolist()
                             priority_cols = [
                                 "dataset",
-                                "cluster_id",
                                 "cluster_name",
                                 "cluster_size",
                             ]
@@ -1377,7 +1373,6 @@ class EmbeddingVisualizationApp:
 
                                 if not point_row.empty:
                                     row_data = point_row.iloc[0].to_dict()
-                                    row_data["cluster_id"] = cluster.id
                                     row_data["cluster_name"] = (
                                         cluster.name or f"Cluster {i+1}"
                                     )
@@ -1391,7 +1386,6 @@ class EmbeddingVisualizationApp:
                             cols = summary_df.columns.tolist()
                             priority_cols = [
                                 "dataset",
-                                "cluster_id",
                                 "cluster_name",
                                 "cluster_index",
                             ]
