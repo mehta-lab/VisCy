@@ -150,3 +150,115 @@ def clustering_evaluation(embeddings, annotations, method="nmi"):
         raise ValueError("Invalid method. Choose 'nmi' or 'ari'.")
 
     return score
+
+
+def compute_msd_from_distance_matrix(
+    distance_matrix: NDArray, timepoints: ArrayLike, squared: bool = True
+) -> dict[int, list[float]]:
+    """
+    Compute MSD from a precomputed distance matrix using diagonal extraction.
+
+    This is the most efficient approach for MSD computation when you already
+    have a distance matrix. Uses the compare_time_offset function internally.
+
+    Parameters
+    ----------
+    distance_matrix : NDArray
+        Square distance matrix (n_timepoints, n_timepoints)
+    timepoints : ArrayLike
+        Time points corresponding to each row/column
+    squared : bool, optional
+        Whether to square the distances (for true MSD), by default True
+
+    Returns
+    -------
+    dict[int, list[float]]
+        Dictionary mapping time lag τ to list of displacement values
+    """
+    from collections import defaultdict
+
+    if squared:
+        distance_matrix = distance_matrix**2
+
+    timepoints = np.array(timepoints)
+    displacement_per_tau = defaultdict(list)
+    n_timepoints = len(timepoints)
+
+    # Use diagonal extraction for efficiency
+    for time_offset in range(1, n_timepoints):
+        # Extract diagonal at this offset using existing function
+        diagonal_displacements = compare_time_offset(distance_matrix, time_offset)
+
+        # Map to actual time lags τ
+        for i, displacement in enumerate(diagonal_displacements):
+            tau = int(timepoints[i + time_offset] - timepoints[i])
+            displacement_per_tau[tau].append(displacement)
+
+    return dict(displacement_per_tau)
+
+
+def compute_msd_from_pairwise_distances(
+    features: ArrayLike, timepoints: ArrayLike, metric: str = "euclidean"
+) -> dict[int, list[float]]:
+    """
+    Compute Mean Square Displacement (MSD) from pairwise distances.
+
+    This is an efficient implementation that uses diagonal extraction
+    instead of nested loops for better performance.
+
+    Parameters
+    ----------
+    features : ArrayLike
+        Feature matrix (n_timepoints, n_features) for a single track
+    timepoints : ArrayLike
+        Time points corresponding to each feature vector
+    metric : str, optional
+        Distance metric to use, by default "euclidean"
+
+    Returns
+    -------
+    dict[int, list[float]]
+        Dictionary mapping time lag τ to list of displacement values
+    """
+    # Ensure proper ordering by time
+    time_order = np.argsort(timepoints)
+    features = np.array(features)[time_order]
+    timepoints = np.array(timepoints)[time_order]
+
+    # Compute pairwise distance matrix
+    distance_matrix = pairwise_distance_matrix(features, metric=metric)
+
+    # Use the optimized diagonal extraction method
+    return compute_msd_from_distance_matrix(
+        distance_matrix, timepoints, squared=(metric == "euclidean")
+    )
+
+
+def compute_track_msd_statistics(
+    features: ArrayLike, timepoints: ArrayLike, metric: str = "euclidean"
+) -> tuple[dict[int, float], dict[int, float]]:
+    """
+    Compute MSD statistics (mean and std) for a single track.
+
+    Parameters
+    ----------
+    features : ArrayLike
+        Feature matrix (n_timepoints, n_features) for a single track
+    timepoints : ArrayLike
+        Time points corresponding to each feature vector
+    metric : str, optional
+        Distance metric to use, by default "euclidean"
+
+    Returns
+    -------
+    tuple[dict[int, float], dict[int, float]]
+        Tuple of (mean_msd, std_msd) dictionaries mapping τ to statistics
+    """
+    msd_per_tau = compute_msd_from_pairwise_distances(features, timepoints, metric)
+
+    mean_msd = {
+        tau: np.mean(displacements) for tau, displacements in msd_per_tau.items()
+    }
+    std_msd = {tau: np.std(displacements) for tau, displacements in msd_per_tau.items()}
+
+    return mean_msd, std_msd
