@@ -6,7 +6,12 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from sklearn.metrics import accuracy_score, classification_report, f1_score
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    f1_score,
+    roc_auc_score,
+)
 
 # %%
 # Mantis
@@ -82,14 +87,18 @@ f1_by_t = prediction.groupby(id_vars).apply(
     lambda x: float(f1_score(x["label"], x["prediction_binary"]))
 )
 
+roc_auc_by_t = prediction.groupby(id_vars).apply(
+    lambda x: float(roc_auc_score(x["label"], x["prediction"]))
+)
+
 metrics_df = pd.DataFrame(
-    data={"accuracy": accuracy_by_t.values, "F1": f1_by_t.values},
+    data={"accuracy": accuracy_by_t.values, "F1": f1_by_t.values, "ROC AUC": roc_auc_by_t.values},
     index=f1_by_t.index,
 ).reset_index()
 
 metrics_long = metrics_df.melt(
     id_vars=id_vars,
-    value_vars=["accuracy"],
+    value_vars=["ROC AUC"],
     var_name="metric",
     value_name="score",
 )
@@ -105,7 +114,7 @@ with sns.axes_style("ticks"):
         linewidth=1.5,
         linestyles="--",
     )
-    g.set_axis_labels("HPI", "accuracy")
+    g.set_axis_labels("HPI", "ROC AUC")
     sns.move_legend(g, "upper left", bbox_to_anchor=(0.35, 1.1))
     g.figure.set_size_inches(3.5, 1.5)
     g.set(xlim=(-1, 7), ylim=(0.6, 1.0))
@@ -115,7 +124,7 @@ with sns.axes_style("ticks"):
 # %%
 g.figure.savefig(
     Path.home()
-    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/accuracy_students.pdf",
+    / "gdrive/publications/dynaCLR/2025_dynaCLR_paper/fig_manuscript_svg/figure_knowledge_distillation/figure_parts/roc_auc_students.pdf",
     dpi=300,
 )
 
