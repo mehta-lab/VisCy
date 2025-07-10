@@ -1,227 +1,207 @@
 # %%
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+import xarray as xr
+from scipy import stats
+
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.distance import (
-    compute_displacement,
-    compute_displacement_statistics,
+    compute_msd,
 )
 
 # Paths to datasets
 feature_paths = {
-    "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_7mins.zarr",
-    "21 min interval": "/hpc/projects/organelle_phenotyping/ALFI_benchmarking/predictions_final/ALFI_opp_21mins.zarr",
+    "7 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_7mins.zarr",
+    "14 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_14mins.zarr",
+    "28 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_28mins.zarr",
+    "56 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_56mins.zarr",
+    "91 min interval": "/hpc/projects/organelle_phenotyping/ALFI_ntxent_loss/logs_alfi_ntxent_time_intervals/predictions/ALFI_91mins.zarr",
 }
 
-# Colors for different time intervals
-interval_colors = {
-    "7 min interval": "blue",
-    "21 min interval": "red",
-}
+
+cmap = plt.get_cmap("tab10")  # or use "Set2", "tab20", etc.
+labels = list(feature_paths.keys())
+interval_colors = {label: cmap(i % cmap.N) for i, label in enumerate(labels)}
+
+# Print and check each path
+for label, path in feature_paths.items():
+    print(f"{label} color: {interval_colors[label]}")
+    assert Path(path).exists(), f"Path {path} does not exist"
 
 # %% Compute MSD for each dataset
 results = {}
 raw_displacements = {}
 
 for label, path in feature_paths.items():
+    results[label] = {}
     print(f"\nProcessing {label}...")
     embedding_dataset = read_embedding_dataset(Path(path))
 
     # Compute displacements
-    displacements = compute_displacement(
+    displacements_per_tau = compute_msd(
         embedding_dataset=embedding_dataset,
-        distance_metric="euclidean_squared",
+        distance_metric="euclidean",
     )
-    means, stds = compute_displacement_statistics(displacements)
-    results[label] = (means, stds)
-    raw_displacements[label] = displacements
+    embeddings_variance = np.var(embedding_dataset["features"].values)
 
-    # Print some statistics
-    taus = sorted(means.keys())
-    print(f"  Number of different τ values: {len(taus)}")
-    print(f"  τ range: {min(taus)} to {max(taus)}")
-    print(f"  MSD at τ=1: {means[1]:.4f} ± {stds[1]:.4f}")
+    # Normalize MSD by embeddings variance
+    for tau, displacements in displacements_per_tau.items():
+        results[label][tau] = [disp / embeddings_variance for disp in displacements]
+
 
 # %% Plot MSD vs time (linear scale)
-plt.figure(figsize=(10, 6))
+show_power_law_fits = True
+log_scale = True
+title = "MSD vs Time Shift"
 
-# Plot each time interval
-for interval_label, path in feature_paths.items():
-    means, stds = results[interval_label]
+fig, ax = plt.subplots(figsize=(10, 7))
 
-    # Sort by tau for plotting
-    taus = sorted(means.keys())
-    mean_values = [means[tau] for tau in taus]
-    std_values = [stds[tau] for tau in taus]
+for model_type, msd_data in results.items():
+    time_lags = sorted(msd_data.keys())
+    msd_means = []
+    msd_stds = []
 
-    plt.plot(
-        taus,
-        mean_values,
-        "-",
-        color=interval_colors[interval_label],
-        alpha=0.5,
-        zorder=1,
+    for tau in time_lags:
+        displacements = np.array(msd_data[tau])
+        msd_means.append(np.mean(displacements))
+        msd_stds.append(np.std(displacements) / np.sqrt(len(displacements)))
+
+    time_lags = np.array(time_lags)
+    msd_means = np.array(msd_means)
+    msd_stds = np.array(msd_stds)
+
+    # Plot with error bars
+    color = interval_colors.get(model_type, "#1f77b4")
+    ax.errorbar(
+        time_lags,
+        msd_means,
+        yerr=msd_stds,
+        marker="o",
+        label=f"{model_type.replace('_', ' ').title()}",
+        color=color,
+        capsize=3,
+        capthick=1,
+        linewidth=2,
+        markersize=6,
     )
-    plt.scatter(
-        taus,
-        mean_values,
-        color=interval_colors[interval_label],
-        s=20,
-        label=interval_label,
-        zorder=2,
+    # Fit power law if requested
+    if show_power_law_fits and len(time_lags) > 3:
+        valid_mask = (time_lags > 0) & (msd_means > 0)
+        if np.sum(valid_mask) > 3:
+            log_tau = np.log(time_lags[valid_mask])
+            log_msd = np.log(msd_means[valid_mask])
+
+            slope, intercept, r_value, p_value, std_err = stats.linregress(
+                log_tau, log_msd
+            )
+
+            # Plot fit line
+            tau_fit = np.linspace(
+                time_lags[valid_mask][0], time_lags[valid_mask][-1], 50
+            )
+            msd_fit = np.exp(intercept) * tau_fit**slope
+
+            ax.plot(
+                tau_fit,
+                msd_fit,
+                "--",
+                color=color,
+                alpha=0.7,
+                label=f"{model_type}: α={slope:.2f} (R²={r_value**2:.3f})",
+            )
+
+    ax.set_xlabel("Time Lag (τ)", fontsize=12)
+    ax.set_ylabel("Mean Squared Displacement", fontsize=12)
+    ax.set_title(title, fontsize=14)
+
+    if log_scale:
+        ax.set_xscale("log")
+        ax.set_yscale("log")
+        ax.grid(True, alpha=0.3)
+
+    ax.legend()
+    plt.tight_layout()
+plt.savefig("msd_vs_time_shift.png", dpi=300)
+# %%
+# Step size analysis
+
+
+def extract_step_sizes(embedding_dataset: xr.Dataset):
+    """Extract step sizes with simple coordinate access."""
+
+    unique_tracks_df = (
+        embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
+    )
+    all_step_sizes = []
+
+    for fov_name, track_id in zip(
+        unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
+    ):
+        track_data = embedding_dataset.where(
+            (embedding_dataset["fov_name"] == fov_name)
+            & (embedding_dataset["track_id"] == track_id),
+            drop=True,
+        )
+        time_order = np.argsort(track_data["t"].values)
+        times = track_data["t"].values[time_order]
+        track_embeddings = track_data["features"].values[time_order]
+        if len(times) != len(np.unique(times)):
+            print(f"Duplicates found in FOV {fov_name}, track {track_id}")
+
+        if len(track_embeddings) > 1:
+            steps = np.diff(track_embeddings, axis=0)
+            step_sizes = np.linalg.norm(steps, axis=1)
+            all_step_sizes.extend(step_sizes)
+
+    return np.array(all_step_sizes)
+
+
+all_step_data = {}
+cv_values = []
+labels = []
+
+for label, path in feature_paths.items():
+    print(f"\nProcessing {label}...")
+    embedding_dataset = read_embedding_dataset(Path(path))
+    steps = extract_step_sizes(embedding_dataset)
+    all_step_data[label] = steps
+
+    # Calculate coefficient of variation
+    cv = np.std(steps) / np.mean(steps)
+    cv_values.append(cv)
+    labels.append(label.replace("_", " ").title())
+
+# %%
+# Plot histograms
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+
+for model_type, steps in all_step_data.items():
+    color = interval_colors.get(model_type, "#1f77b4")
+    ax1.hist(
+        steps,
+        bins=50,
+        alpha=0.7,
+        color=color,
+        label=f"{model_type.replace('_', ' ').title()} (n={len(steps)}, μ={np.mean(steps):.3f}, σ={np.std(steps):.3f})",
     )
 
-plt.xlabel("Time Shift (τ)")
-plt.ylabel("Mean Square Displacement")
-plt.title("MSD vs Time Shift")
-plt.grid(True, alpha=0.3)
-plt.legend()
+ax1.set_xlabel("Step Size")
+ax1.set_ylabel("Frequency")
+ax1.set_title("Step Size Distributions")
+ax1.legend()
+
+# Plot coefficient of variation
+bar_colors = [
+    interval_colors.get(model_type, "#1f77b4") for model_type in results.keys()
+]
+bars = ax2.bar(labels, cv_values, color=bar_colors, alpha=0.7)
+ax2.set_ylabel("Coefficient of Variation (σ/μ)")
+ax2.set_title("Step Size Variability")
+ax2.tick_params(axis="x", rotation=45)
 plt.tight_layout()
-plt.show()
-
-# %% Plot MSD vs time (log-log scale with slopes)
-plt.figure(figsize=(10, 6))
-
-# Plot each time interval
-for interval_label, path in feature_paths.items():
-    means, stds = results[interval_label]
-
-    # Sort by tau for plotting
-    taus = sorted(means.keys())
-    mean_values = [means[tau] for tau in taus]
-    std_values = [stds[tau] for tau in taus]
-
-    # Filter out non-positive values for log scale
-    valid_mask = np.array(mean_values) > 0
-    valid_taus = np.array(taus)[valid_mask]
-    valid_means = np.array(mean_values)[valid_mask]
-
-    # Calculate slopes for different regions
-    log_taus = np.log(valid_taus)
-    log_means = np.log(valid_means)
-
-    # Early slope (first third of points)
-    n_points = len(log_taus)
-    early_end = n_points // 3
-    early_slope, early_intercept = np.polyfit(
-        log_taus[:early_end], log_means[:early_end], 1
-    )
-
-    # Late slope (last third of points)
-    late_start = 2 * (n_points // 3)
-    late_slope, late_intercept = np.polyfit(
-        log_taus[late_start:], log_means[late_start:], 1
-    )
-
-    plt.plot(
-        valid_taus,
-        valid_means,
-        "-",
-        color=interval_colors[interval_label],
-        alpha=0.5,
-        zorder=1,
-    )
-    plt.scatter(
-        valid_taus,
-        valid_means,
-        color=interval_colors[interval_label],
-        s=20,
-        label=f"{interval_label} (α_early={early_slope:.2f}, α_late={late_slope:.2f})",
-        zorder=2,
-    )
-
-    # Plot fitted lines for early and late regions
-    early_fit = np.exp(early_intercept + early_slope * log_taus[:early_end])
-    late_fit = np.exp(late_intercept + late_slope * log_taus[late_start:])
-
-    plt.plot(
-        valid_taus[:early_end],
-        early_fit,
-        "--",
-        color=interval_colors[interval_label],
-        alpha=0.3,
-        zorder=1,
-    )
-    plt.plot(
-        valid_taus[late_start:],
-        late_fit,
-        "--",
-        color=interval_colors[interval_label],
-        alpha=0.3,
-        zorder=1,
-    )
-
-plt.xscale("log")
-plt.yscale("log")
-plt.xlabel("Time Shift (τ)")
-plt.ylabel("Mean Square Displacement")
-plt.title("MSD vs Time Shift (log-log)")
-plt.grid(True, alpha=0.3, which="both")
-plt.legend(
-    title="α = slope in log-log space", bbox_to_anchor=(1.05, 1), loc="upper left"
-)
-plt.tight_layout()
-plt.show()
-
-# %% Plot slopes analysis
-early_slopes = []
-late_slopes = []
-intervals = []
-
-for interval_label in feature_paths.keys():
-    means, _ = results[interval_label]
-
-    # Calculate slopes
-    taus = np.array(sorted(means.keys()))
-    mean_values = np.array([means[tau] for tau in taus])
-    valid_mask = mean_values > 0
-
-    if np.sum(valid_mask) > 3:  # Need at least 4 points to calculate both slopes
-        log_taus = np.log(taus[valid_mask])
-        log_means = np.log(mean_values[valid_mask])
-
-        # Calculate early and late slopes
-        n_points = len(log_taus)
-        early_end = n_points // 3
-        late_start = 2 * (n_points // 3)
-
-        early_slope, _ = np.polyfit(log_taus[:early_end], log_means[:early_end], 1)
-        late_slope, _ = np.polyfit(log_taus[late_start:], log_means[late_start:], 1)
-
-        early_slopes.append(early_slope)
-        late_slopes.append(late_slope)
-        intervals.append(interval_label)
-
-# Create bar plot
-plt.figure(figsize=(12, 6))
-
-x = np.arange(len(intervals))
-width = 0.35
-
-plt.bar(x - width / 2, early_slopes, width, label="Early slope", alpha=0.7)
-plt.bar(x + width / 2, late_slopes, width, label="Late slope", alpha=0.7)
-
-# Add reference lines
-plt.axhline(y=1, color="k", linestyle="--", alpha=0.3, label="Normal diffusion (α=1)")
-plt.axhline(y=0, color="k", linestyle="-", alpha=0.2)
-
-plt.xlabel("Time Interval")
-plt.ylabel("Slope (α)")
-plt.title("MSD Slopes by Time Interval")
-plt.xticks(x, intervals, rotation=45)
-plt.legend()
-
-# Add annotations for diffusion regimes
-plt.text(
-    plt.xlim()[1] * 1.2, 1.5, "Super-diffusion", rotation=90, verticalalignment="center"
-)
-plt.text(
-    plt.xlim()[1] * 1.2, 0.5, "Sub-diffusion", rotation=90, verticalalignment="center"
-)
-
-plt.grid(True, alpha=0.3)
-plt.tight_layout()
-plt.show()
+# plt.show()
+plt.savefig("step_size_distributions.png", dpi=300)
 
 # %%

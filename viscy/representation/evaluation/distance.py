@@ -1,8 +1,17 @@
+import logging
 from collections import defaultdict
 from typing import Literal
 
 import numpy as np
+import xarray as xr
 from sklearn.metrics.pairwise import cosine_similarity
+
+from viscy.representation.evaluation.clustering import (
+    compare_time_offset,
+    pairwise_distance_matrix,
+)
+
+_logger = logging.getLogger(__name__)
 
 
 def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
@@ -21,84 +30,69 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     return time_points, cosine_similarities.tolist()
 
 
-def compute_displacement(
-    embedding_dataset,
-    distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
+def compute_msd(
+    embedding_dataset: xr.Dataset,
+    distance_metric: Literal["euclidean", "cosine"] = "euclidean",
 ) -> dict[int, list[float]]:
-    """Compute the displacement or mean square displacement (MSD) of embeddings.
-
-    For each time difference τ, computes either:
-    - |r(t + τ) - r(t)|² for squared Euclidean (MSD)
-    - cos_sim(r(t + τ), r(t)) for cosine
-    for all particles and initial times t.
+    """
+    Compute Mean Squared Displacement using pairwise distance matrix.
 
     Parameters
     ----------
-    embedding_dataset : xarray.Dataset
+    embedding_dataset : xr.Dataset
         Dataset containing embeddings and metadata
-    distance_metric : str
-        The metric to use for computing distances between embeddings.
-        Valid options are:
-        - "euclidean": Euclidean distance (L2 norm)
-        - "euclidean_squared": Squared Euclidean distance (for MSD, default)
-        - "cosine": Cosine similarity
-        - "cosine_dissimilarity": 1 - cosine similarity
+    distance_metric : Literal["euclidean", "cosine"]
+        Distance metric to use
 
     Returns
     -------
     dict[int, list[float]]
-        Dictionary mapping τ to list of displacements for all particles and initial times
+        Dictionary mapping time lag τ to list of squared displacements
     """
-    # Get unique tracks efficiently using pandas operations
+    from collections import defaultdict
+
     unique_tracks_df = (
         embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
     )
 
-    # Get data from dataset
-    fov_names = embedding_dataset["fov_name"].values
-    track_ids = embedding_dataset["track_id"].values
-    timepoints = embedding_dataset["t"].values
-    embeddings = embedding_dataset["features"].values
-
-    # Initialize results dictionary with empty lists
     displacement_per_tau = defaultdict(list)
 
-    # Process each track
     for fov_name, track_id in zip(
         unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
     ):
-        # Get sorted track data
-        mask = (fov_names == fov_name) & (track_ids == track_id)
-        times = timepoints[mask]
-        track_embeddings = embeddings[mask]
+        # Filter data for this track
+        track_data = embedding_dataset.where(
+            (embedding_dataset["fov_name"] == fov_name)
+            & (embedding_dataset["track_id"] == track_id),
+            drop=True,
+        )
 
         # Sort by time
-        time_order = np.argsort(times)
-        times = times[time_order]
-        track_embeddings = track_embeddings[time_order]
+        time_order = np.argsort(track_data["t"].values)
+        times = track_data["t"].values[time_order]
+        track_embeddings = track_data["features"].values[time_order]
 
-        # Process each time point
-        for t_idx, t in enumerate(times[:-1]):
-            current_embedding = track_embeddings[t_idx]
+        # Compute pairwise distance matrix
+        if distance_metric == "euclidean":
+            distance_matrix = pairwise_distance_matrix(
+                track_embeddings, metric="euclidean"
+            )
+            distance_matrix = distance_matrix**2  # Square for MSD
+        elif distance_metric == "cosine":
+            distance_matrix = pairwise_distance_matrix(
+                track_embeddings, metric="cosine"
+            )
+        else:
+            raise ValueError(f"Unsupported distance metric: {distance_metric}")
 
-            # Check all possible future time points
-            for future_idx, future_time in enumerate(
-                times[t_idx + 1 :], start=t_idx + 1
-            ):
-                tau = future_time - t
-                future_embedding = track_embeddings[future_idx]
+        # Extract displacements using diagonal offsets
+        n_timepoints = len(times)
+        for time_offset in range(1, n_timepoints):
+            diagonal_displacements = compare_time_offset(distance_matrix, time_offset)
 
-                if distance_metric in ["cosine"]:
-                    dot_product = np.dot(current_embedding, future_embedding)
-                    norms = np.linalg.norm(current_embedding) * np.linalg.norm(
-                        future_embedding
-                    )
-                    similarity = dot_product / norms
-                    displacement = similarity
-                else:  # Euclidean metrics
-                    diff_squared = np.sum((current_embedding - future_embedding) ** 2)
-                    displacement = diff_squared
-                displacement_per_tau[int(tau)].append(displacement)
+            for i, displacement in enumerate(diagonal_displacements):
+                tau = int(times[i + time_offset] - times[i])
+                displacement_per_tau[tau].append(displacement)
 
     return dict(displacement_per_tau)
 
