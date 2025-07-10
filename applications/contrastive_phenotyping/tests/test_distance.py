@@ -7,9 +7,8 @@ import pandas as pd
 import xarray as xr
 from scipy import stats
 
-from viscy.representation.evaluation.clustering import (
-    compare_time_offset,
-    pairwise_distance_matrix,
+from viscy.representation.evaluation.distance import (
+    compute_msd,
 )
 
 
@@ -334,196 +333,6 @@ def analyze_step_sizes_before_and_after_normalization(
 
     plt.tight_layout()
     return fig, (ax1, ax2, ax3, ax4)
-
-
-def compute_msd_pairwise_optimized(
-    embedding_dataset: xr.Dataset,
-    distance_metric: Literal["euclidean", "cosine"] = "euclidean",
-) -> dict[int, list[float]]:
-    """
-    Compute Mean Squared Displacement using pairwise distance matrix.
-
-    Uses compare_time_offset for efficient diagonal extraction.
-
-    Parameters
-    ----------
-    embedding_dataset : xr.Dataset
-        Dataset containing embeddings and metadata
-    distance_metric : Literal["euclidean", "cosine"]
-        Distance metric to use
-
-    Returns
-    -------
-    dict[int, list[float]]
-        Dictionary mapping time lag τ to list of squared displacements
-    """
-    from collections import defaultdict
-
-    unique_tracks_df = (
-        embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
-    )
-
-    displacement_per_tau = defaultdict(list)
-
-    for fov_name, track_id in zip(
-        unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
-    ):
-        # Filter data for this track
-        track_data = embedding_dataset.where(
-            (embedding_dataset["fov_name"] == fov_name)
-            & (embedding_dataset["track_id"] == track_id),
-            drop=True,
-        )
-
-        # Sort by time
-        time_order = np.argsort(track_data["t"].values)
-        times = track_data["t"].values[time_order]
-        track_embeddings = track_data["features"].values[time_order]
-
-        # Compute pairwise distance matrix
-        if distance_metric == "euclidean":
-            distance_matrix = pairwise_distance_matrix(
-                track_embeddings, metric="euclidean"
-            )
-            distance_matrix = distance_matrix**2  # Square for MSD
-        elif distance_metric == "cosine":
-            distance_matrix = pairwise_distance_matrix(
-                track_embeddings, metric="cosine"
-            )
-        else:
-            raise ValueError(f"Unsupported distance metric: {distance_metric}")
-
-        # Extract displacements using diagonal offsets
-        n_timepoints = len(times)
-        for time_offset in range(1, n_timepoints):
-            diagonal_displacements = compare_time_offset(distance_matrix, time_offset)
-
-            for i, displacement in enumerate(diagonal_displacements):
-                tau = int(times[i + time_offset] - times[i])
-                displacement_per_tau[tau].append(displacement)
-
-    return dict(displacement_per_tau)
-
-
-def normalize_msd_by_embedding_variance(
-    msd_data_dict: dict[str, dict[int, list[float]]],
-    datasets: dict[str, xr.Dataset],
-) -> dict[str, dict[int, list[float]]]:
-    """
-    Normalize MSD values by the embedding variance for each movement type.
-
-    This enables fair comparison between different embedding models or movement types
-    by removing scale differences.
-
-    Parameters
-    ----------
-    msd_data_dict : dict[str, dict[int, list[float]]]
-        Dictionary mapping movement type to MSD data
-    datasets : dict[str, xr.Dataset]
-        Dictionary mapping movement type to dataset (for computing variance)
-
-    Returns
-    -------
-    dict[str, dict[int, list[float]]]
-        Normalized MSD data with same structure as input
-    """
-    normalized_msd_data = {}
-
-    for movement_type, msd_data in msd_data_dict.items():
-        # Calculate embedding variance for this movement type
-        embeddings = datasets[movement_type]["features"].values
-        embedding_variance = np.var(embeddings)
-
-        print(f"{movement_type}: embedding_variance = {embedding_variance:.4f}")
-
-        # Normalize all MSD values by this variance
-        normalized_msd_data[movement_type] = {}
-        for tau, displacements in msd_data.items():
-            normalized_msd_data[movement_type][tau] = [
-                disp / embedding_variance for disp in displacements
-            ]
-
-    return normalized_msd_data
-
-
-def normalize_step_sizes_by_embedding_variance(
-    datasets: dict[str, xr.Dataset],
-) -> dict[str, dict[str, float]]:
-    """
-    Normalize step size statistics by embedding variance for fair comparison.
-
-    Parameters
-    ----------
-    datasets : dict[str, xr.Dataset]
-        Dictionary mapping movement type to dataset
-
-    Returns
-    -------
-    dict[str, dict[str, float]]
-        Dictionary with normalized step size statistics
-    """
-    step_stats = {}
-
-    print("\n=== Step Size Statistics (Normalized by Embedding Variance) ===")
-    print("-" * 70)
-
-    for movement_type, dataset in datasets.items():
-        # Calculate embedding variance for normalization
-        embeddings = dataset["features"].values
-        embedding_variance = np.var(embeddings)
-
-        # Extract step sizes
-        all_step_sizes = []
-        unique_track_ids = np.unique(dataset["track_id"].values)
-
-        for track_id in unique_track_ids:
-            track_mask = dataset["track_id"] == track_id
-            track_embeddings = dataset["features"].values[track_mask]
-            track_times = dataset["t"].values[track_mask]
-
-            # Sort by time and remove duplicates
-            time_order = np.argsort(track_times)
-            sorted_embeddings = track_embeddings[time_order]
-            sorted_times = track_times[time_order]
-            unique_times, unique_indices = np.unique(sorted_times, return_index=True)
-            final_embeddings = sorted_embeddings[unique_indices]
-
-            if len(final_embeddings) > 1:
-                steps = np.diff(final_embeddings, axis=0)
-                step_sizes = np.linalg.norm(steps, axis=1)
-                all_step_sizes.extend(step_sizes)
-
-        step_sizes = np.array(all_step_sizes)
-
-        # Calculate raw statistics
-        raw_mean = np.mean(step_sizes)
-        raw_std = np.std(step_sizes)
-        raw_cv = raw_std / raw_mean
-
-        # Calculate normalized statistics
-        norm_mean = raw_mean / np.sqrt(embedding_variance)
-        norm_std = raw_std / np.sqrt(embedding_variance)
-        norm_cv = norm_std / norm_mean  # CV remains the same after scaling
-
-        step_stats[movement_type] = {
-            "raw_mean": raw_mean,
-            "raw_std": raw_std,
-            "raw_cv": raw_cv,
-            "norm_mean": norm_mean,
-            "norm_std": norm_std,
-            "norm_cv": norm_cv,
-            "embedding_variance": embedding_variance,
-            "n_steps": len(step_sizes),
-        }
-
-        print(
-            f"{movement_type:15} | Raw: μ={raw_mean:.4f}, σ={raw_std:.4f}, CV={raw_cv:.4f}"
-        )
-        print(f"{'':15} | Norm: μ={norm_mean:.4f}, σ={norm_std:.4f}, CV={norm_cv:.4f}")
-        print(f"{'':15} | Var={embedding_variance:.4f}, N={len(step_sizes)}")
-        print("-" * 70)
-
-    return step_stats
 
 
 def plot_msd_comparison(
@@ -1086,7 +895,7 @@ if __name__ == "__main__":
     msd_data_dict = {}
     for movement_type, dataset in datasets.items():
         print(f"Computing MSD for {movement_type}...")
-        msd_data_dict[movement_type] = compute_msd_pairwise_optimized(dataset)
+        msd_data_dict[movement_type] = compute_msd(dataset)
 
     print("\n=== Normalizing MSD by Embedding Variance ===")
     normalized_msd_data_dict = normalize_msd_by_embedding_variance(
