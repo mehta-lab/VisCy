@@ -72,22 +72,19 @@ def test_datamodule_setup_fit(
 def test_datamodule_z_window_size(
     preprocessed_hcs_dataset, tracks_hcs_dataset, z_window_size
 ):
-    data_path = preprocessed_hcs_dataset
-    split_ratio = 0.75
     z_range = (4, 9)
     yx_patch_size = [32, 32]
     batch_size = 4
-    with open_ome_zarr(data_path) as dataset:
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
         channel_names = dataset.channel_names
     dm = TripletDataModule(
-        data_path=data_path,
+        data_path=preprocessed_hcs_dataset,
         tracks_path=tracks_hcs_dataset,
         source_channel=channel_names,
-        z_range=(4, 9),
+        z_range=z_range,
         initial_yx_patch_size=(64, 64),
         final_yx_patch_size=(32, 32),
         num_workers=0,
-        split_ratio=split_ratio,
         batch_size=batch_size,
         return_negative=True,
         z_window_size=z_window_size,
