@@ -321,6 +321,7 @@ class TripletDataModule(HCSDataModule):
         persistent_workers: bool = False,
         prefetch_factor: int | None = None,
         pin_memory: bool = False,
+        z_window_size: int | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -374,12 +375,14 @@ class TripletDataModule(HCSDataModule):
             Number of batches loaded in advance by each worker, by default None
         pin_memory : bool, optional
             Whether to pin memory in CPU for faster GPU transfer, by default False
+        z_window_size : int, optional
+            Size of the final Z window, by default None (inferred from z_range)
         """
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
             target_channel=[],
-            z_window_size=z_range[1] - z_range[0],
+            z_window_size=z_window_size or z_range[1] - z_range[0],
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
