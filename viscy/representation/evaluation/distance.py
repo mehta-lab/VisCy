@@ -49,7 +49,6 @@ def compute_msd(
     dict[int, list[float]]
         Dictionary mapping time lag τ to list of squared displacements
     """
-    from collections import defaultdict
 
     unique_tracks_df = (
         embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
