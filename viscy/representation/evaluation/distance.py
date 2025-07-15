@@ -32,7 +32,7 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
 
 def compute_track_displacement(
     embedding_dataset: xr.Dataset,
-    distance_metric: Literal["euclidean", "cosine"] = "euclidean",
+    distance_metric: Literal["euclidean", "cosine"] = "cosine",
 ) -> dict[int, list[float]]:
     """
     Compute Mean Squared Displacement using pairwise distance matrix.
@@ -42,7 +42,7 @@ def compute_track_displacement(
     embedding_dataset : xr.Dataset
         Dataset containing embeddings and metadata
     distance_metric : Literal["euclidean", "cosine"]
-        Distance metric to use
+        Distance metric to use. Default is cosine.
 
     Returns
     -------
