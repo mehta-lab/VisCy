@@ -30,7 +30,7 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     return time_points, cosine_similarities.tolist()
 
 
-def compute_msd(
+def compute_track_displacement(
     embedding_dataset: xr.Dataset,
     distance_metric: Literal["euclidean", "cosine"] = "euclidean",
 ) -> dict[int, list[float]]:

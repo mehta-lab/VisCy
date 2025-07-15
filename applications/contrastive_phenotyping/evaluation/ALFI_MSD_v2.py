@@ -8,7 +8,7 @@ from scipy import stats
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.distance import (
-    compute_msd,
+    compute_track_displacement,
 )
 
 # Paths to datasets
@@ -34,27 +34,34 @@ for label, path in feature_paths.items():
 results = {}
 raw_displacements = {}
 
+DISTANCE_METRIC = "cosine"
 for label, path in feature_paths.items():
     results[label] = {}
     print(f"\nProcessing {label}...")
     embedding_dataset = read_embedding_dataset(Path(path))
 
     # Compute displacements
-    displacements_per_tau = compute_msd(
+    displacements_per_tau = compute_track_displacement(
         embedding_dataset=embedding_dataset,
-        distance_metric="euclidean",
+        distance_metric=DISTANCE_METRIC,
     )
-    embeddings_variance = np.var(embedding_dataset["features"].values)
 
-    # Normalize MSD by embeddings variance
-    for tau, displacements in displacements_per_tau.items():
-        results[label][tau] = [disp / embeddings_variance for disp in displacements]
+    # Store displacements with conditional normalization
+    if DISTANCE_METRIC == "cosine":
+        # Cosine distance is already scale-invariant, no normalization needed
+        for tau, displacements in displacements_per_tau.items():
+            results[label][tau] = displacements
+    else:
+        # Normalize by embeddings variance for euclidean distance
+        embeddings_variance = np.var(embedding_dataset["features"].values)
+        for tau, displacements in displacements_per_tau.items():
+            results[label][tau] = [disp / embeddings_variance for disp in displacements]
 
 
 # %% Plot MSD vs time (linear scale)
 show_power_law_fits = True
 log_scale = True
-title = "MSD vs Time Shift"
+title = "Mean Track Displacement vs Time Shift"
 
 fig, ax = plt.subplots(figsize=(10, 7))
 
@@ -63,6 +70,7 @@ for model_type, msd_data in results.items():
     msd_means = []
     msd_stds = []
 
+    # Compute mean and std of MSD for each time lag
     for tau in time_lags:
         displacements = np.array(msd_data[tau])
         msd_means.append(np.mean(displacements))
@@ -113,7 +121,7 @@ for model_type, msd_data in results.items():
             )
 
     ax.set_xlabel("Time Lag (τ)", fontsize=12)
-    ax.set_ylabel("Mean Squared Displacement", fontsize=12)
+    ax.set_ylabel("Mean Track Displacement", fontsize=12)
     ax.set_title(title, fontsize=14)
 
     if log_scale:
@@ -123,7 +131,7 @@ for model_type, msd_data in results.items():
 
     ax.legend()
     plt.tight_layout()
-plt.savefig("msd_vs_time_shift.png", dpi=300)
+plt.savefig(f"msd_vs_time_shift_{DISTANCE_METRIC}.png", dpi=300)
 # %%
 # Step size analysis
 
@@ -202,6 +210,6 @@ ax2.set_title("Step Size Variability")
 ax2.tick_params(axis="x", rotation=45)
 plt.tight_layout()
 # plt.show()
-plt.savefig("step_size_distributions.png", dpi=300)
+plt.savefig(f"step_size_distributions_{DISTANCE_METRIC}.png", dpi=300)
 
 # %%
