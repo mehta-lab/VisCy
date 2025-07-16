@@ -27,17 +27,17 @@ VAL_FOVS = test_virus + test_mock
 prediction_from_scratch = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/from-scratch-last-1126.csv"
 )
-prediction_from_scratch["pretraining"] = "without DynaCLR"
+prediction_from_scratch["pretraining"] = "ImageNet encoder"
 
 prediction_classical = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/fine-tune-classical-last-1126.csv"
 )
-prediction_classical["pretraining"] = "classical sampling"
+prediction_classical["pretraining"] = "DynaCLR (classical sampling)"
 
 prediction_finetuned = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/fine-tune-last-1126.csv"
 )
-pretrained_name = "cell and time aware sampling"
+pretrained_name = "DynaCLR (cell- and time-aware sampling)"
 prediction_finetuned["pretraining"] = pretrained_name
 
 prediction = pd.concat(
