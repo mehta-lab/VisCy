@@ -27,15 +27,22 @@ VAL_FOVS = test_virus + test_mock
 prediction_from_scratch = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/from-scratch-last-1126.csv"
 )
-prediction_from_scratch["pretraining"] = "ImageNet"
+prediction_from_scratch["pretraining"] = "without DynaCLR"
+
+prediction_classical = pd.read_csv(
+    "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/fine-tune-classical-last-1126.csv"
+)
+prediction_classical["pretraining"] = "classical sampling"
 
 prediction_finetuned = pd.read_csv(
     "/hpc/projects/intracellular_dashboard/viral-sensor/infection_classification/models/bootstrap-labels/test/fine-tune-last-1126.csv"
 )
-pretrained_name = "DynaCLR"
+pretrained_name = "cell and time aware sampling"
 prediction_finetuned["pretraining"] = pretrained_name
 
-prediction = pd.concat([prediction_from_scratch, prediction_finetuned], axis=0)
+prediction = pd.concat(
+    [prediction_from_scratch, prediction_classical, prediction_finetuned], axis=0
+)
 
 # %%
 prediction = prediction[prediction["fov_name"].isin(VAL_FOVS)]
@@ -92,13 +99,17 @@ roc_auc_by_t = prediction.groupby(id_vars).apply(
 )
 
 metrics_df = pd.DataFrame(
-    data={"accuracy": accuracy_by_t.values, "F1": f1_by_t.values, "ROC AUC": roc_auc_by_t.values},
+    data={
+        "accuracy": accuracy_by_t.values,
+        "F1": f1_by_t.values,
+        "ROC AUC": roc_auc_by_t.values,
+    },
     index=f1_by_t.index,
 ).reset_index()
 
 metrics_long = metrics_df.melt(
     id_vars=id_vars,
-    value_vars=["ROC AUC"],
+    value_vars=["accuracy", "F1", "ROC AUC"],
     var_name="metric",
     value_name="score",
 )
@@ -113,11 +124,12 @@ with sns.axes_style("ticks"):
         kind="point",
         linewidth=1.5,
         linestyles="--",
+        col="metric",
     )
     g.set_axis_labels("HPI", "ROC AUC")
-    sns.move_legend(g, "upper left", bbox_to_anchor=(0.35, 1.1))
-    g.figure.set_size_inches(3.5, 1.5)
-    g.set(xlim=(-1, 7), ylim=(0.6, 1.0))
+    # sns.move_legend(g, "upper left", bbox_to_anchor=(0.35, 1.1))
+    # g.figure.set_size_inches(3.5, 1.5)
+    # g.set(xlim=(-1, 7), ylim=(0.6, 1.0))
     plt.show()
 
 
