@@ -78,7 +78,6 @@ def compute_metrics(
     print(f"Organelle: {sample['organelle']}")
     print(f"Infection condition: {sample['infection_condition']}")
     
-
     # Use the CSVLogger without version (we'll use our own naming)
     log_output_dir.mkdir(exist_ok=True)
     logger = CSVLogger(save_dir=log_output_dir, name=log_name, version=log_version)
@@ -101,20 +100,18 @@ def compute_metrics(
 
 # %%
 if __name__ == "__main__":
-    # print("Running intensity metrics with single z-slice...")
-    # intensity_metrics = main("intensity", use_z_slice_range=False)
-
     csv_database_path = Path(
-        "/home/eduardo.hirata/repos/viscy/applications/DynaCell/dynacell_summary_table.csv"
+        "~/gdrive/publications/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
     ).expanduser()
-    tmp_path = Path("/home/eduardo.hirata/repos/viscy/applications/DynaCell/demo_metrics")
-    tmp_path.mkdir(parents=True, exist_ok=True)
+    output_dir = Path(
+        "~/gdrive/publications/dynacell/metrics"
+    ).expanduser()
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     database = pd.read_csv(csv_database_path, dtype={"FOV": str})
 
-    # Add prediction paths
-    pred_database = database[database['Organelle'] == "HIST2H2BE"].copy()
-    pred_database["Path"]= "path_to_prediction"
+    # Select test set only
+    database = database[database["Test Set"] == "x"]
 
     print("\nRunning intensity metrics with z-slice range...")
     metrics = compute_metrics(
@@ -123,10 +120,10 @@ if __name__ == "__main__":
         organelles=["HIST2H2BE"],
         infection_conditions=["Mock"],
         target_database=database,
-        target_channel_name="GFP",
-        prediction_database=pred_database,
-        prediction_channel_name="nuclei_prediction",
-        log_output_dir=tmp_path,
+        target_channel_name="Organelle",
+        prediction_database=database,
+        prediction_channel_name="Nuclei-prediction",
+        log_output_dir=output_dir,
         log_name="intensity_metrics",
-        z_slice=None,
+        z_slice=36,
     )

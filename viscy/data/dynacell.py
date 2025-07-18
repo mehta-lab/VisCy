@@ -81,12 +81,16 @@ class DynaCellDataBase:
         self.channel_name = channel_name
         self.z_slice = z_slice
         self.zarr_path_column_name = zarr_path_column_name
-        self._process_database()
-
-        if ("Cell type", "Organelle", "Infection", zarr_path_column_name) not in self.database.columns:
+        
+        required_columns = [
+            "Cell type", "Organelle", "Infection", zarr_path_column_name
+        ]
+        if not set(required_columns).issubset(self.database.columns):
             raise ValueError(
-                f"Database must contain 'Cell type', 'Organelle', 'Infection', and {zarr_path_column_name} columns."
+                f"Database must contains {required_columns}."
             )
+
+        self._process_database()
 
     def _process_database(self):
         # Select the portion of the database that matches the provided criteria
@@ -100,10 +104,14 @@ class DynaCellDataBase:
         self._filtered_db["Zarr path"] = self._filtered_db[self.zarr_path_column_name].apply(
             lambda x: Path(*Path(x).parts[:-3])
         )
+        self._filtered_db["FOV name"] = self._filtered_db[self.zarr_path_column_name].apply(
+            lambda x: Path(*Path(x).parts[-3:]).as_posix()
+        )
         self._filtered_db = self._filtered_db.drop_duplicates(subset=["Zarr path"])
 
         # Store values for later use
         self.zarr_paths = self._filtered_db["Zarr path"].values.tolist()
+        self.position_names = self._filtered_db["FOV name"].values.tolist()
         self.cell_types_per_store = self._filtered_db["Cell type"].values.tolist()
         self.organelles_per_store = self._filtered_db["Organelle"].values.tolist()
         self.infection_per_store = self._filtered_db["Infection"].values.tolist()
@@ -111,6 +119,7 @@ class DynaCellDataBase:
     def __getitem__(self, idx) -> dict:
         return {
             "zarr_path": self.zarr_paths[idx],
+            "position_names": [self.position_names[idx]],
             "cell_type": self.cell_types_per_store[idx],
             "organelle": self.organelles_per_store[idx],
             "infection_condition": self.infection_per_store[idx],
@@ -163,6 +172,7 @@ class DynaCellDataModule(LightningDataModule):
                     infection_condition=target_data["infection_condition"],
                     pred_dataset=open_ome_zarr(pred_data["zarr_path"]),
                     target_dataset=open_ome_zarr(target_data["zarr_path"]),
+                    position_names=target_data["position_names"],
                     pred_channel=pred_data["channel_name"],
                     target_channel=target_data["channel_name"],
                     pred_z_slice=pred_data["z_slice"],

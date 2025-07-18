@@ -40,6 +40,7 @@ class TargetPredictionDataset(Dataset):
         target_channel: str,
         pred_z_slice: int | slice | None = None,
         target_z_slice: int | slice | None = None,
+        position_names: list[str] | None = None,
         img_name: str = "0",
         dtype: np.dtype | None = np.int16,
     ) -> None:
@@ -54,13 +55,17 @@ class TargetPredictionDataset(Dataset):
         )
         self.img_name = img_name
         self.dtype = dtype
+        self.position_names = position_names
+        if not position_names:
+            self.position_names = list([p[0] for p in self.target_dataset.positions()])
+
         self._build_indices()
 
     def _build_indices(self) -> None:
         self._indices = []
-        for p, (name, target_fov) in enumerate(self.target_dataset.positions()):
+        for p, name in enumerate(self.position_names):
             pred_img: ImageArray = self.pred_dataset[name][self.img_name]
-            target_img: ImageArray = target_fov[self.img_name]
+            target_img: ImageArray = self.target_dataset[name][self.img_name]
             if not pred_img.shape[0] == target_img.shape[0]:
                 raise ValueError(
                     "Shape mismatch between prediction and target: "
