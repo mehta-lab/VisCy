@@ -25,68 +25,6 @@ def normalise(volume: torch.Tensor) -> torch.Tensor:
     volume = (volume - v_min) / (v_max - v_min + 1e-6)        # → [0,1]
     return volume * 2.0 - 1.0                                 # → [-1,1]
 
-@torch.no_grad()
-def encode_fovs(
-    fov_pairs,
-    vae,
-    channel_name1: str,
-    channel_name2: str,
-    device: str = "cuda",
-    batch_size: int = 4,
-    input_spatial_size: tuple = (32, 512, 512), 
-):
-    """
-    For each FOV pair:
-        • take all T time-frames  (shape: T, D, H, W)
-        • normalise to [-1, 1]
-        • feed through VAE in chunks of ≤ batch_size frames
-        • average the resulting T latent vectors  →  one embedding / FOV
-    Returns
-        emb1, emb2 : (N, latent_dim) tensors
-    """
-    emb1, emb2 = [], []
-
-    for pos1, pos2 in tqdm(fov_pairs, desc="Encoding FOVs"):
-        # ---------------- load & normalise ---------------- #
-        v1 = torch.as_tensor(
-            pos1.data[:, pos1.get_channel_index(channel_name1)],
-            dtype=torch.float32, device=device,
-        )                                                  # (T, D, H, W)
-        v2 = torch.as_tensor(
-            pos2.data[:, pos2.get_channel_index(channel_name2)],
-            dtype=torch.float32, device=device,
-        )
-
-        v1 = normalise(v1)                                 # still (T, D, H, W)
-        v2 = normalise(v2)
-
-        # ---------------- chunked VAE inference ----------- #
-        for t0 in range(0, v1.shape[0], batch_size):
-            slice1 = v1[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
-            slice2 = v2[t0 : t0 + batch_size].unsqueeze(1)
-
-            # resize to input spatial size
-            slice1 = torch.nn.functional.interpolate(
-                slice1, size=input_spatial_size, mode="trilinear", align_corners=False,
-            )  # (b, 1, D, H, W)
-            slice2 = torch.nn.functional.interpolate(
-                slice2, size=input_spatial_size, mode="trilinear", align_corners=False,
-            )  # (b, 1, D, H, W)
-
-            feat1 = vae.encode(slice1).mean
-            feat2 = vae.encode(slice2).mean
-
-            feat1 = feat1.mean(dim=(1, 2))
-            feat2 = feat2.mean(dim=(1, 2))
-
-            feat1 = feat1.flatten(start_dim=1)  # (b, latent_dim)
-            feat2 = feat2.flatten(start_dim=1)  # (b, latent_dim)
-
-            emb1.append(feat1)
-            emb2.append(feat2)
-
-    return torch.cat(emb1, 0), torch.cat(emb2, 0)
-
 @torch.jit.script_if_tracing
 def sqrtm(sigma: Tensor) -> Tensor:
     r"""Returns the square root of a positive semi-definite matrix.
@@ -160,12 +98,71 @@ def fid_from_features(f1, f2, eps=1e-6):
 
     return frechet_distance(mu1, sigma1, mu2, sigma2).clamp_min_(0).item()
 
+@torch.no_grad()
+def encode_fovs(
+    fov_pairs,
+    vae,
+    channel_name1: str,
+    channel_name2: str,
+    device: str = "cuda",
+    batch_size: int = 4,
+    input_spatial_size: tuple = (32, 512, 512), 
+):
+    """
+    For each FOV pair:
+        • take all T time-frames  (shape: T, D, H, W)
+        • normalise to [-1, 1]
+        • feed through VAE in chunks of ≤ batch_size frames
+        • average the resulting T latent vectors  →  one embedding / FOV
+    Returns
+        emb1, emb2 : (N, latent_dim) tensors
+    """
+    emb1, emb2 = [], []
+
+    for pos1, pos2 in tqdm(fov_pairs, desc="Encoding FOVs"):
+        # ---------------- load & normalise ---------------- #
+        v1 = torch.as_tensor(
+            pos1.data[:, pos1.get_channel_index(channel_name1)],
+            dtype=torch.float32, device=device,
+        )                                                  # (T, D, H, W)
+        v2 = torch.as_tensor(
+            pos2.data[:, pos2.get_channel_index(channel_name2)],
+            dtype=torch.float32, device=device,
+        )
+
+        v1 = normalise(v1)                                 # still (T, D, H, W)
+        v2 = normalise(v2)
+
+        # ---------------- chunked VAE inference ----------- #
+        for t0 in range(0, v1.shape[0], batch_size):
+            slice1 = v1[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
+            slice2 = v2[t0 : t0 + batch_size].unsqueeze(1)
+
+            # resize to input spatial size
+            slice1 = torch.nn.functional.interpolate(
+                slice1, size=input_spatial_size, mode="trilinear", align_corners=False,
+            )  # (b, 1, D, H, W)
+            slice2 = torch.nn.functional.interpolate(
+                slice2, size=input_spatial_size, mode="trilinear", align_corners=False,
+            )  # (b, 1, D, H, W)
+
+            feat1 = vae.encode(slice1).mean
+            feat2 = vae.encode(slice2).mean
+
+            feat1 = feat1.flatten(start_dim=1)  # (b, latent_dim)
+            feat2 = feat2.flatten(start_dim=1)  # (b, latent_dim)
+
+            emb1.append(feat1)
+            emb2.append(feat2)
+
+    return torch.cat(emb1, 0), torch.cat(emb2, 0)
+
 # ----------------------------------------------------------------------------- #
 #                                   Main                                        #
 # ----------------------------------------------------------------------------- #
 
 def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(add_help=False)          # let Hydra handle VAE3DConfig
+    p = argparse.ArgumentParser(add_help=False)
     p.add_argument("--data_path1", type=Path, required=True)
     p.add_argument("--data_path2", type=Path, required=True)
     p.add_argument("--channel_name", type=str, default=None)
@@ -212,7 +209,7 @@ def main(args) -> None:
 
     # ----------------- FID ------------------ #
     fid_val = fid_from_features(emb1, emb2)
-    print(f"\nFID (VAE latent, N={emb1.size(0)}): {fid_val:.6f}")
+    print(f"\nFID: {fid_val:.6f}")
 
 if __name__ == "__main__":
     parser = build_argparser()
