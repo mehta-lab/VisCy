@@ -34,7 +34,7 @@ def compute_metrics(
     z_slice: slice = None,
 ):
     """
-    Run DynaCell metrics computation.
+    Compute DynaCell metrics.
 
     """
     # Generate timestamp for unique versioning
@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
     print("\nRunning intensity metrics with z-slice range...")
     metrics = compute_metrics(
-        metrics_module=IntensityMetrics(),
+        metrics_module=IntensityMetrics(),  # IntensityMetrics(), or SegmentationMetrics(mode="2D"),
         cell_types=["HEK293T"],
         organelles=["HIST2H2BE"],
         infection_conditions=["Mock"],
