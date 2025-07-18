@@ -25,9 +25,17 @@ csv_database_path = Path(
 tmp_path = Path("/home/eduardo.hirata/repos/viscy/applications/DynaCell/demo_metrics")
 tmp_path.mkdir(parents=True, exist_ok=True)
 
+database = pd.read_csv(csv_database_path, dtype={"FOV": str})
+
+# Add prediction paths
+pred_database = database[database['Organelle'] == "HIST2H2BE"].copy()
+pred_database["Path"]= "path_to_prediction"
+
 
 def main(
-    method: Literal["segmentation2D", "segmentation3D", "intensity"] = "intensity",
+    method: Literal["segmentation2D", "segmentation3D", "intensity"],
+    target_channel_name: str,
+    prediction_channel_name: str,
     use_z_slice_range: bool = False,
 ):
     """
@@ -48,22 +56,22 @@ def main(
 
     # Create target database
     target_db = DynaCellDataBase(
-        database_path=csv_database_path,
+        database=database,
         cell_types=["HEK293T"],
         organelles=["HIST2H2BE"],
         infection_conditions=["Mock"],
-        channel_name="Organelle",
+        channel_name=target_channel_name,
         z_slice=z_slice_value,
     )
 
     if method == "segmentation2D":
         # For segmentation, use same channel for pred and target (self-comparison)
         pred_db = DynaCellDataBase(
-            database_path=csv_database_path,
+            database=database,
             cell_types=["HEK293T"],
             organelles=["HIST2H2BE"],
             infection_conditions=["Mock"],
-            channel_name="Organelle",
+            channel_name=prediction_channel_name,
             z_slice=z_slice_value,
         )
 
@@ -115,11 +123,11 @@ def main(
     elif method == "intensity":
         # For intensity comparison, use the same channel to compare to itself
         pred_db = DynaCellDataBase(
-            database_path=csv_database_path,
+            database=database,
             cell_types=["HEK293T"],
             organelles=["HIST2H2BE"],
             infection_conditions=["Mock"],
-            channel_name="Organelle",
+            channel_name=prediction_channel_name,
             z_slice=z_slice_value,
         )
 
@@ -175,4 +183,9 @@ if __name__ == "__main__":
     # intensity_metrics = main("intensity", use_z_slice_range=False)
 
     print("\nRunning intensity metrics with z-slice range...")
-    intensity_metrics_range = main("intensity", use_z_slice_range=True)
+    intensity_metrics_range = main(
+        method="intensity",
+        target_channel_name="GFP",
+        prediction_channel_name="nuclei_prediction",
+        use_z_slice_range=True
+    )

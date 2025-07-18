@@ -294,7 +294,7 @@ class VisCyTrainer(Trainer):
             f"Creating target database from {target_database} with channel '{target_channel}'"
         )
         target_db = DynaCellDataBase(
-            database_path=target_database,
+            database=target_database,
             cell_types=target_cell_types,
             organelles=target_organelles,
             infection_conditions=target_infection_conditions,
@@ -307,7 +307,7 @@ class VisCyTrainer(Trainer):
             f"Creating prediction database from {pred_database} with channel '{pred_channel}'"
         )
         pred_db = DynaCellDataBase(
-            database_path=pred_database,
+            database=pred_database,
             cell_types=pred_cell_types,
             organelles=pred_organelles,
             infection_conditions=pred_infection_conditions,

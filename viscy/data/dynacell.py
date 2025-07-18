@@ -66,21 +66,27 @@ class DynaCellDataBase:
 
     def __init__(
         self,
-        database_path: Path,
+        database: pd.DataFrame,
         cell_types: list[str],
         organelles: list[str],
         infection_conditions: list[str],
         channel_name: str,
+        zarr_path_column_name: str = "Path",
         z_slice: int | slice | None = None,
     ):
-        self.database_path = database_path
+        self.database = database
         self.cell_types = cell_types
         self.organelles = organelles
         self.infection_conditions = infection_conditions
         self.channel_name = channel_name
         self.z_slice = z_slice
-        self.database = pd.read_csv(database_path, dtype={"FOV": str})
+        self.zarr_path_column_name = zarr_path_column_name
         self._process_database()
+
+        if ("Cell type", "Organelle", "Infection", zarr_path_column_name) not in self.database.columns:
+            raise ValueError(
+                f"Database must contain 'Cell type', 'Organelle', 'Infection', and {zarr_path_column_name} columns."
+            )
 
     def _process_database(self):
         # Select the portion of the database that matches the provided criteria
@@ -91,7 +97,7 @@ class DynaCellDataBase:
         ].copy()
 
         # Extract zarr store paths
-        self._filtered_db["Zarr path"] = self._filtered_db["Path"].apply(
+        self._filtered_db["Zarr path"] = self._filtered_db[self.zarr_path_column_name].apply(
             lambda x: Path(*Path(x).parts[:-3])
         )
         self._filtered_db = self._filtered_db.drop_duplicates(subset=["Zarr path"])
