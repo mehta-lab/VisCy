@@ -19,7 +19,7 @@ from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
 torch.set_float32_matmul_precision("high")
 
 
-def main(
+def compute_metrics(
     metrics_module: LightningModule,
     cell_types: list,
     organelles: list,
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     pred_database["Path"]= "path_to_prediction"
 
     print("\nRunning intensity metrics with z-slice range...")
-    metrics = main(
+    metrics = compute_metrics(
         metrics_module=IntensityMetrics(),
         cell_types=["HEK293T"],
         organelles=["HIST2H2BE"],
