@@ -1,16 +1,17 @@
 import io
 import logging
-from typing import Dict, List, Optional, Tuple
+from typing import Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
-import seaborn as sns
 import torch
 import torch.nn.functional as F
 from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
 from torchvision.utils import make_grid
+
+from viscy.representation.disentanglement_metrics import DisentanglementMetrics
 
 _logger = logging.getLogger(__name__)
 
@@ -23,8 +24,9 @@ class BetaVaeLogger:
     and latent space analysis for microscopy data.
     """
 
-    def __init__(self, latent_dim: int = 128):
+    def __init__(self, latent_dim: int = 128, device: str = "cuda"):
         self.latent_dim = latent_dim
+        self.disentanglement_metrics = DisentanglementMetrics(device=device)
 
     def log_enhanced_metrics(
         self, lightning_module, model_output: dict, batch: dict, stage: str = "train"
@@ -43,9 +45,9 @@ class BetaVaeLogger:
         # Handle both Pythae dict format and object format
         if isinstance(model_output, dict):
             z = model_output["z"]
-            recon_x = model_output["recon_x"] 
+            recon_x = model_output["recon_x"]
             recon_loss = model_output["recon_loss"]
-            kl_loss = model_output["reg_loss"]  # Pythae uses 'reg_loss' for KL
+            kl_loss = model_output["kl_loss"]
         else:
             z = model_output.z if hasattr(model_output, "z") else model_output.embedding
             recon_x = (
@@ -56,12 +58,8 @@ class BetaVaeLogger:
             recon_loss = model_output.recon_loss
             kl_loss = model_output.kl_loss
 
-        # Get β from model config
-        beta = (
-            lightning_module.model.model_config.beta
-            if hasattr(lightning_module.model, "model_config")
-            else 1.0
-        )
+        # Get β directly from lightning module
+        beta = getattr(lightning_module, "beta", 1.0)
 
         # 1. Core VAE Loss Components (organized in one TensorBoard group)
         total_loss = recon_loss + beta * kl_loss
@@ -74,7 +72,6 @@ class BetaVaeLogger:
             f"loss_components/weighted_kl_loss/{stage}": beta * kl_loss,
             f"loss_components/total_loss/{stage}": total_loss,
             f"loss_components/beta_value/{stage}": beta,
-            
             # Loss analysis ratios
             f"loss_analysis/kl_recon_ratio/{stage}": kl_recon_ratio,
             f"loss_analysis/recon_contribution/{stage}": recon_loss / total_loss,
@@ -139,7 +136,7 @@ class BetaVaeLogger:
 
         for i in range(n_dims_to_log):
             lightning_module.logger.experiment.add_histogram(
-                f"latent_dim_{i}_distribution/{stage}",
+                f"latent_distributions/dim_{i}_{stage}",
                 z_np[:, i],
                 lightning_module.current_epoch,
             )
@@ -177,17 +174,8 @@ class BetaVaeLogger:
                     z_modified = z_base.clone()
                     z_modified[0, dim] = val
 
-                    # Generate reconstruction
-                    decoder_output = lightning_module.model.decoder(z_modified)
-                    # Handle both Pythae dict format and object format
-                    if isinstance(decoder_output, dict):
-                        recon = decoder_output["reconstruction"]
-                    else:
-                        recon = (
-                            decoder_output.reconstruction
-                            if hasattr(decoder_output, "reconstruction")
-                            else decoder_output
-                        )
+                    # Generate reconstruction using lightning module's decoder
+                    recon = lightning_module.decoder(z_modified)
 
                     # Take middle z-slice for visualization
                     mid_z = recon.shape[2] // 2
@@ -237,17 +225,8 @@ class BetaVaeLogger:
                 for alpha in np.linspace(0, 1, n_steps):
                     z_interp = alpha * z1 + (1 - alpha) * z2
 
-                    # Generate reconstruction
-                    decoder_output = lightning_module.model.decoder(z_interp)
-                    # Handle both Pythae dict format and object format
-                    if isinstance(decoder_output, dict):
-                        recon = decoder_output["reconstruction"]
-                    else:
-                        recon = (
-                            decoder_output.reconstruction
-                            if hasattr(decoder_output, "reconstruction")
-                            else decoder_output
-                        )
+                    # Generate reconstruction using lightning module's decoder
+                    recon = lightning_module.decoder(z_interp)
 
                     # Take middle z-slice for visualization
                     mid_z = recon.shape[2] // 2
@@ -302,17 +281,8 @@ class BetaVaeLogger:
                     z_mod = z_base.clone()
                     z_mod[0, dim] = val
 
-                    # Generate reconstruction
-                    decoder_output = lightning_module.model.decoder(z_mod)
-                    # Handle both Pythae dict format and object format
-                    if isinstance(decoder_output, dict):
-                        recon = decoder_output["reconstruction"]
-                    else:
-                        recon = (
-                            decoder_output.reconstruction
-                            if hasattr(decoder_output, "reconstruction")
-                            else decoder_output
-                        )
+                    # Generate reconstruction using lightning module's decoder
+                    recon = lightning_module.decoder(z_mod)
 
                     # Take middle z-slice for visualization
                     mid_z = recon.shape[2] // 2
@@ -446,3 +416,60 @@ class BetaVaeLogger:
 
         lightning_module.log("beta_schedule", beta)
         return beta
+
+    def log_disentanglement_metrics(
+        self,
+        lightning_module,
+        dataloader: torch.utils.data.DataLoader,
+        max_samples: int = 500,
+    ):
+        """
+        Log disentanglement metrics to TensorBoard every 10 epochs.
+
+        Args:
+            lightning_module: Lightning module instance
+            dataloader: DataLoader for evaluation
+            max_samples: Maximum samples to use for evaluation
+        """
+        # Only compute every 10 epochs to save compute
+        if lightning_module.current_epoch % 10 != 0:
+            return
+
+        _logger.info(
+            f"Computing disentanglement metrics at epoch {lightning_module.current_epoch}"
+        )
+
+        try:
+            # Use the lightning module directly (no separate model attribute after refactoring)
+            vae_model = lightning_module
+
+            # Compute all disentanglement metrics
+            metrics = self.disentanglement_metrics.compute_all_metrics(
+                vae_model=vae_model, dataloader=dataloader, max_samples=max_samples
+            )
+
+            # Log metrics with organized naming
+            tensorboard_metrics = {}
+            for metric_name, value in metrics.items():
+                tensorboard_metrics[f"disentanglement_metrics/{metric_name}"] = value
+
+            lightning_module.log_dict(
+                tensorboard_metrics,
+                on_step=False,
+                on_epoch=True,
+                logger=True,
+                sync_dist=True,
+            )
+
+            _logger.info(f"Logged disentanglement metrics: {metrics}")
+
+        except Exception as e:
+            _logger.warning(f"Failed to compute disentanglement metrics: {e}")
+            # Log a placeholder to indicate the attempt
+            lightning_module.log(
+                "disentanglement_metrics/computation_failed",
+                1.0,
+                on_step=False,
+                on_epoch=True,
+                logger=True,
+            )

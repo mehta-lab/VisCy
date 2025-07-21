@@ -4,13 +4,11 @@ from typing import Callable, Literal
 import timm
 from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
-from pythae.models.nn import BaseDecoder, BaseEncoder
 from torch import Tensor, nn
 
 from viscy.unet.networks.unext2 import (
     PixelToVoxelHead,
     StemDepthtoChannels,
-    UNeXt2Stem,
 )
 
 
@@ -172,9 +170,7 @@ class VaeDecoder(nn.Module):
         latent_spatial_size: int = 8,
         head_expansion_ratio: int = 4,
         head_pool: bool = False,
-        upsample_mode: Literal[
-            "deconv", "pixelshuffle"
-        ] = "pixelshuffle",  # Better quality
+        upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
         norm_name: str = "batch",
         upsample_pre_conv: Literal["default"] | Callable | None = None,

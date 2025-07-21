@@ -97,7 +97,7 @@ if __name__ == "__main__":
     batch_size = 64
     num_workers = 12
     time_interval = 1
-    z_stack_depth = 32
+    z_stack_depth = 16
 
     print("Creating model components...")
 
@@ -107,8 +107,8 @@ if __name__ == "__main__":
         in_channels=1,
         in_stack_depth=z_stack_depth,
         embedding_dim=256,
-        stem_kernel_size=(8, 4, 4),
-        stem_stride=(8, 4, 4),
+        stem_kernel_size=(4, 4, 4),
+        stem_stride=(4, 4, 4),
     )
     print(f"Encoder created successfully")
 
@@ -130,7 +130,7 @@ if __name__ == "__main__":
         latent_spatial_size=3,
         head_expansion_ratio=2,
         head_pool=False,
-        upsample_mode="deconv",
+        upsample_mode="pixelshuffle",
         conv_blocks=2,
         norm_name="batch",
         upsample_pre_conv=None,
@@ -144,8 +144,11 @@ if __name__ == "__main__":
         decoder=decoder,
         example_input_array_shape=(1, 1, z_stack_depth, 192, 192),
         latent_dim=256,
-        beta=3.0,
+        beta=0.5,
         lr=2e-4,
+        beta_schedule="linear",
+        beta_min=0.1,
+        beta_warmup_epochs=15,
     )
     print(f"VaeModule created successfully")
 
@@ -163,7 +166,7 @@ if __name__ == "__main__":
         data_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/2-assemble/2024_10_16_A549_SEC61_ZIKV_DENV.zarr",
         tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
         source_channel=["Phase3D"],
-        z_range=(5, 37),
+        z_range=(10, 26),
         initial_yx_patch_size=initial_yx_patch_size,
         final_yx_patch_size=final_yx_patch_size,
         batch_size=batch_size,
@@ -171,6 +174,8 @@ if __name__ == "__main__":
         time_interval=time_interval,
         augmentations=channel_augmentations("Phase3D"),
         normalizations=channel_normalization(phase_channel="Phase3D"),
+        augment_validation=False,
+        return_negative=False,
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
     )
     print(f"DataModule created successfully")
@@ -189,7 +194,7 @@ if __name__ == "__main__":
         logger=TensorBoardLogger(
             save_dir="/hpc/projects/organelle_phenotyping/models/SEC61B/vae",
             name="betavae_phase3D_ddp",
-            version="beta_3_16slice",
+            version="beta_0.5_16slice",
         ),
         callbacks=[
             LearningRateMonitor(logging_interval="step"),

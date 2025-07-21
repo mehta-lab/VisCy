@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Sequence, TypedDict
+from typing import Literal, Optional, Sequence, TypedDict
 
 import numpy as np
 import torch
@@ -250,34 +250,99 @@ class ContrastiveModule(LightningModule):
         }
 
 
-class BetaVAE(nn.Module):
-    """Native Beta-VAE implementation with reparameterization trick.
-
-    Parameters
-    ----------
-    encoder : nn.Module
-        Encoder model
-    decoder : nn.Module
-        Decoder model
-    latent_dim : int
-        Latent dimension
-    beta : float
-        Beta parameter for the Beta-VAE loss. Default is 1.0 equivalent to a VAE.
-
-    Returns
-    -------
-    dict
-        Dictionary containing the reconstruction, latent, mu, logvar, recon_loss, kl_loss, reg_loss, and total_loss.
-    """
+class VaeModule(LightningModule):
+    """Native PyTorch Lightning Beta-VAE implementation."""
 
     def __init__(
-        self, encoder: nn.Module, decoder: nn.Module, latent_dim: int, beta: float = 1.0
+        self,
+        encoder: VaeEncoder,
+        decoder: VaeDecoder,
+        latent_dim: int = 128,
+        beta: float = 1.0,
+        beta_schedule: str = None,  # "linear", "cosine", "warmup", or None
+        beta_min: float = 0.1,
+        beta_warmup_epochs: int = 50,
+        lr: float = 1e-3,
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
+        example_input_array_shape: Sequence[int] = (1, 2, 30, 256, 256),
+        compute_disentanglement: bool = True,
+        disentanglement_frequency: int = 10,
+        # Deprecated parameters for backward compatibility
+        model_name: str = "BetaVAE",
+        loss: str = "mse",
     ):
         super().__init__()
+
         self.encoder = encoder
         self.decoder = decoder
         self.latent_dim = latent_dim
         self.beta = beta
+        self.beta_schedule = beta_schedule
+        self.beta_min = beta_min
+        self.beta_warmup_epochs = beta_warmup_epochs
+        self.lr = lr
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+
+        self.example_input_array = torch.rand(*example_input_array_shape)
+        self.compute_disentanglement = compute_disentanglement
+        self.disentanglement_frequency = disentanglement_frequency
+
+        # Store model components directly (no separate BetaVAE class)
+
+        # Initialize tracking lists
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+
+        # Enhanced β-VAE logging - initialize early
+        self.vae_logger = BetaVaeLogger(latent_dim=latent_dim, device="cuda")
+
+        # Note: DisentanglementMetrics will be initialized in setup() when device is available
+        self.disentanglement_metrics = None
+
+    def setup(self, stage: str = None):
+        """Setup hook to initialize device-dependent components."""
+        super().setup(stage)
+        # Initialize DisentanglementMetrics after device is available
+        if self.disentanglement_metrics is None:
+            self.disentanglement_metrics = DisentanglementMetrics(device=self.device)
+
+    def _get_current_beta(self) -> float:
+        """Get current beta value based on scheduling."""
+        if self.beta_schedule is None:
+            return self.beta
+
+        epoch = self.current_epoch
+
+        if self.beta_schedule == "linear":
+            # Linear warmup from beta_min to beta
+            if epoch < self.beta_warmup_epochs:
+                return (
+                    self.beta_min
+                    + (self.beta - self.beta_min) * epoch / self.beta_warmup_epochs
+                )
+            else:
+                return self.beta
+
+        elif self.beta_schedule == "cosine":
+            # Cosine warmup from beta_min to beta
+            if epoch < self.beta_warmup_epochs:
+                import math
+
+                progress = epoch / self.beta_warmup_epochs
+                return self.beta_min + (self.beta - self.beta_min) * 0.5 * (
+                    1 + math.cos(math.pi * (1 - progress))
+                )
+            else:
+                return self.beta
+
+        elif self.beta_schedule == "warmup":
+            # Keep beta_min for warmup epochs, then jump to beta
+            return self.beta_min if epoch < self.beta_warmup_epochs else self.beta
+
+        else:
+            return self.beta
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
         """Reparameterization trick: sample from N(mu, var) using N(0,1)."""
@@ -298,10 +363,11 @@ class BetaVAE(nn.Module):
         # Decode
         reconstruction = self.decoder(z)
 
-        # Compute losses
-        recon_loss = F.mse_loss(reconstruction, x, reduction="sum") / x.size(0)
+        # Compute losses with current beta (allows for scheduling)
+        current_beta = self._get_current_beta()
+        recon_loss = F.mse_loss(reconstruction, x, reduction="mean")
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
-        total_loss = recon_loss + self.beta * kl_loss
+        total_loss = recon_loss + current_beta * kl_loss
 
         return {
             "recon_x": reconstruction,
@@ -310,69 +376,8 @@ class BetaVAE(nn.Module):
             "logvar": logvar,
             "recon_loss": recon_loss,
             "kl_loss": kl_loss,
-            "reg_loss": kl_loss,  # For compatibility with logging
             "loss": total_loss,
         }
-
-
-class VaeModule(LightningModule):
-    """Native PyTorch Lightning Beta-VAE implementation."""
-
-    def __init__(
-        self,
-        encoder: VaeEncoder,
-        decoder: VaeDecoder,
-        latent_dim: int = 128,
-        beta: float = 1.0,
-        lr: float = 1e-3,
-        log_batches_per_epoch: int = 8,
-        log_samples_per_batch: int = 1,
-        example_input_array_shape: Sequence[int] = (1, 2, 30, 256, 256),
-        compute_disentanglement: bool = True,
-        disentanglement_frequency: int = 10,
-        # Deprecated parameters for backward compatibility
-        model_name: str = "BetaVAE",
-        loss: str = "mse",
-    ):
-        super().__init__()
-
-        self.encoder = encoder
-        self.decoder = decoder
-        self.latent_dim = latent_dim
-        self.beta = beta
-        self.lr = lr
-        self.log_batches_per_epoch = log_batches_per_epoch
-        self.log_samples_per_batch = log_samples_per_batch
-
-        self.example_input_array = torch.rand(*example_input_array_shape)
-        self.compute_disentanglement = compute_disentanglement
-        self.disentanglement_frequency = disentanglement_frequency
-
-        # Create the Beta-VAE model
-        self.model = BetaVAE(
-            encoder=self.encoder, decoder=self.decoder, latent_dim=latent_dim, beta=beta
-        )
-
-        # Initialize tracking lists
-        self.training_step_outputs = []
-        self.validation_step_outputs = []
-
-        # Enhanced β-VAE logging - initialize early
-        self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
-
-        # Note: DisentanglementMetrics will be initialized in setup() when device is available
-        self.disentanglement_metrics = None
-
-    def setup(self, stage: str = None):
-        """Setup hook to initialize device-dependent components."""
-        super().setup(stage)
-        # Initialize DisentanglementMetrics after device is available
-        if self.disentanglement_metrics is None:
-            self.disentanglement_metrics = DisentanglementMetrics(device=self.device)
-
-    def forward(self, x: Tensor) -> dict:
-        """Forward pass through VAE model."""
-        return self.model(x)
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Training step with VAE loss computation."""
