@@ -178,9 +178,17 @@ if __name__ == "__main__":
         return_negative=False,
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
     )
+    dm.setup("fit")
     print(f"DataModule created successfully")
+    train_size = len(dm.train_dataset)
+    val_size = len(dm.val_dataset)
+    batches_per_epoch = train_size // batch_size
 
-    # Create trainer
+    print(f"Training samples: {train_size:,}")
+    print(f"Validation samples: {val_size:,}")
+    print(f"Batches per epoch: {batches_per_epoch:,}")
+
+    # # Create trainer
     trainer = VisCyTrainer(
         accelerator="gpu",
         strategy="ddp",

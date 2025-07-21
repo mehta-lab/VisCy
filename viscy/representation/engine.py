@@ -528,12 +528,14 @@ class VaeModule(LightningModule):
                 )
                 return
 
-            # Get validation dataloader
-            val_dataloader = (
-                self.trainer.val_dataloaders[0]
-                if self.trainer.val_dataloaders
-                else None
-            )
+            # Get validation dataloader - handle both single DataLoader and list cases
+            val_dataloaders = self.trainer.val_dataloaders
+            if val_dataloaders is None:
+                val_dataloader = None
+            elif isinstance(val_dataloaders, list):
+                val_dataloader = val_dataloaders[0] if val_dataloaders else None
+            else:
+                val_dataloader = val_dataloaders
 
             if val_dataloader is None:
                 _logger.warning(
@@ -571,12 +573,14 @@ class VaeModule(LightningModule):
     def _log_enhanced_visualizations(self):
         """Log enhanced β-VAE visualizations."""
         try:
-            # Get validation dataloader
-            val_dataloader = (
-                self.trainer.val_dataloaders[0]
-                if self.trainer.val_dataloaders
-                else None
-            )
+            # Get validation dataloader - handle both single DataLoader and list cases
+            val_dataloaders = self.trainer.val_dataloaders
+            if val_dataloaders is None:
+                val_dataloader = None
+            elif isinstance(val_dataloaders, list):
+                val_dataloader = val_dataloaders[0] if val_dataloaders else None
+            else:
+                val_dataloader = val_dataloaders
 
             if val_dataloader is None:
                 _logger.warning("No validation dataloader available for visualizations")
