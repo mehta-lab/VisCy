@@ -61,56 +61,44 @@ class BetaVaeLogger:
         # Get β directly from lightning module
         beta = getattr(lightning_module, "beta", 1.0)
 
-        # 1. Core VAE Loss Components (organized in one TensorBoard group)
+        # Record losses and reconstruction quality metrics
         total_loss = recon_loss + beta * kl_loss
         kl_recon_ratio = kl_loss / (recon_loss + 1e-8)
 
-        metrics = {
-            # Core loss components
-            f"loss_components/reconstruction_loss/{stage}": recon_loss,
-            f"loss_components/kl_loss/{stage}": kl_loss,
-            f"loss_components/weighted_kl_loss/{stage}": beta * kl_loss,
-            f"loss_components/total_loss/{stage}": total_loss,
-            f"loss_components/beta_value/{stage}": beta,
-            # Loss analysis ratios
-            f"loss_analysis/kl_recon_ratio/{stage}": kl_recon_ratio,
-            f"loss_analysis/recon_contribution/{stage}": recon_loss / total_loss,
-        }
-
-        # 2. Latent space statistics
-        latent_mean = torch.mean(z, dim=0)
-        latent_std = torch.std(z, dim=0)
-
-        metrics.update(
-            {
-                f"latent_stats/mean_avg/{stage}": torch.mean(latent_mean),
-                f"latent_stats/std_avg/{stage}": torch.mean(latent_std),
-                f"latent_stats/mean_max/{stage}": torch.max(latent_mean),
-                f"latent_stats/std_max/{stage}": torch.max(latent_std),
-            }
-        )
-
-        # 3. Reconstruction quality metrics
         mse_loss = F.mse_loss(recon_x, x)
         mae_loss = F.l1_loss(recon_x, x)
 
-        metrics.update(
-            {
-                f"reconstruction_quality/mse/{stage}": mse_loss,
-                f"reconstruction_quality/mae/{stage}": mae_loss,
-            }
-        )
+        metrics = {
+            # All losses in one consolidated group
+            f"losses/reconstruction/{stage}": recon_loss,
+            f"losses/kl/{stage}": kl_loss,
+            f"losses/weighted_kl/{stage}": beta * kl_loss,
+            f"losses/total/{stage}": total_loss,
+            f"losses/mse/{stage}": mse_loss,
+            f"losses/mae/{stage}": mae_loss,
+            f"losses/beta_value/{stage}": beta,
+            f"losses/kl_recon_ratio/{stage}": kl_recon_ratio,
+            f"losses/recon_contribution/{stage}": recon_loss / total_loss,
+        }
 
-        # 4. Latent capacity metrics
+        # Latent space statistics
+        latent_mean = torch.mean(z, dim=0)
+        latent_std = torch.std(z, dim=0)
+
         active_dims = torch.sum(torch.var(z, dim=0) > 0.01)
         variances = torch.var(z, dim=0)
         effective_dim = torch.sum(variances) ** 2 / torch.sum(variances**2)
 
         metrics.update(
             {
-                f"latent_capacity/active_dims/{stage}": active_dims,
-                f"latent_capacity/effective_dim/{stage}": effective_dim,
-                f"latent_capacity/utilization/{stage}": active_dims / self.latent_dim,
+                # Consolidated latent statistics
+                f"latent_statistics/mean_avg/{stage}": torch.mean(latent_mean),
+                f"latent_statistics/std_avg/{stage}": torch.mean(latent_std),
+                f"latent_statistics/mean_max/{stage}": torch.max(latent_mean),
+                f"latent_statistics/std_max/{stage}": torch.max(latent_std),
+                f"latent_statistics/active_dims/{stage}": active_dims,
+                f"latent_statistics/effective_dim/{stage}": effective_dim,
+                f"latent_statistics/utilization/{stage}": active_dims / self.latent_dim,
             }
         )
 
@@ -123,7 +111,7 @@ class BetaVaeLogger:
             sync_dist=True,
         )
 
-        # 5. Log latent dimension histograms (periodically)
+        # Log latent dimension histograms (periodically)
         if stage == "val" and lightning_module.current_epoch % 10 == 0:
             self._log_latent_histograms(lightning_module, z, stage)
 
