@@ -11,6 +11,9 @@ from umap import UMAP
 
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
+from viscy.representation.disentanglement_metrics import DisentanglementMetrics
+from viscy.representation.vae import VaeDecoder, VaeEncoder
+from viscy.representation.vae_logging import BetaVaeLogger
 from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -243,5 +246,381 @@ class ContrastiveModule(LightningModule):
         return {
             "features": features,
             "projections": projections,
+            "index": batch["index"],
+        }
+
+
+class BetaVAE(nn.Module):
+    """Native Beta-VAE implementation with reparameterization trick.
+
+    Parameters
+    ----------
+    encoder : nn.Module
+        Encoder model
+    decoder : nn.Module
+        Decoder model
+    latent_dim : int
+        Latent dimension
+    beta : float
+        Beta parameter for the Beta-VAE loss. Default is 1.0 equivalent to a VAE.
+
+    Returns
+    -------
+    dict
+        Dictionary containing the reconstruction, latent, mu, logvar, recon_loss, kl_loss, reg_loss, and total_loss.
+    """
+
+    def __init__(
+        self, encoder: nn.Module, decoder: nn.Module, latent_dim: int, beta: float = 1.0
+    ):
+        super().__init__()
+        self.encoder = encoder
+        self.decoder = decoder
+        self.latent_dim = latent_dim
+        self.beta = beta
+
+    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+        """Reparameterization trick: sample from N(mu, var) using N(0,1)."""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
+
+    def forward(self, x: Tensor) -> dict:
+        """Forward pass through Beta-VAE."""
+        # Encode
+        encoder_output = self.encoder(x)
+        mu = encoder_output.embedding
+        logvar = encoder_output.log_covariance
+
+        # Reparameterize
+        z = self.reparameterize(mu, logvar)
+
+        # Decode
+        reconstruction = self.decoder(z)
+
+        # Compute losses
+        recon_loss = F.mse_loss(reconstruction, x, reduction="sum") / x.size(0)
+        kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
+        total_loss = recon_loss + self.beta * kl_loss
+
+        return {
+            "recon_x": reconstruction,
+            "z": z,
+            "mu": mu,
+            "logvar": logvar,
+            "recon_loss": recon_loss,
+            "kl_loss": kl_loss,
+            "reg_loss": kl_loss,  # For compatibility with logging
+            "loss": total_loss,
+        }
+
+
+class VaeModule(LightningModule):
+    """Native PyTorch Lightning Beta-VAE implementation."""
+
+    def __init__(
+        self,
+        encoder: VaeEncoder,
+        decoder: VaeDecoder,
+        latent_dim: int = 128,
+        beta: float = 1.0,
+        lr: float = 1e-3,
+        log_batches_per_epoch: int = 8,
+        log_samples_per_batch: int = 1,
+        example_input_array_shape: Sequence[int] = (1, 2, 30, 256, 256),
+        compute_disentanglement: bool = True,
+        disentanglement_frequency: int = 10,
+        # Deprecated parameters for backward compatibility
+        model_name: str = "BetaVAE",
+        loss: str = "mse",
+    ):
+        super().__init__()
+
+        self.encoder = encoder
+        self.decoder = decoder
+        self.latent_dim = latent_dim
+        self.beta = beta
+        self.lr = lr
+        self.log_batches_per_epoch = log_batches_per_epoch
+        self.log_samples_per_batch = log_samples_per_batch
+
+        self.example_input_array = torch.rand(*example_input_array_shape)
+        self.compute_disentanglement = compute_disentanglement
+        self.disentanglement_frequency = disentanglement_frequency
+
+        # Create the Beta-VAE model
+        self.model = BetaVAE(
+            encoder=self.encoder, decoder=self.decoder, latent_dim=latent_dim, beta=beta
+        )
+
+        # Initialize tracking lists
+        self.training_step_outputs = []
+        self.validation_step_outputs = []
+
+        # Enhanced β-VAE logging - initialize early
+        self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
+
+        # Note: DisentanglementMetrics will be initialized in setup() when device is available
+        self.disentanglement_metrics = None
+
+    def setup(self, stage: str = None):
+        """Setup hook to initialize device-dependent components."""
+        super().setup(stage)
+        # Initialize DisentanglementMetrics after device is available
+        if self.disentanglement_metrics is None:
+            self.disentanglement_metrics = DisentanglementMetrics(device=self.device)
+
+    def forward(self, x: Tensor) -> dict:
+        """Forward pass through VAE model."""
+        return self.model(x)
+
+    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+        """Training step with VAE loss computation."""
+        x = batch["anchor"]
+        model_output = self(x)
+
+        # Beta-VAE computes loss internally
+        loss = model_output["loss"]
+
+        # Log basic metrics
+        self._log_metrics(
+            loss=loss,
+            recon_loss=model_output["recon_loss"],
+            kl_loss=model_output["kl_loss"],
+            stage="train",
+        )
+
+        # Log enhanced β-VAE metrics
+        self.vae_logger.log_enhanced_metrics(
+            lightning_module=self, model_output=model_output, batch=batch, stage="train"
+        )
+
+        # Log samples
+        self._log_step_samples(batch_idx, x, model_output["recon_x"], "train")
+
+        return loss
+
+    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+        """Validation step with VAE loss computation."""
+        x = batch["anchor"]
+        model_output = self(x)
+
+        # Beta-VAE computes loss internally
+        loss = model_output["loss"]
+
+        # Log basic metrics
+        self._log_metrics(
+            loss=loss,
+            recon_loss=model_output["recon_loss"],
+            kl_loss=model_output["kl_loss"],
+            stage="val",
+        )
+
+        # Log enhanced β-VAE metrics
+        self.vae_logger.log_enhanced_metrics(
+            lightning_module=self, model_output=model_output, batch=batch, stage="val"
+        )
+
+        # Log samples
+        self._log_step_samples(batch_idx, x, model_output["recon_x"], "val")
+
+        return loss
+
+    def _log_metrics(self, loss, recon_loss, kl_loss, stage: Literal["train", "val"]):
+        """Log VAE-specific metrics."""
+        metrics = {
+            f"loss/{stage}": loss,
+            f"recon_loss/{stage}": recon_loss,
+            f"kl_loss/{stage}": kl_loss,
+        }
+
+        self.log_dict(
+            metrics,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+            logger=True,
+            sync_dist=True,
+        )
+
+    def _log_step_samples(
+        self, batch_idx, original, reconstruction, stage: Literal["train", "val"]
+    ):
+        """Log sample reconstructions."""
+        if batch_idx < self.log_batches_per_epoch:
+            output_list = (
+                self.training_step_outputs
+                if stage == "train"
+                else self.validation_step_outputs
+            )
+
+            # Store samples for epoch end logging
+            samples = {
+                "original": original.detach().cpu()[: self.log_samples_per_batch],
+                "reconstruction": reconstruction.detach().cpu()[
+                    : self.log_samples_per_batch
+                ],
+            }
+            output_list.append(samples)
+
+    def _log_samples(self, key: str, samples_list: list):
+        """Log reconstruction samples at epoch end."""
+        if len(samples_list) > 0:
+            # Take middle z-slice for visualization
+            mid_z = samples_list[0]["original"].shape[2] // 2
+
+            originals = []
+            reconstructions = []
+
+            for sample in samples_list:
+                orig = sample["original"][:, :, mid_z].numpy()
+                recon = sample["reconstruction"][:, :, mid_z].numpy()
+
+                originals.extend([orig[i] for i in range(orig.shape[0])])
+                reconstructions.extend([recon[i] for i in range(recon.shape[0])])
+
+            # Create grid with originals and reconstructions
+            combined = []
+            for orig, recon in zip(originals[:4], reconstructions[:4]):
+                combined.append([orig, recon])
+
+            grid = render_images(combined, cmaps=["gray", "gray"])
+            self.logger.experiment.add_image(
+                key, grid, self.current_epoch, dataformats="HWC"
+            )
+
+    def on_train_epoch_end(self) -> None:
+        """Log training samples at epoch end."""
+        super().on_train_epoch_end()
+        self._log_samples("train_reconstructions", self.training_step_outputs)
+        self.training_step_outputs = []
+
+    def on_validation_epoch_end(self) -> None:
+        """Log validation samples at epoch end."""
+        super().on_validation_epoch_end()
+        self._log_samples("val_reconstructions", self.validation_step_outputs)
+        self.validation_step_outputs = []
+
+        # Compute disentanglement metrics periodically
+        if (
+            self.compute_disentanglement
+            and self.current_epoch % self.disentanglement_frequency == 0
+            and self.current_epoch > 0
+        ):
+            self._compute_and_log_disentanglement_metrics()
+
+        # Log enhanced β-VAE visualizations periodically
+        if self.current_epoch % 20 == 0 and self.current_epoch > 0:
+            self._log_enhanced_visualizations()
+
+    def _compute_and_log_disentanglement_metrics(self):
+        """Compute and log disentanglement metrics."""
+        try:
+            # Check if disentanglement metrics are initialized
+            if self.disentanglement_metrics is None:
+                _logger.warning(
+                    "DisentanglementMetrics not initialized, skipping computation"
+                )
+                return
+
+            # Get validation dataloader
+            val_dataloader = (
+                self.trainer.val_dataloaders[0]
+                if self.trainer.val_dataloaders
+                else None
+            )
+
+            if val_dataloader is None:
+                _logger.warning(
+                    "No validation dataloader available for disentanglement metrics"
+                )
+                return
+
+            # Compute metrics
+            _logger.info(
+                f"Computing disentanglement metrics at epoch {self.current_epoch}"
+            )
+            metrics = self.disentanglement_metrics.compute_all_metrics(
+                vae_model=self,
+                dataloader=val_dataloader,
+                max_samples=200,
+            )
+
+            # Log metrics
+            for metric_name, metric_value in metrics.items():
+                self.log(
+                    f"disentanglement/{metric_name}",
+                    metric_value,
+                    on_step=False,
+                    on_epoch=True,
+                    logger=True,
+                    sync_dist=True,
+                )
+
+            _logger.info(f"Disentanglement metrics: {metrics}")
+
+        except Exception as e:
+            _logger.error(f"Error computing disentanglement metrics: {e}")
+            # Continue training even if metrics fail
+
+    def _log_enhanced_visualizations(self):
+        """Log enhanced β-VAE visualizations."""
+        try:
+            # Get validation dataloader
+            val_dataloader = (
+                self.trainer.val_dataloaders[0]
+                if self.trainer.val_dataloaders
+                else None
+            )
+
+            if val_dataloader is None:
+                _logger.warning("No validation dataloader available for visualizations")
+                return
+
+            _logger.info(
+                f"Logging enhanced β-VAE visualizations at epoch {self.current_epoch}"
+            )
+
+            # Log latent traversals
+            self.vae_logger.log_latent_traversal(
+                lightning_module=self, n_dims=8, n_steps=11
+            )
+
+            # Log latent interpolations
+            self.vae_logger.log_latent_interpolation(
+                lightning_module=self, n_pairs=3, n_steps=11
+            )
+
+            # Log factor traversal matrix
+            self.vae_logger.log_factor_traversal_matrix(
+                lightning_module=self, n_dims=8, n_steps=7
+            )
+
+            # Log latent space visualization (every 40 epochs to avoid overhead)
+            if self.current_epoch % 40 == 0:
+                self.vae_logger.log_latent_space_visualization(
+                    lightning_module=self,
+                    dataloader=val_dataloader,
+                    max_samples=500,
+                    method="pca",
+                )
+
+        except Exception as e:
+            _logger.error(f"Error logging enhanced visualizations: {e}")
+            # Continue training even if visualizations fail
+
+    def configure_optimizers(self):
+        """Configure optimizer for VAE training."""
+        optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
+        return optimizer
+
+    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> dict:
+        """Prediction step for VAE inference."""
+        x = batch["anchor"]
+        model_output = self(x)
+
+        return {
+            "latent": model_output["z"],
+            "reconstruction": model_output["recon_x"],
             "index": batch["index"],
         }
