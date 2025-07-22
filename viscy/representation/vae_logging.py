@@ -74,15 +74,15 @@ class BetaVaeLogger:
 
         metrics = {
             # All losses in one consolidated group
-            f"losses/reconstruction/{stage}": recon_loss,
-            f"losses/kl/{stage}": kl_loss,
-            f"losses/weighted_kl/{stage}": beta * kl_loss,
-            f"losses/total/{stage}": total_loss,
-            f"losses/mse/{stage}": mse_loss,
-            f"losses/mae/{stage}": mae_loss,
-            f"losses/beta_value/{stage}": beta,
-            f"losses/kl_recon_ratio/{stage}": kl_recon_ratio,
-            f"losses/recon_contribution/{stage}": recon_loss / total_loss,
+            f"loss/total/{stage}": total_loss,
+            f"loss/reconstruction/{stage}": recon_loss,
+            f"loss/kl/{stage}": kl_loss,
+            f"loss/weighted_kl/{stage}": beta * kl_loss,
+            f"loss/mse/{stage}": mse_loss,
+            f"loss/mae/{stage}": mae_loss,
+            f"loss/beta_value/{stage}": beta,
+            f"loss/kl_recon_ratio/{stage}": kl_recon_ratio,
+            f"loss/recon_contribution/{stage}": recon_loss / total_loss,
         }
 
         # Latent space statistics

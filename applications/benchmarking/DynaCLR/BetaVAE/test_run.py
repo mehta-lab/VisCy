@@ -207,7 +207,10 @@ if __name__ == "__main__":
         callbacks=[
             LearningRateMonitor(logging_interval="step"),
             ModelCheckpoint(
-                monitor="loss/val", save_top_k=5, save_last=True, every_n_epochs=1
+                monitor="loss/total/val",
+                save_top_k=5,
+                save_last=True,
+                every_n_epochs=1,
             ),
         ],
         use_distributed_sampler=True,
