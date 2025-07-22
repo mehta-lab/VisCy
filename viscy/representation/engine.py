@@ -289,22 +289,17 @@ class VaeModule(LightningModule):
         self.compute_disentanglement = compute_disentanglement
         self.disentanglement_frequency = disentanglement_frequency
 
-        # Store model components directly (no separate BetaVAE class)
-
-        # Initialize tracking lists
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
-        # Enhanced β-VAE logging - initialize early
         self.vae_logger = BetaVaeLogger(latent_dim=latent_dim, device="cuda")
 
-        # Note: DisentanglementMetrics will be initialized in setup() when device is available
         self.disentanglement_metrics = None
 
     def setup(self, stage: str = None):
         """Setup hook to initialize device-dependent components."""
         super().setup(stage)
-        # Initialize DisentanglementMetrics after device is available
+
         if self.disentanglement_metrics is None:
             self.disentanglement_metrics = DisentanglementMetrics(device=self.device)
 
@@ -363,7 +358,7 @@ class VaeModule(LightningModule):
         # Decode
         reconstruction = self.decoder(z)
 
-        # Compute losses with current beta (allows for scheduling)
+        # Compute losses with current beta
         current_beta = self._get_current_beta()
         recon_loss = F.mse_loss(reconstruction, x, reduction="mean")
         kl_loss = -0.5 * torch.sum(1 + logvar - mu.pow(2) - logvar.exp()) / x.size(0)
@@ -387,14 +382,6 @@ class VaeModule(LightningModule):
         # Beta-VAE computes loss internally
         loss = model_output["loss"]
 
-        # Log basic metrics
-        self._log_metrics(
-            loss=loss,
-            recon_loss=model_output["recon_loss"],
-            kl_loss=model_output["kl_loss"],
-            stage="train",
-        )
-
         # Log enhanced β-VAE metrics
         self.vae_logger.log_enhanced_metrics(
             lightning_module=self, model_output=model_output, batch=batch, stage="train"
@@ -412,14 +399,6 @@ class VaeModule(LightningModule):
 
         # Beta-VAE computes loss internally
         loss = model_output["loss"]
-
-        # Log basic metrics
-        self._log_metrics(
-            loss=loss,
-            recon_loss=model_output["recon_loss"],
-            kl_loss=model_output["kl_loss"],
-            stage="val",
-        )
 
         # Log enhanced β-VAE metrics
         self.vae_logger.log_enhanced_metrics(

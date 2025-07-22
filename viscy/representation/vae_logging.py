@@ -58,8 +58,12 @@ class BetaVaeLogger:
             recon_loss = model_output.recon_loss
             kl_loss = model_output.kl_loss
 
-        # Get β directly from lightning module
-        beta = getattr(lightning_module, "beta", 1.0)
+        # Get current β (scheduled value, not static)
+        beta = getattr(
+            lightning_module,
+            "_get_current_beta",
+            lambda: getattr(lightning_module, "beta", 1.0),
+        )()
 
         # Record losses and reconstruction quality metrics
         total_loss = recon_loss + beta * kl_loss

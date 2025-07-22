@@ -144,10 +144,10 @@ if __name__ == "__main__":
         decoder=decoder,
         example_input_array_shape=(1, 1, z_stack_depth, 192, 192),
         latent_dim=256,
-        beta=0.5,
+        beta=1.5,
         lr=2e-4,
         beta_schedule="linear",
-        beta_min=0.1,
+        beta_min=0.5,
         beta_warmup_epochs=15,
     )
     print(f"VaeModule created successfully")
@@ -201,8 +201,8 @@ if __name__ == "__main__":
         check_val_every_n_epoch=1,
         logger=TensorBoardLogger(
             save_dir="/hpc/projects/organelle_phenotyping/models/SEC61B/vae",
-            name="betavae_phase3D_ddp",
-            version="beta_0.5_16slice",
+            name="betavae_phase3D",
+            version="beta_1.5_16slice",
         ),
         callbacks=[
             LearningRateMonitor(logging_interval="step"),
