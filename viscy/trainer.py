@@ -21,6 +21,8 @@ class VisCyTrainer(Trainer):
         channel_names: list[str] | Literal[-1] = -1,
         num_workers: int = 1,
         block_size: int = 32,
+        per_timepoint: bool = False,
+        percentiles: tuple[float, float] = (50.0, 99.0),
         model: LightningModule | None = None,
     ):
         """
@@ -36,6 +38,10 @@ class VisCyTrainer(Trainer):
             Number of CPU workers, by default 1
         block_size : int, optional
             Block size to subsample images, by default 32
+        per_timepoint : bool, optional
+            If True, compute normalization statistics per timepoint, by default False
+        percentiles : tuple[float, float], optional
+            Lower and upper percentiles to compute, by default (50.0, 99.0)
         model: LightningModule, optional
             Ignored placeholder, by default None
         """
@@ -52,6 +58,8 @@ class VisCyTrainer(Trainer):
             num_workers=num_workers,
             channel_ids=channel_indices,
             grid_spacing=block_size,
+            per_timepoint=per_timepoint,
+            percentiles=percentiles,
         )
 
     def export(

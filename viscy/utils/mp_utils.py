@@ -247,40 +247,82 @@ def mp_get_val_stats(fn_args, workers):
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
-        res = ex.map(get_val_stats, fn_args)
+        res = ex.map(get_val_stats, *zip(*fn_args))
     return list(res)
 
 
-def get_val_stats(sample_values):
+def get_val_stats(sample_values, percentiles=(25.0, 75.0)):
     """
     Computes the statistics of a numpy array and returns a dictionary
     of metadata corresponding to input sample values.
 
-    :param list(float) sample_values: List of sample values at respective
-                                        indices
-    :return dict meta_row: Dict with intensity data for image
+    Parameters
+    ----------
+    sample_values : array_like
+        List of sample values at respective indices
+    percentiles : tuple of float, optional
+        Lower and upper percentiles to compute, by default (25.0, 75.0)
+        
+    Returns
+    -------
+    dict
+        Dict with intensity data for image including mean, std, median, iqr,
+        percentile bounds and range
     """
-
+    percentile_vals = np.nanpercentile(sample_values, percentiles)
+    
     meta_row = {
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),
         "median": float(np.nanmedian(sample_values)),
         "iqr": float(scipy.stats.iqr(sample_values)),
+        "percentile_lower_b": float(percentile_vals[0]),
+        "percentile_upper_b": float(percentile_vals[1]),
+        "percentile_range": float(percentile_vals[1] - percentile_vals[0]),
     }
     return meta_row
 
 
 def mp_sample_im_pixels(fn_args, workers):
-    """Read and computes statistics of images with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of paths and corresponding returned df from get_im_stats
     """
+    Read and computes statistics of images with multiprocessing.
 
+    Parameters
+    ----------
+    fn_args : list of tuple
+        List with tuples of function arguments
+    workers : int
+        Max number of workers
+        
+    Returns
+    -------
+    list
+        List of paths and corresponding returned df from get_im_stats
+    """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
         res = ex.map(sample_im_pixels, *zip(*fn_args))
+    return list(map(list, zip(*list(res))))
+
+
+def mp_sample_im_pixels_per_timepoint(fn_args, workers):
+    """
+    Sample pixel values per timepoint with multiprocessing.
+
+    Parameters
+    ----------
+    fn_args : list of tuple
+        List with tuples of function arguments
+    workers : int
+        Max number of workers
+        
+    Returns
+    -------
+    list
+        List of (position, timepoint_samples_dict) tuples
+    """
+    with ProcessPoolExecutor(workers) as ex:
+        res = ex.map(sample_im_pixels_per_timepoint, *zip(*fn_args))
     return list(map(list, zip(*list(res))))
 
 
@@ -298,11 +340,19 @@ def sample_im_pixels(
     assumes that the data in the zarr store is stored in [T,C,Z,Y,X] format,
     for time, channel, z, y, x.
 
-    :param Position zarr_dir: NGFF position node object
-    :param int grid_spacing: spacing of sampling grid in x and y
-    :param int channel: channel to sample from
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object
+    grid_spacing : int
+        Spacing of sampling grid in x and y
+    channel : int
+        Channel to sample from
 
-    :return list meta_rows: Dicts with intensity data for each grid point
+    Returns
+    -------
+    tuple
+        (position, sample_values)
     """
     image_zarr = position.data
 
@@ -320,3 +370,45 @@ def sample_im_pixels(
     sample_values = np.stack(all_sample_values, 0).flatten()
 
     return position, sample_values
+
+
+def sample_im_pixels_per_timepoint(
+    position: ngff.Position,
+    grid_spacing,
+    channel,
+):
+    """
+    Sample pixel values per timepoint for per-timepoint normalization statistics.
+    
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object
+    grid_spacing : int
+        Spacing of sampling grid in x and y
+    channel : int
+        Channel to sample from
+
+    Returns
+    -------
+    tuple
+        (position, dict mapping time_index to sample_values)
+    """
+    image_zarr = position.data
+    
+    timepoint_samples = {}
+    all_time_indices = list(range(image_zarr.shape[0]))
+    all_z_indices = list(range(image_zarr.shape[2]))
+
+    for time_index in all_time_indices:
+        time_sample_values = []
+        for z_index in all_z_indices:
+            image_slice = image_zarr[time_index, channel, z_index, :, :]
+            _, _, sample_values = image_utils.grid_sample_pixel_values(
+                image_slice, grid_spacing
+            )
+            time_sample_values.append(sample_values)
+        
+        timepoint_samples[time_index] = np.stack(time_sample_values, 0).flatten()
+
+    return position, timepoint_samples
