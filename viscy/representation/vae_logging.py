@@ -72,18 +72,31 @@ class BetaVaeLogger:
         mse_loss = F.mse_loss(recon_x, x)
         mae_loss = F.l1_loss(recon_x, x)
 
+        # Add gradient explosion diagnostics
+        grad_diagnostics = self._compute_gradient_diagnostics(lightning_module)
+        
+        # Add NaN/Inf detection
+        nan_inf_diagnostics = self._check_nan_inf(recon_x, x, z)
+        
+        # Add shape diagnostics (log occasionally to avoid spam)  
+        if lightning_module.current_epoch % 5 == 0:
+            self._log_tensor_shapes(lightning_module, x, recon_x, z, stage)
+        
         metrics = {
             # All losses in one consolidated group
             f"loss/total/{stage}": total_loss,
             f"loss/reconstruction/{stage}": recon_loss,
             f"loss/kl/{stage}": kl_loss,
             f"loss/weighted_kl/{stage}": beta * kl_loss,
-            f"loss/mse/{stage}": mse_loss,
             f"loss/mae/{stage}": mae_loss,
             f"loss/beta_value/{stage}": beta,
             f"loss/kl_recon_ratio/{stage}": kl_recon_ratio,
             f"loss/recon_contribution/{stage}": recon_loss / total_loss,
         }
+        
+        # Add diagnostic metrics
+        metrics.update(grad_diagnostics)
+        metrics.update(nan_inf_diagnostics)
 
         # Latent space statistics
         latent_mean = torch.mean(z, dim=0)
@@ -118,6 +131,69 @@ class BetaVaeLogger:
         # Log latent dimension histograms (periodically)
         if stage == "val" and lightning_module.current_epoch % 10 == 0:
             self._log_latent_histograms(lightning_module, z, stage)
+
+    def _compute_gradient_diagnostics(self, lightning_module):
+        """Compute gradient norms and parameter statistics for explosion detection."""
+        grad_diagnostics = {}
+        
+        # Compute gradient norms for encoder and decoder
+        encoder_grad_norm = 0.0
+        decoder_grad_norm = 0.0
+        encoder_param_norm = 0.0  
+        decoder_param_norm = 0.0
+        
+        for name, param in lightning_module.named_parameters():
+            if param.grad is not None:
+                param_norm = param.grad.data.norm(2)
+                if 'encoder' in name:
+                    encoder_grad_norm += param_norm.item() ** 2
+                elif 'decoder' in name:
+                    decoder_grad_norm += param_norm.item() ** 2
+                    
+            # Parameter magnitudes
+            if 'encoder' in name:
+                encoder_param_norm += param.data.norm(2).item() ** 2
+            elif 'decoder' in name:
+                decoder_param_norm += param.data.norm(2).item() ** 2
+        
+        grad_diagnostics.update({
+            "diagnostics/encoder_grad_norm": encoder_grad_norm ** 0.5,
+            "diagnostics/decoder_grad_norm": decoder_grad_norm ** 0.5,  
+            "diagnostics/encoder_param_norm": encoder_param_norm ** 0.5,
+            "diagnostics/decoder_param_norm": decoder_param_norm ** 0.5,
+        })
+        
+        return grad_diagnostics
+    
+    def _check_nan_inf(self, recon_x, x, z):
+        """Check for NaN/Inf values in tensors."""
+        diagnostics = {
+            "diagnostics/recon_has_nan": torch.isnan(recon_x).any().float(),
+            "diagnostics/recon_has_inf": torch.isinf(recon_x).any().float(),
+            "diagnostics/input_has_nan": torch.isnan(x).any().float(),
+            "diagnostics/latent_has_nan": torch.isnan(z).any().float(),
+            "diagnostics/recon_max_val": torch.max(torch.abs(recon_x)),
+            "diagnostics/recon_min_val": torch.min(recon_x),
+        }
+        return diagnostics
+    
+    def _log_tensor_shapes(self, lightning_module, x, recon_x, z, stage):
+        """Log tensor shapes to help diagnose architectural mismatches."""
+        _logger.info(f"[{stage}] Input shape: {x.shape}")
+        _logger.info(f"[{stage}] Latent shape: {z.shape}") 
+        _logger.info(f"[{stage}] Reconstruction shape: {recon_x.shape}")
+        
+        # Check for shape mismatches
+        if x.shape != recon_x.shape:
+            _logger.warning(f"SHAPE MISMATCH: Input {x.shape} != Reconstruction {recon_x.shape}")
+            
+        # Log as scalars for TensorBoard tracking
+        lightning_module.log_dict({
+            f"shapes/input_numel_{stage}": x.numel(),
+            f"shapes/recon_numel_{stage}": recon_x.numel(), 
+            f"shapes/latent_numel_{stage}": z.numel(),
+            f"shapes/spatial_dims_{stage}": len(z.shape) - 2,  # Exclude batch and channel dims
+        }, on_step=False, on_epoch=True, logger=True)
 
     def _log_latent_histograms(self, lightning_module, z: torch.Tensor, stage: str):
         """Log histograms of latent dimensions."""

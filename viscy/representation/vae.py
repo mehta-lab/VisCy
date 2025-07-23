@@ -2,6 +2,7 @@ from types import SimpleNamespace
 from typing import Callable, Literal
 
 import timm
+import torch
 from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from torch import Tensor, nn
@@ -96,19 +97,24 @@ class VaeUpStage(nn.Module):
 class VaeEncoder(nn.Module):
     """VAE encoder for microscopy data with 3D to 2D conversion."""
 
+    # TODO: roll back the Conv2d to AveragePooling and linear layer to global pooling
+    # TODO: embedding dim
+    # TODO: check the OG VAE compression rate
+    # TODO do log grid search for the best embedding dim
+
     def __init__(
         self,
-        backbone: str = "resnet50",
+        backbone: str = "resnet50",  # [64, 256, 512, 1024, 2048] channels
         in_channels: int = 2,
-        in_stack_depth: int = 32,
-        embedding_dim: int = 128,
-        stem_kernel_size: tuple[int, int, int] = (8, 4, 4),
-        stem_stride: tuple[int, int, int] = (8, 2, 2),
+        in_stack_depth: int = 16,
+        latent_dim: int = 1024,
+        stem_kernel_size: tuple[int, int, int] = (4, 5, 5),
+        stem_stride: tuple[int, int, int] = (4, 5, 5),  # same as kernel size
         drop_path_rate: float = 0.0,
     ):
         super().__init__()
         self.backbone = backbone
-        self.embedding_dim = embedding_dim
+        self.latent_dim = latent_dim
 
         encoder = timm.create_model(
             backbone,
@@ -135,25 +141,33 @@ class VaeEncoder(nn.Module):
         )
         self.encoder = encoder
 
-        self.global_pool = nn.AdaptiveAvgPool2d(1)
+        # Store for creating linear layers dynamically in forward pass
+        self.out_channels_encoder = out_channels_encoder
+        self.fc_mu = None
+        self.fc_logvar = None
 
-        self.fc_mu = nn.Linear(out_channels_encoder, embedding_dim)
-        self.fc_logvar = nn.Linear(out_channels_encoder, embedding_dim)
-
-    def forward(self, x: Tensor) -> dict:
+    def forward(self, x: Tensor) -> SimpleNamespace:
         """Forward pass returning VAE encoder outputs."""
         x = self.stem(x)
 
         features = self.encoder(x)
 
-        # Take highest resolution features
-        x = features[-1]
-        x = self.global_pool(x)
-        x = x.flatten(1)
+        # Take highest resolution features and flatten
+        x = features[-1]  # [B, C, H, W]
 
-        # VAE outputs
-        mu = self.fc_mu(x)
-        logvar = self.fc_logvar(x)
+        # Flatten spatial dimensions
+        batch_size = x.size(0)
+        x_flat = x.view(batch_size, -1)  # [B, C*H*W]
+
+        # Initialize linear layers on first forward pass
+        if self.fc_mu is None:
+            flattened_size = x_flat.size(1)
+            self.fc_mu = nn.Linear(flattened_size, self.latent_dim).to(x.device)
+            self.fc_logvar = nn.Linear(flattened_size, self.latent_dim).to(x.device)
+
+        # Apply linear layers to get 1D embeddings
+        mu = self.fc_mu(x_flat)  # [B, embedding_dim]
+        logvar = self.fc_logvar(x_flat)  # [B, embedding_dim]
 
         return SimpleNamespace(embedding=mu, log_covariance=logvar)
 
@@ -164,11 +178,10 @@ class VaeDecoder(nn.Module):
     def __init__(
         self,
         decoder_channels: list[int] = [1024, 512, 256, 128],
-        latent_dim: int = 128,
+        latent_dim: int = 1024,
         out_channels: int = 2,
-        out_stack_depth: int = 20,
-        latent_spatial_size: int = 8,
-        head_expansion_ratio: int = 4,
+        out_stack_depth: int = 16,
+        head_expansion_ratio: int = 2,
         head_pool: bool = False,
         upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
@@ -179,7 +192,6 @@ class VaeDecoder(nn.Module):
         super().__init__()
         self.out_channels = out_channels
         self.out_stack_depth = out_stack_depth
-        self.latent_spatial_size = latent_spatial_size
 
         head_channels = (
             (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
@@ -194,7 +206,12 @@ class VaeDecoder(nn.Module):
             if (
                 num_stages == 4
             ):  # Default [1024, 512, 256, 128] + head = 5 channels, 4 stages
-                strides = [2, 2, 2, 4]  # 8→16→32→64→256 (32x total upsampling)
+                strides = [
+                    2,
+                    2,
+                    2,
+                    1,
+                ]  # Reduce to account for PixelToVoxelHead's 4x upsampling
             else:
                 strides = [2] * num_stages  # Fallback to uniform 2x upsampling
         elif len(strides) != num_stages:
@@ -202,10 +219,16 @@ class VaeDecoder(nn.Module):
                 f"Length of strides ({len(strides)}) must match number of stages ({num_stages})"
             )
 
-        # Project latent vector to first feature map
-        self.latent_proj = nn.Linear(
-            latent_dim,
-            decoder_channels_with_head[0] * latent_spatial_size * latent_spatial_size,
+        # Store spatial dimensions for reshaping 1D latent back to spatial
+        self.spatial_size = 6  # Will be computed dynamically based on encoder output
+        self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
+
+        # Project 1D latent to spatial format, then to first decoder channels
+        self.latent_reshape = nn.Linear(
+            latent_dim, self.spatial_channels * self.spatial_size * self.spatial_size
+        )
+        self.latent_proj = nn.Conv2d(
+            self.spatial_channels, decoder_channels_with_head[0], kernel_size=1
         )
 
         # Build the decoder stages
@@ -227,7 +250,7 @@ class VaeDecoder(nn.Module):
             )
             self.decoder_stages.append(stage)
 
-        # Head to convert back to 3D (no final_conv needed - last stage outputs head_channels)
+        # Head to convert back to 3D
         self.head = PixelToVoxelHead(
             in_channels=head_channels,
             out_channels=self.out_channels,
@@ -236,18 +259,27 @@ class VaeDecoder(nn.Module):
             pool=head_pool,
         )
 
-    def forward(self, z: Tensor) -> dict:
+    def forward(self, z: Tensor) -> Tensor:
         """Forward pass converting latent to 3D output."""
-        batch_size = z.shape[0]
+        # z is now 1D: [batch, latent_dim]
+        batch_size = z.size(0)
 
-        # Project latent to feature map
-        x = self.latent_proj(z)
-        x = x.view(batch_size, -1, self.latent_spatial_size, self.latent_spatial_size)
+        # Reshape 1D latent back to spatial format
+        z_spatial = self.latent_reshape(z)  # [batch, spatial_channels * H * W]
+        z_spatial = z_spatial.view(
+            batch_size, self.spatial_channels, self.spatial_size, self.spatial_size
+        )
+
+        # Project spatial latent to first decoder channels using 1x1 conv
+        x = self.latent_proj(
+            z_spatial
+        )  # [batch, decoder_channels[0], spatial_H, spatial_W]
 
         for stage in self.decoder_stages:
             x = stage(x)
 
         # Last stage outputs head_channels directly - no final_conv needed
         output = self.head(x)
+        output = torch.sigmoid(output)  # Constrain to [0,1] to match normalized input
 
         return output

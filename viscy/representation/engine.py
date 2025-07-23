@@ -257,9 +257,8 @@ class VaeModule(LightningModule):
         self,
         encoder: VaeEncoder,
         decoder: VaeDecoder,
-        latent_dim: int = 128,
         beta: float = 1.0,
-        beta_schedule: str = None,  # "linear", "cosine", "warmup", or None
+        beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
         beta_min: float = 0.1,
         beta_warmup_epochs: int = 50,
         lr: float = 1e-3,
@@ -276,7 +275,16 @@ class VaeModule(LightningModule):
 
         self.encoder = encoder
         self.decoder = decoder
-        self.latent_dim = latent_dim
+
+        # Infer latent dimension from encoder and validate decoder matches
+        self.latent_dim = encoder.latent_dim
+
+        # Validate that decoder's latent_dim matches encoder's embedding_dim
+        if hasattr(decoder, "latent_dim") and decoder.latent_dim != self.latent_dim:
+            raise ValueError(
+                f"Encoder embedding_dim ({self.latent_dim}) must match "
+                f"decoder latent_dim ({decoder.latent_dim})"
+            )
         self.beta = beta
         self.beta_schedule = beta_schedule
         self.beta_min = beta_min
@@ -292,7 +300,7 @@ class VaeModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
-        self.vae_logger = BetaVaeLogger(latent_dim=latent_dim, device="cuda")
+        self.vae_logger = BetaVaeLogger(latent_dim=self.latent_dim, device="cuda")
 
         self.disentanglement_metrics = None
 
