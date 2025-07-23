@@ -77,12 +77,14 @@ def compute_metrics(
     print(f"Cell type: {sample['cell_type']}")
     print(f"Organelle: {sample['organelle']}")
     print(f"Infection condition: {sample['infection_condition']}")
-    
+
     # Use the CSVLogger without version (we'll use our own naming)
     log_output_dir.mkdir(exist_ok=True)
     logger = CSVLogger(save_dir=log_output_dir, name=log_name, version=log_version)
-    
-    trainer = Trainer(logger=logger)
+
+    trainer = Trainer(
+        logger=logger, accelerator="cpu", devices=1, precision="16-mixed", num_nodes=1
+    )
     trainer.test(metrics_module, datamodule=dm)
 
     # Find the metrics file - use the correct relative pattern
@@ -103,9 +105,7 @@ if __name__ == "__main__":
     csv_database_path = Path(
         "~/gdrive/publications/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
     ).expanduser()
-    output_dir = Path(
-        "~/gdrive/publications/dynacell/metrics"
-    ).expanduser()
+    output_dir = Path("~/gdrive/publications/dynacell/metrics").expanduser()
     output_dir.mkdir(parents=True, exist_ok=True)
 
     database = pd.read_csv(csv_database_path, dtype={"FOV": str})
