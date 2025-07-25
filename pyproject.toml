@@ -62,7 +62,6 @@ dev = [
     "pytest-cov",
     "hypothesis",
     "ruff",
-    "profilehooks",
     "onnxruntime",
 ]
 
