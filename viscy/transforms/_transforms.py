@@ -51,12 +51,20 @@ class NormalizeSampled(MapTransform):
         self.level = level
         self.remove_meta = remove_meta
 
+    @staticmethod
+    def _match_image(tensor: Tensor, target: Tensor) -> Tensor:
+        return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(
+            device=target.device
+        )
+
     # TODO: need to implement the case where the preprocessing already exists
     def __call__(self, sample: Sample) -> Sample:
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
             subtrahend_val = level_meta[self.subtrahend]
+            subtrahend_val = self._match_image(subtrahend_val, sample[key])
             divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
+            divisor_val = self._match_image(divisor_val, sample[key])
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
         if self.remove_meta:
             sample.pop("norm_meta")
