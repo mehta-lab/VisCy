@@ -1,4 +1,5 @@
 import bisect
+import logging
 from collections import defaultdict
 from enum import Enum
 from typing import Literal, Sequence
@@ -11,6 +12,8 @@ from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _collate_samples
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class CombineMode(Enum):
@@ -108,6 +111,7 @@ class BatchedConcatDataset(ConcatDataset):
         for idx in indices:
             dataset_idx, sample_indices = self._get_sample_indices(idx)
             grouped_indices[dataset_idx].append(sample_indices)
+        _logger.debug(f"Grouped indices: {grouped_indices}")
         sub_batches = []
         for dataset_idx, sample_indices in grouped_indices.items():
             sub_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
