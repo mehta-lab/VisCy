@@ -203,7 +203,7 @@ class BatchedScaleIntensityRangePercentiles(ScaleIntensityRangePercentiles):
             img.view(batch_size, -1),
             torch.tensor([q_low, q_high], dtype=img.dtype, device=img.device),
             dim=1,
-        ).reshape(2, batch_size, 1, 1, 1)
+        ).reshape(2, batch_size, 1, 1, 1, 1)
         b_min = self.b_min
         b_max = self.b_max
 
@@ -299,6 +299,7 @@ class BatchedRandAffined(MapTransform):
     def _maybe_invert_sequence(
         value: Sequence[tuple[float, float] | float] | float | None,
     ) -> Sequence[tuple[float, float] | float] | float | None:
+        """Translate MONAI's ZYX order to Kornia's XYZ order."""
         if isinstance(value, Sequence):
             return tuple(reversed(value))
         return value
