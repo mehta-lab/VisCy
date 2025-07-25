@@ -31,15 +31,12 @@ INDEX_COLUMNS = [
 ]
 
 
-def _identity_collate(batch):
-    return batch
-
-
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
 ) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
     channels = {
-        name: patch[:, c] for name, c in zip(channel_names, range(patch.shape[1]))
+        name: patch[:, c : c + 1]
+        for name, c in zip(channel_names, range(patch.shape[1]))
     }
     if norm_meta is not None:
         channels |= {"norm_meta": norm_meta}
@@ -48,12 +45,12 @@ def _scatter_channels(
 
 def _gather_channels(
     patch_channels: list[dict[str, Tensor | NormMeta]],
-) -> Tensor:
+) -> list[Tensor]:
     samples = []
     for sample in patch_channels:
         sample.pop("norm_meta", None)
         samples.append(torch.cat(list(sample.values()), dim=0))
-    return torch.stack(samples, dim=0)
+    return samples
 
 
 def _transform_channel_wise(
@@ -61,10 +58,10 @@ def _transform_channel_wise(
     channel_names: list[str],
     patch: Tensor,
     norm_meta: NormMeta | None,
-) -> Tensor:
-    return _gather_channels(
-        transform(_scatter_channels(channel_names, patch, norm_meta))
-    )
+) -> list[Tensor]:
+    scattered_channels = _scatter_channels(channel_names, patch, norm_meta)
+    transformed_channels = transform(scattered_channels)
+    return _gather_channels(transformed_channels)
 
 
 class TripletDataset(Dataset):
@@ -303,26 +300,27 @@ class TripletDataset(Dataset):
                 patch=anchor_patches,
                 norm_meta=anchor_norms,
             )
-        sample = {"anchor": anchor_patches}
+        samples: list[TripletSample] = [
+            {"anchor": anchor_patch} for anchor_patch in anchor_patches
+        ]
         if self.fit:
+            for sample, positive_patch in zip(samples, positive_patches):
+                sample["positive"] = positive_patch
             if self.return_negative:
-                sample.update(
-                    {"positive": positive_patches, "negative": negative_patches}
-                )
-            else:
-                sample.update({"positive": positive_patches})
+                for sample, negative_patch in zip(samples, negative_patches):
+                    sample["negative"] = negative_patch
         else:
-            # For new predictions, ensure all INDEX_COLUMNS are included
-            index_dict = {}
-            for col in INDEX_COLUMNS:
-                if col in anchor_rows.index:
-                    index_dict[col] = anchor_rows[col]
-                else:
-                    # Skip y and x for legacy data - they weren't part of INDEX_COLUMNS
-                    if col not in ["y", "x", "z"]:
+            for sample, anchor_row in zip(samples, anchor_rows.iterrows()):
+                # For new predictions, ensure all INDEX_COLUMNS are included
+                index_dict = {}
+                for col in INDEX_COLUMNS:
+                    if col in anchor_row.index:
+                        index_dict[col] = anchor_row[col]
+                    elif col not in ["y", "x", "z"]:
+                        # Skip y and x for legacy data - they weren't part of INDEX_COLUMNS
                         raise KeyError(f"Required column '{col}' not found in data")
-            sample.update({"index": index_dict})
-        return sample
+                sample["index"] = index_dict
+        return samples
 
 
 class TripletDataModule(HCSDataModule):
@@ -534,7 +532,6 @@ class TripletDataModule(HCSDataModule):
             shuffle=True,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
             persistent_workers=self.persistent_workers,
-            collate_fn=_identity_collate,
             drop_last=True,
             pin_memory=self.pin_memory,
         )
@@ -548,7 +545,6 @@ class TripletDataModule(HCSDataModule):
             shuffle=False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
             persistent_workers=self.persistent_workers,
-            collate_fn=_identity_collate,
             drop_last=False,
             pin_memory=self.pin_memory,
         )
