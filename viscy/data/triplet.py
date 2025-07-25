@@ -8,6 +8,7 @@ import tensorstore as ts
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
 from monai.data import ThreadDataLoader
+from monai.data.utils import collate_meta_tensor
 from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
@@ -39,7 +40,7 @@ def _scatter_channels(
         for name, c in zip(channel_names, range(patch.shape[1]))
     }
     if norm_meta is not None:
-        channels |= {"norm_meta": norm_meta}
+        channels["norm_meta"] = collate_meta_tensor(norm_meta)
     return channels
 
 
