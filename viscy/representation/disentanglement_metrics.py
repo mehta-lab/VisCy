@@ -97,11 +97,15 @@ class DisentanglementMetrics:
 
                 # Extract latent representations
                 model_output = vae_model(x)
-                z = (
-                    model_output.z
-                    if hasattr(model_output, "z")
-                    else model_output.embedding
-                )
+                # Handle both dict format and object format
+                if isinstance(model_output, dict):
+                    z = model_output["z"]
+                else:
+                    z = (
+                        model_output.z
+                        if hasattr(model_output, "z")
+                        else model_output.embedding
+                    )
                 latents.append(z.cpu().numpy())
 
                 # Extract visual factors from images
@@ -280,11 +284,15 @@ class DisentanglementMetrics:
 
                 # Get latent representation
                 model_output = vae_model(x)
-                z = (
-                    model_output.z
-                    if hasattr(model_output, "z")
-                    else model_output.embedding
-                )
+                # Handle both dict format and object format
+                if isinstance(model_output, dict):
+                    z = model_output["z"]
+                else:
+                    z = (
+                        model_output.z
+                        if hasattr(model_output, "z")
+                        else model_output.embedding
+                    )
 
                 # Compute baseline reconstruction
                 baseline_recon = vae_model.decoder(z)

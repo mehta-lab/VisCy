@@ -108,6 +108,7 @@ class VaeEncoder(nn.Module):
         in_channels: int = 2,
         in_stack_depth: int = 16,
         latent_dim: int = 1024,
+        input_spatial_size: tuple[int, int] = (256, 256),
         stem_kernel_size: tuple[int, int, int] = (4, 5, 5),
         stem_stride: tuple[int, int, int] = (4, 5, 5),  # same as kernel size
         drop_path_rate: float = 0.0,
@@ -141,10 +142,40 @@ class VaeEncoder(nn.Module):
         )
         self.encoder = encoder
 
-        # Store for creating linear layers dynamically in forward pass
+        # Calculate spatial dimensions after encoder and initialize linear layers
         self.out_channels_encoder = out_channels_encoder
-        self.fc_mu = None
-        self.fc_logvar = None
+
+        if "resnet50" in backbone:
+            # Calculate spatial size after stem, then ResNet50 downsampling
+            stem_spatial_h = (
+                input_spatial_size[0] - stem_kernel_size[1]
+            ) // stem_stride[1] + 1
+            stem_spatial_w = (
+                input_spatial_size[1] - stem_kernel_size[2]
+            ) // stem_stride[2] + 1
+
+            # ResNet50 downsamples by 32x total, but stem already downsampled
+            total_downsample_factor = 32
+            stem_downsample_factor = stem_stride[1]  # Spatial downsampling from stem
+            resnet_downsample_factor = total_downsample_factor // stem_downsample_factor
+            final_h = stem_spatial_h // resnet_downsample_factor
+            final_w = stem_spatial_w // resnet_downsample_factor
+            flattened_size = out_channels_encoder * final_h * final_w
+        else:
+            raise ValueError(
+                f"Backbone {backbone} not supported for analytical calculation"
+            )
+
+        # Multi-layer perceptron for better representation learning
+        self.fc = nn.Linear(flattened_size, latent_dim)
+        self.fc_mu = nn.Linear(latent_dim, latent_dim)
+        self.fc_logvar = nn.Linear(latent_dim, latent_dim)
+
+    def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
+        """Reparameterization trick: sample from N(mu, var) using N(0,1)."""
+        std = torch.exp(0.5 * logvar)
+        eps = torch.randn_like(std)
+        return mu + eps * std
 
     def forward(self, x: Tensor) -> SimpleNamespace:
         """Forward pass returning VAE encoder outputs."""
@@ -154,22 +185,17 @@ class VaeEncoder(nn.Module):
 
         # Take highest resolution features and flatten
         x = features[-1]  # [B, C, H, W]
+        x_flat = x.flatten(1)  # [B, C*H*W] - flatten from dim 1 onwards
 
-        # Flatten spatial dimensions
-        batch_size = x.size(0)
-        x_flat = x.view(batch_size, -1)  # [B, C*H*W]
-
-        # Initialize linear layers on first forward pass
-        if self.fc_mu is None:
-            flattened_size = x_flat.size(1)
-            self.fc_mu = nn.Linear(flattened_size, self.latent_dim).to(x.device)
-            self.fc_logvar = nn.Linear(flattened_size, self.latent_dim).to(x.device)
+        # Apply intermediate FC layer
+        x_intermediate = self.fc(x_flat)  # [B, intermediate_dim]
 
         # Apply linear layers to get 1D embeddings
-        mu = self.fc_mu(x_flat)  # [B, embedding_dim]
-        logvar = self.fc_logvar(x_flat)  # [B, embedding_dim]
+        mu = self.fc_mu(x_intermediate)  # [B, latent_dim]
+        logvar = self.fc_logvar(x_intermediate)  # [B, latent_dim]
+        z = self.reparameterize(mu, logvar)  # [B, latent_dim]
 
-        return SimpleNamespace(embedding=mu, log_covariance=logvar)
+        return SimpleNamespace(mean=mu, log_covariance=logvar, z=z)
 
 
 class VaeDecoder(nn.Module):
@@ -188,6 +214,10 @@ class VaeDecoder(nn.Module):
         norm_name: str = "batch",
         upsample_pre_conv: Literal["default"] | Callable | None = None,
         strides: list[int] | None = None,
+        input_spatial_size: tuple[int, int] = (
+            128,
+            128,
+        ),  # Input size to calculate spatial dimensions
     ):
         super().__init__()
         self.out_channels = out_channels
@@ -197,10 +227,8 @@ class VaeDecoder(nn.Module):
             (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
         )
 
-        # Copy decoder_channels to avoid modifying the original list
         decoder_channels_with_head = decoder_channels.copy() + [head_channels]
 
-        # Set optimal default strides for ResNet50 if not provided
         num_stages = len(decoder_channels_with_head) - 1
         if strides is None:
             if (
@@ -218,9 +246,8 @@ class VaeDecoder(nn.Module):
             raise ValueError(
                 f"Length of strides ({len(strides)}) must match number of stages ({num_stages})"
             )
-
-        # Store spatial dimensions for reshaping 1D latent back to spatial
-        self.spatial_size = 6  # Will be computed dynamically based on encoder output
+        # Calculate spatial size based on input dimensions and ResNet50 32x downsampling
+        self.spatial_size = input_spatial_size[0] // 32  # ResNet50 downsamples by 32x
         self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
 
         # Project 1D latent to spatial format, then to first decoder channels
@@ -261,10 +288,10 @@ class VaeDecoder(nn.Module):
 
     def forward(self, z: Tensor) -> Tensor:
         """Forward pass converting latent to 3D output."""
-        # z is now 1D: [batch, latent_dim]
+
         batch_size = z.size(0)
 
-        # Reshape 1D latent back to spatial format
+        # Reshape 1D latent back to spatial format so we can reconstruct the 2.5D image
         z_spatial = self.latent_reshape(z)  # [batch, spatial_channels * H * W]
         z_spatial = z_spatial.view(
             batch_size, self.spatial_channels, self.spatial_size, self.spatial_size
@@ -280,6 +307,5 @@ class VaeDecoder(nn.Module):
 
         # Last stage outputs head_channels directly - no final_conv needed
         output = self.head(x)
-        output = torch.sigmoid(output)  # Constrain to [0,1] to match normalized input
 
         return output

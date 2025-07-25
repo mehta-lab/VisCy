@@ -24,9 +24,16 @@ class BetaVaeLogger:
     and latent space analysis for microscopy data.
     """
 
-    def __init__(self, latent_dim: int = 128, device: str = "cuda"):
+    def __init__(self, latent_dim: int = 128):
         self.latent_dim = latent_dim
-        self.disentanglement_metrics = DisentanglementMetrics(device=device)
+        self.device = None
+        self.disentanglement_metrics = None
+
+    def setup(self, device: str):
+        """Initialize device-dependent components."""
+        self.device = device
+        if self.disentanglement_metrics is None:
+            self.disentanglement_metrics = DisentanglementMetrics(device=device)
 
     def log_enhanced_metrics(
         self, lightning_module, model_output: dict, batch: dict, stage: str = "train"
@@ -42,21 +49,12 @@ class BetaVaeLogger:
         """
         # Extract components
         x = batch["anchor"]
-        # Handle both Pythae dict format and object format
-        if isinstance(model_output, dict):
-            z = model_output["z"]
-            recon_x = model_output["recon_x"]
-            recon_loss = model_output["recon_loss"]
-            kl_loss = model_output["kl_loss"]
-        else:
-            z = model_output.z if hasattr(model_output, "z") else model_output.embedding
-            recon_x = (
-                model_output.recon_x
-                if hasattr(model_output, "recon_x")
-                else model_output.reconstruction
-            )
-            recon_loss = model_output.recon_loss
-            kl_loss = model_output.kl_loss
+
+        z = model_output["z"]
+        recon_x = model_output["recon_x"]
+        recon_loss = model_output["recon_loss"]
+        kl_loss = model_output["kl_loss"]
+        total_loss = model_output["total_loss"]
 
         # Get current β (scheduled value, not static)
         beta = getattr(
@@ -66,22 +64,18 @@ class BetaVaeLogger:
         )()
 
         # Record losses and reconstruction quality metrics
-        total_loss = recon_loss + beta * kl_loss
         kl_recon_ratio = kl_loss / (recon_loss + 1e-8)
 
-        mse_loss = F.mse_loss(recon_x, x)
         mae_loss = F.l1_loss(recon_x, x)
 
         # Add gradient explosion diagnostics
         grad_diagnostics = self._compute_gradient_diagnostics(lightning_module)
-        
+
         # Add NaN/Inf detection
         nan_inf_diagnostics = self._check_nan_inf(recon_x, x, z)
-        
-        # Add shape diagnostics (log occasionally to avoid spam)  
-        if lightning_module.current_epoch % 5 == 0:
-            self._log_tensor_shapes(lightning_module, x, recon_x, z, stage)
-        
+
+        # Shape diagnostics removed for cleaner logs
+
         metrics = {
             # All losses in one consolidated group
             f"loss/total/{stage}": total_loss,
@@ -89,11 +83,11 @@ class BetaVaeLogger:
             f"loss/kl/{stage}": kl_loss,
             f"loss/weighted_kl/{stage}": beta * kl_loss,
             f"loss/mae/{stage}": mae_loss,
-            f"loss/beta_value/{stage}": beta,
+            f"beta/{stage}": beta,
             f"loss/kl_recon_ratio/{stage}": kl_recon_ratio,
             f"loss/recon_contribution/{stage}": recon_loss / total_loss,
         }
-        
+
         # Add diagnostic metrics
         metrics.update(grad_diagnostics)
         metrics.update(nan_inf_diagnostics)
@@ -135,36 +129,38 @@ class BetaVaeLogger:
     def _compute_gradient_diagnostics(self, lightning_module):
         """Compute gradient norms and parameter statistics for explosion detection."""
         grad_diagnostics = {}
-        
+
         # Compute gradient norms for encoder and decoder
         encoder_grad_norm = 0.0
         decoder_grad_norm = 0.0
-        encoder_param_norm = 0.0  
+        encoder_param_norm = 0.0
         decoder_param_norm = 0.0
-        
+
         for name, param in lightning_module.named_parameters():
             if param.grad is not None:
                 param_norm = param.grad.data.norm(2)
-                if 'encoder' in name:
+                if "encoder" in name:
                     encoder_grad_norm += param_norm.item() ** 2
-                elif 'decoder' in name:
+                elif "decoder" in name:
                     decoder_grad_norm += param_norm.item() ** 2
-                    
+
             # Parameter magnitudes
-            if 'encoder' in name:
+            if "encoder" in name:
                 encoder_param_norm += param.data.norm(2).item() ** 2
-            elif 'decoder' in name:
+            elif "decoder" in name:
                 decoder_param_norm += param.data.norm(2).item() ** 2
-        
-        grad_diagnostics.update({
-            "diagnostics/encoder_grad_norm": encoder_grad_norm ** 0.5,
-            "diagnostics/decoder_grad_norm": decoder_grad_norm ** 0.5,  
-            "diagnostics/encoder_param_norm": encoder_param_norm ** 0.5,
-            "diagnostics/decoder_param_norm": decoder_param_norm ** 0.5,
-        })
-        
+
+        grad_diagnostics.update(
+            {
+                "diagnostics/encoder_grad_norm": encoder_grad_norm**0.5,
+                "diagnostics/decoder_grad_norm": decoder_grad_norm**0.5,
+                "diagnostics/encoder_param_norm": encoder_param_norm**0.5,
+                "diagnostics/decoder_param_norm": decoder_param_norm**0.5,
+            }
+        )
+
         return grad_diagnostics
-    
+
     def _check_nan_inf(self, recon_x, x, z):
         """Check for NaN/Inf values in tensors."""
         diagnostics = {
@@ -176,24 +172,6 @@ class BetaVaeLogger:
             "diagnostics/recon_min_val": torch.min(recon_x),
         }
         return diagnostics
-    
-    def _log_tensor_shapes(self, lightning_module, x, recon_x, z, stage):
-        """Log tensor shapes to help diagnose architectural mismatches."""
-        _logger.info(f"[{stage}] Input shape: {x.shape}")
-        _logger.info(f"[{stage}] Latent shape: {z.shape}") 
-        _logger.info(f"[{stage}] Reconstruction shape: {recon_x.shape}")
-        
-        # Check for shape mismatches
-        if x.shape != recon_x.shape:
-            _logger.warning(f"SHAPE MISMATCH: Input {x.shape} != Reconstruction {recon_x.shape}")
-            
-        # Log as scalars for TensorBoard tracking
-        lightning_module.log_dict({
-            f"shapes/input_numel_{stage}": x.numel(),
-            f"shapes/recon_numel_{stage}": recon_x.numel(), 
-            f"shapes/latent_numel_{stage}": z.numel(),
-            f"shapes/spatial_dims_{stage}": len(z.shape) - 2,  # Exclude batch and channel dims
-        }, on_step=False, on_epoch=True, logger=True)
 
     def _log_latent_histograms(self, lightning_module, z: torch.Tensor, stage: str):
         """Log histograms of latent dimensions."""
@@ -263,7 +241,10 @@ class BetaVaeLogger:
                 )
 
                 lightning_module.logger.experiment.add_image(
-                    f"latent_traversal/dim_{dim}", grid, lightning_module.current_epoch
+                    f"latent_traversal/dim_{dim}",
+                    grid,
+                    lightning_module.current_epoch,
+                    dataformats="CHW",
                 )
 
     def log_latent_interpolation(
@@ -317,6 +298,7 @@ class BetaVaeLogger:
                     f"latent_interpolation/pair_{pair_idx}",
                     grid,
                     lightning_module.current_epoch,
+                    dataformats="CHW",
                 )
 
     def log_factor_traversal_matrix(
@@ -369,7 +351,10 @@ class BetaVaeLogger:
             grid = make_grid(all_images.unsqueeze(1), nrow=n_steps, normalize=True)
 
             lightning_module.logger.experiment.add_image(
-                "factor_traversal_matrix", grid, lightning_module.current_epoch
+                "factor_traversal_matrix",
+                grid,
+                lightning_module.current_epoch,
+                dataformats="CHW",
             )
 
     def log_latent_space_visualization(
@@ -450,7 +435,10 @@ class BetaVaeLogger:
         img_tensor = torch.from_numpy(img_array).permute(2, 0, 1) / 255.0
 
         lightning_module.logger.experiment.add_image(
-            f"latent_space_{method}", img_tensor, lightning_module.current_epoch
+            f"latent_space_{method}",
+            img_tensor,
+            lightning_module.current_epoch,
+            dataformats="CHW",
         )
 
         plt.close()
