@@ -9,7 +9,7 @@ import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
 from monai.data import ThreadDataLoader
 from monai.data.utils import collate_meta_tensor
-from monai.transforms import Compose, MapTransform
+from monai.transforms import Compose, MapTransform, ToDeviced
 from torch import Tensor
 from torch.utils.data import Dataset
 
@@ -463,7 +463,16 @@ class TripletDataModule(HCSDataModule):
             "time_interval": self.time_interval,
         }
 
+    def _update_to_device_transform(self):
+        "Make sure that GPU transforms are set to the current device."
+        for transform in self.normalizations + self.augmentations:
+            if isinstance(transform, ToDeviced):
+                transform.converter.device = torch.device(
+                    f"cuda:{torch.cuda.current_device()}"
+                )
+
     def _setup_fit(self, dataset_settings: dict):
+        self._update_to_device_transform()
         augment_transform, no_aug_transform = self._fit_transform()
         positions, tracks_tables = self._align_tracks_tables_with_positions()
         shuffled_indices = self._set_fit_global_state(len(positions))
