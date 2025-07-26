@@ -9,12 +9,20 @@ def debug_vae_dimensions():
     print("=== VAE Dimension Debugging (Updated Architecture) ===\n")
 
     # Configuration matching current config
-    z_stack_depth = 16
-    input_shape = (1, 1, z_stack_depth, 192, 192)  # 1 channel to match config
+    z_stack_depth = 8
+    input_shape = (1, 1, z_stack_depth, 128, 128)  # 1 channel to match config
     latent_dim = 1024  # Updated to new default
 
     print(f"Input shape: {input_shape}")
     print(f"Expected latent dim: {latent_dim}")
+    print()
+
+    # Debug encoder channel expectations
+    import timm
+
+    debug_encoder = timm.create_model("resnet50", pretrained=False, features_only=True)
+    print(f"ResNet50 conv1.out_channels: {debug_encoder.conv1.out_channels}")
+    print(f"ResNet50 expects input channels: {debug_encoder.conv1.in_channels}")
     print()
 
     # Create encoder
@@ -23,6 +31,7 @@ def debug_vae_dimensions():
         in_channels=1,
         in_stack_depth=z_stack_depth,
         latent_dim=latent_dim,
+        input_spatial_size=(128, 128),  # Match the actual input size
         stem_kernel_size=(4, 2, 2),
         stem_stride=(4, 2, 2),
     )
@@ -39,6 +48,10 @@ def debug_vae_dimensions():
         conv_blocks=2,
         norm_name="batch",
         strides=[2, 2, 2, 1],
+        input_spatial_size=(
+            128,
+            128,
+        ),  # Add input spatial size for correct spatial_size calculation
     )
 
     print("=== ENCODER FORWARD PASS ===")
@@ -63,22 +76,26 @@ def debug_vae_dimensions():
         print(f"   Final features: {x_final.shape}")
 
         # Flatten spatial dimensions (new approach)
-        batch_size = x_final.size(0)
-        x_flat = x_final.view(batch_size, -1)
+        x_flat = x_final.flatten(1)  # Use flatten(1) like updated code
         print(f"   After flatten: {x_flat.shape}")
+
+        print("\\n3b. Intermediate FC layer:")
+        # Test intermediate FC layer (new addition)
+        x_intermediate = encoder.fc(x_flat)
+        print(f"   After intermediate FC: {x_intermediate.shape}")
 
         # Full encoder output
         encoder_output = encoder(x)
-        mu = encoder_output.embedding
+        mu = encoder_output.mean
         logvar = encoder_output.log_covariance
+        z = encoder_output.z
         print(f"   Final mu: {mu.shape}")
         print(f"   Final logvar: {logvar.shape}")
+        print(f"   Sampled z: {z.shape}")
 
         print("\\n=== DECODER FORWARD PASS ===")
 
-        # Test decoder with latent vector
-        z = torch.randn(1, latent_dim)
-        print(f"Input to decoder: {z.shape}")
+        print(f"Input to decoder (sampled z): {z.shape}")
 
         print("\\n1. Reshape to spatial:")
         batch_size = z.size(0)
@@ -155,9 +172,11 @@ def debug_vae_dimensions():
         z_sampled = mu + torch.exp(0.5 * logvar) * eps
         print(f"Sampled latent z: {z_sampled.shape}")
 
-        # Decode the sampled latent
-        reconstruction_from_sampled = decoder(z_sampled)
-        print(f"Reconstruction from sampled z: {reconstruction_from_sampled.shape}")
+        # Use the z from encoder (already sampled)
+        reconstruction_from_sampled = decoder(z)
+        print(
+            f"Reconstruction from encoder's sampled z: {reconstruction_from_sampled.shape}"
+        )
 
         # Compute VAE losses
         import torch.nn.functional as F
@@ -243,7 +262,7 @@ def debug_vae_dimensions():
             final_feat = features[-1]
             print(f"Final feature shape: {final_feat.shape}")
 
-            flattened_size = final_feat.view(1, -1).shape[1]
+            flattened_size = final_feat.flatten(1).shape[1]
             print(f"Flattened size: {flattened_size:,}")
             print(f"Expected latent dim: {latent_dim:,}")
 
