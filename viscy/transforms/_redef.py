@@ -4,6 +4,7 @@ from typing import Sequence
 
 from monai.transforms import (
     CenterSpatialCropd,
+    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
@@ -15,6 +16,15 @@ from monai.transforms import (
     ScaleIntensityRangePercentilesd,
 )
 from numpy.typing import DTypeLike
+
+
+class NormalizeIntensityd(NormalizeIntensityd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, **kwargs)
 
 
 class RandWeightedCropd(RandWeightedCropd):
