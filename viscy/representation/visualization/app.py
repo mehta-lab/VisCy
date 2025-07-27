@@ -273,7 +273,7 @@ class EmbeddingVisualizationApp:
             # Pre-compute track colors
             cmap = plt.cm.get_cmap("tab20")
             self.track_colors = {
-                track_key: f"rgb{tuple(int(x*255) for x in cmap(i % 20)[:3])}"
+                track_key: f"rgb{tuple(int(x * 255) for x in cmap(i % 20)[:3])}"
                 for i, track_key in enumerate(self.valid_combinations)
             }
 
@@ -1224,7 +1224,6 @@ class EmbeddingVisualizationApp:
         def clear_selection(n_clicks, color_mode, show_arrows, x_axis, y_axis):
             """Callback to clear the selection and restore original opacity"""
             if n_clicks:
-
                 # Create a new figure with no selections
                 if color_mode == "track":
                     fig = self._create_track_colored_figure(
@@ -1287,7 +1286,7 @@ class EmbeddingVisualizationApp:
 
                     # Save each cluster to a separate CSV file
                     for i, cluster in enumerate(self.cluster_manager.clusters):
-                        cluster_name = cluster.name or f"Cluster_{i+1}"
+                        cluster_name = cluster.name or f"Cluster_{i + 1}"
                         # Clean the cluster name for filename
                         safe_name = "".join(
                             c
@@ -1321,7 +1320,7 @@ class EmbeddingVisualizationApp:
 
                             # Add cluster information (dataset is already in the dataframe)
                             cluster_df["cluster_name"] = (
-                                cluster.name or f"Cluster {i+1}"
+                                cluster.name or f"Cluster {i + 1}"
                             )
                             cluster_df["cluster_size"] = len(cluster.points)
 
@@ -1367,7 +1366,7 @@ class EmbeddingVisualizationApp:
                                 if not point_row.empty:
                                     row_data = point_row.iloc[0].to_dict()
                                     row_data["cluster_name"] = (
-                                        cluster.name or f"Cluster {i+1}"
+                                        cluster.name or f"Cluster {i + 1}"
                                     )
                                     row_data["cluster_index"] = i
                                     all_cluster_data.append(row_data)
@@ -1904,8 +1903,8 @@ class EmbeddingVisualizationApp:
                             line=dict(width=0.5, color="black"),
                             opacity=0.8,
                         ),
-                        name=cluster.name or f"Cluster {i+1}",
-                        hovertemplate=f"<b>{cluster.name or f'Cluster {i+1}'}</b><br>"
+                        name=cluster.name or f"Cluster {i + 1}",
+                        hovertemplate=f"<b>{cluster.name or f'Cluster {i + 1}'}</b><br>"
                         + f"{x_axis}: %{{x}}<br>"
                         + f"{y_axis}: %{{y}}<br>"
                         + "<extra></extra>",
