@@ -478,6 +478,7 @@ class BetaVaeLogger:
         lightning_module,
         dataloader: torch.utils.data.DataLoader,
         max_samples: int = 500,
+        sync_dist: bool = True,
     ):
         """
         Log disentanglement metrics to TensorBoard every 10 epochs.
@@ -501,7 +502,10 @@ class BetaVaeLogger:
 
             # Compute all disentanglement metrics
             metrics = self.disentanglement_metrics.compute_all_metrics(
-                vae_model=vae_model, dataloader=dataloader, max_samples=max_samples
+                vae_model=vae_model,
+                dataloader=dataloader,
+                max_samples=max_samples,
+                sync_dist=sync_dist,
             )
 
             # Log metrics with organized naming
@@ -514,7 +518,7 @@ class BetaVaeLogger:
                 on_step=False,
                 on_epoch=True,
                 logger=True,
-                sync_dist=True,
+                sync_dist=sync_dist,
             )
 
             _logger.info(f"Logged disentanglement metrics: {metrics}")
@@ -528,4 +532,5 @@ class BetaVaeLogger:
                 on_step=False,
                 on_epoch=True,
                 logger=True,
+                sync_dist=sync_dist,
             )
