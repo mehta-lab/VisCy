@@ -15,6 +15,10 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
 from viscy.representation.embedding_writer import read_embedding_dataset
+from viscy.representation.evaluation.combined_analysis import (
+    compute_phate_for_combined_datasets,
+    load_and_combine_features,
+)
 from viscy.representation.evaluation.dimensionality_reduction import (
     compute_pca,
 )
@@ -79,36 +83,93 @@ class EmbeddingVisualizationApp:
 
     def _prepare_data(self):
         """Load and prepare the data for visualization"""
-        # Load features from all datasets and extract raw embeddings
-        all_features_dfs = []
-        all_raw_embeddings = []
+        # Extract feature paths and dataset names
+        feature_paths = [Path(config.features_path) for config in self.datasets.values()]
+        dataset_names = list(self.datasets.keys())
+        
+        # Determine if we should use the combined PHATE approach
+        if self.viz_config.phate_kwargs is not None and len(self.datasets) > 1:
+            self._prepare_data_with_combined_phate(feature_paths, dataset_names)
+        else:
+            self._loading_and_prepare_data(feature_paths, dataset_names)
 
-        for dataset_name, dataset_config in self.datasets.items():
-            logger.info(f"Loading features from dataset: {dataset_name}")
-            embedding_dataset = read_embedding_dataset(
-                Path(dataset_config.features_path)
-            )
+    def _prepare_data_with_combined_phate(self, feature_paths, dataset_names):
+        """Prepare data using the new combined PHATE approach"""
+        # Set up combined PHATE cache path
+        if self.viz_config.combined_phate_cache_path:
+            combined_cache_path = Path(self.viz_config.combined_phate_cache_path)
+        elif self.cache_path:
+            combined_cache_path = self.cache_path / "combined_phate.zarr"
+        else:
+            combined_cache_path = Path.cwd() / "combined_phate.zarr"
+        
+        # Check if we should use cached results
+        use_cache = (
+            self.viz_config.use_cached_combined_phate 
+            and combined_cache_path.exists()
+        )
+        
+        if use_cache:
+            logger.info(f"Loading cached combined PHATE results from {combined_cache_path}")
+            try:
+                combined_dataset = read_embedding_dataset(combined_cache_path)
+                # Convert to DataFrame
+                self.features_df = combined_dataset.to_dataframe().reset_index(drop=True)
+                # Extract combined embeddings for PCA computation
+                combined_embeddings = combined_dataset["features"].values
+                logger.info(f"Loaded cached combined dataset with {len(self.features_df)} samples")
+            except Exception as e:
+                logger.warning(f"Failed to load cached results: {e}. Computing fresh PHATE.")
+                use_cache = False
+        
+        if not use_cache:
+            logger.info("Computing fresh combined PHATE embeddings")
+            try:
+                combined_dataset = compute_phate_for_combined_datasets(
+                    feature_paths=feature_paths,
+                    output_path=combined_cache_path,
+                    dataset_names=dataset_names,
+                    phate_kwargs=self.viz_config.phate_kwargs,
+                    overwrite=True,
+                )
+                # Convert to DataFrame
+                self.features_df = combined_dataset.to_dataframe().reset_index(drop=True)
+                # Extract combined embeddings
+                combined_embeddings = combined_dataset["features"].values
+                logger.info(f"Successfully computed combined PHATE with {len(self.features_df)} samples")
+            except Exception as e:
+                logger.error(f"Combined PHATE computation failed: {e}")
+                # Fall back to traditional approach
+                self._prepare_data_traditional(feature_paths, dataset_names)
+                return
+        
+        # Rename dataset_pair to dataset for compatibility
+        if "dataset_pair" in self.features_df.columns:
+            self.features_df["dataset"] = self.features_df["dataset_pair"]
+        
+        # Continue with PCA computation using combined embeddings
+        self._compute_pca_on_combined_embeddings(combined_embeddings)
 
-            # Extract raw features/embeddings
-            raw_features = embedding_dataset["features"].values
-            all_raw_embeddings.append(raw_features)
-
-            # Extract metadata
-            features = embedding_dataset["features"]
-            features_df = features["sample"].to_dataframe().reset_index(drop=True)
-
-            # Add dataset identifier
-            features_df["dataset"] = dataset_name
-
-            all_features_dfs.append(features_df)
-
-        # Combine all features dataframes (metadata)
-        self.features_df = pd.concat(all_features_dfs, axis=0, ignore_index=True)
-
-        # Concatenate all raw embeddings
-        combined_embeddings = np.concatenate(all_raw_embeddings, axis=0)
+    def _loading_and_prepare_data(self, feature_paths, dataset_names):
+        """Load and prepare data using modular functions"""
+        # Use the modular load_and_combine_features function
+        combined_embeddings, combined_indices = load_and_combine_features(
+            feature_paths, dataset_names
+        )
+        
+        # Convert to DataFrame and rename dataset_pair to dataset for compatibility
+        self.features_df = combined_indices.copy()
+        if "dataset_pair" in self.features_df.columns:
+            self.features_df["dataset"] = self.features_df["dataset_pair"]
+        
         logger.info(f"Combined embeddings shape: {combined_embeddings.shape}")
+        
+        # Compute PCA and PHATE on combined embeddings
+        self._compute_pca_on_combined_embeddings(combined_embeddings)
+        self._compute_phate_on_combined_embeddings(combined_embeddings)
 
+    def _compute_pca_on_combined_embeddings(self, combined_embeddings):
+        """Compute PCA on combined embeddings and set up dimension options"""
         # Check if dimensionality reduction columns already exist
         existing_dims = []
         dim_options = []
@@ -152,6 +213,34 @@ class EmbeddingVisualizationApp:
                 dim_options.append({"label": pc_label, "value": f"PCA{i + 1}"})
                 existing_dims.append(f"PCA{i + 1}")
 
+        # Check for existing PHATE coordinates (if they exist in the data already)
+        phate_dims = [col for col in self.features_df.columns if col.startswith("PHATE")]
+        if phate_dims:
+            for dim in phate_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
+
+        # Check for existing UMAP coordinates (if they exist in the data)
+        umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
+        if umap_dims:
+            for dim in umap_dims:
+                dim_options.append({"label": dim, "value": dim})
+                existing_dims.append(dim)
+
+        # Store dimension options for dropdowns
+        self.dim_options = dim_options
+
+        # Set default x and y axes based on available dimensions
+        # TODO: hardcoding to default to PCA1 and PCA2
+        self.default_x = existing_dims[0] if existing_dims else "PCA1"
+        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PCA2"
+
+    def _compute_phate_on_combined_embeddings(self, combined_embeddings):
+        """Compute PHATE on combined embeddings (traditional approach)"""
+        # Check if dimensionality reduction columns already exist
+        existing_dims = []
+        dim_options = []
+
         # Compute PHATE if specified in config
         if self.viz_config.phate_kwargs is not None:
             logger.info(
@@ -173,10 +262,6 @@ class EmbeddingVisualizationApp:
                 # Add PHATE coordinates to the features dataframe
                 for i in range(self.viz_config.phate_kwargs["n_components"]):
                     self.features_df[f"PHATE{i + 1}"] = phate_coords[:, i]
-                    dim_options.append(
-                        {"label": f"PHATE{i + 1}", "value": f"PHATE{i + 1}"}
-                    )
-                    existing_dims.append(f"PHATE{i + 1}")
 
                 logger.info(
                     f"Successfully computed PHATE with {self.viz_config.phate_kwargs['n_components']} components"
@@ -188,21 +273,6 @@ class EmbeddingVisualizationApp:
                 )
             except Exception as e:
                 logger.warning(f"PHATE computation failed: {str(e)}")
-
-        # Check for existing UMAP coordinates (if they exist in the data)
-        umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
-        if umap_dims:
-            for dim in umap_dims:
-                dim_options.append({"label": dim, "value": dim})
-                existing_dims.append(dim)
-
-        # Store dimension options for dropdowns
-        self.dim_options = dim_options
-
-        # Set default x and y axes based on available dimensions
-        # TODO: hardcoding to default to PCA1 and PCA2
-        self.default_x = existing_dims[0] if existing_dims else "PCA1"
-        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PCA2"
 
         # Collect all valid (dataset, fov, track) combinations
         self.valid_combinations = []

@@ -34,6 +34,16 @@ class VizConfig(BaseModel):
         default=None,
         description="PHATE parameters. If None, PHATE will not be computed.",
     )
+    
+    # Combined analysis options
+    use_cached_combined_phate: bool = Field(
+        default=True,
+        description="Use cached combined PHATE results if available",
+    )
+    combined_phate_cache_path: Optional[str] = Field(
+        default=None,
+        description="Path to cache combined PHATE results. If None, uses cache_path/combined_phate.zarr",
+    )
 
     # File system paths
     output_dir: Optional[str] = Field(
@@ -45,7 +55,7 @@ class VizConfig(BaseModel):
         description="Path to save/load image cache. If None, images will not be cached to disk.",
     )
 
-    @field_validator("output_dir", "cache_path")
+    @field_validator("output_dir", "cache_path", "combined_phate_cache_path")
     @classmethod
     def validate_optional_paths(cls, v):
         if v is not None:
