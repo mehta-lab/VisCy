@@ -34,7 +34,7 @@ class VizConfig(BaseModel):
         default=None,
         description="PHATE parameters. If None, PHATE will not be computed.",
     )
-    
+
     # Combined analysis options
     use_cached_combined_phate: bool = Field(
         default=True,
