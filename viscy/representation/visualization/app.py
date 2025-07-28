@@ -19,6 +19,7 @@ from viscy.representation.evaluation.combined_analysis import (
     compute_phate_for_combined_datasets,
     load_and_combine_features,
 )
+from viscy.representation.evaluation.data_loading import EmbeddingDataLoader
 from viscy.representation.evaluation.dimensionality_reduction import (
     compute_pca,
 )
@@ -37,6 +38,7 @@ class EmbeddingVisualizationApp:
         cache_path: str | None = None,
         num_loading_workers: int = 16,
         output_dir: str | None = None,
+        loader: EmbeddingDataLoader | None = None,
     ) -> None:
         """
         Initialize a Dash application for visualizing the DynaCLR embeddings.
@@ -54,6 +56,8 @@ class EmbeddingVisualizationApp:
             Number of workers to use for loading data.
         output_dir: str | None, optional
             Directory to save CSV files and other outputs. If None, uses current working directory.
+        loader: EmbeddingDataLoader | None
+            Custom data loader for embeddings. If None, uses TripletEmbeddingLoader.
         Returns
         -------
         None
@@ -67,6 +71,7 @@ class EmbeddingVisualizationApp:
         self.features_df: pd.DataFrame | None = None
         self.fig = None
         self.num_loading_workers = num_loading_workers
+        self.loader = loader
 
         # Initialize cluster storage before preparing data and creating figure
         self.cluster_manager = ClusterManager()
@@ -89,7 +94,6 @@ class EmbeddingVisualizationApp:
         ]
         dataset_names = list(self.datasets.keys())
 
-        # Determine if we should use the combined PHATE approach
         if self.viz_config.phate_kwargs is not None and len(self.datasets) > 1:
             self._prepare_data_with_combined_phate(feature_paths, dataset_names)
         else:
@@ -116,11 +120,7 @@ class EmbeddingVisualizationApp:
             )
             try:
                 combined_dataset = read_embedding_dataset(combined_cache_path)
-                # Convert to DataFrame
-                self.features_df = combined_dataset.to_dataframe().reset_index(
-                    drop=True
-                )
-                # Extract combined embeddings for PCA computation
+                self.features_df = self.loader.extract_metadata(combined_dataset)
                 combined_embeddings = combined_dataset["features"].values
                 logger.info(
                     f"Loaded cached combined dataset with {len(self.features_df)} samples"
@@ -134,18 +134,24 @@ class EmbeddingVisualizationApp:
         if not use_cache:
             logger.info("Computing fresh combined PHATE embeddings")
             try:
-                combined_dataset = compute_phate_for_combined_datasets(
-                    feature_paths=feature_paths,
-                    output_path=combined_cache_path,
-                    dataset_names=dataset_names,
-                    phate_kwargs=self.viz_config.phate_kwargs,
-                    overwrite=True,
-                )
-                # Convert to DataFrame
-                self.features_df = combined_dataset.to_dataframe().reset_index(
-                    drop=True
-                )
-                # Extract combined embeddings
+                if self.loader is not None:
+                    combined_dataset = compute_phate_for_combined_datasets(
+                        feature_paths=feature_paths,
+                        output_path=combined_cache_path,
+                        dataset_names=dataset_names,
+                        phate_kwargs=self.viz_config.phate_kwargs,
+                        overwrite=True,
+                        loader=self.loader,
+                    )
+                else:
+                    combined_dataset = compute_phate_for_combined_datasets(
+                        feature_paths=feature_paths,
+                        output_path=combined_cache_path,
+                        dataset_names=dataset_names,
+                        phate_kwargs=self.viz_config.phate_kwargs,
+                        overwrite=True,
+                    )
+                self.features_df = combined_dataset.to_dataframe().reset_index()
                 combined_embeddings = combined_dataset["features"].values
                 logger.info(
                     f"Successfully computed combined PHATE with {len(self.features_df)} samples"
@@ -156,19 +162,22 @@ class EmbeddingVisualizationApp:
                 self._prepare_data_traditional(feature_paths, dataset_names)
                 return
 
-        # Rename dataset_pair to dataset for compatibility
         if "dataset_pair" in self.features_df.columns:
             self.features_df["dataset"] = self.features_df["dataset_pair"]
 
-        # Continue with PCA computation using combined embeddings
         self._compute_pca_on_combined_embeddings(combined_embeddings)
 
     def _loading_and_prepare_data(self, feature_paths, dataset_names):
         """Load and prepare data using modular functions"""
-        # Use the modular load_and_combine_features function
-        combined_embeddings, combined_indices = load_and_combine_features(
-            feature_paths, dataset_names
-        )
+        if self.loader is not None:
+            combined_embeddings, combined_indices = load_and_combine_features(
+                feature_paths, dataset_names, self.loader
+            )
+        else:
+            # Let the function use its default TripletEmbeddingLoader
+            combined_embeddings, combined_indices = load_and_combine_features(
+                feature_paths, dataset_names
+            )
 
         # Convert to DataFrame and rename dataset_pair to dataset for compatibility
         self.features_df = combined_indices.copy()

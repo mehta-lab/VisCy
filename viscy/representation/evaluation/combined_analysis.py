@@ -1,6 +1,6 @@
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Literal, Optional
 
 import numpy as np
 import pandas as pd
@@ -9,6 +9,10 @@ from xarray import Dataset
 from viscy.representation.embedding_writer import (
     read_embedding_dataset,
     write_embedding_dataset,
+)
+from viscy.representation.evaluation.data_loading import (
+    EmbeddingDataLoader,
+    TripletEmbeddingLoader,
 )
 from viscy.representation.evaluation.dimensionality_reduction import compute_phate
 
@@ -20,9 +24,12 @@ _logger = logging.getLogger("lightning.pytorch")
 def load_and_combine_features(
     feature_paths: list[Path],
     dataset_names: Optional[list[str]] = None,
+    loader: Literal[
+        EmbeddingDataLoader, TripletEmbeddingLoader
+    ] = TripletEmbeddingLoader(),
 ) -> tuple[np.ndarray, pd.DataFrame]:
     """
-    Load features from multiple zarr files and combine them.
+    Load features from multiple datasets and combine them using a pluggable loader.
 
     Parameters
     ----------
@@ -30,6 +37,8 @@ def load_and_combine_features(
         Paths to embedding datasets
     dataset_names : list[str], optional
         Names for datasets. If None, uses file stems
+    loader : EmbeddingDataLoader | TripletEmbeddingLoader, optional
+        Custom data loader. If None, uses TripletEmbeddingLoader
 
     Returns
     -------
@@ -48,18 +57,10 @@ def load_and_combine_features(
     for path, dataset_name in zip(feature_paths, dataset_names):
         _logger.info(f"Loading features from {path}")
 
-        # Load the dataset
-        dataset = read_embedding_dataset(path)
-        features = dataset["features"].values
+        dataset = loader.load_dataset(path)
+        features = loader.extract_features(dataset)
+        index_df = loader.extract_metadata(dataset)
 
-        features_data_array = dataset["features"]
-        index_df = features_data_array["sample"].to_dataframe().reset_index(drop=True)
-
-        for var_name in dataset.data_vars:
-            if var_name != "features" and var_name not in index_df.columns:
-                var_data = dataset[var_name]
-                if "sample" in var_data.dims and len(var_data.dims) == 1:
-                    index_df[var_name] = var_data.values
         index_df["dataset_pair"] = dataset_name
         index_df["dataset_path"] = str(path)
 
@@ -84,6 +85,9 @@ def compute_phate_for_combined_datasets(
     dataset_names: Optional[list[str]] = None,
     phate_kwargs: Optional[dict] = None,
     overwrite: bool = False,
+    loader: Literal[
+        EmbeddingDataLoader, TripletEmbeddingLoader
+    ] = TripletEmbeddingLoader(),
 ) -> Dataset:
     """
     Compute PHATE embeddings on combined features from multiple datasets.
@@ -100,6 +104,8 @@ def compute_phate_for_combined_datasets(
         Parameters for PHATE computation. Default: {"knn": 5, "decay": 40, "n_components": 2}
     overwrite : bool, optional
         Whether to overwrite existing output file
+    loader : EmbeddingDataLoader | TripletEmbeddingLoader, optional
+        Custom data loader. If None, uses TripletEmbeddingLoader
 
     Returns
     -------
@@ -128,7 +134,7 @@ def compute_phate_for_combined_datasets(
     )
 
     combined_features, combined_indices = load_and_combine_features(
-        feature_paths, dataset_names
+        feature_paths, dataset_names, loader
     )
 
     n_samples = len(combined_features)
