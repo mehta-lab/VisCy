@@ -84,9 +84,11 @@ class EmbeddingVisualizationApp:
     def _prepare_data(self):
         """Load and prepare the data for visualization"""
         # Extract feature paths and dataset names
-        feature_paths = [Path(config.features_path) for config in self.datasets.values()]
+        feature_paths = [
+            Path(config.features_path) for config in self.datasets.values()
+        ]
         dataset_names = list(self.datasets.keys())
-        
+
         # Determine if we should use the combined PHATE approach
         if self.viz_config.phate_kwargs is not None and len(self.datasets) > 1:
             self._prepare_data_with_combined_phate(feature_paths, dataset_names)
@@ -102,26 +104,33 @@ class EmbeddingVisualizationApp:
             combined_cache_path = self.cache_path / "combined_phate.zarr"
         else:
             combined_cache_path = Path.cwd() / "combined_phate.zarr"
-        
+
         # Check if we should use cached results
         use_cache = (
-            self.viz_config.use_cached_combined_phate 
-            and combined_cache_path.exists()
+            self.viz_config.use_cached_combined_phate and combined_cache_path.exists()
         )
-        
+
         if use_cache:
-            logger.info(f"Loading cached combined PHATE results from {combined_cache_path}")
+            logger.info(
+                f"Loading cached combined PHATE results from {combined_cache_path}"
+            )
             try:
                 combined_dataset = read_embedding_dataset(combined_cache_path)
                 # Convert to DataFrame
-                self.features_df = combined_dataset.to_dataframe().reset_index(drop=True)
+                self.features_df = combined_dataset.to_dataframe().reset_index(
+                    drop=True
+                )
                 # Extract combined embeddings for PCA computation
                 combined_embeddings = combined_dataset["features"].values
-                logger.info(f"Loaded cached combined dataset with {len(self.features_df)} samples")
+                logger.info(
+                    f"Loaded cached combined dataset with {len(self.features_df)} samples"
+                )
             except Exception as e:
-                logger.warning(f"Failed to load cached results: {e}. Computing fresh PHATE.")
+                logger.warning(
+                    f"Failed to load cached results: {e}. Computing fresh PHATE."
+                )
                 use_cache = False
-        
+
         if not use_cache:
             logger.info("Computing fresh combined PHATE embeddings")
             try:
@@ -133,20 +142,24 @@ class EmbeddingVisualizationApp:
                     overwrite=True,
                 )
                 # Convert to DataFrame
-                self.features_df = combined_dataset.to_dataframe().reset_index(drop=True)
+                self.features_df = combined_dataset.to_dataframe().reset_index(
+                    drop=True
+                )
                 # Extract combined embeddings
                 combined_embeddings = combined_dataset["features"].values
-                logger.info(f"Successfully computed combined PHATE with {len(self.features_df)} samples")
+                logger.info(
+                    f"Successfully computed combined PHATE with {len(self.features_df)} samples"
+                )
             except Exception as e:
                 logger.error(f"Combined PHATE computation failed: {e}")
                 # Fall back to traditional approach
                 self._prepare_data_traditional(feature_paths, dataset_names)
                 return
-        
+
         # Rename dataset_pair to dataset for compatibility
         if "dataset_pair" in self.features_df.columns:
             self.features_df["dataset"] = self.features_df["dataset_pair"]
-        
+
         # Continue with PCA computation using combined embeddings
         self._compute_pca_on_combined_embeddings(combined_embeddings)
 
@@ -156,14 +169,14 @@ class EmbeddingVisualizationApp:
         combined_embeddings, combined_indices = load_and_combine_features(
             feature_paths, dataset_names
         )
-        
+
         # Convert to DataFrame and rename dataset_pair to dataset for compatibility
         self.features_df = combined_indices.copy()
         if "dataset_pair" in self.features_df.columns:
             self.features_df["dataset"] = self.features_df["dataset_pair"]
-        
+
         logger.info(f"Combined embeddings shape: {combined_embeddings.shape}")
-        
+
         # Compute PCA and PHATE on combined embeddings
         self._compute_pca_on_combined_embeddings(combined_embeddings)
         self._compute_phate_on_combined_embeddings(combined_embeddings)
@@ -214,7 +227,9 @@ class EmbeddingVisualizationApp:
                 existing_dims.append(f"PCA{i + 1}")
 
         # Check for existing PHATE coordinates (if they exist in the data already)
-        phate_dims = [col for col in self.features_df.columns if col.startswith("PHATE")]
+        phate_dims = [
+            col for col in self.features_df.columns if col.startswith("PHATE")
+        ]
         if phate_dims:
             for dim in phate_dims:
                 dim_options.append({"label": dim, "value": dim})
@@ -237,10 +252,6 @@ class EmbeddingVisualizationApp:
 
     def _compute_phate_on_combined_embeddings(self, combined_embeddings):
         """Compute PHATE on combined embeddings (traditional approach)"""
-        # Check if dimensionality reduction columns already exist
-        existing_dims = []
-        dim_options = []
-
         # Compute PHATE if specified in config
         if self.viz_config.phate_kwargs is not None:
             logger.info(
