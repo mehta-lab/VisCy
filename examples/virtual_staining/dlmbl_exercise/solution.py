@@ -1242,7 +1242,9 @@ phase2fluor_model.eval()
 # %%
 # Create cellpose model once for reuse
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-cellpose_model = models.CellposeModel(gpu=True, device=device)
+cellpose_model = models.CellposeModel(
+    gpu=True if device.type == "cuda" else False, device=device
+)
 
 
 # Define the function to compute the cellpose segmentation
@@ -1254,9 +1256,9 @@ def cellpose_segmentation(
     # Convert 2D arrays to 3D format expected by cellpose v4.0.1+
     # Add channel dimension and replicate to 3 channels (RGB format)
     if prediction.ndim == 2:
-        prediction = np.stack([prediction] * 3, axis=0)  # Shape: (3, H, W)
+        prediction = np.tile(prediction, (3, 1, 1))  # Shape: (3, H, W)
     if target.ndim == 2:
-        target = np.stack([target] * 3, axis=0)  # Shape: (3, H, W)
+        target = np.tile(target, (3, 1, 1))  # Shape: (3, H, W)
 
     cp_nuc_kwargs = {
         "diameter": 65,
