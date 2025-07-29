@@ -8,6 +8,7 @@ import pandas as pd
 import torch
 from iohub.ngff import open_ome_zarr
 from lightning.pytorch import LightningDataModule
+from monai.transforms import Compose, MapTransform
 from torch.utils.data import ConcatDataset, DataLoader
 
 from viscy.data.segmentation import TargetPredictionDataset
@@ -24,12 +25,14 @@ class DynaCellDataset(TargetPredictionDataset):
         cell_type: str,
         organelle: str,
         infection_condition: str,
+        transforms: list[MapTransform] | None = None,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self.cell_type = cell_type
         self.organelle = organelle
         self.infection_condition = infection_condition
+        self.transforms = Compose(transforms) if transforms else None
 
     def __getitem__(self, idx) -> DynaCellSample:
         sample = super().__getitem__(idx)
@@ -58,10 +61,15 @@ class DynaCellDataset(TargetPredictionDataset):
                 "infection_condition": self.infection_condition,
             }
         )
+
+        # Apply transforms if provided
+        if self.transforms:
+            sample = self.transforms(sample)
+
         return sample
 
 
-class DynaCellDataBase:
+class DynaCellDatabase:
     """Database for DynaCell datasets filtered by cell types, organelles, and infection conditions."""
 
     def __init__(
@@ -81,14 +89,15 @@ class DynaCellDataBase:
         self.channel_name = channel_name
         self.z_slice = z_slice
         self.zarr_path_column_name = zarr_path_column_name
-        
+
         required_columns = [
-            "Cell type", "Organelle", "Infection", zarr_path_column_name
+            "Cell type",
+            "Organelle",
+            "Infection",
+            zarr_path_column_name,
         ]
         if not set(required_columns).issubset(self.database.columns):
-            raise ValueError(
-                f"Database must contains {required_columns}."
-            )
+            raise ValueError(f"Database must contains {required_columns}.")
 
         self._process_database()
 
@@ -101,12 +110,12 @@ class DynaCellDataBase:
         ].copy()
 
         # Extract zarr store paths
-        self._filtered_db["Zarr path"] = self._filtered_db[self.zarr_path_column_name].apply(
-            lambda x: Path(*Path(x).parts[:-3])
-        )
-        self._filtered_db["FOV name"] = self._filtered_db[self.zarr_path_column_name].apply(
-            lambda x: Path(*Path(x).parts[-3:]).as_posix()
-        )
+        self._filtered_db["Zarr path"] = self._filtered_db[
+            self.zarr_path_column_name
+        ].apply(lambda x: Path(*Path(x).parts[:-3]))
+        self._filtered_db["FOV name"] = self._filtered_db[
+            self.zarr_path_column_name
+        ].apply(lambda x: Path(*Path(x).parts[-3:]).as_posix())
         self._filtered_db = self._filtered_db.drop_duplicates(subset=["Zarr path"])
 
         # Store values for later use
@@ -134,16 +143,18 @@ class DynaCellDataBase:
 class DynaCellDataModule(LightningDataModule):
     def __init__(
         self,
-        target_database: DynaCellDataBase,
-        pred_database: DynaCellDataBase,
+        target_database: DynaCellDatabase,
+        pred_database: DynaCellDatabase,
         batch_size: int,
         num_workers: int,
+        transforms: list[MapTransform] | None = None,
     ) -> None:
         super().__init__()
         self.target_database = target_database
         self.pred_database = pred_database
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.transforms = transforms
 
     def setup(self, stage: str) -> None:
         if stage != "test":
@@ -177,6 +188,7 @@ class DynaCellDataModule(LightningDataModule):
                     target_channel=target_data["channel_name"],
                     pred_z_slice=pred_data["z_slice"],
                     target_z_slice=target_data["z_slice"],
+                    transforms=self.transforms,
                 )
             )
 
@@ -224,6 +236,7 @@ class DynaCellDataModule(LightningDataModule):
 
     def _custom_collate(self, batch):
         """Custom collate function that preserves metadata strings."""
+        assert len(batch) == 1, "Batch size must be 1 for DynaCellDataModule"
         # Extract metadata from first element in batch
         metadata = {
             "cell_type": batch[0]["cell_type"],

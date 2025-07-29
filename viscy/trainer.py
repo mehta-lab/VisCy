@@ -11,7 +11,7 @@ from lightning.pytorch.loggers import CSVLogger
 from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
-from viscy.data.dynacell import DynaCellDataBase, DynaCellDataModule
+from viscy.data.dynacell import DynaCellDatabase, DynaCellDataModule
 from viscy.preprocessing.precompute import precompute_array
 from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
 from viscy.utils.meta_utils import generate_normalization_metadata
@@ -153,6 +153,7 @@ class VisCyTrainer(Trainer):
         batch_size: int = 1,
         num_workers: int = 0,
         version: str = "1",
+        transforms: list = None,
         model: LightningModule | None = None,
     ):
         """
@@ -194,6 +195,8 @@ class VisCyTrainer(Trainer):
             Number of workers for data loading, by default 0
         version : str, optional
             Version string for output directory, by default "1"
+        transforms : list, optional
+            List of transforms to apply to the data (e.g., normalization), by default None
         model : LightningModule | None, optional
             Ignored placeholder, by default None
         """
@@ -293,7 +296,7 @@ class VisCyTrainer(Trainer):
         _logger.info(
             f"Creating target database from {target_database} with channel '{target_channel}'"
         )
-        target_db = DynaCellDataBase(
+        target_db = DynaCellDatabase(
             database=target_database,
             cell_types=target_cell_types,
             organelles=target_organelles,
@@ -306,7 +309,7 @@ class VisCyTrainer(Trainer):
         _logger.info(
             f"Creating prediction database from {pred_database} with channel '{pred_channel}'"
         )
-        pred_db = DynaCellDataBase(
+        pred_db = DynaCellDatabase(
             database=pred_database,
             cell_types=pred_cell_types,
             organelles=pred_organelles,
@@ -322,6 +325,7 @@ class VisCyTrainer(Trainer):
             pred_database=pred_db,
             batch_size=batch_size,
             num_workers=num_workers,
+            transforms=transforms,
         )
 
         # Setup datamodule
@@ -338,35 +342,35 @@ class VisCyTrainer(Trainer):
         _logger.info(f"Creating logger for run '{run_name}' with version '{version}'")
         logger = CSVLogger(save_dir=method_dir, name=run_name, version=version)
 
-        # Create trainer
-        trainer = Trainer(logger=logger)
-
         # Select and run appropriate metrics
-        if method == "segmentation2D":
+        if method == "Segmentation2D":
             _logger.info("Running segmentation metrics...")
             metrics_module = SegmentationMetrics()
-        else:  # intensity
+        elif method == "Intensity":
             _logger.info("Running intensity metrics...")
             metrics_module = IntensityMetrics()
+        else:
+            raise ValueError(f"Invalid method: {method}")
 
         # Run the metrics computation
-        trainer.test(metrics_module, datamodule=dm)
+        self.test(metrics_module, datamodule=dm)
 
         # Find the metrics file
         metrics_file = method_dir / run_name / version / "metrics.csv"
 
-        if metrics_file.exists():
-            metrics_df = pd.read_csv(metrics_file)
-            _logger.info(f"Metrics saved to: {metrics_file}")
-            _logger.info(f"Computed {len(metrics_df)} metric rows")
-
-            # Display columns in the metrics
-            _logger.info(f"Metrics columns: {metrics_df.columns.tolist()}")
-
-            # Display a preview of the metrics
-            if not metrics_df.empty:
-                _logger.info(f"Metrics preview:\n{metrics_df.head().to_string()}")
-        else:
+        if not metrics_file.exists():
             _logger.warning(f"No metrics file found at {metrics_file}")
+            return None
 
-        return metrics_file if metrics_file.exists() else None
+        metrics_df = pd.read_csv(metrics_file)
+        _logger.info(f"Metrics saved to: {metrics_file}")
+        _logger.info(f"Computed {len(metrics_df)} metric rows")
+
+        # Display columns in the metrics
+        _logger.info(f"Metrics columns: {metrics_df.columns.tolist()}")
+
+        # Display a preview of the metrics
+        if not metrics_df.empty:
+            _logger.info(f"Metrics preview:\n{repr(metrics_df.head())}")
+
+        return metrics_file

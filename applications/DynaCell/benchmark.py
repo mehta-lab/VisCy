@@ -10,9 +10,11 @@ import pandas as pd
 import torch
 from lightning import LightningModule
 from lightning.pytorch.loggers import CSVLogger
+from monai.transforms import NormalizeIntensityd
 
-from viscy.data.dynacell import DynaCellDataBase, DynaCellDataModule
+from viscy.data.dynacell import DynaCellDatabase, DynaCellDataModule
 from viscy.trainer import Trainer
+from viscy.transforms import NormalizeSampled, ScaleIntensityRangePercentilesd
 from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
 
 # Set float32 matmul precision for better performance on Tensor Cores
@@ -32,6 +34,7 @@ def compute_metrics(
     log_name: str = "dynacell_metrics",
     log_version: str = None,
     z_slice: slice = None,
+    transforms: list = None,
 ):
     """
     Compute DynaCell metrics.
@@ -43,7 +46,7 @@ def compute_metrics(
         log_version = timestamp
 
     # Create target database
-    target_db = DynaCellDataBase(
+    target_db = DynaCellDatabase(
         database=target_database,
         cell_types=cell_types,
         organelles=organelles,
@@ -53,7 +56,7 @@ def compute_metrics(
     )
 
     # For segmentation, use same channel for pred and target (self-comparison)
-    pred_db = DynaCellDataBase(
+    pred_db = DynaCellDatabase(
         database=prediction_database,
         cell_types=cell_types,
         organelles=organelles,
@@ -68,6 +71,7 @@ def compute_metrics(
         pred_database=pred_db,
         batch_size=1,
         num_workers=0,
+        transforms=transforms,
     )
     dm.setup(stage="test")
 
@@ -103,9 +107,9 @@ def compute_metrics(
 # %%
 if __name__ == "__main__":
     csv_database_path = Path(
-        "~/gdrive/publications/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
+        "~/mydata/gdrive/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
     ).expanduser()
-    output_dir = Path("~/gdrive/publications/dynacell/metrics").expanduser()
+    output_dir = Path("/home/eduardo.hirata/repos/viscy/applications/DynaCell/metrics")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     database = pd.read_csv(csv_database_path, dtype={"FOV": str})
@@ -126,4 +130,9 @@ if __name__ == "__main__":
         log_output_dir=output_dir,
         log_name="intensity_metrics",
         z_slice=36,
+        transforms=[
+            NormalizeIntensityd(
+                keys=["pred", "target"],
+            )
+        ],
     )
