@@ -102,37 +102,3 @@ def compute_metrics(
         metrics = None
 
     return metrics
-
-
-# %%
-if __name__ == "__main__":
-    csv_database_path = Path(
-        "~/mydata/gdrive/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
-    ).expanduser()
-    output_dir = Path("/home/eduardo.hirata/repos/viscy/applications/DynaCell/metrics")
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    database = pd.read_csv(csv_database_path, dtype={"FOV": str})
-
-    # Select test set only
-    database = database[database["Test Set"] == "x"]
-
-    print("\nRunning intensity metrics with z-slice range...")
-    metrics = compute_metrics(
-        metrics_module=IntensityMetrics(),  # IntensityMetrics(), or SegmentationMetrics(mode="2D"),
-        cell_types=["HEK293T"],
-        organelles=["HIST2H2BE"],
-        infection_conditions=["Mock"],
-        target_database=database,
-        target_channel_name="Organelle",
-        prediction_database=database,
-        prediction_channel_name="Nuclei-prediction",
-        log_output_dir=output_dir,
-        log_name="intensity_metrics",
-        z_slice=36,
-        transforms=[
-            NormalizeIntensityd(
-                keys=["pred", "target"],
-            )
-        ],
-    )
