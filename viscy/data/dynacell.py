@@ -4,6 +4,7 @@ import logging
 from pathlib import Path
 from typing import Sequence
 
+import numpy as np
 import pandas as pd
 import torch
 from iohub.ngff import open_ome_zarr
@@ -189,6 +190,7 @@ class DynaCellDataModule(LightningDataModule):
                     pred_z_slice=pred_data["z_slice"],
                     target_z_slice=target_data["z_slice"],
                     transforms=self.transforms,
+                    dtype=np.float32,  # Ensure float32
                 )
             )
 
