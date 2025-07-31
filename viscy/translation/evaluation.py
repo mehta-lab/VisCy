@@ -1,6 +1,7 @@
 """Test stage lightning modules for comparing segmentation based on  virtual staining and fluorescence ground truth"""
 
 import logging
+import warnings
 
 import numpy as np
 from lightning.pytorch import LightningModule
@@ -40,44 +41,51 @@ class SegmentationMetrics(LightningModule):
             raise ValueError(f"Mode must be one of {valid_modes}, got {self.mode}")
 
     def test_step(self, batch: SegmentationSample, batch_idx: int) -> None:
-        pred = batch["pred"]
-        target = batch["target"]
+        pred = batch["pred"]  #4D
+        target = batch["target"]  
+        assert pred.ndim == target.ndim, f"Pred and target must have the same number of dimensions, got {pred.ndim} and {target.ndim}"
 
         # Determine dimensionality from input data if in auto mode
         if self.mode == "auto":
-            if pred.shape[0] == 1 and target.shape[0] == 1:
+            if pred.ndim == 4:
                 current_mode = "2D"
-            elif pred.shape[0] > 1 and target.shape[0] > 1:
+            elif pred.ndim == 5:
                 current_mode = "3D"
             else:
                 raise ValueError(
                     f"Cannot determine dimensionality from shapes {pred.shape} and {target.shape}"
                 )
         else:
-            current_mode = self.mode
-
-            # Validate input shapes against selected mode
-            if current_mode == "2D" and not (
-                pred.shape[0] == 1 and target.shape[0] == 1
-            ):
-                raise ValueError(
-                    f"Expected 2D segmentation, got {pred.shape[0]} and {target.shape[0]}"
-                )
-            elif current_mode == "3D" and not (
-                pred.shape[0] > 1 and target.shape[0] > 1
-            ):
-                raise ValueError(
-                    f"Expected 3D segmentation, got {pred.shape[0]} and {target.shape[0]}"
-                )
-
-        pred = pred[0]
-        target = target[0]
+            if self.mode == "2D":
+                if pred.ndim ==4:
+                    warnings.warn(f"Pred and target have more than 2 dimensions: {pred.shape}. Taking the last two dimensions (Y,X)")
+                    pred = pred[0,0]
+                    target = target[0,0]
+                elif pred.ndim == 5:
+                    warnings.warn(f"Pred and target have more than 2 dimensions: {pred.shape}. Taking the last two dimensions (Y,X)")
+                    pred = pred[0,0,0]
+                    target = target[0,0,0]
+                else:
+                    raise ValueError(
+                        f"Cannot determine dimensionality from shapes {pred.shape} and {target.shape}"
+                    )
+            elif self.mode == "3D":
+                if pred.ndim == 5:
+                    warnings.warn(f"Pred and target have more than 2 dimensions: {pred.shape}. Taking the last two dimensions (Y,X)")
+                    pred = pred[0,0,0]
+                    target = target[0,0,0]
+                else:
+                    raise ValueError(
+                        f"Cannot determine dimensionality from shapes {pred.shape} and {target.shape}"
+                    )
+            else:
+                raise ValueError(f"Invalid mode: {self.mode}")
 
         # Common preprocessing for both modes
         pred_binary = pred > 0
         target_binary = target > 0
 
-        if current_mode == "2D":
+        if self.mode == "2D":
             self._compute_2d_metrics(pred, target, pred_binary, target_binary, batch)
         else:  # 3D mode
             self._compute_3d_metrics(pred, target, pred_binary, target_binary, batch)
