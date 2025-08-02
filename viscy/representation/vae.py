@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from types import SimpleNamespace
 from typing import Callable, Literal
 
@@ -5,6 +6,7 @@ import timm
 import torch
 from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
+from monai.networks.nets import VarAutoEncoder
 from torch import Tensor, nn
 
 from viscy.unet.networks.unext2 import (
@@ -97,21 +99,17 @@ class VaeUpStage(nn.Module):
 class VaeEncoder(nn.Module):
     """VAE encoder for microscopy data with 3D to 2D conversion."""
 
-    # TODO: roll back the Conv2d to AveragePooling and linear layer to global pooling
-    # TODO: embedding dim
-    # TODO: check the OG VAE compression rate
-    # TODO do log grid search for the best embedding dim
-
     def __init__(
         self,
-        backbone: str = "resnet50",  # [64, 256, 512, 1024, 2048] channels
+        backbone: Literal["resnet50", "convnext_tiny"] = "resnet50",
         in_channels: int = 2,
         in_stack_depth: int = 16,
         latent_dim: int = 1024,
         input_spatial_size: tuple[int, int] = (256, 256),
-        stem_kernel_size: tuple[int, int, int] = (4, 5, 5),
-        stem_stride: tuple[int, int, int] = (4, 5, 5),  # same as kernel size
+        stem_kernel_size: tuple[int, int, int] = (2, 4, 4),
+        stem_stride: tuple[int, int, int] = (2, 4, 4),  
         drop_path_rate: float = 0.0,
+        pretrained: bool = True,
     ):
         super().__init__()
         self.backbone = backbone
@@ -119,18 +117,23 @@ class VaeEncoder(nn.Module):
 
         encoder = timm.create_model(
             backbone,
-            pretrained=False,
+            pretrained=pretrained,
             features_only=True,
             drop_path_rate=drop_path_rate,
         )
 
-        if "resnet" in backbone:
-            in_channels_encoder = encoder.conv1.out_channels
-            # remove the original 3D stem for rgb imges to support the multichannel 3D input
+        if "convnext" in backbone:
+            num_channels = encoder.feature_info.channels()
+            in_channels_encoder = num_channels[0]
+            encoder.stem_0 = nn.Identity()
+            out_channels_encoder = num_channels[-1]
+        elif "resnet" in backbone:
+            num_channels = encoder.feature_info.channels()
+            in_channels_encoder = num_channels[0]
             encoder.conv1 = nn.Identity()
-            out_channels_encoder = encoder.feature_info.channels()[-1]
+            out_channels_encoder = num_channels[-1]
         else:
-            raise ValueError(f"Backbone {backbone} not supported")
+            raise ValueError(f"Backbone {backbone} not supported. Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'")
 
         # Stem for 3d multichannel and to convert 3D to 2D
         self.stem = StemDepthtoChannels(
@@ -141,35 +144,27 @@ class VaeEncoder(nn.Module):
             stem_stride=stem_stride,
         )
         self.encoder = encoder
-
-        # Calculate spatial dimensions after encoder and initialize linear layers
+        self.num_channels = num_channels
+        self.in_channels_encoder = in_channels_encoder
         self.out_channels_encoder = out_channels_encoder
+        
+        # Calculate spatial size after stem
+        stem_spatial_size_h = input_spatial_size[0] // stem_stride[1]
+        stem_spatial_size_w = input_spatial_size[1] // stem_stride[2]
+        
+        # Spatial size after backbone
+        backbone_reduction = 2 ** (len(num_channels) - 1)
+        final_spatial_size_h = stem_spatial_size_h // backbone_reduction
+        final_spatial_size_w = stem_spatial_size_w // backbone_reduction
+        
+        flattened_size = out_channels_encoder * final_spatial_size_h * final_spatial_size_w
 
-        if "resnet50" in backbone:
-            # Calculate spatial size after stem, then ResNet50 downsampling
-            stem_spatial_h = (
-                input_spatial_size[0] - stem_kernel_size[1]
-            ) // stem_stride[1] + 1
-            stem_spatial_w = (
-                input_spatial_size[1] - stem_kernel_size[2]
-            ) // stem_stride[2] + 1
-
-            # ResNet50 downsamples by 32x total, but stem already downsampled
-            total_downsample_factor = 32
-            stem_downsample_factor = stem_stride[1]  # Spatial downsampling from stem
-            resnet_downsample_factor = total_downsample_factor // stem_downsample_factor
-            final_h = stem_spatial_h // resnet_downsample_factor
-            final_w = stem_spatial_w // resnet_downsample_factor
-            flattened_size = out_channels_encoder * final_h * final_w
-        else:
-            raise ValueError(
-                f"Backbone {backbone} not supported for analytical calculation"
-            )
-
-        # Multi-layer perceptron for better representation learning
         self.fc = nn.Linear(flattened_size, latent_dim)
         self.fc_mu = nn.Linear(latent_dim, latent_dim)
         self.fc_logvar = nn.Linear(latent_dim, latent_dim)
+        
+        # Store final spatial size for decoder (assuming square for simplicity)
+        self.encoder_spatial_size = final_spatial_size_h  # Assuming square output
 
     def reparameterize(self, mu: Tensor, logvar: Tensor) -> Tensor:
         """Reparameterization trick: sample from N(mu, var) using N(0,1)."""
@@ -183,17 +178,19 @@ class VaeEncoder(nn.Module):
 
         features = self.encoder(x)
 
-        # Take highest resolution features and flatten
-        x = features[-1]  # [B, C, H, W]
+        # NOTE: taking the highest resolution features and flatten
+        # When features_only=False, encoder returns single tensor, not list
+        if isinstance(features, list):
+            x = features[-1]  # [B, C, H, W]
+        else:
+            x = features  # [B, C, H, W]
         x_flat = x.flatten(1)  # [B, C*H*W] - flatten from dim 1 onwards
 
-        # Apply intermediate FC layer
-        x_intermediate = self.fc(x_flat)  # [B, intermediate_dim]
+        x_intermediate = self.fc(x_flat)
 
-        # Apply linear layers to get 1D embeddings
-        mu = self.fc_mu(x_intermediate)  # [B, latent_dim]
-        logvar = self.fc_logvar(x_intermediate)  # [B, latent_dim]
-        z = self.reparameterize(mu, logvar)  # [B, latent_dim]
+        mu = self.fc_mu(x_intermediate)  
+        logvar = self.fc_logvar(x_intermediate)  
+        z = self.reparameterize(mu, logvar)  
 
         return SimpleNamespace(mean=mu, log_covariance=logvar, z=z)
 
@@ -208,68 +205,40 @@ class VaeDecoder(nn.Module):
         out_channels: int = 2,
         out_stack_depth: int = 16,
         head_expansion_ratio: int = 2,
+        strides: list[int] = [2, 2, 2, 1],
+        encoder_spatial_size: int=16,
         head_pool: bool = False,
         upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
         norm_name: str = "batch",
         upsample_pre_conv: Literal["default"] | Callable | None = None,
-        strides: list[int] | None = None,
-        input_spatial_size: tuple[int, int] = (
-            128,
-            128,
-        ),  # Input size to calculate spatial dimensions
     ):
         super().__init__()
+        self.decoder_channels = decoder_channels
+        self.latent_dim = latent_dim
         self.out_channels = out_channels
         self.out_stack_depth = out_stack_depth
+        self.decoder_channels = decoder_channels
 
-        head_channels = (
-            (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
-        )
 
-        decoder_channels_with_head = decoder_channels.copy() + [head_channels]
-
-        num_stages = len(decoder_channels_with_head) - 1
-        if strides is None:
-            if (
-                num_stages == 4
-            ):  # Default [1024, 512, 256, 128] + head = 5 channels, 4 stages
-                strides = [
-                    2,
-                    2,
-                    2,
-                    1,
-                ]  # Reduce to account for PixelToVoxelHead's 4x upsampling
-            else:
-                strides = [2] * num_stages  # Fallback to uniform 2x upsampling
-        elif len(strides) != num_stages:
-            raise ValueError(
-                f"Length of strides ({len(strides)}) must match number of stages ({num_stages})"
-            )
-        # Calculate spatial size based on input dimensions and ResNet50 32x downsampling
-        self.spatial_size = input_spatial_size[0] // 32  # ResNet50 downsamples by 32x
+        self.spatial_size = encoder_spatial_size
         self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
 
-        # Project 1D latent to spatial format, then to first decoder channels
         self.latent_reshape = nn.Linear(
             latent_dim, self.spatial_channels * self.spatial_size * self.spatial_size
         )
         self.latent_proj = nn.Conv2d(
-            self.spatial_channels, decoder_channels_with_head[0], kernel_size=1
+            self.spatial_channels, decoder_channels[0], kernel_size=1
         )
 
         # Build the decoder stages
         self.decoder_stages = nn.ModuleList()
-
+        num_stages = len(self.decoder_channels) - 1
         for i in range(num_stages):
-            in_channels = decoder_channels_with_head[i]
-            out_channels_stage = decoder_channels_with_head[i + 1]
-            stride = strides[i]
-
             stage = VaeUpStage(
-                in_channels=in_channels,
-                out_channels=out_channels_stage,
-                scale_factor=stride,
+                in_channels=self.decoder_channels[i],
+                out_channels=self.decoder_channels[i + 1],
+                scale_factor=strides[i],
                 mode=upsample_mode,
                 conv_blocks=conv_blocks,
                 norm_name=norm_name,
@@ -279,7 +248,7 @@ class VaeDecoder(nn.Module):
 
         # Head to convert back to 3D
         self.head = PixelToVoxelHead(
-            in_channels=head_channels,
+            in_channels=decoder_channels[-1],
             out_channels=self.out_channels,
             out_stack_depth=self.out_stack_depth,
             expansion_ratio=head_expansion_ratio,
@@ -305,7 +274,126 @@ class VaeDecoder(nn.Module):
         for stage in self.decoder_stages:
             x = stage(x)
 
-        # Last stage outputs head_channels directly - no final_conv needed
         output = self.head(x)
 
         return output
+
+
+class BetaVae25D(nn.Module):
+    """2.5D Beta-VAE combining VaeEncoder and VaeDecoder."""
+
+    def __init__(
+        self,
+        backbone: Literal["resnet50", "convnext_tiny"] = "resnet50",
+        in_channels: int = 2,
+        in_stack_depth: int = 16,
+        out_stack_depth: int = 16,
+        latent_dim: int = 1024,
+        input_spatial_size: tuple[int, int] = (256, 256),
+        stem_kernel_size: tuple[int, int, int] = (2, 4, 4),
+        stem_stride: tuple[int, int, int] = (2, 4, 4),
+        drop_path_rate: float = 0.0,
+        decoder_stages: int = 4,
+        head_expansion_ratio: int = 2,
+        head_pool: bool = False,
+        upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
+        conv_blocks: int = 2,
+        norm_name: str = "batch",
+        upsample_pre_conv: Literal["default"] | Callable | None = None,
+    ):
+        super().__init__()
+        
+        self.encoder = VaeEncoder(
+            backbone=backbone,
+            in_channels=in_channels,
+            in_stack_depth=in_stack_depth,
+            latent_dim=latent_dim,
+            input_spatial_size=input_spatial_size,
+            stem_kernel_size=stem_kernel_size,
+            stem_stride=stem_stride,
+            drop_path_rate=drop_path_rate,
+        )
+
+        decoder_channels = self.encoder.num_channels.copy()
+        decoder_channels.reverse()
+        decoder_channels[-1] = (
+            (out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
+        )
+        
+        strides = [2] * (len(decoder_channels) - 1) + [1]   
+
+        self.decoder = VaeDecoder(
+            decoder_channels=decoder_channels,
+            latent_dim=latent_dim,
+            out_channels=in_channels,
+            out_stack_depth=out_stack_depth,
+            head_expansion_ratio=head_expansion_ratio,
+            head_pool=head_pool,
+            upsample_mode=upsample_mode,
+            conv_blocks=conv_blocks,
+            norm_name=norm_name,
+            upsample_pre_conv=upsample_pre_conv,
+            strides=strides,
+            encoder_spatial_size=self.encoder.encoder_spatial_size,
+        )
+
+    def forward(self, x: Tensor) -> SimpleNamespace:
+        """Forward pass returning VAE outputs."""
+        encoder_output = self.encoder(x)
+        recon_x = self.decoder(encoder_output.z)
+        
+        return SimpleNamespace(
+            recon_x=recon_x,
+            mean=encoder_output.mean,
+            logvar=encoder_output.log_covariance,
+            z=encoder_output.z
+        )
+
+
+class BetaVaeMonai(nn.Module):
+    """Beta-VAE with Monai architecture."""
+
+    def __init__(self, 
+        spatial_dims: int,
+        in_shape: Sequence[int],
+        out_channels: int,
+        latent_size: int,
+        channels: Sequence[int],
+        strides: Sequence[int],
+        kernel_size: Sequence[int] | int = 3,
+        up_kernel_size: Sequence[int] | int = 3,
+        num_res_units: int = 0,
+        use_sigmoid: bool = False,
+        **kwargs
+        ):
+        super().__init__()
+
+        self.spatial_dims = spatial_dims
+        self.in_shape = in_shape
+        self.out_channels = out_channels
+        self.latent_size = latent_size
+        self.channels = channels
+        self.strides = strides
+        self.kernel_size = kernel_size
+        self.up_kernel_size = up_kernel_size
+        self.num_res_units = num_res_units
+        self.use_sigmoid = use_sigmoid
+        
+        self.model = VarAutoEncoder(
+            spatial_dims=self.spatial_dims,
+            in_shape=self.in_shape,
+            out_channels=self.out_channels,
+            latent_size=self.latent_size,
+            channels=self.channels,
+            strides=self.strides,
+            kernel_size=self.kernel_size,
+            up_kernel_size=self.up_kernel_size,
+            num_res_units=self.num_res_units,
+            use_sigmoid=self.use_sigmoid,
+            **kwargs
+        )
+
+    def forward(self, x: Tensor) -> SimpleNamespace:
+        """Forward pass returning VAE encoder outputs."""
+        recon_x, mu, logvar, z = self.model(x)
+        return SimpleNamespace(recon_x=recon_x, mean=mu, logvar=logvar, z=z)

@@ -1,5 +1,5 @@
 import logging
-from typing import Literal, Optional, Sequence, TypedDict
+from typing import Literal, Sequence, TypedDict
 
 import numpy as np
 import torch
@@ -12,12 +12,16 @@ from umap import UMAP
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.representation.disentanglement_metrics import DisentanglementMetrics
-from viscy.representation.vae import VaeDecoder, VaeEncoder
+from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 from viscy.representation.vae_logging import BetaVaeLogger
 from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
 
+_VAE_ARCHITECTURE = {
+    "2.5D": BetaVae25D,
+    "monai_beta": BetaVaeMonai,
+}
 
 class ContrastivePrediction(TypedDict):
     features: Tensor
@@ -249,20 +253,18 @@ class ContrastiveModule(LightningModule):
             "index": batch["index"],
         }
 
-
-class VaeModule(LightningModule):
-    """Native PyTorch Lightning Beta-VAE implementation."""
-
+class BetaVaeModule(LightningModule):
     def __init__(
         self,
-        encoder: VaeEncoder,
-        decoder: VaeDecoder,
-        loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
+        architecture: Literal["monai_beta","2.5D"],
+        model_config: dict = {},
+        loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="mean"),
         beta: float = 1.0,
         beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
         beta_min: float = 0.1,
         beta_warmup_epochs: int = 50,
-        lr: float = 1e-3,
+        lr: float = 1e-5,
+        lr_schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_array_shape: Sequence[int] = (1, 2, 30, 256, 256),
@@ -273,35 +275,50 @@ class VaeModule(LightningModule):
     ):
         super().__init__()
 
-        self.encoder = encoder
-        self.decoder = decoder
-
-        # Infer latent dimension from encoder and validate decoder matches
-        self.latent_dim = encoder.latent_dim
-        # Validate that decoder's latent_dim matches encoder's embedding_dim
-        if hasattr(decoder, "latent_dim") and decoder.latent_dim != self.latent_dim:
+        net_class= _VAE_ARCHITECTURE.get(architecture)
+        if not net_class:
             raise ValueError(
-                f"Encoder embedding_dim ({self.latent_dim}) must match "
-                f"decoder latent_dim ({decoder.latent_dim})"
+                f"Architecture {architecture} not in {_VAE_ARCHITECTURE.keys()}"
             )
+
+        self.model = net_class(**model_config)
+        self.model_config = model_config
+        self.loss_function = loss_function
+
         self.beta = beta
         self.beta_schedule = beta_schedule
         self.beta_min = beta_min
         self.beta_warmup_epochs = beta_warmup_epochs
+
         self.lr = lr
+        self.lr_schedule = lr_schedule
+        
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
-        self.loss_function = loss_function
+
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.compute_disentanglement = compute_disentanglement
         self.disentanglement_frequency = disentanglement_frequency
+        
         self.log_enhanced_visualizations = log_enhanced_visualizations
         self.log_enhanced_visualizations_frequency = (
             log_enhanced_visualizations_frequency
         )
         self.training_step_outputs = []
         self.validation_step_outputs = []
-        self.vae_logger = BetaVaeLogger(latent_dim=self.latent_dim)
+
+        # Handle different parameter names for latent dimensions
+        latent_dim = None
+        if "latent_dim" in self.model_config:
+            latent_dim = self.model_config["latent_dim"]
+        elif "latent_size" in self.model_config:
+            latent_dim = self.model_config["latent_size"]
+            
+        if latent_dim is not None:
+            self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
+        else:
+            _logger.warning("No latent dimension provided for BetaVaeLogger. Using default with 128 dimensions.")
+            self.vae_logger = BetaVaeLogger()
 
     def setup(self, stage: str = None):
         """Setup hook to initialize device-dependent components."""
@@ -348,23 +365,20 @@ class VaeModule(LightningModule):
 
     def forward(self, x: Tensor) -> dict:
         """Forward pass through Beta-VAE."""
-        # Encode
-        encoder_output = self.encoder(x)
-        mu = encoder_output.mean
-        logvar = encoder_output.log_covariance
-        z = encoder_output.z
+        # Handle different model output formats
+        model_output = self.model(x)
+        
+        recon_x = model_output.recon_x
+        mu = model_output.mean
+        logvar = model_output.logvar
+        z = model_output.z
 
-        # Decode
-        reconstruction = self.decoder(z)
 
-        # Compute losses with current beta (normalized by batch size)
         current_beta = self._get_current_beta()
         batch_size = x.size(0)
 
-        # MSE loss normalized by batch size
-        recon_loss = self.loss_function(reconstruction, x)
-
-        # KL loss normalized by batch size
+        # NOTE: normalizing by the batch size
+        recon_loss = self.loss_function(recon_x, x)
         kl_loss = (
             -0.5
             * current_beta
@@ -375,7 +389,7 @@ class VaeModule(LightningModule):
         total_loss = recon_loss + kl_loss
 
         return {
-            "recon_x": reconstruction,
+            "recon_x": recon_x,
             "z": z,
             "mu": mu,
             "logvar": logvar,
