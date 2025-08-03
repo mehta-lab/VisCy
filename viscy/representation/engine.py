@@ -43,6 +43,7 @@ class ContrastiveModule(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         log_embeddings: bool = False,
+        embedding_log_frequency: int = 10,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -56,6 +57,50 @@ class ContrastiveModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.log_embeddings = log_embeddings
+        self.embedding_log_frequency = embedding_log_frequency
+
+    def on_train_start(self) -> None:
+        """Log comprehensive hyperparameters including model architecture details."""
+        super().on_train_start()
+        
+        # Collect comprehensive hyperparameters
+        hparams = {
+            # Training hyperparameters
+            "lr": self.lr,
+            "schedule": self.schedule,
+            "input_shape": self.example_input_array_shape, 
+            "loss_function_class": self.loss_function.__class__.__name__,
+        }
+        
+        # Add loss function specific parameters
+        if hasattr(self.loss_function, 'margin'):
+            hparams["loss_margin"] = self.loss_function.margin
+        if hasattr(self.loss_function, 'temperature'):
+            hparams["loss_temperature"] = self.loss_function.temperature
+        if hasattr(self.loss_function, 'normalize_embeddings'):
+            hparams["loss_normalize_embeddings"] = self.loss_function.normalize_embeddings
+            
+        # Add encoder details if it's a ContrastiveEncoder
+        if hasattr(self.model, 'backbone'):
+            hparams["encoder_backbone"] = self.model.backbone
+        if hasattr(self.model, 'in_channels'):
+            hparams["encoder_in_channels"] = self.model.in_channels
+        if hasattr(self.model, 'in_stack_depth'):
+            hparams["encoder_in_stack_depth"] = self.model.in_stack_depth
+        if hasattr(self.model, 'embedding_dim'):
+            hparams["encoder_embedding_dim"] = self.model.embedding_dim
+        if hasattr(self.model, 'projection_dim'):
+            hparams["encoder_projection_dim"] = self.model.projection_dim
+        if hasattr(self.model, 'drop_path_rate'):
+            hparams["encoder_drop_path_rate"] = self.model.drop_path_rate
+        if hasattr(self.model, 'stem_kernel_size'):
+            hparams["encoder_stem_kernel_size"] = str(self.model.stem_kernel_size)
+        if hasattr(self.model, 'stem_stride'):
+            hparams["encoder_stem_stride"] = str(self.model.stem_stride)
+            
+        # Log to TensorBoard
+        if self.logger is not None:
+            self.logger.log_hyperparams(hparams)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections.
@@ -186,12 +231,6 @@ class ContrastiveModule(LightningModule):
     def on_train_epoch_end(self) -> None:
         super().on_train_epoch_end()
         self._log_samples("train_samples", self.training_step_outputs)
-        # Log UMAP embeddings for validation
-        if self.log_embeddings:
-            embeddings = torch.cat(
-                [output["embeddings"] for output in self.validation_step_outputs]
-            )
-            self.log_embedding_umap(embeddings, tag="train")
         self.training_step_outputs = []
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
@@ -229,14 +268,71 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        # Log UMAP embeddings for training
-        if self.log_embeddings:
-            embeddings = torch.cat(
-                [output["embeddings"] for output in self.training_step_outputs]
-            )
-            self.log_embedding_umap(embeddings, tag="val")
+        
+        # Log UMAP embeddings from validation set every N epochs
+        if (
+            self.log_embeddings 
+            and self.current_epoch % self.embedding_log_frequency == 0 
+            and self.current_epoch > 0
+        ):
+            self._collect_and_log_embeddings()
 
         self.validation_step_outputs = []
+
+    def _collect_and_log_embeddings(self):
+        """Collect embeddings from validation dataloader and log UMAP visualization."""
+        try:
+            # Get validation dataloader
+            val_dataloaders = self.trainer.val_dataloaders
+            if val_dataloaders is None:
+                _logger.warning("No validation dataloader available for embedding logging")
+                return
+            elif isinstance(val_dataloaders, list):
+                val_dataloader = val_dataloaders[0] if val_dataloaders else None
+            else:
+                val_dataloader = val_dataloaders
+
+            if val_dataloader is None:
+                _logger.warning("No validation dataloader available for embedding logging")
+                return
+
+            _logger.info(f"Collecting embeddings for visualization at epoch {self.current_epoch}")
+            
+            # Collect embeddings from validation set
+            embeddings_list = []
+            max_samples = 1000  # Limit samples for performance
+            sample_count = 0
+            
+            self.eval()
+            with torch.no_grad():
+                for batch in val_dataloader:
+                    if sample_count >= max_samples:
+                        break
+                    
+                    # Move batch to device
+                    anchor = batch["anchor"].to(self.device)
+                    
+                    # Get embeddings (features, not projections)
+                    features, _ = self(anchor)
+                    embeddings_list.append(features.cpu())
+                    
+                    sample_count += features.size(0)
+                    
+            if embeddings_list:
+                embeddings = torch.cat(embeddings_list, dim=0)[:max_samples]
+                self.log_embedding_umap(embeddings, tag="validation")
+                
+                # Also log to TensorBoard's embedding projector
+                self.logger.experiment.add_embedding(
+                    embeddings,
+                    global_step=self.current_epoch,
+                    tag="validation_embeddings"
+                )
+            else:
+                _logger.warning("No embeddings collected from validation set")
+                
+        except Exception as e:
+            _logger.error(f"Error collecting embeddings: {e}")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
