@@ -50,6 +50,7 @@ class JointContrastiveModule(ContrastiveModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         log_embeddings: bool = False,
+        embedding_log_frequency: int = 10,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
         prediction_arm: Literal["source", "target"] = "source",
     ) -> None:
@@ -61,6 +62,7 @@ class JointContrastiveModule(ContrastiveModule):
             log_batches_per_epoch=log_batches_per_epoch,
             log_samples_per_batch=log_samples_per_batch,
             log_embeddings=log_embeddings,
+            embedding_log_frequency=embedding_log_frequency,
             example_input_array_shape=example_input_array_shape,
         )
         self.example_input_array = (self.example_input_array, self.example_input_array)
