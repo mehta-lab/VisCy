@@ -68,7 +68,7 @@ class ContrastiveModule(LightningModule):
             # Training hyperparameters
             "lr": self.lr,
             "schedule": self.schedule,
-            "input_shape": self.example_input_array_shape, 
+            "input_shape": self.example_input_array, 
             "loss_function_class": self.loss_function.__class__.__name__,
         }
         
@@ -298,9 +298,11 @@ class ContrastiveModule(LightningModule):
 
             _logger.info(f"Collecting embeddings for visualization at epoch {self.current_epoch}")
             
-            # Collect embeddings from validation set
+            # Collect embeddings, images, and metadata from validation set
             embeddings_list = []
-            max_samples = 1000  # Limit samples for performance
+            images_list = []
+            labels_list = []
+            max_samples = 500  # Reduced for memory efficiency with images
             sample_count = 0
             
             self.eval()
@@ -311,23 +313,59 @@ class ContrastiveModule(LightningModule):
                     
                     # Move batch to device
                     anchor = batch["anchor"].to(self.device)
+                    batch_size = anchor.size(0)
                     
                     # Get embeddings (features, not projections)
                     features, _ = self(anchor)
                     embeddings_list.append(features.cpu())
                     
-                    sample_count += features.size(0)
+                    # Collect images for sprite visualization
+                    # Take middle slice for 3D data and first channel if multi-channel
+                    if anchor.ndim == 5:  # (B, C, D, H, W)
+                        mid_z = anchor.size(2) // 2
+                        img_slice = anchor[:, 0, mid_z].cpu()  # (B, H, W)
+                    else:  # (B, C, H, W)
+                        img_slice = anchor[:, 0].cpu()  # (B, H, W)
+                    images_list.append(img_slice)
+                    
+                    # Collect labels from index information
+                    if "index" in batch and batch["index"] is not None:
+                        for i, idx_info in enumerate(batch["index"][:batch_size]):
+                            if isinstance(idx_info, dict):
+                                # Create label from track_id and time info
+                                track_id = idx_info.get("track_id", "unknown")
+                                t = idx_info.get("t", "unknown")
+                                labels_list.append(f"track_{track_id}_t_{t}")
+                            else:
+                                labels_list.append(f"sample_{sample_count + i}")
+                    else:
+                        # Fallback labels
+                        for i in range(batch_size):
+                            labels_list.append(f"sample_{sample_count + i}")
+                    
+                    sample_count += batch_size
                     
             if embeddings_list:
                 embeddings = torch.cat(embeddings_list, dim=0)[:max_samples]
+                images = torch.cat(images_list, dim=0)[:max_samples]
+                labels = labels_list[:max_samples]
+                
+                # Normalize images for visualization (0-1 range)
+                images = (images - images.min()) / (images.max() - images.min() + 1e-8)
+                
+                # Log UMAP visualization  
                 self.log_embedding_umap(embeddings, tag="validation")
                 
-                # Also log to TensorBoard's embedding projector
+                # Log to TensorBoard's embedding projector with images and labels
                 self.logger.experiment.add_embedding(
                     embeddings,
+                    metadata=labels,
+                    label_img=images.unsqueeze(1),  # Add channel dimension
                     global_step=self.current_epoch,
                     tag="validation_embeddings"
                 )
+                
+                _logger.info(f"Logged {len(embeddings)} embeddings with images and labels")
             else:
                 _logger.warning("No embeddings collected from validation set")
                 
