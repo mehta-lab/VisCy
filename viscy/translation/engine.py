@@ -546,6 +546,7 @@ class AugmentedPredictionVSUNet(LightningModule):
 
         # TODO: add linear blending
         blended_slab = 
+        assert blended_slab.shape[-3:] == input_shape[-3:]
 
         return blended_slab
 
