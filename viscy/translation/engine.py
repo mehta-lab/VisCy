@@ -530,6 +530,26 @@ class AugmentedPredictionVSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
+    # TODO: come up with better name
+    def predict_volume(self, x: Tensor) -> Tensor:
+        # x.dype (Phase 3D) will be float32
+        # x.device should be CUDA
+
+        assert x.ndim == 5
+
+        input_shape = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
+        window_size = self.model.config.z_stack # TODO: check
+
+        slabs = []
+        for idx in range(0, input_shape[-3], window_size): # TODO: make sure this goes over the whole volume
+            slab.append(self(x[:, :, idx:idx+window_size])) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+
+        # TODO: add linear blending
+        blended_slab = 
+
+        return blended_slab
+
+
     def setup(self, stage: str) -> None:
         if stage != "predict":
             raise NotImplementedError(
