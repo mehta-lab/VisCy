@@ -1,51 +1,10 @@
-from dataclasses import dataclass
-from typing import Optional, Tuple
-
 import torch
 import torch.nn as nn
 
+from typing import Tuple
 from .blocks import DownEncoderBlock3D, UNetMidBlock3D
-from diffusers.utils import BaseOutput, is_torch_version
-
-
-@dataclass
-class DecoderOutput(BaseOutput):
-    r"""
-    Output of decoding method.
-
-    Args:
-        sample (`torch.Tensor` of shape `(batch_size, num_channels, height, width)`):
-            The decoded output sample from the last layer of the model.
-    """
-
-    sample: torch.Tensor
-    commit_loss: Optional[torch.FloatTensor] = None
-
 
 class Encoder(nn.Module):
-    r"""
-    The `Encoder` layer of a variational autoencoder that encodes its input into a latent representation.
-
-    Args:
-        in_channels (`int`, *optional*, defaults to 3):
-            The number of input channels.
-        out_channels (`int`, *optional*, defaults to 3):
-            The number of output channels.
-        down_block_types (`Tuple[str, ...]`, *optional*, defaults to `("DownEncoderBlock2D",)`):
-            The types of down blocks to use. See `~diffusers.models.unet_2d_blocks.get_down_block` for available
-            options.
-        block_out_channels (`Tuple[int, ...]`, *optional*, defaults to `(64,)`):
-            The number of output channels for each block.
-        layers_per_block (`int`, *optional*, defaults to 2):
-            The number of layers per block.
-        norm_num_groups (`int`, *optional*, defaults to 32):
-            The number of groups for normalization.
-        act_fn (`str`, *optional*, defaults to `"silu"`):
-            The activation function to use. See `~diffusers.models.activations.get_activation` for available options.
-        double_z (`bool`, *optional*, defaults to `True`):
-            Whether to double the number of output channels for the last block.
-    """
-
     def __init__(
         self,
         in_channels: int = 3,
@@ -111,41 +70,14 @@ class Encoder(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
-        r"""The forward method of the `Encoder` class."""
-
         sample = self.conv_in(sample)
+        
+        # down
+        for down_block in self.down_blocks:
+            sample = down_block(sample)
 
-        if self.training and self.gradient_checkpointing:
-
-            def create_custom_forward(module):
-                def custom_forward(*inputs):
-                    return module(*inputs)
-
-                return custom_forward
-
-            # down
-            if is_torch_version(">=", "1.11.0"):
-                for down_block in self.down_blocks:
-                    sample = torch.utils.checkpoint.checkpoint(
-                        create_custom_forward(down_block), sample, use_reentrant=False
-                    )
-                # middle
-                sample = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(self.mid_block), sample, use_reentrant=False
-                )
-            else:
-                for down_block in self.down_blocks:
-                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(down_block), sample)
-                # middle
-                sample = torch.utils.checkpoint.checkpoint(create_custom_forward(self.mid_block), sample)
-
-        else:
-            # down
-            for down_block in self.down_blocks:
-                sample = down_block(sample)
-
-            # middle
-            sample = self.mid_block(sample)
+        # middle
+        sample = self.mid_block(sample)
 
         # post-process
         sample = self.conv_norm_out(sample)
@@ -153,5 +85,3 @@ class Encoder(nn.Module):
         sample = self.conv_out(sample)
 
         return sample
-
-

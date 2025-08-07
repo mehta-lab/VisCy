@@ -4,14 +4,9 @@ import torch
 import torch.nn as nn
 
 from .blocks import UNetMidBlock3D, UpDecoderBlock3D
-
-from diffusers.utils import is_torch_version
 from diffusers.models.attention_processor import SpatialNorm
 
 class Decoder(nn.Module):
-    r"""
-    The `Decoder` layer of a variational autoencoder that decodes its latent representation into an output sample.
-    """
 
     def __init__(
         self,
@@ -87,53 +82,14 @@ class Decoder(nn.Module):
         self.gradient_checkpointing = False
 
     def forward(self, sample: torch.Tensor) -> torch.Tensor:
-        r"""The forward method of the `Decoder` class."""
-
         sample = self.conv_in(sample)
 
-        upscale_dtype = next(iter(self.up_blocks.parameters())).dtype
-        if self.training and self.gradient_checkpointing:
+        # middle
+        sample = self.mid_block(sample)
 
-            def create_custom_forward(module):
-                def custom_forward(*inputs):
-                    return module(*inputs)
-
-                return custom_forward
-
-            if is_torch_version(">=", "1.11.0"):
-                # middle
-                sample = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(self.mid_block),
-                    sample,
-                    use_reentrant=False,
-                )
-                sample = sample.to(upscale_dtype)
-
-                # up
-                for up_block in self.up_blocks:
-                    sample = torch.utils.checkpoint.checkpoint(
-                        create_custom_forward(up_block),
-                        sample,
-                        use_reentrant=False,
-                    )
-            else:
-                # middle
-                sample = torch.utils.checkpoint.checkpoint(
-                    create_custom_forward(self.mid_block), sample,
-                )
-                sample = sample.to(upscale_dtype)
-
-                # up
-                for up_block in self.up_blocks:
-                    sample = torch.utils.checkpoint.checkpoint(create_custom_forward(up_block), sample)
-        else:
-            # middle
-            sample = self.mid_block(sample)
-            sample = sample.to(upscale_dtype)
-
-            # up
-            for up_block in self.up_blocks:
-                sample = up_block(sample)
+        # up
+        for up_block in self.up_blocks:
+            sample = up_block(sample)
 
         sample = self.conv_norm_out(sample)
         sample = self.conv_act(sample)

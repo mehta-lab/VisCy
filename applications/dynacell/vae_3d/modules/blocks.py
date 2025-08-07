@@ -4,7 +4,6 @@ import torch
 import torch.nn.functional as F
 from torch import nn
 from diffusers.models.normalization import RMSNorm
-from diffusers.utils import is_torch_version
 from diffusers.models.activations import get_activation
 
 class UpDecoderBlock3D(nn.Module):
@@ -93,14 +92,14 @@ class DownEncoderBlock3D(nn.Module):
             self.downsamplers = nn.ModuleList(
                 [
                     Downsample3D(
-                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding,
+                        out_channels, use_conv=True, out_channels=out_channels, padding=downsample_padding, 
                     )
                 ]
             )
         else:
             self.downsamplers = None
 
-    def forward(self, hidden_states: torch.Tensor, *args, **kwargs) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
         for resnet in self.resnets:
             hidden_states = resnet(hidden_states)
 
@@ -248,7 +247,7 @@ class Downsample3D(nn.Module):
         # Apply padding if using conv downsampling and no padding was specified
         if self.use_conv and self.padding == 0:
             pad = (0, 1, 0, 1, 0, 1)  # Padding for 3D tensor: (D, H, W)
-            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0)
+            hidden_states = F.pad(hidden_states, pad, mode="constant", value=0.0)
 
         # Apply downsampling
         hidden_states = self.conv(hidden_states)
@@ -291,7 +290,7 @@ class Upsample3D(nn.Module):
         # TODO(Suraj, Patrick) - clean up after weight dicts are correctly renamed
         self.conv = conv
 
-    def forward(self, hidden_states: torch.Tensor, output_size: Optional[int] = None, *args, **kwargs) -> torch.Tensor:
+    def forward(self, hidden_states: torch.Tensor, output_size: Optional[int] = None) -> torch.Tensor:
         assert hidden_states.shape[1] == self.channels, f"Expected {self.channels} channels, got {hidden_states.shape[1]}"
 
         # Apply normalization if specified
@@ -300,28 +299,13 @@ class Upsample3D(nn.Module):
             hidden_states = self.norm(hidden_states.permute(0, 2, 3, 4, 1))
             hidden_states = hidden_states.permute(0, 4, 1, 2, 3)  # Back to (B, C, D, H, W)
 
-        dtype = hidden_states.dtype
-        if dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
-            hidden_states = hidden_states.to(torch.float32)
-
         if hidden_states.shape[0] >= 64:
             hidden_states = hidden_states.contiguous()
 
         if output_size is None:
-            B, C, D, H, W = hidden_states.shape
-            if B*C*D*H*W*8 > 2_100_000_000:
-                x1 = F.interpolate(hidden_states[:, :, :D//2], scale_factor=2, mode="nearest")
-                x2 = F.interpolate(hidden_states[:, :, D//2:], scale_factor=2, mode="nearest")
-                hidden_states = torch.cat([x1, x2], dim=2)
-            else:
-                hidden_states = F.interpolate(hidden_states, scale_factor=2, mode="nearest")
-            # hidden_states = F.interpolate(hidden_states, scale_factor=2.0, mode="nearest")
+            hidden_states = F.interpolate(hidden_states, scale_factor=2.0, mode="nearest")
         else:
             hidden_states = F.interpolate(hidden_states, size=output_size, mode="nearest")
-
-        # Cast back to original dtype
-        if dtype == torch.bfloat16 and is_torch_version("<", "2.1"):
-            hidden_states = hidden_states.to(dtype)
 
         hidden_states = self.conv(hidden_states)
 
@@ -349,8 +333,7 @@ class UNetMidBlock3D(nn.Module):
         if attn_groups is None:
             attn_groups = resnet_groups
 
-        # there is always at least one resnet
-        resnets = [
+        self.resnets = nn.ModuleList([
             ResnetBlock3D(
                 in_channels=in_channels,
                 out_channels=in_channels,
@@ -359,27 +342,12 @@ class UNetMidBlock3D(nn.Module):
                 dropout=dropout,
                 non_linearity=resnet_act_fn,
                 output_scale_factor=output_scale_factor,
-            ), 
-        ]
-
-        for _ in range(num_layers):
-            resnets.append(
-                ResnetBlock3D(
-                    in_channels=in_channels,
-                    out_channels=in_channels,
-                    eps=resnet_eps,
-                    groups=resnet_groups,
-                    dropout=dropout,
-                    non_linearity=resnet_act_fn,
-                    output_scale_factor=output_scale_factor,
-                )
             )
-
-        self.resnets = nn.ModuleList(resnets)
+            for _ in range(num_layers + 1)
+        ])
 
     def forward(self, hidden_states: torch.Tensor) -> torch.Tensor:
-        hidden_states = self.resnets[0](hidden_states)
-        for resnet in self.resnets[1:]:
+        for resnet in self.resnets:
             hidden_states = resnet(hidden_states)
 
         return hidden_states
