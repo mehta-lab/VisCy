@@ -61,7 +61,11 @@ def compute_phate(
 
     # Compute PHATE embeddings
     phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+        n_components=n_components,
+        knn=knn,
+        decay=decay,
+        random_state=42,
+        **phate_kwargs,
     )
     phate_embedding = phate_model.fit_transform(embeddings)
 

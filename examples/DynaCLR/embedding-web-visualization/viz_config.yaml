@@ -1,0 +1,52 @@
+# Multi-dataset visualization configuration
+datasets:
+  g3bp1_sensor:
+    data_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/train-test/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr"
+    tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/1-preprocess/label-free/3-track/2025_01_28_A549_G3BP1_ZIKV_DENV_cropped.zarr"
+    features_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/predictions/sensor_160patch_99ckpt_max.zarr"
+    channels_to_display: ["raw mCherry EX561 EM600-37"]
+    z_range: [0, 1]
+    yx_patch_size: [192, 192]
+    fov_tracks:
+      "/B/3/000000": [42, 47, 56, 57, 58, 59, 61]
+      "/B/4/000001": [57, 83, 89, 90, 91, 101]
+
+
+  g3bp1_organelle:
+    data_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/train-test/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr"
+    tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/1-preprocess/label-free/3-track/2025_01_28_A549_G3BP1_ZIKV_DENV_cropped.zarr"
+    features_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/predictions/organelle_160patch_99ckpt_max.zarr"
+    channels_to_display: ["raw GFP EX488 EM525-45"]
+    z_range: [0, 1]
+    yx_patch_size: [192, 192]
+    fov_tracks:
+      # "/B/3/000000": "all"
+      # "/B/4/000001": "all"
+      "/B/2/000000": [15, 47, 61, 62, 63, 64, 65]
+      "/C/2/000001": "all"
+      # "/C/2/000000": []
+
+  # sec61_organelle:
+  #   data_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/4-phenotyping/train-test/2025_01_28_A549_G3BP1_ZIKV_DENV.zarr"
+  #   tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2025_01_28_A549_G3BP1_ZIKV_DENV/1-preprocess/label-free/3-track/2025_01_28_A549_G3BP1_ZIKV_DENV_cropped.zarr"
+  #   features_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/4-phenotyping/2-predictions/organelle_160patch_99ckpt_max.zarr"
+  #   channels_to_display: ["raw GFP EX488 EM525-45"]
+  #   z_range: [0, 1]
+  #   yx_patch_size: [192, 192]
+
+# Global settings
+num_PC_components: 8
+# phate_kwargs:
+#   n_components: 4     # Number of PHATE components
+#   knn: 5              # Number of nearest neighbors for KNN graph
+#   decay: 40           # Decay parameter for Markov operator  
+#   n_jobs: -1          # Number of parallel jobs (-1 uses all cores)
+#   random_state: 42    # Random seed for reproducibility
+#   # gamma: 1.0        # Informational scale parameter (optional)
+#   # t: "auto"         # Number of diffusion steps (optional, auto-selects optimal)
+#   # a: 1              # Alpha parameter for alpha-decay kernel (optional)
+#   # verbose: 0        # Verbosity level (optional)
+
+# File system paths
+output_dir: "./output"  # Directory to save CSV files and other outputs
+cache_path: "/home/eduardo.hirata/mydata/tmp/pcviewer/cache/image_cache1.pkl"  # Path to save/load image cache
