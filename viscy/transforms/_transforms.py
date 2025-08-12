@@ -20,7 +20,7 @@ class NormalizeSampled(MapTransform):
     ----------
     keys : str | Iterable[str]
         Keys to normalize.
-    level : {'fov_statistics', 'dataset_statistics'}
+    level : {'fov_statistics', 'dataset_statistics', 'per_timepoint'}
         Level of normalization.
     subtrahend : str, optional
         Subtrahend for normalization, defaults to "mean".
@@ -33,7 +33,7 @@ class NormalizeSampled(MapTransform):
     def __init__(
         self,
         keys: str | Iterable[str],
-        level: Literal["fov_statistics", "dataset_statistics"],
+        level: Literal["fov_statistics", "dataset_statistics", "per_timepoint"],
         subtrahend="mean",
         divisor="std",
         remove_meta: bool = False,
@@ -47,7 +47,12 @@ class NormalizeSampled(MapTransform):
     # TODO: need to implement the case where the preprocessing already exists
     def __call__(self, sample: Sample) -> Sample:
         for key in self.keys:
-            level_meta = sample["norm_meta"][key][self.level]
+            if self.level == "per_timepoint":
+                time_idx = sample["index"].time
+                level_meta = sample["norm_meta"][key]["per_timepoint"][time_idx]
+            else:
+                level_meta = sample["norm_meta"][key][self.level]
+
             subtrahend_val = level_meta[self.subtrahend]
             divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
