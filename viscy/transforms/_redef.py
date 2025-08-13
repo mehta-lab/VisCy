@@ -10,6 +10,7 @@ from monai.transforms import (
     RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
+    RandRotate90d,
     RandScaleIntensityd,
     RandSpatialCropd,
     RandWeightedCropd,
@@ -182,3 +183,13 @@ class RandFlipd(RandFlipd):
         **kwargs,
     ):
         super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)
+
+class RandRotate90d(RandRotate90d):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        prob: float,
+        spatial_axes: Sequence[int] | int,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, prob=prob, spatial_axes=spatial_axes, **kwargs)
