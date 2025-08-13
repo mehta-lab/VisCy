@@ -36,6 +36,7 @@ class Decollated(Decollated):
             **kwargs,
         )
 
+
 class ToDeviced(ToDeviced):
     def __init__(self, keys: Sequence[str] | str, **kwargs):
         super().__init__(keys=keys, **kwargs)
