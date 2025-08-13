@@ -42,8 +42,8 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
-        log_embeddings: bool = False,
-        embedding_log_frequency: int = 10,
+        log_embeddings: bool = True,
+        embedding_log_frequency: int = 20,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -417,6 +417,7 @@ class BetaVaeModule(LightningModule):
 
         self.model = net_class(**model_config)
         self.model_config = model_config
+        self.architecture = architecture
         self.loss_function = loss_function
 
         self.beta = beta
@@ -499,6 +500,13 @@ class BetaVaeModule(LightningModule):
 
     def forward(self, x: Tensor) -> dict:
         """Forward pass through Beta-VAE."""
+
+        original_shape = x.shape
+        is_monai_2d = (self.architecture == "monai_beta" and 
+                      self.model_config.get("spatial_dims") == 2)
+        if is_monai_2d and len(x.shape) == 5 and x.shape[2] == 1:
+            x = x.squeeze(2)
+        
         # Handle different model output formats
         model_output = self.model(x)
         
@@ -506,6 +514,10 @@ class BetaVaeModule(LightningModule):
         mu = model_output.mean
         logvar = model_output.logvar
         z = model_output.z
+        
+        if is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1:
+            # Convert back (B, C, H, W) to (B, C, 1, H, W)
+            recon_x = recon_x.unsqueeze(2)
 
 
         current_beta = self._get_current_beta()
@@ -513,6 +525,7 @@ class BetaVaeModule(LightningModule):
 
         # NOTE: normalizing by the batch size
         recon_loss = self.loss_function(recon_x, x)
+
         kl_loss = (
             -0.5
             * current_beta

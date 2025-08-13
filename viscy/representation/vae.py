@@ -6,6 +6,7 @@ import timm
 import torch
 from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
+from monai.networks.layers.factories import Norm
 from monai.networks.nets import VarAutoEncoder
 from torch import Tensor, nn
 
@@ -25,7 +26,7 @@ class VaeUpStage(nn.Module):
         scale_factor: int,
         mode: Literal["deconv", "pixelshuffle"],
         conv_blocks: int,
-        norm_name: str,
+        norm_name: Literal["batch", "instance"],
         upsample_pre_conv: Literal["default"] | Callable | None,
     ) -> None:
         super().__init__()
@@ -178,7 +179,7 @@ class VaeEncoder(nn.Module):
 
         features = self.encoder(x)
 
-        # NOTE: taking the highest resolution features and flatten
+        # NOTE: taking the highest semantic features and flatten
         # When features_only=False, encoder returns single tensor, not list
         if isinstance(features, list):
             x = features[-1]  # [B, C, H, W]
@@ -210,7 +211,7 @@ class VaeDecoder(nn.Module):
         head_pool: bool = False,
         upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
-        norm_name: str = "batch",
+        norm_name: Literal["batch", "instance"] = "batch",
         upsample_pre_conv: Literal["default"] | Callable | None = None,
     ):
         super().__init__()
@@ -364,6 +365,7 @@ class BetaVaeMonai(nn.Module):
         up_kernel_size: Sequence[int] | int = 3,
         num_res_units: int = 0,
         use_sigmoid: bool = False,
+        norm: str= Norm.BATCH,
         **kwargs
         ):
         super().__init__()
