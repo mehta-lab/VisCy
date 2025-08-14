@@ -66,3 +66,44 @@ def test_datamodule_setup_fit(
             z_window_size,
             *yx_patch_size,
         )
+
+
+@mark.parametrize("z_window_size", [None, 3])
+def test_datamodule_z_window_size(
+    preprocessed_hcs_dataset, tracks_hcs_dataset, z_window_size
+):
+    z_range = (4, 9)
+    yx_patch_size = [32, 32]
+    batch_size = 4
+    with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
+        channel_names = dataset.channel_names
+    dm = TripletDataModule(
+        data_path=preprocessed_hcs_dataset,
+        tracks_path=tracks_hcs_dataset,
+        source_channel=channel_names,
+        z_range=z_range,
+        initial_yx_patch_size=(64, 64),
+        final_yx_patch_size=(32, 32),
+        num_workers=0,
+        batch_size=batch_size,
+        return_negative=True,
+        z_window_size=z_window_size,
+    )
+    dm.setup(stage="fit")
+    if z_window_size is None:
+        expected_z_shape = z_range[1] - z_range[0]
+    else:
+        expected_z_shape = z_window_size
+    for batch in dm.train_dataloader():
+        assert batch["anchor"].shape == (
+            batch_size,
+            len(channel_names),
+            expected_z_shape,
+            *yx_patch_size,
+        )
+        assert batch["negative"].shape == (
+            batch_size,
+            len(channel_names),
+            expected_z_shape,
+            *yx_patch_size,
+        )
