@@ -23,6 +23,16 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class CellDivisionTripletDataset(Dataset):
+    # Hardcoded channel mapping for .npy files
+    CHANNEL_MAPPING = {
+        # Channel 0 aliases (brightfield)
+        'bf': 0,
+        'brightfield': 0,
+        # Channel 1 aliases (h2b)
+        'h2b': 1,
+        'nuclei': 1,
+    }
+
     def __init__(
         self,
         data_paths: list[Path],
@@ -33,6 +43,7 @@ class CellDivisionTripletDataset(Dataset):
         fit: bool = True,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
+        output_2d: bool = False,
     ) -> None:
         """Dataset for triplet sampling of cell division data from npy files.
 
@@ -56,6 +67,8 @@ class CellDivisionTripletDataset(Dataset):
             by default "any"
         return_negative : bool, optional
             Whether to return the negative sample during the fit stage, by default True
+        output_2d : bool, optional
+            Whether to return 2D tensors (C,Y,X) instead of 3D (C,1,Y,X), by default False
         """
         self.channel_names = channel_names
         self.anchor_transform = anchor_transform
@@ -64,6 +77,7 @@ class CellDivisionTripletDataset(Dataset):
         self.fit = fit
         self.time_interval = time_interval
         self.return_negative = return_negative
+        self.output_2d = output_2d
 
         # Load and process all data files
         self.cell_tracks = self._load_data(data_paths)
@@ -131,8 +145,9 @@ class CellDivisionTripletDataset(Dataset):
             positive_t = anchor_t + self.time_interval
 
         positive_patch = track["data"][positive_t]  # Shape: (C, Y, X)
-        # Add depth dimension: (C, Y, X) -> (C, D=1, Y, X)
-        positive_patch = positive_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
+        # Add depth dimension only if not output_2d: (C, Y, X) -> (C, D=1, Y, X)
+        if not self.output_2d:
+            positive_patch = positive_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
         return positive_patch
 
     def _sample_negative(self, anchor_info: dict) -> Tensor:
@@ -173,8 +188,9 @@ class CellDivisionTripletDataset(Dataset):
 
             negative_patch = neg_track["data"][neg_t]
 
-        # Add depth dimension: (C, Y, X) -> (C, D=1, Y, X)
-        negative_patch = negative_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
+        # Add depth dimension only if not output_2d: (C, Y, X) -> (C, D=1, Y, X)
+        if not self.output_2d:
+            negative_patch = negative_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
         return negative_patch
 
     def __getitem__(self, index: int) -> TripletSample:
@@ -182,9 +198,10 @@ class CellDivisionTripletDataset(Dataset):
         track = anchor_info["track"]
         anchor_t = anchor_info["timepoint"]
 
-        # Get anchor patch and add depth dimension
+        # Get anchor patch and add depth dimension only if not output_2d
         anchor_patch = track["data"][anchor_t]  # Shape: (C, Y, X)
-        anchor_patch = anchor_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
+        if not self.output_2d:
+            anchor_patch = anchor_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
 
         sample = {"anchor": anchor_patch}
 
@@ -246,6 +263,7 @@ class CellDivisionTripletDataModule(HCSDataModule):
         augment_validation: bool = True,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
+        output_2d: bool = False,
         persistent_workers: bool = False,
         prefetch_factor: int | None = None,
         pin_memory: bool = False,
@@ -276,6 +294,8 @@ class CellDivisionTripletDataModule(HCSDataModule):
             Future time interval to sample positive and anchor from, by default "any"
         return_negative : bool, optional
             Whether to return the negative sample during the fit stage, by default True
+        output_2d : bool, optional
+            Whether to return 2D tensors (C,Y,X) instead of 3D (C,1,Y,X), by default False
         persistent_workers : bool, optional
             Whether to keep worker processes alive between iterations, by default False
         prefetch_factor : int | None, optional
@@ -305,6 +325,7 @@ class CellDivisionTripletDataModule(HCSDataModule):
         self.data_path = Path(data_path)
         self.time_interval = time_interval
         self.return_negative = return_negative
+        self.output_2d = output_2d
         self.augment_validation = augment_validation
 
         # Find all npy files in the data directory
@@ -319,6 +340,7 @@ class CellDivisionTripletDataModule(HCSDataModule):
         return {
             "channel_names": self.source_channel,
             "time_interval": self.time_interval,
+            "output_2d": self.output_2d,
         }
 
     def _setup_fit(self, dataset_settings: dict):
