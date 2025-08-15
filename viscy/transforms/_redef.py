@@ -4,17 +4,28 @@ from typing import Sequence
 
 from monai.transforms import (
     CenterSpatialCropd,
+    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
+    RandRotate90d,
     RandScaleIntensityd,
     RandSpatialCropd,
     RandWeightedCropd,
     ScaleIntensityRangePercentilesd,
 )
 from numpy.typing import DTypeLike
+
+
+class NormalizeIntensityd(NormalizeIntensityd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, **kwargs)
 
 
 class RandWeightedCropd(RandWeightedCropd):
@@ -172,3 +183,13 @@ class RandFlipd(RandFlipd):
         **kwargs,
     ):
         super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)
+
+class RandRotate90d(RandRotate90d):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        prob: float,
+        spatial_axes: Sequence[int] | int,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, prob=prob, spatial_axes=spatial_axes, **kwargs)

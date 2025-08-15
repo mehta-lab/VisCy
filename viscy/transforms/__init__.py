@@ -1,10 +1,12 @@
 from viscy.transforms._redef import (
     CenterSpatialCropd,
+    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
+    RandRotate90d,
     RandScaleIntensityd,
     RandSpatialCropd,
     RandWeightedCropd,
@@ -27,6 +29,7 @@ __all__ = [
     "RandFlipd",
     "RandGaussianNoised",
     "RandGaussianSmoothd",
+    "RandRotate90d",
     "RandInvertIntensityd",
     "RandScaleIntensityd",
     "RandSpatialCropd",
@@ -34,4 +37,5 @@ __all__ = [
     "ScaleIntensityRangePercentilesd",
     "StackChannelsd",
     "TiledSpatialCropSamplesd",
+    "NormalizeIntensityd",
 ]

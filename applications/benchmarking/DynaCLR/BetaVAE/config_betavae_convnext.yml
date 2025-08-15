@@ -1,0 +1,146 @@
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  devices: 1
+  num_nodes: 1
+  strategy: auto
+  precision: 16-mixed
+  max_epochs: 200
+  log_every_n_steps: 10
+  check_val_every_n_epoch: 1
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: "/hpc/projects/organelle_phenotyping/models/SEC61B/vae"
+      version: "sensor_phase3d_zikv_denv_lr2e-4_beta1.5"
+      log_graph: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: "loss/total/val"
+        save_top_k: 5
+        save_last: true
+        every_n_epochs: 1
+  fast_dev_run: true
+  enable_checkpointing: true
+  # inference_mode: true
+  use_distributed_sampler: true
+
+model:
+  class_path: viscy.representation.engine.BetaVaeModule
+  init_args:
+    architecture: "2.5D"
+    model_config:
+      backbone: convnext_tiny
+      in_channels: 2
+      in_stack_depth: 16
+      out_stack_depth: 16
+      latent_dim: 1024
+      input_spatial_size: [192, 192]
+      stem_kernel_size: [4, 2, 2]
+      stem_stride: [4, 2, 2]
+      decoder_stages: 4
+      head_expansion_ratio: 2
+      head_pool: false
+      upsample_mode: pixelshuffle
+      conv_blocks: 2
+      norm_name: batch
+    beta: 1.0          # Conservative target - can increase later
+    beta_schedule: cosine
+    beta_min: 0.1       # Start low to learn reconstructions first  
+    beta_warmup_epochs: 50  # Half of training for gradual ramp
+    lr: 0.0002
+    example_input_array_shape: [1, 2, 16, 192, 192]
+    loss_function: 
+      class_path: torch.nn.MSELoss
+      init_args:
+        reduction: mean
+    log_batches_per_epoch: 8
+    log_samples_per_batch: 1
+    compute_disentanglement: false
+    disentanglement_frequency: 10
+    log_enhanced_visualizations: false
+    log_enhanced_visualizations_frequency: 30
+  
+data:
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: "/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV.zarr"
+    tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr"
+    source_channel:
+      - &phase Phase3D
+      - &mcherry raw mCherry EX561 EM600-37
+    z_range: [10, 26]
+    initial_yx_patch_size: [384, 384]
+    final_yx_patch_size: [192, 192]
+    batch_size: 64
+    num_workers: 12
+    time_interval: 1
+    augment_validation: false
+    return_negative: false
+    fit_include_wells: ["B/3", "B/4", "C/3", "C/4"]
+    augmentations:
+      - class_path: viscy.transforms.RandAffined
+        init_args:
+          keys: [*phase, *mcherry]
+          prob: 0.8
+          scale_range: [0, 0.2, 0.2]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.0, 0.01, 0.01]
+          padding_mode: zeros
+      - class_path: viscy.transforms.RandAdjustContrastd
+        init_args:
+          keys: [*mcherry]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy.transforms.RandAdjustContrastd
+        init_args:
+          keys: [*phase]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy.transforms.RandScaleIntensityd
+        init_args:
+          keys: [*mcherry]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy.transforms.RandScaleIntensityd
+        init_args:
+          keys: [*phase]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy.transforms.RandGaussianSmoothd
+        init_args:
+          keys: [*phase, *mcherry]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [*mcherry]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [*phase]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2
+    normalizations:
+      - class_path: viscy.transforms.NormalizeSampled
+        init_args:
+          keys: [*phase]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [*mcherry]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
