@@ -81,7 +81,6 @@ class BetaVaeLogger:
             f"loss/total/{stage}": total_loss,
             f"loss/reconstruction/{stage}": recon_loss,
             f"loss/kl/{stage}": kl_loss,
-            f"loss/weighted_kl/{stage}": beta * kl_loss,
             f"loss/mae/{stage}": mae_loss,
             f"beta/{stage}": beta,
             f"loss/kl_recon_ratio/{stage}": kl_recon_ratio,
@@ -505,7 +504,6 @@ class BetaVaeLogger:
                 vae_model=vae_model,
                 dataloader=dataloader,
                 max_samples=max_samples,
-                sync_dist=sync_dist,
             )
 
             # Log metrics with organized naming
