@@ -572,3 +572,16 @@ class TripletDataModule(HCSDataModule):
             drop_last=False,
             pin_memory=self.pin_memory,
         )
+
+    def predict_dataloader(self):
+        return ThreadDataLoader(
+            self.predict_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+        )
