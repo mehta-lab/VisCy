@@ -210,7 +210,7 @@ class TripletDataset(Dataset):
         """Select a positive sample from the same track in the next time point."""
         query = anchor_rows[["global_track_id", "t"]].copy()
         query["t"] += self.time_interval
-        return self.tracks.merge(query, on=["global_track_id", "t"], how="inner")
+        return query.merge(self.tracks, on=["global_track_id", "t"], how="inner")
 
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
         """Select a negative sample from a different track in the next time point
@@ -275,7 +275,12 @@ class TripletDataset(Dataset):
                 positive_norms = anchor_norms
             else:
                 positive_rows = self._sample_positives(anchor_rows)
-                assert len(positive_rows) == len(anchor_rows)
+                anchor_ids = anchor_rows["global_track_id"]
+                pos_ids = positive_rows["global_track_id"]
+                assert np.all(anchor_ids.values == pos_ids.values), (
+                    anchor_ids,
+                    pos_ids,
+                )
                 positive_patches, positive_norms = self._slice_patches(positive_rows)
             if self.positive_transform:
                 positive_patches = _transform_channel_wise(
@@ -447,11 +452,20 @@ class TripletDataModule(HCSDataModule):
         images_plate = open_ome_zarr(self.data_path)
         for well in _filter_wells(images_plate, include_wells=self._include_wells):
             for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
-                positions.append(fov)
-                tracks_df = pd.read_csv(
-                    next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))
-                ).astype(int)
-                tracks_tables.append(tracks_df)
+                try:
+                    tracks_df = pd.read_csv(
+                        next(
+                            (self.tracks_path / fov.zgroup.name.strip("/")).glob(
+                                "*.csv"
+                            )
+                        )
+                    ).astype(int)
+                    positions.append(fov)
+                    tracks_tables.append(tracks_df)
+                except StopIteration:
+                    _logger.warning(
+                        f"No tracks found for FOV {fov.zgroup.name}, skipping."
+                    )
 
         return positions, tracks_tables
 
