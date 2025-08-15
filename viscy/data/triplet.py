@@ -452,20 +452,11 @@ class TripletDataModule(HCSDataModule):
         images_plate = open_ome_zarr(self.data_path)
         for well in _filter_wells(images_plate, include_wells=self._include_wells):
             for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
-                try:
-                    tracks_df = pd.read_csv(
-                        next(
-                            (self.tracks_path / fov.zgroup.name.strip("/")).glob(
-                                "*.csv"
-                            )
-                        )
-                    ).astype(int)
-                    positions.append(fov)
-                    tracks_tables.append(tracks_df)
-                except StopIteration:
-                    _logger.warning(
-                        f"No tracks found for FOV {fov.zgroup.name}, skipping."
-                    )
+                positions.append(fov)
+                tracks_df = pd.read_csv(
+                    next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))
+                ).astype(int)
+                tracks_tables.append(tracks_df)
 
         return positions, tracks_tables
 
