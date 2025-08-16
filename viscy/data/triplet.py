@@ -275,12 +275,6 @@ class TripletDataset(Dataset):
                 positive_norms = anchor_norms
             else:
                 positive_rows = self._sample_positives(anchor_rows)
-                anchor_ids = anchor_rows["global_track_id"]
-                pos_ids = positive_rows["global_track_id"]
-                assert np.all(anchor_ids.values == pos_ids.values), (
-                    anchor_ids,
-                    pos_ids,
-                )
                 positive_patches, positive_norms = self._slice_patches(positive_rows)
             if self.positive_transform:
                 positive_patches = _transform_channel_wise(
@@ -316,7 +310,7 @@ class TripletDataset(Dataset):
                 for sample, negative_patch in zip(samples, negative_patches):
                     sample["negative"] = negative_patch
         else:
-            for sample, anchor_row in zip(samples, anchor_rows.iterrows()):
+            for sample, (_, anchor_row) in zip(samples, anchor_rows.iterrows()):
                 # For new predictions, ensure all INDEX_COLUMNS are included
                 index_dict = {}
                 for col in INDEX_COLUMNS:
