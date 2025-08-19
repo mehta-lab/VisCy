@@ -16,7 +16,8 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "iohub>=0.2.0b0",
+    "iohub[tensorstore]>=0.2.2rc0",
+    "kornia",
     "torch>=2.4.1",
     "timm>=0.9.5",
     "tensorboard>=2.13.0",
@@ -61,7 +62,6 @@ dev = [
     "pytest-cov",
     "hypothesis",
     "ruff",
-    "profilehooks",
     "onnxruntime",
 ]
 
