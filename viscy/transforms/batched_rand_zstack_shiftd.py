@@ -6,7 +6,7 @@ from typing_extensions import Iterable
 
 class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
     """Batched random Z-axis shifts for 3D microscopy data."""
-    
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -25,16 +25,20 @@ class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
         self.randomize(None)
         d = dict(sample)
-        
+
         for key in self.key_iterator(d):
             data = d[key]
             if self.R.rand() < self.prob:
                 batch_size, channels, depth, height, width = data.shape
-                
+
                 # Generate random shifts for the batch
-                shifts = torch.randint(-self.max_shift, self.max_shift + 1, 
-                                     (batch_size,), device=data.device)
-                
+                shifts = torch.randint(
+                    -self.max_shift,
+                    self.max_shift + 1,
+                    (batch_size,),
+                    device=data.device,
+                )
+
                 # Process samples with shifts
                 result = data.clone()
                 for b in range(batch_size):
@@ -49,7 +53,7 @@ class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
                             shift = -shift
                             result[b, :, :-shift] = data[b, :, shift:]
                             result[b, :, -shift:] = self.cval
-                
+
                 d[key] = result
-        
+
         return d
