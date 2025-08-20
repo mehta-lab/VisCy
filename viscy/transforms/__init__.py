@@ -25,7 +25,9 @@ from viscy.transforms._transforms import (
 from viscy.transforms.batched_rand_3d_elasticd import BatchedRand3DElasticd
 from viscy.transforms.batched_rand_flipd import BatchedRandFlipd
 from viscy.transforms.batched_rand_histogram_shiftd import BatchedRandHistogramShiftd
-from viscy.transforms.batched_rand_local_pixel_shufflingd import BatchedRandLocalPixelShufflingd
+from viscy.transforms.batched_rand_local_pixel_shufflingd import (
+    BatchedRandLocalPixelShufflingd,
+)
 from viscy.transforms.batched_rand_sharpend import BatchedRandSharpend
 from viscy.transforms.batched_rand_zstack_shiftd import BatchedRandZStackShiftd
 
