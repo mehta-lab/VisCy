@@ -7,6 +7,7 @@ import torch.nn.functional as F
 from monai.transforms import (
     NormalizeIntensity,
 )
+from torch.nn import KLDivLoss, MSELoss
 from torchview import draw_graph
 
 from viscy.representation.vae import BetaVae25D, BetaVaeMonai
@@ -15,10 +16,17 @@ from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 def compute_vae_losses(model_output, target, beta=1.0):
     """Compute VAE losses: reconstruction (MSE) and KL divergence.
     """
-    recon_loss = F.mse_loss(model_output.recon_x, target, reduction='mean')
+    mse_loss_fn = MSELoss(reduction='mean')
+    recon_loss = mse_loss_fn(model_output.recon_x, target)
+    
+    # Standard VAE: per-sample, per-dimension KL loss normalization
+    batch_size = target.size(0)
+    latent_dim = model_output.mean.size(1)  # Get latent dimension
+    normalizer = batch_size * latent_dim  # Normalize by both batch size and latent dim
     
     kl_loss = -0.5 * torch.sum(1 + model_output.logvar - model_output.mean.pow(2) - model_output.logvar.exp())
-    kl_loss = kl_loss / model_output.mean.size(0) 
+    print(f"  Debug - KL raw: {kl_loss.item():.6f}, normalizer: {normalizer}, batch_size: {target.size(0)}")
+    kl_loss = kl_loss / normalizer
     
     total_loss = recon_loss + beta * kl_loss
     
@@ -154,7 +162,7 @@ def test_vae_magnitudes():
         print(f"Latent shape: {synthetic_output.z.shape}")
         
         for beta in beta_values:
-            losses = compute_vae_losses(synthetic_output, synthetic_target, beta)
+            losses = compute_vae_losses(model_output=synthetic_output, target=synthetic_target, beta=beta)
             print(f"\nBeta = {beta}:")
             print(f"  Mu shape: {losses['mu'].shape}, mean: {losses['mu'].mean():.6f}, std: {losses['mu'].std():.6f}")
             print(f"  Logvar shape: {losses['logvar'].shape}, mean: {losses['logvar'].mean():.6f}, std: {losses['logvar'].std():.6f}")
@@ -170,7 +178,7 @@ def test_vae_magnitudes():
         # data_path = "/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV"
         # zarr_path = Path(data_path) / "2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr"
         zarr_path = None
-        if not zarr_path.exists() or zarr_path is None:
+        if not zarr_path:
             print(f"Found real data at: {zarr_path}")
             
             normalizations = [
@@ -189,7 +197,7 @@ def test_vae_magnitudes():
             with torch.no_grad():
                 real_output = model(normalized_data)
             
-            losses = compute_vae_losses(real_output, normalized_data, beta=1.0)
+            losses = compute_vae_losses(model_output=real_output, target=normalized_data, beta=1.0)
             print(f"\nPerfect reconstruction test (beta=1.0):")
             print(f"  Reconstruction Loss: {losses['recon_loss']:.6f}")
             print(f"  KL Loss: {losses['kl_loss']:.6f}")
