@@ -42,7 +42,7 @@ class ClassificationModule(LightningModule):
         self.backbone.head.fc = nn.Linear(768, 1)
         self.loss = loss
         self.lr = lr
-        self.example_input_array = example_input_array_shape
+        self.example_input_array = torch.rand(example_input_array_shape)
 
     def forward(self, x):
         x = self.stem(x)
