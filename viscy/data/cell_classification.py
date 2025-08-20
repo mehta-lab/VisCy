@@ -83,7 +83,7 @@ class ClassificationDataModule(LightningDataModule):
         val_fovs: list[str] | None,
         channel_name: str,
         z_range: tuple[int, int],
-        train_exlude_timepoints: list[int],
+        train_exclude_timepoints: list[int],
         train_transforms: list[Callable] | None,
         val_transforms: list[Callable] | None,
         initial_yx_patch_size: tuple[int, int],
@@ -97,7 +97,7 @@ class ClassificationDataModule(LightningDataModule):
         self.val_fovs = val_fovs
         self.channel_name = channel_name
         self.z_range = z_range
-        self.train_exlude_timepoints = train_exlude_timepoints
+        self.train_exclude_timepoints = train_exclude_timepoints
         self.train_transform = Compose(train_transforms)
         self.val_transform = Compose(val_transforms)
         self.initial_yx_patch_size = initial_yx_patch_size
@@ -143,7 +143,7 @@ class ClassificationDataModule(LightningDataModule):
                 annotation,
                 train_fovs,
                 transform=self.train_transform,
-                exclude_timepoints=self.train_exlude_timepoints,
+                exclude_timepoints=self.train_exclude_timepoints,
             )
             self.val_dataset = self._subset(
                 plate,
