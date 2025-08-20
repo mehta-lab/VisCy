@@ -26,7 +26,7 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         self.mode = mode
         self.padding_mode = padding_mode
 
-    def _generate_elastic_field(self, shape: torch.Size) -> Tensor:
+    def _generate_elastic_field(self, shape: torch.Size, device: torch.device) -> Tensor:
         """Generate batched elastic deformation field."""
         batch_size = shape[0]
         spatial_dims = shape[2:]  # Skip batch and channel
@@ -43,7 +43,7 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
                 )
 
                 # Generate random field
-                random_field = torch.randn((3,) + spatial_dims) * magnitude
+                random_field = torch.randn((3,) + spatial_dims, device=device) * magnitude
 
                 # Smooth with Gaussian kernel (simplified version)
                 # In practice, you'd use proper Gaussian smoothing
@@ -52,7 +52,7 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
                     from torch.nn.functional import conv3d
 
                     # Simple box filter approximation
-                    kernel = torch.ones(1, 1, kernel_size, kernel_size, kernel_size) / (
+                    kernel = torch.ones(1, 1, kernel_size, kernel_size, kernel_size, device=device) / (
                         kernel_size**3
                     )
                     for dim in range(3):
@@ -65,7 +65,7 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
                 displacement_fields.append(random_field)
             else:
                 # No deformation
-                displacement_fields.append(torch.zeros((3,) + spatial_dims))
+                displacement_fields.append(torch.zeros((3,) + spatial_dims, device=device))
 
         return torch.stack(displacement_fields)
 
@@ -77,13 +77,13 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
             data = d[key]
             if self.R.rand() < self.prob:
                 # Apply elastic deformation using grid_sample
-                displacement = self._generate_elastic_field(data.shape)
+                displacement = self._generate_elastic_field(data.shape, data.device)
 
                 # Create sampling grid
                 coords = torch.meshgrid(
-                    torch.linspace(-1, 1, data.shape[2]),
-                    torch.linspace(-1, 1, data.shape[3]),
-                    torch.linspace(-1, 1, data.shape[4]),
+                    torch.linspace(-1, 1, data.shape[2], device=data.device),
+                    torch.linspace(-1, 1, data.shape[3], device=data.device),
+                    torch.linspace(-1, 1, data.shape[4], device=data.device),
                     indexing="ij",
                 )
                 grid = torch.stack(
