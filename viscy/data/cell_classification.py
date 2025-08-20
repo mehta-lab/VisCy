@@ -23,6 +23,7 @@ class ClassificationDataset(Dataset):
         transform: Callable | None,
         initial_yx_patch_size: tuple[int, int],
         return_indices: bool = False,
+        label_column: str = "infection_state"
     ):
         self.plate = plate
         self.z_range = z_range
@@ -42,6 +43,7 @@ class ClassificationDataset(Dataset):
             annotation["y"].between(*y_range, inclusive="neither")
             & annotation["x"].between(*x_range, inclusive="neither")
         ]
+        self.label_column = label_column
 
     def __len__(self):
         return len(self.annotation)
@@ -66,7 +68,7 @@ class ClassificationDataset(Dataset):
         img = (image - norm_meta["mean"]) / norm_meta["std"]
         if self.transform is not None:
             img = self.transform(img)
-        label = torch.tensor(row["infection_state"]).float()[None]
+        label = torch.tensor(row[self.label_column]).float()[None]
         if self.return_indices:
             return img, label, row[INDEX_COLUMNS].to_dict()
         else:
@@ -87,6 +89,7 @@ class ClassificationDataModule(LightningDataModule):
         initial_yx_patch_size: tuple[int, int],
         batch_size: int,
         num_workers: int,
+        label_column: str = "infection_state"
     ):
         super().__init__()
         self.image_path = image_path
@@ -100,6 +103,7 @@ class ClassificationDataModule(LightningDataModule):
         self.initial_yx_patch_size = initial_yx_patch_size
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.label_column = label_column
 
     def _subset(
         self,
@@ -121,6 +125,7 @@ class ClassificationDataModule(LightningDataModule):
             transform=transform,
             initial_yx_patch_size=self.initial_yx_patch_size,
             return_indices=return_indices,
+            label_column=self.label_column,
         )
 
     def setup(self, stage=None):
