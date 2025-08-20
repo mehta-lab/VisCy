@@ -34,6 +34,7 @@ class ClassificationModule(LightningModule):
         encoder: ContrastiveEncoder,
         lr: float | None,
         loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
+        example_input_array_shape=(2, 1, 15, 160, 160),
     ):
         super().__init__()
         self.stem = encoder.stem
@@ -41,7 +42,7 @@ class ClassificationModule(LightningModule):
         self.backbone.head.fc = nn.Linear(768, 1)
         self.loss = loss
         self.lr = lr
-        self.example_input_array = torch.rand(2, 1, 15, 160, 160)
+        self.example_input_array = example_input_array_shape
 
     def forward(self, x):
         x = self.stem(x)
