@@ -125,8 +125,10 @@ class ClassificationDataModule(LightningDataModule):
 
     def setup(self, stage=None):
         plate = open_ome_zarr(self.image_path)
-        all_fovs = ["/" + name for (name, _) in plate.positions()]
         annotation = pd.read_csv(self.annotation_path)
+        all_fovs = [name for (name, _) in plate.positions()]
+        if annotation["fov_name"].iloc[0].startswith("/"):
+            all_fovs = ["/" + name for name in all_fovs]
         for column in ("t", "y", "x"):
             annotation[column] = annotation[column].astype(int)
         if stage in (None, "fit", "validate"):
