@@ -1,3 +1,4 @@
+from viscy.transforms._decollate import Decollate
 from viscy.transforms._redef import (
     CenterSpatialCropd,
     Decollated,
@@ -28,6 +29,7 @@ __all__ = [
     "BatchedScaleIntensityRangePercentilesd",
     "BatchedZoom",
     "CenterSpatialCropd",
+    "Decollate",
     "Decollated",
     "NormalizeSampled",
     "RandAdjustContrastd",
