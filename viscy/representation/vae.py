@@ -365,7 +365,7 @@ class BetaVaeMonai(nn.Module):
         up_kernel_size: Sequence[int] | int = 3,
         num_res_units: int = 0,
         use_sigmoid: bool = False,
-        norm: str= Norm.BATCH,
+        norm: Literal[Norm.BATCH, Norm.INSTANCE] = Norm.INSTANCE,
         **kwargs
         ):
         super().__init__()
@@ -380,6 +380,7 @@ class BetaVaeMonai(nn.Module):
         self.up_kernel_size = up_kernel_size
         self.num_res_units = num_res_units
         self.use_sigmoid = use_sigmoid
+        self.norm = norm
         
         self.model = VarAutoEncoder(
             spatial_dims=self.spatial_dims,
@@ -392,6 +393,7 @@ class BetaVaeMonai(nn.Module):
             up_kernel_size=self.up_kernel_size,
             num_res_units=self.num_res_units,
             use_sigmoid=self.use_sigmoid,
+            norm=self.norm,
             **kwargs
         )
 
