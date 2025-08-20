@@ -34,7 +34,7 @@ class ClassificationModule(LightningModule):
         encoder: ContrastiveEncoder,
         lr: float | None,
         loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
-        example_input_array_shape=(2, 1, 15, 160, 160),
+        example_input_array_shape: tuple[int, ...] = (2, 1, 15, 160, 160),
     ):
         super().__init__()
         self.stem = encoder.stem
