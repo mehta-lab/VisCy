@@ -23,7 +23,7 @@ class ClassificationDataset(Dataset):
         transform: Callable | None,
         initial_yx_patch_size: tuple[int, int],
         return_indices: bool = False,
-        label_column: str = "infection_state"
+        label_column: str = "infection_state",
     ):
         self.plate = plate
         self.z_range = z_range
@@ -89,7 +89,7 @@ class ClassificationDataModule(LightningDataModule):
         initial_yx_patch_size: tuple[int, int],
         batch_size: int,
         num_workers: int,
-        label_column: str = "infection_state"
+        label_column: str = "infection_state",
     ):
         super().__init__()
         self.image_path = image_path
