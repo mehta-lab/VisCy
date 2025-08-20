@@ -1,8 +1,8 @@
+import torch
+import torch.nn.functional as F
 from monai.transforms import MapTransform, RandomizableTransform
 from torch import Tensor
 from typing_extensions import Iterable
-import torch
-import torch.nn.functional as F
 
 
 class BatchedRandSharpend(MapTransform, RandomizableTransform):

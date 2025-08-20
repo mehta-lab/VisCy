@@ -1,7 +1,6 @@
+import torch
 from monai.transforms import MapTransform, RandomizableTransform
 from torch import Tensor
-from typing_extensions import Iterable
-import torch
 
 
 class BatchedRandFlipd(MapTransform, RandomizableTransform):
