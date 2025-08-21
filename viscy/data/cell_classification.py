@@ -134,6 +134,12 @@ class ClassificationDataModule(LightningDataModule):
         all_fovs = [name for (name, _) in plate.positions()]
         if annotation["fov_name"].iloc[0].startswith("/"):
             all_fovs = ["/" + name for name in all_fovs]
+        if all_fovs[0].startswith("/"):
+            if not self.val_fovs[0].startswith("/"):
+                self.val_fovs = ["/" + name for name in self.val_fovs]
+        else:
+            if self.val_fovs[0].startswith("/"):
+                self.val_fovs = [name[1:] for name in self.val_fovs]
         for column in ("t", "y", "x"):
             annotation[column] = annotation[column].astype(int)
         if stage in (None, "fit", "validate"):
