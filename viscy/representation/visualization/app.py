@@ -1,6 +1,7 @@
 import atexit
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Union
 
@@ -79,6 +80,11 @@ class EmbeddingVisualizationApp:
         # Store datasets for per-dataset access
         self.datasets = viz_config.get_datasets()
         self._DEFAULT_MARKER_SIZE = 15
+        
+        # Debouncing for dropdown updates
+        # TODO: check if this hack works for plotting to be successful
+        self._last_update_time = 0
+        self._debounce_delay = 0.3  # 300ms debounce delay
 
         # Initialize data
         self._prepare_data()
@@ -719,6 +725,8 @@ class EmbeddingVisualizationApp:
             ],
             [dd.State("scatter-plot", "figure")],
             prevent_initial_call=True,
+            # Add debouncing to prevent rapid successive updates
+            config={"suppress_callback_exceptions": True},
         )
         def update_figure(
             color_mode,
@@ -729,7 +737,17 @@ class EmbeddingVisualizationApp:
             selected_data,
             current_figure,
         ):
+            # Input validation
+            if not color_mode:
+                color_mode = "track"
             show_arrows = len(show_arrows or []) > 0
+            
+            # Validate axis values exist in available options
+            valid_axis_values = [opt["value"] for opt in self.dim_options]
+            if not x_axis or x_axis not in valid_axis_values:
+                x_axis = self.default_x
+            if not y_axis or y_axis not in valid_axis_values:
+                y_axis = self.default_y
 
             ctx = dash.callback_context
             if not ctx.triggered:
@@ -737,12 +755,20 @@ class EmbeddingVisualizationApp:
             else:
                 triggered_id = ctx.triggered[0]["prop_id"].split(".")[0]
 
-            # Create new figure when necessary
+            # Debouncing for axis changes to prevent rapid successive updates
+            current_time = time.time()
+            if triggered_id in ["x-axis", "y-axis"]:
+                if current_time - self._last_update_time < self._debounce_delay:
+                    return dash.no_update, selected_data
+                self._last_update_time = current_time
+
+            # Always create new figure when control inputs change (remove dependency on callback context)
             if triggered_id in [
                 "color-mode",
-                "show-arrows",
+                "show-arrows", 
                 "x-axis",
                 "y-axis",
+                "No clicks yet"
             ]:
                 if color_mode == "track":
                     fig = self._create_track_colored_figure(show_arrows, x_axis, y_axis)
