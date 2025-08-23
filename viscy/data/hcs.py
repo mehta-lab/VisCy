@@ -142,6 +142,12 @@ class SlidingWindowDataset(Dataset):
             img_arr: ImageArray = fov["0"]
             ts = img_arr.frames
             zs = img_arr.slices - self.z_window_size + 1
+            if zs < 1:
+                raise IndexError(
+                    f"Z window size {self.z_window_size} "
+                    f"is larger than the number of Z slices ({img_arr.slices}) "
+                    f"for FOV {fov.name}."
+                )
             w += ts * zs
             self.window_keys.append(w)
             self.window_arrays.append(img_arr)
@@ -340,6 +346,7 @@ class HCSDataModule(LightningDataModule):
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
         prefetch_factor=None,
+        pin_memory=False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -358,6 +365,7 @@ class HCSDataModule(LightningDataModule):
         self.prepare_data_per_node = True
         self.persistent_workers = persistent_workers
         self.prefetch_factor = prefetch_factor
+        self.pin_memory = pin_memory
 
     @property
     def cache_path(self):
@@ -543,6 +551,7 @@ class HCSDataModule(LightningDataModule):
             persistent_workers=self.persistent_workers,
             collate_fn=_collate_samples,
             drop_last=True,
+            pin_memory=self.pin_memory,
         )
 
     def val_dataloader(self):
@@ -553,6 +562,7 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
             persistent_workers=self.persistent_workers,
+            pin_memory=self.pin_memory,
         )
 
     def test_dataloader(self):

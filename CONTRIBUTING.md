@@ -12,16 +12,11 @@ pip install -e ".[dev]"
 
 ## CI requirements
 
-Lint with Ruff:
+Lint and format with Ruff:
 
 ```sh
 ruff check viscy
-```
-
-Format the code with Black:
-
-```sh
-black viscy
+ruff format viscy tests
 ```
 
 Run tests with `pytest`:

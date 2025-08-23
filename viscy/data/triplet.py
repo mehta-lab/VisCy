@@ -2,37 +2,56 @@ import logging
 from pathlib import Path
 from typing import Literal, Sequence
 
+import numpy as np
 import pandas as pd
+import tensorstore as ts
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
-from monai.transforms import Compose, MapTransform
+from monai.data import ThreadDataLoader
+from monai.data.utils import collate_meta_tensor
+from monai.transforms import Compose, MapTransform, ToDeviced
 from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
+from viscy.data.select import _filter_fovs, _filter_wells
 from viscy.data.typing import DictTransform, NormMeta, TripletSample
 
 _logger = logging.getLogger("lightning.pytorch")
 
-INDEX_COLUMNS = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
+INDEX_COLUMNS = [
+    "fov_name",
+    "track_id",
+    "t",
+    "id",
+    "parent_track_id",
+    "parent_id",
+    "z",
+    "y",
+    "x",
+]
 
 
 def _scatter_channels(
     channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
 ) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
-    channels = {name: data[None] for name, data in zip(channel_names, patch)}
+    channels = {
+        name: patch[:, c : c + 1]
+        for name, c in zip(channel_names, range(patch.shape[1]))
+    }
     if norm_meta is not None:
-        channels |= {"norm_meta": norm_meta}
+        channels["norm_meta"] = collate_meta_tensor(norm_meta)
     return channels
 
 
-def _gather_channels(patch_channels: dict[str, Tensor | NormMeta]) -> Tensor:
-    """
-    :param dict[str, Tensor | NormMeta] patch_channels: dictionary of single-channel tensors
-    :return Tensor: Multi-channel tensor
-    """
-    patch_channels.pop("norm_meta", None)
-    return torch.cat(list(patch_channels.values()), dim=0)
+def _gather_channels(
+    patch_channels: list[dict[str, Tensor | NormMeta]],
+) -> list[Tensor]:
+    samples = []
+    for sample in patch_channels:
+        sample.pop("norm_meta", None)
+        samples.append(torch.cat(list(sample.values()), dim=0))
+    return samples
 
 
 def _transform_channel_wise(
@@ -40,10 +59,10 @@ def _transform_channel_wise(
     channel_names: list[str],
     patch: Tensor,
     norm_meta: NormMeta | None,
-) -> Tensor:
-    return _gather_channels(
-        transform(_scatter_channels(channel_names, patch, norm_meta))
-    )
+) -> list[Tensor]:
+    scattered_channels = _scatter_channels(channel_names, patch, norm_meta)
+    transformed_channels = transform(scattered_channels)
+    return _gather_channels(transformed_channels)
 
 
 class TripletDataset(Dataset):
@@ -98,6 +117,10 @@ class TripletDataset(Dataset):
             by default "any"
             (sample negative from another track any time point
             and use the augmented anchor patch as positive)
+        return_negative : bool, optional
+            Whether to return the negative sample during the fit stage
+            (can be set to False when using a loss function like NT-Xent),
+            by default True
         """
         self.positions = positions
         self.channel_names = channel_names
@@ -183,14 +206,11 @@ class TripletDataset(Dataset):
     def __len__(self) -> int:
         return len(self.valid_anchors)
 
-    def _sample_positive(self, anchor_row: pd.Series) -> pd.Series:
+    def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
         """Select a positive sample from the same track in the next time point."""
-        same_track = self.tracks[
-            (self.tracks["global_track_id"] == anchor_row["global_track_id"])
-        ]
-        return same_track[
-            same_track["t"] == (anchor_row["t"] + self.time_interval)
-        ].iloc[0]
+        query = anchor_rows[["global_track_id", "t"]].copy()
+        query["t"] += self.time_interval
+        return query.merge(self.tracks, on=["global_track_id", "t"], how="inner")
 
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
         """Select a negative sample from a different track in the next time point
@@ -211,9 +231,17 @@ class TripletDataset(Dataset):
         # reproducibility relies on setting a global seed for numpy
         return candidates.sample(n=1).iloc[0]
 
-    def _slice_patch(self, track_row: pd.Series) -> tuple[Tensor, NormMeta | None]:
+    def _sample_negatives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
+        return pd.concat(
+            [self._sample_negative(row) for _, row in anchor_rows.iterrows()],
+            axis=1,
+        )
+
+    def _slice_patch(
+        self, track_row: pd.Series
+    ) -> tuple[ts.TensorStore, NormMeta | None]:
         position: Position = track_row["position"]
-        image = position["0"]
+        image = position["0"].tensorstore()
         time = track_row["t"]
         y_center = track_row["y"]
         x_center = track_row["x"]
@@ -225,51 +253,74 @@ class TripletDataset(Dataset):
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
         ]
-        return torch.from_numpy(patch), _read_norm_meta(position)
+        return patch, _read_norm_meta(position)
 
-    def __getitem__(self, index: int) -> TripletSample:
-        anchor_row = self.valid_anchors.iloc[index]
-        anchor_patch, anchor_norm = self._slice_patch(anchor_row)
+    def _slice_patches(self, track_rows: pd.DataFrame):
+        patches = []
+        norms = []
+        with ts.Batch() as batch:
+            for _, row in track_rows.iterrows():
+                patch, norm = self._slice_patch(row)
+                patches.append(patch.read(batch=batch))
+                norms.append(norm)
+        results = [p.result() for p in patches]
+        return torch.from_numpy(np.stack(results, axis=0)), norms
+
+    def __getitems__(self, indices: list[int]) -> list[TripletSample]:
+        anchor_rows = self.valid_anchors.iloc[indices]
+        anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
         if self.fit:
             if self.time_interval == "any":
-                positive_patch = anchor_patch.clone()
-                positive_norm = anchor_norm
+                positive_patches = anchor_patches.clone()
+                positive_norms = anchor_norms
             else:
-                positive_row = self._sample_positive(anchor_row)
-                positive_patch, positive_norm = self._slice_patch(positive_row)
+                positive_rows = self._sample_positives(anchor_rows)
+                positive_patches, positive_norms = self._slice_patches(positive_rows)
             if self.positive_transform:
-                positive_patch = _transform_channel_wise(
+                positive_patches = _transform_channel_wise(
                     transform=self.positive_transform,
                     channel_names=self.channel_names,
-                    patch=positive_patch,
-                    norm_meta=positive_norm,
+                    patch=positive_patches,
+                    norm_meta=positive_norms,
                 )
             if self.return_negative:
-                negative_row = self._sample_negative(anchor_row)
-                negative_patch, negative_norm = self._slice_patch(negative_row)
+                negative_rows = self._sample_negatives(anchor_rows)
+                negative_patches, negative_norms = self._slice_patches(negative_rows)
                 if self.negative_transform:
-                    negative_patch = _transform_channel_wise(
+                    negative_patches = _transform_channel_wise(
                         transform=self.negative_transform,
                         channel_names=self.channel_names,
-                        patch=negative_patch,
-                        norm_meta=negative_norm,
+                        patch=negative_patches,
+                        norm_meta=negative_norms,
                     )
         if self.anchor_transform:
-            anchor_patch = _transform_channel_wise(
+            anchor_patches = _transform_channel_wise(
                 transform=self.anchor_transform,
                 channel_names=self.channel_names,
-                patch=anchor_patch,
-                norm_meta=anchor_norm,
+                patch=anchor_patches,
+                norm_meta=anchor_norms,
             )
-        sample = {"anchor": anchor_patch}
+        samples: list[TripletSample] = [
+            {"anchor": anchor_patch} for anchor_patch in anchor_patches
+        ]
         if self.fit:
+            for sample, positive_patch in zip(samples, positive_patches):
+                sample["positive"] = positive_patch
             if self.return_negative:
-                sample.update({"positive": positive_patch, "negative": negative_patch})
-            else:
-                sample.update({"positive": positive_patch})
+                for sample, negative_patch in zip(samples, negative_patches):
+                    sample["negative"] = negative_patch
         else:
-            sample.update({"index": anchor_row[INDEX_COLUMNS].to_dict()})
-        return sample
+            for sample, (_, anchor_row) in zip(samples, anchor_rows.iterrows()):
+                # For new predictions, ensure all INDEX_COLUMNS are included
+                index_dict = {}
+                for col in INDEX_COLUMNS:
+                    if col in anchor_row.index:
+                        index_dict[col] = anchor_row[col]
+                    elif col not in ["y", "x", "z"]:
+                        # Skip y and x for legacy data - they weren't part of INDEX_COLUMNS
+                        raise KeyError(f"Required column '{col}' not found in data")
+                sample["index"] = index_dict
+        return samples
 
 
 class TripletDataModule(HCSDataModule):
@@ -287,10 +338,17 @@ class TripletDataModule(HCSDataModule):
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
+        fit_include_wells: list[str] | None = None,
+        fit_exclude_fovs: list[str] | None = None,
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
+        return_negative: bool = True,
+        persistent_workers: bool = False,
+        prefetch_factor: int | None = None,
+        pin_memory: bool = False,
+        z_window_size: int | None = None,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -320,6 +378,10 @@ class TripletDataModule(HCSDataModule):
             Augmentation transforms, by default []
         caching : bool, optional
             Whether to cache the dataset, by default False
+        fit_include_wells : list[str], optional
+            Only include these wells for fitting, by default None
+        fit_exclude_fovs : list[str], optional
+            Exclude these FOVs for fitting, by default None
         predict_cells : bool, optional
             Only predict for selected cells, by default False
         include_fov_names : list[str] | None, optional
@@ -330,12 +392,24 @@ class TripletDataModule(HCSDataModule):
             Future time interval to sample positive and anchor from,
             "any" means sampling negative from another track any time point
             and using the augmented anchor patch as positive), by default "any"
+        return_negative : bool, optional
+            Whether to return the negative sample during the fit stage
+            (can be set to False when using a loss function like NT-Xent),
+            by default True
+        persistent_workers : bool, optional
+            Whether to keep worker processes alive between iterations, by default False
+        prefetch_factor : int | None, optional
+            Number of batches loaded in advance by each worker, by default None
+        pin_memory : bool, optional
+            Whether to pin memory in CPU for faster GPU transfer, by default False
+        z_window_size : int, optional
+            Size of the final Z window, by default None (inferred from z_range)
         """
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
             target_channel=[],
-            z_window_size=z_range[1] - z_range[0],
+            z_window_size=z_window_size or z_range[1] - z_range[0],
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
@@ -344,14 +418,20 @@ class TripletDataModule(HCSDataModule):
             normalizations=normalizations,
             augmentations=augmentations,
             caching=caching,
+            persistent_workers=persistent_workers,
+            prefetch_factor=prefetch_factor,
+            pin_memory=pin_memory,
         )
         self.z_range = slice(*z_range)
         self.tracks_path = Path(tracks_path)
         self.initial_yx_patch_size = initial_yx_patch_size
+        self._include_wells = fit_include_wells
+        self._exclude_fovs = fit_exclude_fovs
         self.predict_cells = predict_cells
         self.include_fov_names = include_fov_names
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
+        self.return_negative = return_negative
 
     def _align_tracks_tables_with_positions(
         self,
@@ -367,12 +447,13 @@ class TripletDataModule(HCSDataModule):
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
-        for fov_name, _ in open_ome_zarr(self.tracks_path).positions():
-            positions.append(images_plate[fov_name])
-            tracks_df = pd.read_csv(
-                next((self.tracks_path / fov_name).glob("*.csv"))
-            ).astype(int)
-            tracks_tables.append(tracks_df)
+        for well in _filter_wells(images_plate, include_wells=self._include_wells):
+            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
+                positions.append(fov)
+                tracks_df = pd.read_csv(
+                    next((self.tracks_path / fov.zgroup.name.strip("/")).glob("*.csv"))
+                ).astype(int)
+                tracks_tables.append(tracks_df)
 
         return positions, tracks_tables
 
@@ -384,7 +465,16 @@ class TripletDataModule(HCSDataModule):
             "time_interval": self.time_interval,
         }
 
+    def _update_to_device_transform(self):
+        "Make sure that GPU transforms are set to the current device."
+        for transform in self.normalizations + self.augmentations:
+            if isinstance(transform, ToDeviced):
+                transform.converter.device = torch.device(
+                    f"cuda:{torch.cuda.current_device()}"
+                )
+
     def _setup_fit(self, dataset_settings: dict):
+        self._update_to_device_transform()
         augment_transform, no_aug_transform = self._fit_transform()
         positions, tracks_tables = self._align_tracks_tables_with_positions()
         shuffled_indices = self._set_fit_global_state(len(positions))
@@ -411,6 +501,7 @@ class TripletDataModule(HCSDataModule):
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
+            return_negative=self.return_negative,
             **dataset_settings,
         )
 
@@ -422,6 +513,7 @@ class TripletDataModule(HCSDataModule):
             positive_transform=augment_transform,
             negative_transform=augment_transform,
             fit=True,
+            return_negative=self.return_negative,
             **dataset_settings,
         )
 
@@ -442,3 +534,42 @@ class TripletDataModule(HCSDataModule):
 
     def _setup_test(self, *args, **kwargs):
         raise NotImplementedError("Self-supervised model does not support testing")
+
+    def train_dataloader(self):
+        return ThreadDataLoader(
+            self.train_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=True,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
+            drop_last=True,
+            pin_memory=self.pin_memory,
+        )
+
+    def val_dataloader(self):
+        return ThreadDataLoader(
+            self.val_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+        )
+
+    def predict_dataloader(self):
+        return ThreadDataLoader(
+            self.predict_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            num_workers=self.num_workers,
+            shuffle=False,
+            prefetch_factor=self.prefetch_factor if self.num_workers else None,
+            persistent_workers=self.persistent_workers,
+            drop_last=False,
+            pin_memory=self.pin_memory,
+        )

@@ -8,13 +8,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: psf/black@stable
+      - uses: astral-sh/ruff-action@v3
         with:
-          src: "viscy"
-          options: "--check --verbose"
-      - uses: chartboost/ruff-action@v1
-        with:
-          src: "viscy"
+          src: viscy
+          args: check --verbose
+      - run: ruff format --check viscy tests
 
   test:
     name: Test
@@ -22,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        python-version: ["3.10", "3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v3
       - uses: actions/setup-python@v4

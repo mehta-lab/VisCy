@@ -1,12 +1,14 @@
 import logging
 import os
-from typing import Literal, Sequence, Union
+import random
+from typing import Callable, Literal, Sequence, Union
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from imageio import imwrite
 from lightning.pytorch import LightningModule
+from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
@@ -14,7 +16,6 @@ from torch.optim.lr_scheduler import ConstantLR
 from torchmetrics.functional import (
     accuracy,
     cosine_similarity,
-    dice,
     jaccard_index,
     mean_absolute_error,
     mean_squared_error,
@@ -22,7 +23,10 @@ from torchmetrics.functional import (
     r2_score,
     structural_similarity_index_measure,
 )
+from torchmetrics.functional.segmentation import dice_score
 
+from viscy.data.combined import CombinedDataModule
+from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.typing import Sample
 from viscy.translation.evaluation_metrics import mean_average_precision, ms_ssim_25d
 from viscy.unet.networks.fcmae import FullyConvolutionalMAE
@@ -30,12 +34,6 @@ from viscy.unet.networks.Unet2D import Unet2d
 from viscy.unet.networks.Unet25D import Unet25d
 from viscy.unet.networks.unext2 import UNeXt2
 from viscy.utils.log_images import detach_sample, render_images
-
-try:
-    from cellpose.models import CellposeModel
-except ImportError:
-    CellposeModel = None
-
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -85,6 +83,13 @@ class MixedLoss(nn.Module):
         return loss
 
 
+class MaskedMSELoss(nn.Module):
+    def forward(self, preds, original, mask):
+        loss = F.mse_loss(preds, original, reduction="none")
+        loss = (loss.mean(2) * mask).sum() / mask.sum()
+        return loss
+
+
 class VSUNet(LightningModule):
     """Regression U-Net module for virtual staining.
 
@@ -98,7 +103,7 @@ class VSUNet(LightningModule):
     :param float lr: learning rate in training, defaults to 1e-3
     :param Literal['WarmupCosine', 'Constant'] schedule:
         learning rate scheduler, defaults to "Constant"
-    :param str chkpt_path: path to the checkpoint to load weights, defaults to None
+    :param str ckpt_path: path to the checkpoint to load weights, defaults to None
     :param int log_batches_per_epoch:
         number of batches to log each training/validation epoch,
         has to be smaller than steps per epoch, defaults to 8
@@ -308,8 +313,15 @@ class VSUNet(LightningModule):
                     if compute
                     else -1
                 ),
-                "test_metrics/dice": (
-                    dice(pred_binary, target_binary) if compute else -1
+                "test_metrics/dice_score": (
+                    dice_score(
+                        pred_binary.long(),
+                        target_binary.long(),
+                        num_classes=2,
+                        input_format="index",
+                    )
+                    if compute
+                    else -1
                 ),
                 "test_metrics/jaccard": (
                     jaccard_index(pred_binary, target_binary, task="binary")
@@ -365,7 +377,8 @@ class VSUNet(LightningModule):
         elif self.tta_type == "median":
             prediction = torch.stack(predictions).median(dim=0).values
         elif self.tta_type == "product":
-            # Perform multiplication of predictions in logarithmic space for numerical stability adding epsion to avoid log(0) case
+            # Perform multiplication of predictions in logarithmic space
+            # for numerical stability adding epsilon to avoid log(0) case
             log_predictions = torch.stack([torch.log(p + 1e-9) for p in predictions])
             log_prediction_sum = log_predictions.sum(dim=0)
             prediction = torch.exp(log_prediction_sum)
@@ -390,22 +403,19 @@ class VSUNet(LightningModule):
 
     def on_test_start(self):
         """Load CellPose model for segmentation."""
-        if CellposeModel is None:
-            # raise ImportError(
-            #     "CellPose not installed. "
-            #     "Please install the metrics dependency with "
-            #     '`pip install viscy".[metrics]"`'
-            # )
-            _logger.warning(
-                "CellPose not installed. "
-                "Please install the metrics dependency with "
-                '`pip install viscy"[metrics]"`'
-            )
-
         if self.test_cellpose_model_path is not None:
-            self.cellpose_model = CellposeModel(
-                model_type=self.test_cellpose_model_path, device=self.device
-            )
+            try:
+                from cellpose.models import CellposeModel
+
+                self.cellpose_model = CellposeModel(
+                    model_type=self.test_cellpose_model_path, device=self.device
+                )
+            except ImportError:
+                raise ImportError(
+                    "CellPose not installed. "
+                    "Please install the metrics dependency with "
+                    '`pip install viscy"[metrics]"`'
+                )
 
     def on_predict_start(self):
         """Pad the input shape to be divisible by the downsampling factor.
@@ -466,64 +476,210 @@ class VSUNet(LightningModule):
         return cropped_tensor
 
 
+class AugmentedPredictionVSUNet(LightningModule):
+    """Apply arbitrary collection of test-time augmentations
+    for image translation prediction.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The model to be used for prediction.
+    forward_transforms : list[Callable[[Tensor], Tensor]]
+        A collection of transforms to apply to the input image before passing it to the model.
+        Each one is applied independently.
+        For example, resizing the input to match the expected voxel size of the model.
+    inverse_transforms : list[Callable[[Tensor], Tensor]]
+        Inverse transforms to apply to the model output before reduction.
+        They should be the inverse of each forward transform.
+        For example, resizing the output to match the original input shape for storage.
+    reduction : Literal["mean", "median"], optional
+        The reduction method to apply to the predictions, by default "mean"
+
+    Notes
+    -----
+    Given sample tensor ``x``,
+    model instance ``model()``,
+    a list of forward transforms ``[f1(), f2()]``,
+    a list of inverse transforms ``[i1(), i2()]``,
+    and reduction method ``reduce()``,
+    the prediction is computed as follows:
+
+        prediction = reduce(
+            [
+                i1(model(f1(x))),
+                i2(model(f2(x))),
+            ]
+        )
+    """
+
+    def __init__(
+        self,
+        model: nn.Module,
+        forward_transforms: list[Callable[[Tensor], Tensor]],
+        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        reduction: Literal["mean", "median"] = "mean",
+    ) -> None:
+        super().__init__()
+        down_factor = 2**model.num_blocks
+        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        self.model = model
+        self._forward_transforms = forward_transforms
+        self._inverse_transforms = inverse_transforms
+        self._reduction = reduction
+
+    def forward(self, x: Tensor) -> Tensor:
+        return self.model(x)
+
+    def setup(self, stage: str) -> None:
+        if stage != "predict":
+            raise NotImplementedError(
+                f"Only the 'predict' stage is supported by {type(self)}"
+            )
+
+    def _reduce_predictions(self, preds: list[Tensor]) -> Tensor:
+        prediction = torch.stack(preds, dim=0)
+        if self._reduction == "mean":
+            prediction = prediction.mean(dim=0)
+        elif self._reduction == "median":
+            prediction = prediction.median(dim=0).values
+        return prediction
+
+    def predict_step(
+        self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
+    ) -> Tensor:
+        source = batch["source"]
+        preds = []
+        for forward_t, inverse_t in zip(
+            self._forward_transforms, self._inverse_transforms
+        ):
+            source = forward_t(source)
+            source = self._predict_pad(source)
+            pred = self.forward(source)
+            pred = self._predict_pad.inverse(pred)
+            pred = inverse_t(pred)
+            preds.append(pred)
+        if len(preds) == 1:
+            prediction = preds[0]
+        else:
+            prediction = self._reduce_predictions(preds)
+        return prediction
+
+
 class FcmaeUNet(VSUNet):
-    def __init__(self, fit_mask_ratio: float = 0.0, **kwargs):
+    def __init__(
+        self,
+        fit_mask_ratio: float = 0.0,
+        **kwargs,
+    ):
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
+        self.save_hyperparameters(ignore=["loss_function"])
+
+    def on_fit_start(self):
+        dm = self.trainer.datamodule
+        if not isinstance(dm, CombinedDataModule):
+            raise ValueError(
+                f"Container data module type {type(dm)} "
+                "is not supported for FCMAE training"
+            )
+        for subdm in dm.data_modules:
+            if not isinstance(subdm, GPUTransformDataModule):
+                raise ValueError(
+                    f"Member data module type {type(subdm)} "
+                    "is not supported for FCMAE training"
+                )
+        self.datamodules = dm.data_modules
+        if self.model.pretraining and not isinstance(self.loss_function, MaskedMSELoss):
+            raise ValueError(
+                "MaskedMSELoss is required for FCMAE pre-training, "
+                f"got {type(self.loss_function)}"
+            )
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0):
         return self.model(x, mask_ratio)
 
-    def forward_fit(self, batch: Sample) -> tuple[Tensor]:
-        source = batch["source"]
-        target = batch["target"]
-        pred, mask = self.forward(source, mask_ratio=self.fit_mask_ratio)
-        loss = F.mse_loss(pred, target, reduction="none")
-        loss = (loss.mean(2) * mask).sum() / mask.sum()
-        return source, target, pred, mask, loss
+    def forward_fit_fcmae(
+        self, batch: Sample, return_target: bool = False
+    ) -> tuple[Tensor, Tensor | None, Tensor]:
+        x = batch["source"]
+        pred, mask = self.forward(x, mask_ratio=self.fit_mask_ratio)
+        loss = self.loss_function(pred, x, mask)
+        if return_target:
+            target = x * mask.unsqueeze(2)
+        else:
+            target = None
+        return pred, target, loss
 
-    def training_step(self, batch: Sequence[Sample], batch_idx: int):
-        losses = []
-        batch_size = 0
-        for b in batch:
-            source, target, pred, mask, loss = self.forward_fit(b)
-            losses.append(loss)
-            batch_size += source.shape[0]
+    def forward_fit_supervised(self, batch: Sample) -> tuple[Tensor, Tensor, Tensor]:
+        x = batch["source"]
+        target = batch["target"]
+        pred = self.forward(x)
+        loss = self.loss_function(pred, target)
+        return pred, target, loss
+
+    def forward_fit_task(
+        self, batch: Sample, batch_idx: int
+    ) -> tuple[Tensor, Tensor | None, Tensor]:
+        if self.model.pretraining:
             if batch_idx < self.log_batches_per_epoch:
-                self.training_step_outputs.extend(
-                    detach_sample(
-                        (source, target * mask.unsqueeze(2), pred),
-                        self.log_samples_per_batch,
-                    )
+                return_target = True
+            pred, target, loss = self.forward_fit_fcmae(batch, return_target)
+        else:
+            pred, target, loss = self.forward_fit_supervised(batch)
+        return pred, target, loss
+
+    @torch.no_grad()
+    def train_transform_and_collate(self, batch: list[dict[str, Tensor]]) -> Sample:
+        transformed = []
+        for dataset_batch, dm in zip(batch, self.datamodules):
+            dataset_batch = dm.train_gpu_transforms(dataset_batch)
+            transformed.extend(dataset_batch)
+        # shuffle references in place for better logging
+        random.shuffle(transformed)
+        return collate_meta_tensor(transformed)
+
+    @torch.no_grad()
+    def val_transform_and_collate(
+        self, batch: list[Sample], dataloader_idx: int
+    ) -> Tensor:
+        batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
+        return collate_meta_tensor(batch)
+
+    def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+        batch = self.train_transform_and_collate(batch)
+        pred, target, loss = self.forward_fit_task(batch, batch_idx)
+        if batch_idx < self.log_batches_per_epoch:
+            self.training_step_outputs.extend(
+                detach_sample(
+                    (batch["source"], target, pred), self.log_samples_per_batch
                 )
-        loss_step = torch.stack(losses).mean()
+            )
         self.log(
             "loss/train",
-            loss_step.to(self.device),
+            loss.to(self.device),
             on_step=True,
             on_epoch=True,
             prog_bar=True,
             logger=True,
             sync_dist=True,
-            batch_size=batch_size,
+            batch_size=pred.shape[0],
         )
-        return loss_step
+        return loss
 
-    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-        source, target, pred, mask, loss = self.forward_fit(batch)
+    def validation_step(
+        self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        batch = self.val_transform_and_collate(batch, dataloader_idx)
+        pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if dataloader_idx + 1 > len(self.validation_losses):
             self.validation_losses.append([])
         self.validation_losses[dataloader_idx].append(loss.detach())
         self.log(
-            f"loss/val/{dataloader_idx}",
-            loss.to(self.device),
-            sync_dist=True,
-            batch_size=source.shape[0],
+            "loss/val", loss.to(self.device), sync_dist=True, batch_size=pred.shape[0]
         )
         if batch_idx < self.log_batches_per_epoch:
             self.validation_step_outputs.extend(
                 detach_sample(
-                    (source, target * mask.unsqueeze(2), pred),
-                    self.log_samples_per_batch,
+                    (batch["source"], target, pred), self.log_samples_per_batch
                 )
             )

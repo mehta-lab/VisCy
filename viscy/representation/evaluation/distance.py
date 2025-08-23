@@ -1,6 +1,5 @@
 from collections import defaultdict
-from pathlib import Path
-from typing import Dict, List, Literal, Optional, Tuple
+from typing import Literal
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -94,37 +93,35 @@ def calculate_distance_cell(
 def compute_displacement(
     embedding_dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
-    max_delta_t: int = None,
-) -> Dict[int, List[float]]:
-    """Compute displacements between embeddings at different time differences.
+) -> dict[int, list[float]]:
+    """Compute the displacement or mean square displacement (MSD) of embeddings.
 
-    For each time difference τ, computes distances between embeddings of the same cell
-    separated by τ timepoints. Supports multiple distance metrics.
+    For each time difference τ, computes either:
+    - |r(t + τ) - r(t)|² for squared Euclidean (MSD)
+    - cos_sim(r(t + τ), r(t)) for cosine
+    for all particles and initial times t.
 
     Parameters
     ----------
     embedding_dataset : xarray.Dataset
-        Dataset containing embeddings and metadata with the following variables:
-        - features: (N, D) array of embeddings
-        - fov_name: (N,) array of field of view names
-        - track_id: (N,) array of cell track IDs
-        - t: (N,) array of timepoints
-    distance_metric : str, optional
+        Dataset containing embeddings and metadata
+    distance_metric : str
         The metric to use for computing distances between embeddings.
         Valid options are:
-        - "euclidean_squared": Squared Euclidean distance (default)
+        - "euclidean": Euclidean distance (L2 norm)
+        - "euclidean_squared": Squared Euclidean distance (for MSD, default)
         - "cosine": Cosine similarity
-    max_delta_t : int, optional
-        Maximum time difference τ to compute displacements for.
-        If None, uses the maximum possible time difference in the dataset.
+        - "cosine_dissimilarity": 1 - cosine similarity
 
     Returns
     -------
-    Dict[int, List[float]]
-        Dictionary mapping time difference τ to list of displacements.
-        Each displacement value represents the distance between a pair of
-        embeddings from the same cell separated by τ timepoints.
+    dict[int, list[float]]
+        Dictionary mapping τ to list of displacements for all particles and initial times
     """
+    # Get unique tracks efficiently using pandas operations
+    unique_tracks_df = (
+        embedding_dataset[["fov_name", "track_id"]].to_dataframe().drop_duplicates()
+    )
 
     # Get data from dataset
     fov_names = embedding_dataset["fov_name"].values
@@ -132,65 +129,74 @@ def compute_displacement(
     timepoints = embedding_dataset["t"].values
     embeddings = embedding_dataset["features"].values
 
-    # Check if max_delta_t is provided, otherwise use the maximum timepoint
-    if max_delta_t is None:
-        max_delta_t = timepoints.max()
+    # Initialize results dictionary with empty lists
+    displacement_per_tau = defaultdict(list)
 
-    displacement_per_delta_t = defaultdict(list)
-    # Process each sample
-    for i in tqdm(range(len(fov_names)), desc="Processing FOVs"):
-        fov_name = fov_names[i]
-        track_id = track_ids[i]
-        current_time = timepoints[i]
-        current_embedding = embeddings[i].reshape(1, -1)
+    # Process each track
+    for fov_name, track_id in zip(
+        unique_tracks_df["fov_name"], unique_tracks_df["track_id"]
+    ):
+        # Get sorted track data
+        mask = (fov_names == fov_name) & (track_ids == track_id)
+        times = timepoints[mask]
+        track_embeddings = embeddings[mask]
 
-        # Compute displacements for each delta t
-        for delta_t in range(1, max_delta_t + 1):
-            future_time = current_time + delta_t
-            matching_indices = np.where(
-                (fov_names == fov_name)
-                & (track_ids == track_id)
-                & (timepoints == future_time)
-            )[0]
+        # Sort by time
+        time_order = np.argsort(times)
+        times = times[time_order]
+        track_embeddings = track_embeddings[time_order]
 
-            if len(matching_indices) == 1:
-                if distance_metric == "euclidean_squared":
-                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
-                    displacement = np.sum((current_embedding - future_embedding) ** 2)
-                elif distance_metric == "cosine":
-                    future_embedding = embeddings[matching_indices[0]].reshape(1, -1)
-                    displacement = cosine_similarity(
-                        current_embedding, future_embedding
+        # Process each time point
+        for t_idx, t in enumerate(times[:-1]):
+            current_embedding = track_embeddings[t_idx]
+
+            # Check all possible future time points
+            for future_idx, future_time in enumerate(
+                times[t_idx + 1 :], start=t_idx + 1
+            ):
+                tau = future_time - t
+                future_embedding = track_embeddings[future_idx]
+
+                if distance_metric in ["cosine"]:
+                    dot_product = np.dot(current_embedding, future_embedding)
+                    norms = np.linalg.norm(current_embedding) * np.linalg.norm(
+                        future_embedding
                     )
-                displacement_per_delta_t[delta_t].append(displacement)
-    return dict(displacement_per_delta_t)
+                    similarity = dot_product / norms
+                    displacement = similarity
+                else:  # Euclidean metrics
+                    diff_squared = np.sum((current_embedding - future_embedding) ** 2)
+                    displacement = diff_squared
+                displacement_per_tau[int(tau)].append(displacement)
+
+    return dict(displacement_per_tau)
 
 
 def compute_displacement_statistics(
-    displacement_per_delta_t: Dict[int, List[float]]
-) -> Tuple[Dict[int, float], Dict[int, float]]:
-    """Compute mean and standard deviation of displacements for each delta_t.
+    displacement_per_tau: dict[int, list[float]],
+) -> tuple[dict[int, float], dict[int, float]]:
+    """Compute mean and standard deviation of displacements for each tau.
 
     Parameters
     ----------
-    displacement_per_delta_t : Dict[int, List[float]]
+    displacement_per_tau : dict[int, list[float]]
         Dictionary mapping τ to list of displacements
 
     Returns
     -------
-    Tuple[Dict[int, float], Dict[int, float]]
+    tuple[dict[int, float], dict[int, float]]
         Tuple of (mean_displacements, std_displacements) where each is a
         dictionary mapping τ to the statistic
     """
-    mean_displacement_per_delta_t = {
-        delta_t: np.mean(displacements)
-        for delta_t, displacements in displacement_per_delta_t.items()
+    mean_displacement_per_tau = {
+        tau: np.mean(displacements)
+        for tau, displacements in displacement_per_tau.items()
     }
-    std_displacement_per_delta_t = {
-        delta_t: np.std(displacements)
-        for delta_t, displacements in displacement_per_delta_t.items()
+    std_displacement_per_tau = {
+        tau: np.std(displacements)
+        for tau, displacements in displacement_per_tau.items()
     }
-    return mean_displacement_per_delta_t, std_displacement_per_delta_t
+    return mean_displacement_per_tau, std_displacement_per_tau
 
 
 def compute_dynamic_range(mean_displacement_per_delta_t):

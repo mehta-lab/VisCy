@@ -5,8 +5,7 @@ from typing import Literal, Optional, Sequence
 
 import numpy as np
 import torch
-from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
-from iohub.ngff_meta import TransformationMeta
+from iohub.ngff import ImageArray, Plate, Position, TransformationMeta, open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray

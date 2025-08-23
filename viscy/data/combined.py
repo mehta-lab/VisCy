@@ -1,11 +1,19 @@
+import bisect
+import logging
+from collections import defaultdict
 from enum import Enum
 from typing import Literal, Sequence
 
+import torch
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
-from torch.utils.data import ConcatDataset, DataLoader
+from monai.data import ThreadDataLoader
+from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
+from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _collate_samples
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class CombineMode(Enum):
@@ -19,11 +27,18 @@ class CombinedDataModule(LightningDataModule):
     """Wrapper for combining multiple data modules.
     For supported modes, see ``lightning.pytorch.utilities.combined_loader``.
 
-    :param Sequence[LightningDataModule] data_modules: data modules to combine
-    :param str train_mode: mode in training stage, defaults to "max_size_cycle"
-    :param str val_mode: mode in validation stage, defaults to "sequential"
-    :param str test_mode: mode in testing stage, defaults to "sequential"
-    :param str predict_mode: mode in prediction stage, defaults to "sequential"
+    Parameters
+    ----------
+    data_modules : Sequence[LightningDataModule]
+        data modules to combine
+    train_mode : CombineMode, optional
+        mode in training stage, by default CombineMode.MAX_SIZE_CYCLE
+    val_mode : CombineMode, optional
+        mode in validation stage, by default CombineMode.SEQUENTIAL
+    test_mode : CombineMode, optional
+        mode in testing stage, by default CombineMode.SEQUENTIAL
+    predict_mode : CombineMode, optional
+        mode in prediction stage, by default CombineMode.SEQUENTIAL
     """
 
     def __init__(
@@ -73,20 +88,61 @@ class CombinedDataModule(LightningDataModule):
         )
 
 
+class BatchedConcatDataset(ConcatDataset):
+    def __getitem__(self, idx):
+        raise NotImplementedError
+
+    def _get_sample_indices(self, idx: int) -> tuple[int, int]:
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError(
+                    "absolute value of index should not exceed dataset length"
+                )
+            idx = len(self) + idx
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        return dataset_idx, sample_idx
+
+    def __getitems__(self, indices: list[int]) -> list:
+        grouped_indices = defaultdict(list)
+        for idx in indices:
+            dataset_idx, sample_indices = self._get_sample_indices(idx)
+            grouped_indices[dataset_idx].append(sample_indices)
+        _logger.debug(f"Grouped indices: {grouped_indices}")
+        sub_batches = []
+        for dataset_idx, sample_indices in grouped_indices.items():
+            sub_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
+            sub_batches.extend(sub_batch)
+        return sub_batches
+
+
 class ConcatDataModule(LightningDataModule):
     """
     Concatenate multiple data modules.
-    The concatenated data module will have the same
-    batch size and number of workers as the first data module.
-    Each element will be sampled uniformly regardless of their original data module.
-    :param Sequence[LightningDataModule] data_modules: data modules to concatenate
+
+    The concatenated data module will have the same batch size and number of workers
+    as the first data module. Each element will be sampled uniformly regardless of
+    their original data module.
+
+    Parameters
+    ----------
+    data_modules : Sequence[LightningDataModule]
+        Data modules to concatenate.
     """
+
+    _ConcatDataset = ConcatDataset
 
     def __init__(self, data_modules: Sequence[LightningDataModule]):
         super().__init__()
         self.data_modules = data_modules
         self.num_workers = data_modules[0].num_workers
         self.batch_size = data_modules[0].batch_size
+        self.persistent_workers = data_modules[0].persistent_workers
+        self.prefetch_factor = data_modules[0].prefetch_factor
+        self.pin_memory = data_modules[0].pin_memory
         for dm in data_modules:
             if dm.num_workers != self.num_workers:
                 raise ValueError("Inconsistent number of workers")
@@ -110,26 +166,130 @@ class ConcatDataModule(LightningDataModule):
                     raise ValueError("Inconsistent patches per stack")
         if stage != "fit":
             raise NotImplementedError("Only fit stage is supported")
-        self.train_dataset = ConcatDataset(
+        self.train_dataset = self._ConcatDataset(
             [dm.train_dataset for dm in self.data_modules]
         )
-        self.val_dataset = ConcatDataset([dm.val_dataset for dm in self.data_modules])
+        self.val_dataset = self._ConcatDataset(
+            [dm.val_dataset for dm in self.data_modules]
+        )
+
+    def _dataloader_kwargs(self) -> dict:
+        return {
+            "num_workers": self.num_workers,
+            "persistent_workers": self.persistent_workers,
+            "prefetch_factor": self.prefetch_factor if self.num_workers else None,
+            "pin_memory": self.pin_memory,
+        }
 
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size // self.train_patches_per_stack,
-            num_workers=self.num_workers,
             shuffle=True,
-            persistent_workers=bool(self.num_workers),
+            batch_size=self.batch_size // self.train_patches_per_stack,
             collate_fn=_collate_samples,
+            drop_last=True,
+            **self._dataloader_kwargs(),
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
             shuffle=False,
-            persistent_workers=bool(self.num_workers),
+            batch_size=self.batch_size,
+            drop_last=False,
+            **self._dataloader_kwargs(),
+        )
+
+
+class BatchedConcatDataModule(ConcatDataModule):
+    _ConcatDataset = BatchedConcatDataset
+
+    def train_dataloader(self):
+        return ThreadDataLoader(
+            self.train_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=True,
+            **self._dataloader_kwargs(),
+        )
+
+    def val_dataloader(self):
+        return ThreadDataLoader(
+            self.val_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            shuffle=False,
+            drop_last=False,
+            **self._dataloader_kwargs(),
+        )
+
+
+class CachedConcatDataModule(LightningDataModule):
+    def __init__(self, data_modules: Sequence[LightningDataModule]):
+        super().__init__()
+        self.data_modules = data_modules
+        self.num_workers = data_modules[0].num_workers
+        self.batch_size = data_modules[0].batch_size
+        for dm in data_modules:
+            if dm.num_workers != self.num_workers:
+                raise ValueError("Inconsistent number of workers")
+            if dm.batch_size != self.batch_size:
+                raise ValueError("Inconsistent batch size")
+        self.prepare_data_per_node = True
+
+    def prepare_data(self):
+        for dm in self.data_modules:
+            dm.trainer = self.trainer
+            dm.prepare_data()
+
+    def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        self.train_patches_per_stack = 0
+        for dm in self.data_modules:
+            dm.setup(stage)
+            if patches := getattr(dm, "train_patches_per_stack", 1):
+                if self.train_patches_per_stack == 0:
+                    self.train_patches_per_stack = patches
+                elif self.train_patches_per_stack != patches:
+                    raise ValueError("Inconsistent patches per stack")
+        if stage != "fit":
+            raise NotImplementedError("Only fit stage is supported")
+        self.train_dataset = ConcatDataset(
+            [dm.train_dataset for dm in self.data_modules]
+        )
+        self.val_dataset = ConcatDataset([dm.val_dataset for dm in self.data_modules])
+
+    def _maybe_sampler(
+        self, dataset: Dataset, shuffle: bool
+    ) -> ShardedDistributedSampler | None:
+        return (
+            ShardedDistributedSampler(dataset, shuffle=shuffle)
+            if torch.distributed.is_initialized()
+            else None
+        )
+
+    def train_dataloader(self) -> DataLoader:
+        sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
+        return DataLoader(
+            self.train_dataset,
+            batch_size=self.batch_size,
+            shuffle=False if sampler else True,
+            sampler=sampler,
+            persistent_workers=True if self.num_workers > 0 else False,
+            num_workers=self.num_workers,
+            drop_last=True,
+            collate_fn=lambda x: x,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
+        return DataLoader(
+            self.val_dataset,
+            batch_size=self.batch_size,
+            shuffle=False,
+            sampler=sampler,
+            persistent_workers=True if self.num_workers > 0 else False,
+            num_workers=self.num_workers,
+            drop_last=False,
+            collate_fn=lambda x: x,
         )

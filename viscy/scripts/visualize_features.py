@@ -97,7 +97,7 @@ for level, feat in enumerate(features):
     pc_first_3 = pca.components_[:3].reshape(3, *features[level].shape[-2:])
     rgb = np.stack([rescale_intensity(pc) for pc in pc_first_3], axis=-1)
     ax[0, level + 1].imshow(rgb)
-    ax[0, level + 1].set_title(f"Level {level+1} {features[level].shape[1:]}")
+    ax[0, level + 1].set_title(f"Level {level + 1} {features[level].shape[1:]}")
     ax[1, level + 1].plot(range(1, n_components + 1), pca.explained_variance_ratio_)
     ax[1, level + 1].set_xlabel("Principal component")
     ax[1, level + 1].set_ylabel("Explained variance ratio")
@@ -131,7 +131,7 @@ nuc_pcs = (
 g, axes = plt.subplots(2, 4, figsize=(16, 8))
 for i, ax in enumerate(axes.ravel()):
     ax.imshow(level3_pcs[i], cmap="magma")
-    ax.set_title(f"PC{i+1}")
+    ax.set_title(f"PC{i + 1}")
     # axes[3].imshow(nuc_pcs, cmap="magma")
     # axes[3].set_title("normalized PC1 + PC2")
     # axes[4].imshow(mem_pcs, cmap="magma")
