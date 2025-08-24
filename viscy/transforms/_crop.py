@@ -3,6 +3,22 @@ from monai.transforms import RandSpatialCrop
 from typing_extensions import Sequence
 
 
+def batched_crop3d_unfold(x, z0, y0, x0, d, h, w):
+    # x: (B,C,D,H,W) contiguous; z0,y0,x0: (B,) int
+    B, _, D, H, W = x.shape
+    z0 = z0.clamp(0, D-d); y0 = y0.clamp(0, H-h); x0 = x0.clamp(0, W-w)
+
+    # Sliding-window view: (B,C, D-d+1, H-h+1, W-w+1, d, h, w)
+    win = (x.contiguous()
+             .unfold(2, d, 1)
+             .unfold(3, h, 1)
+             .unfold(4, w, 1))
+
+    b = torch.arange(B, device=x.device)
+    out = win[b, :, z0, y0, x0]             # (B,C,d,h,w)
+    return out.contiguous()
+
+
 class BatchedRandSpatialCrop(RandSpatialCrop):
     """
     Batched version of RandSpatialCrop that applies random spatial cropping to a batch of images.
@@ -82,28 +98,23 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
         # Only support 3D cropping
         if len(self._batch_slices[0]) != 3:
             raise ValueError("BatchedRandSpatialCrop only supports 3D data")
-            
-        # Use gather-based cropping for 3D batched operation
-        B, C, D, H, W = img.shape
-        d, h, w = self.roi_size
         
-        # Extract start coordinates  
-        z_starts = torch.tensor([slices[0].start for slices in self._batch_slices], device=img.device)
-        y_starts = torch.tensor([slices[1].start for slices in self._batch_slices], device=img.device)
-        x_starts = torch.tensor([slices[2].start for slices in self._batch_slices], device=img.device)
+        # Extract crop parameters from slices
+        B = img.shape[0]
+        z0 = torch.zeros(B, dtype=torch.long, device=img.device)
+        y0 = torch.zeros(B, dtype=torch.long, device=img.device)
+        x0 = torch.zeros(B, dtype=torch.long, device=img.device)
         
-        # Clamp to valid ranges
-        z_starts = z_starts.clamp(0, D - d)
-        y_starts = y_starts.clamp(0, H - h)  
-        x_starts = x_starts.clamp(0, W - w)
+        # Get crop dimensions from the first batch (all should be the same)
+        d = self._batch_slices[0][0].stop - self._batch_slices[0][0].start
+        h = self._batch_slices[0][1].stop - self._batch_slices[0][1].start
+        w = self._batch_slices[0][2].stop - self._batch_slices[0][2].start
         
-        # Create coordinate grids
-        zs = (z_starts[:, None, None, None] + torch.arange(d, device=img.device)[None, :, None, None]).long()
-        ys = (y_starts[:, None, None, None] + torch.arange(h, device=img.device)[None, None, :, None]).long()
-        xs = (x_starts[:, None, None, None] + torch.arange(w, device=img.device)[None, None, None, :]).long()
+        # Extract start positions for each batch item
+        for i, slices in enumerate(self._batch_slices):
+            z0[i] = slices[0].start
+            y0[i] = slices[1].start
+            x0[i] = slices[2].start
         
-        # Apply gather operations
-        xz = img.gather(2, zs.view(B, 1, d, 1, 1).expand(B, C, d, H, W))
-        xzy = xz.gather(3, ys.view(B, 1, 1, h, 1).expand(B, C, d, h, W))
-        out = xzy.gather(4, xs.view(B, 1, 1, 1, w).expand(B, C, d, h, w))
-        return out
+        # Apply batched cropping using the unfold method
+        return batched_crop3d_unfold(img, z0, y0, x0, d, h, w)
