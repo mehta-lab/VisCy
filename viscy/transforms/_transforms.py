@@ -9,7 +9,6 @@ from monai.transforms import (
     RandGaussianNoise,
     RandGaussianNoised,
     RandomizableTransform,
-    RandSpatialCrop,
     ScaleIntensityRangePercentiles,
     Transform,
 )
@@ -368,76 +367,3 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         )
 
 
-class BatchedRandSpatialCrop(RandSpatialCrop):
-    """
-    Batched version of RandSpatialCrop that applies random spatial cropping to a batch of images.
-
-    Each image in the batch gets its own random crop parameters. When random_size=True,
-    all crops use the same randomly chosen size to ensure consistent output tensor shapes.
-
-    Parameters
-    ----------
-    roi_size : Sequence[int] | int
-        Expected ROI size to crop. e.g. [224, 224, 128]. If int, same size used for all dimensions.
-    max_roi_size : Sequence[int] | int | None, optional
-        Maximum ROI size when random_size=True. If None, defaults to input image size.
-    random_center : bool, optional
-        Whether to crop at random position (True) or image center (False). Default is True.
-    random_size : bool, optional
-        Not supported in batched mode, must be False.
-    """
-
-    def __init__(
-        self,
-        roi_size: Sequence[int] | int,
-        max_roi_size: Sequence[int] | int | None = None,
-        random_center: bool = True,
-        random_size: bool = False,
-    ) -> None:
-        if random_size:
-            raise ValueError("Batched transform does not support random size.")
-        super().__init__(roi_size, max_roi_size, random_center, random_size, lazy=False)
-        self._batch_sizes: list[Sequence[int]] = []
-        self._batch_slices: list[tuple[slice, ...]] = []
-
-    def randomize(self, img_size: Sequence[int]) -> None:
-        """Generate random crop parameters for each image in the batch."""
-        self._batch_sizes = []
-        self._batch_slices = []
-
-        for _ in range(img_size[0]):
-            super().randomize(img_size[1:])
-            if self._size is not None:
-                self._batch_sizes.append(tuple(self._size))
-            if hasattr(self, "_slices"):
-                self._batch_slices.append(self._slices)
-
-    def __call__(
-        self, img: torch.Tensor, randomize: bool = True, lazy: bool | None = None
-    ) -> torch.Tensor:
-        """
-        Apply batched random spatial crop to input tensor.
-
-        Parameters
-        ----------
-        img : torch.Tensor
-            Input tensor of shape (B, C, H, W, D) or (B, C, H, W).
-        randomize : bool, optional
-            Whether to generate new random parameters. Default is True.
-        lazy : bool | None, optional
-            Not used in batched version. Default is None.
-
-        Returns
-        -------
-        torch.Tensor
-            Cropped tensor with same batch size. When random_size=True, all crops
-            use the same randomly chosen size to ensure consistent output shapes.
-        """
-        if randomize:
-            self.randomize(img.shape)
-        out = torch.empty(
-            img.shape[0], *self._batch_sizes[0], device=img.device, dtype=img.dtype
-        )
-        for i in range(img.shape[0]):
-            out[i] = img[i, :, self._batch_slices[i]]
-        return out
