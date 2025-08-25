@@ -1,4 +1,4 @@
-from viscy.transforms._crop import BatchedRandSpatialCrop
+from viscy.transforms._crop import BatchedRandSpatialCrop, BatchedRandSpatialCropd
 from viscy.transforms._decollate import Decollate
 from viscy.transforms._redef import (
     CenterSpatialCropd,
@@ -16,6 +16,7 @@ from viscy.transforms._redef import (
 )
 from viscy.transforms._transforms import (
     BatchedRandAffined,
+    BatchedScaleIntensityRangePercentiles,
     BatchedScaleIntensityRangePercentilesd,
     BatchedZoom,
     NormalizeSampled,
@@ -41,7 +42,9 @@ __all__ = [
     "BatchedRandLocalPixelShufflingd",
     "BatchedRandSharpend",
     "BatchedRandSpatialCrop",
+    "BatchedRandSpatialCropd",
     "BatchedRandZStackShiftd",
+    "BatchedScaleIntensityRangePercentiles",
     "BatchedScaleIntensityRangePercentilesd",
     "BatchedZoom",
     "CenterSpatialCropd",

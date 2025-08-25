@@ -1,22 +1,6 @@
 import torch
-from monai.transforms import RandSpatialCrop
+from monai.transforms import RandCropd, RandSpatialCrop
 from typing_extensions import Sequence
-
-
-def batched_crop3d_unfold(x, z0, y0, x0, d, h, w):
-    # x: (B,C,D,H,W) contiguous; z0,y0,x0: (B,) int
-    B, _, D, H, W = x.shape
-    z0 = z0.clamp(0, D-d); y0 = y0.clamp(0, H-h); x0 = x0.clamp(0, W-w)
-
-    # Sliding-window view: (B,C, D-d+1, H-h+1, W-w+1, d, h, w)
-    win = (x.contiguous()
-             .unfold(2, d, 1)
-             .unfold(3, h, 1)
-             .unfold(4, w, 1))
-
-    b = torch.arange(B, device=x.device)
-    out = win[b, :, z0, y0, x0]             # (B,C,d,h,w)
-    return out.contiguous()
 
 
 class BatchedRandSpatialCrop(RandSpatialCrop):
@@ -47,9 +31,7 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
     ) -> None:
         if random_size:
             raise ValueError("Batched transform does not support random size.")
-        super().__init__(
-            roi_size, max_roi_size, random_center, random_size, lazy=False
-        )
+        super().__init__(roi_size, max_roi_size, random_center, random_size, lazy=False)
         self._batch_sizes: list[Sequence[int]] = []
         self._batch_slices: list[tuple[slice, ...]] = []
 
@@ -60,7 +42,7 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
 
         # Skip batch and channel dimensions for spatial cropping
         spatial_size = img_size[2:]
-        
+
         for _ in range(img_size[0]):
             super().randomize(spatial_size)
             if self._size is not None:
@@ -98,23 +80,58 @@ class BatchedRandSpatialCrop(RandSpatialCrop):
         # Only support 3D cropping
         if len(self._batch_slices[0]) != 3:
             raise ValueError("BatchedRandSpatialCrop only supports 3D data")
-        
-        # Extract crop parameters from slices
-        B = img.shape[0]
-        z0 = torch.zeros(B, dtype=torch.long, device=img.device)
-        y0 = torch.zeros(B, dtype=torch.long, device=img.device)
-        x0 = torch.zeros(B, dtype=torch.long, device=img.device)
-        
-        # Get crop dimensions from the first batch (all should be the same)
-        d = self._batch_slices[0][0].stop - self._batch_slices[0][0].start
-        h = self._batch_slices[0][1].stop - self._batch_slices[0][1].start
-        w = self._batch_slices[0][2].stop - self._batch_slices[0][2].start
-        
-        # Extract start positions for each batch item
-        for i, slices in enumerate(self._batch_slices):
-            z0[i] = slices[0].start
-            y0[i] = slices[1].start
-            x0[i] = slices[2].start
-        
-        # Apply batched cropping using the unfold method
-        return batched_crop3d_unfold(img, z0, y0, x0, d, h, w)
+        first_slice = self._batch_slices[0]
+
+        crop_depth, crop_height, crop_width = (
+            first_slice[0].stop - first_slice[0].start,
+            first_slice[1].stop - first_slice[1].start,
+            first_slice[2].stop - first_slice[2].start,
+        )
+        batch_size = img.shape[0]
+
+        start_positions = torch.tensor(
+            [[s[0].start, s[1].start, s[2].start] for s in self._batch_slices],
+            dtype=torch.long,
+            device=img.device,
+        )
+
+        windows = (
+            img.contiguous()
+            .unfold(2, crop_depth, 1)
+            .unfold(3, crop_height, 1)
+            .unfold(4, crop_width, 1)
+        )
+
+        batch_indices = torch.arange(batch_size, device=img.device)
+        return windows[
+            batch_indices,
+            :,
+            start_positions[:, 0],
+            start_positions[:, 1],
+            start_positions[:, 2],
+        ].contiguous()
+
+
+class BatchedRandSpatialCropd(RandCropd):
+    def __init__(
+        self,
+        keys: Sequence[str],
+        roi_size: Sequence[int] | int,
+        max_roi_size: Sequence[int] | int | None = None,
+        random_center: bool = True,
+        random_size: bool = False,
+        allow_missing_keys: bool = False,
+    ) -> None:
+        cropper = BatchedRandSpatialCrop(
+            roi_size, max_roi_size, random_center, random_size
+        )
+        super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
+
+    def __call__(
+        self, data: dict[str, torch.Tensor], lazy: bool | None = None
+    ) -> dict[str, torch.Tensor]:
+        first_item = data[self.first_key(data)]
+        self.randomize(first_item.shape)
+        for key in self.key_iterator(data):
+            data[key] = self.cropper(data[key], randomize=False)
+        return data
