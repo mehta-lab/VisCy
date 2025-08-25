@@ -531,21 +531,27 @@ class AugmentedPredictionVSUNet(LightningModule):
         return self.model(x)
 
     # TODO: come up with better name
-    def predict_volume(self, x: Tensor) -> Tensor:
+    @torch.no_grad()
+    def inference_tiled(self, x: Tensor) -> Tensor:
         # x.dype (Phase 3D) will be float32
         # x.device should be CUDA
 
         assert x.ndim == 5
 
         input_shape = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
-        window_size = self.model.config.z_stack # TODO: check
+        window_size = self.data.z_window_size # TODO: check
 
-        slabs = []
-        for idx in range(0, input_shape[-3], window_size): # TODO: make sure this goes over the whole volume
-            slab.append(self(x[:, :, idx:idx+window_size])) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+        accum_tensor = torch.zeros_like(x, dtype=torch.float32, device=x.device)
+        weights = torch.zeros((x.shape[-3],), dtype=torch.float32, device=x.device) # Z dimension
+        step = 1 # TODO: verify 
+        for idx in range(0, input_shape[-3], step): # TODO: make sure this goes over the whole volume
+            accum_tensor[:,:idx:idx+window_size] += self(x[:, :, idx:idx+window_size]) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+            weights[idx:idx+window_size] += 1.0
+
+        blended_slab = accum_tensor / weights.view(1, 1, -1, 1, 1) # Shape is (B, C, Z, Y, X)
 
         # TODO: add linear blending
-        blended_slab = 
+        #blended_slab = slabs / torch.from_numpy(weights).to(slabs.device).view(1, 1, -1, 1, 1) # Shape is (B, C, Z, Y, X)
         assert blended_slab.shape[-3:] == input_shape[-3:]
 
         return blended_slab
