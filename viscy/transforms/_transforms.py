@@ -365,5 +365,3 @@ class RandGaussianNoiseTensord(RandGaussianNoised):
         self.rand_gaussian_noise = RandGaussianNoiseTensor(
             mean=mean, std=std, prob=1.0, dtype=dtype, sample_std=sample_std
         )
-
-

@@ -66,20 +66,18 @@ def test_batched_rand_spatial_cropd():
     channels = 1
     shape = (batch_size, channels, 16, 16, 16)
     roi_size = [8, 8, 8]
-    
+
     data = {
         "image": torch.rand(shape),
         "mask": torch.randint(0, 2, shape),
     }
-    
+
     transform = BatchedRandSpatialCropd(
-        keys=["image", "mask"], 
-        roi_size=roi_size, 
-        random_center=True
+        keys=["image", "mask"], roi_size=roi_size, random_center=True
     )
-    
+
     output = transform(data)
-    
+
     expected_shape = (batch_size, channels, roi_size[0], roi_size[1], roi_size[2])
     assert output["image"].shape == expected_shape
     assert output["mask"].shape == expected_shape
@@ -93,15 +91,13 @@ def test_batched_rand_spatial_cropd_missing_keys():
     channels = 1
     shape = (batch_size, channels, 16, 16, 16)
     roi_size = [8, 8, 8]
-    
+
     data = {"image": torch.rand(shape)}
-    
+
     transform = BatchedRandSpatialCropd(
-        keys=["image", "nonexistent"], 
-        roi_size=roi_size, 
-        allow_missing_keys=True
+        keys=["image", "nonexistent"], roi_size=roi_size, allow_missing_keys=True
     )
-    
+
     output = transform(data)
     expected_shape = (batch_size, channels, roi_size[0], roi_size[1], roi_size[2])
     assert output["image"].shape == expected_shape
