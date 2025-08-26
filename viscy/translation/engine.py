@@ -530,34 +530,93 @@ class AugmentedPredictionVSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    # TODO: come up with better name
+    # @torch.no_grad()
+    # def inference_tiled(self, x: Tensor) -> Tensor:
+    #     """
+    #     Perform tiled inference on a 3D volume.
+    #     Args:
+    #         x (Tensor): Input tensor of shape (B, C, Z, Y, X)
+    #     Returns:
+    #         Tensor: Output tensor of shape (B, C_out, Z, Y, X)
+    #     """
+    #     self.eval()
+
+    #     assert x.ndim == 5, f"Expected (B,C,Z,Y,X), got {x.shape}"
+
+    #     B,_,Z,Y,X = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
+    #     in_stack_depth =  self.model.out_stack_depth 
+
+
+    #     out_tensor = x.new_zeros((B,2, Z, Y, X))
+    #     print("out_tensor shape:", out_tensor.shape)
+    #     print("in_stack_depth:",in_stack_depth)
+    #     weights = x.new_zeros((1,1,Z,1,1)) # Z dimension
+    #     step = 1
+    #     # use padding logic from on_predict_start()
+    #     pad = self._predict_pad
+
+
+    #     for start in range(0, Z, step): # TODO: make sure this goes over the whole volume
+    #         end = min(start + in_stack_depth, Z)
+    #         slab = x[:,:,start:end] # Shape is (B, C, window_size, Y, X), C will be 1 for Phase3D
+    #         slab = pad(slab)
+    #         pred = self(slab) # Shape is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+    #         pred = pad.inverse(pred)
+    #         assert pred.shape[-3] == (end - start)
+    #         out_tensor[:,:, start:end] += pred # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+    #         weights[:,:, start:end] += 1.0
+
+    #     blended_slab = out_tensor / weights.clamp_min(1e-8) # Shape is (B, C, Z, Y, X)
+    #     assert blended_slab.shape[-3] == Z
+
+    #     return blended_slab
+
+
     @torch.no_grad()
     def inference_tiled(self, x: Tensor) -> Tensor:
-        # x.dype (Phase 3D) will be float32
-        # x.device should be CUDA
-
+        """
+        Run tiled inference on a 3D volume with internal padding setup.
+        Args:
+            x (Tensor): Input of shape (B, C, Z, Y, X)
+        Returns:
+            Tensor: Output of shape (B, C_out, Z, Y, X)
+        """
+        self.eval()
         assert x.ndim == 5, f"Expected (B,C,Z,Y,X), got {x.shape}"
 
-        B,_,Z,Y,X = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
-        output_shape = B,self.model.out_channels,Z,Y,X # C is 2 - nucleus and membrane
-        input_shape = x.shape
-        in_stack_depth =  self.model.in_stack_depth # TODO: check read from some place,
+        B, _, Z, Y, X = x.shape
+        z_window = self.model.out_stack_depth         # e.g., 21
+        C_out = 2                                      # from config
+        step = 1
 
+        out_tensor = x.new_zeros((B, C_out, Z, Y, X))
+        weights = x.new_zeros((1, 1, Z, 1, 1))
 
-        accum_tensor = torch.zeros(output_shape, dtype=torch.float32, device=x.device)
-        weights = torch.zeros((Z,), dtype=torch.float32, device=x.device) # Z dimension
-        step = 1 # TODO: verify 
-        for idx in range(0, Z, step): # TODO: make sure this goes over the whole volume
-            accum_tensor[:,:idx:idx+in_stack_depth] += self(x[:, :, idx:idx+in_stack_depth]) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
-            weights[idx:idx+in_stack_depth] += 1.0
+        # ⬇️ create padding transform here (was on_predict_start)
+        down_factor = 32  # stem=4 × encoder=2×2×2
+        pad = DivisiblePad((0, 0, down_factor, down_factor))
 
-        blended_slab = accum_tensor / weights.view(1, 1, -1, 1, 1) # Shape is (B, C, Z, Y, X)
+        for start in range(0, Z, step):
+            print("Processing Z slice:", start)
+            end = min(start + z_window, Z)
+            slab = x[:, :, start:end]    
+            print("slab shape:", slab.shape)    # (B, 1, Zs, Y, X)
+            slab = pad(slab)
+            print("padded slab shape:", slab.shape)  # (B, 1, Zs, Y_pad, X_pad)
+            pred = self(slab)  
+            print("pred shape:", pred.shape)              # (B, 2, Zs, Y_pad, X_pad)
+            pred = pad.inverse(pred)    
+            print("pred shape:", pred.shape)              # (B, 2, Zs, Y_pad, X_pad)
+        # crop back to original
 
-        # TODO: add linear blending
-        #blended_slab = slabs / torch.from_numpy(weights).to(slabs.device).view(1, 1, -1, 1, 1) # Shape is (B, C, Z, Y, X)
-        assert blended_slab.shape[-3:] == input_shape[-3:]
+            assert pred.shape[-3] == (end - start), f"Z mismatch: got {pred.shape[-3]}, expected {end - start}"
+            out_tensor[:, :, start:end] += pred
+            weights[:, :, start:end] += 1.0
 
-        return blended_slab
+        blended = out_tensor / weights.clamp_min(1e-8)
+        assert blended.shape[-3] == Z
+        return blended
+
 
 
     def setup(self, stage: str) -> None:
