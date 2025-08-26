@@ -536,17 +536,20 @@ class AugmentedPredictionVSUNet(LightningModule):
         # x.dype (Phase 3D) will be float32
         # x.device should be CUDA
 
-        assert x.ndim == 5
+        assert x.ndim == 5, f"Expected (B,C,Z,Y,X), got {x.shape}"
 
-        input_shape = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
-        window_size = self.data.z_window_size # TODO: check
+        B,_,Z,Y,X = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
+        output_shape = B,self.model.out_channels,Z,Y,X # C is 2 - nucleus and membrane
+        input_shape = x.shape
+        in_stack_depth =  self.model.in_stack_depth # TODO: check read from some place,
 
-        accum_tensor = torch.zeros_like(x, dtype=torch.float32, device=x.device)
-        weights = torch.zeros((x.shape[-3],), dtype=torch.float32, device=x.device) # Z dimension
+
+        accum_tensor = torch.zeros(output_shape, dtype=torch.float32, device=x.device)
+        weights = torch.zeros((Z,), dtype=torch.float32, device=x.device) # Z dimension
         step = 1 # TODO: verify 
-        for idx in range(0, input_shape[-3], step): # TODO: make sure this goes over the whole volume
-            accum_tensor[:,:idx:idx+window_size] += self(x[:, :, idx:idx+window_size]) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
-            weights[idx:idx+window_size] += 1.0
+        for idx in range(0, Z, step): # TODO: make sure this goes over the whole volume
+            accum_tensor[:,:idx:idx+in_stack_depth] += self(x[:, :, idx:idx+in_stack_depth]) # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
+            weights[idx:idx+in_stack_depth] += 1.0
 
         blended_slab = accum_tensor / weights.view(1, 1, -1, 1, 1) # Shape is (B, C, Z, Y, X)
 
