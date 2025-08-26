@@ -10,7 +10,7 @@ from viscy.transforms import BatchedRandSpatialCrop
 seed_everything(42)
 
 # %%
-x = torch.rand(32, 2, 15, 512, 512, device="mps")
+x = torch.rand(32, 2, 15, 512, 512, device="cuda")
 
 # %%
 roi_size = [8, 256, 256]
@@ -18,9 +18,7 @@ roi_size = [8, 256, 256]
 monai_transform = RandSpatialCrop(
     roi_size=roi_size, random_center=True, random_size=False
 )
-batched_transform = BatchedRandSpatialCrop(
-    roi_size=roi_size, random_center=True
-)
+batched_transform = BatchedRandSpatialCrop(roi_size=roi_size, random_center=True)
 
 
 # %%
