@@ -2,10 +2,6 @@
 # use with a sampling profiler like py-spy
 from monai.transforms import (
     Decollated,
-    RandAdjustContrastd,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-    ToDeviced,
 )
 from pytorch_metric_learning.losses import NTXentLoss
 
@@ -14,11 +10,6 @@ from viscy.data.triplet import TripletDataModule
 from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.transforms import (
     NormalizeSampled,
-)
-from viscy.transforms._transforms import (
-    BatchedRandAffined,
-    BatchedScaleIntensityRangePercentilesd,
-    RandGaussianNoiseTensord,
 )
 
 
@@ -54,37 +45,37 @@ def model(
 
 def channel_augmentations(processing_channel: str):
     return [
-        BatchedRandAffined(
-            keys=[processing_channel],
-            prob=0.8,
-            scale_range=((1.0, 1.0), (0.8, 1.2), (0.8, 1.2)),
-            rotate_range=[1.0, 0.0, 0.0],
-            shear_range=(0.2, 0.2, 0.0, 0.2, 0.0, 0.2),
-        ),
+        # BatchedRandAffined(
+        #     keys=[processing_channel],
+        #     prob=0.8,
+        #     scale_range=((1.0, 1.0), (0.8, 1.2), (0.8, 1.2)),
+        #     rotate_range=[1.0, 0.0, 0.0],
+        #     shear_range=(0.2, 0.2, 0.0, 0.2, 0.0, 0.2),
+        # ),
         Decollated(keys=[processing_channel]),
-        RandAdjustContrastd(
-            keys=[processing_channel],
-            prob=0.5,
-            gamma=[0.8, 1.2],
-        ),
-        RandScaleIntensityd(
-            keys=[processing_channel],
-            prob=0.5,
-            factors=0.5,
-        ),
-        RandGaussianSmoothd(
-            keys=[processing_channel],
-            prob=0.5,
-            sigma_x=[0.25, 0.75],
-            sigma_y=[0.25, 0.75],
-            sigma_z=[0.0, 0.0],
-        ),
-        RandGaussianNoiseTensord(
-            keys=[processing_channel],
-            prob=0.5,
-            mean=0.0,
-            std=0.2,
-        ),
+        # RandAdjustContrastd(
+        #     keys=[processing_channel],
+        #     prob=0.5,
+        #     gamma=[0.8, 1.2],
+        # ),
+        # RandScaleIntensityd(
+        #     keys=[processing_channel],
+        #     prob=0.5,
+        #     factors=0.5,
+        # ),
+        # RandGaussianSmoothd(
+        #     keys=[processing_channel],
+        #     prob=0.5,
+        #     sigma_x=[0.25, 0.75],
+        #     sigma_y=[0.25, 0.75],
+        #     sigma_z=[0.0, 0.0],
+        # ),
+        # RandGaussianNoiseTensord(
+        #     keys=[processing_channel],
+        #     prob=0.5,
+        #     mean=0.0,
+        #     std=0.2,
+        # ),
     ]
 
 
@@ -103,20 +94,21 @@ def channel_normalization(
         ]
     elif fl_channel:
         return [
-            ToDeviced(keys=[fl_channel], device="cuda"),
-            BatchedScaleIntensityRangePercentilesd(
-                keys=[fl_channel],
-                lower=50,
-                upper=99,
-                b_min=0.0,
-                b_max=1.0,
-            ),
+            # ToDeviced(keys=[fl_channel], device="cuda"),
+            # BatchedScaleIntensityRangePercentilesd(
+            #     keys=[fl_channel],
+            #     lower=50,
+            #     upper=99,
+            #     b_min=0.0,
+            #     b_max=1.0,
+            # ),
         ]
     else:
         raise NotImplementedError("Either phase_channel or fl_channel must be provided")
 
 
 if __name__ == "__main__":
+    num_workers = 1
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
         tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
@@ -125,7 +117,7 @@ if __name__ == "__main__":
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
         batch_size=16,
-        num_workers=4,
+        num_workers=num_workers,
         time_interval=1,
         augmentations=channel_augmentations("raw GFP EX488 EM525-45"),
         normalizations=channel_normalization(
@@ -142,7 +134,7 @@ if __name__ == "__main__":
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
         batch_size=16,
-        num_workers=4,
+        num_workers=num_workers,
         time_interval=1,
         augmentations=channel_augmentations("raw mCherry EX561 EM600-37"),
         normalizations=channel_normalization(
@@ -155,7 +147,7 @@ if __name__ == "__main__":
     dm.setup("fit")
 
     print(len(dm1.train_dataset), len(dm2.train_dataset), len(dm.train_dataset))
-    n = 1
+    n = 32
 
     print("Training batches:")
     for i, batch in enumerate(dm.train_dataloader()):

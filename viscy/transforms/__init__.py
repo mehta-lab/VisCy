@@ -1,4 +1,9 @@
-from viscy.transforms._crop import BatchedRandSpatialCrop, BatchedRandSpatialCropd
+from viscy.transforms._crop import (
+    BatchedCenterSpatialCrop,
+    BatchedCenterSpatialCropd,
+    BatchedRandSpatialCrop,
+    BatchedRandSpatialCropd,
+)
 from viscy.transforms._decollate import Decollate
 from viscy.transforms._flip import BatchedRandFlipd
 from viscy.transforms._redef import (
@@ -35,6 +40,8 @@ from viscy.transforms.batched_rand_sharpend import BatchedRandSharpend
 from viscy.transforms.batched_rand_zstack_shiftd import BatchedRandZStackShiftd
 
 __all__ = [
+    "BatchedCenterSpatialCrop",
+    "BatchedCenterSpatialCropd",
     "BatchedRandAffined",
     "BatchedRand3DElasticd",
     "BatchedRandFlipd",

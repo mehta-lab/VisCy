@@ -2,7 +2,6 @@ import logging
 from pathlib import Path
 from typing import Literal, Sequence
 
-import numpy as np
 import pandas as pd
 import tensorstore as ts
 import torch

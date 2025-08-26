@@ -1,5 +1,10 @@
 import torch
-from monai.transforms import RandCropd, RandSpatialCrop
+from monai.transforms import (
+    CenterSpatialCrop,
+    Cropd,
+    RandCropd,
+    RandSpatialCrop,
+)
 from typing_extensions import Sequence
 
 
@@ -134,4 +139,74 @@ class BatchedRandSpatialCropd(RandCropd):
         self.randomize(first_item.shape)
         for key in self.key_iterator(data):
             data[key] = self.cropper(data[key], randomize=False)
+        return data
+
+
+class BatchedCenterSpatialCrop(CenterSpatialCrop):
+    """
+    Batched version of CenterSpatialCrop.
+
+    Parameters
+    ----------
+    roi_size : Sequence[int] | int
+        Expected ROI size to crop. e.g. [224, 224, 128]. If int, same size used for all dimensions.
+    """
+
+    def __init__(self, roi_size: Sequence[int] | int) -> None:
+        super().__init__(roi_size, lazy=False)
+
+    def __call__(
+        self,
+        img: torch.Tensor,
+        lazy: bool | None = None,
+    ) -> torch.Tensor:
+        """
+        Apply batched center spatial crop to input tensor.
+
+        Parameters
+        ----------
+        img : torch.Tensor
+            Input tensor of shape (B, C, H, W, D) or (B, C, H, W).
+        lazy : bool | None, optional
+            Not used in batched version. Default is None.
+
+        Returns
+        -------
+        torch.Tensor
+            Cropped tensor with same batch size and consistent crop size across batch.
+        """
+        spatial_size = img.shape[2:]
+        crop_slices = self.compute_slices(spatial_size)
+        slices = (slice(None), slice(None)) + crop_slices
+        return img[slices]
+
+
+class BatchedCenterSpatialCropd(Cropd):
+    """
+    Batched version of CenterSpatialCropd.
+
+    Parameters
+    ----------
+    keys : Sequence[str]
+        Keys to pick data for transformation.
+    roi_size : Sequence[int] | int
+        Expected ROI size to crop. e.g. [224, 224, 128]. If int, same size used for all dimensions.
+    allow_missing_keys : bool, optional
+        Don't raise exception if key is missing. Default is False.
+    """
+
+    def __init__(
+        self,
+        keys: Sequence[str],
+        roi_size: Sequence[int] | int,
+        allow_missing_keys: bool = False,
+    ) -> None:
+        cropper = BatchedCenterSpatialCrop(roi_size)
+        super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
+
+    def __call__(
+        self, data: dict[str, torch.Tensor], lazy: bool | None = None
+    ) -> dict[str, torch.Tensor]:
+        for key in self.key_iterator(data):
+            data[key] = self.cropper(data[key])
         return data
