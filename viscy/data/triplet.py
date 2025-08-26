@@ -258,13 +258,12 @@ class TripletDataset(Dataset):
     def _slice_patches(self, track_rows: pd.DataFrame):
         patches = []
         norms = []
-        with ts.Batch() as batch:
-            for _, row in track_rows.iterrows():
-                patch, norm = self._slice_patch(row)
-                patches.append(patch.read(batch=batch))
-                norms.append(norm)
-        results = [p.result() for p in patches]
-        return torch.from_numpy(np.stack(results, axis=0)), norms
+        for _, row in track_rows.iterrows():
+            patch, norm = self._slice_patch(row)
+            patches.append(patch)
+            norms.append(norm)
+        results = ts.stack([p.translate_to[0] for p in patches]).read().result()
+        return torch.from_numpy(results), norms
 
     def __getitems__(self, indices: list[int]) -> list[TripletSample]:
         anchor_rows = self.valid_anchors.iloc[indices]
