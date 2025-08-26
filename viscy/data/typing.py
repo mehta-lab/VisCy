@@ -84,7 +84,7 @@ class TripletSample(TypedDict):
     Triplet sample type for mini-batches.
     """
 
-    index: TrackingIndex
     anchor: Tensor
     positive: NotRequired[Tensor]
     negative: NotRequired[Tensor]
+    index: NotRequired[TrackingIndex]
