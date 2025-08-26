@@ -530,92 +530,53 @@ class AugmentedPredictionVSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    # @torch.no_grad()
-    # def inference_tiled(self, x: Tensor) -> Tensor:
-    #     """
-    #     Perform tiled inference on a 3D volume.
-    #     Args:
-    #         x (Tensor): Input tensor of shape (B, C, Z, Y, X)
-    #     Returns:
-    #         Tensor: Output tensor of shape (B, C_out, Z, Y, X)
-    #     """
-    #     self.eval()
-
-    #     assert x.ndim == 5, f"Expected (B,C,Z,Y,X), got {x.shape}"
-
-    #     B,_,Z,Y,X = x.shape # BCZYX shape, Z is ~100 slices, B is 1 for real-time processing, C is 1 - phase
-    #     in_stack_depth =  self.model.out_stack_depth 
-
-
-    #     out_tensor = x.new_zeros((B,2, Z, Y, X))
-    #     print("out_tensor shape:", out_tensor.shape)
-    #     print("in_stack_depth:",in_stack_depth)
-    #     weights = x.new_zeros((1,1,Z,1,1)) # Z dimension
-    #     step = 1
-    #     # use padding logic from on_predict_start()
-    #     pad = self._predict_pad
-
-
-    #     for start in range(0, Z, step): # TODO: make sure this goes over the whole volume
-    #         end = min(start + in_stack_depth, Z)
-    #         slab = x[:,:,start:end] # Shape is (B, C, window_size, Y, X), C will be 1 for Phase3D
-    #         slab = pad(slab)
-    #         pred = self(slab) # Shape is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
-    #         pred = pad.inverse(pred)
-    #         assert pred.shape[-3] == (end - start)
-    #         out_tensor[:,:, start:end] += pred # Size of slabs is (B, C, window_size, Y, X), C will be 2 for VSCyto3D - nucleus and membrane
-    #         weights[:,:, start:end] += 1.0
-
-    #     blended_slab = out_tensor / weights.clamp_min(1e-8) # Shape is (B, C, Z, Y, X)
-    #     assert blended_slab.shape[-3] == Z
-
-    #     return blended_slab
-
-
     @torch.no_grad()
-    def inference_tiled(self, x: Tensor) -> Tensor:
+    def inference_tiled(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Run tiled inference on a 3D volume with internal padding setup.
+        Run tiled inference over a 3D volume.
         Args:
-            x (Tensor): Input of shape (B, C, Z, Y, X)
+            x: Input tensor of shape (B, C, Z, Y, X)
         Returns:
-            Tensor: Output of shape (B, C_out, Z, Y, X)
+            Tensor of shape (B, C_out, Z, Y, X)
         """
         self.eval()
-        assert x.ndim == 5, f"Expected (B,C,Z,Y,X), got {x.shape}"
+        assert x.ndim == 5, f"Expected shape (B,C,Z,Y,X), got {x.shape}"
 
         B, _, Z, Y, X = x.shape
-        z_window = self.model.out_stack_depth         # e.g., 21
-        C_out = 2                                      # from config
+        in_stack_depth = self.model.out_stack_depth
+        C_out = 2  # model was trained with out_channels=2
         step = 1
 
         out_tensor = x.new_zeros((B, C_out, Z, Y, X))
         weights = x.new_zeros((1, 1, Z, 1, 1))
 
-        # ⬇️ create padding transform here (was on_predict_start)
-        down_factor = 32  # stem=4 × encoder=2×2×2
-        pad = DivisiblePad((0, 0, down_factor, down_factor))
+        pad = getattr(self, "_predict_pad", None)
+        if pad is None:
+            raise RuntimeError("Missing _predict_pad; call on_predict_start() before inference.")
 
         for start in range(0, Z, step):
-            print("Processing Z slice:", start)
-            end = min(start + z_window, Z)
-            slab = x[:, :, start:end]    
-            print("slab shape:", slab.shape)    # (B, 1, Zs, Y, X)
-            slab = pad(slab)
-            print("padded slab shape:", slab.shape)  # (B, 1, Zs, Y_pad, X_pad)
-            pred = self(slab)  
-            print("pred shape:", pred.shape)              # (B, 2, Zs, Y_pad, X_pad)
-            pred = pad.inverse(pred)    
-            print("pred shape:", pred.shape)              # (B, 2, Zs, Y_pad, X_pad)
-        # crop back to original
+            end = min(start + in_stack_depth, Z)
+            slab = x[:, :, start:end]
 
-            assert pred.shape[-3] == (end - start), f"Z mismatch: got {pred.shape[-3]}, expected {end - start}"
+            # pad if last slab is shorter
+            if end - start < in_stack_depth:
+                pad_z = in_stack_depth - (end - start)
+                slab = torch.nn.functional.pad(slab, (0, 0, 0, 0, 0, pad_z))
+
+            slab = pad(slab)
+            pred = self(slab)
+            pred = pad.inverse(pred)
+
+            # clip prediction if padded in Z
+            pred = pred[:, :, : end - start]
+
             out_tensor[:, :, start:end] += pred
             weights[:, :, start:end] += 1.0
 
         blended = out_tensor / weights.clamp_min(1e-8)
         assert blended.shape[-3] == Z
         return blended
+
 
 
 
