@@ -1,5 +1,6 @@
 from viscy.transforms._crop import BatchedRandSpatialCrop, BatchedRandSpatialCropd
 from viscy.transforms._decollate import Decollate
+from viscy.transforms._flip import BatchedRandFlipd
 from viscy.transforms._redef import (
     CenterSpatialCropd,
     Decollated,
@@ -26,7 +27,6 @@ from viscy.transforms._transforms import (
     TiledSpatialCropSamplesd,
 )
 from viscy.transforms.batched_rand_3d_elasticd import BatchedRand3DElasticd
-from viscy.transforms.batched_rand_flipd import BatchedRandFlipd
 from viscy.transforms.batched_rand_histogram_shiftd import BatchedRandHistogramShiftd
 from viscy.transforms.batched_rand_local_pixel_shufflingd import (
     BatchedRandLocalPixelShufflingd,
