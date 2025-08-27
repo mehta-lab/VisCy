@@ -3,6 +3,9 @@ from viscy.api.inference import VS_inference_t2t
 
 
 def test_vs_inference_t2t():
+    """
+    Test the VS_inference_t2t function with a simple config and random input.
+    """
     in_stack_depth = 21
     dims = [24, 48, 96, 192]  # dims[0] must be divisible by ratio (24/3=8)
 
