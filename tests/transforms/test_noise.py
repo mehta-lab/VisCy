@@ -1,4 +1,3 @@
-from networkx import compose
 import pytest
 import torch
 from monai.transforms import Compose
@@ -31,6 +30,20 @@ def test_batched_gaussian_noise(device, ndim, prob, compose):
     if not compose:
         repeat = transform(img, randomize=False)
         assert torch.equal(result, repeat)
+
+
+@pytest.mark.parametrize("mean", [0.0, 3.0])
+@pytest.mark.parametrize("std", [2.0, 4.0])
+@pytest.mark.parametrize("sample_std", [True, False])
+def test_batched_gaussian_noise_statistics(mean, std, sample_std):
+    img = torch.zeros(64, 8, 8, 8, 8)
+    transform = BatchedRandGaussianNoise(
+        prob=1.0, mean=mean, std=std, sample_std=sample_std
+    )
+    result = transform(img)
+    assert (result.mean() - mean).abs() < 0.5
+    expected_std = std / 2.0 if sample_std else std
+    assert (result.std() - expected_std).abs() < 0.5
 
 
 def test_batched_gaussian_noise_dict():

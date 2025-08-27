@@ -54,25 +54,29 @@ class BatchedRandGaussianNoise(RandGaussianNoiseTensor):
                 torch.rand(len(self._noise_batch_indices), device=img.device) * self.std
             ).view(-1, *([1] * (img.ndim - 1)))
         else:
-            std = self.std
+            std = torch.tensor(self.std, device=img.device, dtype=img.dtype)
         if len(self._noise_batch_indices) == 0:
             return None
+        if mean is None:
+            mean = self.mean
+        mean = torch.tensor(mean, device=img.device, dtype=img.dtype)
         noise_single = torch.normal(
-            self.mean if mean is None else mean,
-            self.std,
+            mean=0.0,
+            std=1.0,
             size=img.shape[1:],
             device=img.device,
             dtype=img.dtype,
         )
-        self.noise_batch = (
-            noise_single.expand(len(self._noise_batch_indices), *img.shape[1:]) * std
+        noise_single = torch.addcmul(mean, noise_single, std)
+        self.noise_batch = noise_single.expand(
+            len(self._noise_batch_indices), *img.shape[1:]
         )
 
     def __call__(
         self, img: Tensor, mean: float | None = None, randomize: bool = True
     ) -> Tensor:
         if randomize:
-            self.randomize(img, mean)
+            self.randomize(img, mean=self.mean if mean is None else mean)
         if len(self._noise_batch_indices) > 0:
             return img.index_add(0, self._noise_batch_indices, self.noise_batch)
         else:
