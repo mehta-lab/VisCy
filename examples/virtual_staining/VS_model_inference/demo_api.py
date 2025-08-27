@@ -1,5 +1,5 @@
 
-# examples/inference_from_config.py
+# %%
 import time
 from pathlib import Path
 import numpy as np
