@@ -3,7 +3,7 @@ import importlib
 from viscy.translation.engine import AugmentedPredictionVSUNet
 
 @torch.no_grad()
-def VS_inference_t2t(cfg: dict, input_tensor: torch.Tensor) -> torch.Tensor:
+def VS_inference_t2t(input_tensor: torch.Tensor, cfg: dict) -> torch.Tensor:
     """
     Run virtual staining using a config dictionary and 5D input tensor (B, C, Z, Y, X).
     Returns predicted tensor of shape (B, C_out, Z, Y, X).
