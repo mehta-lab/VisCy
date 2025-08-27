@@ -73,5 +73,6 @@ class BatchedRandGaussianNoise(RandGaussianNoiseTensor):
         if randomize:
             self.randomize(img, mean)
         if len(self._noise_batch_indices) > 0:
-            img.index_add_(0, self._noise_batch_indices, self.noise_batch)
-        return img
+            return img.index_add(0, self._noise_batch_indices, self.noise_batch)
+        else:
+            return img

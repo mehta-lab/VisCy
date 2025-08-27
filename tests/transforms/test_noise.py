@@ -1,22 +1,29 @@
 import pytest
 import torch
+from monai.transforms import Compose
 
 from viscy.transforms import BatchedRandGaussianNoise
 
 
 @pytest.mark.parametrize("ndim", [4, 5])
-@pytest.mark.parametrize("prob", [0.0, 1.0])
+@pytest.mark.parametrize("prob", [0.0, 0.5, 1.0])
 @pytest.mark.parametrize(
     "device", ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
 )
-def test_batched_gaussian_noise(device, ndim, prob):
-    img = torch.zeros([8] + [2] * (ndim - 1), device=device)
+@pytest.mark.parametrize("compose", [True, False])
+def test_batched_gaussian_noise(device, ndim, prob, compose):
+    img = torch.zeros([16] + [2] * (ndim - 1), device=device)
     transform = BatchedRandGaussianNoise(prob=prob, mean=0.0, std=1.0)
+    if compose:
+        transform = Compose([transform])
     out = transform(img)
     assert out.shape == img.shape
-    changed = out != 0
-    if prob > 0:
+    changed = (out != 0).sum(dim=list(range(1, out.ndim))) > 0
+    if prob == 1.0:
         assert changed.all()
-    else:
+    elif prob == 0.5:
+        assert changed.any()
+        assert not changed.all()
+    elif prob == 0.0:
         assert not changed.any()
     assert out.device == img.device

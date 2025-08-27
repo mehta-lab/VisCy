@@ -6,7 +6,11 @@ from viscy.transforms._crop import (
 )
 from viscy.transforms._decollate import Decollate
 from viscy.transforms._flip import BatchedRandFlipd
-from viscy.transforms._noise import BatchedRandGaussianNoise, RandGaussianNoiseTensord
+from viscy.transforms._noise import (
+    BatchedRandGaussianNoise,
+    RandGaussianNoiseTensor,
+    RandGaussianNoiseTensord,
+)
 from viscy.transforms._redef import (
     CenterSpatialCropd,
     Decollated,
@@ -63,6 +67,7 @@ __all__ = [
     "RandAffined",
     "RandFlipd",
     "RandGaussianNoised",
+    "RandGaussianNoiseTensor",
     "RandGaussianNoiseTensord",
     "RandGaussianSmoothd",
     "RandInvertIntensityd",
