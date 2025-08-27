@@ -531,28 +531,30 @@ class AugmentedPredictionVSUNet(LightningModule):
         return self.model(x)
 
     @torch.no_grad()
-    def inference_tiled(self, x: torch.Tensor) -> torch.Tensor:
+    def inference_tiled(self, x: torch.Tensor, out_channel: int = 2, step: int =1) -> torch.Tensor:
         """
-        Run tiled inference over a 3D volume.
-        Args:
-            x: Input tensor of shape (B, C, Z, Y, X)
-        Returns:
-            Tensor of shape (B, C_out, Z, Y, X)
+        Example:
+            pred = VS_inference_t2t(input_tensor, config)
+            # input_tensor: torch.Tensor of shape (B, 1, Z, Y, X)
+            # pred: torch.Tensor of shape (B, 2, Z, Y, X)
         """
+
         self.eval()
         assert x.ndim == 5, f"Expected shape (B,C,Z,Y,X), got {x.shape}"
 
         B, _, Z, Y, X = x.shape
         in_stack_depth = self.model.out_stack_depth
-        C_out = 2  # model was trained with out_channels=2
-        step = 1
 
-        out_tensor = x.new_zeros((B, C_out, Z, Y, X))
+        out_tensor = x.new_zeros((B, out_channel, Z, Y, X))
         weights = x.new_zeros((1, 1, Z, 1, 1))
 
         pad = getattr(self, "_predict_pad", None)
         if pad is None:
             raise RuntimeError("Missing _predict_pad; call on_predict_start() before inference.")
+        if in_stack_depth > Z:
+            raise ValueError(
+                f"Input stack depth {in_stack_depth} is larger than input Z dimension {Z}"
+            )
 
         for start in range(0, Z, step):
             end = min(start + in_stack_depth, Z)
