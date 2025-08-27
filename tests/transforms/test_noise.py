@@ -1,8 +1,9 @@
+from networkx import compose
 import pytest
 import torch
 from monai.transforms import Compose
 
-from viscy.transforms import BatchedRandGaussianNoise
+from viscy.transforms import BatchedRandGaussianNoise, BatchedRandGaussianNoised
 
 
 @pytest.mark.parametrize("ndim", [4, 5])
@@ -16,9 +17,9 @@ def test_batched_gaussian_noise(device, ndim, prob, compose):
     transform = BatchedRandGaussianNoise(prob=prob, mean=0.0, std=1.0)
     if compose:
         transform = Compose([transform])
-    out = transform(img)
-    assert out.shape == img.shape
-    changed = (out != 0).sum(dim=list(range(1, out.ndim))) > 0
+    result = transform(img)
+    assert result.shape == img.shape
+    changed = (result != 0).sum(dim=list(range(1, result.ndim))) > 0
     if prob == 1.0:
         assert changed.all()
     elif prob == 0.5:
@@ -26,4 +27,16 @@ def test_batched_gaussian_noise(device, ndim, prob, compose):
         assert not changed.all()
     elif prob == 0.0:
         assert not changed.any()
-    assert out.device == img.device
+    assert result.device == img.device
+    if not compose:
+        repeat = transform(img, randomize=False)
+        assert torch.equal(result, repeat)
+
+
+def test_batched_gaussian_noise_dict():
+    img = torch.zeros([16, 1, 4, 8, 8])
+    data = {"a": img, "b": img.clone()}
+    transform = BatchedRandGaussianNoised(keys=["a", "b"], prob=1.0, mean=0.0, std=1.0)
+    result = transform(data)
+    assert (result["a"] != img).all()
+    assert torch.equal(result["a"], result["b"])

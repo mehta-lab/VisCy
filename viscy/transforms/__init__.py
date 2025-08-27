@@ -8,6 +8,7 @@ from viscy.transforms._decollate import Decollate
 from viscy.transforms._flip import BatchedRandFlipd
 from viscy.transforms._noise import (
     BatchedRandGaussianNoise,
+    BatchedRandGaussianNoised,
     RandGaussianNoiseTensor,
     RandGaussianNoiseTensord,
 )
@@ -50,6 +51,7 @@ __all__ = [
     "BatchedRand3DElasticd",
     "BatchedRandFlipd",
     "BatchedRandGaussianNoise",
+    "BatchedRandGaussianNoised",
     "BatchedRandHistogramShiftd",
     "BatchedRandLocalPixelShufflingd",
     "BatchedRandSharpend",
