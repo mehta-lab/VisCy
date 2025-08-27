@@ -8,18 +8,22 @@ class BatchedRandFlipd(MapTransform, RandomizableTransform):
 
     This transform applies random flips along specified spatial axes to batched data
     with shape [B, C, D, H, W].
+
+    Parameters
+    ----------
+    keys : list
+        Keys to apply flipping to.
+    spatial_axis : list of int, optional
+        List of spatial axes to randomly flip (0=D, 1=H, 2=W). Default is [0, 1, 2].
+    prob : float, optional
+        Probability of applying each flip. Default is 0.5.
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. Default is False.
     """
 
     def __init__(
         self, keys, spatial_axis=[0, 1, 2], prob=0.5, allow_missing_keys=False
     ):
-        """
-        Args:
-            keys: Keys to apply flipping to
-            spatial_axis: List of spatial axes to randomly flip (0=D, 1=H, 2=W)
-            prob: Probability of applying each flip
-            allow_missing_keys: Whether to allow missing keys
-        """
         MapTransform.__init__(self, keys, allow_missing_keys)
         RandomizableTransform.__init__(self, prob)
         self.spatial_axis = spatial_axis
