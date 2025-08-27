@@ -2,6 +2,7 @@ import torch
 import importlib
 from viscy.translation.engine import AugmentedPredictionVSUNet
 
+
 @torch.no_grad()
 def VS_inference_t2t(x: torch.Tensor, cfg: dict) -> torch.Tensor:
     """
@@ -26,11 +27,15 @@ def VS_inference_t2t(x: torch.Tensor, cfg: dict) -> torch.Tensor:
     model = model_class(**init_args).to(x.device).eval()
 
     # Wrap with augmentation logic
-    wrapper = AugmentedPredictionVSUNet(
-        model=model.model,
-        forward_transforms=[lambda t: t],
-        inverse_transforms=[lambda t: t],
-    ).to(x.device).eval()
+    wrapper = (
+        AugmentedPredictionVSUNet(
+            model=model.model,
+            forward_transforms=[lambda t: t],
+            inverse_transforms=[lambda t: t],
+        )
+        .to(x.device)
+        .eval()
+    )
 
     wrapper.on_predict_start()
     return wrapper.inference_tiled(x)

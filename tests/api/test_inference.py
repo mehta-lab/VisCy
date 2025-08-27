@@ -1,6 +1,7 @@
 import torch
 from viscy.api.inference import VS_inference_t2t
 
+
 def test_vs_inference_t2t():
     in_stack_depth = 21
     dims = [24, 48, 96, 192]  # dims[0] must be divisible by ratio (24/3=8)
@@ -26,7 +27,7 @@ def test_vs_inference_t2t():
                 "test_time_augmentations": False,
                 "tta_type": "none",
                 "ckpt_path": None,
-            }
+            },
         }
     }
 
@@ -34,4 +35,6 @@ def test_vs_inference_t2t():
     pred = VS_inference_t2t(x, cfg)
 
     assert isinstance(pred, torch.Tensor)
-    assert pred.shape == (1, 2, in_stack_depth, 64, 64), f"Unexpected shape: {pred.shape}"
+    assert pred.shape == (1, 2, in_stack_depth, 64, 64), (
+        f"Unexpected shape: {pred.shape}"
+    )

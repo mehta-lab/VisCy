@@ -531,7 +531,9 @@ class AugmentedPredictionVSUNet(LightningModule):
         return self.model(x)
 
     @torch.no_grad()
-    def inference_tiled(self, x: torch.Tensor, out_channel: int = 2, step: int =1) -> torch.Tensor:
+    def inference_tiled(
+        self, x: torch.Tensor, out_channel: int = 2, step: int = 1
+    ) -> torch.Tensor:
         """
         Example:
             pred = VS_inference_t2t(input_tensor, config)
@@ -550,7 +552,9 @@ class AugmentedPredictionVSUNet(LightningModule):
 
         pad = getattr(self, "_predict_pad", None)
         if pad is None:
-            raise RuntimeError("Missing _predict_pad; call on_predict_start() before inference.")
+            raise RuntimeError(
+                "Missing _predict_pad; call on_predict_start() before inference."
+            )
         if in_stack_depth > Z:
             raise ValueError(
                 f"Input stack depth {in_stack_depth} is larger than input Z dimension {Z}"
@@ -578,9 +582,6 @@ class AugmentedPredictionVSUNet(LightningModule):
         blended = out_tensor / weights.clamp_min(1e-8)
         assert blended.shape[-3] == Z
         return blended
-
-
-
 
     def setup(self, stage: str) -> None:
         if stage != "predict":
