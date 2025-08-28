@@ -531,10 +531,27 @@ class AugmentedPredictionVSUNet(LightningModule):
         return self.model(x)
 
     @torch.no_grad()
-    def inference_tiled(
+    def predict_sliding_windows(
         self, x: torch.Tensor, out_channel: int = 2, step: int = 1
     ) -> torch.Tensor:
         """
+        Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
+        along the Z dimension with overlap and blending.
+        
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, C, Z, Y, X).
+        out_channel : int, optional
+            Number of output channels, by default 2.
+        step : int, optional
+            Step size for sliding window along Z, by default 1.
+        Returns
+        -------
+        torch.Tensor
+            Output tensor of shape (B, out_channel, Z, Y, X).
+        Notes
+        -----   
         Example:
             pred = VS_inference_t2t(input_tensor, config)
             # input_tensor: torch.Tensor of shape (B, 1, Z, Y, X)
@@ -542,26 +559,29 @@ class AugmentedPredictionVSUNet(LightningModule):
         """
 
         self.eval()
-        assert x.ndim == 5, f"Expected shape (B,C,Z,Y,X), got {x.shape}"
 
-        B, _, Z, Y, X = x.shape
+        if x.ndim != 5:
+            raise ValueError(f"Expected input with 5 dimensions (B, C, Z, Y, X), but got shape {x.shape}")
+
+        batch_size, _, depth, height, width = x.shape
+
         in_stack_depth = self.model.out_stack_depth
 
-        out_tensor = x.new_zeros((B, out_channel, Z, Y, X))
-        weights = x.new_zeros((1, 1, Z, 1, 1))
+        out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
+        weights = x.new_zeros((1, 1, depth, 1, 1))
 
         pad = getattr(self, "_predict_pad", None)
         if pad is None:
             raise RuntimeError(
                 "Missing _predict_pad; call on_predict_start() before inference."
             )
-        if in_stack_depth > Z:
+        if in_stack_depth > depth:
             raise ValueError(
-                f"Input stack depth {in_stack_depth} is larger than input Z dimension {Z}"
+                f"Input stack depth {in_stack_depth} is larger than input Z dimension {depth}"
             )
 
-        for start in range(0, Z, step):
-            end = min(start + in_stack_depth, Z)
+        for start in range(0, depth, step):
+            end = min(start + in_stack_depth, depth)
             slab = x[:, :, start:end]
 
             # pad if last slab is shorter
@@ -580,7 +600,11 @@ class AugmentedPredictionVSUNet(LightningModule):
             weights[:, :, start:end] += 1.0
 
         blended = out_tensor / weights.clamp_min(1e-8)
-        assert blended.shape[-3] == Z
+        if not blended.shape[-3] == depth:
+            raise ValueError(
+                f"Output depth {blended.shape[-3]} matches input depth {Z}, "
+                "something went wrong in sliding window inference"
+            )
         return blended
 
     def setup(self, stage: str) -> None:

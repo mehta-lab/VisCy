@@ -6,11 +6,15 @@ from viscy.translation.engine import AugmentedPredictionVSUNet
 
 
 @torch.no_grad()
-def VS_inference_t2t(x: torch.Tensor, cfg: dict) -> torch.Tensor:
+def vs_inference_t2t(x: torch.Tensor, cfg: dict, gpu: bool = True) -> torch.Tensor:
     """
     Run virtual staining using a config dictionary and 5D input tensor (B, C, Z, Y, X).
     Returns predicted tensor of shape (B, C_out, Z, Y, X).
     """
+    if gpu:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    else:
+        device = torch.device("cpu")
 
     # Extract model info
     model_cfg = cfg["model"].copy()
@@ -26,7 +30,7 @@ def VS_inference_t2t(x: torch.Tensor, cfg: dict) -> torch.Tensor:
     model_class = getattr(importlib.import_module(module_path), class_name)
 
     # Instantiate model
-    model = model_class(**init_args).to(x.device).eval()
+    model = model_class(**init_args).to(device).eval()
 
     # Wrap with augmentation logic
     wrapper = (
@@ -40,4 +44,4 @@ def VS_inference_t2t(x: torch.Tensor, cfg: dict) -> torch.Tensor:
     )
 
     wrapper.on_predict_start()
-    return wrapper.inference_tiled(x)
+    return wrapper.predict_sliding_windows(x)

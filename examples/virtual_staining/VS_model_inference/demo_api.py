@@ -7,7 +7,7 @@ import torch
 from iohub import open_ome_zarr
 import napari
 
-from viscy.api.inference import VS_inference_t2t
+from viscy.translation.inference import VS_inference_t2t
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

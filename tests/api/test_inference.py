@@ -1,5 +1,5 @@
 import torch
-from viscy.api.inference import VS_inference_t2t
+from viscy.translation.inference import VS_inference_t2t
 
 
 def test_vs_inference_t2t():
