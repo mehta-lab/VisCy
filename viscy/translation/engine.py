@@ -529,6 +529,8 @@ class AugmentedPredictionVSUNet(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
+    
+
 
     @torch.no_grad()
     def predict_sliding_windows(
@@ -536,8 +538,9 @@ class AugmentedPredictionVSUNet(LightningModule):
     ) -> torch.Tensor:
         """
         Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
-        along the Z dimension with overlap and blending.
-        
+        along the Z dimension with overlap and blending. Applies test-time augmentations
+        and padding as defined in predict_step.
+
         Parameters
         ----------
         x : torch.Tensor
@@ -546,65 +549,49 @@ class AugmentedPredictionVSUNet(LightningModule):
             Number of output channels, by default 2.
         step : int, optional
             Step size for sliding window along Z, by default 1.
+
         Returns
         -------
         torch.Tensor
             Output tensor of shape (B, out_channel, Z, Y, X).
-        Notes
-        -----   
-        Example:
-            pred = VS_inference_t2t(input_tensor, config)
-            # input_tensor: torch.Tensor of shape (B, 1, Z, Y, X)
-            # pred: torch.Tensor of shape (B, 2, Z, Y, X)
         """
 
         self.eval()
 
         if x.ndim != 5:
-            raise ValueError(f"Expected input with 5 dimensions (B, C, Z, Y, X), but got shape {x.shape}")
+            raise ValueError(f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}")
 
         batch_size, _, depth, height, width = x.shape
-
         in_stack_depth = self.model.out_stack_depth
+
+        if not hasattr(self, "_predict_pad"):
+            raise RuntimeError("Missing _predict_pad; make sure to call `on_predict_start()` before inference.")
+        if in_stack_depth > depth:
+            raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
 
         out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
         weights = x.new_zeros((1, 1, depth, 1, 1))
 
-        pad = getattr(self, "_predict_pad", None)
-        if pad is None:
-            raise RuntimeError(
-                "Missing _predict_pad; call on_predict_start() before inference."
-            )
-        if in_stack_depth > depth:
-            raise ValueError(
-                f"Input stack depth {in_stack_depth} is larger than input Z dimension {depth}"
-            )
-
+        # Loop over Z with overlapping slabs
         for start in range(0, depth, step):
             end = min(start + in_stack_depth, depth)
             slab = x[:, :, start:end]
 
-            # pad if last slab is shorter
             if end - start < in_stack_depth:
                 pad_z = in_stack_depth - (end - start)
-                slab = torch.nn.functional.pad(slab, (0, 0, 0, 0, 0, pad_z))
+                slab = F.pad(slab, (0, 0, 0, 0, 0, pad_z))
 
-            slab = pad(slab)
-            pred = self(slab)
-            pred = pad.inverse(pred)
+            # Use the same logic as predict_step (TTA + pad + model + unpad)
+            pred = self._predict_with_tta(slab)
 
-            # clip prediction if padded in Z
-            pred = pred[:, :, : end - start]
-
+            pred = pred[:, :, : end - start]  # Trim if Z was padded
             out_tensor[:, :, start:end] += pred
             weights[:, :, start:end] += 1.0
 
-        blended = out_tensor / weights.clamp_min(1e-8)
-        if not blended.shape[-3] == depth:
-            raise ValueError(
-                f"Output depth {blended.shape[-3]} matches input depth {depth}, "
-                "something went wrong in sliding window inference"
-            )
+        if (weights == 0).any():
+            raise RuntimeError("Some Z slices were not covered during sliding window inference.")
+
+        blended = out_tensor / weights
         return blended
 
     def setup(self, stage: str) -> None:
@@ -620,26 +607,43 @@ class AugmentedPredictionVSUNet(LightningModule):
         elif self._reduction == "median":
             prediction = prediction.median(dim=0).values
         return prediction
+    
+    def _predict_with_tta(self, source: torch.Tensor) -> torch.Tensor:
+        preds = []
+        for fwd_t, inv_t in zip(self._forward_transforms or [lambda x: x],
+                                self._inverse_transforms or [lambda x: x]):
+            src = fwd_t(source)
+            src = self._predict_pad(src)
+            y = self.forward(src)
+            y = self._predict_pad.inverse(y)
+            preds.append(inv_t(y))
+        return preds[0] if len(preds) == 1 else self._reduce_predictions(preds)
 
     def predict_step(
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
-    ) -> Tensor:
+        ) -> torch.Tensor:
+        """
+        Lightning's built-in prediction step. This method is called by the Trainer during `.predict(...)`.
+
+        Applies test-time augmentations (TTA) and padding logic to the input batch["source"].
+
+        Parameters
+        ----------
+        batch : dict[str, Tensor]
+            A dictionary containing a "source" tensor of shape (B, C, Z, Y, X).
+        batch_idx : int
+            Index of the batch.
+        dataloader_idx : int
+            Index of the dataloader if multiple dataloaders are used.
+
+        Returns
+        -------
+        torch.Tensor
+            Prediction tensor of shape (B, out_channels, Z, Y, X).
+        """
         source = batch["source"]
-        preds = []
-        for forward_t, inverse_t in zip(
-            self._forward_transforms, self._inverse_transforms
-        ):
-            source = forward_t(source)
-            source = self._predict_pad(source)
-            pred = self.forward(source)
-            pred = self._predict_pad.inverse(pred)
-            pred = inverse_t(pred)
-            preds.append(pred)
-        if len(preds) == 1:
-            prediction = preds[0]
-        else:
-            prediction = self._reduce_predictions(preds)
-        return prediction
+        return self._predict_with_tta(source)
+
 
 
 class FcmaeUNet(VSUNet):
