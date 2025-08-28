@@ -602,7 +602,7 @@ class AugmentedPredictionVSUNet(LightningModule):
         blended = out_tensor / weights.clamp_min(1e-8)
         if not blended.shape[-3] == depth:
             raise ValueError(
-                f"Output depth {blended.shape[-3]} matches input depth {Z}, "
+                f"Output depth {blended.shape[-3]} matches input depth {depth}, "
                 "something went wrong in sliding window inference"
             )
         return blended
