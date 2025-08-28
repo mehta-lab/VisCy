@@ -529,8 +529,6 @@ class AugmentedPredictionVSUNet(LightningModule):
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
-    
-
 
     @torch.no_grad()
     def predict_sliding_windows(
@@ -538,8 +536,7 @@ class AugmentedPredictionVSUNet(LightningModule):
     ) -> torch.Tensor:
         """
         Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
-        along the Z dimension with overlap and blending. Applies test-time augmentations
-        and padding as defined in predict_step.
+        along the Z dimension with overlap and blending.
 
         Parameters
         ----------
@@ -559,20 +556,23 @@ class AugmentedPredictionVSUNet(LightningModule):
         self.eval()
 
         if x.ndim != 5:
-            raise ValueError(f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}")
+            raise ValueError(
+                f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}"
+            )
 
         batch_size, _, depth, height, width = x.shape
         in_stack_depth = self.model.out_stack_depth
 
         if not hasattr(self, "_predict_pad"):
-            raise RuntimeError("Missing _predict_pad; make sure to call `on_predict_start()` before inference.")
+            raise RuntimeError(
+                "Missing _predict_pad; make sure to call `on_predict_start()` before inference."
+            )
         if in_stack_depth > depth:
             raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
 
         out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
         weights = x.new_zeros((1, 1, depth, 1, 1))
 
-        # Loop over Z with overlapping slabs
         for start in range(0, depth, step):
             end = min(start + in_stack_depth, depth)
             slab = x[:, :, start:end]
@@ -581,7 +581,6 @@ class AugmentedPredictionVSUNet(LightningModule):
                 pad_z = in_stack_depth - (end - start)
                 slab = F.pad(slab, (0, 0, 0, 0, 0, pad_z))
 
-            # Use the same logic as predict_step (TTA + pad + model + unpad)
             pred = self._predict_with_tta(slab)
 
             pred = pred[:, :, : end - start]  # Trim if Z was padded
@@ -589,7 +588,9 @@ class AugmentedPredictionVSUNet(LightningModule):
             weights[:, :, start:end] += 1.0
 
         if (weights == 0).any():
-            raise RuntimeError("Some Z slices were not covered during sliding window inference.")
+            raise RuntimeError(
+                "Some Z slices were not covered during sliding window inference."
+            )
 
         blended = out_tensor / weights
         return blended
@@ -607,11 +608,13 @@ class AugmentedPredictionVSUNet(LightningModule):
         elif self._reduction == "median":
             prediction = prediction.median(dim=0).values
         return prediction
-    
+
     def _predict_with_tta(self, source: torch.Tensor) -> torch.Tensor:
         preds = []
-        for fwd_t, inv_t in zip(self._forward_transforms or [lambda x: x],
-                                self._inverse_transforms or [lambda x: x]):
+        for fwd_t, inv_t in zip(
+            self._forward_transforms or [lambda x: x],
+            self._inverse_transforms or [lambda x: x],
+        ):
             src = fwd_t(source)
             src = self._predict_pad(src)
             y = self.forward(src)
@@ -621,7 +624,7 @@ class AugmentedPredictionVSUNet(LightningModule):
 
     def predict_step(
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
-        ) -> torch.Tensor:
+    ) -> torch.Tensor:
         """
         Lightning's built-in prediction step. This method is called by the Trainer during `.predict(...)`.
 
@@ -643,7 +646,6 @@ class AugmentedPredictionVSUNet(LightningModule):
         """
         source = batch["source"]
         return self._predict_with_tta(source)
-
 
 
 class FcmaeUNet(VSUNet):
