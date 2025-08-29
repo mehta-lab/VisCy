@@ -32,7 +32,7 @@ class BatchedRandFlip(RandomizableTransform):
             self.randomize(data)
         if not self._flip_spatial_dims.any():
             return data
-        
+
         out = torch.zeros_like(data)
         for i in range(data.shape[0]):
             flip_mask = self._flip_spatial_dims[i]
