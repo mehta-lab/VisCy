@@ -6,7 +6,7 @@ from viscy.transforms._crop import (
 )
 from viscy.transforms._decollate import Decollate
 from viscy.transforms._flip import BatchedRandFlip, BatchedRandFlipd
-from viscy.transforms._gaussian_blur import (
+from viscy.transforms._gaussian_smooth import (
     BatchedRandGaussianSmooth,
     BatchedRandGaussianSmoothd,
 )
