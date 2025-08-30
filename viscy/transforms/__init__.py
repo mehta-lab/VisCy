@@ -51,6 +51,10 @@ from viscy.transforms._adjust_contrast import (
     BatchedRandAdjustContrast,
     BatchedRandAdjustContrastd,
 )
+from viscy.transforms._scale_intensity import (
+    BatchedRandScaleIntensity,
+    BatchedRandScaleIntensityd,
+)
 
 __all__ = [
     "BatchedCenterSpatialCrop",
@@ -67,6 +71,8 @@ __all__ = [
     "BatchedRandGaussianNoised",
     "BatchedRandHistogramShiftd",
     "BatchedRandLocalPixelShufflingd",
+    "BatchedRandScaleIntensity",
+    "BatchedRandScaleIntensityd",
     "BatchedRandSharpend",
     "BatchedRandSpatialCrop",
     "BatchedRandSpatialCropd",
