@@ -47,10 +47,16 @@ from viscy.transforms.batched_rand_local_pixel_shufflingd import (
 )
 from viscy.transforms.batched_rand_sharpend import BatchedRandSharpend
 from viscy.transforms.batched_rand_zstack_shiftd import BatchedRandZStackShiftd
+from viscy.transforms._adjust_contrast import (
+    BatchedRandAdjustContrast,
+    BatchedRandAdjustContrastd,
+)
 
 __all__ = [
     "BatchedCenterSpatialCrop",
     "BatchedCenterSpatialCropd",
+    "BatchedRandAdjustContrast",
+    "BatchedRandAdjustContrastd",
     "BatchedRandAffined",
     "BatchedRand3DElasticd",
     "BatchedRandFlip",
