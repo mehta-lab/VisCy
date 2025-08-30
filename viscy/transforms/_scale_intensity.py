@@ -38,33 +38,22 @@ class BatchedRandScaleIntensity(RandomizableTransform):
     def randomize(self, data: Tensor) -> None:
         batch_size = data.shape[0]
         do_transform = torch.rand(batch_size, device=data.device) < self.prob
-
-        # Sample scaling factors for each batch item
         factors_min, factors_max = self.factors_range
         if self.channel_wise and data.ndim > 2:
-            # Generate factors per channel: (batch, channels)
             shape = (batch_size, data.shape[1])
         else:
-            # Single factor per batch item: (batch,)
             shape = (batch_size,)
-
         factors = torch.empty(shape, device=data.device).uniform_(
             factors_min, factors_max
         )
-        
-        # Set factors to 0 for samples that shouldn't be transformed (so 1 + 0 = 1)
         factors[~do_transform] = 0.0
-        
-        # Add 1 to get final scaling factors
         scale_factors = 1.0 + factors
-        
-        # Reshape factors for broadcasting
         if self.channel_wise and data.ndim > 2:
-            # Reshape factors for broadcasting: (B, C, 1, 1, ...)
-            factors_shape = [scale_factors.shape[0], scale_factors.shape[1]] + [1] * (data.ndim - 2)
+            factors_shape = [scale_factors.shape[0], scale_factors.shape[1]] + [1] * (
+                data.ndim - 2
+            )
             self._broadcast_factors = scale_factors.view(*factors_shape)
         else:
-            # Reshape factors for broadcasting: (B, 1, 1, ...)
             factors_shape = [scale_factors.shape[0]] + [1] * (data.ndim - 1)
             self._broadcast_factors = scale_factors.view(*factors_shape)
 
@@ -85,7 +74,6 @@ class BatchedRandScaleIntensity(RandomizableTransform):
         """
         if randomize:
             self.randomize(data)
-
         return data * self._broadcast_factors
 
 
@@ -136,8 +124,6 @@ class BatchedRandScaleIntensityd(MapTransform, RandomizableTransform):
         dict[str, Tensor]
             Dictionary with transformed tensors.
         """
-        # Use the first tensor to generate random parameters, then apply
-        # the same random state to all specified keys for consistency
         first_key = next(iter(sample.keys()))
         self.intensity_transform.randomize(sample[first_key])
 
