@@ -442,6 +442,8 @@ class BetaVaeModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
+        self._min_beta = 1e-15
+
         # Handle different parameter names for latent dimensions
         latent_dim = None
         if "latent_dim" in self.model_config:
@@ -465,7 +467,7 @@ class BetaVaeModule(LightningModule):
     def _get_current_beta(self) -> float:
         """Get current beta value based on scheduling."""
         if self.beta_schedule is None:
-            return max(self.beta, 1e-6)
+            return max(self.beta, self._min_beta)
 
         epoch = self.current_epoch
 
@@ -476,9 +478,9 @@ class BetaVaeModule(LightningModule):
                     self.beta_min
                     + (self.beta - self.beta_min) * epoch / self.beta_warmup_epochs
                 )
-                return max(beta_val, 1e-6)
+                return max(beta_val, self._min_beta)
             else:
-                return max(self.beta, 1e-6)
+                return max(self.beta, self._min_beta)
 
         elif self.beta_schedule == "cosine":
             # Cosine warmup from beta_min to beta
@@ -489,17 +491,17 @@ class BetaVaeModule(LightningModule):
                 beta_val = self.beta_min + (self.beta - self.beta_min) * 0.5 * (
                     1 + math.cos(math.pi * (1 - progress))
                 )
-                return max(beta_val, 1e-6)
+                return max(beta_val, self._min_beta)
             else:
-                return max(self.beta, 1e-6)
+                return max(self.beta, self._min_beta)
 
         elif self.beta_schedule == "warmup":
             # Keep beta_min for warmup epochs, then jump to beta
             beta_val = self.beta_min if epoch < self.beta_warmup_epochs else self.beta
-            return max(beta_val, 1e-6)
+            return max(beta_val, self._min_beta)
 
         else:
-            return max(self.beta, 1e-6)
+            return max(self.beta, self._min_beta)
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, x: Tensor) -> dict:
@@ -535,7 +537,7 @@ class BetaVaeModule(LightningModule):
             -0.5
             * current_beta
             * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            / normalizer
+            / batch_size
         )
 
         total_loss = recon_loss + kl_loss
