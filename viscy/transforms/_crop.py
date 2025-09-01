@@ -203,10 +203,3 @@ class BatchedCenterSpatialCropd(Cropd):
     ) -> None:
         cropper = BatchedCenterSpatialCrop(roi_size)
         super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
-
-    def __call__(
-        self, data: dict[str, torch.Tensor], lazy: bool | None = None
-    ) -> dict[str, torch.Tensor]:
-        for key in self.key_iterator(data):
-            data[key] = self.cropper(data[key])
-        return data
