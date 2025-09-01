@@ -34,8 +34,12 @@ class BatchedRandAdjustContrast(RandomizableTransform):
         self.retain_stats = retain_stats
         if isinstance(gamma, (int, float)):
             self.gamma_range = (gamma, gamma)
-        else:
+        elif isinstance(gamma, tuple) and len(gamma) == 2:
             self.gamma_range = (min(gamma), max(gamma))
+        else:
+            raise ValueError("Gamma must be a float or a tuple of two floats.")
+        if self.gamma_range[0] <= 0.0:
+            raise ValueError("Gamma must be a positive value.")
 
     def randomize(self, data: Tensor) -> None:
         batch_size = data.shape[0]
