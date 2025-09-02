@@ -571,3 +571,14 @@ class TripletDataModule(HCSDataModule):
             drop_last=False,
             pin_memory=self.pin_memory,
         )
+
+    def _final_crop(self) -> BatchedCenterSpatialCropd:
+        """Setup final cropping: center crop to the target size."""
+        return BatchedCenterSpatialCropd(
+            keys=self.source_channel,
+            roi_size=(
+                self.z_window_size,
+                self.yx_patch_size[0],
+                self.yx_patch_size[1],
+            ),
+        )
