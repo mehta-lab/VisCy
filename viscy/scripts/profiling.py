@@ -1,81 +1,73 @@
 # script to profile dataloading
 # use with a sampling profiler like py-spy
-from monai.transforms import (
-    Decollated,
-)
-from pytorch_metric_learning.losses import NTXentLoss
+
+
+import torch
+from lightning.pytorch import LightningModule
 
 from viscy.data.combined import BatchedConcatDataModule
 from viscy.data.triplet import TripletDataModule
-from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.transforms import (
+    BatchedCenterSpatialCropd,
+    BatchedRandAdjustContrastd,
+    BatchedRandAffined,
+    BatchedRandGaussianNoised,
+    BatchedRandGaussianSmoothd,
+    BatchedRandScaleIntensityd,
+    BatchedScaleIntensityRangePercentilesd,
     NormalizeSampled,
+    ToDeviced,
 )
 
 
-def model(
-    input_channel_number: int = 1,
-    z_stack_depth: int = 30,
-    patch_size: int = 192,
-    temperature: float = 0.5,
-):
-    return ContrastiveModule(
-        encoder=ContrastiveEncoder(
-            backbone="convnext_tiny",
-            in_channels=input_channel_number,
-            in_stack_depth=z_stack_depth,
-            stem_kernel_size=(5, 4, 4),
-            embedding_dim=768,
-            projection_dim=32,
-            drop_path_rate=0.0,
-        ),
-        loss_function=NTXentLoss(temperature=temperature),
-        lr=0.00002,
-        log_batches_per_epoch=3,
-        log_samples_per_batch=3,
-        example_input_array_shape=[
-            1,
-            input_channel_number,
-            z_stack_depth,
-            patch_size,
-            patch_size,
-        ],
-    )
+class DummyModel(LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.a = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
+
+    def training_step(self, batch, batch_idx):
+        return (batch["anchor"] * self.a).mean()
+
+    def validation_step(self, batch, batch_idx):
+        return (batch["anchor"] * self.a).mean()
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters())
 
 
 def channel_augmentations(processing_channel: str):
     return [
-        # BatchedRandAffined(
-        #     keys=[processing_channel],
-        #     prob=0.8,
-        #     scale_range=((1.0, 1.0), (0.8, 1.2), (0.8, 1.2)),
-        #     rotate_range=[1.0, 0.0, 0.0],
-        #     shear_range=(0.2, 0.2, 0.0, 0.2, 0.0, 0.2),
-        # ),
-        Decollated(keys=[processing_channel]),
-        # RandAdjustContrastd(
-        #     keys=[processing_channel],
-        #     prob=0.5,
-        #     gamma=[0.8, 1.2],
-        # ),
-        # RandScaleIntensityd(
-        #     keys=[processing_channel],
-        #     prob=0.5,
-        #     factors=0.5,
-        # ),
-        # RandGaussianSmoothd(
-        #     keys=[processing_channel],
-        #     prob=0.5,
-        #     sigma_x=[0.25, 0.75],
-        #     sigma_y=[0.25, 0.75],
-        #     sigma_z=[0.0, 0.0],
-        # ),
-        # RandGaussianNoiseTensord(
-        #     keys=[processing_channel],
-        #     prob=0.5,
-        #     mean=0.0,
-        #     std=0.2,
-        # ),
+        BatchedRandAffined(
+            keys=[processing_channel],
+            prob=0.8,
+            scale_range=((1.0, 1.0), (0.8, 1.2), (0.8, 1.2)),
+            rotate_range=[1.0, 0.0, 0.0],
+            shear_range=(0.2, 0.2, 0.0, 0.2, 0.0, 0.2),
+        ),
+        BatchedCenterSpatialCropd(keys=[processing_channel], roi_size=(32, 192, 192)),
+        BatchedRandAdjustContrastd(
+            keys=[processing_channel],
+            prob=0.5,
+            gamma=(0.8, 1.2),
+        ),
+        BatchedRandScaleIntensityd(
+            keys=[processing_channel],
+            prob=0.5,
+            factors=0.5,
+        ),
+        BatchedRandGaussianSmoothd(
+            keys=[processing_channel],
+            prob=0.5,
+            sigma_x=(0.25, 0.75),
+            sigma_y=(0.25, 0.75),
+            sigma_z=(0.0, 0.0),
+        ),
+        BatchedRandGaussianNoised(
+            keys=[processing_channel],
+            prob=0.5,
+            mean=0.0,
+            std=0.2,
+        ),
     ]
 
 
@@ -94,21 +86,22 @@ def channel_normalization(
         ]
     elif fl_channel:
         return [
-            # ToDeviced(keys=[fl_channel], device="cuda"),
-            # BatchedScaleIntensityRangePercentilesd(
-            #     keys=[fl_channel],
-            #     lower=50,
-            #     upper=99,
-            #     b_min=0.0,
-            #     b_max=1.0,
-            # ),
+            ToDeviced(keys=[fl_channel], device="cuda"),
+            BatchedScaleIntensityRangePercentilesd(
+                keys=[fl_channel],
+                lower=50,
+                upper=99,
+                b_min=0.0,
+                b_max=1.0,
+            ),
         ]
     else:
         raise NotImplementedError("Either phase_channel or fl_channel must be provided")
 
 
 if __name__ == "__main__":
-    num_workers = 1
+    num_workers = 2
+    batch_size = 128
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
         tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
@@ -116,7 +109,7 @@ if __name__ == "__main__":
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
-        batch_size=16,
+        batch_size=batch_size,
         num_workers=num_workers,
         time_interval=1,
         augmentations=channel_augmentations("raw GFP EX488 EM525-45"),
@@ -133,7 +126,7 @@ if __name__ == "__main__":
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
-        batch_size=16,
+        batch_size=batch_size,
         num_workers=num_workers,
         time_interval=1,
         augmentations=channel_augmentations("raw mCherry EX561 EM600-37"),
