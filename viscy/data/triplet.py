@@ -15,6 +15,7 @@ from torch.utils.data import Dataset
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
 from viscy.data.select import _filter_fovs, _filter_wells
 from viscy.data.typing import DictTransform, NormMeta, TripletSample
+from viscy.transforms import BatchedCenterSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
 
