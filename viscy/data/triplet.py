@@ -401,6 +401,8 @@ class TripletDataModule(HCSDataModule):
         z_window_size : int, optional
             Size of the final Z window, by default None (inferred from z_range)
         """
+        if num_workers > 1:
+            raise ValueError("Multiple workers not supported due to thread safety.")
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
