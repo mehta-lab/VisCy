@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal, Optional, Tuple
@@ -11,6 +12,7 @@ from tqdm import tqdm
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 
+_logger = logging.getLogger("lightning.pytorch")
 
 @dataclass
 class DTWResult:
@@ -20,12 +22,11 @@ class DTWResult:
     reference_info: dict
     
 
-class DTWAnalyzer:
-    """High-level API for DTW-based pseudotime analysis."""
-    
+class CytoDtw:    
     def __init__(self, embedding_path: str | Path, tracks_path: Optional[str | Path] = None):
-        """Initialize DTW analyzer.
-        
+        """
+        DTW for Dynamic Cell Embeddings 
+               
         Parameters
         ----------
         embedding_path : str | Path
@@ -49,13 +50,13 @@ class DTWAnalyzer:
     def tracking_df(self) -> pd.DataFrame:
         """Load tracking dataframe lazily."""
         if self._tracking_df is None and self.tracks_path:
-            # This would need to be implemented based on your tracking data format
             raise NotImplementedError("Tracking data loading not yet implemented")
         return self._tracking_df
     
     def get_reference_pattern(self, fov_name: str, track_id: int | list[int], 
                             timepoints: tuple[int, int]) -> np.ndarray:
-        """Extract reference pattern from embeddings.
+        """
+        Extract reference pattern from embeddings.
         
         Parameters
         ----------
@@ -74,16 +75,13 @@ class DTWAnalyzer:
         if isinstance(track_id, int):
             track_id = [track_id]
             
-        # Extract embeddings for the reference track(s)
         reference_embeddings = []
         for tid in track_id:
             track_emb = self.embeddings.sel(sample=(fov_name, tid)).features.values
             reference_embeddings.append(track_emb)
-            
-        # Concatenate if multiple tracks
+
         reference_pattern = np.concatenate(reference_embeddings, axis=0)
         
-        # Extract the specified timepoint range
         start_t, end_t = timepoints
         reference_pattern = reference_pattern[start_t:end_t]
         
@@ -130,7 +128,7 @@ class DTWAnalyzer:
             Match results with distances and warping paths
         """
         if filtered_lineages is None:
-            # TODO: Auto-identify lineages from tracking data
+            # FIXME: Auto-identify lineages from tracking data
             raise NotImplementedError("Auto-identification of lineages not yet implemented")
             
         return find_pattern_matches(
@@ -193,6 +191,431 @@ class DTWAnalyzer:
             reference_pattern=reference_pattern,
             reference_info=reference_info
         )
+    
+    def create_consensus_reference_pattern(
+        self, 
+        annotated_examples: list[dict],
+        reference_selection: str = "median_length",
+        aggregation_method: str = "mean"
+    ) -> np.ndarray:
+        """
+        Create consensus reference pattern from multiple annotated examples.
+        
+        This method takes multiple manually annotated cell examples and creates a
+        consensus reference pattern by aligning them with DTW and aggregating.
+        
+        Parameters
+        ----------
+        annotated_examples : list[dict]
+            List of annotated examples, each containing:
+            - 'fov_name': str - FOV identifier
+            - 'track_id': int or list[int] - Track ID(s)
+            - 'timepoints': tuple[int, int] - (start, end) timepoints
+            - 'annotations': dict or list - Optional annotations/labels
+            - 'weight': float - Optional weight for this example (default 1.0)
+        reference_selection : str
+            mode of selection of reference: "median_length", "first", "longest", "shortest"
+        aggregation_method : str
+            mode of aggregation: "mean", "median", "weighted_mean"
+            
+        Returns
+        -------
+        np.ndarray
+            Consensus reference pattern
+            
+        Examples
+        --------
+        >>> analyzer = CytoDtw("embeddings.zarr")
+        >>> examples = [
+        ...     {
+        ...         'fov_name': '/FOV1', 'track_id': 129, 
+        ...         'timepoints': (8, 70), 'annotations': ['G1', 'S', 'G2', ...]
+        ...     },
+        ...     {
+        ...         'fov_name': '/FOV2', 'track_id': 45,
+        ...         'timepoints': (5, 55), 'weight': 1.2
+        ...     }
+        ... ]
+        >>> consensus = analyzer.create_consensus_reference_pattern(examples)
+        """
+        if not annotated_examples:
+            raise ValueError("No annotated examples provided")
+        
+        # Extract embedding patterns from each example
+        extracted_patterns = {}
+        for i, example in enumerate(annotated_examples):
+            pattern = self.get_reference_pattern(
+                fov_name=example['fov_name'],
+                track_id=example['track_id'],
+                timepoints=example['timepoints']
+            )
+            
+            extracted_patterns[f"example_{i}"] = {
+                'pattern': pattern,
+                'annotations': example.get('annotations', None),
+                'weight': example.get('weight', 1.0),
+                'source': example
+            }
+        
+        # Use the standalone function to create consensus
+        consensus_data = create_consensus_from_patterns(
+            extracted_patterns,
+            reference_selection=reference_selection,
+            aggregation_method=aggregation_method
+        )
+        
+        return consensus_data['consensus_pattern']
+    
+    def align_patterns(
+        self,
+        pattern1: np.ndarray,
+        pattern2: np.ndarray,
+        metric: str = "euclidean"
+    ) -> dict:
+        """Align two embedding patterns using DTW.
+        
+        This is a general-purpose alignment method that can be used for any
+        two embedding patterns with shape (T, ndim). It provides the core DTW 
+        functionality in a modular way that can be reused by other methods.
+        
+        Parameters
+        ----------
+        pattern1 : np.ndarray
+            First embedding pattern (T1, ndim) - will be used as query
+        pattern2 : np.ndarray
+            Second embedding pattern (T2, ndim) - will be used as reference
+        metric : str
+            Distance metric for DTW alignment
+            
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - 'distance': float - DTW distance
+            - 'skewness': float - Path skewness
+            - 'warping_path': list - DTW warping path
+            - 'aligned_pattern1': np.ndarray - Pattern1 aligned to pattern2's timepoints
+        """
+        result = align_embedding_patterns(pattern1, pattern2, metric=metric)
+        result['aligned_pattern1'] = result.pop('aligned_query')
+        return result
+    
+    def visualize_alignment(
+        self,
+        pattern1: np.ndarray,
+        pattern2: np.ndarray,
+        plot_type: str = "trajectories_2d",
+        feature_subset: list[int] = None,
+        **kwargs
+    ):
+        """Visualize DTW alignment results.
+        
+        Parameters
+        ----------
+        pattern1 : np.ndarray
+            First embedding pattern (T1, ndim)
+        pattern2 : np.ndarray  
+            Second embedding pattern (T2, ndim) - used as reference
+        plot_type : str
+            Type of visualization: "comparison", "trajectories_2d", "warping_path", "phase_portrait"
+        feature_subset : list[int], optional
+            Subset of features to visualize
+        **kwargs
+            Additional arguments for specific plot types
+            
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The generated figure
+        """
+        # Get alignment results
+        alignment = self.align_patterns(pattern1, pattern2, **kwargs)
+        aligned_pattern1 = alignment['aligned_pattern1']
+        warping_path = alignment['warping_path']
+        
+        if plot_type == "comparison":
+            return self._plot_aligned_comparison(
+                pattern1, pattern2, aligned_pattern1, feature_subset
+            )
+        elif plot_type == "trajectories_2d":
+            return self._plot_trajectories_2d(
+                pattern1, pattern2, aligned_pattern1, **kwargs
+            )
+        elif plot_type == "warping_path":
+            feature_idx = kwargs.get('feature_idx', 0)
+            return self._plot_warping_path(
+                pattern1, pattern2, warping_path, feature_idx
+            )
+        elif plot_type == "phase_portrait":
+            feature_pairs = kwargs.get('feature_pairs', [(0, 1)])
+            return self._plot_phase_portraits(
+                pattern1, pattern2, aligned_pattern1, feature_pairs
+            )
+        else:
+            raise ValueError(f"Unknown plot_type: {plot_type}")
+    
+    def _plot_aligned_comparison(self, query, reference, aligned, feature_subset):
+        """Plot before/after alignment comparison."""
+        import matplotlib.pyplot as plt
+        
+        n_features = min(4, query.shape[1])
+        if feature_subset:
+            features_to_plot = feature_subset[:n_features]
+        else:
+            features_to_plot = list(range(n_features))
+        
+        fig, axes = plt.subplots(2, 2, figsize=(12, 8))
+        fig.suptitle('DTW Alignment: Before vs After')
+        
+        # Original patterns
+        axes[0,0].plot(query[:, features_to_plot])
+        axes[0,0].set_title('Original Query Pattern')
+        axes[0,0].set_ylabel('Embedding Value')
+        
+        axes[0,1].plot(reference[:, features_to_plot])
+        axes[0,1].set_title('Reference Pattern') 
+        axes[0,1].set_ylabel('Embedding Value')
+        
+        # Aligned patterns
+        axes[1,0].plot(aligned[:, features_to_plot])
+        axes[1,0].set_title('Aligned Query Pattern')
+        axes[1,0].set_xlabel('Time')
+        axes[1,0].set_ylabel('Embedding Value')
+        
+        # Overlay
+        axes[1,1].plot(reference[:, features_to_plot], alpha=0.7, label='Reference')
+        axes[1,1].plot(aligned[:, features_to_plot], alpha=0.7, linestyle='--', label='Aligned Query')
+        axes[1,1].set_title('Aligned Overlay')
+        axes[1,1].set_xlabel('Time')
+        axes[1,1].legend()
+        
+        plt.tight_layout()
+        return fig
+        
+    def _plot_trajectories_2d(self, query, reference, aligned, reduction_method="pca", **kwargs):
+        """Plot 2D embedding trajectories."""
+        import matplotlib.pyplot as plt
+        from sklearn.decomposition import PCA
+        
+        # Use PCA for dimensionality reduction
+        all_data = np.vstack([query, reference, aligned])
+        pca = PCA(n_components=2)
+        reduced_data = pca.fit_transform(all_data)
+        
+        n_query = len(query)
+        n_ref = len(reference)
+        
+        query_2d = reduced_data[:n_query]
+        ref_2d = reduced_data[n_query:n_query+n_ref]
+        aligned_2d = reduced_data[n_query+n_ref:]
+        
+        plt.figure(figsize=(10, 8))
+        
+        # Plot with colorblind-friendly colors (blue/orange)
+        plt.plot(query_2d[:, 0], query_2d[:, 1], 'b-o', alpha=0.7, 
+                label='Original Query', markersize=3)
+        plt.plot(ref_2d[:, 0], ref_2d[:, 1], color='orange', marker='s', 
+                linestyle='-', alpha=0.7, label='Reference', markersize=3)
+        plt.plot(aligned_2d[:, 0], aligned_2d[:, 1], 'g--^', alpha=0.7, 
+                label='Aligned Query', markersize=3)
+        
+        plt.xlabel('PCA 1')
+        plt.ylabel('PCA 2')
+        plt.title('Embedding Trajectories (PCA)')
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+        
+        return plt.gcf()
+        
+    def _plot_warping_path(self, query, reference, warping_path, feature_idx):
+        """Plot DTW warping path visualization."""
+        import matplotlib.pyplot as plt
+        
+        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 6))
+        
+        # Distance matrix with path
+        distance_matrix = cdist(query, reference, metric='euclidean')
+        ax1.imshow(distance_matrix, origin='lower', cmap='viridis', aspect='auto')
+        
+        path_array = np.array(warping_path)
+        ax1.plot(path_array[:, 1], path_array[:, 0], 'r-', linewidth=2)
+        ax1.set_xlabel('Reference Time')
+        ax1.set_ylabel('Query Time')
+        ax1.set_title('DTW Distance Matrix & Warping Path')
+        
+        # Signal alignment
+        ax2.plot(query[:, feature_idx], 'b-', alpha=0.7, label='Original Query')
+        ax2.plot(reference[:, feature_idx], color='orange', alpha=0.7, label='Reference')
+        
+        ax2.set_xlabel('Time')
+        ax2.set_ylabel(f'Feature {feature_idx} Value')
+        ax2.set_title(f'Signal Alignment (Feature {feature_idx})')
+        ax2.legend()
+        
+        plt.tight_layout()
+        return fig
+        
+    def _plot_phase_portraits(self, query, reference, aligned, feature_pairs):
+        """Plot phase portraits in feature space."""
+        import matplotlib.pyplot as plt
+        
+        n_pairs = len(feature_pairs)
+        fig, axes = plt.subplots(1, n_pairs, figsize=(5*n_pairs, 5))
+        if n_pairs == 1:
+            axes = [axes]
+        
+        for i, (f1, f2) in enumerate(feature_pairs):
+            axes[i].plot(query[:, f1], query[:, f2], 'b-o', alpha=0.7, 
+                        markersize=2, label='Original Query')
+            axes[i].plot(reference[:, f1], reference[:, f2], color='orange', 
+                        marker='s', linestyle='-', alpha=0.7, markersize=2, label='Reference')
+            axes[i].plot(aligned[:, f1], aligned[:, f2], 'g--^', alpha=0.7, 
+                        markersize=2, label='Aligned Query')
+            
+            # Mark start/end
+            axes[i].scatter(reference[0, f1], reference[0, f2], 
+                           c='red', s=50, marker='*', label='Start', zorder=5)
+            axes[i].scatter(reference[-1, f1], reference[-1, f2], 
+                           c='darkred', s=50, marker='X', label='End', zorder=5)
+            
+            axes[i].set_xlabel(f'Feature {f1}')
+            axes[i].set_ylabel(f'Feature {f2}')
+            axes[i].set_title(f'Phase Portrait (Features {f1} vs {f2})')
+            axes[i].legend()
+            axes[i].grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        return fig
+    
+    def visualize_consensus(
+        self,
+        consensus_result: dict,
+        individual_patterns: dict,
+        plot_types: list[str] = ["comparison", "trajectories_2d"],
+        example_pattern_id: str = None
+    ):
+        """Visualize consensus reference pattern against individual examples.
+        
+        This method specifically visualizes the results of consensus creation,
+        showing how individual cell patterns align to the consensus reference.
+        
+        Parameters
+        ----------
+        consensus_result : dict
+            Result from create_consensus_from_patterns()
+        individual_patterns : dict  
+            Original patterns dictionary used to create consensus
+        plot_types : list[str]
+            Types of plots to generate
+        example_pattern_id : str, optional
+            Specific pattern to use for comparison. If None, uses first pattern.
+            
+        Returns
+        -------
+        dict
+            Dictionary mapping plot_type to matplotlib.figure.Figure
+        """
+        consensus_pattern = consensus_result['consensus_pattern']
+        metadata = consensus_result['metadata']
+        
+        # Select example pattern for comparison
+        if example_pattern_id is None:
+            example_pattern_id = list(individual_patterns.keys())[0]
+        
+        if example_pattern_id not in individual_patterns:
+            raise ValueError(f"Pattern '{example_pattern_id}' not found in individual_patterns")
+            
+        example_pattern = individual_patterns[example_pattern_id]['pattern']
+        
+        # Align example to consensus
+        alignment = self.align_patterns(example_pattern, consensus_pattern)
+        aligned_example = alignment['aligned_pattern1']
+        
+        figures = {}
+        
+        for plot_type in plot_types:
+            if plot_type == "comparison":
+                fig = self._plot_aligned_comparison(
+                    example_pattern, consensus_pattern, aligned_example, 
+                    feature_subset=[0, 1, 2, 3]
+                )
+                fig.suptitle(f'Consensus Alignment: {example_pattern_id} → Consensus Reference\\n'
+                           f'Distance: {alignment["distance"]:.3f}, Skewness: {alignment["skewness"]:.3f}',
+                           fontsize=12)
+                
+            elif plot_type == "trajectories_2d":
+                fig = self._plot_trajectories_2d(
+                    example_pattern, consensus_pattern, aligned_example
+                )
+                fig.suptitle(f'Consensus Reference Pattern (built from {metadata["n_patterns"]} cells)\\n'
+                           f'Method: {metadata["aggregation_method"]}, Reference: {metadata["reference_pattern"]}',
+                           fontsize=12)
+                
+            elif plot_type == "phase_portrait":
+                fig = self._plot_phase_portraits(
+                    example_pattern, consensus_pattern, aligned_example, 
+                    feature_pairs=[(0, 1), (2, 3)]
+                )
+                fig.suptitle(f'Cell State Transitions: Individual vs Consensus', fontsize=12)
+                
+            elif plot_type == "warping_path":
+                fig = self._plot_warping_path(
+                    example_pattern, consensus_pattern, alignment['warping_path'], 0
+                )
+                fig.suptitle(f'DTW Alignment to Consensus Reference', fontsize=12)
+                
+            else:
+                raise ValueError(f"Unknown plot_type: {plot_type}")
+                
+            figures[plot_type] = fig
+            
+        return figures
+    
+    def get_annotated_patterns(
+        self,
+        annotation_specs: list[dict]
+    ) -> dict[str, dict]:
+        """Extract multiple patterns with their annotations for consensus building.
+        
+        This is a helper method to extract patterns from multiple examples
+        that can then be used with the consensus creation functions.
+        
+        Parameters
+        ----------
+        annotation_specs : list[dict]
+            List of pattern specifications, each containing:
+            - 'fov_name': str
+            - 'track_id': int or list[int]
+            - 'timepoints': tuple[int, int]
+            - 'label': str - identifier for this pattern
+            - 'annotations': optional annotations
+            
+        Returns
+        -------
+        dict[str, dict]
+            Dictionary mapping labels to pattern data compatible with
+            create_consensus_from_patterns function
+        """
+        patterns = {}
+        
+        for spec in annotation_specs:
+            pattern = self.get_reference_pattern(
+                fov_name=spec['fov_name'],
+                track_id=spec['track_id'],
+                timepoints=spec['timepoints']
+            )
+            
+            patterns[spec['label']] = {
+                'pattern': pattern,
+                'annotations': spec.get('annotations', None),
+                'source_info': {
+                    'fov_name': spec['fov_name'],
+                    'track_id': spec['track_id'],
+                    'timepoints': spec['timepoints']
+                }
+            }
+        
+        return patterns
 
 
 def identify_lineages(
@@ -266,6 +689,46 @@ def identify_lineages(
                 all_lineages.append((fov_id, lineage_tracks[0]))
 
     return all_lineages
+
+
+def filter_lineages_by_timepoints(
+    lineages: list[tuple[str, list[int]]],
+    tracking_df: pd.DataFrame,
+    min_timepoints: int = 20
+) -> list[tuple[str, list[int]]]:
+    """Filter lineages that have at least a minimum number of timepoints.
+    
+    This convenience function takes the output from identify_lineages() and filters
+    out lineages that don't meet the minimum timepoint requirement.
+    
+    Parameters
+    ----------
+    lineages : list[tuple[str, list[int]]]
+        List of (fov_name, track_ids) representing lineages from identify_lineages()
+    tracking_df : pd.DataFrame
+        Tracking dataframe with columns: fov_name, track_id, and other tracking data
+    min_timepoints : int, default=20
+        Minimum number of timepoints required to keep a lineage
+        
+    Returns
+    -------
+    list[tuple[str, list[int]]]
+        Filtered list of lineages that meet the minimum timepoint requirement
+    """
+    filtered_lineages = []
+    
+    for fov_id, track_ids in lineages:
+        # Count total timepoints for this lineage
+        lineage_rows = tracking_df[
+            (tracking_df["fov_name"] == fov_id) & 
+            (tracking_df["track_id"].isin(track_ids))
+        ]
+        total_timepoints = len(lineage_rows)
+        
+        if total_timepoints >= min_timepoints:
+            filtered_lineages.append((fov_id, track_ids))
+    
+    return filtered_lineages
 
 
 def find_pattern_matches(
@@ -692,3 +1155,311 @@ def path_skew(warping_path: list, ref_len: int, query_len: int) -> float:
     skew = np.mean(distances) / max_distance
 
     return skew
+
+
+def create_consensus_from_patterns(
+    patterns: dict[str, dict],
+    reference_selection: str = "median_length",
+    aggregation_method: str = "mean",
+    distance_method: Literal["cosine", "euclidean"] = "cosine"
+) -> dict:
+    """Create consensus pattern from multiple embedding patterns using DTW alignment.
+    
+    This function is compatible with CytoDtw workflow and creates consensus
+    patterns from embedding vectors extracted from different cell examples.
+    
+    Parameters
+    ----------
+    patterns : dict[str, dict]
+        Dictionary where keys are pattern identifiers and values contain:
+        - 'pattern': np.ndarray - The embedding pattern (time, features)
+        - 'annotations': list or dict - Optional annotations/labels
+        - 'weight': float - Optional weight for this pattern (default 1.0)
+        - Other metadata fields are preserved
+    reference_selection : str
+        How to select reference: "median_length", "first", "longest", "shortest"
+    aggregation_method : str
+        How to aggregate: "mean", "median", "weighted_mean"
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'consensus_pattern': np.ndarray - The consensus embedding pattern
+        - 'consensus_annotations': list - Consensus annotations (if available)
+        - 'metadata': dict - Information about the consensus creation process
+        
+    Examples
+    --------
+    >>> patterns = {
+    ...     'cell1': {
+    ...         'pattern': np.random.rand(50, 128),  # 50 timepoints, 128 features
+    ...         'annotations': ['G1'] * 20 + ['S'] * 15 + ['G2'] * 15,
+    ...         'weight': 1.0
+    ...     },
+    ...     'cell2': {
+    ...         'pattern': np.random.rand(45, 128),  # Different length
+    ...         'annotations': ['G1'] * 18 + ['S'] * 12 + ['G2'] * 15
+    ...     }
+    ... }
+    >>> consensus = create_consensus_from_patterns(patterns)
+    """
+    if not patterns:
+        raise ValueError("No patterns provided")
+    
+    # Validate that all patterns have the 'pattern' key
+    for pattern_id, pattern_data in patterns.items():
+        if 'pattern' not in pattern_data:
+            raise ValueError(f"Pattern '{pattern_id}' missing 'pattern' key")
+        if not isinstance(pattern_data['pattern'], np.ndarray):
+            raise ValueError(f"Pattern '{pattern_id}' must be numpy array")
+    
+    # Select reference pattern and align all patterns to it
+    reference_id = _select_reference_pattern(patterns, reference_selection)
+    reference_pattern = patterns[reference_id]['pattern']
+    
+    _logger.debug(f"Selected reference pattern: {reference_id}")
+    _logger.debug(f"Reference shape: {reference_pattern.shape}")
+    
+    aligned_patterns = align_patterns_to_reference(patterns, reference_id, metric=distance_method)
+    consensus = _aggregate_aligned_patterns(aligned_patterns, aggregation_method)
+    
+    consensus['metadata'] = {
+        'reference_pattern': reference_id,
+        'source_patterns': list(patterns.keys()),
+        'reference_selection': reference_selection,
+        'aggregation_method': aggregation_method,
+        'n_patterns': len(patterns),
+        'reference_shape': reference_pattern.shape,
+        'consensus_shape': consensus['consensus_pattern'].shape
+    }
+    
+    return consensus
+
+
+def _select_reference_pattern(patterns: dict, method: str) -> str:
+    """Select which pattern to use as reference for DTW alignment."""
+    if method == "first":
+        return list(patterns.keys())[0]
+    
+    elif method == "median_length":
+        lengths = {pid: len(pdata['pattern']) for pid, pdata in patterns.items()}
+        median_length = np.median(list(lengths.values()))
+        closest_id = min(lengths.keys(), key=lambda x: abs(lengths[x] - median_length))
+        return closest_id
+    
+    elif method == "longest":
+        lengths = {pid: len(pdata['pattern']) for pid, pdata in patterns.items()}
+        return max(lengths.keys(), key=lambda x: lengths[x])
+    
+    elif method == "shortest":
+        lengths = {pid: len(pdata['pattern']) for pid, pdata in patterns.items()}
+        return min(lengths.keys(), key=lambda x: lengths[x])
+    
+    else:
+        raise ValueError(f"Unknown reference selection method: {method}")
+
+
+def align_embedding_patterns(
+    query_pattern: np.ndarray, 
+    reference_pattern: np.ndarray,
+    metric: str = "euclidean"
+) -> dict:
+    """Align two embedding patterns using DTW.
+    
+    This is a modular function that aligns two embedding sequences (T, ndim)
+    using DTW and returns comprehensive alignment information.
+    
+    Parameters
+    ----------
+    query_pattern : np.ndarray
+        Query embedding pattern with shape (T1, ndim)
+    reference_pattern : np.ndarray
+        Reference embedding pattern with shape (T2, ndim)
+    metric : str
+        Distance metric for DTW alignment
+        
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'distance': float - DTW distance
+        - 'skewness': float - Path skewness  
+        - 'warping_path': list - DTW warping path
+        - 'aligned_query': np.ndarray - Query aligned to reference timepoints
+    """
+
+    distance, skewness = compute_dtw_distance(
+        query_pattern, 
+        reference_pattern, 
+        metric=metric
+    )
+    
+    distance_matrix = cdist(query_pattern, reference_pattern, metric=metric)
+    _, _, dtw_path = dtw_with_matrix(distance_matrix, normalize=True)
+    
+    aligned_query, _ = _apply_warping_path(
+        query_pattern, 
+        reference_pattern,
+        dtw_path
+    )
+    
+    return {
+        'distance': distance,
+        'skewness': skewness,
+        'warping_path': dtw_path,
+        'aligned_query': aligned_query
+    }
+
+
+def align_patterns_to_reference(patterns: dict, reference_id: str, metric: str = "cosine") -> dict:
+    """Align all patterns to the selected reference using DTW on embedding vectors.
+    
+    This function reuses the existing modular DTW functionality from the CytoDtw system
+    instead of duplicating DTW alignment logic.
+    """
+    reference_pattern = patterns[reference_id]['pattern']
+    aligned_patterns = {reference_id: patterns[reference_id]}  # Reference doesn't need alignment
+    
+    for pattern_id, pattern_data in patterns.items():
+        if pattern_id == reference_id:
+            continue  # Skip reference
+        
+        query_pattern = pattern_data['pattern']
+        
+        # Use our modular alignment function
+        alignment_result = align_embedding_patterns(
+            query_pattern, 
+            reference_pattern, 
+            metric=metric
+        )
+        
+        # Apply the alignment to annotations if present
+        _, aligned_annotations = _apply_warping_path(
+            query_pattern, 
+            reference_pattern,
+            alignment_result['warping_path'],
+            pattern_data.get('annotations')
+        )
+        
+        # Create aligned pattern data
+        aligned_data = {
+            'pattern': alignment_result['aligned_query'],
+            'annotations': aligned_annotations,
+            'weight': pattern_data.get('weight', 1.0),
+            'dtw_distance': alignment_result['distance'],
+            'dtw_skewness': alignment_result['skewness'],
+            'alignment_path': alignment_result['warping_path']
+        }
+        
+        # Copy other metadata
+        for key, value in pattern_data.items():
+            if key not in ['pattern', 'annotations', 'weight']:
+                aligned_data[key] = value
+        
+        aligned_patterns[pattern_id] = aligned_data
+    
+    return aligned_patterns
+
+
+def _apply_warping_path(
+    query_pattern: np.ndarray,
+    reference_pattern: np.ndarray, 
+    dtw_path: list[tuple[int, int]],
+    query_annotations: list = None
+) -> tuple[np.ndarray, list]:
+    """Apply DTW warping path to align query pattern to reference pattern.
+    
+    This is a modular helper function that applies a DTW warping path
+    to align embedding patterns and their annotations.
+    
+    Parameters
+    ----------
+    query_pattern : np.ndarray
+        Query embedding pattern to be aligned (time, features)
+    reference_pattern : np.ndarray
+        Reference pattern to align to (time, features)
+    dtw_path : list[tuple[int, int]]
+        DTW warping path as list of (query_idx, ref_idx) tuples
+    query_annotations : list, optional
+        Optional annotations for query pattern
+        
+    Returns
+    -------
+    tuple[np.ndarray, list]
+        Aligned pattern and aligned annotations (if provided)
+    """
+    ref_length, n_features = reference_pattern.shape
+    aligned_pattern = np.zeros_like(reference_pattern)
+    
+    # Apply warping path to align the embedding vectors
+    for query_idx, ref_idx in dtw_path:
+        if ref_idx < ref_length and query_idx < len(query_pattern):
+            aligned_pattern[ref_idx] = query_pattern[query_idx]
+    
+    # Align annotations if present
+    aligned_annotations = None
+    if query_annotations is not None:
+        aligned_annotations = ['Unknown'] * ref_length
+        for query_idx, ref_idx in dtw_path:
+            if (ref_idx < ref_length and 
+                query_idx < len(query_annotations)):
+                aligned_annotations[ref_idx] = query_annotations[query_idx]
+    
+    return aligned_pattern, aligned_annotations
+
+
+def _aggregate_aligned_patterns(aligned_patterns: dict, method: str) -> dict:
+    """Aggregate aligned embedding patterns into consensus."""
+    consensus = {}
+    
+    # Extract patterns and weights
+    pattern_arrays = []
+    weights = []
+    
+    for pattern_data in aligned_patterns.values():
+        pattern_arrays.append(pattern_data['pattern'])
+        weights.append(pattern_data.get('weight', 1.0))
+    
+    pattern_arrays = np.array(pattern_arrays)  # Shape: (n_patterns, time, features)
+    weights = np.array(weights)
+    
+    # Aggregate embedding patterns
+    if method == "mean":
+        consensus_pattern = np.mean(pattern_arrays, axis=0)
+    elif method == "median":
+        consensus_pattern = np.median(pattern_arrays, axis=0)
+    elif method == "weighted_mean":
+        weights = weights / np.sum(weights)
+        consensus_pattern = np.average(pattern_arrays, axis=0, weights=weights)
+    else:
+        raise ValueError(f"Unknown aggregation method: {method}")
+    
+    consensus['consensus_pattern'] = consensus_pattern
+    
+    # Aggregate annotations if present (use most common at each timepoint)
+    annotation_lists = []
+    for pattern_data in aligned_patterns.values():
+        if pattern_data.get('annotations') is not None:
+            annotation_lists.append(pattern_data['annotations'])
+    
+    if annotation_lists:
+        consensus_annotations = []
+        time_length = consensus_pattern.shape[0]
+        
+        for t in range(time_length):
+            annotations_at_t = []
+            for ann_list in annotation_lists:
+                if t < len(ann_list) and ann_list[t] != 'Unknown':
+                    annotations_at_t.append(ann_list[t])
+            
+            if annotations_at_t:
+                # Find most common annotation
+                most_common = max(set(annotations_at_t), key=annotations_at_t.count)
+                consensus_annotations.append(most_common)
+            else:
+                consensus_annotations.append('Unknown')
+        
+        consensus['consensus_annotations'] = consensus_annotations
+    
+    return consensus
