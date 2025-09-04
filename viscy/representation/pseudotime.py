@@ -9,28 +9,21 @@ import xarray as xr
 from numpy.typing import ArrayLike
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
-from typing_extensions import TypedDict
+
+from viscy.representation.embedding_writer import read_embedding_dataset
 
 _logger = logging.getLogger("lightning.pytorch")
 
-#Annotated Example TypeDict
-class AnnotatedSample(TypedDict):
-    fov_name: str
-    track_id: int | list[int]
-    timepoints: tuple[int, int]
-    annotations: dict | list
-    weight: float
-
-class DtwSample(TypedDict, total=False):
-    pattern: np.ndarray
-    annotations: list[str,int,float] | None
-    distance: float
-    skewness: float
-    warping_path: list[tuple[int, int]]
-    metadata: dict
+@dataclass
+class DTWResult:
+    """Results from DTW pattern matching."""
+    matches: pd.DataFrame
+    reference_pattern: np.ndarray
+    reference_info: dict
+    
 
 class CytoDtw:    
-    def __init__(self, embeddings: xr.Dataset, annotations_df: pd.DataFrame):
+    def __init__(self, embedding_path: str | Path, tracks_path: Optional[str | Path] = None):
         """
         DTW for Dynamic Cell Embeddings 
                
@@ -39,45 +32,27 @@ class CytoDtw:
         embeddings  : xr.Dataset
             Embedding dataset (zarr file)
         """
-        self.embeddings=embeddings
-        self.annotations_df=annotations_df
-        self.lineages = None
-        self.consensus_data = None
-        self.reference_patterns = None
-
-
-    def _validate_input(self):
-        raise NotImplementedError("Validation of input not implemented")
+        self.embedding_path = Path(embedding_path)
+        self.tracks_path = Path(tracks_path) if tracks_path else None
+        self._embeddings = None
+        self._tracking_df = None
+        
+    @property
+    def embeddings(self) -> xr.Dataset:
+        """Load embeddings dataset lazily."""
+        if self._embeddings is None:
+            self._embeddings = read_embedding_dataset(str(self.embedding_path))
+        return self._embeddings
     
-    def get_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
-        """Get identified lineages with specified minimum timepoints."""
-        return self._identify_lineages(min_timepoints)
-        
-    def _identify_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
-        """Auto-identify lineages from the data."""
-        # Use parent_track_id if available for proper lineage identification
-        if 'parent_track_id' in self.annotations_df.columns:
-            all_lineages = identify_lineages(self.annotations_df, return_both_branches=False)
-        else:
-            # Fallback: treat each track as individual lineage
-            all_lineages = []
-            for (fov, track_id), group in self.annotations_df.groupby(['fov_name', 'track_id']):
-                all_lineages.append((fov, [track_id]))
-        
-        # Filter lineages by total timepoints across all tracks in lineage
-        filtered_lineages = []
-        for fov_id, track_ids in all_lineages:
-            lineage_rows = self.annotations_df[
-                (self.annotations_df["fov_name"] == fov_id) & (self.annotations_df["track_id"].isin(track_ids))
-            ]
-            total_timepoints = len(lineage_rows)
-            if total_timepoints >= min_timepoints:
-                filtered_lineages.append((fov_id, track_ids))
-        self.lineages=filtered_lineages
-        return self.lineages
-
+    @property  
+    def tracking_df(self) -> pd.DataFrame:
+        """Load tracking dataframe lazily."""
+        if self._tracking_df is None and self.tracks_path:
+            raise NotImplementedError("Tracking data loading not yet implemented")
+        return self._tracking_df
+    
     def get_reference_pattern(self, fov_name: str, track_id: int | list[int], 
-                            timepoints: tuple[int, int], reference_type: str = "features") -> np.ndarray:
+                            timepoints: tuple[int, int]) -> np.ndarray:
         """
         Extract reference pattern from embeddings.
         
@@ -159,12 +134,10 @@ class CytoDtw:
         pd.DataFrame
             Match results with distances and warping paths
         """
-        if reference_pattern is None:
-            reference_pattern = self.consensus_data['pattern']
-        if lineages is None:
+        if filtered_lineages is None:
             # FIXME: Auto-identify lineages from tracking data
-            lineages = self.get_lineages()
-
+            raise NotImplementedError("Auto-identification of lineages not yet implemented")
+            
         return find_pattern_matches(
             reference_pattern=reference_pattern,
             filtered_lineages=lineages,
@@ -257,6 +230,129 @@ class CytoDtw:
         )
         
         return consensus_data
+    
+    def align_patterns(
+        self,
+        pattern1: np.ndarray,
+        pattern2: np.ndarray,
+        metric: str = "euclidean"
+    ) -> dict:
+        """Align two embedding patterns using DTW.
+        
+        This is a general-purpose alignment method that can be used for any
+        two embedding patterns with shape (T, ndim). It provides the core DTW 
+        functionality in a modular way that can be reused by other methods.
+        
+        Parameters
+        ----------
+        pattern1 : np.ndarray
+            First embedding pattern (T1, ndim) - will be used as query
+        pattern2 : np.ndarray
+            Second embedding pattern (T2, ndim) - will be used as reference
+        metric : str
+            Distance metric for DTW alignment
+            
+        Returns
+        -------
+        DTWResult
+            Analysis results
+        """
+        # Extract reference pattern
+        reference_pattern = self.get_reference_pattern(fov_name, track_id, timepoints)
+        
+        # Find matches
+        matches = self.find_pattern_matches(
+            reference_pattern=reference_pattern,
+            filtered_lineages=filtered_lineages,
+            **kwargs
+        )
+        
+        # Package results
+        reference_info = {
+            'fov_name': fov_name,
+            'track_id': track_id,
+            'timepoints': timepoints
+        }
+        
+        return DTWResult(
+            matches=matches,
+            reference_pattern=reference_pattern,
+            reference_info=reference_info
+        )
+    
+    def create_consensus_reference_pattern(
+        self, 
+        annotated_examples: list[dict],
+        reference_selection: str = "median_length",
+        aggregation_method: str = "mean"
+    ) -> np.ndarray:
+        """
+        Create consensus reference pattern from multiple annotated examples.
+        
+        This method takes multiple manually annotated cell examples and creates a
+        consensus reference pattern by aligning them with DTW and aggregating.
+        
+        Parameters
+        ----------
+        annotated_examples : list[dict]
+            List of annotated examples, each containing:
+            - 'fov_name': str - FOV identifier
+            - 'track_id': int or list[int] - Track ID(s)
+            - 'timepoints': tuple[int, int] - (start, end) timepoints
+            - 'annotations': dict or list - Optional annotations/labels
+            - 'weight': float - Optional weight for this example (default 1.0)
+        reference_selection : str
+            mode of selection of reference: "median_length", "first", "longest", "shortest"
+        aggregation_method : str
+            mode of aggregation: "mean", "median", "weighted_mean"
+            
+        Returns
+        -------
+        np.ndarray
+            Consensus reference pattern
+            
+        Examples
+        --------
+        >>> analyzer = CytoDtw("embeddings.zarr")
+        >>> examples = [
+        ...     {
+        ...         'fov_name': '/FOV1', 'track_id': 129, 
+        ...         'timepoints': (8, 70), 'annotations': ['G1', 'S', 'G2', ...]
+        ...     },
+        ...     {
+        ...         'fov_name': '/FOV2', 'track_id': 45,
+        ...         'timepoints': (5, 55), 'weight': 1.2
+        ...     }
+        ... ]
+        >>> consensus = analyzer.create_consensus_reference_pattern(examples)
+        """
+        if not annotated_examples:
+            raise ValueError("No annotated examples provided")
+        
+        # Extract embedding patterns from each example
+        extracted_patterns = {}
+        for i, example in enumerate(annotated_examples):
+            pattern = self.get_reference_pattern(
+                fov_name=example['fov_name'],
+                track_id=example['track_id'],
+                timepoints=example['timepoints']
+            )
+            
+            extracted_patterns[f"example_{i}"] = {
+                'pattern': pattern,
+                'annotations': example.get('annotations', None),
+                'weight': example.get('weight', 1.0),
+                'source': example
+            }
+        
+        # Use the standalone function to create consensus
+        consensus_data = create_consensus_from_patterns(
+            extracted_patterns,
+            reference_selection=reference_selection,
+            aggregation_method=aggregation_method
+        )
+        
+        return consensus_data['consensus_pattern']
     
     def align_patterns(
         self,
@@ -681,6 +777,46 @@ def identify_lineages(
                 all_lineages.append((fov_id, lineage_tracks[0]))
 
     return all_lineages
+
+
+def filter_lineages_by_timepoints(
+    lineages: list[tuple[str, list[int]]],
+    tracking_df: pd.DataFrame,
+    min_timepoints: int = 20
+) -> list[tuple[str, list[int]]]:
+    """Filter lineages that have at least a minimum number of timepoints.
+    
+    This convenience function takes the output from identify_lineages() and filters
+    out lineages that don't meet the minimum timepoint requirement.
+    
+    Parameters
+    ----------
+    lineages : list[tuple[str, list[int]]]
+        List of (fov_name, track_ids) representing lineages from identify_lineages()
+    tracking_df : pd.DataFrame
+        Tracking dataframe with columns: fov_name, track_id, and other tracking data
+    min_timepoints : int, default=20
+        Minimum number of timepoints required to keep a lineage
+        
+    Returns
+    -------
+    list[tuple[str, list[int]]]
+        Filtered list of lineages that meet the minimum timepoint requirement
+    """
+    filtered_lineages = []
+    
+    for fov_id, track_ids in lineages:
+        # Count total timepoints for this lineage
+        lineage_rows = tracking_df[
+            (tracking_df["fov_name"] == fov_id) & 
+            (tracking_df["track_id"].isin(track_ids))
+        ]
+        total_timepoints = len(lineage_rows)
+        
+        if total_timepoints >= min_timepoints:
+            filtered_lineages.append((fov_id, track_ids))
+    
+    return filtered_lineages
 
 
 def find_pattern_matches(
@@ -1175,9 +1311,7 @@ def create_consensus_from_patterns(
     patterns: dict[str, dict],
     reference_selection: str = "median_length",
     aggregation_method: str = "mean",
-    metric: Literal["cosine", "euclidean"] = "cosine",
-    constraint_type: str = "unconstrained",
-    band_width_ratio: float = 0.0
+    distance_method: Literal["cosine", "euclidean"] = "cosine"
 ) -> dict:
     """Create consensus pattern from multiple embedding patterns using DTW alignment.
     
@@ -1196,78 +1330,58 @@ def create_consensus_from_patterns(
         How to select reference: "median_length", "first", "longest", "shortest"
     aggregation_method : str
         How to aggregate: "mean", "median", "weighted_mean"
-    metric: Literal["cosine", "euclidean"]
-        Distance metric for DTW alignment
         
     Returns
     -------
     dict
         Dictionary containing:
-        - 'pattern': np.ndarray - The consensus embedding pattern
-        - 'annotations': list - Consensus annotations (if available)
+        - 'consensus_pattern': np.ndarray - The consensus embedding pattern
+        - 'consensus_annotations': list - Consensus annotations (if available)
         - 'metadata': dict - Information about the consensus creation process
+        
+    Examples
+    --------
+    >>> patterns = {
+    ...     'cell1': {
+    ...         'pattern': np.random.rand(50, 128),  # 50 timepoints, 128 features
+    ...         'annotations': ['G1'] * 20 + ['S'] * 15 + ['G2'] * 15,
+    ...         'weight': 1.0
+    ...     },
+    ...     'cell2': {
+    ...         'pattern': np.random.rand(45, 128),  # Different length
+    ...         'annotations': ['G1'] * 18 + ['S'] * 12 + ['G2'] * 15
+    ...     }
+    ... }
+    >>> consensus = create_consensus_from_patterns(patterns)
     """
     if not patterns:
         raise ValueError("No patterns provided")
     
+    # Validate that all patterns have the 'pattern' key
     for pattern_id, pattern_data in patterns.items():
         if 'pattern' not in pattern_data:
             raise ValueError(f"Pattern '{pattern_id}' missing 'pattern' key")
         if not isinstance(pattern_data['pattern'], np.ndarray):
             raise ValueError(f"Pattern '{pattern_id}' must be numpy array")
     
+    # Select reference pattern and align all patterns to it
     reference_id = _select_reference_pattern(patterns, reference_selection)
     reference_pattern = patterns[reference_id]['pattern']
     
     _logger.debug(f"Selected reference pattern: {reference_id}")
     _logger.debug(f"Reference shape: {reference_pattern.shape}")
-
-    reference_pattern = patterns[reference_id]['pattern']
-    aligned_patterns = {reference_id: patterns[reference_id]}
     
-    for pattern_id, pattern_data in patterns.items():
-        if pattern_id == reference_id:
-            continue  # Skip reference
-        
-        query_pattern = pattern_data['pattern']
-        alignment_result = align_embedding_patterns(
-            query_pattern, 
-            reference_pattern, 
-            metric=metric,
-            query_annotations=pattern_data.get('annotations'),
-            constraint_type=constraint_type,
-            band_width_ratio=band_width_ratio
-        )
-        aligned_data = {
-            'pattern': alignment_result['pattern'],
-            'annotations': alignment_result['annotations'],
-            'weight': pattern_data.get('weight', 1.0),
-            'dtw_distance': alignment_result['distance'],
-            'dtw_skewness': alignment_result['skewness'],
-            'alignment_path': alignment_result['warping_path']
-        }
-        # Copy other metadata
-        for key, value in pattern_data.items():
-            if key not in ['pattern', 'annotations', 'weight']:
-                aligned_data[key] = value
-        
-        aligned_patterns[pattern_id] = aligned_data
+    aligned_patterns = align_patterns_to_reference(patterns, reference_id, metric=distance_method)
     consensus = _aggregate_aligned_patterns(aligned_patterns, aggregation_method)
     
-    consensus = DtwSample(
-      pattern=consensus['pattern'],
-      annotations=consensus['annotations'],
-      distance=alignment_result['distance'],
-      skewness=alignment_result['skewness'],
-      warping_path=alignment_result['warping_path']
-    )
-
     consensus['metadata'] = {
         'reference_pattern': reference_id,
         'source_patterns': list(patterns.keys()),
         'reference_selection': reference_selection,
         'aggregation_method': aggregation_method,
         'n_patterns': len(patterns),
+        'reference_shape': reference_pattern.shape,
+        'consensus_shape': consensus['consensus_pattern'].shape
     }
     
     return consensus
@@ -1299,11 +1413,8 @@ def _select_reference_pattern(patterns: dict, method: str) -> str:
 def align_embedding_patterns(
     query_pattern: np.ndarray, 
     reference_pattern: np.ndarray,
-    metric: str = "cosine",
-    query_annotations: list = None,
-    constraint_type: str = "unconstrained",
-    band_width_ratio: float = 0.0
-) -> DtwSample:
+    metric: str = "euclidean"
+) -> dict:
     """Align two embedding patterns using DTW.
     
     This is a modular function that aligns two embedding sequences (T, ndim)
@@ -1317,42 +1428,94 @@ def align_embedding_patterns(
         Reference embedding pattern with shape (T2, ndim)
     metric : str
         Distance metric for DTW alignment
-    query_annotations : list, optional
-        Optional annotations for query pattern to align alongside the embeddings
         
     Returns
     -------
-    DtwSample
+    dict
+        Dictionary containing:
+        - 'distance': float - DTW distance
+        - 'skewness': float - Path skewness  
+        - 'warping_path': list - DTW warping path
+        - 'aligned_query': np.ndarray - Query aligned to reference timepoints
     """
 
-    dtw_result = compute_dtw_distance(
+    distance, skewness = compute_dtw_distance(
         query_pattern, 
         reference_pattern, 
-        metric=metric,
-        constraint_type=constraint_type,
-        band_width_ratio=band_width_ratio
-    )    
-
-    # Apply warping path once for both pattern and annotations
-    aligned_query, aligned_annotations = _apply_warping_path(
-        query_pattern = query_pattern, 
-        reference_pattern = reference_pattern,
-        warping_path = dtw_result['warping_path'],
-        query_annotations = query_annotations
+        metric=metric
     )
     
-    return DtwSample(
-      pattern=aligned_query,
-      annotations=aligned_annotations,
-      distance=dtw_result['distance'],
-      skewness=dtw_result['skewness'],
-      warping_path=dtw_result['warping_path']
+    distance_matrix = cdist(query_pattern, reference_pattern, metric=metric)
+    _, _, dtw_path = dtw_with_matrix(distance_matrix, normalize=True)
+    
+    aligned_query, _ = _apply_warping_path(
+        query_pattern, 
+        reference_pattern,
+        dtw_path
     )
+    
+    return {
+        'distance': distance,
+        'skewness': skewness,
+        'warping_path': dtw_path,
+        'aligned_query': aligned_query
+    }
+
+
+def align_patterns_to_reference(patterns: dict, reference_id: str, metric: str = "cosine") -> dict:
+    """Align all patterns to the selected reference using DTW on embedding vectors.
+    
+    This function reuses the existing modular DTW functionality from the CytoDtw system
+    instead of duplicating DTW alignment logic.
+    """
+    reference_pattern = patterns[reference_id]['pattern']
+    aligned_patterns = {reference_id: patterns[reference_id]}  # Reference doesn't need alignment
+    
+    for pattern_id, pattern_data in patterns.items():
+        if pattern_id == reference_id:
+            continue  # Skip reference
+        
+        query_pattern = pattern_data['pattern']
+        
+        # Use our modular alignment function
+        alignment_result = align_embedding_patterns(
+            query_pattern, 
+            reference_pattern, 
+            metric=metric
+        )
+        
+        # Apply the alignment to annotations if present
+        _, aligned_annotations = _apply_warping_path(
+            query_pattern, 
+            reference_pattern,
+            alignment_result['warping_path'],
+            pattern_data.get('annotations')
+        )
+        
+        # Create aligned pattern data
+        aligned_data = {
+            'pattern': alignment_result['aligned_query'],
+            'annotations': aligned_annotations,
+            'weight': pattern_data.get('weight', 1.0),
+            'dtw_distance': alignment_result['distance'],
+            'dtw_skewness': alignment_result['skewness'],
+            'alignment_path': alignment_result['warping_path']
+        }
+        
+        # Copy other metadata
+        for key, value in pattern_data.items():
+            if key not in ['pattern', 'annotations', 'weight']:
+                aligned_data[key] = value
+        
+        aligned_patterns[pattern_id] = aligned_data
+    
+    return aligned_patterns
+
 
 def _apply_warping_path(
     query_pattern: np.ndarray,
     reference_pattern: np.ndarray, 
-    warping_path: list[tuple[int, int]],
+    dtw_path: list[tuple[int, int]],
     query_annotations: list = None
 ) -> tuple[np.ndarray, list]:
     """Apply DTW warping path to align query pattern to reference pattern.
@@ -1366,7 +1529,7 @@ def _apply_warping_path(
         Query embedding pattern to be aligned (time, features)
     reference_pattern : np.ndarray
         Reference pattern to align to (time, features)
-    warping_path : list[tuple[int, int]]
+    dtw_path : list[tuple[int, int]]
         DTW warping path as list of (query_idx, ref_idx) tuples
     query_annotations : list, optional
         Optional annotations for query pattern
@@ -1380,7 +1543,7 @@ def _apply_warping_path(
     aligned_pattern = np.zeros_like(reference_pattern)
     
     # Apply warping path to align the embedding vectors
-    for query_idx, ref_idx in warping_path:
+    for query_idx, ref_idx in dtw_path:
         if ref_idx < ref_length and query_idx < len(query_pattern):
             aligned_pattern[ref_idx] = query_pattern[query_idx]
     
@@ -1388,7 +1551,7 @@ def _apply_warping_path(
     aligned_annotations = None
     if query_annotations is not None:
         aligned_annotations = ['Unknown'] * ref_length
-        for query_idx, ref_idx in warping_path:
+        for query_idx, ref_idx in dtw_path:
             if (ref_idx < ref_length and 
                 query_idx < len(query_annotations)):
                 aligned_annotations[ref_idx] = query_annotations[query_idx]
@@ -1396,7 +1559,7 @@ def _apply_warping_path(
     return aligned_pattern, aligned_annotations
 
 
-def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["mean", "median", "weighted_mean"]) -> DtwSample:
+def _aggregate_aligned_patterns(aligned_patterns: dict, method: str) -> dict:
     """Aggregate aligned embedding patterns into consensus."""
     consensus = {}
     
@@ -1408,19 +1571,21 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
         pattern_arrays.append(pattern_data['pattern'])
         weights.append(pattern_data.get('weight', 1.0))
     
-    pattern_arrays = np.array(pattern_arrays) 
+    pattern_arrays = np.array(pattern_arrays)  # Shape: (n_patterns, time, features)
     weights = np.array(weights)
     
     # Aggregate embedding patterns
     if method == "mean":
-        pattern = np.mean(pattern_arrays, axis=0)
+        consensus_pattern = np.mean(pattern_arrays, axis=0)
     elif method == "median":
-        pattern = np.median(pattern_arrays, axis=0)
+        consensus_pattern = np.median(pattern_arrays, axis=0)
     elif method == "weighted_mean":
         weights = weights / np.sum(weights)
-        pattern = np.average(pattern_arrays, axis=0, weights=weights)
-
-    consensus['pattern'] = pattern
+        consensus_pattern = np.average(pattern_arrays, axis=0, weights=weights)
+    else:
+        raise ValueError(f"Unknown aggregation method: {method}")
+    
+    consensus['consensus_pattern'] = consensus_pattern
     
     # Aggregate annotations if present (use most common at each timepoint)
     annotation_lists = []
@@ -1429,8 +1594,8 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
             annotation_lists.append(pattern_data['annotations'])
     
     if annotation_lists:
-        annotations = []
-        time_length = pattern.shape[0]
+        consensus_annotations = []
+        time_length = consensus_pattern.shape[0]
         
         for t in range(time_length):
             annotations_at_t = []
@@ -1441,10 +1606,10 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
             if annotations_at_t:
                 # Find most common annotation
                 most_common = max(set(annotations_at_t), key=annotations_at_t.count)
-                annotations.append(most_common)
+                consensus_annotations.append(most_common)
             else:
-                annotations.append('Unknown')
+                consensus_annotations.append('Unknown')
         
-        consensus['annotations'] = annotations
+        consensus['consensus_annotations'] = consensus_annotations
     
     return consensus
