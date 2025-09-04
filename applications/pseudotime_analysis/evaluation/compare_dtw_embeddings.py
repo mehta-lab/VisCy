@@ -1,4 +1,5 @@
-# %%
+#!/usr/bin/env python3
+#%%
 import ast
 import logging
 from pathlib import Path
@@ -17,9 +18,8 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
-from viscy.data.triplet import TripletDataModule
-from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation.dimensionality_reduction import compute_pca
+# Use the new integrated DTW API
+from viscy.representation.pseudotime import CytoDtw, identify_lineages
 
 logger = logging.getLogger("viscy")
 logger.setLevel(logging.INFO)
@@ -63,148 +63,129 @@ dynaclr_features_path = "/hpc/projects/intracellular_dashboard/organelle_dynamic
 output_root = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/figure/SEC61B/model_comparison"
 )
-
-
-# Load embeddings
-imagenet_features_path = (
-    pretrain_features_root / "ImageNet/20241107_sensor_n_phase_imagenet.zarr"
-)
-openphenom_features_path = (
-    pretrain_features_root / "OpenPhenom/20241107_sensor_n_phase_openphenom.zarr"
-)
-
-dynaclr_embeddings = read_embedding_dataset(dynaclr_features_path)
-imagenet_embeddings = read_embedding_dataset(imagenet_features_path)
-openphenom_embeddings = read_embedding_dataset(openphenom_features_path)
-
-# Load infection annotations
-infection_annotations_df = pd.read_csv(infection_annotations_path)
-infection_annotations_df["fov_name"] = "/C/2/000001"
-
-process_embeddings = [
-    (dynaclr_embeddings, "dynaclr"),
-    (imagenet_embeddings, "imagenet"),
-    (openphenom_embeddings, "openphenom"),
-]
-
-
 output_root.mkdir(parents=True, exist_ok=True)
-# %%
-feature_df = dynaclr_embeddings["sample"].to_dataframe().reset_index(drop=True)
-
-# Logic to find lineages
-lineages = identify_lineages(feature_df)
-logger.info(f"Found {len(lineages)} distinct lineages")
-filtered_lineages = []
-min_timepoints = 20
-for fov_id, track_ids in lineages:
-    # Get all rows for this lineage
-    lineage_rows = feature_df[
-        (feature_df["fov_name"] == fov_id) & (feature_df["track_id"].isin(track_ids))
-    ]
-
-    # Count the total number of timepoints
-    total_timepoints = len(lineage_rows)
-
-    # Only keep lineages with at least min_timepoints
-    if total_timepoints >= min_timepoints:
-        filtered_lineages.append((fov_id, track_ids))
-logger.info(
-    f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints"
-)
-
-# %%
-# Aligning condition embeddings to infection
-# OPTION 1: Use the infection annotations to find the reference lineage
-reference_lineage_fov = "/C/2/001000"
-reference_lineage_track_id = [129]
-reference_timepoints = [8, 70]  # sensor rellocalization and partial remodelling
-
-# Option 2: from the filtered lineages find one from FOV C/2/000001
-reference_lineage_fov = "/C/2/000001"
-for fov_id, track_ids in filtered_lineages:
-    if reference_lineage_fov == fov_id:
-        break
-reference_lineage_track_id = track_ids
-reference_timepoints = [8, 70]  # sensor rellocalization and partial remodelling
-
-# %%
-# Dictionary to store alignment results for comparison
-alignment_results = {}
-
-for embeddings, name in process_embeddings:
-    # Get the reference pattern from the current embedding space
-    reference_pattern = None
-    reference_lineage = []
+#%%
+def main():
+    """Main analysis pipeline using the new DTW API."""
+    
+    # Initialize DTW analyzers for each embedding method
+    analyzers = {
+        "dynaclr": CytoDtw(dynaclr_features_path),
+        "imagenet": CytoDtw(imagenet_features_path), 
+        "openphenom": CytoDtw(openphenom_features_path),
+    }
+    
+    # Load infection annotations
+    infection_annotations_df = pd.read_csv(infection_annotations_path)
+    infection_annotations_df["fov_name"] = "/C/2/000001"
+    
+    # Identify lineages from the first dataset
+    feature_df = analyzers["dynaclr"].embeddings["sample"].to_dataframe().reset_index(drop=True)
+    all_lineages = identify_lineages(feature_df)
+    logger.info(f"Found {len(all_lineages)} distinct lineages")
+    
+    # Filter lineages by minimum timepoints
+    min_timepoints = 20
+    filtered_lineages = []
+    for fov_id, track_ids in all_lineages:
+        lineage_rows = feature_df[
+            (feature_df["fov_name"] == fov_id) & (feature_df["track_id"].isin(track_ids))
+        ]
+        total_timepoints = len(lineage_rows)
+        if total_timepoints >= min_timepoints:
+            filtered_lineages.append((fov_id, track_ids))
+    
+    logger.info(f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints")
+    
+    # Reference pattern configuration
+    reference_lineage_fov = "/C/2/000001"
+    reference_lineage_track_id = [129]
+    reference_timepoints = (8, 70)  # sensor relocalization and partial remodelling
+    
+    # Find a valid reference lineage from filtered lineages
     for fov_id, track_ids in filtered_lineages:
-        if fov_id == reference_lineage_fov and all(
-            track_id in track_ids for track_id in reference_lineage_track_id
-        ):
-            logger.info(
-                f"Found reference pattern for {fov_id} {reference_lineage_track_id} using {name} embeddings"
-            )
-            reference_pattern = embeddings.sel(
-                sample=(fov_id, reference_lineage_track_id)
-            ).features.values
-            reference_lineage.append(reference_pattern)
+        if reference_lineage_fov == fov_id:
+            reference_lineage_track_id = track_ids
             break
-    if reference_pattern is None:
-        logger.info(f"Reference pattern not found for {name} embeddings. Skipping.")
-        continue
-    reference_pattern = np.concatenate(reference_lineage)
-    reference_pattern = reference_pattern[
-        reference_timepoints[0] : reference_timepoints[1]
-    ]
-
-    # Find all matches to the reference pattern
-    metric = "cosine"
-    all_match_positions = find_pattern_matches(
-        reference_pattern,
-        filtered_lineages,
-        embeddings,
-        window_step_fraction=0.1,
-        num_candidates=4,
-        method="bernd_clifford",
-        save_path=output_root / f"{name}_matching_lineages_{metric}.csv",
-        metric=metric,
-    )
-
-    # Store results for later comparison
-    alignment_results[name] = all_match_positions
-
-# Visualize warping paths in PC space instead of raw embedding dimensions
-for name, match_positions in alignment_results.items():
-    if match_positions is not None and not match_positions.empty:
-        # Call the new function from plotting_utils
-        plot_pc_trajectories(
-            reference_lineage_fov=reference_lineage_fov,
-            reference_lineage_track_id=reference_lineage_track_id,
-            reference_timepoints=reference_timepoints,
-            match_positions=match_positions,
-            embeddings_dataset=next(
-                emb for emb, emb_name in process_embeddings if emb_name == name
-            ),
-            filtered_lineages=filtered_lineages,
-            name=name,
-            save_path=output_root / f"{name}_pc_lineage_alignment.png",
+    
+    # Perform DTW analysis for each embedding method
+    alignment_results = {}
+    
+    for name, analyzer in analyzers.items():
+        logger.info(f"Processing {name} embeddings")
+        
+        try:
+            # Extract reference pattern
+            reference_pattern = analyzer.get_reference_pattern(
+                fov_name=reference_lineage_fov,
+                track_id=reference_lineage_track_id,
+                timepoints=reference_timepoints
+            )
+            
+            logger.info(f"Found reference pattern for {name} with shape {reference_pattern.shape}")
+            
+            # Find pattern matches
+            matches = analyzer.find_pattern_matches(
+                reference_pattern=reference_pattern,
+                filtered_lineages=filtered_lineages,
+                window_step_fraction=0.1,
+                num_candidates=4,
+                method="bernd_clifford",
+                metric="cosine",
+                save_path=output_root / f"{name}_matching_lineages_cosine.csv"
+            )
+            
+            alignment_results[name] = matches
+            logger.info(f"Found {len(matches)} matches for {name}")
+            
+            # Generate PC trajectory visualization
+            if not matches.empty:
+                plot_pc_trajectories(
+                    reference_lineage_fov=reference_lineage_fov,
+                    reference_lineage_track_id=reference_lineage_track_id,
+                    reference_timepoints=list(reference_timepoints),
+                    match_positions=matches,
+                    embeddings_dataset=analyzer.embeddings,
+                    filtered_lineages=filtered_lineages,
+                    name=name,
+                    save_path=output_root / f"{name}_pc_lineage_alignment.png",
+                )
+                
+        except Exception as e:
+            logger.error(f"Failed to process {name}: {e}")
+            continue
+    
+    # Compare DTW performance between embedding methods
+    create_dtw_comparison_plots(alignment_results, output_root)
+    
+    # Demonstrate image alignment for the best model
+    if alignment_results:
+        best_model = min(alignment_results.keys(), 
+                        key=lambda k: alignment_results[k]["distance"].min() 
+                        if not alignment_results[k].empty else float('inf'))
+        
+        logger.info(f"Best performing model: {best_model}")
+        demonstrate_image_alignment(
+            analyzers[best_model], 
+            alignment_results[best_model], 
+            reference_pattern,
+            output_root
         )
 
-
-# %%
-# Compare DTW performance between embedding methods
-
-# Create a DataFrame to collect the alignment statistics for comparison
-match_data = []
-for name, match_positions in alignment_results.items():
-    if match_positions is not None and not match_positions.empty:
-        for i, row in match_positions.head(10).iterrows():  # Take top 10 matches
-            warping_path = (
-                ast.literal_eval(row["warp_path"])
-                if isinstance(row["warp_path"], str)
-                else row["warp_path"]
-            )
-            match_data.append(
-                {
+def create_dtw_comparison_plots(alignment_results, output_root):
+    """Create comparison plots for DTW performance across models."""
+    
+    # Collect alignment statistics
+    match_data = []
+    for name, match_positions in alignment_results.items():
+        if match_positions is not None and not match_positions.empty:
+            for i, row in match_positions.head(10).iterrows():
+                warp_path = (
+                    ast.literal_eval(row["warp_path"])
+                    if isinstance(row["warp_path"], str)
+                    else row["warp_path"]
+                )
+                match_data.append({
                     "model": name,
                     "match_position": row["start_timepoint"],
                     "dtw_distance": row["distance"],
