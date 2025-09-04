@@ -1,9 +1,4 @@
 #!/usr/bin/env python3
-"""
-Refactored DTW embedding comparison using the new viscy.representation.pseudotime API.
-
-This demonstrates how to use the integrated DTW functionality without local imports.
-"""
 #%%
 import ast
 import logging
@@ -21,7 +16,7 @@ from viscy.representation.evaluation.pseudotime_plotting import (
 )
 
 # Use the new integrated DTW API
-from viscy.representation.pseudotime import DTWAnalyzer, identify_lineages
+from viscy.representation.pseudotime import CytoDtw, identify_lineages
 
 logger = logging.getLogger("viscy")
 logger.setLevel(logging.INFO)
@@ -80,9 +75,9 @@ def main():
     
     # Initialize DTW analyzers for each embedding method
     analyzers = {
-        "dynaclr": DTWAnalyzer(dynaclr_features_path),
-        "imagenet": DTWAnalyzer(imagenet_features_path), 
-        "openphenom": DTWAnalyzer(openphenom_features_path),
+        "dynaclr": CytoDtw(dynaclr_features_path),
+        "imagenet": CytoDtw(imagenet_features_path), 
+        "openphenom": CytoDtw(openphenom_features_path),
     }
     
     # Load infection annotations
