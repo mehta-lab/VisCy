@@ -37,9 +37,9 @@ vs = AugmentedPredictionVSUNet(
 # Load data
 path = Path("/path/to/your.zarr/0/1/000000")
 with open_ome_zarr(path) as ds:
-    vol_np = np.asarray(ds.data[0, 0])  # (Z, Y, X)
+    vol_np = np.asarray(ds.data[0:1, 0:1])  # (1, 1, Z, Y, X)
 
-vol = torch.from_numpy(vol_np).unsqueeze(0).unsqueeze(0).float().to(DEVICE)
+vol = torch.from_numpy(vol_np).float().to(DEVICE)
 
 # Run inference
 with torch.no_grad():
