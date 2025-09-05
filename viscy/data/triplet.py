@@ -330,7 +330,7 @@ class TripletDataModule(HCSDataModule):
         final_yx_patch_size: tuple[int, int] = (224, 224),
         split_ratio: float = 0.8,
         batch_size: int = 16,
-        num_workers: int = 8,
+        num_workers: int = 1,
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
         caching: bool = False,
@@ -367,7 +367,7 @@ class TripletDataModule(HCSDataModule):
         batch_size : int, optional
             Batch size, by default 16
         num_workers : int, optional
-            Number of data-loading workers, by default 8
+            Number of thread workers, by default 1
         normalizations : list[MapTransform], optional
             Normalization transforms, by default []
         augmentations : list[MapTransform], optional
