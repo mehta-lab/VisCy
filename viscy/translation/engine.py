@@ -515,16 +515,16 @@ class AugmentedPredictionVSUNet(LightningModule):
     def __init__(
         self,
         model: nn.Module,
-        forward_transforms: list[Callable[[Tensor], Tensor]],
-        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        forward_transforms: list[Callable[[Tensor], Tensor]] | None = None,
+        inverse_transforms: list[Callable[[Tensor], Tensor]] | None = None,
         reduction: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
         down_factor = 2**model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
         self.model = model
-        self._forward_transforms = forward_transforms
-        self._inverse_transforms = inverse_transforms
+        self._forward_transforms = forward_transforms or [lambda x: x]
+        self._inverse_transforms = inverse_transforms or [lambda x: x]
         self._reduction = reduction
 
     def forward(self, x: Tensor) -> Tensor:
@@ -610,8 +610,8 @@ class AugmentedPredictionVSUNet(LightningModule):
     def _predict_with_tta(self, source: torch.Tensor) -> torch.Tensor:
         preds = []
         for fwd_t, inv_t in zip(
-            self._forward_transforms or [lambda x: x],
-            self._inverse_transforms or [lambda x: x],
+            self._forward_transforms,
+            self._inverse_transforms,
         ):
             src = fwd_t(source)
             src = self._predict_pad(src)
