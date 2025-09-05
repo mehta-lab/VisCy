@@ -584,6 +584,9 @@ class TripletDataModule(HCSDataModule):
 
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
         """Apply transforms after transferring to device."""
+        if isinstance(batch, Tensor):
+            # example array
+            return batch
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
