@@ -26,8 +26,6 @@ model = VSUNet(
         "head_conv_pool": False,
     },
     ckpt_path="/path/to/checkpoint.ckpt",
-    test_time_augmentations=True,
-    tta_type="median",
 ).to(DEVICE).eval()
 
 vs = AugmentedPredictionVSUNet(
