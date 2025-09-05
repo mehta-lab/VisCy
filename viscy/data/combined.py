@@ -224,6 +224,13 @@ class BatchedConcatDataModule(ConcatDataModule):
             **self._dataloader_kwargs(),
         )
 
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
+        """Apply GPU transforms from constituent data modules."""
+        for dm in self.data_modules:
+            if hasattr(dm, "on_after_batch_transfer"):
+                batch = dm.on_after_batch_transfer(batch, dataloader_idx)
+        return batch
+
 
 class CachedConcatDataModule(LightningDataModule):
     def __init__(self, data_modules: Sequence[LightningDataModule]):

@@ -401,8 +401,6 @@ class TripletDataModule(HCSDataModule):
         z_window_size : int, optional
             Size of the final Z window, by default None (inferred from z_range)
         """
-        if num_workers > 1:
-            raise ValueError("Multiple workers not supported due to thread safety.")
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
@@ -430,6 +428,7 @@ class TripletDataModule(HCSDataModule):
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
         self.return_negative = return_negative
+        self._gpu_augment_transform = None
 
     def _align_tracks_tables_with_positions(
         self,
@@ -474,6 +473,17 @@ class TripletDataModule(HCSDataModule):
     def _setup_fit(self, dataset_settings: dict):
         self._update_to_device_transform()
         augment_transform, no_aug_transform = self._fit_transform()
+
+        # Create normalization-only transform for thread-safe dataset operations
+        norm_only_transform = Compose(self.normalizations)
+
+        # Store augmentation + final crop for GPU application (preserving correct order)
+        self._gpu_augment_transform = (
+            Compose(self.augmentations + [self._final_crop()])
+            if self.augmentations
+            else self._final_crop()  # Still need final crop even without augmentations
+        )
+
         positions, tracks_tables = self._align_tracks_tables_with_positions()
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
@@ -486,30 +496,29 @@ class TripletDataModule(HCSDataModule):
         val_tracks_tables = tracks_tables[num_train_fovs:]
         _logger.debug(f"Number of training FOVs: {len(train_positions)}")
         _logger.debug(f"Number of validation FOVs: {len(val_positions)}")
-        anchor_transform = (
-            no_aug_transform
-            if (self.time_interval == "any" or self.time_interval == 0)
-            else augment_transform
-        )
+
+        # Use normalization-only transform in dataset (thread-safe)
+        # Augmentations + final crop will be applied later on GPU
         self.train_dataset = TripletDataset(
             positions=train_positions,
             tracks_tables=train_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=anchor_transform,
-            positive_transform=augment_transform,
-            negative_transform=augment_transform,
+            anchor_transform=norm_only_transform,
+            positive_transform=norm_only_transform,
+            negative_transform=norm_only_transform,
             fit=True,
             return_negative=self.return_negative,
             **dataset_settings,
         )
 
+        # For validation, use the standard no_aug_transform (includes final crop)
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=anchor_transform,
-            positive_transform=augment_transform,
-            negative_transform=augment_transform,
+            anchor_transform=no_aug_transform,
+            positive_transform=no_aug_transform,
+            negative_transform=no_aug_transform,
             fit=True,
             return_negative=self.return_negative,
             **dataset_settings,
@@ -582,3 +591,48 @@ class TripletDataModule(HCSDataModule):
                 self.yx_patch_size[1],
             ),
         )
+
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
+        """Apply augmentation transforms on GPU after batch transfer."""
+        if self._gpu_augment_transform is None:
+            return batch
+
+        # Apply GPU transforms during training only
+        # (validation dataset already has final crop applied, so this won't be called)
+        if (
+            hasattr(self, "trainer")
+            and self.trainer is not None
+            and not self.trainer.training
+        ):
+            return batch
+
+        # Apply augmentations to each sample in the batch
+        augmented_batch = []
+        for sample in batch:
+            augmented_sample = {}
+            for key in ["anchor", "positive", "negative"]:
+                if key in sample:
+                    # Apply channel-wise transforms similar to the original logic
+                    patches = sample[key].unsqueeze(
+                        0
+                    )  # Add batch dimension for consistency
+
+                    # Apply augmentations using the stored transform
+                    transformed_patches = _transform_channel_wise(
+                        transform=self._gpu_augment_transform,
+                        channel_names=self.source_channel,
+                        patch=patches,
+                        norm_meta=None,  # Normalization already applied
+                    )
+                    augmented_sample[key] = transformed_patches[
+                        0
+                    ]  # Remove batch dimension
+
+            # Copy any other keys that aren't anchor/positive/negative
+            for key, value in sample.items():
+                if key not in ["anchor", "positive", "negative"]:
+                    augmented_sample[key] = value
+
+            augmented_batch.append(augmented_sample)
+
+        return augmented_batch

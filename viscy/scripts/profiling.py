@@ -100,7 +100,7 @@ def channel_normalization(
 
 
 if __name__ == "__main__":
-    num_workers = 1
+    num_workers = 2
     batch_size = 128
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
@@ -140,7 +140,7 @@ if __name__ == "__main__":
     dm.setup("fit")
 
     print(len(dm1.train_dataset), len(dm2.train_dataset), len(dm.train_dataset))
-    n = 32
+    n = 16
 
     print("Training batches:")
     for i, batch in enumerate(dm.train_dataloader()):
