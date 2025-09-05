@@ -6,11 +6,11 @@ import pandas as pd
 import tensorstore as ts
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
-from monai.data import ThreadDataLoader
+from monai.data.thread_buffer import ThreadDataLoader
 from monai.data.utils import collate_meta_tensor
 from monai.transforms import Compose, MapTransform
 from torch import Tensor
-from torch.utils.data import DataLoader, Dataset
+from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
 from viscy.data.select import _filter_fovs, _filter_wells
@@ -447,9 +447,6 @@ class TripletDataModule(HCSDataModule):
         val_tracks_tables = tracks_tables[num_train_fovs:]
         _logger.debug(f"Number of training FOVs: {len(train_positions)}")
         _logger.debug(f"Number of validation FOVs: {len(val_positions)}")
-
-        # Use no transforms in dataset (pure I/O only, maximum multi-threading efficiency)
-        # All processing (normalizations → augmentations → final crop) on GPU
         self.train_dataset = TripletDataset(
             positions=train_positions,
             tracks_tables=train_tracks_tables,
@@ -458,8 +455,6 @@ class TripletDataModule(HCSDataModule):
             return_negative=self.return_negative,
             **dataset_settings,
         )
-
-        # For validation, also use no transforms in dataset - GPU handles everything
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,
@@ -487,9 +482,9 @@ class TripletDataModule(HCSDataModule):
         raise NotImplementedError("Self-supervised model does not support testing")
 
     def train_dataloader(self):
-        return DataLoader(
+        return ThreadDataLoader(
             self.train_dataset,
-            # use_thread_workers=True,
+            use_thread_workers=True,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True,
@@ -501,9 +496,9 @@ class TripletDataModule(HCSDataModule):
         )
 
     def val_dataloader(self):
-        return DataLoader(
+        return ThreadDataLoader(
             self.val_dataset,
-            # use_thread_workers=True,
+            use_thread_workers=True,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
@@ -561,7 +556,6 @@ class TripletDataModule(HCSDataModule):
                     norm_meta=norm_meta,
                 )
                 batch[key] = transformed_patches
-                # Remove norm_meta from batch after use
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]
 

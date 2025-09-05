@@ -106,7 +106,7 @@ def channel_normalization(
 
 
 if __name__ == "__main__":
-    num_workers = 2
+    num_workers = 0
     batch_size = 128
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
@@ -142,5 +142,5 @@ if __name__ == "__main__":
     )
     dm = BatchedConcatDataModule(data_modules=[dm1, dm2])
     model = DummyModel()
-    trainer = Trainer(max_epochs=1, limit_train_batches=5, limit_val_batches=5)
+    trainer = Trainer(max_epochs=1, limit_train_batches=32, limit_val_batches=32)
     trainer.fit(model, dm)
