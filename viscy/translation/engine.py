@@ -536,7 +536,7 @@ class AugmentedPredictionVSUNet(LightningModule):
     ) -> torch.Tensor:
         """
         Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
-        along the Z dimension with overlap and blending.
+        along the Z dimension with overlap and average blending.
 
         Parameters
         ----------
