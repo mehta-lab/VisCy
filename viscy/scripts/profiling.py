@@ -2,6 +2,8 @@
 # use with a sampling profiler like py-spy
 
 
+import logging
+
 import torch
 from lightning.pytorch import LightningModule, Trainer
 
@@ -16,8 +18,9 @@ from viscy.transforms import (
     BatchedRandScaleIntensityd,
     BatchedScaleIntensityRangePercentilesd,
     NormalizeSampled,
-    ToDeviced,
 )
+
+_logger = logging.getLogger(__name__)
 
 
 class DummyModel(LightningModule):
@@ -27,12 +30,12 @@ class DummyModel(LightningModule):
 
     def training_step(self, batch, batch_idx):
         img = batch["anchor"]
-        print(img.shape)
+        _logger.info(img.shape)
         return (img * self.a).mean()
 
     def validation_step(self, batch, batch_idx):
         img = batch["anchor"]
-        print(img.shape)
+        _logger.info(img.shape)
         return (img * self.a).mean()
 
     def configure_optimizers(self):
@@ -90,7 +93,6 @@ def channel_normalization(
         ]
     elif fl_channel:
         return [
-            ToDeviced(keys=[fl_channel], device="cuda"),
             BatchedScaleIntensityRangePercentilesd(
                 keys=[fl_channel],
                 lower=50,
@@ -126,17 +128,15 @@ if __name__ == "__main__":
     dm2 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
         tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
-        source_channel=["raw mCherry EX561 EM600-37"],
+        source_channel=["Phase3D"],
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
         batch_size=batch_size,
         num_workers=num_workers,
         time_interval=1,
-        augmentations=channel_augmentations("raw mCherry EX561 EM600-37"),
-        normalizations=channel_normalization(
-            phase_channel=None, fl_channel="raw mCherry EX561 EM600-37"
-        ),
+        augmentations=channel_augmentations("Phase3D"),
+        normalizations=channel_normalization(phase_channel="Phase3D", fl_channel=None),
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
         return_negative=False,
     )

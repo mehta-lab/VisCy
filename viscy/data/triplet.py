@@ -8,13 +8,13 @@ import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
 from monai.data import ThreadDataLoader
 from monai.data.utils import collate_meta_tensor
-from monai.transforms import Compose, MapTransform, ToDeviced
+from monai.transforms import Compose, MapTransform
 from torch import Tensor
-from torch.utils.data import Dataset
+from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.hcs import HCSDataModule, _read_norm_meta
 from viscy.data.select import _filter_fovs, _filter_wells
-from viscy.data.typing import DictTransform, NormMeta, TripletSample
+from viscy.data.typing import DictTransform, NormMeta
 from viscy.transforms import BatchedCenterSpatialCropd
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -70,9 +70,6 @@ class TripletDataset(Dataset):
         channel_names: list[str],
         initial_yx_patch_size: tuple[int, int],
         z_range: slice,
-        anchor_transform: DictTransform | None = None,
-        positive_transform: DictTransform | None = None,
-        negative_transform: DictTransform | None = None,
         fit: bool = True,
         predict_cells: bool = False,
         include_fov_names: list[str] | None = None,
@@ -91,15 +88,9 @@ class TripletDataset(Dataset):
         channel_names : list[str]
             Input channel names
         initial_yx_patch_size : tuple[int, int]
-            YX size of the initially sampled image patch before augmentation
+            YX size of the initially sampled image patch
         z_range : slice
             Range of Z-slices
-        anchor_transform : DictTransform | None, optional
-            Transforms applied to the anchor sample, by default None
-        positive_transform : DictTransform | None, optional
-            Transforms applied to the positve sample, by default None
-        negative_transform : DictTransform | None, optional
-            Transforms applied to the negative sample, by default None
         fit : bool, optional
             Fitting mode in which the full triplet will be sampled,
             only sample anchor if ``False``, by default True
@@ -125,9 +116,6 @@ class TripletDataset(Dataset):
             positions[0].get_channel_index(ch) for ch in channel_names
         ]
         self.z_range = z_range
-        self.anchor_transform = anchor_transform
-        self.positive_transform = positive_transform
-        self.negative_transform = negative_transform
         self.fit = fit
         self.yx_patch_size = initial_yx_patch_size
         self.predict_cells = predict_cells
@@ -262,9 +250,10 @@ class TripletDataset(Dataset):
         results = ts.stack([p.translate_to[0] for p in patches]).read().result()
         return torch.from_numpy(results), norms
 
-    def __getitems__(self, indices: list[int]) -> list[TripletSample]:
+    def __getitems__(self, indices: list[int]) -> dict[str, torch.Tensor]:
         anchor_rows = self.valid_anchors.iloc[indices]
         anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
+        sample = {"anchor": anchor_patches, "anchor_norm_meta": anchor_norms}
         if self.fit:
             if self.time_interval == "any":
                 positive_patches = anchor_patches.clone()
@@ -272,51 +261,27 @@ class TripletDataset(Dataset):
             else:
                 positive_rows = self._sample_positives(anchor_rows)
                 positive_patches, positive_norms = self._slice_patches(positive_rows)
-            if self.positive_transform:
-                positive_patches = _transform_channel_wise(
-                    transform=self.positive_transform,
-                    channel_names=self.channel_names,
-                    patch=positive_patches,
-                    norm_meta=positive_norms,
-                )
+
+            sample["positive"] = positive_patches
+            sample["positive_norm_meta"] = positive_norms
             if self.return_negative:
                 negative_rows = self._sample_negatives(anchor_rows)
                 negative_patches, negative_norms = self._slice_patches(negative_rows)
-                if self.negative_transform:
-                    negative_patches = _transform_channel_wise(
-                        transform=self.negative_transform,
-                        channel_names=self.channel_names,
-                        patch=negative_patches,
-                        norm_meta=negative_norms,
-                    )
-        if self.anchor_transform:
-            anchor_patches = _transform_channel_wise(
-                transform=self.anchor_transform,
-                channel_names=self.channel_names,
-                patch=anchor_patches,
-                norm_meta=anchor_norms,
-            )
-        samples: list[TripletSample] = [
-            {"anchor": anchor_patch} for anchor_patch in anchor_patches
-        ]
-        if self.fit:
-            for sample, positive_patch in zip(samples, positive_patches):
-                sample["positive"] = positive_patch
-            if self.return_negative:
-                for sample, negative_patch in zip(samples, negative_patches):
-                    sample["negative"] = negative_patch
+                sample["negative"] = negative_patches
+                sample["negative_norm_meta"] = negative_norms
         else:
-            for sample, (_, anchor_row) in zip(samples, anchor_rows.iterrows()):
-                # For new predictions, ensure all INDEX_COLUMNS are included
+            indices_list = []
+            for _, anchor_row in anchor_rows.iterrows():
                 index_dict = {}
                 for col in INDEX_COLUMNS:
                     if col in anchor_row.index:
                         index_dict[col] = anchor_row[col]
                     elif col not in ["y", "x", "z"]:
-                        # Skip y and x for legacy data - they weren't part of INDEX_COLUMNS
                         raise KeyError(f"Required column '{col}' not found in data")
-                sample["index"] = index_dict
-        return samples
+                indices_list.append(index_dict)
+            sample["index"] = indices_list
+
+        return sample
 
 
 class TripletDataModule(HCSDataModule):
@@ -428,7 +393,8 @@ class TripletDataModule(HCSDataModule):
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
         self.return_negative = return_negative
-        self._gpu_augment_transform = None
+        self._augmentation_transform = None  # Will be set during setup
+        self._no_augmentation_transform = None  # Will be set during setup
 
     def _align_tracks_tables_with_positions(
         self,
@@ -462,28 +428,13 @@ class TripletDataModule(HCSDataModule):
             "time_interval": self.time_interval,
         }
 
-    def _update_to_device_transform(self):
-        "Make sure that GPU transforms are set to the current device."
-        for transform in self.normalizations + self.augmentations:
-            if isinstance(transform, ToDeviced):
-                transform.converter.device = torch.device(
-                    f"cuda:{torch.cuda.current_device()}"
-                )
-
     def _setup_fit(self, dataset_settings: dict):
-        self._update_to_device_transform()
-        augment_transform, no_aug_transform = self._fit_transform()
-
-        # Create normalization-only transform for thread-safe dataset operations
-        norm_only_transform = Compose(self.normalizations)
-
-        # Store augmentation + final crop for GPU application (preserving correct order)
-        self._gpu_augment_transform = (
-            Compose(self.augmentations + [self._final_crop()])
-            if self.augmentations
-            else self._final_crop()  # Still need final crop even without augmentations
+        self._augmentation_transform = Compose(
+            self.normalizations + self.augmentations + [self._final_crop()]
         )
-
+        self._no_augmentation_transform = Compose(
+            self.normalizations + [self._final_crop()]
+        )
         positions, tracks_tables = self._align_tracks_tables_with_positions()
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
@@ -497,28 +448,22 @@ class TripletDataModule(HCSDataModule):
         _logger.debug(f"Number of training FOVs: {len(train_positions)}")
         _logger.debug(f"Number of validation FOVs: {len(val_positions)}")
 
-        # Use normalization-only transform in dataset (thread-safe)
-        # Augmentations + final crop will be applied later on GPU
+        # Use no transforms in dataset (pure I/O only, maximum multi-threading efficiency)
+        # All processing (normalizations → augmentations → final crop) on GPU
         self.train_dataset = TripletDataset(
             positions=train_positions,
             tracks_tables=train_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=norm_only_transform,
-            positive_transform=norm_only_transform,
-            negative_transform=norm_only_transform,
             fit=True,
             return_negative=self.return_negative,
             **dataset_settings,
         )
 
-        # For validation, use the standard no_aug_transform (includes final crop)
+        # For validation, also use no transforms in dataset - GPU handles everything
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=no_aug_transform,
-            positive_transform=no_aug_transform,
-            negative_transform=no_aug_transform,
             fit=True,
             return_negative=self.return_negative,
             **dataset_settings,
@@ -531,7 +476,6 @@ class TripletDataModule(HCSDataModule):
             positions=positions,
             tracks_tables=tracks_tables,
             initial_yx_patch_size=self.initial_yx_patch_size,
-            anchor_transform=Compose(self.normalizations),
             fit=False,
             predict_cells=self.predict_cells,
             include_fov_names=self.include_fov_names,
@@ -543,9 +487,9 @@ class TripletDataModule(HCSDataModule):
         raise NotImplementedError("Self-supervised model does not support testing")
 
     def train_dataloader(self):
-        return ThreadDataLoader(
+        return DataLoader(
             self.train_dataset,
-            use_thread_workers=True,
+            # use_thread_workers=True,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=True,
@@ -553,12 +497,13 @@ class TripletDataModule(HCSDataModule):
             persistent_workers=self.persistent_workers,
             drop_last=True,
             pin_memory=self.pin_memory,
+            collate_fn=lambda x: x,
         )
 
     def val_dataloader(self):
-        return ThreadDataLoader(
+        return DataLoader(
             self.val_dataset,
-            use_thread_workers=True,
+            # use_thread_workers=True,
             batch_size=self.batch_size,
             num_workers=self.num_workers,
             shuffle=False,
@@ -566,6 +511,7 @@ class TripletDataModule(HCSDataModule):
             persistent_workers=self.persistent_workers,
             drop_last=False,
             pin_memory=self.pin_memory,
+            collate_fn=lambda x: x,
         )
 
     def predict_dataloader(self):
@@ -579,6 +525,7 @@ class TripletDataModule(HCSDataModule):
             persistent_workers=self.persistent_workers,
             drop_last=False,
             pin_memory=self.pin_memory,
+            collate_fn=lambda x: x,
         )
 
     def _final_crop(self) -> BatchedCenterSpatialCropd:
@@ -592,47 +539,30 @@ class TripletDataModule(HCSDataModule):
             ),
         )
 
+    def _find_transform(self, key: str):
+        if self.trainer:
+            if self.trainer.predicting:
+                return self._no_augmentation_transform
+        # NOTE: for backwards compatibility
+        if key == "anchor" and self.time_interval in ("any", 0):
+            return self._no_augmentation_transform
+        return self._augmentation_transform
+
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
-        """Apply augmentation transforms on GPU after batch transfer."""
-        if self._gpu_augment_transform is None:
-            return batch
+        """Apply transforms after transferring to device."""
+        for key in ["anchor", "positive", "negative"]:
+            if key in batch:
+                norm_meta_key = f"{key}_norm_meta"
+                norm_meta = batch.get(norm_meta_key)
+                transformed_patches = _transform_channel_wise(
+                    transform=self._find_transform(key),
+                    channel_names=self.source_channel,
+                    patch=batch[key],
+                    norm_meta=norm_meta,
+                )
+                batch[key] = transformed_patches
+                # Remove norm_meta from batch after use
+                if norm_meta_key in batch:
+                    del batch[norm_meta_key]
 
-        # Apply GPU transforms during training only
-        # (validation dataset already has final crop applied, so this won't be called)
-        if (
-            hasattr(self, "trainer")
-            and self.trainer is not None
-            and not self.trainer.training
-        ):
-            return batch
-
-        # Apply augmentations to each sample in the batch
-        augmented_batch = []
-        for sample in batch:
-            augmented_sample = {}
-            for key in ["anchor", "positive", "negative"]:
-                if key in sample:
-                    # Apply channel-wise transforms similar to the original logic
-                    patches = sample[key].unsqueeze(
-                        0
-                    )  # Add batch dimension for consistency
-
-                    # Apply augmentations using the stored transform
-                    transformed_patches = _transform_channel_wise(
-                        transform=self._gpu_augment_transform,
-                        channel_names=self.source_channel,
-                        patch=patches,
-                        norm_meta=None,  # Normalization already applied
-                    )
-                    augmented_sample[key] = transformed_patches[
-                        0
-                    ]  # Remove batch dimension
-
-            # Copy any other keys that aren't anchor/positive/negative
-            for key, value in sample.items():
-                if key not in ["anchor", "positive", "negative"]:
-                    augmented_sample[key] = value
-
-            augmented_batch.append(augmented_sample)
-
-        return augmented_batch
+        return batch
