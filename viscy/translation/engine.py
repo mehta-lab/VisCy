@@ -624,10 +624,6 @@ class AugmentedPredictionVSUNet(LightningModule):
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
     ) -> torch.Tensor:
         """
-        Lightning's built-in prediction step. This method is called by the Trainer during `.predict(...)`.
-
-        Applies test-time augmentations (TTA) and padding logic to the input batch["source"].
-
         Parameters
         ----------
         batch : dict[str, Tensor]
