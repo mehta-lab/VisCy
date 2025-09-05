@@ -1,4 +1,6 @@
 import logging
+import os
+import warnings
 from pathlib import Path
 from typing import Literal, Sequence
 
@@ -128,14 +130,44 @@ class TripletDataset(Dataset):
         )
         self.valid_anchors = self._filter_anchors(self.tracks)
         self.return_negative = return_negative
+        self._setup_tensorstore_context()
+
+    def _setup_tensorstore_context(self):
+        """Configure tensorstore context with CPU limits based on SLURM environment."""
+        cpus_per_task = os.environ.get("SLURM_CPUS_PER_TASK")
+        if cpus_per_task is not None:
+            cpus_per_task = int(cpus_per_task)
+        else:
+            cpus_per_task = os.cpu_count() or 4
+        self.tensorstore_context = ts.Context(
+            {"data_copy_concurrency": {"limit": cpus_per_task}}
+        )
+        self._tensorstores = {}
+
+    def _get_tensorstore(self, position: Position) -> ts.TensorStore:
+        """Get cached tensorstore object or create and cache new one."""
+        fov_name = position.zgroup.name
+        if fov_name not in self._tensorstores:
+            image_array = position["0"]
+            spec = {
+                "driver": "zarr",
+                "kvstore": {"driver": "file", "path": str(position.zgroup.store.path)},
+                "path": image_array.name,
+            }
+            self._tensorstores[fov_name] = ts.open(
+                spec, context=self.tensorstore_context
+            ).result()
+        return self._tensorstores[fov_name]
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
-        """Exclude tracks that are too close to the border or do not have the next time point.
+        """Exclude tracks that are too close to the border
+        or do not have the next time point.
 
         Parameters
         ----------
         tracks_tables : list[pd.DataFrame]
-            List of tracks_tables returned by TripletDataModule._align_tracks_tables_with_positions
+            List of tracks_tables returned by
+            TripletDataModule._align_tracks_tables_with_positions
 
         Returns
         -------
@@ -226,7 +258,10 @@ class TripletDataset(Dataset):
         self, track_row: pd.Series
     ) -> tuple[ts.TensorStore, NormMeta | None]:
         position: Position = track_row["position"]
-        image = position["0"].tensorstore()
+
+        # Get cached tensorstore object using FOV name
+        image = self._get_tensorstore(position)
+
         time = track_row["t"]
         y_center = track_row["y"]
         x_center = track_row["x"]
@@ -366,6 +401,10 @@ class TripletDataModule(HCSDataModule):
         z_window_size : int, optional
             Size of the final Z window, by default None (inferred from z_range)
         """
+        if num_workers > 1:
+            warnings.warn(
+                "Using more than 1 thread worker will likely degrade performance."
+            )
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,
