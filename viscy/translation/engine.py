@@ -552,7 +552,6 @@ class AugmentedPredictionVSUNet(LightningModule):
             Output tensor of shape (B, out_channel, Z, Y, X).
         """
 
-        self.eval()
 
         if x.ndim != 5:
             raise ValueError(
