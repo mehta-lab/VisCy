@@ -44,7 +44,6 @@ vol = torch.from_numpy(vol_np).float().to(DEVICE)
 # Run inference
 with torch.inference_mode():
     pred = vs.predict_sliding_windows(vol)
-torch.cuda.synchronize()
 
 # Visualize
 pred_np = pred.cpu().numpy()
