@@ -3,7 +3,7 @@
 
 
 import torch
-from lightning.pytorch import LightningModule
+from lightning.pytorch import LightningModule, Trainer
 
 from viscy.data.combined import BatchedConcatDataModule
 from viscy.data.triplet import TripletDataModule
@@ -26,10 +26,14 @@ class DummyModel(LightningModule):
         self.a = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
 
     def training_step(self, batch, batch_idx):
-        return (batch["anchor"] * self.a).mean()
+        img = batch["anchor"]
+        print(img.shape)
+        return (img * self.a).mean()
 
     def validation_step(self, batch, batch_idx):
-        return (batch["anchor"] * self.a).mean()
+        img = batch["anchor"]
+        print(img.shape)
+        return (img * self.a).mean()
 
     def configure_optimizers(self):
         return torch.optim.Adam(self.parameters())
@@ -137,18 +141,6 @@ if __name__ == "__main__":
         return_negative=False,
     )
     dm = BatchedConcatDataModule(data_modules=[dm1, dm2])
-    dm.setup("fit")
-
-    print(len(dm1.train_dataset), len(dm2.train_dataset), len(dm.train_dataset))
-    n = 16
-
-    print("Training batches:")
-    for i, batch in enumerate(dm.train_dataloader()):
-        print(i, batch["anchor"].shape, batch["positive"].device)
-        if i == n - 1:
-            break
-    print("Validation batches:")
-    for i, batch in enumerate(dm.val_dataloader()):
-        print(i, batch["anchor"].shape, batch["positive"].device)
-        if i == n - 1:
-            break
+    model = DummyModel()
+    trainer = Trainer(max_epochs=1, limit_train_batches=5, limit_val_batches=5)
+    trainer.fit(model, dm)
