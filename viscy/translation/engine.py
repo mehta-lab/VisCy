@@ -530,7 +530,6 @@ class AugmentedPredictionVSUNet(LightningModule):
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
 
-    @torch.no_grad()
     def predict_sliding_windows(
         self, x: torch.Tensor, out_channel: int = 2, step: int = 1
     ) -> torch.Tensor:
