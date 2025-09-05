@@ -487,10 +487,12 @@ class AugmentedPredictionVSUNet(LightningModule):
     forward_transforms : list[Callable[[Tensor], Tensor]]
         A collection of transforms to apply to the input image before passing it to the model.
         Each one is applied independently.
+        If None, no forward transforms are applied, fallback to the identity transform.
         For example, resizing the input to match the expected voxel size of the model.
     inverse_transforms : list[Callable[[Tensor], Tensor]]
         Inverse transforms to apply to the model output before reduction.
         They should be the inverse of each forward transform.
+        If None, no inverse transforms are applied, fallback to the identity transform.
         For example, resizing the output to match the original input shape for storage.
     reduction : Literal["mean", "median"], optional
         The reduction method to apply to the predictions, by default "mean"
