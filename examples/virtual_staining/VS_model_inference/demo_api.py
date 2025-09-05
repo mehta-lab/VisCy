@@ -42,7 +42,7 @@ with open_ome_zarr(path) as ds:
 vol = torch.from_numpy(vol_np).float().to(DEVICE)
 
 # Run inference
-with torch.no_grad():
+with torch.inference_mode():
     pred = vs.predict_sliding_windows(vol)
 torch.cuda.synchronize()
 
