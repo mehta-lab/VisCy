@@ -217,10 +217,10 @@ class TripletDataset(Dataset):
         return candidates.sample(n=1).iloc[0]
 
     def _sample_negatives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
-        return pd.concat(
-            [self._sample_negative(row) for _, row in anchor_rows.iterrows()],
-            axis=1,
-        )
+        negative_samples = [
+            self._sample_negative(row) for _, row in anchor_rows.iterrows()
+        ]
+        return pd.DataFrame(negative_samples).reset_index(drop=True)
 
     def _slice_patch(
         self, track_row: pd.Series
