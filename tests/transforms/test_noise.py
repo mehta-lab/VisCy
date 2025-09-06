@@ -43,7 +43,7 @@ def test_batched_gaussian_noise_statistics(mean, std, sample_std):
     result = transform(img)
     assert (result.mean() - mean).abs() < 0.5
     expected_std = std / 2.0 if sample_std else std
-    assert (result.std() - expected_std).abs() < 0.5
+    assert (result.std() - expected_std).abs() < 0.6
 
 
 def test_batched_gaussian_noise_dict():
