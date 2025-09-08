@@ -536,6 +536,10 @@ class BetaVaeModule(LightningModule):
         if isinstance(self.loss_function, nn.MSELoss):
             if hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'sum':
                 recon_loss = recon_loss / batch_size
+            elif hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'mean':
+                # Correct the over-normalization by PyTorch's mean reduction by multiplying by the number of elements per image
+                num_elements_per_image = x_original[0].numel()
+                recon_loss = recon_loss * num_elements_per_image
 
         kl_loss = -0.5 * torch.sum(1 + torch.clamp(logvar,self._logvar_minmax[0],self._logvar_minmax[1]) - mu.pow(2) - logvar.exp(), dim=1)
         kl_loss = torch.mean(kl_loss)
