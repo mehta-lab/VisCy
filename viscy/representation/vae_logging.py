@@ -93,7 +93,7 @@ class BetaVaeLogger:
                 f"latent_statistics/std_avg/{stage}": torch.mean(latent_std),
                 f"latent_statistics/mean_max/{stage}": torch.max(latent_mean),
                 f"latent_statistics/std_max/{stage}": torch.max(latent_std),
-                f"latent_statistics/active_dims/{stage}": active_dims,
+                f"latent_statistics/active_dims/{stage}": active_dims.float(),
                 f"latent_statistics/effective_dim/{stage}": effective_dim,
                 f"latent_statistics/utilization/{stage}": active_dims / self.latent_dim,
             }
