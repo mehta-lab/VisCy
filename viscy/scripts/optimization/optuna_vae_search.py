@@ -3,14 +3,10 @@
 Optuna hyperparameter optimization for VAE training with PyTorch Lightning.
 """
 
-import os
-import shutil
 import subprocess
 import tempfile
 from pathlib import Path
-from typing import Any, Dict
 
-import click
 import optuna
 import torch
 import yaml
@@ -155,7 +151,7 @@ def main():
 
     # Set up study
     study_name = "vae_hyperparameter_optimization"
-    storage_url = f"sqlite:///optuna_vae_study.db"
+    storage_url = "sqlite:///optuna_vae_study.db"
 
     study = optuna.create_study(
         study_name=study_name,

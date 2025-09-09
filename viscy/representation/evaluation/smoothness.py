@@ -4,7 +4,6 @@ from typing import Literal
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
-from scipy.optimize import minimize_scalar
 from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde
 from sklearn.preprocessing import StandardScaler

@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE

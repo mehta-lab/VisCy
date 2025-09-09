@@ -11,7 +11,6 @@ from umap import UMAP
 
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
-from viscy.representation.disentanglement_metrics import DisentanglementMetrics
 from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 from viscy.representation.vae_logging import BetaVaeLogger
 from viscy.utils.log_images import detach_sample, render_images
