@@ -1,13 +1,13 @@
 datamodule:
   batch_size: 32
   final_yx_patch_size:
-  - 224
-  - 224
+  - 256
+  - 256
   include_fov_names: null
   include_track_ids: null
   initial_yx_patch_size:
-  - 224
-  - 224
+  - 256
+  - 256
   normalizations:
   - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
     init_args:
@@ -50,7 +50,7 @@ execution:
 model:
   model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
   pooling_method: mean  # Options: "mean", "max", "cls_token"
-  middle_slice_index: 30  # Specific z-slice index (if null, uses D//2)
+  middle_slice_index: 18  # Specific z-slice index (if null, uses D//2)
   channel_reduction_methods:
     Phase3D: middle_slice
     RFP: max

@@ -26,18 +26,25 @@ class DINOv3Module(LightningModule):
             Dict[str, Literal["middle_slice", "mean", "max"]]
         ] = None,
         channel_names: Optional[List[str]] = None,
-        pooling_method: str = "mean",  # "mean", "max", or "cls_token"
+        pooling_method: Literal["mean", "max", "cls_token"] = "mean",  
         middle_slice_index: Optional[int] = None,
     ):
         """
         DINOv3 module for feature extraction.
-        
-        Args:
-            model_name: DINOv3 model name from HuggingFace
-            channel_reduction_methods: How to reduce 5D inputs per channel
-            channel_names: Names of channels for reduction mapping
-            pooling_method: How to pool spatial tokens ("mean", "max", "cls_token")
-            middle_slice_index: Specific z-slice index to use (if None, uses D//2)
+
+        Parameters
+        ----------
+        model_name : str, optional
+            DINOv3 model name from HuggingFace Model Hub (default: "facebook/dinov3-vitb16-pretrain-lvd1689m").
+        channel_reduction_methods : dict[str, {"middle_slice", "mean", "max"}], optional
+            Dictionary mapping channel names to reduction methods for 5D inputs (default: None, uses "middle_slice").
+        channel_names : list of str, optional
+            List of channel names corresponding to input channels (default: None).
+        pooling_method : Literal["mean", "max", "cls_token"], optional
+            Method to pool spatial tokens from the model output (default: "mean").
+        middle_slice_index : int, optional
+            Specific z-slice index to use for "middle_slice" reduction (default: None, uses D//2).
+
         """
         super().__init__()
         self.model_name = model_name
@@ -51,7 +58,6 @@ class DINOv3Module(LightningModule):
         self.processor = None
 
     def on_predict_start(self):
-        """Initialize model and processor when prediction starts"""
         if self.model is None:
             self.processor = AutoImageProcessor.from_pretrained(self.model_name)
             self.model = AutoModel.from_pretrained(self.model_name)
@@ -59,13 +65,18 @@ class DINOv3Module(LightningModule):
             self.model.to(self.device)
 
     def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
-        """Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
+        """
+        Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
 
-        Args:
-            x: 5D input tensor
+        Parameters
+        ----------
+        x : torch.Tensor
+            5D input tensor with shape (B, C, D, H, W).
 
-        Returns:
-            4D tensor after applying reduction methods
+        Returns
+        -------
+        torch.Tensor
+            4D tensor after applying reduction methods with shape (B, C, H, W).
         """
         if x.dim() != 5:
             return x
@@ -108,13 +119,18 @@ class DINOv3Module(LightningModule):
         return result
 
     def _convert_to_pil_images(self, x: torch.Tensor) -> List[Image.Image]:
-        """Convert tensor to list of PIL Images for DINOv3 processing.
+        """
+        Convert tensor to list of PIL Images for DINOv3 processing.
 
-        Args:
-            x: Input tensor (B, C, H, W)
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with shape (B, C, H, W).
 
-        Returns:
-            List of PIL Images
+        Returns
+        -------
+        list of PIL.Image.Image
+            List of PIL Images ready for DINOv3 processing.
         """
         images = []
         
@@ -161,13 +177,18 @@ class DINOv3Module(LightningModule):
         return images
 
     def _pool_features(self, features: torch.Tensor) -> torch.Tensor:
-        """Pool spatial features from DINOv3 tokens.
+        """
+        Pool spatial features from DINOv3 tokens.
         
-        Args:
-            features: Token features (B, num_tokens, hidden_dim)
+        Parameters
+        ----------
+        features : torch.Tensor
+            Token features with shape (B, num_tokens, hidden_dim).
             
-        Returns:
-            Pooled features (B, hidden_dim)
+        Returns
+        -------
+        torch.Tensor
+            Pooled features with shape (B, hidden_dim).
         """
         if self.pooling_method == "cls_token":
             # For ViT models, first token is usually CLS token
@@ -183,11 +204,6 @@ class DINOv3Module(LightningModule):
             return features.mean(dim=1)
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        """Extract features from input images using DINOv3.
-
-        Returns:
-            Dictionary with pooled features, empty projections, and index information
-        """
         x = batch["anchor"]
 
         # Handle 5D input (B, C, D, H, W)
@@ -197,26 +213,14 @@ class DINOv3Module(LightningModule):
         # Convert to PIL Images for DINOv3 processing
         pil_images = self._convert_to_pil_images(x)
         
-        # Process all images in batch
-        batch_features = []
+        # Batch process all images at once for better GPU utilization
+        inputs = self.processor(pil_images, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
         
-        for pil_img in pil_images:
-            # Process single image
-            inputs = self.processor(pil_img, return_tensors="pt")
-            inputs = {k: v.to(self.device) for k, v in inputs.items()}
-            
-            with torch.no_grad():
-                outputs = self.model(**inputs)
-                # Get all tokens from last hidden state
-                token_features = outputs.last_hidden_state  # (1, num_tokens, hidden_dim)
-                
-                # Pool spatial tokens to get single feature vector
-                pooled_features = self._pool_features(token_features)  # (1, hidden_dim)
-                
-                batch_features.append(pooled_features)
-        
-        # Concatenate all features in batch
-        features = torch.cat(batch_features, dim=0)  # (B, hidden_dim)
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            token_features = outputs.last_hidden_state  # (B, num_tokens, hidden_dim)
+            features = self._pool_features(token_features)  # (B, hidden_dim)
 
         return {
             "features": features,
@@ -226,27 +230,21 @@ class DINOv3Module(LightningModule):
 
 
 def load_config(config_file):
-    """Load configuration from a YAML file."""
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
     return config
 
 
 def load_normalization_from_config(norm_config):
-    """Load a normalization transform from a configuration dictionary."""
     class_path = norm_config["class_path"]
     init_args = norm_config.get("init_args", {})
 
-    # Split module and class name
     module_path, class_name = class_path.rsplit(".", 1)
 
-    # Import the module
     module = importlib.import_module(module_path)
 
-    # Get the class
     transform_class = getattr(module, class_name)
 
-    # Instantiate the transform
     return transform_class(**init_args)
 
 
@@ -259,19 +257,23 @@ def load_normalization_from_config(norm_config):
     help="Path to YAML configuration file",
 )
 def main(config):
-    """Extract DINOv3 embeddings and save to zarr format using VisCy Trainer."""
-    # Configure logging
+    """
+    Extract DINOv3 embeddings and save to zarr format using VisCy Trainer.
+    
+    Parameters
+    ----------
+    config : str or Path
+        Path to the YAML configuration file containing all parameters for
+        data loading, model configuration, and output settings.
+    """
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
-    # Load config file
     cfg = load_config(config)
     logger.info(f"Loaded configuration from {config}")
 
-    # Prepare datamodule parameters
     dm_params = {}
 
-    # Add data and tracks paths from the paths section
     if "paths" not in cfg:
         raise ValueError("Configuration must contain a 'paths' section")
 
@@ -287,11 +289,9 @@ def main(config):
         )
     dm_params["tracks_path"] = cfg["paths"]["tracks_path"]
 
-    # Add datamodule parameters
     if "datamodule" not in cfg:
         raise ValueError("Configuration must contain a 'datamodule' section")
 
-    # Prepare normalizations
     if (
         "normalizations" not in cfg["datamodule"]
         or not cfg["datamodule"]["normalizations"]
@@ -304,7 +304,6 @@ def main(config):
     normalizations = [load_normalization_from_config(norm) for norm in norm_configs]
     dm_params["normalizations"] = normalizations
 
-    # Copy all other datamodule parameters
     for param, value in cfg["datamodule"].items():
         if param != "normalizations":
             # Handle patch sizes
@@ -314,7 +313,6 @@ def main(config):
             else:
                 dm_params[param] = value
 
-    # Set up the data module
     logger.info("Setting up data module")
     dm = TripletDataModule(**dm_params)
 
@@ -335,7 +333,6 @@ def main(config):
         middle_slice_index=middle_slice_index,
     )
 
-    # Get dimensionality reduction parameters from config
     phate_kwargs = None
     pca_kwargs = None
 
@@ -345,7 +342,6 @@ def main(config):
         if "pca_kwargs" in cfg["embedding"]:
             pca_kwargs = cfg["embedding"]["pca_kwargs"]
 
-    # Check if output path exists and should be overwritten
     if "output_path" not in cfg["paths"]:
         raise ValueError(
             "Output path is required in the configuration file (paths.output_path)"
@@ -362,7 +358,6 @@ def main(config):
         logger.warning(f"Output path {output_path} already exists, will overwrite")
         overwrite = True
 
-    # Set up EmbeddingWriter callback
     embedding_writer = EmbeddingWriter(
         output_path=output_path,
         phate_kwargs=phate_kwargs,
@@ -370,7 +365,6 @@ def main(config):
         overwrite=overwrite,
     )
 
-    # Set up and run VisCy trainer
     logger.info("Setting up VisCy trainer")
     trainer = VisCyTrainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
