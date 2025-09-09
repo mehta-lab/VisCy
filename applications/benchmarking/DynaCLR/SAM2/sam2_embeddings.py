@@ -26,6 +26,21 @@ class SAM2Module(LightningModule):
         channel_names: Optional[List[str]] = None,
         middle_slice_index: Optional[int] = None,
     ):
+        """
+        SAM2 module for feature extraction.
+
+        Parameters
+        ----------
+        model_name : str, optional
+            SAM2 model name from HuggingFace Model Hub (default: "facebook/sam2-hiera-base-plus").
+        channel_reduction_methods : dict[str, {"middle_slice", "mean", "max"}], optional
+            Dictionary mapping channel names to reduction methods for 5D inputs (default: None, uses "middle_slice").
+        channel_names : list of str, optional
+            List of channel names corresponding to input channels (default: None).
+        middle_slice_index : int, optional
+            Specific z-slice index to use for "middle_slice" reduction (default: None, uses D//2).
+
+        """
         super().__init__()
         self.model_name = model_name
         self.channel_reduction_methods = channel_reduction_methods or {}
@@ -36,20 +51,32 @@ class SAM2Module(LightningModule):
         self.model = None  # Initialize in on_predict_start when device is set
 
     def on_predict_start(self):
-        """Initialize model with proper device when prediction starts"""
+        """
+        Initialize model with proper device when prediction starts.
+        
+        Notes
+        -----
+        This method is called automatically by Lightning when prediction begins.
+        It ensures the SAM2 model is properly initialized on the correct device.
+        """
         if self.model is None:
             self.model = SAM2ImagePredictor.from_pretrained(
                 self.model_name, device=self.device
             )
 
     def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
-        """Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
+        """
+        Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
 
-        Args:
-            x: 5D input tensor
+        Parameters
+        ----------
+        x : torch.Tensor
+            5D input tensor with shape (B, C, D, H, W).
 
-        Returns:
-            4D tensor after applying reduction methods
+        Returns
+        -------
+        torch.Tensor
+            4D tensor after applying reduction methods with shape (B, C, H, W).
         """
         if x.dim() != 5:
             return x
@@ -95,13 +122,18 @@ class SAM2Module(LightningModule):
         return result
 
     def _convert_to_rgb(self, x: torch.Tensor) -> list:
-        """Convert input tensor to 3-channel RGB format as needed for SAM2.
+        """
+        Convert input tensor to 3-channel RGB format as needed for SAM2.
 
-        Args:
-            x: Input tensor with 1, 2, or 3+ channels
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor with 1, 2, or 3+ channels and shape (B, C, H, W).
 
-        Returns:
-            List of numpy arrays in HWC format for SAM2
+        Returns
+        -------
+        list of numpy.ndarray
+            List of numpy arrays in HWC format for SAM2 processing.
         """
         # Convert to RGB and scale to [0, 255] range for SAM2
         if x.shape[1] == 1:
@@ -130,10 +162,25 @@ class SAM2Module(LightningModule):
         ]
 
     def predict_step(self, batch, batch_idx, dataloader_idx=0):
-        """Extract features from the input images.
+        """
+        Extract features from the input images.
 
-        Returns:
-            Dictionary with features, properly shaped empty projections tensor, and index information
+        Parameters
+        ----------
+        batch : dict
+            Batch dictionary containing "anchor" key with input tensors.
+        batch_idx : int
+            Index of the current batch.
+        dataloader_idx : int, optional
+            Index of the dataloader (default: 0).
+
+        Returns
+        -------
+        dict
+            Dictionary containing:
+            - "features": Extracted features tensor
+            - "projections": Empty tensor for compatibility (B, 0)
+            - "index": Batch index information
         """
         x = batch["anchor"]
 
@@ -161,14 +208,38 @@ class SAM2Module(LightningModule):
 
 
 def load_config(config_file):
-    """Load configuration from a YAML file."""
+    """
+    Load configuration from a YAML file.
+    
+    Parameters
+    ----------
+    config_file : str or Path
+        Path to the YAML configuration file.
+        
+    Returns
+    -------
+    dict
+        Configuration dictionary loaded from the YAML file.
+    """
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
     return config
 
 
 def load_normalization_from_config(norm_config):
-    """Load a normalization transform from a configuration dictionary."""
+    """
+    Load a normalization transform from a configuration dictionary.
+    
+    Parameters
+    ----------
+    norm_config : dict
+        Configuration dictionary containing "class_path" and optional "init_args".
+        
+    Returns
+    -------
+    object
+        Instantiated normalization transform object.
+    """
     class_path = norm_config["class_path"]
     init_args = norm_config.get("init_args", {})
 
@@ -194,7 +265,15 @@ def load_normalization_from_config(norm_config):
     help="Path to YAML configuration file",
 )
 def main(config):
-    """Extract SAM2 embeddings and save to zarr format using VisCy Trainer."""
+    """
+    Extract SAM2 embeddings and save to zarr format using VisCy Trainer.
+    
+    Parameters
+    ----------
+    config : str or Path
+        Path to the YAML configuration file containing all parameters for
+        data loading, model configuration, and output settings.
+    """
     # Configure logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
