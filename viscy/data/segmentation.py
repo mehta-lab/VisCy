@@ -73,7 +73,12 @@ class TargetPredictionDataset(Dataset):
                 )
             for t in range(pred_img.shape[0]):
                 self._indices.append((pred_img, target_img, p, t))
-        _logger.info(f"Number of test samples: {len(self)}")
+        # Only log sample count once to reduce noise
+        if hasattr(self, '_samples_logged'):
+            pass  # Already logged for this dataset type
+        else:
+            _logger.info(f"Built dataset with {len(self)} samples across {len(self.position_names)} positions")
+            type(self)._samples_logged = True
 
     def __len__(self) -> int:
         return len(self._indices)

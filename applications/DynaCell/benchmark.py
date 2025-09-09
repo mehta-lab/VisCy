@@ -4,6 +4,7 @@ It loads the ome-zarr 0.4v format, calculates metrics and saves the results as c
 """
 
 import datetime
+import os
 from pathlib import Path
 
 import pandas as pd
@@ -17,6 +18,12 @@ from viscy.utils.logging import ParallelSafeMetricsLogger
 
 # Set float32 matmul precision for better performance on Tensor Cores
 torch.set_float32_matmul_precision("high")
+
+# Suppress Lightning warnings for intentional CPU usage
+os.environ["SLURM_NTASKS"] = "1"  # Suppress SLURM warning
+import warnings
+warnings.filterwarnings("ignore", "GPU available but not used")
+warnings.filterwarnings("ignore", "The `srun` command is available")
 
 
 def compute_metrics(
@@ -129,30 +136,30 @@ def compute_metrics(
     )
     dm.setup(stage="test")
 
-    # Print a sample to verify metadata
+    # Print dataset configuration summary
     sample = next(iter(dm.test_dataloader()))
-    print(f"Sample keys: {sample.keys()}")
-    print(f"Cell type: {sample['cell_type']}")
-    print(f"Organelle: {sample['organelle']}")
-    print(f"Infection condition: {sample['infection_condition']}")
+    print(f"\n📊 Dataset Configuration:")
+    print(f"   • Samples: {len(dm.test_dataset)} total across all positions/timepoints")
+    print(f"   • Cell types: {cell_types}")
+    print(f"   • Organelles: {organelles}")  
+    print(f"   • Infection conditions: {infection_conditions}")
+    print(f"   • Sample metadata: {sample['cell_type']}, {sample['organelle']}, {sample['infection_condition']}")
 
-    # Use parallel-safe logger to avoid race conditions with multiple workers
+    # Setup logging
     log_output_dir.mkdir(exist_ok=True)
     
     if num_workers > 0:
-        # Use parallel-safe logger for multiple workers
         logger = ParallelSafeMetricsLogger(save_dir=log_output_dir, name=log_name, version=log_version)
-        print(f"Using parallel processing with {num_workers} workers (batch_size=1)")
+        print(f"\n🚀 Processing Mode: Parallel ({num_workers} workers, batch_size=1)")
     else:
-        # Use standard CSVLogger for single-threaded processing
         logger = CSVLogger(save_dir=log_output_dir, name=log_name, version=log_version)
-        print(f"Using sequential processing (num_workers=0, batch_size=1)")
+        print(f"\n🔄 Processing Mode: Sequential (single-threaded, batch_size=1)")
 
     trainer = Trainer(
         logger=logger, 
         accelerator="cpu", 
         devices=1, 
-        precision="16-mixed", 
+        precision="bf16-mixed",  # Use bf16 for CPU instead of fp16
         num_nodes=1,
         enable_progress_bar=True,
         enable_model_summary=False
@@ -163,14 +170,21 @@ def compute_metrics(
     if hasattr(logger, 'finalize'):
         logger.finalize()
 
-    # Find the metrics file - use the correct relative pattern
+    # Find and report results
     metrics_file = log_output_dir / log_name / log_version / "metrics.csv"
     if metrics_file.exists():
         metrics = pd.read_csv(metrics_file)
-        print(f"Segmentation metrics saved to: {metrics_file}")
-        print(f"Segmentation metrics columns: {metrics.columns.tolist()}")
+        print(f"\n✅ Metrics computation completed successfully!")
+        print(f"   • Output file: {metrics_file}")
+        print(f"   • Records: {len(metrics)} samples")
+        print(f"   • Metrics: {[col for col in metrics.columns if col not in ['position', 'time', 'cell_type', 'organelle', 'infection_condition', 'dataset', 'position_name']]}")
+        
+        # Show infection condition breakdown
+        if 'infection_condition' in metrics.columns:
+            condition_counts = metrics['infection_condition'].value_counts()
+            print(f"   • Conditions: {dict(condition_counts)}")
     else:
-        print(f"Warning: Metrics file not found at {metrics_file}")
+        print(f"❌ Warning: Metrics file not found at {metrics_file}")
         metrics = None
 
     return metrics

@@ -348,6 +348,7 @@ class ParallelSafeMetricsLogger(Logger):
         # Thread-safe storage for metrics
         self._metrics = []
         self._lock = threading.Lock()
+        self._finalized = False
         
     @property
     def experiment(self):
@@ -378,6 +379,9 @@ class ParallelSafeMetricsLogger(Logger):
     
     def finalize(self, status: str = "") -> None:
         """Write all collected metrics to CSV file atomically."""
+        if self._finalized:
+            return  # Already finalized, skip duplicate write
+            
         if not self._metrics:
             _logger.warning("No metrics collected")
             return
@@ -389,8 +393,9 @@ class ParallelSafeMetricsLogger(Logger):
         metrics_file = self._log_dir / "metrics.csv"
         df.to_csv(metrics_file, index=False)
         
-        _logger.info(f"Wrote {len(df)} metric records to {metrics_file}")
-        _logger.info(f"Metrics columns: {df.columns.tolist()}")
+        _logger.debug(f"ParallelSafeLogger: Wrote {len(df)} records to {metrics_file.name}")
+        
+        self._finalized = True
         
     @property
     def name(self) -> str:
