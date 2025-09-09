@@ -72,6 +72,8 @@ class DynaCellSample(SegmentationSample):
     cell_type: str
     organelle: str
     infection: str
+    dataset: str
+    position_name: str
 
 
 class ChannelMap(TypedDict):

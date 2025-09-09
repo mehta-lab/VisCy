@@ -234,6 +234,10 @@ class IntensityMetrics(LightningModule):
             metrics_dict["organelle"] = batch["organelle"]
         if "infection_condition" in batch:
             metrics_dict["infection_condition"] = batch["infection_condition"]
+        if "dataset" in batch:
+            metrics_dict["dataset"] = batch["dataset"]
+        if "position_name" in batch:
+            metrics_dict["position_name"] = batch["position_name"]
 
         # Compute metrics
         for metric in self.metrics:

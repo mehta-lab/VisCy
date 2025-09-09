@@ -26,6 +26,7 @@ class DynaCellDataset(TargetPredictionDataset):
         cell_type: str,
         organelle: str,
         infection_condition: str,
+        dataset: str,
         transforms: list[MapTransform] | None = None,
         **kwargs,
     ) -> None:
@@ -33,10 +34,12 @@ class DynaCellDataset(TargetPredictionDataset):
         self.cell_type = cell_type
         self.organelle = organelle
         self.infection_condition = infection_condition
+        self.dataset = dataset
         self.transforms = Compose(transforms) if transforms else None
 
     def __getitem__(self, idx) -> DynaCellSample:
         sample = super().__getitem__(idx)
+        position_idx = sample["position_idx"]
 
         # Convert tensors to float32 for metrics compatibility
         sample["pred"] = sample["pred"].float()
@@ -60,6 +63,8 @@ class DynaCellDataset(TargetPredictionDataset):
                 "cell_type": self.cell_type,
                 "organelle": self.organelle,
                 "infection_condition": self.infection_condition,
+                "dataset": self.dataset,
+                "position_name": self.position_names[position_idx],
             }
         )
 
@@ -117,7 +122,8 @@ class DynaCellDatabase:
         self._filtered_db["FOV name"] = self._filtered_db[
             self.zarr_path_column_name
         ].apply(lambda x: Path(*Path(x).parts[-3:]).as_posix())
-        self._filtered_db = self._filtered_db.drop_duplicates(subset=["Zarr path"])
+        # Fixed: dedup by both zarr path AND FOV name to preserve different positions/conditions
+        self._filtered_db = self._filtered_db.drop_duplicates(subset=["Zarr path", "FOV name"])
 
         # Store values for later use
         self.zarr_paths = self._filtered_db["Zarr path"].values.tolist()
@@ -125,6 +131,7 @@ class DynaCellDatabase:
         self.cell_types_per_store = self._filtered_db["Cell type"].values.tolist()
         self.organelles_per_store = self._filtered_db["Organelle"].values.tolist()
         self.infection_per_store = self._filtered_db["Infection"].values.tolist()
+        self.datasets_per_store = self._filtered_db["Dataset"].values.tolist()
 
     def __getitem__(self, idx) -> dict:
         return {
@@ -133,6 +140,7 @@ class DynaCellDatabase:
             "cell_type": self.cell_types_per_store[idx],
             "organelle": self.organelles_per_store[idx],
             "infection_condition": self.infection_per_store[idx],
+            "dataset": self.datasets_per_store[idx],
             "channel_name": self.channel_name,
             "z_slice": self.z_slice,
         }
@@ -182,6 +190,7 @@ class DynaCellDataModule(LightningDataModule):
                     cell_type=target_data["cell_type"],
                     organelle=target_data["organelle"],
                     infection_condition=target_data["infection_condition"],
+                    dataset=target_data["dataset"],
                     pred_dataset=open_ome_zarr(pred_data["zarr_path"]),
                     target_dataset=open_ome_zarr(target_data["zarr_path"]),
                     position_names=target_data["position_names"],
@@ -221,6 +230,13 @@ class DynaCellDataModule(LightningDataModule):
                 f"target={target_data['infection_condition']}, pred={pred_data['infection_condition']}"
             )
 
+        # Check dataset
+        if target_data["dataset"] != pred_data["dataset"]:
+            raise ValueError(
+                f"Dataset mismatch at index {idx}: "
+                f"target={target_data['dataset']}, pred={pred_data['dataset']}"
+            )
+
         # Check zarr paths if they should match
         if target_data["zarr_path"] != pred_data["zarr_path"]:
             _logger.warning(
@@ -244,6 +260,8 @@ class DynaCellDataModule(LightningDataModule):
             "cell_type": batch[0]["cell_type"],
             "organelle": batch[0]["organelle"],
             "infection_condition": batch[0]["infection_condition"],
+            "dataset": batch[0]["dataset"],
+            "position_name": batch[0]["position_name"],
         }
 
         # Standard collate for tensors

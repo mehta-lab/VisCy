@@ -28,8 +28,9 @@ database = database[database["Test Set"] == "x"]
 # %% Compute VSCyto3D intensity-based metrics
 print("\nComputing VSCyto3D intensity-based metrics...")
 
+# HEK293T cells - Mock condition only
 metrics = compute_metrics(
-    metrics_module=IntensityMetrics(),  # IntensityMetrics(), or SegmentationMetrics(mode="2D"),
+    metrics_module=IntensityMetrics(),
     cell_types=["HEK293T"],
     organelles=["HIST2H2BE"],
     infection_conditions=["Mock"],
@@ -66,17 +67,19 @@ metrics = compute_metrics(
     ],
 )
 
+# A549 cells - Both Mock and DENV conditions in single calls
+print("Computing A549 nuclei metrics for Mock and DENV conditions...")
 metrics = compute_metrics(
     metrics_module=IntensityMetrics(),
     cell_types=["A549"],
     organelles=["HIST2H2BE"],
-    infection_conditions=["Mock"],
+    infection_conditions=["Mock", "DENV"],  # Multiple conditions in single call
     target_database=database,
     target_channel_name="raw Cy5 EX639 EM698-70",
     prediction_database=database,
     prediction_channel_name="nuclei_prediction",
     log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_nuclei_mock",
+    log_name="intensity_VSCyto3D_A549_nuclei_mock_denv",
     z_slice=10,
     transforms=[
         NormalizeIntensityd(
@@ -85,55 +88,18 @@ metrics = compute_metrics(
     ],
 )
 
+print("Computing A549 membrane metrics for Mock and DENV conditions...")
 metrics = compute_metrics(
     metrics_module=IntensityMetrics(),
     cell_types=["A549"],
     organelles=["HIST2H2BE"],
-    infection_conditions=["DENV"],
-    target_database=database,
-    target_channel_name="raw Cy5 EX639 EM698-70",
-    prediction_database=database,
-    prediction_channel_name="nuclei_prediction",
-    log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_nuclei_DENV",
-    z_slice=10,
-    transforms=[
-        NormalizeIntensityd(
-            keys=["pred", "target"],
-        )
-    ],
-)
-
-metrics = compute_metrics(
-    metrics_module=IntensityMetrics(),
-    cell_types=["A549"],
-    organelles=["HIST2H2BE"],
-    infection_conditions=["Mock"],
+    infection_conditions=["Mock", "DENV"],  # Multiple conditions in single call
     target_database=database,
     target_channel_name="raw mCherry EX561 EM600-37",
     prediction_database=database,
     prediction_channel_name="membrane_prediction",
     log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_membrane_mock",
-    z_slice=10,
-    transforms=[
-        NormalizeIntensityd(
-            keys=["pred", "target"],
-        )
-    ],
-)
-
-metrics = compute_metrics(
-    metrics_module=IntensityMetrics(),
-    cell_types=["A549"],
-    organelles=["HIST2H2BE"],
-    infection_conditions=["DENV"],
-    target_database=database,
-    target_channel_name="raw mCherry EX561 EM600-37",
-    prediction_database=database,
-    prediction_channel_name="membrane_prediction",
-    log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_membrane_DENV",
+    log_name="intensity_VSCyto3D_A549_membrane_mock_denv",
     z_slice=10,
     transforms=[
         NormalizeIntensityd(
@@ -214,17 +180,18 @@ target_root = Path("/hpc/projects/virtual_staining/datasets/huang-lab/crops/a549
 pred_database["Path"] = pred_database["Path"].apply(partial(replace_root, new_root=pred_root))
 target_database["Path"] = target_database["Path"].apply(partial(replace_root, new_root=target_root))
 
+print("Computing CellDiff A549 nuclei metrics for Mock and DENV conditions...")
 metrics = compute_metrics(
     metrics_module=IntensityMetrics(),
     cell_types=["A549"],
     organelles=["HIST2H2BE"],
-    infection_conditions=["Mock"],
+    infection_conditions=["Mock", "DENV"],  # Multiple conditions in single call
     target_database=target_database,
     target_channel_name="raw Cy5 EX639 EM698-70",
     prediction_database=pred_database,
     prediction_channel_name="Nuclei-prediction",
     log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_nuclei_mock",
+    log_name="intensity_CellDiff_A549_nuclei_mock_denv",
     z_slice=10,
     transforms=[
         NormalizeIntensityd(
@@ -233,55 +200,18 @@ metrics = compute_metrics(
     ],
 )
 
+print("Computing CellDiff A549 membrane metrics for Mock and DENV conditions...")
 metrics = compute_metrics(
     metrics_module=IntensityMetrics(),
     cell_types=["A549"],
     organelles=["HIST2H2BE"],
-    infection_conditions=["Mock"],
+    infection_conditions=["Mock", "DENV"],  # Multiple conditions in single call
     target_database=target_database,
     target_channel_name="raw mCherry EX561 EM600-37",
     prediction_database=pred_database,
     prediction_channel_name="Membrane-prediction",
     log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_membrane_mock",
-    z_slice=10,
-    transforms=[
-        NormalizeIntensityd(
-            keys=["pred", "target"],
-        )
-    ],
-)
-
-metrics = compute_metrics(
-    metrics_module=IntensityMetrics(),
-    cell_types=["A549"],
-    organelles=["HIST2H2BE"],
-    infection_conditions=["DENV"],
-    target_database=target_database,
-    target_channel_name="raw Cy5 EX639 EM698-70",
-    prediction_database=pred_database,
-    prediction_channel_name="Nuclei-prediction",
-    log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_nuclei_DENV",
-    z_slice=10,
-    transforms=[
-        NormalizeIntensityd(
-            keys=["pred", "target"],
-        )
-    ],
-)
-
-metrics = compute_metrics(
-    metrics_module=IntensityMetrics(),
-    cell_types=["A549"],
-    organelles=["HIST2H2BE"],
-    infection_conditions=["DENV"],
-    target_database=target_database,
-    target_channel_name="raw mCherry EX561 EM600-37",
-    prediction_database=pred_database,
-    prediction_channel_name="Membrane-prediction",
-    log_output_dir=output_dir,
-    log_name="intensity_VSCyto3D_A549_membrane_DENV",
+    log_name="intensity_CellDiff_A549_membrane_mock_denv",
     z_slice=10,
     transforms=[
         NormalizeIntensityd(
