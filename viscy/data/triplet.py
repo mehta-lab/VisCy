@@ -78,6 +78,7 @@ class TripletDataset(Dataset):
         include_track_ids: list[int] | None = None,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
+        cache_pool_bytes: int = 0,
     ) -> None:
         """Dataset for triplet sampling of cells based on tracking.
 
@@ -111,6 +112,8 @@ class TripletDataset(Dataset):
             Whether to return the negative sample during the fit stage
             (can be set to False when using a loss function like NT-Xent),
             by default True
+        cache_pool_bytes : int, optional
+            Size of the tensorstore cache pool in bytes, by default 0
         """
         self.positions = positions
         self.channel_names = channel_names
@@ -130,9 +133,9 @@ class TripletDataset(Dataset):
         )
         self.valid_anchors = self._filter_anchors(self.tracks)
         self.return_negative = return_negative
-        self._setup_tensorstore_context()
+        self._setup_tensorstore_context(cache_pool_bytes)
 
-    def _setup_tensorstore_context(self):
+    def _setup_tensorstore_context(self, cache_pool_bytes: int):
         """Configure tensorstore context with CPU limits based on SLURM environment."""
         cpus_per_task = os.environ.get("SLURM_CPUS_PER_TASK")
         if cpus_per_task is not None:
@@ -140,7 +143,10 @@ class TripletDataset(Dataset):
         else:
             cpus_per_task = os.cpu_count() or 4
         self.tensorstore_context = ts.Context(
-            {"data_copy_concurrency": {"limit": cpus_per_task}}
+            {
+                "data_copy_concurrency": {"limit": cpus_per_task},
+                "cache_pool": {"total_bytes_limit": cache_pool_bytes},
+            }
         )
         self._tensorstores = {}
 
@@ -345,6 +351,7 @@ class TripletDataModule(HCSDataModule):
         prefetch_factor: int | None = None,
         pin_memory: bool = False,
         z_window_size: int | None = None,
+        cache_pool_bytes: int = 0,
     ):
         """Lightning data module for triplet sampling of patches.
 
@@ -400,6 +407,8 @@ class TripletDataModule(HCSDataModule):
             Whether to pin memory in CPU for faster GPU transfer, by default False
         z_window_size : int, optional
             Size of the final Z window, by default None (inferred from z_range)
+        cache_pool_bytes : int, optional
+            Size of the per-process tensorstore cache pool in bytes, by default 0
         """
         if num_workers > 1:
             warnings.warn(
@@ -432,8 +441,9 @@ class TripletDataModule(HCSDataModule):
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
         self.return_negative = return_negative
-        self._augmentation_transform = None  # Will be set during setup
-        self._no_augmentation_transform = None  # Will be set during setup
+        self._augmentation_transform = None
+        self._no_augmentation_transform = None
+        self._cache_pool_bytes = cache_pool_bytes
 
     def _align_tracks_tables_with_positions(
         self,
@@ -465,6 +475,7 @@ class TripletDataModule(HCSDataModule):
             "channel_names": self.source_channel,
             "z_range": self.z_range,
             "time_interval": self.time_interval,
+            "cache_pool_bytes": self._cache_pool_bytes,
         }
 
     def _setup_fit(self, dataset_settings: dict):

@@ -108,6 +108,8 @@ def channel_normalization(
 if __name__ == "__main__":
     num_workers = 1
     batch_size = 128
+    persistent_workers = True
+    cache_pool_bytes = 32 << 30
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
         tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
@@ -124,6 +126,8 @@ if __name__ == "__main__":
         ),
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
         return_negative=False,
+        persistent_workers=persistent_workers,
+        cache_pool_bytes=cache_pool_bytes,
     )
     dm2 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
@@ -139,8 +143,10 @@ if __name__ == "__main__":
         normalizations=channel_normalization(phase_channel="Phase3D", fl_channel=None),
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
         return_negative=False,
+        persistent_workers=persistent_workers,
+        cache_pool_bytes=cache_pool_bytes,
     )
     dm = BatchedConcatDataModule(data_modules=[dm1, dm2])
     model = DummyModel()
-    trainer = Trainer(max_epochs=1, limit_train_batches=32, limit_val_batches=32)
+    trainer = Trainer(max_epochs=4, limit_train_batches=8, limit_val_batches=8)
     trainer.fit(model, dm)
