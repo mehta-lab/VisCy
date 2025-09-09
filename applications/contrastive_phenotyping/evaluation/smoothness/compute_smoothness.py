@@ -93,6 +93,7 @@ for label, path in feature_paths.items():
       "random_frame_std": stats["random_frame_std"],
       "random_frame_median": stats["random_frame_median"],
       "random_frame_peak": stats["random_frame_peak"],
+      "smoothness_score": stats["smoothness_score"],
       "dynamic_range": stats["dynamic_range"]
     }
     # Create DataFrame with single row

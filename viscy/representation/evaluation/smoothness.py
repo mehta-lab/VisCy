@@ -129,6 +129,7 @@ def compute_embeddings_smoothness(
         - random_frame_median: Median of random sampling dissimilarity
         - random_frame_peak: Peak of random sampling distribution
         - random_frame_distribution: Full distribution of random sampling dissimilarities
+        - smoothness_score: Score of smoothness
         - dynamic_range: Difference between random and adjacent peaks
     distributions: dict: Dictionary containing distributions including:
         - adjacent_frame_distribution: Full distribution of adjacent frame dissimilarities
@@ -154,13 +155,6 @@ def compute_embeddings_smoothness(
 
     all_piecewise_distances = np.concatenate(piecewise_distance_per_track)
 
-    # p99_piece_wise_distance = np.array(
-    #     [np.percentile(track, 99) for track in piecewise_distance_per_track]
-    # )
-    # p1_percentile_piece_wise_distance = np.array(
-    #     [np.percentile(track, 1) for track in piecewise_distance_per_track]
-    # )
-
     # Random sampling values in the distance matrix with same size as adjacent frame measurements
     n_samples = len(all_piecewise_distances)
     # Avoid sampling the diagonal elements
@@ -178,6 +172,7 @@ def compute_embeddings_smoothness(
     # Compute the peaks of both distributions using KDE
     adjacent_peak = find_distribution_peak(all_piecewise_distances, method="kde_robust")
     random_peak = find_distribution_peak(sampled_values, method="kde_robust")
+    smoothness_score = np.mean(all_piecewise_distances) / np.mean(sampled_values)
     dynamic_range = random_peak - adjacent_peak
 
     stats = {
@@ -193,6 +188,7 @@ def compute_embeddings_smoothness(
         "random_frame_median": float(np.median(sampled_values)),
         "random_frame_peak": float(random_peak),
         # "random_frame_distribution": sampled_values,
+        "smoothness_score": float(smoothness_score),
         "dynamic_range": float(dynamic_range), 
     }
     distributions = {
