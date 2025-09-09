@@ -7,7 +7,7 @@ import pandas as pd
 from functools import partial
 from DynaCell.benchmark import compute_metrics
 from monai.transforms import NormalizeIntensityd
-from viscy.translation.evaluation import IntensityMetrics, SegmentationMetrics
+from viscy.translation.evaluation import IntensityMetrics
 
 # csv_database_path = Path(
 #     "~/mydata/gdrive/dynacell/summary_table/dynacell_summary_table_2025_05_05.csv"
@@ -81,6 +81,7 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_A549_nuclei_mock_denv",
     z_slice=10,
+    num_workers=6,       # Use parallel processing for speed
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -101,6 +102,7 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_A549_membrane_mock_denv",
     z_slice=10,
+    num_workers=6,       # Use parallel processing for speed
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -193,6 +195,7 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_A549_nuclei_mock_denv",
     z_slice=10,
+    num_workers=6,       # Use parallel processing for speed
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -213,6 +216,7 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_A549_membrane_mock_denv",
     z_slice=10,
+    num_workers=6,       # Use parallel processing for speed
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],

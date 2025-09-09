@@ -1,11 +1,58 @@
 import datetime
+import logging
 import os
+import threading
 import time
+from pathlib import Path
+from typing import Any, Dict
 
+import pandas as pd
 import torch
+from lightning.pytorch.loggers import Logger
 
 from viscy.utils.cli_utils import save_figure
 from viscy.utils.normalize import hist_clipping
+
+_logger = logging.getLogger("lightning.pytorch")
+
+
+def convert_tensors_to_numbers(metrics: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Convert tensor values in a metrics dictionary to Python numbers.
+    
+    This function handles PyTorch tensors, numpy arrays, and other tensor types
+    that have single scalar values, converting them to native Python types
+    suitable for CSV serialization.
+    
+    Parameters
+    ----------
+    metrics : Dict[str, Any]
+        Dictionary containing metric names and values, potentially with tensor objects
+        
+    Returns
+    -------
+    Dict[str, Any]
+        Dictionary with tensor values converted to Python numbers
+        
+    Examples
+    --------
+    >>> import torch
+    >>> metrics = {"mae": torch.tensor(0.5), "count": 42, "name": "test"}
+    >>> convert_tensors_to_numbers(metrics)
+    {"mae": 0.5, "count": 42, "name": "test"}
+    """
+    cleaned_metrics = {}
+    for key, value in metrics.items():
+        if hasattr(value, 'item'):  # PyTorch tensor with single value
+            cleaned_metrics[key] = value.item()
+        elif hasattr(value, 'numpy'):  # Other tensor types (e.g., numpy arrays with single values)
+            if hasattr(value.numpy(), 'item'):
+                cleaned_metrics[key] = value.numpy().item()
+            else:
+                cleaned_metrics[key] = value.numpy()
+        else:
+            cleaned_metrics[key] = value
+    return cleaned_metrics
 
 
 def log_feature(feature_map, name, log_save_folder, debug_mode):
@@ -282,3 +329,81 @@ class FeatureLogger:
         for i in range(1, len(arrays) * 2 - 1, 2):
             arrays.insert(i, bar)
         return arrays
+
+
+class ParallelSafeMetricsLogger(Logger):
+    """
+    A Lightning logger that collects metrics in memory and writes them atomically
+    to avoid race conditions with multiple workers.
+    """
+    
+    def __init__(self, save_dir: Path, name: str, version: str):
+        super().__init__()
+        self._save_dir = Path(save_dir)
+        self._name = name  
+        self._version = version
+        self._log_dir = self._save_dir / name / version
+        self._log_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Thread-safe storage for metrics
+        self._metrics = []
+        self._lock = threading.Lock()
+        
+    @property
+    def experiment(self):
+        return None
+    
+    @property
+    def save_dir(self) -> Path:
+        return self._save_dir
+    
+    @property
+    def log_dir(self) -> Path:
+        return self._log_dir
+        
+    def log_metrics(self, metrics: Dict[str, Any], step: int = None) -> None:
+        """Log metrics in a thread-safe manner."""
+        with self._lock:
+            # Convert tensor values to Python numbers
+            cleaned_metrics = convert_tensors_to_numbers(metrics)
+            
+            # Add step if provided
+            if step is not None:
+                cleaned_metrics["step"] = step
+            self._metrics.append(cleaned_metrics)
+            
+    def log_hyperparams(self, params: Dict[str, Any]) -> None:
+        """Hyperparameters logging - not needed for metrics computation."""
+        pass
+    
+    def finalize(self, status: str = "") -> None:
+        """Write all collected metrics to CSV file atomically."""
+        if not self._metrics:
+            _logger.warning("No metrics collected")
+            return
+            
+        # Convert to DataFrame (tensors already converted in log_metrics)
+        df = pd.DataFrame(self._metrics)
+        
+        # Write to CSV file
+        metrics_file = self._log_dir / "metrics.csv"
+        df.to_csv(metrics_file, index=False)
+        
+        _logger.info(f"Wrote {len(df)} metric records to {metrics_file}")
+        _logger.info(f"Metrics columns: {df.columns.tolist()}")
+        
+    @property
+    def name(self) -> str:
+        return self._name
+        
+    @name.setter  
+    def name(self, name: str) -> None:
+        self._name = name
+    
+    @property
+    def version(self) -> str:
+        return self._version
+    
+    @version.setter
+    def version(self, version: str) -> None:
+        self._version = version

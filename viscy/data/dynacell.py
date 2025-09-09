@@ -150,6 +150,32 @@ class DynaCellDatabase:
 
 
 class DynaCellDataModule(LightningDataModule):
+    """
+    Lightning DataModule for DynaCell metrics computation with parallel processing support.
+    
+    This data module creates datasets from database entries and enables parallel processing
+    at the individual timepoint level. Each sample represents a single (position, timepoint)
+    combination, allowing workers to process different timepoints/positions simultaneously.
+    
+    Parallel Processing:
+    - Samples are distributed across workers in round-robin fashion
+    - Each worker loads and processes independent (position, timepoint) combinations
+    - Thread-safe collate function preserves metadata for metrics logging
+    - Recommended num_workers: 4-12 for typical HPC environments
+    
+    Parameters
+    ----------
+    target_database : DynaCellDatabase
+        Database containing target image information
+    pred_database : DynaCellDatabase  
+        Database containing prediction image information
+    batch_size : int
+        Batch size (typically 1 for metrics compatibility)
+    num_workers : int
+        Number of parallel workers for data loading
+    transforms : list[MapTransform] | None
+        Optional data transforms to apply
+    """
     def __init__(
         self,
         target_database: DynaCellDatabase,
@@ -255,7 +281,7 @@ class DynaCellDataModule(LightningDataModule):
     def _custom_collate(self, batch):
         """Custom collate function that preserves metadata strings."""
         assert len(batch) == 1, "Batch size must be 1 for DynaCellDataModule"
-        # Extract metadata from first element in batch
+        # Extract metadata from single element in batch
         metadata = {
             "cell_type": batch[0]["cell_type"],
             "organelle": batch[0]["organelle"],

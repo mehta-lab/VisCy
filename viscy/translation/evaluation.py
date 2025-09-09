@@ -276,5 +276,9 @@ class IntensityMetrics(LightningModule):
                     pred.flatten(), target.flatten()
                 )
 
+        # Convert tensors to Python numbers before logging
+        from viscy.utils.logging import convert_tensors_to_numbers
+        cleaned_metrics = convert_tensors_to_numbers(metrics_dict)
+        
         # Log computed metrics
-        self.logger.log_metrics(metrics_dict)
+        self.logger.log_metrics(cleaned_metrics)
