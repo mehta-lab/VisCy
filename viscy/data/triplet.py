@@ -155,7 +155,9 @@ class TripletDataset(Dataset):
         fov_name = position.zgroup.name
         if fov_name not in self._tensorstores:
             self._tensorstores[fov_name] = position["0"].tensorstore(
-                context=self.tensorstore_context
+                context=self.tensorstore_context,
+                # assume immutable data to reduce metadata access
+                recheck_cached_data="open",
             )
         return self._tensorstores[fov_name]
 
