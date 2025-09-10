@@ -154,15 +154,9 @@ class TripletDataset(Dataset):
         """Get cached tensorstore object or create and cache new one."""
         fov_name = position.zgroup.name
         if fov_name not in self._tensorstores:
-            image_array = position["0"]
-            spec = {
-                "driver": "zarr",
-                "kvstore": {"driver": "file", "path": str(position.zgroup.store.path)},
-                "path": image_array.name,
-            }
-            self._tensorstores[fov_name] = ts.open(
-                spec, context=self.tensorstore_context
-            ).result()
+            self._tensorstores[fov_name] = position["0"].tensorstore(
+                context=self.tensorstore_context
+            )
         return self._tensorstores[fov_name]
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
