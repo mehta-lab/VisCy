@@ -50,6 +50,8 @@ def generate_normalization_metadata(
     num_workers=4,
     channel_ids=-1,
     grid_spacing=32,
+    per_timepoint=False,
+    percentiles=(50.0, 99.0),
 ):
     """
     Generate pixel intensity metadata to be later used in on-the-fly normalization
@@ -62,7 +64,8 @@ def generate_normalization_metadata(
     {
         channel_idx : {
             dataset_statistics: dataset level normalization values (positive float),
-            fov_statistics: field-of-view level normalization values (positive float)
+            fov_statistics: field-of-view level normalization values (positive float),
+            per_timepoint: per-timepoint level normalization values (when enabled)
         },
         .
         .
@@ -74,6 +77,8 @@ def generate_normalization_metadata(
     :param list/int channel_ids: indices of channels to process in dataset arrays,
                                     by default calculates all
     :param int grid_spacing: distance between points in sampling grid
+    :param bool per_timepoint: if True, compute statistics per timepoint, defaults to False
+    :param tuple percentiles: lower and upper percentiles to compute, defaults to (50.0, 99.0)
     """
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
@@ -99,16 +104,47 @@ def generate_normalization_metadata(
         channel_name = plate.channel_names[channel]
         this_channels_args = tuple([args + [channel] for args in mp_grid_sampler_args])
 
-        # NOTE: Doing sequential mp with pool execution creates synchronization
-        #      points between each step. This could be detrimental to performance
-        positions, fov_sample_values = mp_utils.mp_sample_im_pixels(
-            this_channels_args, num_workers
-        )
-        dataset_sample_values = np.concatenate(
-            [arr.flatten() for arr in fov_sample_values]
-        )
-        fov_level_statistics = mp_utils.mp_get_val_stats(fov_sample_values, num_workers)
-        dataset_level_statistics = mp_utils.get_val_stats(dataset_sample_values)
+        if per_timepoint:
+            # Sample per timepoint
+            positions, fov_timepoint_samples = mp_utils.mp_sample_im_pixels_per_timepoint(
+                this_channels_args, num_workers
+            )
+            
+            # Compute dataset-level statistics across all timepoints
+            all_dataset_samples = []
+            for fov_samples in fov_timepoint_samples:
+                for timepoint_samples in fov_samples.values():
+                    all_dataset_samples.append(timepoint_samples)
+            dataset_sample_values = np.concatenate(all_dataset_samples)
+            
+            # Compute per-timepoint statistics for each FOV
+            fov_level_statistics = []
+            per_timepoint_statistics = []
+            
+            for fov_samples in fov_timepoint_samples:
+                # FOV-level statistics (across all timepoints in this FOV)
+                fov_all_samples = np.concatenate(list(fov_samples.values()))
+                fov_stats = mp_utils.get_val_stats(fov_all_samples, percentiles)
+                fov_level_statistics.append(fov_stats)
+                
+                # Per-timepoint statistics for this FOV
+                timepoint_stats = {}
+                for time_idx, samples in fov_samples.items():
+                    timepoint_stats[time_idx] = mp_utils.get_val_stats(samples, percentiles)
+                per_timepoint_statistics.append(timepoint_stats)
+            
+        else:
+            # Original behavior - sample across all timepoints
+            positions, fov_sample_values = mp_utils.mp_sample_im_pixels(
+                this_channels_args, num_workers
+            )
+            dataset_sample_values = np.concatenate(
+                [arr.flatten() for arr in fov_sample_values]
+            )
+            fov_args = [(samples, percentiles) for samples in fov_sample_values]
+            fov_level_statistics = mp_utils.mp_get_val_stats(fov_args, num_workers)
+
+        dataset_level_statistics = mp_utils.get_val_stats(dataset_sample_values, percentiles)
 
         dataset_statistics = {
             "dataset_statistics": dataset_level_statistics,
@@ -130,6 +166,9 @@ def generate_normalization_metadata(
             position_statistics = dataset_statistics | {
                 "fov_statistics": fov_level_statistics[j],
             }
+            
+            if per_timepoint:
+                position_statistics["per_timepoint"] = per_timepoint_statistics[j]
 
             write_meta_field(
                 position=pos,

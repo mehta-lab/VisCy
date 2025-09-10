@@ -17,11 +17,15 @@ class LevelNormStats(TypedDict):
     std: Tensor
     median: Tensor
     iqr: Tensor
+    percentile_lower_b: NotRequired[Tensor]
+    percentile_upper_b: NotRequired[Tensor] 
+    percentile_range: NotRequired[Tensor]
 
 
 class ChannelNormStats(TypedDict):
     dataset_statistics: LevelNormStats
     fov_statistics: LevelNormStats
+    per_timepoint: NotRequired[dict[int, LevelNormStats]]
 
 
 NormMeta = dict[str, ChannelNormStats]
