@@ -246,6 +246,7 @@ class IntensityMetrics(LightningModule):
             elif metric == "mse":
                 metrics_dict["mse"] = mean_squared_error(pred, target)
             elif metric == "ssim":
+                # TODO: find out more about data_range parameter
                 # Handle different dimensionality cases
                 if pred.shape[0] > 1:  # 3D/2.5D case
                     metrics_dict["ssim"] = structural_similarity_index_measure(
@@ -262,7 +263,7 @@ class IntensityMetrics(LightningModule):
                     )
                 else:  # 2D case
                     metrics_dict["ssim"] = structural_similarity_index_measure(
-                        pred, target
+                        pred, target, data_range=1.0
                     )
             elif metric == "ms_ssim":
                 if pred.ndim > 1:
