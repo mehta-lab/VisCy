@@ -4,10 +4,9 @@ import unittest
 import cv2
 import numpy as np
 import pandas as pd
-from testfixtures import TempDirectory
-
 import viscy.preprocessing.resize_images as resize_images
 import viscy.utils.aux_utils as aux_utils
+from testfixtures import TempDirectory
 
 
 class TestResizeImages(unittest.TestCase):
@@ -133,7 +132,7 @@ class TestResizeImages(unittest.TestCase):
                     ),
                     ignore_index=True,
                 )
-            op_fname = "im_c00{}_z000_t005_p007_3.3-0.8-1.0.npy".format(c)
+            op_fname = f"im_c00{c}_z000_t005_p007_3.3-0.8-1.0.npy"
             exp_meta_dict.append(
                 {
                     "time_idx": self.time_idx,
@@ -169,7 +168,7 @@ class TestResizeImages(unittest.TestCase):
         exp_meta_dict = []
         for c in channel_ids:
             for s in [0, 2]:
-                op_fname = "im_c00{}_z00{}_t005_p007_3.3-0.8-1.0.npy".format(c, s)
+                op_fname = f"im_c00{c}_z00{s}_t005_p007_3.3-0.8-1.0.npy"
                 exp_meta_dict.append(
                     {
                         "time_idx": self.time_idx,

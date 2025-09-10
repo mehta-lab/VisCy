@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import numpy as np
 import pandas as pd
@@ -66,6 +67,13 @@ def _transform_channel_wise(
 
 
 class TripletDataset(Dataset):
+    """Dataset for triplet sampling of tracked cells.
+
+    Generates anchor, positive, and negative triplets from tracked cell
+    patches for contrastive learning. Supports temporal sampling with
+    configurable time intervals.
+    """
+
     def __init__(
         self,
         positions: list[Position],
@@ -213,8 +221,21 @@ class TripletDataset(Dataset):
         return query.merge(self.tracks, on=["global_track_id", "t"], how="inner")
 
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
-        """Select a negative sample from a different track in the next time point
-        if an interval is specified, otherwise from any random time point."""
+        """Select a negative sample from a different track.
+
+        Selects from the next time point if an interval is specified,
+        otherwise from any random time point.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            Row containing anchor cell information.
+
+        Returns
+        -------
+        pd.Series
+            Row containing negative sample information.
+        """
         if self.time_interval == "any":
             tracks = self.tracks
         else:
@@ -324,10 +345,17 @@ class TripletDataset(Dataset):
 
 
 class TripletDataModule(HCSDataModule):
+    """Lightning data module for triplet sampling from tracked cells.
+
+    Provides train, validation, and prediction dataloaders for contrastive
+    learning on cell tracking data. Supports configurable time intervals
+    and spatial patch sampling.
+    """
+
     def __init__(
         self,
-        data_path: str,
-        tracks_path: str,
+        data_path: str | Path,
+        tracks_path: str | Path,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
         initial_yx_patch_size: tuple[int, int] = (512, 512),
@@ -354,9 +382,9 @@ class TripletDataModule(HCSDataModule):
 
         Parameters
         ----------
-        data_path : str
+        data_path : str | Path
             Image dataset path
-        tracks_path : str
+        tracks_path : str | Path
             Tracks labels dataset path
         source_channel : str | Sequence[str]
             List of input channel names
@@ -436,13 +464,15 @@ class TripletDataModule(HCSDataModule):
     def _align_tracks_tables_with_positions(
         self,
     ) -> tuple[list[Position], list[pd.DataFrame]]:
-        """Parse positions in ome-zarr store containing tracking information
-        and assemble tracks tables for each position.
+        """Parse positions in ome-zarr store containing tracking information.
+
+        Assembles tracks tables for each position by matching position names
+        with corresponding CSV files in the tracks directory.
 
         Returns
         -------
         tuple[list[Position], list[pd.DataFrame]]
-            List of positions and list of tracks tables for each position
+            List of positions and list of tracks tables for each position.
         """
         positions = []
         tracks_tables = []
@@ -466,7 +496,7 @@ class TripletDataModule(HCSDataModule):
         }
 
     def _update_to_device_transform(self):
-        "Make sure that GPU transforms are set to the current device."
+        """Make sure that GPU transforms are set to the current device."""
         for transform in self.normalizations + self.augmentations:
             if isinstance(transform, ToDeviced):
                 transform.converter.device = torch.device(
@@ -535,7 +565,14 @@ class TripletDataModule(HCSDataModule):
     def _setup_test(self, *args, **kwargs):
         raise NotImplementedError("Self-supervised model does not support testing")
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> ThreadDataLoader:
+        """Create training data loader for triplet sampling.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Training data loader with shuffling and thread workers.
+        """
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
@@ -548,7 +585,14 @@ class TripletDataModule(HCSDataModule):
             pin_memory=self.pin_memory,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> ThreadDataLoader:
+        """Create validation data loader for triplet sampling.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Validation data loader without shuffling.
+        """
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
@@ -561,7 +605,14 @@ class TripletDataModule(HCSDataModule):
             pin_memory=self.pin_memory,
         )
 
-    def predict_dataloader(self):
+    def predict_dataloader(self) -> ThreadDataLoader:
+        """Create prediction data loader for cell embedding extraction.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Prediction data loader for anchor-only sampling.
+        """
         return ThreadDataLoader(
             self.predict_dataset,
             use_thread_workers=True,

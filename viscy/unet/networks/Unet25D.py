@@ -1,3 +1,5 @@
+from typing import Literal
+
 import torch
 import torch.nn as nn
 
@@ -5,53 +7,68 @@ from viscy.unet.networks.layers.ConvBlock3D import ConvBlock3D
 
 
 class Unet25d(nn.Module):
-    def __name__(self):
+    """2.5D U-Net neural network for volumetric image translation.
+
+    A hybrid approach that processes 3D input stacks but outputs 2D predictions.
+    Combines 3D spatial information with 2D computational efficiency.
+    """
+
+    def __name__(self) -> str:
         return "Unet25d"
 
     def __init__(
         self,
-        in_channels=1,
-        out_channels=1,
-        in_stack_depth=5,
-        out_stack_depth=1,
-        xy_kernel_size=(3, 3),
-        residual=False,
-        dropout=0.2,
-        num_blocks=4,
-        num_block_layers=2,
-        num_filters=[],
-        task="seg",
-    ):
-        """
-        Instance of 2.5D Unet.
-        1.) https://elifesciences.org/articles/55502
+        in_channels: int = 1,
+        out_channels: int = 1,
+        in_stack_depth: int = 5,
+        out_stack_depth: int = 1,
+        xy_kernel_size: tuple[int, int] = (3, 3),
+        residual: bool = False,
+        dropout: float = 0.2,
+        num_blocks: int = 4,
+        num_block_layers: int = 2,
+        num_filters: list[int] = [],
+        task: Literal["seg", "reg"] = "seg",
+    ) -> None:
+        """Initialize 2.5D U-Net.
 
-        Architecture takes in stack of 2d inputs given as a 3d tensor
-        and returns a 2d interpretation.
-        Learns 3d information based upon input stack,
-        but speeds up training by compressing 3d information before the decoding path.
-        Uses interruption conv layers in the Unet skip paths to
+        Architecture takes in stack of 2D inputs given as a 3D tensor
+        and returns a 2D interpretation. Learns 3D information based upon input stack,
+        but speeds up training by compressing 3D information before the decoding path.
+        Uses interruption conv layers in the U-Net skip paths to
         compress information with z-channel convolution.
 
-        :param int in_channels: number of feature channels in (1 or more)
-        :param int out_channels: number of feature channels out (1 or more)
-        :param int input_stack_depth: depth of input stack in z
-        :param int output_stack_depth: depth of output stack
-        :param int/tuple(int, int) xy_kernel_size: size of x and y dimensions
-            of conv kernels in blocks
-        :param bool residual: see name
-        :param float dropout: probability of dropout, between 0 and 0.5
-        :param int num_blocks: number of convolutional blocks
-            on encoder and decoder paths
-        :param int num_block_layers: number of layer sequences repeated per block
-        :param list[int] num_filters: list of filters/feature levels
-            at each conv block depth
-        :param str task: network task (for virtual staining this is regression),
-            one of 'seg','reg'
-        :param str debug_mode: if true logs features at each step of architecture,
-            must be manually set
+        References
+        ----------
+        https://elifesciences.org/articles/55502
+
+        Parameters
+        ----------
+        in_channels : int, optional
+            Number of feature channels in (1 or more), by default 1.
+        out_channels : int, optional
+            Number of feature channels out (1 or more), by default 1.
+        in_stack_depth : int, optional
+            Depth of input stack in z, by default 5.
+        out_stack_depth : int, optional
+            Depth of output stack, by default 1.
+        xy_kernel_size : int or tuple of int, optional
+            Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
+        residual : bool, optional
+            Whether to use residual connections, by default False.
+        dropout : float, optional
+            Probability of dropout, between 0 and 0.5, by default 0.2.
+        num_blocks : int, optional
+            Number of convolutional blocks on encoder and decoder paths, by default 4.
+        num_block_layers : int, optional
+            Number of layer sequences repeated per block, by default 2.
+        num_filters : list of int, optional
+            List of filters/feature levels at each conv block depth, by default [].
+        task : str, optional
+            Network task (for virtual staining this is regression),
+            one of 'seg','reg', by default "seg".
         """
-        super(Unet25d, self).__init__()
+        super().__init__()
         self.in_channels = in_channels
         self.num_blocks = num_blocks
         self.kernel_size = xy_kernel_size
@@ -202,7 +219,7 @@ class Unet25d(nn.Module):
         # ----- Feature Logging ----- #
         self.log_save_folder = None
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
         Forward call of network.
 
@@ -215,7 +232,6 @@ class Unet25d(nn.Module):
 
         :param torch.tensor x: input image
         """
-
         # encoder
         skip_tensors = []
         for i in range(self.num_blocks):
@@ -240,16 +256,20 @@ class Unet25d(nn.Module):
         x = self.terminal_block(x)
         return x
 
-    def register_modules(self, module_list, name):
-        """
-        Helper function that registers modules stored in a list to the model object
-        so that the can be seen by PyTorch optimizer.
+    def register_modules(self, module_list: list[nn.Module], name: str) -> None:
+        """Helper function that registers modules stored in a list to the model object.
+
+        So that they can be seen by PyTorch optimizer.
 
         Used to enable model graph creation with
-        non-sequential model types and dynamic layer numbers
+        non-sequential model types and dynamic layer numbers.
 
-        :param list(torch.nn.module) module_list: list of modules to register
-        :param str name: name of module type
+        Parameters
+        ----------
+        module_list : list[torch.nn.module]
+            List of modules to register
+        name : str
+            Name of module type
         """
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)

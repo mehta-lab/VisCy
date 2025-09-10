@@ -1,6 +1,7 @@
 """3D version of `kornia.augmentation._2d.intensity.gaussian_blur`."""
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from kornia.augmentation import random_generator as rg
 from kornia.augmentation._3d.intensity.base import IntensityAugmentationBase3D

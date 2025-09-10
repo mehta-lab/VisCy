@@ -1,12 +1,12 @@
-"""
-Fully Convolutional Masked Autoencoder as described in ConvNeXt V2
-based on the official JAX example in
+"""Fully Convolutional Masked Autoencoder as described in ConvNeXt V2.
+
+Based on the official JAX example in
 https://github.com/facebookresearch/ConvNeXt-V2/blob/main/TRAINING.md#implementing-fcmae-with-masked-convolution-in-jax
 and timm's dense implementation of the encoder in ``timm.models.convnext``
 """
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from monai.networks.blocks import UpSample
@@ -40,7 +40,8 @@ def _init_weights(module: nn.Module) -> None:
 def generate_mask(
     target: Size, stride: int, mask_ratio: float, device: str
 ) -> BoolTensor:
-    """
+    """Generate random boolean mask for masked autoencoder training.
+
     :param Size target: target shape
     :param int stride: total stride
     :param float mask_ratio: ratio of the pixels to mask
@@ -55,7 +56,8 @@ def generate_mask(
 
 
 def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
-    """
+    """Upsample boolean mask to match target spatial dimensions.
+
     :param BoolTensor mask: low-resolution boolean mask (B1HW)
     :param Size target: target size (BCHW)
     :return BoolTensor: upsampled boolean mask (B1HW)
@@ -73,7 +75,8 @@ def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
 
 
 def masked_patchify(features: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-    """
+    """Convert spatial features to channel-last patches, optionally masked.
+
     :param Tensor features: input image features (BCHW)
     :param BoolTensor unmasked: boolean foreground mask (B1HW)
     :return Tensor: masked channel-last features (BLC, L = H * W * mask_ratio)
@@ -91,7 +94,8 @@ def masked_patchify(features: Tensor, unmasked: BoolTensor | None = None) -> Ten
 def masked_unpatchify(
     features: Tensor, out_shape: Size, unmasked: BoolTensor | None = None
 ) -> Tensor:
-    """
+    """Convert channel-last patches back to spatial features.
+
     :param Tensor features: dense channel-last features (BLC)
     :param Size out_shape: output shape (BCHW)
     :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
@@ -151,7 +155,8 @@ class MaskedConvNeXtV2Block(nn.Module):
             self.shortcut = nn.Identity()
 
     def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-        """
+        """Forward pass through masked ConvNeXt V2 block.
+
         :param Tensor x: input tensor (BCHW)
         :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
         :return Tensor: output tensor (BCHW)
@@ -229,7 +234,8 @@ class MaskedConvNeXtV2Stage(nn.Module):
             in_channels = out_channels
 
     def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-        """
+        """Forward pass through masked ConvNeXt V2 stage.
+
         :param Tensor x: input tensor (BCHW)
         :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
         :return Tensor: output tensor (BCHW)
@@ -281,7 +287,8 @@ class MaskedAdaptiveProjection(nn.Module):
         self.norm = nn.LayerNorm(out_channels)
 
     def forward(self, x: Tensor, unmasked: BoolTensor = None) -> Tensor:
-        """
+        """Forward pass through masked adaptive projection layer.
+
         :param Tensor x: input tensor (BCDHW)
         :param BoolTensor unmasked: boolean foreground mask (B1HW), defaults to None
         :return Tensor: output tensor (BCHW)
@@ -305,6 +312,19 @@ class MaskedAdaptiveProjection(nn.Module):
 
 
 class MaskedMultiscaleEncoder(nn.Module):
+    """Multi-scale encoder with masking support for FC-MAE architecture.
+
+    Implements hierarchical feature extraction through multiple ConvNeXt V2 stages
+    with optional random masking for self-supervised pretraining.
+
+    :param int in_channels: input channels
+    :param Sequence[int] stage_blocks: number of blocks per encoder stage
+    :param Sequence[int] dims: feature dimensions at each stage
+    :param float drop_path_rate: stochastic depth rate
+    :param Sequence[int] stem_kernel_size: kernel sizes for adaptive projection
+    :param int in_stack_depth: input stack depth for 3D input
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -342,7 +362,8 @@ class MaskedMultiscaleEncoder(nn.Module):
     def forward(
         self, x: Tensor, mask_ratio: float = 0.0
     ) -> tuple[list[Tensor], BoolTensor | None]:
-        """
+        """Extract multi-scale features with optional masking.
+
         :param Tensor x: input tensor (BCDHW)
         :param float mask_ratio: ratio of the feature maps to mask,
             defaults to 0.0 (no masking)
@@ -367,6 +388,18 @@ class MaskedMultiscaleEncoder(nn.Module):
 
 
 class PixelToVoxelShuffleHead(nn.Module):
+    """Pixel-to-voxel reconstruction head using pixel shuffle upsampling.
+
+    Converts 2D feature maps to 3D output volumes through pixel shuffle
+    upsampling and channel-to-depth reshaping.
+
+    :param int in_channels: input feature channels
+    :param int out_channels: output channels per voxel
+    :param int out_stack_depth: output stack depth (Z dimension)
+    :param int xy_scaling: spatial upsampling factor
+    :param bool pool: whether to apply pooling in upsampling
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -389,6 +422,11 @@ class PixelToVoxelShuffleHead(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Reconstruct 3D volume from 2D features.
+
+        :param Tensor x: input 2D features (BCHW)
+        :return Tensor: reconstructed 3D volume (BCDHW)
+        """
         x = self.upsample(x)
         b, _, h, w = x.shape
         x = x.reshape(b, self.out_channels, self.out_stack_depth, h, w)
@@ -396,6 +434,28 @@ class PixelToVoxelShuffleHead(nn.Module):
 
 
 class FullyConvolutionalMAE(nn.Module):
+    """Fully Convolutional Masked Autoencoder for self-supervised learning.
+
+    Implements FC-MAE architecture combining a masked multi-scale encoder
+    with a UNet-style decoder for reconstruction tasks. Supports both
+    pretraining with masking and fine-tuning for downstream tasks.
+
+    # TODO: MANUAL_REVIEW - Complex encoder-decoder architecture with masking
+
+    :param int in_channels: input channels
+    :param int out_channels: output channels
+    :param Sequence[int] encoder_blocks: blocks per encoder stage
+    :param Sequence[int] dims: feature dimensions per stage
+    :param float encoder_drop_path_rate: encoder stochastic depth rate
+    :param Sequence[int] stem_kernel_size: adaptive projection kernel sizes
+    :param int in_stack_depth: input stack depth for 3D data
+    :param int decoder_conv_blocks: decoder convolution blocks per stage
+    :param bool pretraining: whether in pretraining mode (returns mask)
+    :param bool head_conv: whether to use convolutional reconstruction head
+    :param int head_conv_expansion_ratio: expansion ratio for conv head
+    :param bool head_conv_pool: whether to use pooling in conv head
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -460,6 +520,15 @@ class FullyConvolutionalMAE(nn.Module):
         self.pretraining = pretraining
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
+        """Forward pass through FC-MAE architecture.
+
+        Encodes input with optional masking, decodes through UNet decoder,
+        and reconstructs output through pixel-to-voxel head.
+
+        :param Tensor x: input tensor (BCDHW)
+        :param float mask_ratio: masking ratio for pretraining (0.0 = no mask)
+        :return Tensor: reconstructed output (BCDHW) or tuple with mask
+        """
         x, mask = self.encoder(x, mask_ratio=mask_ratio)
         x.reverse()
         x = self.decoder(x)

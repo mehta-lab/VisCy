@@ -1,7 +1,8 @@
 import logging
 import os
 import random
-from typing import Callable, Literal, Sequence, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Literal, Union
 
 import numpy as np
 import torch
@@ -24,7 +25,6 @@ from torchmetrics.functional import (
     structural_similarity_index_measure,
 )
 from torchmetrics.functional.segmentation import dice_score
-
 from viscy.data.combined import CombinedDataModule
 from viscy.data.gpu_aug import GPUTransformDataModule
 from viscy.data.typing import Sample
@@ -48,17 +48,23 @@ _logger = logging.getLogger("lightning.pytorch")
 
 class MixedLoss(nn.Module):
     """Mixed reconstruction loss.
+
     Adapted from Zhao et al, https://arxiv.org/pdf/1511.08861.pdf
     Reduces to simple distances if only one weight is non-zero.
 
-    :param float l1_alpha: L1 loss weight, defaults to 0.5
-    :param float l2_alpha: L2 loss weight, defaults to 0.0
-    :param float ms_dssim_alpha: MS-DSSIM weight, defaults to 0.5
+    Parameters
+    ----------
+    l1_alpha : float, optional
+        L1 loss weight, by default 0.5
+    l2_alpha : float, optional
+        L2 loss weight, by default 0.0
+    ms_dssim_alpha : float, optional
+        MS-DSSIM weight, by default 0.5
     """
 
     def __init__(
         self, l1_alpha: float = 0.5, l2_alpha: float = 0.0, ms_dssim_alpha: float = 0.5
-    ):
+    ) -> None:
         super().__init__()
         if not any([l1_alpha, l2_alpha, ms_dssim_alpha]):
             raise ValueError("Loss term weights cannot be all zero!")
@@ -67,7 +73,21 @@ class MixedLoss(nn.Module):
         self.ms_dssim_alpha = ms_dssim_alpha
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
-    def forward(self, preds, target):
+    def forward(self, preds: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+        """Compute mixed reconstruction loss.
+
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Predicted tensor
+        target : torch.Tensor
+            Target tensor
+
+        Returns
+        -------
+        torch.Tensor
+            Combined loss value
+        """
         loss = 0
         if self.l1_alpha:
             # the gaussian in the reference is not used
@@ -84,7 +104,30 @@ class MixedLoss(nn.Module):
 
 
 class MaskedMSELoss(nn.Module):
-    def forward(self, preds, original, mask):
+    """Masked mean squared error loss.
+
+    Computes MSE loss only for masked regions.
+    """
+
+    def forward(
+        self, preds: torch.Tensor, original: torch.Tensor, mask: torch.Tensor
+    ) -> torch.Tensor:
+        """Compute masked MSE loss.
+
+        Parameters
+        ----------
+        preds : torch.Tensor
+            Predicted tensor.
+        original : torch.Tensor
+            Original tensor.
+        mask : torch.Tensor
+            Binary mask tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Masked MSE loss value.
+        """
         loss = F.mse_loss(preds, original, reduction="none")
         loss = (loss.mean(2) * mask).sum() / mask.sum()
         return loss
@@ -93,44 +136,52 @@ class MaskedMSELoss(nn.Module):
 class VSUNet(LightningModule):
     """Regression U-Net module for virtual staining.
 
-    :param dict model_config: model config,
-        defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`
-    :param Union[nn.Module, MixedLoss] loss_function:
-        loss function in training/validation,
-        if a dictionary, should specify weights of each term
-        ('l1_alpha', 'l2_alpha', 'ssim_alpha')
-        defaults to L2 (mean squared error)
-    :param float lr: learning rate in training, defaults to 1e-3
-    :param Literal['WarmupCosine', 'Constant'] schedule:
-        learning rate scheduler, defaults to "Constant"
-    :param str ckpt_path: path to the checkpoint to load weights, defaults to None
-    :param int log_batches_per_epoch:
-        number of batches to log each training/validation epoch,
-        has to be smaller than steps per epoch, defaults to 8
-    :param int log_samples_per_batch:
-        number of samples to log each training/validation batch,
-        has to be smaller than batch size, defaults to 1
-    :param Sequence[int] example_input_yx_shape:
-        XY shape of the example input for network graph tracing, defaults to (256, 256)
-    :param str test_cellpose_model_path:
-        path to the CellPose model for testing segmentation, defaults to None
-    :param float test_cellpose_diameter:
-        diameter parameter of the CellPose model for testing segmentation,
-        defaults to None
-    :param bool test_evaluate_cellpose:
-        evaluate the performance of the CellPose model instead of the trained model
-        in test stage, defaults to False
-    :param bool test_time_augmentations:
-        apply test time augmentations in test stage, defaults to False
-    :param Literal['mean', 'median', 'product'] tta_type:
-        type of test time augmentations aggregation, defaults to "mean"
+    Parameters
+    ----------
+    architecture : Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"]
+        Model architecture type.
+    model_config : dict, optional
+        Model config, defaults to :py:class:`viscy.unet.utils.model.ModelDefaults25D`,
+        by default {}.
+    loss_function : Union[nn.Module, MixedLoss], optional
+        Loss function in training/validation. If a dictionary, should specify weights
+        of each term ('l1_alpha', 'l2_alpha', 'ssim_alpha'), defaults to L2
+        (mean squared error), by default None.
+    lr : float, optional
+        Learning rate in training, by default 1e-3.
+    schedule : Literal['WarmupCosine', 'Constant'], optional
+        Learning rate scheduler, by default "Constant".
+    freeze_encoder : bool, optional
+        Whether to freeze encoder weights, by default False.
+    ckpt_path : str, optional
+        Path to the checkpoint to load weights, by default None.
+    log_batches_per_epoch : int, optional
+        Number of batches to log each training/validation epoch,
+        has to be smaller than steps per epoch, by default 8.
+    log_samples_per_batch : int, optional
+        Number of samples to log each training/validation batch,
+        has to be smaller than batch size, by default 1.
+    example_input_yx_shape : Sequence[int], optional
+        XY shape of the example input for network graph tracing, by default (256, 256).
+    test_cellpose_model_path : str, optional
+        Path to the CellPose model for testing segmentation, by default None.
+    test_cellpose_diameter : float, optional
+        Diameter parameter of the CellPose model for testing segmentation,
+        by default None.
+    test_evaluate_cellpose : bool, optional
+        Evaluate the performance of the CellPose model instead of the trained model
+        in test stage, by default False.
+    test_time_augmentations : bool, optional
+        Apply test time augmentations in test stage, by default False.
+    tta_type : Literal['mean', 'median', 'product'], optional
+        Type of test time augmentations aggregation, by default "mean".
     """
 
     def __init__(
         self,
         architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
         model_config: dict = {},
-        loss_function: Union[nn.Module, MixedLoss] | None = None,
+        loss_function: nn.Module | MixedLoss | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         freeze_encoder: bool = False,
@@ -185,9 +236,37 @@ class VSUNet(LightningModule):
             )  # loading only weights
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass through the model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Model output.
+        """
         return self.model(x)
 
-    def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int):
+    def training_step(
+        self, batch: Sample | Sequence[Sample], batch_idx: int
+    ) -> torch.Tensor:
+        """Execute single training step.
+
+        Parameters
+        ----------
+        batch : Sample or Sequence[Sample]
+            Training batch data.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         losses = []
         batch_size = 0
         if not isinstance(batch, Sequence):
@@ -216,7 +295,20 @@ class VSUNet(LightningModule):
         )
         return loss_step
 
-    def validation_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
+    def validation_step(
+        self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
+    ) -> None:
+        """Execute single validation step.
+
+        Parameters
+        ----------
+        batch : Sample
+            Validation batch data.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int, default=0
+            Dataloader index for multi-dataloader validation.
+        """
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
         pred = self.forward(source)
@@ -235,7 +327,16 @@ class VSUNet(LightningModule):
                 detach_sample((source, target, pred), self.log_samples_per_batch)
             )
 
-    def test_step(self, batch: Sample, batch_idx: int):
+    def test_step(self, batch: Sample, batch_idx: int) -> None:
+        """Execute single test step.
+
+        Parameters
+        ----------
+        batch : Sample
+            Test batch data.
+        batch_idx : int
+            Batch index.
+        """
         source = batch["source"]
         target = batch["target"]
         center_index = target.shape[-3] // 2
@@ -266,7 +367,7 @@ class VSUNet(LightningModule):
         else:
             self._log_segmentation_metrics(None, None)
 
-    def _log_regression_metrics(self, pred: Tensor, target: Tensor):
+    def _log_regression_metrics(self, pred: Tensor, target: Tensor) -> None:
         # paired image translation metrics
         self.log_dict(
             {
@@ -298,7 +399,7 @@ class VSUNet(LightningModule):
 
     def _log_segmentation_metrics(
         self, pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor
-    ):
+    ) -> None:
         compute = pred_labels is not None
         if compute:
             pred_binary = pred_labels > 0
@@ -337,7 +438,25 @@ class VSUNet(LightningModule):
             on_epoch=False,
         )
 
-    def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
+    def predict_step(
+        self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
+    ) -> dict[str, Any]:
+        """Execute single prediction step.
+
+        Parameters
+        ----------
+        batch : Sample
+            Prediction batch data.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int, default=0
+            Dataloader index.
+
+        Returns
+        -------
+        torch.Tensor
+            Model prediction.
+        """
         source = batch["source"]
         if self.test_time_augmentations:
             prediction = self.perform_test_time_augmentations(source)
@@ -349,13 +468,21 @@ class VSUNet(LightningModule):
         return prediction
 
     def perform_test_time_augmentations(self, source: Tensor) -> Tensor:
-        """Perform test time augmentations on the input source
-        and aggregate the predictions using the specified method.
+        """Perform test time augmentations and aggregate predictions.
 
-        :param source: input tensor
-        :return: aggregated prediction
+        Apply rotational augmentations to input source and aggregate the
+        predictions using the specified method.
+
+        Parameters
+        ----------
+        source : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Aggregated prediction.
         """
-
         # Save the yx coords to crop post rotations
         self._original_shape_yx = source.shape[-2:]
         predictions = []
@@ -384,11 +511,13 @@ class VSUNet(LightningModule):
             prediction = torch.exp(log_prediction_sum)
         return prediction
 
-    def on_train_epoch_end(self):
+    def on_train_epoch_end(self) -> None:
+        """Log training samples at end of epoch."""
         self._log_samples("train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
-    def on_validation_epoch_end(self):
+    def on_validation_epoch_end(self) -> None:
+        """Log validation samples and compute average loss at end of epoch."""
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         # average within each dataloader
@@ -401,7 +530,7 @@ class VSUNet(LightningModule):
         self.validation_step_outputs.clear()
         self.validation_losses.clear()
 
-    def on_test_start(self):
+    def on_test_start(self) -> None:
         """Load CellPose model for segmentation."""
         if self.test_cellpose_model_path is not None:
             try:
@@ -417,14 +546,23 @@ class VSUNet(LightningModule):
                     '`pip install viscy"[metrics]"`'
                 )
 
-    def on_predict_start(self):
-        """Pad the input shape to be divisible by the downsampling factor.
+    def on_predict_start(self) -> None:
+        """Setup prediction padding transform.
+
+        Pad the input shape to be divisible by the downsampling factor.
         The inverse of this transform crops the prediction to original shape.
         """
         down_factor = 2**self.model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[Any]]:
+        """Configure optimizer and learning rate scheduler.
+
+        Returns
+        -------
+        tuple
+            Tuple containing optimizer and scheduler lists.
+        """
         if self.freeze_encoder:
             self.model: FullyConvolutionalMAE
             self.model.encoder.requires_grad_(False)
@@ -442,7 +580,7 @@ class VSUNet(LightningModule):
             )
         return [optimizer], [scheduler]
 
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]) -> None:
         grid = render_images(imgs)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
@@ -477,8 +615,7 @@ class VSUNet(LightningModule):
 
 
 class AugmentedPredictionVSUNet(LightningModule):
-    """Apply arbitrary collection of test-time augmentations
-    for image translation prediction.
+    """Apply arbitrary collection of test-time augmentations for image translation prediction.
 
     Parameters
     ----------
@@ -528,15 +665,51 @@ class AugmentedPredictionVSUNet(LightningModule):
         self._reduction = reduction
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass through the model.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Model output.
+        """
         return self.model(x)
 
     def setup(self, stage: str) -> None:
+        """Setup method for Lightning module.
+
+        Parameters
+        ----------
+        stage : str
+            Stage name (only 'predict' is supported).
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not 'predict'.
+        """
         if stage != "predict":
             raise NotImplementedError(
                 f"Only the 'predict' stage is supported by {type(self)}"
             )
 
     def _reduce_predictions(self, preds: list[Tensor]) -> Tensor:
+        """Reduce multiple predictions using specified method.
+
+        Parameters
+        ----------
+        preds : list[torch.Tensor]
+            List of prediction tensors.
+
+        Returns
+        -------
+        torch.Tensor
+            Reduced prediction tensor.
+        """
         prediction = torch.stack(preds, dim=0)
         if self._reduction == "mean":
             prediction = prediction.mean(dim=0)
@@ -547,6 +720,22 @@ class AugmentedPredictionVSUNet(LightningModule):
     def predict_step(
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
     ) -> Tensor:
+        """Execute single prediction step with augmentations.
+
+        Parameters
+        ----------
+        batch : Sample
+            Prediction batch data.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int, default=0
+            Dataloader index.
+
+        Returns
+        -------
+        torch.Tensor
+            Aggregated prediction from augmented inputs.
+        """
         source = batch["source"]
         preds = []
         for forward_t, inverse_t in zip(
@@ -566,16 +755,36 @@ class AugmentedPredictionVSUNet(LightningModule):
 
 
 class FcmaeUNet(VSUNet):
+    """Fully Convolutional Masked Autoencoder U-Net.
+
+    Extends VSUNet to support masked autoencoder pre-training and supervised
+    fine-tuning for virtual staining tasks.
+
+    Parameters
+    ----------
+    fit_mask_ratio : float, default=0.0
+        Masking ratio for FCMAE pre-training.
+    **kwargs
+        Additional arguments passed to VSUNet.
+    """
+
     def __init__(
         self,
         fit_mask_ratio: float = 0.0,
         **kwargs,
-    ):
+    ) -> None:
         super().__init__(architecture="fcmae", **kwargs)
         self.fit_mask_ratio = fit_mask_ratio
         self.save_hyperparameters(ignore=["loss_function"])
 
-    def on_fit_start(self):
+    def on_fit_start(self) -> None:
+        """Setup data modules and validate configuration for training.
+
+        Raises
+        ------
+        ValueError
+            If data module configuration is incompatible with FCMAE training.
+        """
         dm = self.trainer.datamodule
         if not isinstance(dm, CombinedDataModule):
             raise ValueError(
@@ -595,12 +804,42 @@ class FcmaeUNet(VSUNet):
                 f"got {type(self.loss_function)}"
             )
 
-    def forward(self, x: Tensor, mask_ratio: float = 0.0):
+    def forward(
+        self, x: Tensor, mask_ratio: float = 0.0
+    ) -> tuple[Tensor, Tensor] | Tensor:
+        """Forward pass with optional masking.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+        mask_ratio : float, default=0.0
+            Masking ratio for FCMAE mode.
+
+        Returns
+        -------
+        torch.Tensor or tuple
+            Model output, optionally with mask if mask_ratio > 0.
+        """
         return self.model(x, mask_ratio)
 
     def forward_fit_fcmae(
         self, batch: Sample, return_target: bool = False
     ) -> tuple[Tensor, Tensor | None, Tensor]:
+        """Forward pass for FCMAE pre-training.
+
+        Parameters
+        ----------
+        batch : Sample
+            Input batch.
+        return_target : bool, default=False
+            Whether to return masked target for logging.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor or None, torch.Tensor]
+            Prediction, target (if requested), and loss.
+        """
         x = batch["source"]
         pred, mask = self.forward(x, mask_ratio=self.fit_mask_ratio)
         loss = self.loss_function(pred, x, mask)
@@ -611,6 +850,18 @@ class FcmaeUNet(VSUNet):
         return pred, target, loss
 
     def forward_fit_supervised(self, batch: Sample) -> tuple[Tensor, Tensor, Tensor]:
+        """Forward pass for supervised training.
+
+        Parameters
+        ----------
+        batch : Sample
+            Input batch containing source and target.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+            Prediction, target, and loss.
+        """
         x = batch["source"]
         target = batch["target"]
         pred = self.forward(x)
@@ -620,6 +871,23 @@ class FcmaeUNet(VSUNet):
     def forward_fit_task(
         self, batch: Sample, batch_idx: int
     ) -> tuple[Tensor, Tensor | None, Tensor]:
+        """Forward pass for current training task.
+
+        Automatically selects FCMAE pre-training or supervised training
+        based on model configuration.
+
+        Parameters
+        ----------
+        batch : Sample
+            Input batch.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        tuple[torch.Tensor, torch.Tensor or None, torch.Tensor]
+            Prediction, target, and loss.
+        """
         if self.model.pretraining:
             if batch_idx < self.log_batches_per_epoch:
                 return_target = True
@@ -630,6 +898,18 @@ class FcmaeUNet(VSUNet):
 
     @torch.no_grad()
     def train_transform_and_collate(self, batch: list[dict[str, Tensor]]) -> Sample:
+        """Apply training transforms and collate batch data.
+
+        Parameters
+        ----------
+        batch : list[dict[str, torch.Tensor]]
+            List of batch dictionaries from multiple data modules.
+
+        Returns
+        -------
+        Sample
+            Collated and transformed sample.
+        """
         transformed = []
         for dataset_batch, dm in zip(batch, self.datamodules):
             dataset_batch = dm.train_gpu_transforms(dataset_batch)
@@ -642,10 +922,38 @@ class FcmaeUNet(VSUNet):
     def val_transform_and_collate(
         self, batch: list[Sample], dataloader_idx: int
     ) -> Tensor:
+        """Apply validation transforms and collate batch data.
+
+        Parameters
+        ----------
+        batch : list[Sample]
+            List of samples.
+        dataloader_idx : int
+            Index of the validation dataloader.
+
+        Returns
+        -------
+        torch.Tensor
+            Collated and transformed batch.
+        """
         batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
         return collate_meta_tensor(batch)
 
     def training_step(self, batch: list[list[Sample]], batch_idx: int) -> Tensor:
+        """Execute single training step for FCMAE.
+
+        Parameters
+        ----------
+        batch : list[list[Sample]]
+            Nested list of samples from multiple data modules.
+        batch_idx : int
+            Batch index.
+
+        Returns
+        -------
+        torch.Tensor
+            Training loss.
+        """
         batch = self.train_transform_and_collate(batch)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if batch_idx < self.log_batches_per_epoch:
@@ -669,6 +977,17 @@ class FcmaeUNet(VSUNet):
     def validation_step(
         self, batch: list[Sample], batch_idx: int, dataloader_idx: int = 0
     ) -> None:
+        """Execute single validation step for FCMAE.
+
+        Parameters
+        ----------
+        batch : list[Sample]
+            List of validation samples.
+        batch_idx : int
+            Batch index.
+        dataloader_idx : int, default=0
+            Dataloader index.
+        """
         batch = self.val_transform_and_collate(batch, dataloader_idx)
         pred, target, loss = self.forward_fit_task(batch, batch_idx)
         if dataloader_idx + 1 > len(self.validation_losses):

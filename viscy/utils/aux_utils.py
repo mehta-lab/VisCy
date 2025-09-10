@@ -1,17 +1,34 @@
-"""Auxiliary utility functions"""
+"""Auxiliary utility functions."""
 
 import iohub.ngff as ngff
 import yaml
 
 
 def _assert_unique_subset(subset, superset, name):
-    """
-    Helper function to allow for clean code:
-        Throws error if unique elements of subset are not a subset of
-        unique elements of superset.
+    """Check that unique elements of subset are a subset of superset.
 
-    Returns unique elements of subset if given a list. If subset is -1,
-    returns all unique elements of superset
+    Helper function to allow for clean code: Throws error if unique elements
+    of subset are not a subset of unique elements of superset.
+
+    Parameters
+    ----------
+    subset : list or int
+        Subset to validate. If -1, returns all unique elements of superset.
+    superset : list
+        Superset to validate against.
+    name : str
+        Name of the parameter being validated (for error messages).
+
+    Returns
+    -------
+    set
+        Unique elements of subset if given a list. If subset is -1,
+        returns all unique elements of superset.
+
+    Raises
+    ------
+    AssertionError
+        If subset is not a subset of superset.
     """
     if subset == -1:
         subset = superset
@@ -33,28 +50,38 @@ def validate_metadata_indices(
     slice_ids=[],
     pos_ids=[],
 ):
-    """
-    Check the availability of indices provided timepoints, channels, positions
-    and slices for all data, and returns only the available of the specified
-    indices.
+    """Check availability of indices for timepoints, channels, positions and slices.
 
+    Returns only the available indices from the specified indices.
     If input ids are None, the indices for that parameter will not be
     evaluated. If input ids are -1, all indices for that parameter will
     be returned.
 
-    Assumes uniform structure, as such structure is required for HCS compatibility
+    Assumes uniform structure, as such structure is required for HCS compatibility.
 
-    :param str zarr_dir: HCS-compatible zarr directory to validate indices against
-    :param list time_ids: check availability of these timepoints in image
-                                metadata
-    :param list channel_ids: check availability of these channels in image
-                                    metadata
-    :param list pos_ids: Check availability of positions in zarr_dir
-    :param list slice_ids: Check availability of z slices in image metadata
+    Parameters
+    ----------
+    zarr_dir : str
+        HCS-compatible zarr directory to validate indices against.
+    time_ids : list, optional
+        Check availability of these timepoints in image metadata, by default [].
+    channel_ids : list, optional
+        Check availability of these channels in image metadata, by default [].
+    slice_ids : list, optional
+        Check availability of z slices in image metadata, by default [].
+    pos_ids : list, optional
+        Check availability of positions in zarr_dir, by default [].
 
-    :return dict indices_metadata: All indices found given input
-    :raise AssertionError: If not all channels, timepoints, positions
-        or slices are present
+    Returns
+    -------
+    dict
+        Dictionary with keys 'time_ids', 'channel_ids', 'slice_ids', 'pos_ids'
+        containing all indices found given input.
+
+    Raises
+    ------
+    AssertionError
+        If not all channels, timepoints, positions or slices are present.
     """
     plate = ngff.open_ome_zarr(zarr_dir, layout="hcs", mode="r")
     position_path, position = next(plate.positions())
@@ -87,13 +114,19 @@ def validate_metadata_indices(
 
 
 def read_config(config_fname):
-    """Read the config file in yml format
+    """Read the config file in yml format.
 
-    :param str config_fname: fname of config yaml with its full path
-    :return: dict config: Configuration parameters
+    Parameters
+    ----------
+    config_fname : str
+        Filename of config yaml with its full path.
+
+    Returns
+    -------
+    dict
+        Configuration parameters.
     """
-
-    with open(config_fname, "r") as f:
+    with open(config_fname) as f:
         config = yaml.safe_load(f)
 
     return config

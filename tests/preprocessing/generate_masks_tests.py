@@ -8,7 +8,6 @@ import numpy.testing
 import pandas as pd
 import skimage.io as sk_im_io
 from testfixtures import TempDirectory
-
 from viscy.preprocessing.generate_masks import MaskProcessor
 from viscy.utils import aux_utils as aux_utils
 
@@ -129,7 +128,7 @@ class TestMaskProcessor(unittest.TestCase):
         nose.tools.assert_equal(len(frames_meta), exp_len)
         for idx in range(exp_len):
             nose.tools.assert_equal(
-                "im_c003_z00{}_t000_p001.npy".format(idx),
+                f"im_c003_z00{idx}_t000_p001.npy",
                 frames_meta.iloc[idx]["file_name"],
             )
 

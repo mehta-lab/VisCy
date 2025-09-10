@@ -2,7 +2,6 @@ import nose.tools
 import numpy as np
 from skimage import draw
 from skimage.filters import gaussian
-
 from viscy.utils.masks import (
     create_unimodal_mask,
     get_unet_border_weight_map,

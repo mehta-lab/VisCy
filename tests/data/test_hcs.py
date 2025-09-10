@@ -3,7 +3,6 @@ from pathlib import Path
 from iohub import open_ome_zarr
 from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
-
 from viscy.data.hcs import HCSDataModule
 from viscy.trainer import VisCyTrainer
 

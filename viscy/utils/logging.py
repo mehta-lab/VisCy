@@ -1,6 +1,7 @@
 import datetime
 import os
 import time
+from typing import Any
 
 import torch
 
@@ -8,11 +9,14 @@ from viscy.utils.cli_utils import save_figure
 from viscy.utils.normalize import hist_clipping
 
 
-def log_feature(feature_map, name, log_save_folder, debug_mode):
+def log_feature(
+    feature_map: torch.Tensor, name: str, log_save_folder: str, debug_mode: bool
+) -> None:
     """
-    If self.debug_mode, creates a visual of the given feature map, and saves it at
-    'log_save_folder'
-    If no log_save_folder specified, saves relative to working directory with timestamp.
+    Create visual feature map logs for debugging deep learning models.
+
+    If debug_mode is enabled, creates a visual of the given feature map and saves it at
+    'log_save_folder'. If no log_save_folder specified, saves relative to working directory with timestamp.
 
     Currently only saving in working directory is supported.
     This is meant to be an analysis tool,
@@ -46,15 +50,56 @@ def log_feature(feature_map, name, log_save_folder, debug_mode):
 
 
 class FeatureLogger:
+    """
+    Logger for visualizing neural network feature maps during training and debugging.
+
+    This utility class provides comprehensive feature map visualization capabilities
+    for monitoring convolutional neural network activations. It supports both
+    individual channel visualization and grid-based multi-channel displays,
+    with flexible normalization and spatial dimension handling.
+
+    The logger is designed for debugging deep learning models by capturing
+    intermediate layer activations and saving them as organized image files.
+    It handles multi-dimensional tensors commonly found in computer vision
+    tasks, including 2D/3D spatial dimensions with batch and channel axes.
+
+    Attributes
+    ----------
+    save_folder : str
+        Directory path for saving visualization outputs
+    spatial_dims : int
+        Number of spatial dimensions in feature tensors (2D or 3D)
+    full_batch : bool
+        Whether to log all samples in batch or just the first
+    save_as_grid : bool
+        Whether to arrange channels in a grid layout
+    grid_width : int
+        Number of columns in grid visualization
+    normalize_by_grid : bool
+        Whether to normalize intensities across entire grid
+
+    Examples
+    --------
+    >>> logger = FeatureLogger(
+    ...     save_folder="./feature_logs",
+    ...     spatial_dims=3,
+    ...     save_as_grid=True,
+    ...     grid_width=8,
+    ... )
+    >>> logger.log_feature_map(
+    ...     conv_features, "conv1_activations", dim_names=["batch", "channels"]
+    ... )
+    """
+
     def __init__(
         self,
-        save_folder,
-        spatial_dims=3,
-        full_batch=False,
-        save_as_grid=True,
-        grid_width=0,
-        normalize_by_grid=False,
-    ):
+        save_folder: str,
+        spatial_dims: int = 3,
+        full_batch: bool = False,
+        save_as_grid: bool = True,
+        grid_width: int = 0,
+        normalize_by_grid: bool = False,
+    ) -> None:
         """
         Logger object for handling logging feature maps inside network architectures.
 
@@ -86,13 +131,14 @@ class FeatureLogger:
 
     def log_feature_map(
         self,
-        feature_map,
-        feature_name,
-        dim_names=[],
-        vmax=0,
-    ):
+        feature_map: torch.Tensor,
+        feature_name: str,
+        dim_names: list[str] | None = None,
+        vmax: float = 0,
+    ) -> None:
         """
-        Creates a log of figures the given feature map tensor at 'save_folder'.
+        Create a log of figures for the given feature map tensor at 'save_folder'.
+
         Log is saved as images of feature maps in nested directory tree.
 
         By default _assumes that batch dimension is the first dimension_, and
@@ -112,7 +158,7 @@ class FeatureLogger:
 
         # handle dim names
         num_dims = len(feature_map.shape)
-        if len(dim_names) == 0:
+        if dim_names is None:
             dim_names = ["dim_" + str(i) for i in range(len(num_dims))]
         else:
             assert len(dim_names) + self.spatial_dims == num_dims, (
@@ -132,11 +178,11 @@ class FeatureLogger:
 
     def map_feature_dims(
         self,
-        feature_map,
-        save_as_grid,
-        vmax=0,
-        depth=0,
-    ):
+        feature_map: torch.Tensor,
+        save_as_grid: bool,
+        vmax: float = 0,
+        depth: int = 0,
+    ) -> None:
         """
         Recursive directory creation for organizing feature map logs
 
@@ -149,7 +195,6 @@ class FeatureLogger:
         :param float vmax: maximum intensity to normalize figures by
         :param int depth: recursion counter. depth in dimensions
         """
-
         for i in range(feature_map.shape[0]):
             if len(feature_map.shape) == 3:
                 # individual saving
@@ -257,11 +302,18 @@ class FeatureLogger:
                 break
         return
 
-    def interleave_bars(self, arrays, axis, pixel_width=3, value=0):
+    def interleave_bars(
+        self,
+        arrays: list[torch.Tensor],
+        axis: int,
+        pixel_width: int = 3,
+        value: float = 0,
+    ) -> list[torch.Tensor]:
         """
+        Interleave separator bars between tensors to improve grid visualization.
+
         Takes list of 2d torch tensors and interleaves bars to improve
-        grid visualization quality.
-        Assumes arrays are all of the same shape.
+        grid visualization quality. Assumes arrays are all of the same shape.
 
         :param list grid_arrays: list of tensors to place bars between
         :param int axis: axis on which to interleave bars (0 or 1)

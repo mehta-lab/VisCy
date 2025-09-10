@@ -4,6 +4,7 @@ import json
 import logging
 from io import BytesIO
 from pathlib import Path
+from typing import Any
 
 import dash
 import dash.dependencies as dd
@@ -12,10 +13,10 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
+from numpy.typing import NDArray
 from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
-
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
 
@@ -24,11 +25,18 @@ logger = logging.getLogger(__name__)
 
 
 class EmbeddingVisualizationApp:
+    """Interactive visualization app for embedding analysis.
+
+    Provides a Dash-based web application for exploring embeddings with PCA
+    visualization, track selection, and image display capabilities for
+    representation learning analysis.
+    """
+
     def __init__(
         self,
-        data_path: str,
-        tracks_path: str,
-        features_path: str,
+        data_path: str | Path,
+        tracks_path: str | Path,
+        features_path: str | Path,
         channels_to_display: list[str] | str,
         fov_tracks: dict[str, list[int] | str],
         z_range: tuple[int, int] = (0, 1),
@@ -46,11 +54,11 @@ class EmbeddingVisualizationApp:
 
         Parameters
         ----------
-        data_path: str
+        data_path: str | Path
             Path to the data directory.
-        tracks_path: str
+        tracks_path: str | Path
             Path to the tracks directory.
-        features_path: str
+        features_path: str | Path
             Path to the features directory.
         channels_to_display: list[str] | str
             List of channels to display.
@@ -68,6 +76,7 @@ class EmbeddingVisualizationApp:
             Number of workers to use for loading data.
         output_dir: str | None, optional
             Directory to save CSV files and other outputs. If None, uses current working directory.
+
         Returns
         -------
         None
@@ -101,7 +110,7 @@ class EmbeddingVisualizationApp:
         self._init_app()
         atexit.register(self._cleanup_cache)
 
-    def _prepare_data(self):
+    def _prepare_data(self) -> None:
         """Prepare the feature data and PCA transformation"""
         embedding_dataset = read_embedding_dataset(self.features_path)
         features = embedding_dataset["features"]
@@ -182,11 +191,11 @@ class EmbeddingVisualizationApp:
         # Combine all filtered features
         self.filtered_features_df = pd.concat(all_filtered_features, axis=0)
 
-    def _create_figure(self):
+    def _create_figure(self) -> None:
         """Create the initial scatter plot figure"""
         self.fig = self._create_track_colored_figure()
 
-    def _init_app(self):
+    def _init_app(self) -> None:
         """Initialize the Dash application"""
         self.app = dash.Dash(__name__)
 
@@ -509,14 +518,29 @@ class EmbeddingVisualizationApp:
             prevent_initial_call=True,
         )
         def update_figure(
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            relayout_data,
-            selected_data,
-            current_figure,
-        ):
+            color_mode: str,
+            show_arrows: list[str] | None,
+            x_axis: str,
+            y_axis: str,
+            relayout_data: dict[str, Any] | None,
+            selected_data: dict[str, Any] | None,
+            current_figure: dict[str, Any],
+        ) -> tuple[dict[str, Any], dict[str, Any] | None]:
+            """Update the figure based on the selected data.
+
+            Parameters
+            ----------
+            color_mode: str
+                The color mode.
+            show_arrows: list[str] | None
+                The show arrows.
+            x_axis: str
+                The x axis.
+            y_axis: str
+                The y axis.
+            """
+            if show_arrows is None:
+                show_arrows = []
             show_arrows = len(show_arrows or []) > 0
 
             ctx = dash.callback_context
@@ -554,8 +578,19 @@ class EmbeddingVisualizationApp:
             [dd.Input("scatter-plot", "clickData")],
             prevent_initial_call=True,
         )
-        def update_track_timeline(clickData):
-            """Update the track timeline based on the clicked point"""
+        def update_track_timeline(clickData: dict[str, Any] | None) -> html.Div:
+            """Update the track timeline based on the clicked point
+            
+            Parameters
+            ----------
+            clickData: dict[str, Any] | None
+                The click data from the scatter plot.
+
+            Returns
+            -------
+            html.Div: The track timeline.
+
+            """
             if clickData is None:
                 return html.Div("Click on a point to see the track timeline")
 
@@ -727,19 +762,61 @@ class EmbeddingVisualizationApp:
             prevent_initial_call=True,
         )
         def update_clusters_tab(
-            assign_clicks,
-            clear_clicks,
-            save_name_clicks,
-            cancel_name_clicks,
-            edit_name_clicks,
-            selected_data,
-            current_figure,
-            color_mode,
-            show_arrows,
-            x_axis,
-            y_axis,
-            cluster_name,
-        ):
+            assign_clicks: int | None,
+            clear_clicks: int | None,
+            save_name_clicks: int | None,
+            cancel_name_clicks: int | None,
+            edit_name_clicks: list[int],
+            selected_data: dict[str, Any] | None,
+            current_figure: dict[str, Any],
+            color_mode: str,
+            show_arrows: list[str] | None,
+            x_axis: str,
+            y_axis: str,
+            cluster_name: str | None,
+        ) -> tuple[
+            dict[str, str],
+            html.Div | None,
+            str,
+            dict[str, Any] | Any,
+            dict[str, str],
+            str,
+            dict[str, Any] | None,
+        ]:
+            """Update the clusters tab and handle modal.
+
+            Parameters
+            ----------
+            assign_clicks: int | None
+                The number of clicks on the assign cluster button.
+            clear_clicks: int | None
+                The number of clicks on the clear clusters button.
+            save_name_clicks: int | None
+                The number of clicks on the save cluster name button.
+            cancel_name_clicks: int | None
+                The number of clicks on the cancel cluster name button.
+            edit_name_clicks: list[int]
+                The indices of the edit cluster name buttons.
+            selected_data: dict[str, Any] | None
+                The selected data from the scatter plot.
+            current_figure: dict[str, Any]
+                The current figure.
+            color_mode: str
+                The color mode.
+            show_arrows: list[str] | None
+                The show arrows.
+            x_axis: str
+                The x axis.
+            y_axis: str
+                The y axis.
+            cluster_name: str | None
+                The cluster name.
+
+            Returns
+            -------
+            tuple[dict[str, str], html.Div | None, str, dict[str, Any] | Any, dict[str, str], str, dict[str, Any] | None]:
+                The updated clusters tab and handle modal.
+            """
             ctx = dash.callback_context
             if not ctx.triggered:
                 return (
@@ -962,8 +1039,18 @@ class EmbeddingVisualizationApp:
             [dd.Input("save-clusters-csv", "n_clicks")],
             prevent_initial_call=True,
         )
-        def save_clusters_csv(n_clicks):
-            """Callback to save clusters to CSV file"""
+        def save_clusters_csv(n_clicks: int | None) -> html.Div:
+            """Callback to save clusters to CSV file
+
+            Parameters
+            ----------
+            n_clicks: int | None
+                The number of clicks on the save clusters CSV button.
+
+            Returns
+            -------
+            html.Div: The cluster container.
+            """
             if n_clicks and self.clusters:
                 try:
                     output_path = self.save_clusters_to_csv()
@@ -1035,8 +1122,33 @@ class EmbeddingVisualizationApp:
             ],
             prevent_initial_call=True,
         )
-        def clear_selection(n_clicks, color_mode, show_arrows, x_axis, y_axis):
-            """Callback to clear the selection and restore original opacity"""
+        def clear_selection(
+            n_clicks: int | None,
+            color_mode: str,
+            show_arrows: list[str] | None,
+            x_axis: str,
+            y_axis: str,
+        ) -> tuple[dict[str, Any] | Any, dict[str, Any] | None]:
+            """Callback to clear the selection and restore original opacity
+
+            Parameters
+            ----------
+            n_clicks: int | None
+                The number of clicks on the clear selection button.
+            color_mode: str
+                The color mode.
+            show_arrows: list[str] | None
+                The show arrows.
+            x_axis: str
+                The x axis.
+            y_axis: str
+                The y axis.
+
+            Returns
+            -------
+            tuple[dict[str, Any] | Any, dict[str, Any] | None]:
+                The new figure and clear selectedData.
+            """
             if n_clicks:
                 # Create a new figure with no selections
                 if color_mode == "track":
@@ -1063,7 +1175,9 @@ class EmbeddingVisualizationApp:
                 return fig, None  # Return new figure and clear selectedData
             return dash.no_update, dash.no_update
 
-    def _calculate_equal_aspect_ranges(self, x_data, y_data):
+    def _calculate_equal_aspect_ranges(
+        self, x_data: NDArray, y_data: NDArray
+    ) -> tuple[tuple[float, float], tuple[float, float]]:
         """Calculate ranges for x and y axes to ensure equal aspect ratio.
 
         Parameters
@@ -1110,11 +1224,26 @@ class EmbeddingVisualizationApp:
 
     def _create_track_colored_figure(
         self,
-        show_arrows=False,
-        x_axis=None,
-        y_axis=None,
-    ):
-        """Create scatter plot with track-based coloring"""
+        show_arrows: bool = False,
+        x_axis: str | None = None,
+        y_axis: str | None = None,
+    ) -> go.Figure:
+        """Create scatter plot with track-based coloring
+
+        Parameters
+        ----------
+        show_arrows: bool
+            The show arrows.
+        x_axis: str | None
+            The x axis.
+        y_axis: str | None
+            The y axis.
+
+        Returns
+        -------
+        go.Figure
+            The scatter plot.
+        """
         x_axis = x_axis or self.default_x
         y_axis = y_axis or self.default_y
 
@@ -1329,10 +1458,10 @@ class EmbeddingVisualizationApp:
 
     def _create_time_colored_figure(
         self,
-        show_arrows=False,
-        x_axis=None,
-        y_axis=None,
-    ):
+        show_arrows: bool = False,
+        x_axis: str | None = None,
+        y_axis: str | None = None,
+    ) -> go.Figure:
         """Create scatter plot with time-based coloring"""
         x_axis = x_axis or self.default_x
         y_axis = y_axis or self.default_y
@@ -1481,7 +1610,7 @@ class EmbeddingVisualizationApp:
         return fig
 
     @staticmethod
-    def _normalize_image(img_array):
+    def _normalize_image(img_array: NDArray) -> NDArray:
         """Normalize a single image array to [0, 255] more efficiently"""
         min_val = img_array.min()
         max_val = img_array.max()
@@ -1491,7 +1620,7 @@ class EmbeddingVisualizationApp:
         return ((img_array - min_val) * 255 / (max_val - min_val)).astype(np.uint8)
 
     @staticmethod
-    def _numpy_to_base64(img_array):
+    def _numpy_to_base64(img_array: NDArray) -> str:
         """Convert numpy array to base64 string with compression"""
         if not isinstance(img_array, np.uint8):
             img_array = img_array.astype(np.uint8)
@@ -1503,12 +1632,12 @@ class EmbeddingVisualizationApp:
             "utf-8"
         )
 
-    def save_cache(self, cache_path: str | None = None):
+    def save_cache(self, cache_path: str |Path | None = None) -> None:
         """Save the image cache to disk using pickle.
 
         Parameters
         ----------
-        cache_path : str | None, optional
+        cache_path : str | Path | None, optional
             Path to save the cache. If None, uses self.cache_path, by default None
         """
         import pickle
@@ -1543,12 +1672,12 @@ class EmbeddingVisualizationApp:
         except Exception as e:
             logger.error(f"Error saving cache: {e}")
 
-    def load_cache(self, cache_path: str | None = None) -> bool:
+    def load_cache(self, cache_path: str | Path | None = None) -> bool:
         """Load the image cache from disk using pickle.
 
         Parameters
         ----------
-        cache_path : str | None, optional
+        cache_path : str | Path | None, optional
             Path to load the cache from. If None, uses self.cache_path, by default None
 
         Returns
@@ -1596,7 +1725,7 @@ class EmbeddingVisualizationApp:
             logger.error(f"Error loading cache: {e}")
             return False
 
-    def preload_images(self):
+    def preload_images(self) -> None:
         """Preload all images into memory"""
         # Try to load from cache first
         if self.cache_path and self.load_cache():
@@ -1625,7 +1754,7 @@ class EmbeddingVisualizationApp:
                     final_yx_patch_size=self.yx_patch_size,
                     batch_size=1,
                     num_workers=self.num_loading_workers,
-                    normalizations=None,
+                    normalizations=[],
                     predict_cells=True,
                 )
                 data_module.setup("predict")
@@ -1696,12 +1825,14 @@ class EmbeddingVisualizationApp:
         if self.cache_path:
             self.save_cache()
 
-    def _cleanup_cache(self):
+    def _cleanup_cache(self) -> None:
         """Clear the image cache when the program exits"""
         logging.info("Cleaning up image cache...")
         self.image_cache.clear()
 
-    def _get_trajectory_images_lasso(self, x_axis, y_axis, selected_data):
+    def _get_trajectory_images_lasso(
+        self, x_axis: str, y_axis: str, selected_data: dict[str, Any] | None
+    ) -> html.Div:
         """Get images of points selected by lasso"""
         if not selected_data or not selected_data.get("points"):
             return html.Div("Use the lasso tool to select points")
@@ -1908,7 +2039,7 @@ class EmbeddingVisualizationApp:
             },
         )
 
-    def _get_cluster_images(self):
+    def _get_cluster_images(self) -> html.Div:
         """Display images for all clusters in a grid layout"""
         if not self.clusters:
             return html.Div(
@@ -2117,7 +2248,7 @@ class EmbeddingVisualizationApp:
         """
         return self.output_dir
 
-    def save_clusters_to_csv(self, output_path: str | None = None) -> str:
+    def save_clusters_to_csv(self, output_path: str | Path | None = None) -> str:
         """
         Save cluster information to CSV file.
 
@@ -2126,7 +2257,7 @@ class EmbeddingVisualizationApp:
 
         Parameters
         ----------
-        output_path : str | None, optional
+        output_path : str | Path | None, optional
             Path to save the CSV file. If None, generates a timestamped filename
             in the output directory, by default None
 
@@ -2195,7 +2326,7 @@ class EmbeddingVisualizationApp:
             logger.error(f"Error saving clusters to CSV: {e}")
             raise
 
-    def run(self, debug=False, port=None):
+    def run(self, debug: bool = False, port: int | None = None) -> None:
         """Run the Dash server
 
         Parameters
@@ -2207,12 +2338,12 @@ class EmbeddingVisualizationApp:
         """
         import socket
 
-        def is_port_in_use(port):
+        def is_port_in_use(port: int) -> bool:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
                 try:
                     s.bind(("127.0.0.1", port))
                     return False
-                except socket.error:
+                except OSError:
                     return True
 
         if port is None:

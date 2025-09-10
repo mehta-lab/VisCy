@@ -2,10 +2,13 @@ from collections import defaultdict
 from typing import Literal
 
 import numpy as np
+import xarray as xr
 from sklearn.metrics.pairwise import cosine_similarity
 
 
-def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
+def calculate_cosine_similarity_cell(
+    embedding_dataset: xr.Dataset, fov_name: str, track_id: int
+):
     """Extract embeddings and calculate cosine similarities for a specific cell"""
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
@@ -22,7 +25,7 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
 
 
 def compute_displacement(
-    embedding_dataset,
+    embedding_dataset: xr.Dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
 ) -> dict[int, list[float]]:
     """Compute the displacement or mean square displacement (MSD) of embeddings.
@@ -130,31 +133,38 @@ def compute_displacement_statistics(
     return mean_displacement_per_tau, std_displacement_per_tau
 
 
-def compute_dynamic_range(mean_displacement_per_tau):
-    """
-    Compute the dynamic range as the difference between the maximum
-    and minimum mean displacement per τ.
+def compute_dynamic_range(mean_displacement_per_tau: dict[int, float]):
+    """Compute the dynamic range as the difference between the maximum and minimum mean displacement.
 
-    Parameters:
-    mean_displacement_per_tau: dict with τ as key and mean displacement as value
+    Per τ.
 
-    Returns:
-    float: dynamic range (max displacement - min displacement)
+    Parameters
+    ----------
+    mean_displacement_per_tau : dict[int, float]
+        Dictionary with τ as key and mean displacement as value
+
+    Returns
+    -------
+    float
+        dynamic range (max displacement - min displacement)
     """
     displacements = list(mean_displacement_per_tau.values())
     return max(displacements) - min(displacements)
 
 
-def compute_rms_per_track(embedding_dataset):
+def compute_rms_per_track(embedding_dataset: xr.Dataset):
     """
     Compute RMS of the time derivative of embeddings per track.
 
-    Parameters:
+    Parameters
+    ----------
     embedding_dataset : xarray.Dataset
         The dataset containing embeddings, timepoints, fov_name, and track_id.
 
-    Returns:
-    list: A list of RMS values, one for each track.
+    Returns
+    -------
+    list
+        A list of RMS values, one for each track.
     """
     fov_names = embedding_dataset["fov_name"].values
     track_ids = embedding_dataset["track_id"].values
@@ -193,7 +203,25 @@ def compute_rms_per_track(embedding_dataset):
     return rms_values
 
 
-def calculate_normalized_euclidean_distance_cell(embedding_dataset, fov_name, track_id):
+def calculate_normalized_euclidean_distance_cell(
+    embedding_dataset: xr.Dataset, fov_name: str, track_id: int
+):
+    """Calculate normalized euclidean distance for a specific cell track.
+
+    Parameters
+    ----------
+    embedding_dataset : xr.Dataset
+        Dataset containing embedding data with fov_name and track_id coordinates
+    fov_name : str
+        Field of view identifier
+    track_id : int
+        Track identifier for the specific cell
+
+    Returns
+    -------
+    NDArray
+        Normalized euclidean distances for the cell track
+    """
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
         & (embedding_dataset["track_id"] == track_id),

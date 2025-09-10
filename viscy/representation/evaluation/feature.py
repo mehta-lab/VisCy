@@ -5,7 +5,7 @@ import numpy as np
 import pandas as pd
 import scipy.stats
 from numpy import fft
-from numpy.typing import ArrayLike
+from numpy.typing import ArrayLike, NDArray
 from scipy.ndimage import distance_transform_edt
 from scipy.stats import linregress
 from skimage.exposure import rescale_intensity
@@ -127,7 +127,7 @@ class CellFeatures:
 
         self._eps = 1e-10
 
-    def _compute_kurtosis(self):
+    def _compute_kurtosis(self) -> float:
         """Compute the kurtosis of the image.
 
         Returns
@@ -140,7 +140,7 @@ class CellFeatures:
             return np.nan
         return scipy.stats.kurtosis(self.image, fisher=True, axis=None)
 
-    def _compute_skewness(self):
+    def _compute_skewness(self) -> float:
         """Compute the skewness of the image.
 
         Returns
@@ -153,7 +153,7 @@ class CellFeatures:
             return np.nan
         return scipy.stats.skew(self.image, axis=None)
 
-    def _compute_glcm_features(self):
+    def _compute_glcm_features(self) -> tuple[float, float, float]:
         """Compute GLCM-based texture features from the image.
 
         Converts normalized image to uint8 for GLCM computation.
@@ -169,7 +169,7 @@ class CellFeatures:
 
         return contrast, dissimilarity, homogeneity
 
-    def _compute_iqr(self):
+    def _compute_iqr(self) -> float:
         """Compute the interquartile range of pixel intensities.
 
         The IQR is observed to increase when a cell is infected,
@@ -184,7 +184,7 @@ class CellFeatures:
 
         return iqr
 
-    def _compute_weighted_intensity_gradient(self):
+    def _compute_weighted_intensity_gradient(self) -> float:
         """Compute the weighted radial intensity gradient profile.
 
         Calculates the slope of the azimuthally averaged radial gradient
@@ -241,7 +241,7 @@ class CellFeatures:
 
         return slope
 
-    def _compute_spectral_entropy(self):
+    def _compute_spectral_entropy(self) -> float:
         """Compute the spectral entropy of the image.
 
         Spectral entropy measures the complexity of the image's frequency
@@ -268,17 +268,22 @@ class CellFeatures:
 
         return entropy
 
-    def _compute_texture_features(self):
+    def _compute_texture_features(self) -> NDArray:
         """Compute Haralick texture features from the image.
 
         Converts normalized image to uint8 for Haralick computation.
+
+        Returns
+        -------
+        texture_features: NDArray
+            Haralick texture features of the image.
         """
         # Convert 0-1 normalized image to uint8 (0-255)
         image_uint8 = (self.image_normalized * 255).astype(np.uint8)
         texture_features = mh.features.haralick(image_uint8)
         return np.mean(np.ptp(texture_features, axis=0))
 
-    def _compute_perimeter_area_ratio(self):
+    def _compute_perimeter_area_ratio(self) -> tuple[float, float, float]:
         """Compute the perimeter of the nuclear segmentations found inside the patch.
 
         This function calculates the average perimeter, average area, and their ratio
@@ -286,14 +291,8 @@ class CellFeatures:
 
         Returns
         -------
-        average_perimeter, average_area, ratio: tuple
-            Tuple containing:
-            - average_perimeter : float
-                Average perimeter of all regions in the patch
-            - average_area : float
-                Average area of all regions
-            - ratio : float
-                Ratio of total perimeter to total area
+        tuple[float, float, float]
+            Tuple containing average perimeter, average area, and ratio of total perimeter to total area
         """
         total_perimeter = 0
         total_area = 0
@@ -314,7 +313,7 @@ class CellFeatures:
 
         return average_perimeter, average_area, total_perimeter / total_area
 
-    def _compute_nucleus_eccentricity(self):
+    def _compute_nucleus_eccentricity(self) -> float:
         """Compute the eccentricity of the nucleus.
 
         Eccentricity measures how much the nucleus deviates from
@@ -336,7 +335,7 @@ class CellFeatures:
         eccentricities = [region.eccentricity for region in regions]
         return float(np.mean(eccentricities))
 
-    def _compute_Eucledian_distance_transform(self):
+    def _compute_Eucledian_distance_transform(self) -> NDArray:
         """Compute the Euclidean distance transform of the segmentation mask.
 
         This transform computes the distance from each pixel to the
@@ -345,7 +344,7 @@ class CellFeatures:
 
         Returns
         -------
-        dist_transform: ndarray
+        dist_transform: NDArray
             Distance transform of the segmentation mask.
         """
         # Ensure the image is binary
@@ -376,7 +375,7 @@ class CellFeatures:
         intensity_weighted_center = np.sum(self.image * edt) / (np.sum(edt) + self._eps)
         return intensity_weighted_center
 
-    def _compute_area(self, sigma=0.6):
+    def _compute_area(self, sigma: float = 0.6) -> tuple[float, float]:
         """Create a binary mask using morphological operations.
 
         This function creates a binary mask from the input image using Gaussian blur
@@ -391,12 +390,8 @@ class CellFeatures:
 
         Returns
         -------
-        masked_intensity, masked_area: tuple
-            Tuple containing:
-            - masked_intensity : float
-                Mean intensity inside the sensor area
-            - masked_area : float
-                Area of the sensor mask in pixels
+        tuple[float, float]
+            Tuple containing masked intensity and masked area
         """
         input_image_blur = gaussian(self.image, sigma=sigma)
 
@@ -411,7 +406,7 @@ class CellFeatures:
 
         return masked_intensity, np.sum(mask)
 
-    def _compute_zernike_moments(self):
+    def _compute_zernike_moments(self) -> NDArray:
         """Compute the Zernike moments of the image.
 
         Zernike moments are a set of orthogonal moments that capture
@@ -420,16 +415,21 @@ class CellFeatures:
 
         Returns
         -------
-        zernike_moments: np.ndarray
+        zernike_moments: NDArray
             Zernike moments of the image.
         """
         zernike_moments = mh.features.zernike_moments(self.image, 32)
         return zernike_moments
 
-    def _compute_radial_intensity_gradient(self):
+    def _compute_radial_intensity_gradient(self) -> float:
         """Compute the radial intensity gradient of the image.
 
         Uses 0-1 normalized image directly for gradient calculation.
+
+        Returns
+        -------
+        radial_intensity_gradient: float
+            Radial intensity gradient of the image.
         """
         # Use 0-1 normalized image directly
         y, x = np.indices(self.image_normalized.shape)
@@ -447,7 +447,7 @@ class CellFeatures:
 
         return radial_intensity_gradient[0]
 
-    def compute_intensity_features(self):
+    def compute_intensity_features(self) -> IntensityFeatures:
         """Compute intensity features.
 
         This function computes various intensity-based features from the input image.
@@ -471,7 +471,7 @@ class CellFeatures:
             weighted_intensity_gradient=self._compute_weighted_intensity_gradient(),
         )
 
-    def compute_texture_features(self):
+    def compute_texture_features(self) -> TextureFeatures:
         """Compute texture features.
 
         This function computes texture features from the input image.
@@ -493,7 +493,7 @@ class CellFeatures:
             texture=self._compute_texture_features(),
         )
 
-    def compute_morphology_features(self):
+    def compute_morphology_features(self) -> MorphologyFeatures:
         """Compute morphology features.
 
         This function computes morphology features from the input image.
@@ -528,7 +528,7 @@ class CellFeatures:
             masked_area=masked_area,
         )
 
-    def compute_symmetry_descriptor(self):
+    def compute_symmetry_descriptor(self) -> SymmetryDescriptor:
         """Compute the symmetry descriptor of the image.
 
         This function computes the symmetry descriptor of the image.
@@ -615,20 +615,20 @@ class DynamicFeatures:
 
     Parameters
     ----------
-    tracking_df : pandas.DataFrame
+    tracking_df : pd.DataFrame
         DataFrame containing cell tracking data with track_id, t, x, y columns
 
     Attributes
     ----------
-    tracking_df : pandas.DataFrame
+    tracking_df : pd.DataFrame
         The input tracking dataframe containing cell position data over time
-    track_features : TrackFeatures or None
+    track_features : TrackFeatures | None
         Computed velocity-based features including mean, max, min velocities
         and their standard deviation
-    displacement_features : DisplacementFeatures or None
+    displacement_features : DisplacementFeatures | None
         Computed displacement features including total distance traveled,
         net displacement, and directional persistence
-    angular_features : AngularFeatures or None
+    angular_features : AngularFeatures | None
         Computed angular features including mean, max, and standard deviation
         of angular velocities
 
@@ -657,7 +657,7 @@ class DynamicFeatures:
             if not np.issubdtype(tracking_df[col].dtype, np.number):
                 raise ValueError(f"Column {col} must be numeric")
 
-    def _compute_instantaneous_velocity(self, track_id: str) -> np.ndarray:
+    def _compute_instantaneous_velocity(self, track_id: str) -> NDArray:
         """Compute the instantaneous velocity for all timepoints in a track.
 
         Parameters
@@ -667,7 +667,7 @@ class DynamicFeatures:
 
         Returns
         -------
-        velocities : np.ndarray
+        velocities : NDArray
             Array of instantaneous velocities for each timepoint
         """
         # Get track data sorted by time
@@ -708,15 +708,12 @@ class DynamicFeatures:
 
         Returns
         -------
-        total_distance, net_displacement, directional_persistence: tuple
-            Tuple containing:
-            - total_distance : float
-                Total distance traveled by the cell along its path
-            - net_displacement : float
-                Straight-line distance between start and end positions
-            - directional_persistence : float
-                Ratio of net displacement to total distance (0 to 1),
-                where 1 indicates perfectly straight movement
+        tuple[float, float, float]
+            Tuple containing total distance, net displacement, and directional persistence
+            - total_distance: Total distance traveled by the cell along its path.
+            - net_displacement: Straight-line distance between start and end positions.
+            - directional_persistence: Ratio of net displacement to total distance (0 to 1),
+              where 1 indicates perfectly straight movement.
         """
         track_data = self.tracking_df[
             self.tracking_df["track_id"] == track_id
@@ -758,11 +755,11 @@ class DynamicFeatures:
 
         Returns
         -------
-        mean_angular_velocity, max_angular_velocity, std_angular_velocity: tuple
-            Tuple containing:
-            - mean_angular_velocity
-            - max_angular_velocity
-            - std_angular_velocity
+        tuple[float, float, float]
+            Tuple containing mean, maximum, and standard deviation of angular velocities
+            - mean_angular_velocity: Average angular velocity over the track.
+            - max_angular_velocity: Maximum angular velocity observed in the track.
+            - std_angular_velocity: Standard deviation of angular velocities in the track.
         """
         track_data = self.tracking_df[
             self.tracking_df["track_id"] == track_id

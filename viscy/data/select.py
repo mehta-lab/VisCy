@@ -1,4 +1,4 @@
-from typing import Generator
+from collections.abc import Generator
 
 from iohub.ngff.nodes import Plate, Position, Well
 
@@ -21,6 +21,12 @@ def _filter_fovs(
 
 
 class SelectWell:
+    """Filter wells and fields-of-view for dataset selection.
+
+    This class provides functionality to filter wells by inclusion criteria
+    and exclude specific fields-of-view from the dataset.
+    """
+
     _include_wells: list[str] | None
     _exclude_fovs: list[str] | None
 

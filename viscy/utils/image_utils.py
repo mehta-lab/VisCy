@@ -1,14 +1,39 @@
-"""Utility functions for processing images"""
+"""Utility functions for processing images."""
 
 import itertools
 import sys
+from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 
 import viscy.utils.normalize as normalize
 
 
-def im_bit_convert(im, bit=16, norm=False, limit=[]):
+def im_bit_convert(
+    im: ArrayLike, bit: int = 16, norm: bool = False, limit: list[float] = []
+) -> NDArray[Any]:
+    """Convert image to specified bit depth with optional normalization.
+
+    FIXME: Verify parameter types and exact behavior for edge cases.
+
+    Parameters
+    ----------
+    im : array_like
+        Input image to convert.
+    bit : int, optional
+        Target bit depth (8 or 16), by default 16.
+    norm : bool, optional
+        Whether to normalize image to [0, 2^bit-1] range, by default False.
+    limit : list, optional
+        Min/max values for normalization. If empty, uses image min/max,
+        by default [].
+
+    Returns
+    -------
+    np.array
+        Image converted to specified bit depth.
+    """
     im = im.astype(
         np.float32, copy=False
     )  # convert to float32 without making a copy to save memory
@@ -29,27 +54,53 @@ def im_bit_convert(im, bit=16, norm=False, limit=[]):
     return im
 
 
-def im_adjust(img, tol=1, bit=8):
-    """
-    Stretches contrast of the image and converts to 'bit'-bit.
-    Useful for weight-maps in masking
+def im_adjust(img: ArrayLike, tol: int | float = 1, bit: int = 8) -> NDArray[Any]:
+    """Stretch contrast of the image and convert to specified bit depth.
+
+    Useful for weight-maps in masking.
+
+    Parameters
+    ----------
+    img : array_like
+        Input image to adjust.
+    tol : int or float, optional
+        Tolerance percentile for contrast stretching, by default 1.
+    bit : int, optional
+        Target bit depth, by default 8.
+
+    Returns
+    -------
+    np.array
+        Contrast-adjusted image in specified bit depth.
     """
     limit = np.percentile(img, [tol, 100 - tol])
     im_adjusted = im_bit_convert(img, bit=bit, norm=True, limit=limit.tolist())
     return im_adjusted
 
 
-def grid_sample_pixel_values(im, grid_spacing):
-    """Sample pixel values in the input image at the grid. Any incomplete
-    grids (remainders of modulus operation) will be ignored.
+def grid_sample_pixel_values(
+    im: NDArray[Any], grid_spacing: int
+) -> tuple[NDArray[Any], NDArray[Any], NDArray[Any]]:
+    """Sample pixel values in the input image at grid points.
 
-    :param np.array im: 2D image
-    :param int grid_spacing: spacing of the grid
-    :return int row_ids: row indices of the grids
-    :return int col_ids: column indices of the grids
-    :return np.array sample_values: sampled pixel values
+    Any incomplete grids (remainders of modulus operation) will be ignored.
+
+    Parameters
+    ----------
+    im : np.array
+        2D image to sample from.
+    grid_spacing : int
+        Spacing of the grid points.
+
+    Returns
+    -------
+    row_ids : np.array
+        Row indices of the grid points.
+    col_ids : np.array
+        Column indices of the grid points.
+    sample_values : np.array
+        Sampled pixel values at grid points.
     """
-
     im_shape = im.shape
     assert grid_spacing < im_shape[0], "grid spacing larger than image height"
     assert grid_spacing < im_shape[1], "grid spacing larger than image width"
@@ -69,22 +120,38 @@ def grid_sample_pixel_values(im, grid_spacing):
 
 
 def preprocess_image(
-    im,
-    hist_clip_limits=None,
-    is_mask=False,
-    normalize_im=None,
-    zscore_mean=None,
-    zscore_std=None,
-):
-    """
-    Do histogram clipping, z score normalization, and potentially binarization.
+    im: ArrayLike,
+    hist_clip_limits: tuple[float, float] | None = None,
+    is_mask: bool = False,
+    normalize_im: str | None = None,
+    zscore_mean: float | None = None,
+    zscore_std: float | None = None,
+) -> NDArray[Any]:
+    """Preprocess image with histogram clipping, z-score normalization, and binarization.
 
-    :param np.array im: Image (stack)
-    :param tuple hist_clip_limits: Percentile histogram clipping limits
-    :param bool is_mask: True if mask
-    :param str/None normalize_im: Normalization, if any
-    :param float/None zscore_mean: Data mean
-    :param float/None zscore_std: Data std
+    Performs histogram clipping, z-score normalization, and potentially binarization
+    depending on the input parameters.
+
+    Parameters
+    ----------
+    im : np.array
+        Input image or image stack.
+    hist_clip_limits : tuple, optional
+        Percentile histogram clipping limits (min_percentile, max_percentile),
+        by default None.
+    is_mask : bool, optional
+        True if input is a mask (will be binarized), by default False.
+    normalize_im : str, optional
+        Normalization method to apply, by default None.
+    zscore_mean : float, optional
+        Precomputed mean for z-score normalization, by default None.
+    zscore_std : float, optional
+        Precomputed standard deviation for z-score normalization, by default None.
+
+    Returns
+    -------
+    np.array
+        Preprocessed image.
     """
     # remove singular dimension for 3D images
     if len(im.shape) > 3:

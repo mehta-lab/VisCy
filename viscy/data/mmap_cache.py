@@ -30,6 +30,31 @@ _CacheMetadata = tuple[Position, int, NormMeta | None]
 
 
 class MmappedDataset(Dataset):
+    """Dataset for memory-mapped OME-Zarr arrays with caching.
+
+    Provides efficient access to time-series microscopy data through
+    memory-mapped tensors with lazy loading and caching capabilities.
+
+    Parameters
+    ----------
+    positions : list[Position]
+        List of FOVs to load images from.
+    channel_names : list[str]
+        List of channel names to load.
+    cache_map : DictProxy
+        Shared dictionary for caching loaded volumes.
+    buffer : MemoryMappedTensor
+        Memory-mapped tensor for caching loaded volumes.
+    preprocess_transforms : Compose | None, optional
+        Composed transforms to be applied on the CPU, by default None
+    cpu_transform : Compose | None, optional
+        Composed transforms to be applied on the CPU, by default None
+    array_key : str, optional
+        The image array key name (multi-scale level), by default "0"
+    load_normalization_metadata : bool, optional
+        Load normalization metadata in the sample dictionary, by default True
+    """
+
     def __init__(
         self,
         positions: list[Position],
@@ -178,26 +203,71 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
 
     @property
     def preprocessing_transforms(self) -> Compose:
+        """Get preprocessing transforms for data normalization.
+
+        Returns
+        -------
+        Compose
+            Composed transforms for preprocessing image data.
+        """
         return self._preprocessing_transforms
 
     @property
     def train_cpu_transforms(self) -> Compose:
+        """Get CPU transforms for training data augmentation.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on CPU during training.
+        """
         return self._train_cpu_transforms
 
     @property
     def train_gpu_transforms(self) -> Compose:
+        """Get GPU transforms for training data augmentation.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on GPU during training.
+        """
         return self._train_gpu_transforms
 
     @property
     def val_cpu_transforms(self) -> Compose:
+        """Get CPU transforms for validation data processing.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on CPU during validation.
+        """
         return self._val_cpu_transforms
 
     @property
     def val_gpu_transforms(self) -> Compose:
+        """Get GPU transforms for validation data processing.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on GPU during validation.
+        """
         return self._val_gpu_transforms
 
     @property
     def cache_dir(self) -> Path:
+        """Get cache directory for memory-mapped files.
+
+        Creates a unique cache directory based on SLURM job ID or
+        distributed rank for parallel training.
+
+        Returns
+        -------
+        Path
+            Cache directory path for storing memory-mapped tensor files.
+        """
         scratch_dir = self.scratch_dir or Path(tempfile.gettempdir())
         cache_dir = Path(
             scratch_dir,
@@ -222,6 +292,22 @@ class MmappedDataModule(GPUTransformDataModule, SelectWell):
         return (len(fovs) * arr_shape[0], len(self.channels), *arr_shape[2:])
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
+        """Set up datasets for training or validation.
+
+        Creates memory-mapped datasets with train/val split based on the
+        specified stage. Initializes buffers and cache maps for efficient
+        data loading.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate"]
+            Stage for which to set up the datasets.
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not "fit" or "validate".
+        """
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
         plate: Plate = open_ome_zarr(self.data_path, mode="r", layout="hcs")

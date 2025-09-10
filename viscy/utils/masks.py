@@ -1,5 +1,8 @@
+from typing import Any
+
 import numpy as np
 import scipy.ndimage as ndimage
+from numpy.typing import NDArray
 from scipy.ndimage import binary_fill_holes
 from skimage.filters import gaussian, laplace, threshold_otsu
 from skimage.morphology import (
@@ -11,14 +14,24 @@ from skimage.morphology import (
 )
 
 
-def create_otsu_mask(input_image, sigma=0.6):
-    """Create a binary mask using morphological operations
-    :param np.array input_image: generate masks from this 3D image
-    :param float sigma: Gaussian blur standard deviation,
-        increase in value increases blur
-    :return: volume mask of input_image, 3D np.array
-    """
+def create_otsu_mask(
+    input_image: NDArray[Any], sigma: float = 0.6
+) -> NDArray[np.bool_]:
+    """Create a binary mask using Otsu thresholding and morphological operations.
 
+    Parameters
+    ----------
+    input_image : np.array
+        Generate masks from this 3D image.
+    sigma : float, optional
+        Gaussian blur standard deviation, increase in value increases blur,
+        by default 0.6.
+
+    Returns
+    -------
+    np.array
+        Volume mask of input_image, 3D binary array.
+    """
     input_sz = input_image.shape
     mid_slice_id = input_sz[0] // 2
 
@@ -28,20 +41,36 @@ def create_otsu_mask(input_image, sigma=0.6):
     return mask
 
 
-def create_membrane_mask(input_image, str_elem_size=23, sigma=0.4, k_size=3, msize=120):
-    """Create a binary mask using Laplacian of Gaussian (LOG) feature detection
+def create_membrane_mask(
+    input_image: NDArray[Any],
+    str_elem_size: int = 23,
+    sigma: float = 0.4,
+    k_size: int = 3,
+    msize: int = 120,
+) -> NDArray[np.bool_]:
+    """Create a binary mask using Laplacian of Gaussian (LOG) feature detection.
 
-    :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the laplacian filter
-        used for contarst enhancement, odd number.
-        Increase in value increases sensitivity of contrast enhancement
-    :param float sigma: Gaussian blur standard deviation
-    :param int k_size: disk/ball size for mask dilation,
-        ball for 3D and disk for 2D data
-    :param int msize: size of small objects removed to clean segmentation
-    :return: mask of input_image, np.array
+    Parameters
+    ----------
+    input_image : np.array
+        Generate masks from this image.
+    str_elem_size : int, optional
+        Size of the laplacian filter used for contrast enhancement, odd number.
+        Increase in value increases sensitivity of contrast enhancement,
+        by default 23.
+    sigma : float, optional
+        Gaussian blur standard deviation, by default 0.4.
+    k_size : int, optional
+        Disk/ball size for mask dilation, ball for 3D and disk for 2D data,
+        by default 3.
+    msize : int, optional
+        Size of small objects removed to clean segmentation, by default 120.
+
+    Returns
+    -------
+    np.array
+        Binary mask of input_image.
     """
-
     input_image_blur = gaussian(input_image, sigma=sigma)
 
     input_Lapl = laplace(input_image_blur, ksize=str_elem_size)
@@ -61,17 +90,24 @@ def create_membrane_mask(input_image, str_elem_size=23, sigma=0.4, k_size=3, msi
     return mask
 
 
-def get_unimodal_threshold(input_image):
-    """Determines optimal unimodal threshold
+def get_unimodal_threshold(input_image: NDArray[Any]) -> float:
+    """Determine optimal unimodal threshold using Rosin's method.
 
+    References
+    ----------
     https://users.cs.cf.ac.uk/Paul.Rosin/resources/papers/unimodal2.pdf
     https://www.mathworks.com/matlabcentral/fileexchange/45443-rosin-thresholding
 
-    :param np.array input_image: generate mask for this image
-    :return float best_threshold: optimal lower threshold for the foreground
-     hist
-    """
+    Parameters
+    ----------
+    input_image : np.array
+        Generate mask for this image.
 
+    Returns
+    -------
+    float
+        Optimal lower threshold for the foreground histogram.
+    """
     hist_counts, bin_edges = np.histogram(
         input_image,
         bins=256,
@@ -105,17 +141,27 @@ def get_unimodal_threshold(input_image):
     return best_threshold
 
 
-def create_unimodal_mask(input_image, str_elem_size=3, sigma=0.6):
-    """
-    Create a mask with unimodal thresholding and morphological operations.
-    Unimodal thresholding seems to oversegment, erode it by a fraction
+def create_unimodal_mask(
+    input_image: NDArray[Any], str_elem_size: int = 3, sigma: float = 0.6
+) -> NDArray[np.bool_]:
+    """Create a mask with unimodal thresholding and morphological operations.
 
-    :param np.array input_image: generate masks from this image
-    :param int str_elem_size: size of the structuring element. typically 3, 5
-    :param float sigma: gaussian blur standard deviation
-    :return mask of input_image, np.array
-    """
+    Unimodal thresholding seems to oversegment, erode it by a fraction.
 
+    Parameters
+    ----------
+    input_image : np.array
+        Generate masks from this image.
+    str_elem_size : int, optional
+        Size of the structuring element, typically 3 or 5, by default 3.
+    sigma : float, optional
+        Gaussian blur standard deviation, by default 0.6.
+
+    Returns
+    -------
+    np.array
+        Binary mask of input_image.
+    """
     input_image = gaussian(input_image, sigma=sigma)
 
     if np.min(input_image) == np.max(input_image):
@@ -133,21 +179,31 @@ def create_unimodal_mask(input_image, str_elem_size=3, sigma=0.6):
     return mask
 
 
-def get_unet_border_weight_map(annotation, w0=10, sigma=5):
-    """
-    Return weight map for borders as specified in UNet paper
-    :param annotation A 2D array of shape (image_height, image_width)
-     contains annotation with each class labeled as an integer.
-    :param w0 multiplier to the exponential distance loss
-     default 10 as mentioned in UNet paper
-    :param sigma standard deviation in the exponential distance term
-     e^(-d1 + d2) ** 2 / 2 (sigma ^ 2)
-     default 5 as mentioned in UNet paper
-    :return weight mapt for borders as specified in UNet
+def get_unet_border_weight_map(
+    annotation: NDArray[Any], w0: int = 10, sigma: int = 5
+) -> NDArray[np.float64]:
+    """Return weight map for borders as specified in U-Net paper.
 
-    TODO: Calculate boundaries directly and calculate distance
-    from boundary of cells to another
-    Note: The below method only works for UNet Segmentation only
+    TODO: Calculate boundaries directly and calculate distance from boundary
+    of cells to another. Note: The below method only works for UNet Segmentation only.
+
+    Parameters
+    ----------
+    annotation : np.array
+        A 2D array of shape (image_height, image_width) containing annotation
+        with each class labeled as an integer.
+    w0 : int, optional
+        Multiplier to the exponential distance loss, default 10 as mentioned
+        in UNet paper, by default 10.
+    sigma : int, optional
+        Standard deviation in the exponential distance term
+        e^(-d1 + d2) ** 2 / 2 (sigma ^ 2), default 5 as mentioned in UNet paper,
+        by default 5.
+
+    Returns
+    -------
+    np.array
+        Weight map for borders as specified in U-Net paper.
     """
     # if there is only one label, zero return the array as is
     if np.sum(annotation) == 0:
@@ -160,7 +216,7 @@ def get_unet_border_weight_map(annotation, w0=10, sigma=5):
     assert annotation.dtype in [
         np.uint8,
         np.uint16,
-    ], "Expected data type uint, it is {}".format(annotation.dtype)
+    ], f"Expected data type uint, it is {annotation.dtype}"
 
     # cells instances for distance computation
     # 4 connected i.e default (cross-shaped)

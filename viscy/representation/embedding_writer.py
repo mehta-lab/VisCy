@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Sequence
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -8,8 +9,6 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
-from xarray import Dataset, open_zarr
-
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
 from viscy.representation.evaluation.dimensionality_reduction import (
@@ -17,14 +16,15 @@ from viscy.representation.evaluation.dimensionality_reduction import (
     compute_pca,
     compute_phate,
 )
+from xarray import Dataset, open_zarr
 
 __all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
 def read_embedding_dataset(path: Path) -> Dataset:
-    """
-    Read the embedding dataset written by the EmbeddingWriter callback.
+    """Read the embedding dataset written by the EmbeddingWriter callback.
+
     Supports both legacy datasets (without x/y coordinates) and new datasets.
 
     Parameters
@@ -63,10 +63,10 @@ def write_embedding_dataset(
     output_path: Path,
     features: np.ndarray,
     index_df: pd.DataFrame,
-    projections: Optional[np.ndarray] = None,
-    umap_kwargs: Optional[Dict[str, Any]] = None,
-    phate_kwargs: Optional[Dict[str, Any]] = None,
-    pca_kwargs: Optional[Dict[str, Any]] = None,
+    projections: np.ndarray | None = None,
+    umap_kwargs: dict[str, Any] | None = None,
+    phate_kwargs: dict[str, Any] | None = None,
+    pca_kwargs: dict[str, Any] | None = None,
     overwrite: bool = False,
 ) -> None:
     """
@@ -221,6 +221,7 @@ class EmbeddingWriter(BasePredictionWriter):
         self.overwrite = overwrite
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Initialize prediction writing and validate output path."""
         if self.output_path.exists():
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")

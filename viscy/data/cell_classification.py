@@ -1,5 +1,7 @@
+"""Dataset and DataModule classes for cell classification tasks."""
+
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 import torch
@@ -14,6 +16,29 @@ from viscy.data.triplet import INDEX_COLUMNS
 
 
 class ClassificationDataset(Dataset):
+    """Dataset for cell classification tasks.
+
+    A PyTorch Dataset that provides cell patches and labels for classification.
+    Loads image patches from HCS OME-Zarr data based on cell annotations.
+
+    Parameters
+    ----------
+    plate : Plate
+        HCS OME-Zarr plate containing image data.
+    annotation : pd.DataFrame
+        DataFrame with cell annotations and labels.
+    channel_name : str
+        Name of the image channel to load.
+    z_range : tuple[int, int]
+        Range of Z slices to include (start, end).
+    transform : Callable | None, optional
+        Transform to apply to image patches.
+    initial_yx_patch_size : tuple[int, int]
+        Initial patch size in Y and X dimensions.
+    return_indices : bool
+        Whether to return cell indices with patches, by default False.
+    """
+
     def __init__(
         self,
         plate: Plate,
@@ -44,11 +69,25 @@ class ClassificationDataset(Dataset):
         ]
 
     def __len__(self):
+        """Return the number of samples in the dataset."""
         return len(self.annotation)
 
     def __getitem__(
         self, idx
     ) -> tuple[Tensor, Tensor] | tuple[Tensor, Tensor, dict[str, int | str]]:
+        """
+        Get a sample from the dataset.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the sample to retrieve.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor] or tuple[Tensor, Tensor, dict[str, int | str]]
+            Image tensor, label tensor, and optionally cell indices.
+        """
         row = self.annotation.iloc[idx]
         fov_name, t, y, x = row["fov_name"], row["t"], row["y"], row["x"]
         fov = self.plate[fov_name]
@@ -74,6 +113,37 @@ class ClassificationDataset(Dataset):
 
 
 class ClassificationDataModule(LightningDataModule):
+    """Lightning DataModule for cell classification tasks.
+
+    Manages data loading and preprocessing for cell classification workflows.
+    Handles train/validation splits and applies appropriate transforms.
+
+    Parameters
+    ----------
+    image_path : Path
+        Path to HCS OME-Zarr image data.
+    annotation_path : Path
+        Path to cell annotation CSV file.
+    val_fovs : list[str], optional
+        List of FOV names to use for validation.
+    channel_name : str
+        Name of the image channel to load.
+    z_range : tuple[int, int]
+        Range of Z slices to include (start, end).
+    train_exlude_timepoints : list[int]
+        Timepoints to exclude from training data.
+    train_transforms : list[Callable], optional
+        List of transforms to apply to training data.
+    val_transforms : list[Callable], optional
+        List of transforms to apply to validation data.
+    initial_yx_patch_size : tuple[int, int]
+        Initial patch size in Y and X dimensions.
+    batch_size : int
+        Batch size for data loading.
+    num_workers : int
+        Number of workers for data loading.
+    """
+
     def __init__(
         self,
         image_path: Path,
@@ -123,7 +193,22 @@ class ClassificationDataModule(LightningDataModule):
             return_indices=return_indices,
         )
 
-    def setup(self, stage=None):
+    def setup(self, stage=None) -> None:
+        """
+        Set up datasets for the specified stage.
+
+        Parameters
+        ----------
+        stage : str, optional
+            Stage to set up for ('fit', 'validate', 'predict', 'test').
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is 'test'.
+        ValueError
+            If stage is unknown.
+        """
         plate = open_ome_zarr(self.image_path)
         all_fovs = ["/" + name for (name, _) in plate.positions()]
         annotation = pd.read_csv(self.annotation_path)
@@ -158,9 +243,17 @@ class ClassificationDataModule(LightningDataModule):
         elif stage == "test":
             raise NotImplementedError("Test stage not implemented.")
         else:
-            raise (f"Unknown stage: {stage}")
+            raise ValueError(f"Unknown stage: {stage}")
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """
+        Create training data loader.
+
+        Returns
+        -------
+        DataLoader
+            Training data loader with shuffling enabled.
+        """
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size,
@@ -168,7 +261,15 @@ class ClassificationDataModule(LightningDataModule):
             shuffle=True,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """
+        Create validation data loader.
+
+        Returns
+        -------
+        DataLoader
+            Validation data loader without shuffling.
+        """
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -176,7 +277,15 @@ class ClassificationDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def predict_dataloader(self):
+    def predict_dataloader(self) -> DataLoader:
+        """
+        Create prediction data loader.
+
+        Returns
+        -------
+        DataLoader
+            Prediction data loader without shuffling.
+        """
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,

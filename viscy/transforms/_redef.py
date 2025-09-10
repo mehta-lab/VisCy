@@ -1,6 +1,7 @@
 """Redefine transforms from MONAI for jsonargparse."""
 
-from typing import Sequence
+from collections.abc import Sequence
+from typing import Any
 
 from monai.transforms import (
     CenterSpatialCropd,
@@ -26,8 +27,8 @@ class Decollated(Decollated):
         detach: bool = True,
         pad_batch: bool = True,
         fill_value: float | None = None,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             keys=keys,
             detach=detach,
@@ -38,7 +39,7 @@ class Decollated(Decollated):
 
 
 class ToDeviced(ToDeviced):
-    def __init__(self, keys: Sequence[str] | str, **kwargs):
+    def __init__(self, keys: Sequence[str] | str, **kwargs: Any) -> None:
         super().__init__(keys=keys, **kwargs)
 
 
@@ -49,8 +50,8 @@ class RandWeightedCropd(RandWeightedCropd):
         w_key: str,
         spatial_size: Sequence[int],
         num_samples: int = 1,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             keys=keys,
             w_key=w_key,
@@ -68,8 +69,8 @@ class RandAffined(RandAffined):
         rotate_range: Sequence[float | Sequence[float]] | float,
         shear_range: Sequence[float | Sequence[float]] | float,
         scale_range: Sequence[float | Sequence[float]] | float,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             keys=keys,
             prob=prob,
@@ -86,8 +87,8 @@ class RandAdjustContrastd(RandAdjustContrastd):
         keys: Sequence[str] | str,
         prob: float,
         gamma: tuple[float, float] | float,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(keys=keys, prob=prob, gamma=gamma, **kwargs)
 
 
@@ -97,8 +98,8 @@ class RandScaleIntensityd(RandScaleIntensityd):
         keys: Sequence[str] | str,
         factors: tuple[float, float] | float,
         prob: float,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(keys=keys, factors=factors, prob=prob, **kwargs)
 
 
@@ -109,8 +110,8 @@ class RandGaussianNoised(RandGaussianNoised):
         prob: float,
         mean: float,
         std: float,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(keys=keys, prob=prob, mean=mean, std=std, **kwargs)
 
 
@@ -122,8 +123,8 @@ class RandGaussianSmoothd(RandGaussianSmoothd):
         sigma_x: tuple[float, float] | float,
         sigma_y: tuple[float, float] | float,
         sigma_z: tuple[float, float] | float,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             keys=keys,
             prob=prob,
@@ -147,7 +148,7 @@ class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
         channel_wise: bool = False,
         dtype: DTypeLike | None = None,
         allow_missing_keys: bool = False,
-    ):
+    ) -> None:
         super().__init__(
             keys=keys,
             lower=lower,
@@ -168,8 +169,8 @@ class RandSpatialCropd(RandSpatialCropd):
         keys: Sequence[str] | str,
         roi_size: Sequence[int] | int,
         random_center: bool = True,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(
             keys=keys,
             roi_size=roi_size,
@@ -183,8 +184,8 @@ class CenterSpatialCropd(CenterSpatialCropd):
         self,
         keys: Sequence[str] | str,
         roi_size: Sequence[int] | int,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(keys=keys, roi_size=roi_size, **kwargs)
 
 
@@ -194,6 +195,6 @@ class RandFlipd(RandFlipd):
         keys: Sequence[str] | str,
         prob: float,
         spatial_axis: Sequence[int] | int,
-        **kwargs,
-    ):
+        **kwargs: Any,
+    ) -> None:
         super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)

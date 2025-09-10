@@ -6,7 +6,6 @@ import pandas as pd
 import pytest
 from lightning.pytorch.loggers import CSVLogger
 from numpy.testing import assert_array_equal
-
 from viscy.data.segmentation import SegmentationDataModule
 from viscy.trainer import Trainer
 from viscy.translation.evaluation import SegmentationMetrics2D

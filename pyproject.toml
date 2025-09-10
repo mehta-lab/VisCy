@@ -74,8 +74,3 @@ packages = ["viscy"]
 [tool.setuptools_scm]
 write_to = "viscy/_version.py"
 
-[tool.ruff]
-src = ["viscy", "tests"]
-line-length = 88
-lint.extend-select = ["I001"]
-lint.isort.known-first-party = ["viscy"]

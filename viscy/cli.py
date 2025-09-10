@@ -1,3 +1,5 @@
+"""Lightning CLI for computer vision models in VisCy."""
+
 import logging
 import os
 import sys
@@ -17,6 +19,13 @@ class VisCyCLI(LightningCLI):
 
     @staticmethod
     def subcommands() -> dict[str, set[str]]:
+        """Define subcommands and their required arguments.
+
+        Returns
+        -------
+        dict[str, set[str]]
+            Dictionary mapping subcommand names to sets of required argument names.
+        """
         subcommands = LightningCLI.subcommands()
         subcommand_base_args = {"model"}
         subcommands["preprocess"] = subcommand_base_args
@@ -25,6 +34,13 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
+        """Add default arguments to the Lightning CLI parser.
+
+        Parameters
+        ----------
+        parser
+            Lightning CLI parser instance to configure.
+        """
         parser.set_defaults(
             {
                 "trainer.logger": lazy_instance(
@@ -45,8 +61,8 @@ def _setup_environment() -> None:
 
 
 def main() -> None:
-    """
-    Main Lightning CLI entry point.
+    """Run the Lightning CLI entry point.
+
     Parse log level and set TF32 precision.
     Set default random seed to 42.
     """

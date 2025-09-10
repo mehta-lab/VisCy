@@ -49,6 +49,16 @@ class GPUTransformDataModule(ABC, LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Create GPU-optimized training data loader.
+
+        Configures distributed sampling, persistent workers, and memory pinning
+        for efficient GPU-accelerated batch processing during training.
+
+        Returns
+        -------
+        DataLoader
+            Training data loader with GPU optimization settings.
+        """
         sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         _logger.debug(f"Using training sampler {sampler}")
         return DataLoader(
@@ -65,6 +75,16 @@ class GPUTransformDataModule(ABC, LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
+        """Create GPU-optimized validation data loader.
+
+        Configures distributed sampling and memory pinning for efficient
+        GPU-accelerated batch processing during validation phase.
+
+        Returns
+        -------
+        DataLoader
+            Validation data loader with GPU optimization settings.
+        """
         sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         _logger.debug(f"Using validation sampler {sampler}")
         return DataLoader(
@@ -82,19 +102,63 @@ class GPUTransformDataModule(ABC, LightningDataModule):
 
     @property
     @abstractmethod
-    def train_cpu_transforms(self) -> Compose: ...
+    def train_cpu_transforms(self) -> Compose:
+        """CPU-based transform pipeline for training data.
+
+        Returns pre-GPU augmentation transforms executed on CPU before
+        GPU transfer to optimize memory bandwidth and device utilization.
+
+        Returns
+        -------
+        Compose
+            Composed CPU transforms for training preprocessing.
+        """
+        ...
 
     @property
     @abstractmethod
-    def train_gpu_transforms(self) -> Compose: ...
+    def train_gpu_transforms(self) -> Compose:
+        """GPU-accelerated transform pipeline for training data.
+
+        Returns GPU-resident transforms for high-performance augmentation
+        with device memory optimization during training workflows.
+
+        Returns
+        -------
+        Compose
+            Composed GPU transforms for training augmentation.
+        """
+        ...
 
     @property
     @abstractmethod
-    def val_cpu_transforms(self) -> Compose: ...
+    def val_cpu_transforms(self) -> Compose:
+        """CPU-based transform pipeline for validation data.
+
+        Returns pre-GPU validation transforms executed on CPU for
+        deterministic preprocessing before GPU transfer.
+
+        Returns
+        -------
+        Compose
+            Composed CPU transforms for validation preprocessing.
+        """
+        ...
 
     @property
     @abstractmethod
-    def val_gpu_transforms(self) -> Compose: ...
+    def val_gpu_transforms(self) -> Compose:
+        """GPU-accelerated transform pipeline for validation data.
+
+        Returns GPU-resident transforms for consistent device-optimized
+        preprocessing during validation phase.
+
+        Returns
+        -------
+        Compose
+            Composed GPU transforms for validation processing.
+        """
+        ...
 
 
 class CachedOmeZarrDataset(Dataset):
@@ -147,7 +211,7 @@ class CachedOmeZarrDataset(Dataset):
     def __len__(self) -> int:
         return len(self._metadata_map)
 
-    def __getitem__(self, idx: int) -> dict[str, Tensor]:
+    def __getitem__(self, idx: int) -> dict[str, Tensor] | list[dict[str, Tensor]]:
         position, time_idx, norm_meta = self._metadata_map[idx]
         cache = self._cache_map[idx]
         if cache is None:
@@ -240,18 +304,46 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
 
     @property
     def train_cpu_transforms(self) -> Compose:
+        """CPU-based transform pipeline for training data.
+
+        Returns
+        -------
+        Compose
+            Composed CPU transforms applied before GPU transfer.
+        """
         return self._train_cpu_transforms
 
     @property
     def train_gpu_transforms(self) -> Compose:
+        """GPU-accelerated transform pipeline for training data.
+
+        Returns
+        -------
+        Compose
+            Composed GPU transforms for device-optimized augmentation.
+        """
         return self._train_gpu_transforms
 
     @property
     def val_cpu_transforms(self) -> Compose:
+        """CPU-based transform pipeline for validation data.
+
+        Returns
+        -------
+        Compose
+            Composed CPU transforms applied before GPU transfer.
+        """
         return self._val_cpu_transforms
 
     @property
     def val_gpu_transforms(self) -> Compose:
+        """GPU-accelerated transform pipeline for validation data.
+
+        Returns
+        -------
+        Compose
+            Composed GPU transforms for device-optimized processing.
+        """
         return self._val_gpu_transforms
 
     def _set_fit_global_state(self, num_positions: int) -> list[int]:
@@ -279,6 +371,24 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         return positions
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
+        """Set up datasets with GPU-optimized caching and memory management.
+
+        Configures train/validation split with shared memory caching for
+        efficient GPU batch loading. Initializes MONAI metadata tracking
+        and distributed data sampling.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate"]
+            PyTorch Lightning stage for dataset configuration.
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not "fit" or "validate".
+        ValueError
+            If fewer than 2 FOVs available for train/validation split.
+        """
         if stage not in ("fit", "validate"):
             raise NotImplementedError("Only fit and validate stages are supported.")
         cache_map = Manager().dict()

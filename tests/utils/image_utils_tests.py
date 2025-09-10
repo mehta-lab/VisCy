@@ -1,5 +1,4 @@
 import numpy as np
-
 from viscy.utils.image_utils import grid_sample_pixel_values, preprocess_image
 
 

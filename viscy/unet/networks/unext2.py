@@ -1,4 +1,5 @@
-from typing import Callable, Literal, Sequence
+from collections.abc import Callable, Sequence
+from typing import Literal
 
 import timm
 import torch
@@ -14,17 +15,22 @@ def icnr_init(
     upsample_dims: int,
     init: Callable = nn.init.kaiming_normal_,
 ):
-    """
-    ICNR initialization for 2D/3D kernels adapted from Aitken et al.,2017 ,
-    "Checkerboard artifact free sub-pixel convolution".
+    """ICNR initialization for 2D/3D kernels.
 
+    Adapted from Aitken et al., 2017, "Checkerboard artifact free sub-pixel convolution".
     Adapted from MONAI v1.2.0, added support for upsampling dimensions
     that are not the same as the kernel dimension.
 
-    :param conv: convolution layer
-    :param upsample_factor: upsample factor
-    :param upsample_dims: upsample dimensions, 2 or 3
-    :param init: initialization function
+    Parameters
+    ----------
+    conv : nn.Module
+        Convolution layer to initialize.
+    upsample_factor : int
+        Upsample factor.
+    upsample_dims : int
+        Upsample dimensions, 2 or 3.
+    init : Callable, optional
+        Initialization function, by default nn.init.kaiming_normal_.
     """
     out_channels, in_channels, *dims = conv.weight.shape
     scale_factor = upsample_factor**upsample_dims
@@ -84,6 +90,19 @@ class UNeXt2Stem(nn.Module):
         )
 
     def forward(self, x: Tensor):
+        """Forward pass through UNeXt2 stem with depth-to-channel projection.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, C, D, H, W) where D is the stack depth.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor with depth projected to channels, shape (B, C*D', H', W')
+            where D' = D // kernel_size[0] after 3D convolution.
+        """
         x = self.conv(x)
         b, c, d, h, w = x.shape
         # project Z/depth into channels
@@ -117,6 +136,29 @@ class StemDepthtoChannels(nn.Module):
     def compute_stem_channels(
         self, in_stack_depth, stem_kernel_size, stem_stride_depth, in_channels_encoder
     ):
+        """Compute required 3D stem output channels for encoder compatibility.
+
+        Parameters
+        ----------
+        in_stack_depth : int
+            Input stack depth dimension.
+        stem_kernel_size : tuple[int, int, int]
+            3D convolution kernel size.
+        stem_stride_depth : int
+            Stride in the depth dimension.
+        in_channels_encoder : int
+            Required input channels for the encoder after depth projection.
+
+        Returns
+        -------
+        int
+            Required output channels for the 3D stem convolution.
+
+        Raises
+        ------
+        ValueError
+            If channel dimensions cannot be matched with current configuration.
+        """
         stem3d_out_depth = (
             in_stack_depth - stem_kernel_size[0]
         ) // stem_stride_depth + 1
@@ -129,6 +171,19 @@ class StemDepthtoChannels(nn.Module):
         return stem3d_out_channels
 
     def forward(self, x: Tensor):
+        """Forward pass with 3D convolution and depth-to-channel mapping.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, C, D, H, W) where D is the input stack depth.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor with depth projected to channels, maintaining spatial
+            dimensions after strided 3D convolution.
+        """
         x = self.conv(x)
         b, c, d, h, w = x.shape
         # project Z/depth into channels
@@ -137,6 +192,16 @@ class StemDepthtoChannels(nn.Module):
 
 
 class UNeXt2UpStage(nn.Module):
+    """UNeXt2 decoder upsampling stage with skip connection fusion.
+
+    Implements hierarchical feature upsampling using either deconvolution or
+    pixel shuffle, followed by ConvNeXt blocks for feature refinement. Combines
+    low-resolution features with high-resolution skip connections for multi-scale
+    feature fusion.
+
+    # TODO: MANUAL_REVIEW - ConvNeXt block integration with skip connections
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -191,10 +256,20 @@ class UNeXt2UpStage(nn.Module):
             )
 
     def forward(self, inp: Tensor, skip: Tensor) -> Tensor:
-        """
-        :param Tensor inp: Low resolution features
-        :param Tensor skip: High resolution skip connection features
-        :return Tensor: High resolution features
+        """Forward pass with upsampling and skip connection fusion.
+
+        Parameters
+        ----------
+        inp : torch.Tensor
+            Low resolution input features from deeper decoder stage.
+        skip : torch.Tensor
+            High resolution skip connection features from encoder.
+
+        Returns
+        -------
+        torch.Tensor
+            Upsampled and refined features combining both inputs through
+            ConvNeXt blocks or residual units.
         """
         inp = self.upsample(inp)
         inp = torch.cat([inp, skip], dim=1)
@@ -202,6 +277,15 @@ class UNeXt2UpStage(nn.Module):
 
 
 class PixelToVoxelHead(nn.Module):
+    """Head module for converting 2D features to 3D voxel output.
+
+    Performs 2D-to-3D reconstruction using pixel shuffle upsampling and 3D
+    convolutions. Applies depth channel expansion and spatial upsampling to
+    generate volumetric outputs from 2D feature representations.
+
+    # TODO: MANUAL_REVIEW - 2D to 3D reconstruction mechanism
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -238,6 +322,19 @@ class PixelToVoxelHead(nn.Module):
         self.out_stack_depth = out_stack_depth
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass for 2D to 3D voxel reconstruction.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input 2D feature tensor of shape (B, C, H, W).
+
+        Returns
+        -------
+        torch.Tensor
+            Output 3D voxel tensor with upsampled spatial dimensions and
+            reconstructed depth, shape (B, out_channels, out_stack_depth, H', W').
+        """
         x = self.upsample(x)
         d = self.out_stack_depth + 2
         b, c, h, w = x.shape
@@ -255,11 +352,32 @@ class UnsqueezeHead(nn.Module):
         super().__init__()
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass adding singleton depth dimension.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input 2D tensor of shape (B, C, H, W).
+
+        Returns
+        -------
+        torch.Tensor
+            Output 3D tensor with singleton depth dimension, shape (B, C, 1, H, W).
+        """
         x = x.unsqueeze(2)
         return x
 
 
 class UNeXt2Decoder(nn.Module):
+    """UNeXt2 hierarchical decoder with multi-stage upsampling.
+
+    Implements progressive upsampling through multiple UNeXt2UpStage modules,
+    combining features from different encoder scales through skip connections.
+    Each stage performs feature upsampling and refinement using ConvNeXt blocks.
+
+    # TODO: MANUAL_REVIEW - Multi-scale feature fusion strategy
+    """
+
     def __init__(
         self,
         num_channels: list[int],
@@ -286,6 +404,20 @@ class UNeXt2Decoder(nn.Module):
             self.decoder_stages.append(stage)
 
     def forward(self, features: Sequence[Tensor]) -> Tensor:
+        """Forward pass through hierarchical decoder stages.
+
+        Parameters
+        ----------
+        features : Sequence[torch.Tensor]
+            List of multi-scale encoder features, ordered from lowest to highest
+            resolution. First element is the bottleneck feature.
+
+        Returns
+        -------
+        torch.Tensor
+            Decoded high-resolution features after progressive upsampling and
+            skip connection fusion through all decoder stages.
+        """
         feat = features[0]
         # padding
         features.append(None)
@@ -295,6 +427,16 @@ class UNeXt2Decoder(nn.Module):
 
 
 class UNeXt2(nn.Module):
+    """UNeXt2: ConvNeXt-based U-Net for 3D-to-2D-to-3D processing.
+
+    Advanced transformer-inspired U-Net architecture using ConvNeXt backbones
+    for hierarchical feature extraction. Performs 3D-to-2D projection via stem,
+    2D multi-scale processing through ConvNeXt encoder-decoder, and 2D-to-3D
+    reconstruction via specialized head modules.
+
+    # TODO: MANUAL_REVIEW - ConvNeXt transformer integration patterns
+    """
+
     def __init__(
         self,
         in_channels: int = 1,
@@ -361,6 +503,19 @@ class UNeXt2(nn.Module):
         return 6
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass through complete UNeXt2 architecture.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, C, D, H, W) where D is the input stack depth.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor of shape (B, out_channels, out_stack_depth, H', W')
+            after 3D-to-2D-to-3D processing through ConvNeXt backbone.
+        """
         x = self.stem(x)
         x: list = self.encoder_stages(x)
         x.reverse()

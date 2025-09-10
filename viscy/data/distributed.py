@@ -14,9 +14,17 @@ if TYPE_CHECKING:
 
 
 class ShardedDistributedSampler(DistributedSampler):
+    """Distributed sampler that creates sharded random permutations.
+
+    A specialized DistributedSampler that generates sharded random permutations
+    to ensure proper data distribution across multiple processes in DDP training.
+    """
+
     def _sharded_randperm(self, max_size: int, generator: Generator) -> list[int]:
         """Generate a sharded random permutation of indices.
-        Overlap may occur in between the last two shards to maintain divisibility."""
+
+        Overlap may occur in between the last two shards to maintain divisibility.
+        """
         sharded_randperm = [
             torch.randperm(self.num_samples, generator=generator)
             + min(i * self.num_samples, max_size - self.num_samples)

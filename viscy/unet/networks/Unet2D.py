@@ -5,6 +5,12 @@ from viscy.unet.networks.layers.ConvBlock2D import ConvBlock2D
 
 
 class Unet2d(nn.Module):
+    """2D U-Net neural network for image-to-image translation.
+
+    A convolutional neural network following the U-Net architecture for 2D images.
+    Supports both segmentation and regression tasks with configurable depth and filters.
+    """
+
     def __name__(self):
         return "Unet2d"
 
@@ -20,27 +26,38 @@ class Unet2d(nn.Module):
         num_filters=[],
         task="seg",
     ):
-        """
-        2D Unet with variable input/output channels and depth (block numbers).
+        """Initialize 2D U-Net with variable input/output channels and depth.
+
         Follows 2D UNet Architecture:
-            1) Unet: https://arxiv.org/pdf/1505.04597.pdf
-            2) residual Unet: https://arxiv.org/pdf/1711.10684.pdf
 
-        :param int in_channels: number of feature channels in
-        :param int out_channels: number of feature channels out
-        :param int/tuple(int,int) kernel_size: size of x and y dimensions
-            of conv kernels in blocks
-        :param bool residual: see name
-        :param float dropout: probability of dropout, between 0 and 0.5
-        :param int num_blocks: number of convolutional blocks on encoder and decoder
-        :param int num_block_layers: number of layers per block
-        :param list[int] num_filters: list of filters/feature levels
-            at each conv block depth
-        :param str task: network task (for virtual staining this is regression),
-            one of 'seg','reg'
+        References
+        ----------
+        1) U-Net: https://arxiv.org/pdf/1505.04597.pdf
+        2) Residual U-Net: https://arxiv.org/pdf/1711.10684.pdf
+
+        Parameters
+        ----------
+        in_channels : int, optional
+            Number of feature channels in, by default 1.
+        out_channels : int, optional
+            Number of feature channels out, by default 1.
+        kernel_size : int or tuple of int, optional
+            Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
+        residual : bool, optional
+            Whether to use residual connections, by default False.
+        dropout : float, optional
+            Probability of dropout, between 0 and 0.5, by default 0.2.
+        num_blocks : int, optional
+            Number of convolutional blocks on encoder and decoder, by default 4.
+        num_block_layers : int, optional
+            Number of layers per block, by default 2.
+        num_filters : list of int, optional
+            List of filters/feature levels at each conv block depth, by default [].
+        task : str, optional
+            Network task (for virtual staining this is regression),
+            one of 'seg','reg', by default "seg".
         """
-
-        super(Unet2d, self).__init__()
+        super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
         self.kernel_size = kernel_size
@@ -168,19 +185,26 @@ class Unet2d(nn.Module):
             )
 
     def forward(self, x, validate_input=False):
-        """
-        Forward call of network
-            - x -> Torch.tensor: input image stack
+        """Forward pass through the 2D U-Net.
 
         Call order:
-            => num_block 2D convolutional blocks, with downsampling in between (encoder)
-            => num_block 2D convolutional blocks, with upsampling between them (decoder)
-            => skip connections between corresponding blocks on encoder and decoder
-            => terminal block collapses to output dimensions
+        => num_block 2D convolutional blocks, with downsampling in between (encoder)
+        => num_block 2D convolutional blocks, with upsampling between them (decoder)
+        => skip connections between corresponding blocks on encoder and decoder
+        => terminal block collapses to output dimensions
 
-        :param torch.tensor x: input image
-        :param bool validate_input: Deactivates assertions which are redundant
-            if forward pass is being traced by tensorboard writer.
+        Parameters
+        ----------
+        x : torch.tensor
+            Input image stack.
+        validate_input : bool, optional
+            Deactivates assertions which are redundant if forward pass is being
+            traced by tensorboard writer, by default False.
+
+        Returns
+        -------
+        torch.tensor
+            Network output with same spatial dimensions as input.
         """
         # handle input exceptions
         if validate_input:
@@ -211,15 +235,19 @@ class Unet2d(nn.Module):
         return x.unsqueeze(2)
 
     def register_modules(self, module_list, name):
-        """
-        Helper function that registers modules stored in a list to the model object
-        so that they can be seen by PyTorch optimizer.
+        """Helper function that registers modules stored in a list to the model object.
+
+        So that they can be seen by PyTorch optimizer.
 
         Used to enable model graph creation with
-        non-sequential model types and dynamic layer numbers
+        non-sequential model types and dynamic layer numbers.
 
-        :param list(torch.nn.module) module_list: list of modules to register
-        :param str name: name of module type
+        Parameters
+        ----------
+        module_list : list[torch.nn.module]
+            List of modules to register
+        name : str
+            Name of module type
         """
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)

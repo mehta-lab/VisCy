@@ -1,0 +1,38 @@
+# This file is used to configure the Ruff linter and formatter:
+# View the documentation for more information on how to configure this file below
+# https://docs.astral.sh/ruff/linter/
+# https://docs.astral.sh/ruff/formatter/
+
+
+line-length = 88
+src = ["viscy", "tests"]
+extend-include = ["*.ipynb"]
+target-version = "py310"
+# Exclude the following for now. Later on we should check every Python file, no exceptions.
+extend-exclude = ["viscy/scripts/*", "applications/*", "examples/*"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[lint]
+select = [
+  "D",      # pydocstyle
+  "I",      # isort
+]
+ignore = [
+  "D100", # Missing docstring in public module
+  "D104", # Missing docstring in public package
+  "D105", # __magic__ methods are often self-explanatory, allow missing docstrings
+  "D107", # Missing docstring in __init__
+  # Disable one in each pair of mutually incompatible rules
+  "D203", # We don’t want a blank line before a class docstring
+  "D213", # <> We want docstrings to start immediately after the opening triple quote
+  "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
+  "D401", # First line should be in imperative mood; try rephrasing
+]
+per-file-ignores."*/__init__.py" = ["F401"]
+per-file-ignores."tests/*" = ["D"]
+pydocstyle.convention = "numpy"

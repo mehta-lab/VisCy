@@ -1,7 +1,10 @@
+"""Prediction writer for HCS virtual staining predictions in OME-Zarr format."""
+
 import logging
 import os
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Optional, Sequence
+from typing import Literal, Optional
 
 import numpy as np
 import torch
@@ -9,7 +12,6 @@ from iohub.ngff import ImageArray, Plate, Position, TransformationMeta, open_ome
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import DTypeLike, NDArray
-
 from viscy.data.hcs import HCSDataModule, Sample
 
 __all__ = ["HCSPredictionWriter"]
@@ -19,6 +21,7 @@ _logger = logging.getLogger("lightning.pytorch")
 def _pad_shape(shape: tuple[int, ...], target: int = 5) -> tuple[int, ...]:
     """
     Pad shape tuple to a target length.
+
     Vendored from ``iohub.ngff.nodes._pad_shape()``.
     """
     pad = target - len(shape)
@@ -49,7 +52,7 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
     weights are determined by the position within the range of slices. If the start
     of `z_slice` is 0, the function returns the `new_stack` unchanged.
 
-    Parameters:
+    Parameters
     ----------
     old_stack : NDArray
         The original stack of images to be blended.
@@ -59,12 +62,11 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
         A slice object indicating the range of slices over which to perform the blending.
         The start and stop attributes of the slice determine the range.
 
-    Returns:
+    Returns
     -------
     NDArray
         The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
     """
-
     if z_slice.start == 0:
         return new_stack
     depth = z_slice.stop - z_slice.start
@@ -81,12 +83,15 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
 class HCSPredictionWriter(BasePredictionWriter):
     """Callback to store virtual staining predictions as HCS OME-Zarr.
 
-    :param str output_store: Path to the zarr store to store output
-    :param bool write_input: Write the source and target channels too
-        (must be writing to a new store),
-        defaults to False
-    :param Literal['batch', 'epoch', 'batch_and_epoch'] write_interval:
-        When to write, defaults to "batch"
+    Parameters
+    ----------
+    output_store : str
+        Path to the zarr store to store output.
+    write_input : bool, optional
+        Write the source and target channels too (must be writing to a new store),
+        by default False.
+    write_interval : Literal['batch', 'epoch', 'batch_and_epoch'], optional
+        When to write, by default "batch".
     """
 
     def __init__(
@@ -117,6 +122,16 @@ class HCSPredictionWriter(BasePredictionWriter):
                 _logger.debug(f"Dataset scale {self._dataset_scale}.")
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """
+        Initialize output store and set up prediction writing at start of prediction.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            PyTorch Lightning trainer instance.
+        pl_module : LightningModule
+            PyTorch Lightning module being used for predictions.
+        """
         dm: HCSDataModule = trainer.datamodule
         self._get_scale_metadata(dm.data_path)
         self.z_padding = dm.z_window_size // 2 if dm.target_2d else 0
@@ -156,21 +171,63 @@ class HCSPredictionWriter(BasePredictionWriter):
         trainer: Trainer,
         pl_module: LightningModule,
         prediction: torch.Tensor,
-        batch_indices: Optional[Sequence[int]],
+        batch_indices: Sequence[int] | None,
         batch: Sample,
         batch_idx: int,
         dataloader_idx: int,
     ) -> None:
+        """
+        Write predictions to output store at the end of each batch.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            PyTorch Lightning trainer instance.
+        pl_module : LightningModule
+            PyTorch Lightning module being used for predictions.
+        prediction : torch.Tensor
+            Batch of predictions from the model.
+        batch_indices : Optional[Sequence[int]]
+            Indices of the batch samples.
+        batch : Sample
+            Input batch data.
+        batch_idx : int
+            Index of the current batch.
+        dataloader_idx : int
+            Index of the current dataloader.
+        """
         _logger.debug(f"Writing batch {batch_idx}.")
         for sample_index, _ in enumerate(batch["index"][0]):
             self.write_sample(batch, prediction[sample_index], sample_index)
 
     def on_predict_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """
+        Close output store at the end of prediction.
+
+        Parameters
+        ----------
+        trainer : Trainer
+            PyTorch Lightning trainer instance.
+        pl_module : LightningModule
+            PyTorch Lightning module being used for predictions.
+        """
         self.plate.close()
 
     def write_sample(
         self, batch: Sample, sample_prediction: torch.Tensor, sample_index: int
     ) -> None:
+        """
+        Write a single sample prediction to the output store.
+
+        Parameters
+        ----------
+        batch : Sample
+            Input batch data containing metadata for the sample.
+        sample_prediction : torch.Tensor
+            Prediction tensor for the sample.
+        sample_index : int
+            Index of the sample within the batch.
+        """
         _logger.debug(f"Writing sample {sample_index}.")
         sample_prediction = sample_prediction.cpu().numpy()
         img_name, t_index, z_index = [batch["index"][i][sample_index] for i in range(3)]

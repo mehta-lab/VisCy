@@ -1,6 +1,6 @@
 """Logging example images during training."""
 
-from typing import Sequence
+from collections.abc import Sequence
 
 import numpy as np
 from matplotlib.pyplot import get_cmap

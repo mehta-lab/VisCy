@@ -1,8 +1,16 @@
+"""Combined data modules for multi-dataset ML training workflows.
+
+This module provides Lightning DataModule implementations for combining multiple
+data sources with various strategies including concatenation, batching, and
+distributed sampling optimizations for computer vision and microscopy datasets.
+"""
+
 import bisect
 import logging
 from collections import defaultdict
+from collections.abc import Sequence
 from enum import Enum
-from typing import Literal, Sequence
+from typing import Literal
 
 import torch
 from lightning.pytorch import LightningDataModule
@@ -17,6 +25,12 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class CombineMode(Enum):
+    """Enumeration of data combination modes for CombinedDataModule.
+
+    Defines how multiple data modules should be combined during training,
+    validation, and testing phases.
+    """
+
     MIN_SIZE = "min_size"
     MAX_SIZE_CYCLE = "max_size_cycle"
     MAX_SIZE = "max_size"
@@ -25,6 +39,7 @@ class CombineMode(Enum):
 
 class CombinedDataModule(LightningDataModule):
     """Wrapper for combining multiple data modules.
+
     For supported modes, see ``lightning.pytorch.utilities.combined_loader``.
 
     Parameters
@@ -57,31 +72,71 @@ class CombinedDataModule(LightningDataModule):
         self.predict_mode = CombineMode(predict_mode).value
         self.prepare_data_per_node = True
 
-    def prepare_data(self):
+    def prepare_data(self) -> None:
+        """Prepare data for all constituent data modules.
+
+        Propagates trainer reference and calls prepare_data on each
+        data module for dataset downloading and preprocessing.
+        """
         for dm in self.data_modules:
             dm.trainer = self.trainer
             dm.prepare_data()
 
-    def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+    def setup(self, stage: Literal["fit", "validate", "test", "predict"]) -> None:
+        """Set up data modules for specified training stage.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate", "test", "predict"]
+            Current training stage for Lightning setup.
+        """
         for dm in self.data_modules:
             dm.setup(stage)
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> CombinedLoader:
+        """Create combined training dataloader.
+
+        Returns
+        -------
+        CombinedLoader
+            Combined dataloader using specified train_mode strategy.
+        """
         return CombinedLoader(
             [dm.train_dataloader() for dm in self.data_modules], mode=self.train_mode
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> CombinedLoader:
+        """Create combined validation dataloader.
+
+        Returns
+        -------
+        CombinedLoader
+            Combined dataloader using specified val_mode strategy.
+        """
         return CombinedLoader(
             [dm.val_dataloader() for dm in self.data_modules], mode=self.val_mode
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> CombinedLoader:
+        """Create combined test dataloader.
+
+        Returns
+        -------
+        CombinedLoader
+            Combined dataloader using specified test_mode strategy.
+        """
         return CombinedLoader(
             [dm.test_dataloader() for dm in self.data_modules], mode=self.test_mode
         )
 
-    def predict_dataloader(self):
+    def predict_dataloader(self) -> CombinedLoader:
+        """Create combined prediction dataloader.
+
+        Returns
+        -------
+        CombinedLoader
+            Combined dataloader using specified predict_mode strategy.
+        """
         return CombinedLoader(
             [dm.predict_dataloader() for dm in self.data_modules],
             mode=self.predict_mode,
@@ -89,10 +144,45 @@ class CombinedDataModule(LightningDataModule):
 
 
 class BatchedConcatDataset(ConcatDataset):
-    def __getitem__(self, idx):
+    """Batched concatenated dataset for efficient multi-dataset sampling.
+
+    Extends PyTorch's ConcatDataset to support batched item retrieval
+    from multiple datasets with optimized index grouping for ML training.
+    """
+
+    def __getitem__(self, idx: int):
+        """Retrieve single item by index.
+
+        Parameters
+        ----------
+        idx : int
+            Sample index across concatenated datasets.
+
+        Raises
+        ------
+        NotImplementedError
+            Single item access not implemented; use __getitems__ instead.
+        """
         raise NotImplementedError
 
     def _get_sample_indices(self, idx: int) -> tuple[int, int]:
+        """Map global index to dataset and sample indices.
+
+        Parameters
+        ----------
+        idx : int
+            Global index across all concatenated datasets.
+
+        Returns
+        -------
+        tuple[int, int]
+            Dataset index and local sample index within that dataset.
+
+        Raises
+        ------
+        ValueError
+            If absolute index value exceeds dataset length.
+        """
         if idx < 0:
             if -idx > len(self):
                 raise ValueError(
@@ -107,6 +197,21 @@ class BatchedConcatDataset(ConcatDataset):
         return dataset_idx, sample_idx
 
     def __getitems__(self, indices: list[int]) -> list:
+        """Retrieve multiple items by indices with batched dataset access.
+
+        Groups indices by source dataset and performs batched retrieval
+        for improved data loading performance during ML training.
+
+        Parameters
+        ----------
+        indices : list[int]
+            List of global indices across concatenated datasets.
+
+        Returns
+        -------
+        list
+            Samples from all requested indices, maintaining order.
+        """
         grouped_indices = defaultdict(list)
         for idx in indices:
             dataset_idx, sample_indices = self._get_sample_indices(idx)
@@ -151,11 +256,33 @@ class ConcatDataModule(LightningDataModule):
         self.prepare_data_per_node = True
 
     def prepare_data(self):
+        """Prepare data for all constituent data modules.
+
+        Propagates trainer reference and calls prepare_data on each
+        data module for dataset preparation and preprocessing.
+        """
         for dm in self.data_modules:
             dm.trainer = self.trainer
             dm.prepare_data()
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        """Set up concatenated datasets for training stage.
+
+        Validates patch configuration consistency across data modules
+        and creates concatenated train/validation datasets.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate", "test", "predict"]
+            Training stage - only "fit" currently supported.
+
+        Raises
+        ------
+        ValueError
+            If patches per stack are inconsistent across data modules.
+        NotImplementedError
+            If stage other than "fit" is requested.
+        """
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
             dm.setup(stage)
@@ -174,6 +301,14 @@ class ConcatDataModule(LightningDataModule):
         )
 
     def _dataloader_kwargs(self) -> dict:
+        """Get common dataloader configuration parameters.
+
+        Returns
+        -------
+        dict
+            Common PyTorch DataLoader configuration parameters including
+            worker settings, memory pinning, and prefetch configuration.
+        """
         return {
             "num_workers": self.num_workers,
             "persistent_workers": self.persistent_workers,
@@ -181,7 +316,15 @@ class ConcatDataModule(LightningDataModule):
             "pin_memory": self.pin_memory,
         }
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """Create training dataloader for concatenated datasets.
+
+        Returns
+        -------
+        DataLoader
+            PyTorch DataLoader with shuffling enabled, batch size adjusted
+            for patch stacking, and sample collation for ML training.
+        """
         return DataLoader(
             self.train_dataset,
             shuffle=True,
@@ -191,7 +334,15 @@ class ConcatDataModule(LightningDataModule):
             **self._dataloader_kwargs(),
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """Create validation dataloader for concatenated datasets.
+
+        Returns
+        -------
+        DataLoader
+            PyTorch DataLoader without shuffling for deterministic
+            validation evaluation.
+        """
         return DataLoader(
             self.val_dataset,
             shuffle=False,
@@ -202,9 +353,23 @@ class ConcatDataModule(LightningDataModule):
 
 
 class BatchedConcatDataModule(ConcatDataModule):
+    """Concatenated data module with batched dataset access.
+
+    Extends ConcatDataModule to use BatchedConcatDataset and
+    ThreadDataLoader for optimized multi-dataset training performance.
+    """
+
     _ConcatDataset = BatchedConcatDataset
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> ThreadDataLoader:
+        """Create threaded training dataloader for batched access.
+
+        Returns
+        -------
+        ThreadDataLoader
+            MONAI ThreadDataLoader with thread-based workers for
+            optimized batched dataset access during training.
+        """
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
@@ -214,7 +379,15 @@ class BatchedConcatDataModule(ConcatDataModule):
             **self._dataloader_kwargs(),
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> ThreadDataLoader:
+        """Create threaded validation dataloader for batched access.
+
+        Returns
+        -------
+        ThreadDataLoader
+            MONAI ThreadDataLoader with thread-based workers for
+            optimized validation data loading.
+        """
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
@@ -226,6 +399,13 @@ class BatchedConcatDataModule(ConcatDataModule):
 
 
 class CachedConcatDataModule(LightningDataModule):
+    """Cached concatenated data module for distributed training.
+
+    Concatenates multiple data modules with support for distributed
+    sampling and caching optimizations for large-scale ML training.
+    # TODO: MANUAL_REVIEW - Verify caching behavior and memory usage
+    """
+
     def __init__(self, data_modules: Sequence[LightningDataModule]):
         super().__init__()
         self.data_modules = data_modules
@@ -239,11 +419,33 @@ class CachedConcatDataModule(LightningDataModule):
         self.prepare_data_per_node = True
 
     def prepare_data(self):
+        """Prepare data for all constituent data modules.
+
+        Propagates trainer reference and calls prepare_data on each
+        data module for dataset preparation and caching setup.
+        """
         for dm in self.data_modules:
             dm.trainer = self.trainer
             dm.prepare_data()
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        """Set up cached concatenated datasets for distributed training.
+
+        Validates patch configuration and creates concatenated datasets
+        with caching optimizations for efficient distributed access.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate", "test", "predict"]
+            Training stage - only "fit" currently supported.
+
+        Raises
+        ------
+        ValueError
+            If patches per stack are inconsistent across data modules.
+        NotImplementedError
+            If stage other than "fit" is requested.
+        """
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
             dm.setup(stage)
@@ -262,6 +464,21 @@ class CachedConcatDataModule(LightningDataModule):
     def _maybe_sampler(
         self, dataset: Dataset, shuffle: bool
     ) -> ShardedDistributedSampler | None:
+        """Create distributed sampler if in distributed training mode.
+
+        Parameters
+        ----------
+        dataset : Dataset
+            PyTorch dataset to create sampler for.
+        shuffle : bool
+            Whether to shuffle samples across distributed processes.
+
+        Returns
+        -------
+        ShardedDistributedSampler | None
+            Distributed sampler if PyTorch distributed is initialized,
+            None otherwise for single-process training.
+        """
         return (
             ShardedDistributedSampler(dataset, shuffle=shuffle)
             if torch.distributed.is_initialized()
@@ -269,6 +486,14 @@ class CachedConcatDataModule(LightningDataModule):
         )
 
     def train_dataloader(self) -> DataLoader:
+        """Create training dataloader with distributed sampling support.
+
+        Returns
+        -------
+        DataLoader
+            PyTorch DataLoader with distributed sampler if available,
+            configured for cached dataset access during training.
+        """
         sampler = self._maybe_sampler(self.train_dataset, shuffle=True)
         return DataLoader(
             self.train_dataset,
@@ -282,6 +507,14 @@ class CachedConcatDataModule(LightningDataModule):
         )
 
     def val_dataloader(self) -> DataLoader:
+        """Create validation dataloader with distributed sampling support.
+
+        Returns
+        -------
+        DataLoader
+            PyTorch DataLoader with distributed sampler if available,
+            configured for deterministic validation evaluation.
+        """
         sampler = self._maybe_sampler(self.val_dataset, shuffle=False)
         return DataLoader(
             self.val_dataset,

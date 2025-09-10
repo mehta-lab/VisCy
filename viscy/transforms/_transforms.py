@@ -1,3 +1,5 @@
+from collections.abc import Iterable, Sequence
+from typing import Literal
 from warnings import warn
 
 import numpy as np
@@ -14,7 +16,6 @@ from monai.transforms import (
 )
 from numpy.typing import DTypeLike
 from torch import Tensor
-from typing_extensions import Iterable, Literal, Sequence
 
 from viscy.data.typing import ChannelMap, Sample
 
@@ -75,9 +76,7 @@ class NormalizeSampled(MapTransform):
 
 
 class RandInvertIntensityd(MapTransform, RandomizableTransform):
-    """
-    Randomly invert the intensity of the image.
-    """
+    """Randomly invert the intensity of the image."""
 
     def __init__(
         self,
@@ -99,8 +98,8 @@ class RandInvertIntensityd(MapTransform, RandomizableTransform):
 
 
 class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
-    """
-    Crop multiple tiled ROIs from an image.
+    """Crop multiple tiled ROIs from an image.
+
     Used for deterministic cropping in validation.
     """
 
@@ -166,7 +165,7 @@ class StackChannelsd(MapTransform):
 
 
 class BatchedZoom(Transform):
-    "Batched zoom transform using ``torch.nn.functional.interpolate``."
+    """Batched zoom transform using ``torch.nn.functional.interpolate``."""
 
     def __init__(
         self,

@@ -15,6 +15,29 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class SegmentationDataset(Dataset):
+    """
+    Dataset for segmentation evaluation tasks.
+
+    Loads predicted and target segmentation masks for comparison and evaluation.
+
+    Parameters
+    ----------
+    pred_dataset : Plate
+        HCS OME-Zarr plate containing predicted segmentation masks.
+    target_dataset : Plate
+        HCS OME-Zarr plate containing ground truth segmentation masks.
+    pred_channel : str
+        Name of the prediction channel to load.
+    target_channel : str
+        Name of the target channel to load.
+    pred_z_slice : int or slice
+        Z slice selection for prediction data.
+    target_z_slice : int or slice
+        Z slice selection for target data.
+    img_name : str, optional
+        Name of the image array within positions, by default "0".
+    """
+
     def __init__(
         self,
         pred_dataset: Plate,
@@ -50,9 +73,23 @@ class SegmentationDataset(Dataset):
         _logger.info(f"Number of test samples: {len(self)}")
 
     def __len__(self) -> int:
+        """Return the number of segmentation samples in the dataset."""
         return len(self._indices)
 
     def __getitem__(self, idx: int) -> SegmentationSample:
+        """
+        Get a segmentation sample pair.
+
+        Parameters
+        ----------
+        idx : int
+            Index of the sample to retrieve.
+
+        Returns
+        -------
+        SegmentationSample
+            Dictionary containing prediction, target, position index, and time index.
+        """
         pred_img, target_img, p, t = self._indices[idx]
         _logger.debug(f"Target image: {target_img.name}")
         pred = torch.from_numpy(
@@ -65,6 +102,32 @@ class SegmentationDataset(Dataset):
 
 
 class SegmentationDataModule(LightningDataModule):
+    """
+    Lightning DataModule for segmentation evaluation.
+
+    Manages data loading for comparing predicted and target segmentation masks.
+    Only supports test stage for evaluation purposes.
+
+    Parameters
+    ----------
+    pred_dataset : Path
+        Path to HCS OME-Zarr containing predicted segmentation masks.
+    target_dataset : Path
+        Path to HCS OME-Zarr containing ground truth segmentation masks.
+    pred_channel : str
+        Name of the prediction channel to load.
+    target_channel : str
+        Name of the target channel to load.
+    pred_z_slice : int
+        Z slice index for prediction data.
+    target_z_slice : int
+        Z slice index for target data.
+    batch_size : int
+        Batch size for data loading.
+    num_workers : int
+        Number of workers for data loading.
+    """
+
     def __init__(
         self,
         pred_dataset: Path,
@@ -87,6 +150,19 @@ class SegmentationDataModule(LightningDataModule):
         self.num_workers = num_workers
 
     def setup(self, stage: str) -> None:
+        """
+        Set up the segmentation dataset.
+
+        Parameters
+        ----------
+        stage : str
+            Stage to set up for. Only "test" is supported.
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not "test".
+        """
         if stage != "test":
             raise NotImplementedError("Only test stage is supported!")
         self.test_dataset = SegmentationDataset(
@@ -99,6 +175,14 @@ class SegmentationDataModule(LightningDataModule):
         )
 
     def test_dataloader(self) -> DataLoader:
+        """
+        Create test data loader for segmentation evaluation.
+
+        Returns
+        -------
+        DataLoader
+            Test data loader containing prediction-target pairs.
+        """
         return DataLoader(
             self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers
         )
