@@ -41,6 +41,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_HEK293T_nuclei_mock",
     z_slice=36,
+    num_workers=8,
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -60,6 +62,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_HEK293T_membrane_mock",
     z_slice=36,
+    num_workers=8,
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -81,7 +85,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_A549_nuclei_mock_denv",
     z_slice=10,
-    num_workers=6,       # Use parallel processing for speed
+    num_workers=8,       # Use parallel processing for speed
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -102,7 +107,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_VSCyto3D_A549_membrane_mock_denv",
     z_slice=10,
-    num_workers=6,       # Use parallel processing for speed
+    num_workers=8,       # Use parallel processing for speed
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -143,6 +149,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_HEK293T_nuclei",
     z_slice=36-15,  # Crop start at slice 15
+    num_workers=8,
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -162,6 +170,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_HEK293T_membrane",
     z_slice=36-15,  # Crop start at slice 15
+    num_workers=8,
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -195,7 +205,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_A549_nuclei_mock_denv",
     z_slice=10,
-    num_workers=6,       # Use parallel processing for speed
+    num_workers=8,       # Use parallel processing for speed
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
@@ -216,7 +227,8 @@ metrics = compute_metrics(
     log_output_dir=output_dir,
     log_name="intensity_CellDiff_A549_membrane_mock_denv",
     z_slice=10,
-    num_workers=6,       # Use parallel processing for speed
+    num_workers=8,       # Use parallel processing for speed
+    use_gpu=True,
     transforms=[
         NormalizeIntensityd(
             keys=["pred", "target"],
