@@ -1,3 +1,5 @@
+"""Embedding writer module for writing embeddings to a zarr store in an Xarray-compatible format."""
+
 import logging
 from collections.abc import Sequence
 from pathlib import Path

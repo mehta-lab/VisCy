@@ -1,3 +1,5 @@
+"""2.5D U-Net implementation for volumetric image processing."""
+
 from typing import Literal
 
 import torch
@@ -11,9 +13,46 @@ class Unet25d(nn.Module):
 
     A hybrid approach that processes 3D input stacks but outputs 2D predictions.
     Combines 3D spatial information with 2D computational efficiency.
+
+    Architecture takes in stack of 2D inputs given as a 3D tensor
+    and returns a 2D interpretation. Learns 3D information based upon input stack,
+    but speeds up training by compressing 3D information before the decoding path.
+    Uses interruption conv layers in the U-Net skip paths to
+    compress information with z-channel convolution.
+
+    References
+    ----------
+    https://elifesciences.org/articles/55502
+
+    Parameters
+    ----------
+    in_channels : int, optional
+        Number of feature channels in (1 or more), by default 1.
+    out_channels : int, optional
+        Number of feature channels out (1 or more), by default 1.
+    in_stack_depth : int, optional
+        Depth of input stack in z, by default 5.
+    out_stack_depth : int, optional
+        Depth of output stack, by default 1.
+    xy_kernel_size : int or tuple of int, optional
+        Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
+    residual : bool, optional
+        Whether to use residual connections, by default False.
+    dropout : float, optional
+        Probability of dropout, between 0 and 0.5, by default 0.2.
+    num_blocks : int, optional
+        Number of convolutional blocks on encoder and decoder paths, by default 4.
+    num_block_layers : int, optional
+        Number of layer sequences repeated per block, by default 2.
+    num_filters : list of int, optional
+        List of filters/feature levels at each conv block depth, by default [].
+    task : str, optional
+        Network task (for virtual staining this is regression),
+        one of 'seg','reg', by default "seg".
     """
 
     def __name__(self) -> str:
+        """Return the name of the network architecture."""
         return "Unet25d"
 
     def __init__(
@@ -30,44 +69,6 @@ class Unet25d(nn.Module):
         num_filters: list[int] = [],
         task: Literal["seg", "reg"] = "seg",
     ) -> None:
-        """Initialize 2.5D U-Net.
-
-        Architecture takes in stack of 2D inputs given as a 3D tensor
-        and returns a 2D interpretation. Learns 3D information based upon input stack,
-        but speeds up training by compressing 3D information before the decoding path.
-        Uses interruption conv layers in the U-Net skip paths to
-        compress information with z-channel convolution.
-
-        References
-        ----------
-        https://elifesciences.org/articles/55502
-
-        Parameters
-        ----------
-        in_channels : int, optional
-            Number of feature channels in (1 or more), by default 1.
-        out_channels : int, optional
-            Number of feature channels out (1 or more), by default 1.
-        in_stack_depth : int, optional
-            Depth of input stack in z, by default 5.
-        out_stack_depth : int, optional
-            Depth of output stack, by default 1.
-        xy_kernel_size : int or tuple of int, optional
-            Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
-        residual : bool, optional
-            Whether to use residual connections, by default False.
-        dropout : float, optional
-            Probability of dropout, between 0 and 0.5, by default 0.2.
-        num_blocks : int, optional
-            Number of convolutional blocks on encoder and decoder paths, by default 4.
-        num_block_layers : int, optional
-            Number of layer sequences repeated per block, by default 2.
-        num_filters : list of int, optional
-            List of filters/feature levels at each conv block depth, by default [].
-        task : str, optional
-            Network task (for virtual staining this is regression),
-            one of 'seg','reg', by default "seg".
-        """
         super().__init__()
         self.in_channels = in_channels
         self.num_blocks = num_blocks
@@ -265,7 +266,7 @@ class Unet25d(nn.Module):
         return x
 
     def register_modules(self, module_list: list[nn.Module], name: str) -> None:
-        """Helper function that registers modules stored in a list to the model object.
+        """Register modules stored in a list to the model object.
 
         So that they can be seen by PyTorch optimizer.
 

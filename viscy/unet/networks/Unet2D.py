@@ -1,3 +1,5 @@
+"""2D U-Net implementation for image-to-image translation tasks."""
+
 import torch
 import torch.nn as nn
 
@@ -9,9 +11,39 @@ class Unet2d(nn.Module):
 
     A convolutional neural network following the U-Net architecture for 2D images.
     Supports both segmentation and regression tasks with configurable depth and filters.
+
+    Follows 2D UNet Architecture:
+
+    References
+    ----------
+    1) U-Net: https://arxiv.org/pdf/1505.04597.pdf
+    2) Residual U-Net: https://arxiv.org/pdf/1711.10684.pdf
+
+    Parameters
+    ----------
+    in_channels : int, optional
+        Number of feature channels in, by default 1.
+    out_channels : int, optional
+        Number of feature channels out, by default 1.
+    kernel_size : int or tuple of int, optional
+        Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
+    residual : bool, optional
+        Whether to use residual connections, by default False.
+    dropout : float, optional
+        Probability of dropout, between 0 and 0.5, by default 0.2.
+    num_blocks : int, optional
+        Number of convolutional blocks on encoder and decoder, by default 4.
+    num_block_layers : int, optional
+        Number of layers per block, by default 2.
+    num_filters : list of int, optional
+        List of filters/feature levels at each conv block depth, by default [].
+    task : str, optional
+        Network task (for virtual staining this is regression),
+        one of 'seg','reg', by default "seg".
     """
 
     def __name__(self):
+        """Return the name of the network architecture."""
         return "Unet2d"
 
     def __init__(
@@ -26,37 +58,6 @@ class Unet2d(nn.Module):
         num_filters=[],
         task="seg",
     ):
-        """Initialize 2D U-Net with variable input/output channels and depth.
-
-        Follows 2D UNet Architecture:
-
-        References
-        ----------
-        1) U-Net: https://arxiv.org/pdf/1505.04597.pdf
-        2) Residual U-Net: https://arxiv.org/pdf/1711.10684.pdf
-
-        Parameters
-        ----------
-        in_channels : int, optional
-            Number of feature channels in, by default 1.
-        out_channels : int, optional
-            Number of feature channels out, by default 1.
-        kernel_size : int or tuple of int, optional
-            Size of x and y dimensions of conv kernels in blocks, by default (3, 3).
-        residual : bool, optional
-            Whether to use residual connections, by default False.
-        dropout : float, optional
-            Probability of dropout, between 0 and 0.5, by default 0.2.
-        num_blocks : int, optional
-            Number of convolutional blocks on encoder and decoder, by default 4.
-        num_block_layers : int, optional
-            Number of layers per block, by default 2.
-        num_filters : list of int, optional
-            List of filters/feature levels at each conv block depth, by default [].
-        task : str, optional
-            Network task (for virtual staining this is regression),
-            one of 'seg','reg', by default "seg".
-        """
         super().__init__()
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -235,7 +236,7 @@ class Unet2d(nn.Module):
         return x.unsqueeze(2)
 
     def register_modules(self, module_list: list[nn.Module], name: str) -> None:
-        """Helper function that registers modules stored in a list to the model object.
+        """Register modules stored in a list to the model object.
 
         So that they can be seen by PyTorch optimizer.
 

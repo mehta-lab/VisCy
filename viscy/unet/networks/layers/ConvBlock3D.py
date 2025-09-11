@@ -1,3 +1,5 @@
+"""3D convolutional blocks for volumetric neural network architectures."""
+
 from typing import Literal
 
 import numpy as np
@@ -246,7 +248,7 @@ class ConvBlock3D(nn.Module):
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward call of convolutional block
+        Forward call of convolutional block.
 
         Order of layers within the block is defined by the 'layer_order' parameter,
         which is a string of 'c's, 'a's and 'n's in reference to
@@ -320,7 +322,7 @@ class ConvBlock3D(nn.Module):
 
     def model(self) -> nn.Sequential:
         """
-        Allows calling of parameters inside ConvBlock object.
+        Create sequential model from ConvBlock parameters.
 
         Layer order: convolution -> normalization -> activation
 
@@ -351,7 +353,7 @@ class ConvBlock3D(nn.Module):
 
     def register_modules(self, module_list: list[nn.Module], name: str) -> None:
         """
-        Helper function that registers modules for PyTorch optimizer visibility.
+        Register modules for PyTorch optimizer visibility.
 
         Used to enable model graph creation
         with non-sequential model types and dynamic layer numbers

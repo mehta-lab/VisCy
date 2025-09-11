@@ -1,3 +1,5 @@
+"""Classification module for binary classification tasks."""
+
 from pathlib import Path
 from typing import Any
 
@@ -17,16 +19,14 @@ class ClassificationPredictionWriter(BasePredictionWriter):
 
     Collects predictions from all batches and writes them to a CSV file at the
     end of each epoch. Converts tensor outputs to numpy arrays for storage.
+
+    Parameters
+    ----------
+    output_path : Path
+        Path to the output CSV file.
     """
 
     def __init__(self, output_path: Path) -> None:
-        """Initialize the prediction writer.
-
-        Parameters
-        ----------
-        output_path : Path
-            Path to the output CSV file.
-        """
         super().__init__("epoch")
         if Path(output_path).exists():
             raise FileExistsError(f"Output path {output_path} already exists.")
@@ -67,6 +67,15 @@ class ClassificationModule(LightningModule):
     Adapts a contrastive encoder for binary classification by replacing the
     final linear layer and adding classification-specific training logic.
     Computes binary cross-entropy loss and tracks accuracy and F1-score metrics.
+
+    Parameters
+    ----------
+    encoder : ContrastiveEncoder
+        Contrastive encoder model.
+    lr : float | None
+        Learning rate.
+    loss : nn.Module | None
+        Loss function. By default, BCEWithLogitsLoss with positive weight of 1.0.
     """
 
     def __init__(
@@ -75,17 +84,6 @@ class ClassificationModule(LightningModule):
         lr: float | None,
         loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
     ) -> None:
-        """Initialize the classification module.
-
-        Parameters
-        ----------
-        encoder : ContrastiveEncoder
-            Contrastive encoder model.
-        lr : float | None
-            Learning rate.
-        loss : nn.Module | None
-            Loss function. By default, BCEWithLogitsLoss with positive weight of 1.0.
-        """
         super().__init__()
         self.stem = encoder.stem
         self.backbone = encoder.encoder

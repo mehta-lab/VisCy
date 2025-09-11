@@ -1,3 +1,5 @@
+"""Well and field-of-view selection utilities for HCS datasets."""
+
 from collections.abc import Generator
 
 from iohub.ngff.nodes import Plate, Position, Well

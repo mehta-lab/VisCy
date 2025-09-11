@@ -53,7 +53,7 @@ class MultiProcessProgressBar:
     Parameters
     ----------
     total_updates : int
-        Total number of updates.
+        Total number of updates expected for this progress bar.
     """
 
     def __init__(self, total_updates: int) -> None:

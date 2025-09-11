@@ -1,3 +1,5 @@
+"""LiveCell dataset implementation for cell segmentation benchmarking."""
+
 from __future__ import annotations
 
 import json

@@ -1,3 +1,5 @@
+"""Metadata utilities for dataset analysis and normalization statistics."""
+
 import os
 import sys
 from pathlib import Path

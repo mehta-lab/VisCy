@@ -1,1 +1,1 @@
-"""Module for utility functions"""
+"""Module for utility functions."""

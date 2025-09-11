@@ -1,3 +1,5 @@
+"""Feature map logging utilities for neural network debugging."""
+
 import datetime
 import os
 import time
@@ -56,8 +58,7 @@ def log_feature(
 
 
 class FeatureLogger:
-    """
-    Logger for visualizing neural network feature maps during training and debugging.
+    """Logger for visualizing neural network feature maps during training and debugging.
 
     This utility class provides comprehensive feature map visualization capabilities
     for monitoring convolutional neural network activations. It supports both
@@ -69,20 +70,38 @@ class FeatureLogger:
     It handles multi-dimensional tensors commonly found in computer vision
     tasks, including 2D/3D spatial dimensions with batch and channel axes.
 
+    Parameters
+    ----------
+    save_folder : str
+        Output directory for saving visualization files.
+    spatial_dims : int, optional
+        Number of spatial dimensions in feature tensors, by default 3.
+    full_batch : bool, optional
+        If true, log all samples in batch (warning: slow!), by default False.
+    save_as_grid : bool, optional
+        If true, feature maps are saved as a grid containing all channels,
+        else saved individually, by default True.
+    grid_width : int, optional
+        Desired width of grid if save_as_grid. If 0, defaults to 1/4 the
+        number of channels, by default 0.
+    normalize_by_grid : bool, optional
+        If true, images saved in grid are normalized to brightest pixel in
+        entire grid, by default False.
+
     Attributes
     ----------
     save_folder : str
-        Directory path for saving visualization outputs
+        Directory path for saving visualization outputs.
     spatial_dims : int
-        Number of spatial dimensions in feature tensors (2D or 3D)
+        Number of spatial dimensions in feature tensors (2D or 3D).
     full_batch : bool
-        Whether to log all samples in batch or just the first
+        Whether to log all samples in batch or just the first.
     save_as_grid : bool
-        Whether to arrange channels in a grid layout
+        Whether to arrange channels in a grid layout.
     grid_width : int
-        Number of columns in grid visualization
+        Number of columns in grid visualization.
     normalize_by_grid : bool
-        Whether to normalize intensities across entire grid
+        Whether to normalize intensities across entire grid.
 
     Examples
     --------
@@ -106,29 +125,6 @@ class FeatureLogger:
         grid_width: int = 0,
         normalize_by_grid: bool = False,
     ) -> None:
-        """Initialize logger for handling feature map visualization in neural networks.
-
-        Saves each 2D slice of a feature map in either a single grid per feature map
-        stack or a directory tree of labeled slices. By default saves images into grid.
-
-        Parameters
-        ----------
-        save_folder : str
-            Output directory for saving visualization files.
-        spatial_dims : int, optional
-            Number of spatial dimensions in feature tensors, by default 3.
-        full_batch : bool, optional
-            If true, log all samples in batch (warning: slow!), by default False.
-        save_as_grid : bool, optional
-            If true, feature maps are saved as a grid containing all channels,
-            else saved individually, by default True.
-        grid_width : int, optional
-            Desired width of grid if save_as_grid. If 0, defaults to 1/4 the
-            number of channels, by default 0.
-        normalize_by_grid : bool, optional
-            If true, images saved in grid are normalized to brightest pixel in
-            entire grid, by default False.
-        """
         self.save_folder = save_folder
         self.spatial_dims = spatial_dims
         self.full_batch = full_batch

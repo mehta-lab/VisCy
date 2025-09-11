@@ -1,3 +1,5 @@
+"""Feature extraction module for computing various features from a single cell image patch."""
+
 from typing import TypedDict
 
 import mahotas as mh

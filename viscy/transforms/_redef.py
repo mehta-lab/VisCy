@@ -21,6 +21,11 @@ from numpy.typing import DTypeLike
 
 
 class Decollated(Decollated):
+    """Decollate data wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -39,11 +44,21 @@ class Decollated(Decollated):
 
 
 class ToDeviced(ToDeviced):
+    """Transfer data to device wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(self, keys: Sequence[str] | str, **kwargs: Any) -> None:
         super().__init__(keys=keys, **kwargs)
 
 
 class RandWeightedCropd(RandWeightedCropd):
+    """Random weighted crop wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -62,6 +77,11 @@ class RandWeightedCropd(RandWeightedCropd):
 
 
 class RandAffined(RandAffined):
+    """Random affine transform wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -82,6 +102,11 @@ class RandAffined(RandAffined):
 
 
 class RandAdjustContrastd(RandAdjustContrastd):
+    """Random contrast adjustment wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -93,6 +118,11 @@ class RandAdjustContrastd(RandAdjustContrastd):
 
 
 class RandScaleIntensityd(RandScaleIntensityd):
+    """Random intensity scaling wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -104,6 +134,11 @@ class RandScaleIntensityd(RandScaleIntensityd):
 
 
 class RandGaussianNoised(RandGaussianNoised):
+    """Random Gaussian noise wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -116,6 +151,11 @@ class RandGaussianNoised(RandGaussianNoised):
 
 
 class RandGaussianSmoothd(RandGaussianSmoothd):
+    """Random Gaussian smoothing wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -136,6 +176,11 @@ class RandGaussianSmoothd(RandGaussianSmoothd):
 
 
 class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
+    """Scale intensity by percentile range wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -164,6 +209,11 @@ class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
 
 
 class RandSpatialCropd(RandSpatialCropd):
+    """Random spatial crop wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -180,6 +230,11 @@ class RandSpatialCropd(RandSpatialCropd):
 
 
 class CenterSpatialCropd(CenterSpatialCropd):
+    """Center spatial crop wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,
@@ -190,6 +245,11 @@ class CenterSpatialCropd(CenterSpatialCropd):
 
 
 class RandFlipd(RandFlipd):
+    """Random flip wrapper for jsonargparse compatibility.
+
+    See parent class documentation for details.
+    """
+
     def __init__(
         self,
         keys: Sequence[str] | str,

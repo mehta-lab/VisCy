@@ -1,3 +1,5 @@
+"""UNeXt2: ConvNeXt-based U-Net implementation for advanced neural network architectures."""
+
 from collections.abc import Callable, Sequence
 from typing import Literal
 
@@ -404,7 +406,7 @@ class PixelToVoxelHead(nn.Module):
 
 
 class UnsqueezeHead(nn.Module):
-    """Unsqueeze 2D (B, C, H, W) feature map to 3D (B, C, 1, H, W) output"""
+    """Unsqueeze 2D (B, C, H, W) feature map to 3D (B, C, 1, H, W) output."""
 
     def __init__(self) -> None:
         super().__init__()
@@ -599,7 +601,7 @@ class UNeXt2(nn.Module):
 
     @property
     def num_blocks(self) -> int:
-        """2-times downscaling factor of the smallest feature map"""
+        """2-times downscaling factor of the smallest feature map."""
         return 6
 
     def forward(self, x: Tensor) -> Tensor:

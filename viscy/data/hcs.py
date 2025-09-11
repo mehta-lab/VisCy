@@ -237,6 +237,7 @@ class SlidingWindowDataset(Dataset):
         return torch.from_numpy(data).unbind(dim=1), HCSStackIndex(img.name, t, z)
 
     def __len__(self) -> int:
+        """Return total number of sliding windows across all FOVs."""
         return self._max_window
 
     # TODO: refactor to a top level function
@@ -255,6 +256,7 @@ class SlidingWindowDataset(Dataset):
         ]
 
     def __getitem__(self, index: int) -> Sample:
+        """Get sliding window sample by index."""
         img, tz, norm_meta = self._find_window(index)
         ch_names = self.channels["source"].copy()
         ch_idx = self.source_ch_idx.copy()
@@ -330,6 +332,7 @@ class MaskTestDataset(SlidingWindowDataset):
         _logger.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
+        """Get sample with ground truth mask if available."""
         sample = super().__getitem__(index)
         img_name, t_idx, z_idx = sample["index"]
         position_name = int(img_name.split("/")[-2])
@@ -623,7 +626,7 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Removes redundant Z slices if the target is 2D to save VRAM."""
+        """Remove redundant Z slices if the target is 2D to save VRAM."""
         predicting = False
         if self.trainer:
             if self.trainer.predicting:
@@ -738,7 +741,7 @@ class HCSDataModule(LightningDataModule):
         return train_transform, val_transform
 
     def _train_transform(self) -> list[Callable]:
-        """Setup training augmentations.
+        """Set up training augmentations.
 
         Check input values and parse the number of Z slices and patches to
         sample per stack.

@@ -1,3 +1,5 @@
+"""Multiprocessing utilities for parallel data processing."""
+
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any
@@ -278,8 +280,7 @@ def get_mask_slice(
 
 
 def mp_get_val_stats(fn_args: list[Any], workers: int) -> list[dict[str, float]]:
-    """
-    Compute statistics of numpy arrays with multiprocessing
+    """Compute statistics of numpy arrays with multiprocessing.
 
     Parameters
     ----------
@@ -327,7 +328,7 @@ def get_val_stats(sample_values: list[float]) -> dict[str, float]:
 def mp_sample_im_pixels(
     fn_args: list[tuple[Any, ...]], workers: int
 ) -> list[list[Any]]:
-    """Read and computes statistics of images with multiprocessing
+    """Read and compute statistics of images with multiprocessing.
 
     Parameters
     ----------

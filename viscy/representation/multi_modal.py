@@ -1,3 +1,5 @@
+"""Joint multi-modal encoders for cross-modal representation learning."""
+
 from collections.abc import Sequence
 from logging import getLogger
 from typing import Literal

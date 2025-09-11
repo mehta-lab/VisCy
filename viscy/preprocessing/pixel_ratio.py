@@ -1,3 +1,5 @@
+"""Pixel ratio utilities for class balancing in semantic segmentation."""
+
 import dask.array as da
 from iohub.ngff import open_ome_zarr
 from numpy.typing import NDArray
@@ -6,7 +8,7 @@ from numpy.typing import NDArray
 def sematic_class_weights(
     dataset_path: str, target_channel: str, num_classes: int = 3
 ) -> NDArray:
-    """Computes class balancing weights for semantic segmentation.
+    """Compute class balancing weights for semantic segmentation.
 
     The weights can be used for cross-entropy loss.
 

@@ -23,8 +23,8 @@ select = [
   "I",      # isort
 ]
 ignore = [
-  "D100", # Missing docstring in public module
-  "D104", # Missing docstring in public package
+  # "D100", # Missing docstring in public module
+  # "D104", # Missing docstring in public package
   "D105", # __magic__ methods are often self-explanatory, allow missing docstrings
   "D107", # Missing docstring in __init__
   # Disable one in each pair of mutually incompatible rules

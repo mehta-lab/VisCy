@@ -15,7 +15,7 @@ from viscy.trainer import VisCyTrainer
 
 
 class VisCyCLI(LightningCLI):
-    """Extending lightning CLI arguments and defualts."""
+    """Extending Lightning CLI arguments and defaults for VisCy."""
 
     @staticmethod
     def subcommands() -> dict[str, set[str]]:

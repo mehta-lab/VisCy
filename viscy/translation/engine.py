@@ -1,3 +1,5 @@
+"""Training engine for virtual staining and image translation models."""
+
 import logging
 import os
 import random
@@ -549,7 +551,7 @@ class VSUNet(LightningModule):
                 )
 
     def on_predict_start(self) -> None:
-        """Setup prediction padding transform.
+        """Set up prediction padding transform.
 
         Pad the input shape to be divisible by the downsampling factor.
         The inverse of this transform crops the prediction to original shape.
@@ -684,7 +686,7 @@ class AugmentedPredictionVSUNet(LightningModule):
         return self.model(x)
 
     def setup(self, stage: str) -> None:
-        """Setup method for Lightning module.
+        """Set up the Lightning module for the specified stage.
 
         Parameters
         ----------
@@ -782,7 +784,7 @@ class FcmaeUNet(VSUNet):
         self.save_hyperparameters(ignore=["loss_function"])
 
     def on_fit_start(self) -> None:
-        """Setup data modules and validate configuration for training.
+        """Set up data modules and validate configuration for training.
 
         Raises
         ------

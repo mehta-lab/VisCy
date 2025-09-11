@@ -34,7 +34,7 @@ class ShardedDistributedSampler(DistributedSampler):
         return indices.tolist()
 
     def __iter__(self):
-        """Modified __iter__ method to shard data across distributed ranks."""
+        """Iterate through sharded data across distributed ranks."""
         max_size = len(self.dataset)  # type: ignore[arg-type]
         if self.shuffle:
             # deterministically shuffle based on epoch and seed

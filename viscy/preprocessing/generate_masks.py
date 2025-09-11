@@ -1,4 +1,4 @@
-"""Generate masks from sum of flurophore channels"""
+"""Generate masks from sum of flurophore channels."""
 
 from pathlib import Path
 from typing import Literal
@@ -9,7 +9,26 @@ from viscy.utils.mp_utils import mp_create_and_write_mask
 
 
 class MaskProcessor:
-    """Appends Masks to zarr directories"""
+    """Appends Masks to zarr directories.
+
+    Parameters
+    ----------
+    zarr_dir : Path
+        Directory of HCS zarr store to pull data from. Note: data in store is assumed to be stored in TCZYX format.
+    channel_ids : list[int] | int
+        Channel indices to be masked (typically just one)
+    time_ids : list[int] | int
+        Timepoints to consider
+    pos_ids : list[int] | int
+        Position (FOV) indices to use
+    num_workers : int, optional
+        Number of workers for multiprocessing, by default 4
+    mask_type : Literal["otsu", "unimodal", "mem_detection", "borders_weight_loss_map"], optional
+        Method to use for generating mask. Needed for mapping to the masking function.
+        One of: {'otsu', 'unimodal', 'mem_detection', 'borders_weight_loss_map'}, by default "otsu".
+    overwrite_ok : bool, optional
+        Overwrite existing masks, by default False.
+    """
 
     def __init__(
         self,
@@ -23,26 +42,6 @@ class MaskProcessor:
         ] = "otsu",
         overwrite_ok: bool = False,
     ):
-        """Initialize mask processor for generating masks from fluorophore channels.
-
-        Parameters
-        ----------
-        zarr_dir : str
-            Directory of HCS zarr store to pull data from. Note: data in store is assumed to be stored in TCZYX format.
-        channel_ids : list[int] | int
-            Channel indices to be masked (typically just one)
-        time_ids : list[int] | int
-            Timepoints to consider
-        pos_ids : list[int] | int
-            Position (FOV) indices to use
-        num_workers : int
-            Number of workers for multiprocessing
-        mask_type : str
-            Method to use for generating mask. Needed for mapping to the masking function.
-            One of: {'otsu', 'unimodal', 'mem_detection', 'borders_weight_loss_map'}. Default is 'otsu'.
-        overwrite_ok : bool
-            Overwrite existing masks. Default is False.
-        """
         self.zarr_dir = zarr_dir
         self.num_workers = num_workers
 

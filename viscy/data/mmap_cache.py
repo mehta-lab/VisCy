@@ -1,3 +1,5 @@
+"""Memory-mapped caching for OME-Zarr data with efficient disk I/O."""
+
 from __future__ import annotations
 
 import os

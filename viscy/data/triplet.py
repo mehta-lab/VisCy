@@ -1,3 +1,5 @@
+"""Triplet sampling for contrastive learning on tracked cell data."""
+
 import logging
 from collections.abc import Sequence
 from pathlib import Path
@@ -72,6 +74,43 @@ class TripletDataset(Dataset):
     Generates anchor, positive, and negative triplets from tracked cell
     patches for contrastive learning. Supports temporal sampling with
     configurable time intervals.
+
+    Parameters
+    ----------
+    positions : list[Position]
+        OME-Zarr images with consistent channel order
+    tracks_tables : list[pd.DataFrame]
+        Data frames containing ultrack results
+    channel_names : list[str]
+        Input channel names
+    initial_yx_patch_size : tuple[int, int]
+        YX size of the initially sampled image patch before augmentation
+    z_range : slice
+        Range of Z-slices
+    anchor_transform : DictTransform | None, optional
+        Transforms applied to the anchor sample, by default None
+    positive_transform : DictTransform | None, optional
+        Transforms applied to the positve sample, by default None
+    negative_transform : DictTransform | None, optional
+        Transforms applied to the negative sample, by default None
+    fit : bool, optional
+        Fitting mode in which the full triplet will be sampled,
+        only sample anchor if ``False``, by default True
+    predict_cells : bool, optional
+        Only predict on selected cells, by default False
+    include_fov_names : list[str] | None, optional
+        Only predict on selected FOVs, by default None
+    include_track_ids : list[int] | None, optional
+        Only predict on selected track IDs, by default None
+    time_interval : Literal["any"] | int, optional
+        Future time interval to sample positive and anchor from,
+        by default "any"
+        (sample negative from another track any time point
+        and use the augmented anchor patch as positive)
+    return_negative : bool, optional
+        Whether to return the negative sample during the fit stage
+        (can be set to False when using a loss function like NT-Xent),
+        by default True
     """
 
     def __init__(
@@ -91,45 +130,6 @@ class TripletDataset(Dataset):
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
     ) -> None:
-        """Dataset for triplet sampling of cells based on tracking.
-
-        Parameters
-        ----------
-        positions : list[Position]
-            OME-Zarr images with consistent channel order
-        tracks_tables : list[pd.DataFrame]
-            Data frames containing ultrack results
-        channel_names : list[str]
-            Input channel names
-        initial_yx_patch_size : tuple[int, int]
-            YX size of the initially sampled image patch before augmentation
-        z_range : slice
-            Range of Z-slices
-        anchor_transform : DictTransform | None, optional
-            Transforms applied to the anchor sample, by default None
-        positive_transform : DictTransform | None, optional
-            Transforms applied to the positve sample, by default None
-        negative_transform : DictTransform | None, optional
-            Transforms applied to the negative sample, by default None
-        fit : bool, optional
-            Fitting mode in which the full triplet will be sampled,
-            only sample anchor if ``False``, by default True
-        predict_cells : bool, optional
-            Only predict on selected cells, by default False
-        include_fov_names : list[str] | None, optional
-            Only predict on selected FOVs, by default None
-        include_track_ids : list[int] | None, optional
-            Only predict on selected track IDs, by default None
-        time_interval : Literal["any"] | int, optional
-            Future time interval to sample positive and anchor from,
-            by default "any"
-            (sample negative from another track any time point
-            and use the augmented anchor patch as positive)
-        return_negative : bool, optional
-            Whether to return the negative sample during the fit stage
-            (can be set to False when using a loss function like NT-Xent),
-            by default True
-        """
         self.positions = positions
         self.channel_names = channel_names
         self.channel_indices = [
@@ -212,6 +212,7 @@ class TripletDataset(Dataset):
         return specific_tracks.reset_index(drop=True)
 
     def __len__(self) -> int:
+        """Return number of valid anchor samples."""
         return len(self.valid_anchors)
 
     def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
@@ -288,6 +289,7 @@ class TripletDataset(Dataset):
         return torch.from_numpy(np.stack(results, axis=0)), norms
 
     def __getitems__(self, indices: list[int]) -> list[TripletSample]:
+        """Get batched triplet samples for efficient data loading."""
         anchor_rows = self.valid_anchors.iloc[indices]
         anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
         if self.fit:
@@ -350,6 +352,59 @@ class TripletDataModule(HCSDataModule):
     Provides train, validation, and prediction dataloaders for contrastive
     learning on cell tracking data. Supports configurable time intervals
     and spatial patch sampling.
+
+    Parameters
+    ----------
+    data_path : str | Path
+        Image dataset path
+    tracks_path : str | Path
+        Tracks labels dataset path
+    source_channel : str | Sequence[str]
+        List of input channel names
+    z_range : tuple[int, int]
+        Range of valid z-slices
+    initial_yx_patch_size : tuple[int, int], optional
+        XY size of the initially sampled image patch, by default (512, 512)
+    final_yx_patch_size : tuple[int, int], optional
+        Output patch size, by default (224, 224)
+    split_ratio : float, optional
+        Ratio of training samples, by default 0.8
+    batch_size : int, optional
+        Batch size, by default 16
+    num_workers : int, optional
+        Number of data-loading workers, by default 8
+    normalizations : list[MapTransform], optional
+        Normalization transforms, by default []
+    augmentations : list[MapTransform], optional
+        Augmentation transforms, by default []
+    caching : bool, optional
+        Whether to cache the dataset, by default False
+    fit_include_wells : list[str], optional
+        Only include these wells for fitting, by default None
+    fit_exclude_fovs : list[str], optional
+        Exclude these FOVs for fitting, by default None
+    predict_cells : bool, optional
+        Only predict for selected cells, by default False
+    include_fov_names : list[str] | None, optional
+        Only predict for selected FOVs, by default None
+    include_track_ids : list[int] | None, optional
+        Only predict for selected tracks, by default None
+    time_interval : Literal["any"] | int, optional
+        Future time interval to sample positive and anchor from,
+        "any" means sampling negative from another track any time point
+        and using the augmented anchor patch as positive), by default "any"
+    return_negative : bool, optional
+        Whether to return the negative sample during the fit stage
+        (can be set to False when using a loss function like NT-Xent),
+        by default True
+    persistent_workers : bool, optional
+        Whether to keep worker processes alive between iterations, by default False
+    prefetch_factor : int | None, optional
+        Number of batches loaded in advance by each worker, by default None
+    pin_memory : bool, optional
+        Whether to pin memory in CPU for faster GPU transfer, by default False
+    z_window_size : int, optional
+        Size of the final Z window, by default None (inferred from z_range)
     """
 
     def __init__(
@@ -378,61 +433,6 @@ class TripletDataModule(HCSDataModule):
         pin_memory: bool = False,
         z_window_size: int | None = None,
     ):
-        """Lightning data module for triplet sampling of patches.
-
-        Parameters
-        ----------
-        data_path : str | Path
-            Image dataset path
-        tracks_path : str | Path
-            Tracks labels dataset path
-        source_channel : str | Sequence[str]
-            List of input channel names
-        z_range : tuple[int, int]
-            Range of valid z-slices
-        initial_yx_patch_size : tuple[int, int], optional
-            XY size of the initially sampled image patch, by default (512, 512)
-        final_yx_patch_size : tuple[int, int], optional
-            Output patch size, by default (224, 224)
-        split_ratio : float, optional
-            Ratio of training samples, by default 0.8
-        batch_size : int, optional
-            Batch size, by default 16
-        num_workers : int, optional
-            Number of data-loading workers, by default 8
-        normalizations : list[MapTransform], optional
-            Normalization transforms, by default []
-        augmentations : list[MapTransform], optional
-            Augmentation transforms, by default []
-        caching : bool, optional
-            Whether to cache the dataset, by default False
-        fit_include_wells : list[str], optional
-            Only include these wells for fitting, by default None
-        fit_exclude_fovs : list[str], optional
-            Exclude these FOVs for fitting, by default None
-        predict_cells : bool, optional
-            Only predict for selected cells, by default False
-        include_fov_names : list[str] | None, optional
-            Only predict for selected FOVs, by default None
-        include_track_ids : list[int] | None, optional
-            Only predict for selected tracks, by default None
-        time_interval : Literal["any"] | int, optional
-            Future time interval to sample positive and anchor from,
-            "any" means sampling negative from another track any time point
-            and using the augmented anchor patch as positive), by default "any"
-        return_negative : bool, optional
-            Whether to return the negative sample during the fit stage
-            (can be set to False when using a loss function like NT-Xent),
-            by default True
-        persistent_workers : bool, optional
-            Whether to keep worker processes alive between iterations, by default False
-        prefetch_factor : int | None, optional
-            Number of batches loaded in advance by each worker, by default None
-        pin_memory : bool, optional
-            Whether to pin memory in CPU for faster GPU transfer, by default False
-        z_window_size : int, optional
-            Size of the final Z window, by default None (inferred from z_range)
-        """
         super().__init__(
             data_path=data_path,
             source_channel=source_channel,

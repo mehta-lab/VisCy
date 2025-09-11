@@ -1,3 +1,5 @@
+"""Interactive visualization app for embedding analysis."""
+
 import atexit
 import base64
 import json
