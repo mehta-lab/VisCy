@@ -9,10 +9,19 @@ import xarray as xr
 from numpy.typing import ArrayLike
 from scipy.spatial.distance import cdist
 from tqdm import tqdm
+from typing_extensions import TypedDict
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 
 _logger = logging.getLogger("lightning.pytorch")
+
+#Annotated Example TypeDict
+class AnnotatedExample(TypedDict):
+    fov_name: str
+    track_id: int | list[int]
+    timepoints: tuple[int, int]
+    annotations: dict | list
+    weight: float
 
 @dataclass
 class DTWResult:
@@ -194,9 +203,10 @@ class CytoDtw:
     
     def create_consensus_reference_pattern(
         self, 
-        annotated_examples: list[dict],
+        annotated_examples: list[AnnotatedExample],
         reference_selection: str = "median_length",
-        aggregation_method: str = "mean"
+        aggregation_method: str = "mean",
+        annotations_name: str = "annotations"
     ) -> np.ndarray:
         """
         Create consensus reference pattern from multiple annotated examples.
@@ -206,7 +216,7 @@ class CytoDtw:
         
         Parameters
         ----------
-        annotated_examples : list[dict]
+        annotated_examples : list[AnnotatedExample]
             List of annotated examples, each containing:
             - 'fov_name': str - FOV identifier
             - 'track_id': int or list[int] - Track ID(s)
@@ -217,7 +227,8 @@ class CytoDtw:
             mode of selection of reference: "median_length", "first", "longest", "shortest"
         aggregation_method : str
             mode of aggregation: "mean", "median", "weighted_mean"
-            
+        annotations_name : str
+            name of the annotations column
         Returns
         -------
         np.ndarray
@@ -252,7 +263,7 @@ class CytoDtw:
             
             extracted_patterns[f"example_{i}"] = {
                 'pattern': pattern,
-                'annotations': example.get('annotations', None),
+                'annotations': example.get(annotations_name, None),
                 'weight': example.get('weight', 1.0),
                 'source': example
             }
