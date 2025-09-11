@@ -201,7 +201,7 @@ class SlidingWindowDataset(Dataset):
 
     def _read_img_window(
         self, img: ImageArray, ch_idx: list[int], tz: int
-    ) -> tuple[tuple[Tensor, ...], HCSStackIndex]:
+    ) -> tuple[tuple[Tensor, ...], tuple[str, int, int]]:
         """Read image window as tensor.
 
         Parameters
@@ -215,7 +215,7 @@ class SlidingWindowDataset(Dataset):
 
         Returns
         -------
-        tuple[tuple[Tensor], HCSStackIndex]
+        tuple[tuple[Tensor], tuple[str, int, int]]
             list of (C=1, Z, Y, X) image tensors,
             tuple of image name, time index, and Z index
 
@@ -232,7 +232,7 @@ class SlidingWindowDataset(Dataset):
             [int(i) for i in ch_idx],
             slice(z, z + self.z_window_size),
         ].astype(np.float32)
-        return torch.from_numpy(data).unbind(dim=1), HCSStackIndex(img.name, t, z)
+        return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
         """Return total number of sliding windows across all FOVs."""
