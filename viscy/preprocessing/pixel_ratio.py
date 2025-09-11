@@ -1,5 +1,3 @@
-"""Pixel ratio utilities for class balancing in semantic segmentation."""
-
 import dask.array as da
 from iohub.ngff import open_ome_zarr
 from numpy.typing import NDArray

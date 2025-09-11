@@ -1,5 +1,3 @@
-"""Lightning CLI for computer vision models in VisCy."""
-
 import logging
 import os
 import sys

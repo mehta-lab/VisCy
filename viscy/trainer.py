@@ -1,5 +1,3 @@
-"""Extended Lightning Trainer for VisCy with preprocessing and export capabilities."""
-
 import logging
 from pathlib import Path
 from typing import Literal

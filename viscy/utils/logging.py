@@ -1,5 +1,3 @@
-"""Feature map logging utilities for neural network debugging."""
-
 import datetime
 import os
 import time

@@ -1,5 +1,3 @@
-"""Command-line interface utilities for data processing and visualization."""
-
 import collections
 import os
 import re

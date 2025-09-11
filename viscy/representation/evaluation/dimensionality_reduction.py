@@ -1,5 +1,3 @@
-"""PCA and UMAP dimensionality reduction."""
-
 import pandas as pd
 import umap
 import xarray as xr

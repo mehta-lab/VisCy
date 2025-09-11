@@ -1,5 +1,3 @@
-"""Methods for evaluating clustering performance."""
-
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.spatial.distance import cdist

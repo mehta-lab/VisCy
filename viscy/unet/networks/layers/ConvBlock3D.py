@@ -1,5 +1,3 @@
-"""3D convolutional blocks for volumetric neural network architectures."""
-
 from typing import Literal
 
 import numpy as np

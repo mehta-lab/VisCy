@@ -1,5 +1,3 @@
-"""UNeXt2: ConvNeXt-based U-Net implementation for advanced neural network architectures."""
-
 from collections.abc import Callable, Sequence
 from typing import Literal
 

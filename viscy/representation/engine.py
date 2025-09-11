@@ -1,5 +1,3 @@
-"""Contrastive learning model for self-supervised learning."""
-
 import logging
 from collections.abc import Sequence
 from typing import Literal, TypedDict

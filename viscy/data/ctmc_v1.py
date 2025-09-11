@@ -1,5 +1,3 @@
-"""Data module for CTMCv1 autoregression dataset with HCS OME-Zarr stores."""
-
 from pathlib import Path
 
 import torch

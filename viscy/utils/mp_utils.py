@@ -1,5 +1,3 @@
-"""Multiprocessing utilities for parallel data processing."""
-
 from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
 from typing import Any

@@ -1,5 +1,3 @@
-"""Mask generation and processing utilities."""
-
 from typing import Any
 
 import numpy as np

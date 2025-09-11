@@ -1,5 +1,3 @@
-"""Prediction writer for HCS virtual staining predictions in OME-Zarr format."""
-
 import logging
 import os
 from collections.abc import Sequence

@@ -1,10 +1,3 @@
-"""Combined data modules for multi-dataset ML training workflows.
-
-This module provides Lightning DataModule implementations for combining multiple
-data sources with various strategies including concatenation, batching, and
-distributed sampling optimizations for computer vision and microscopy datasets.
-"""
-
 import bisect
 import logging
 from collections import defaultdict

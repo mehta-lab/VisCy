@@ -1,5 +1,3 @@
-"""High-Content Screening (HCS) data loading and preprocessing module."""
-
 import logging
 import math
 import os

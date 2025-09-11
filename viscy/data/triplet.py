@@ -1,5 +1,3 @@
-"""Triplet sampling for contrastive learning on tracked cell data."""
-
 import logging
 from collections.abc import Sequence
 from pathlib import Path

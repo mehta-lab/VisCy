@@ -1,5 +1,3 @@
-"""Type definitions for VisCy data modules and structures."""
-
 from collections.abc import Callable, Sequence
 from typing import NamedTuple, TypedDict, TypeVar
 

@@ -1,6 +1,7 @@
-"""Metrics for model evaluation."""
+"""Metrics for model evaluation"""
 
-from collections.abc import Sequence
+from typing import Sequence, Union
+from warnings import warn
 
 import numpy as np
 import torch
@@ -10,25 +11,24 @@ from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
+from torchvision.ops import masks_to_boxes
 
 
-def VOI_metric(target: NDArray, prediction: NDArray) -> list[float]:
-    """
-    Variation of information metric.
+def VOI_metric(target: np.array, prediction: np.array) -> float:
+    """Variation of information metric
 
-    Reports overlap between predicted and ground truth mask.
+    Reports overlap between predicted and ground truth mask
 
     Parameters
     ----------
-    target : NDArray
-        Ground truth mask.
-    prediction : NDArray
-        Model inferred FL image cellpose mask.
+    target : np.array
+        Ground truth mask
+    prediction : np.array
+        Model inferred FL image cellpose mask
 
     Returns
     -------
-    list[float]
-        VI for image masks.
+    float VI: VI for image masks
     """
     # cellpose segmentation of predicted image: outputs labl mask
     pred_bin = prediction > 0
@@ -65,9 +65,7 @@ def VOI_metric(target: NDArray, prediction: NDArray) -> list[float]:
     return [VI]
 
 
-def POD_metric(
-    target_bin: NDArray, pred_bin: NDArray
-) -> tuple[float, float, float, int, int]:
+def POD_metric(target_bin: NDArray, pred_bin: NDArray):
     """
     Probability of detection metric for object matching.
 
@@ -132,260 +130,160 @@ def POD_metric(
             matching_targ.append(rid)
             matching_pred.append(cid)
 
-    # probability of detection
-    POD = len(matching_targ) / len(props_targ)
+    true_positives = len(matching_pred)
+    false_positives = n_predObj - len(matching_pred)
+    false_negatives = n_targObj - len(matching_targ)
+    precision = true_positives / (true_positives + false_positives)
+    recall = true_positives / (true_positives + false_negatives)
+    f1_score = 2 * (precision * recall / (precision + recall))
 
-    # probability of false alarm
-    FAR = (len(props_pred) - len(matching_pred)) / len(props_pred)
-
-    # probability of correct detection
-    PCD = len(matching_targ) / len(props_targ)
-
-    return (POD, FAR, PCD, len(props_targ), len(props_pred))
-
-
-def compute_3d_dice_score(
-    y_true: torch.Tensor,
-    y_pred: torch.Tensor,
-    eps: float = 1e-8,
-    threshold: float = 0.5,
-    aggregate: bool = True,
-) -> torch.Tensor:
-    """Compute 3D Dice similarity coefficient.
-
-    Parameters
-    ----------
-    y_true : torch.Tensor
-        True labels.
-    y_pred : torch.Tensor
-        Predicted labels.
-    eps : float, optional
-        Epsilon to avoid division by zero. Defaults to 1e-8.
-    threshold : float, optional
-        Threshold for binarization. Defaults to 0.5.
-    aggregate : bool, optional
-        Whether to aggregate the dice score. Defaults to True.
-
-    Returns
-    -------
-    torch.Tensor
-        Dice score.
-    """
-    y_pred_thresholded = (y_pred > threshold).float()
-    intersection = torch.sum(y_true * y_pred_thresholded, dim=(-3, -2, -1))
-    total = torch.sum(y_true + y_pred_thresholded, dim=(-3, -2, -1))
-    dice = (2.0 * intersection + eps) / (total + eps)
-    if aggregate:
-        return torch.mean(dice)
-    return dice
+    return [
+        true_positives,
+        false_positives,
+        false_negatives,
+        precision,
+        recall,
+        f1_score,
+    ]
 
 
-def compute_jaccard_index(
-    y_true: torch.Tensor,
-    y_pred: torch.Tensor,
-    threshold: float = 0.5,
-) -> torch.Tensor:
-    """Compute Jaccard index (IoU).
+def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
+    """Convert integer labels to a stack of boolean masks.
 
     Parameters
     ----------
-    y_true : torch.Tensor
-        True labels.
-    y_pred : torch.Tensor
-        Predicted labels.
-    threshold : float, optional
-        Threshold for binarization. Defaults to 0.5.
+    labels : torch.ShortTensor
+        2D labels where each value is an object (0 is background)
 
     Returns
     -------
-    torch.Tensor
-        Jaccard index.
+    torch.BoolTensor
+        Boolean masks of shape (objects, H, W)
+
     """
-    y_pred_thresholded = y_pred > threshold
-    intersection = torch.sum(y_true & y_pred_thresholded, dim=(-3, -2, -1))
-    union = torch.sum(y_true | y_pred_thresholded, dim=(-3, -2, -1))
-    return torch.mean(intersection.float() / union.float())
-
-
-def compute_pearson_correlation_coefficient(
-    y_true: torch.Tensor, y_pred: torch.Tensor, dim: Sequence[int] | None = None
-) -> torch.Tensor:
-    """Compute Pearson correlation coefficient.
-
-    Parameters
-    ----------
-    y_true : torch.Tensor
-        True labels.
-    y_pred : torch.Tensor
-        Predicted labels.
-    dim : Sequence[int] | None, optional
-        Dimensions to compute the Pearson correlation coefficient. Defaults to None.
-
-    Returns
-    -------
-    torch.Tensor
-        Pearson correlation coefficient.
-    """
-    if dim is None:
-        # default to spatial dimensions
-        dim = (-3, -2, -1)
-    y_true_centered = y_true - torch.mean(y_true, dim=dim, keepdim=True)
-    y_pred_centered = y_pred - torch.mean(y_pred, dim=dim, keepdim=True)
-    numerator = torch.sum(y_true_centered * y_pred_centered, dim=dim)
-    # compute stds
-    y_true_std = torch.sqrt(torch.sum(y_true_centered**2, dim=dim))
-    y_pred_std = torch.sqrt(torch.sum(y_pred_centered**2, dim=dim))
-    denominator = y_true_std * y_pred_std
-    # torch.full_like makes the entire tensor have the same value,
-    # so we have to use torch.full instead
-    small_correlation = torch.abs(denominator) < 1e-8
-    pcc = torch.where(
-        small_correlation, torch.zeros_like(numerator), numerator / denominator
+    if labels.ndim != 2:
+        raise ValueError(f"Labels must be 2D, got shape {labels.shape}.")
+    segments = torch.unique(labels)
+    n_instances = segments.numel() - 1
+    masks = torch.zeros(
+        (n_instances, *labels.shape), dtype=torch.bool, device=labels.device
     )
-    return torch.mean(pcc)
+    # TODO: optimize this?
+    for s, segment in enumerate(segments):
+        # start from label value 1, i.e. skip background label
+        masks[s - 1] = labels == segment
+    return masks
 
 
-class MeanAveragePrecisionNuclei(MeanAveragePrecision):
-    """Mean Average Precision for nuclei detection.
+def labels_to_detection(labels: torch.ShortTensor) -> dict[str, torch.Tensor]:
+    """Convert integer labels to a torchvision/torchmetrics detection dictionary.
 
     Parameters
     ----------
-    min_area : int, optional
-        Minimum area of nuclei to be considered. Defaults to 20.
-    iou_threshold : float, optional
-        IoU threshold for matching. Defaults to 0.5.
+    labels : torch.ShortTensor
+        2D labels where each value is an object (0 is background)
 
     Returns
     -------
-    torch.Tensor
-        Mean average precision score.
+    dict[str, torch.Tensor]
+        detection boxes, scores, labels, and masks
     """
-
-    def __init__(self, min_area: int = 20, iou_threshold: float = 0.5) -> None:
-        super().__init__(iou_thresholds=[iou_threshold])
-        self.min_area = min_area
-
-    def __call__(self, prediction: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
-        """
-        Compute mean average precision for nuclei detection.
-
-        Parameters
-        ----------
-        prediction : torch.Tensor
-            Predicted nuclei segmentation masks.
-        target : torch.Tensor
-            Ground truth nuclei segmentation masks.
-
-        Returns
-        -------
-        torch.Tensor
-            Mean average precision score.
-        """
-        prediction_labels = label(prediction > 0.5)
-        target_labels = label(target > 0.5)
-        device = prediction.device
-        preds = []
-        targets = []
-        for i, (pred_img, target_img) in enumerate(
-            zip(prediction_labels, target_labels)
-        ):
-            pred_props = regionprops(pred_img)
-            # binary mask for each instance
-            pred_masks = torch.zeros(
-                len(pred_props), *pred_img.shape, dtype=torch.bool, device=device
-            )
-            pred_labels = torch.zeros(len(pred_props), dtype=torch.long, device=device)
-            pred_scores = torch.ones(len(pred_props), dtype=torch.float, device=device)
-            for j, prop in enumerate(pred_props):
-                if prop.area < self.min_area:
-                    continue
-                pred_masks[j, pred_img == prop.label] = True
-                pred_labels[j] = 1  # class 1 for nuclei
-
-            target_props = regionprops(target_img)
-            target_masks = torch.zeros(
-                len(target_props), *target_img.shape, dtype=torch.bool, device=device
-            )
-            target_labels = torch.zeros(
-                len(target_props), dtype=torch.long, device=device
-            )
-            for j, prop in enumerate(target_props):
-                if prop.area < self.min_area:
-                    continue
-                target_masks[j, target_img == prop.label] = True
-                target_labels[j] = 1
-
-            preds.append(
-                {
-                    "masks": pred_masks,
-                    "labels": pred_labels,
-                    "scores": pred_scores,
-                }
-            )
-            targets.append({"masks": target_masks, "labels": target_labels})
-        return super().__call__(preds, targets)
+    masks = labels_to_masks(labels)
+    boxes = masks_to_boxes(masks)
+    return {
+        "boxes": boxes,
+        # dummy confidence scores
+        "scores": torch.ones(
+            (boxes.shape[0],), dtype=torch.float32, device=boxes.device
+        ),
+        # dummy class labels
+        "labels": torch.zeros(
+            (boxes.shape[0],), dtype=torch.uint8, device=boxes.device
+        ),
+        "masks": masks,
+    }
 
 
-def ssim_loss_25d(
+def mean_average_precision(
+    pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor, **kwargs
+) -> dict[str, torch.Tensor]:
+    """Compute the mAP metric for instance segmentation.
+
+    Parameters
+    ----------
+    pred_labels : torch.ShortTensor
+        2D integer prediction labels
+    target_labels : torch.ShortTensor
+        2D integer prediction labels
+    **kwargs : dict
+        Keyword arguments passed to
+        :py:class:`torchmetrics.detection.MeanAveragePrecision`
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        COCO-style metrics
+    """
+    defaults = dict(
+        iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000]
+    )
+    if not kwargs:
+        kwargs = {}
+    map_metric = MeanAveragePrecision(**(defaults | kwargs))
+    map_metric.update(
+        [labels_to_detection(pred_labels)], [labels_to_detection(target_labels)]
+    )
+    return map_metric.compute()
+
+
+def ssim_25d(
     preds: torch.Tensor,
     target: torch.Tensor,
     in_plane_window_size: tuple[int, int] = (11, 11),
     return_contrast_sensitivity: bool = False,
-) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
-    """
-    Multi-scale SSIM loss function for 2.5D volumes (3D with small depth).
+) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
+    """Multi-scale SSIM loss function for 2.5D volumes (3D with small depth).
 
     Uses uniform kernel (windows), depth-dimension window size equals to depth size.
 
     Parameters
     ----------
     preds : torch.Tensor
-        Predicted batch (B, C, D, W, H).
+        predicted batch (B, C, D, W, H)
     target : torch.Tensor
-        Target batch.
+        target batch
     in_plane_window_size : tuple[int, int], optional
-        Kernel width and height, by default (11, 11).
+        kernel width and height, by default (11, 11)
     return_contrast_sensitivity : bool, optional
-        Whether to return contrast sensitivity, by default False.
+        whether to return contrast sensitivity
 
     Returns
     -------
-    torch.Tensor | tuple[torch.Tensor, torch.Tensor]
-        SSIM for the batch, optionally with contrast sensitivity.
+    torch.Tensor: SSIM for the batch
+    Optional[torch.Tensor]: contrast sensitivity
     """
     if preds.ndim != 5:
         raise ValueError(
-            f"Expected preds to have 5 dimensions (B, C, D, W, H), got {preds.ndim}"
+            f"Input shape must be (B, C, D, W, H), got input shape {preds.shape}"
         )
-    if preds.shape != target.shape:
-        raise ValueError(
-            f"Expected preds and target to have the same shape, "
-            f"got {preds.shape} and {target.shape}"
-        )
-
-    B, C, D, H, W = preds.shape
-    # Compute SSIM for each channel and each depth slice
-    ssim_per_channel = []
-    cs_per_channel = []
-
-    for c in range(C):
-        # Window size for depth dimension is the depth size
-        window_size = (*in_plane_window_size, D)
-        ssim, cs = compute_ssim_and_cs(
-            preds[:, c, :, :, :], target[:, c, :, :, :], window_size
-        )
-        ssim_per_channel.append(ssim)
-        if return_contrast_sensitivity:
-            cs_per_channel.append(cs)
-
-    # Average across channels
-    ssim_result = torch.mean(torch.stack(ssim_per_channel))
-
+    depth = preds.shape[2]
+    if depth > 15:
+        warn(f"Input depth {depth} is potentially too large for 2.5D SSIM.")
+    ssim_img, cs_img = compute_ssim_and_cs(
+        preds,
+        target,
+        3,
+        kernel_sigma=None,
+        kernel_size=(depth, *in_plane_window_size),
+        data_range=target.max(),
+        kernel_type="uniform",
+    )
+    # aggregate to one scalar per batch
+    ssim = ssim_img.view(ssim_img.shape[0], -1).mean(1)
     if return_contrast_sensitivity:
-        cs_result = torch.mean(torch.stack(cs_per_channel))
-        return ssim_result, cs_result
-
-    return ssim_result
+        return ssim, cs_img.view(cs_img.shape[0], -1).mean(1)
+    else:
+        return ssim
 
 
 def ms_ssim_25d(
@@ -395,8 +293,7 @@ def ms_ssim_25d(
     clamp: bool = False,
     betas: Sequence[float] = (0.0448, 0.2856, 0.3001, 0.2363, 0.1333),
 ) -> torch.Tensor:
-    """
-    Multi-scale SSIM for 2.5D volumes (3D with small depth).
+    """Multi-scale SSIM for 2.5D volumes (3D with small depth).
 
     Uses uniform kernel (windows), depth-dimension window size equals to depth size.
     Depth dimension is not downsampled.
@@ -408,69 +305,37 @@ def ms_ssim_25d(
     Parameters
     ----------
     preds : torch.Tensor
-        Predicted images.
+        predicted images
     target : torch.Tensor
-        Target images.
+        target images
     in_plane_window_size : tuple[int, int], optional
-        Kernel width and height, defaults to (11, 11).
+        kernel width and height, by default (11, 11)
     clamp : bool, optional
-        Clamp to [1e-6, 1] for training stability when used in loss,
-        defaults to False.
+        clamp to [1e-6, 1] for training stability when used in loss,
+        by default False
     betas : Sequence[float], optional
-        Exponents of each resolution,
-        defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333).
+        exponents of each resolution, by default (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
 
     Returns
     -------
-    torch.Tensor
-        Multi-scale SSIM.
+    torch.Tensor: multi-scale SSIM
     """
     base_min = 1e-4
     mcs_list = []
-    ssim_list = []
-
-    B, C, D, H, W = preds.shape
-
-    for c in range(C):
-        # Window size for depth dimension is the depth size
-        window_size = (*in_plane_window_size, D)
-
-        pred_c = preds[:, c]
-        target_c = target[:, c]
-
-        for level in range(len(betas)):
-            if level > 0:
-                # Downsample only in spatial dimensions, not depth
-                pred_c = F.avg_pool2d(pred_c.view(-1, H, W), kernel_size=2).view(
-                    B, D, H // 2, W // 2
-                )
-                target_c = F.avg_pool2d(target_c.view(-1, H, W), kernel_size=2).view(
-                    B, D, H // 2, W // 2
-                )
-                H, W = H // 2, W // 2
-
-            ssim, cs = compute_ssim_and_cs(pred_c, target_c, window_size)
-
-            if level == len(betas) - 1:
-                ssim_list.append(ssim)
-            else:
-                mcs_list.append(cs)
-
-    # Compute the final ms-ssim score
-    mcs_tensor = torch.stack(mcs_list)
-    ssim_tensor = torch.stack(ssim_list)
-
-    # Apply betas weighting
-    betas_tensor = torch.tensor(betas, device=preds.device, dtype=preds.dtype)
-
-    # For numerical stability
+    for _ in range(len(betas)):
+        ssim, contrast_sensitivity = ssim_25d(
+            preds, target, in_plane_window_size, return_contrast_sensitivity=True
+        )
+        if clamp:
+            contrast_sensitivity = contrast_sensitivity.clamp(min=base_min)
+        mcs_list.append(contrast_sensitivity)
+        # do not downsample along depth
+        preds = F.avg_pool3d(preds, (1, 2, 2))
+        target = F.avg_pool3d(target, (1, 2, 2))
     if clamp:
-        mcs_tensor = torch.clamp(mcs_tensor, base_min, 1)
-        ssim_tensor = torch.clamp(ssim_tensor, base_min, 1)
-
-    # Compute weighted geometric mean
-    ms_ssim_val = torch.prod(mcs_tensor ** betas_tensor[:-1]) * (
-        ssim_tensor ** betas_tensor[-1]
-    )
-
-    return torch.mean(ms_ssim_val)
+        ssim = ssim.clamp(min=base_min)
+    mcs_list[-1] = ssim
+    mcs_stack = torch.stack(mcs_list)
+    betas = torch.tensor(betas, device=mcs_stack.device).view(-1, 1)
+    mcs_weighted = mcs_stack**betas
+    return torch.prod(mcs_weighted, axis=0).mean()

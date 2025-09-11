@@ -1,5 +1,3 @@
-"""Distance evaluation module for computing displacement and cosine similarities."""
-
 from collections import defaultdict
 from typing import Literal
 

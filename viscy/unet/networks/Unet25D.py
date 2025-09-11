@@ -1,5 +1,3 @@
-"""2.5D U-Net implementation for volumetric image processing."""
-
 from typing import Literal
 
 import torch

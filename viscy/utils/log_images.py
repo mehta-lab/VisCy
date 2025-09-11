@@ -1,5 +1,3 @@
-"""Logging example images during training."""
-
 from collections.abc import Sequence
 
 import numpy as np

@@ -1,5 +1,3 @@
-"""Dataset and DataModule classes for cell classification tasks."""
-
 from collections.abc import Callable
 from pathlib import Path
 

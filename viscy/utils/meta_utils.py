@@ -1,5 +1,3 @@
-"""Metadata utilities for dataset analysis and normalization statistics."""
-
 import os
 import sys
 from pathlib import Path
@@ -70,7 +68,7 @@ def _grid_sample(
 
 
 def generate_normalization_metadata(
-    zarr_dir: str | Path,
+    zarr_dir: str,
     num_workers: int = 4,
     channel_ids: list[int] | int = -1,
     grid_spacing: int = 32,
@@ -200,7 +198,7 @@ def generate_normalization_metadata(
 
 
 def compute_normalization_stats(
-    image_data: NDArray, grid_spacing: int = 32
+    image_data: np.ndarray, grid_spacing: int = 32
 ) -> dict[str, float]:
     """Compute normalization statistics from image data using grid sampling.
 
@@ -209,7 +207,7 @@ def compute_normalization_stats(
     image_data : np.ndarray
         3D or 4D image array of shape (z, y, x) or (t, z, y, x).
     grid_spacing : int, optional
-        Spacing between grid points for sampling, by default 32.
+        Spacing betweend grid points for sampling, by default 32.
 
     Returns
     -------

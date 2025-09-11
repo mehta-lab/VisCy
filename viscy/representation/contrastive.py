@@ -1,5 +1,3 @@
-"""Contrastive encoder network that uses ConvNeXt v1 and ResNet backbones from timm."""
-
 from typing import Literal
 
 import timm

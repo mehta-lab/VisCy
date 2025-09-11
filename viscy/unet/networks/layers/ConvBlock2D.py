@@ -1,5 +1,3 @@
-"""2D convolutional blocks for U-Net architectures."""
-
 from typing import Literal
 
 import numpy as np

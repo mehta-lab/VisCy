@@ -1,5 +1,3 @@
-"""Utilities for DDP training."""
-
 from __future__ import annotations
 
 import math
