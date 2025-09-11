@@ -1,6 +1,5 @@
 import os
 import sys
-from pathlib import Path
 
 import iohub.ngff as ngff
 import numpy as np
@@ -11,7 +10,9 @@ from tqdm import tqdm
 from viscy.utils.mp_utils import get_val_stats
 
 
-def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
+def write_meta_field(
+    position: ngff.Position, metadata: dict, field_name: str, subfield_name: str
+):
     """Write metadata to position's plate-level or FOV level .zattrs metadata.
 
     Write metadata to position's plate-level or FOV level .zattrs metadata by either
@@ -68,21 +69,13 @@ def _grid_sample(
 
 
 def generate_normalization_metadata(
-    zarr_dir: str,
-    num_workers: int = 4,
-    channel_ids: list[int] | int = -1,
-    grid_spacing: int = 32,
+    zarr_dir: str, num_workers: int = 4, channel_ids: int = -1, grid_spacing: int = 32
 ):
     """Generate pixel intensity metadata for on-the-fly normalization.
 
     Generate pixel intensity metadata to be later used in on-the-fly normalization
     during training and inference. Sampling is used for efficient estimation of median
     and interquartile range for intensity values on both a dataset and field-of-view
-    level.
-
-    Normalization values are recorded in the image-level metadata in the corresponding
-    position of each zarr_dir store. Format of metadata is as follows:
-    {
         channel_idx : {
             dataset_statistics: dataset level normalization values (positive float),
             fov_statistics: field-of-view level normalization values (positive float)
@@ -106,152 +99,139 @@ def generate_normalization_metadata(
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
 
-    # Prepare parameters for multiprocessing
-    zarr_dir_path = os.path.dirname(os.path.dirname(zarr_dir))
-
-    # Get channels to process
     if channel_ids == -1:
-        # Get channel IDs from first position
-        first_position = position_map[0][1]
-        first_images = list(first_position.images())
-        first_image = first_images[0][1]
-        # shape is (t, c, z, y, x)
-        channel_ids = list(range(first_image.data.shape[1]))
-
-    if isinstance(channel_ids, int):
+        channel_ids = range(len(plate.channel_names))
+    elif isinstance(channel_ids, int):
         channel_ids = [channel_ids]
 
-    # Prepare parameters for each position and channel
-    params_list = []
-    for position_idx, (position_key, position) in enumerate(position_map):
-        for channel_id in channel_ids:
-            params = {
-                "zarr_dir": zarr_dir,
-                "position_key": position_key,
-                "channel_id": channel_id,
-                "grid_spacing": grid_spacing,
-            }
-            params_list.append(params)
+    # get arguments for multiprocessed grid sampling
+    mp_grid_sampler_args = []
+    for _, position in position_map:
+        mp_grid_sampler_args.append([position, grid_spacing])
 
-    # Use multiprocessing to compute normalization statistics
-    progress_bar = show_progress_bar()
-    if num_workers > 1:
-        with mp_utils.get_context("spawn").Pool(num_workers) as pool:
-            results = pool.map(mp_utils.normalize_meta_worker, params_list)
-            progress_bar.update(len(params_list))
-    else:
-        results = []
-        for params in params_list:
-            result = mp_utils.normalize_meta_worker(params)
-            results.append(result)
-            progress_bar.update(1)
+    # sample values and use them to get normalization statistics
+    for i, channel_index in enumerate(channel_ids):
+        print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
-    progress_bar.close()
+        channel_name = plate.channel_names[channel_index]
+        dataset_sample_values = []
+        position_and_statistics = []
 
-    # Aggregate results and write to metadata
-    all_dataset_stats = {}
-    for result in results:
-        if result is not None:
-            position_key, channel_id, dataset_stats, fov_stats = result
+        for _, pos in tqdm(position_map, desc="Positions"):
+            samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
+            dataset_sample_values.append(samples)
+            fov_level_statistics = {"fov_statistics": get_val_stats(samples)}
+            position_and_statistics.append((pos, fov_level_statistics))
 
-            if channel_id not in all_dataset_stats:
-                all_dataset_stats[channel_id] = []
-            all_dataset_stats[channel_id].append(dataset_stats)
+        dataset_statistics = {
+            "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
+        }
+        write_meta_field(
+            position=plate,
+            metadata=dataset_statistics,
+            field_name="normalization",
+            subfield_name=channel_name,
+        )
 
-    # Calculate dataset-level statistics
-    final_dataset_stats = {}
-    for channel_id, stats_list in all_dataset_stats.items():
-        if stats_list:
-            # Aggregate median and IQR across all positions
-            medians = [stats["median"] for stats in stats_list if "median" in stats]
-            iqrs = [stats["iqr"] for stats in stats_list if "iqr" in stats]
-
-            if medians and iqrs:
-                final_dataset_stats[channel_id] = {
-                    "median": np.median(medians),
-                    "iqr": np.median(iqrs),
-                }
-
-    # Write metadata to each position
-    for result in results:
-        if result is not None:
-            position_key, channel_id, dataset_stats, fov_stats = result
-
-            # Get position object
-            position = dict(plate.positions())[position_key]
-
-            # Prepare metadata
-            metadata = {
-                "dataset_statistics": final_dataset_stats.get(channel_id, {}),
-                "fov_statistics": fov_stats,
-            }
-
-            # Write metadata
+        for pos, position_statistics in position_and_statistics:
             write_meta_field(
-                position=position,
-                metadata=metadata,
+                position=pos,
+                metadata=dataset_statistics | position_statistics,
                 field_name="normalization",
-                subfield_name=str(channel_id),
+                subfield_name=channel_name,
             )
 
     plate.close()
 
 
-def compute_normalization_stats(
-    image_data: np.ndarray, grid_spacing: int = 32
-) -> dict[str, float]:
+def compute_zscore_params(
+    frames_meta, ints_meta, input_dir, normalize_im, min_fraction=0.99
+):
     """Compute normalization statistics from image data using grid sampling.
+
+    Compute zscore median and interquartile range.
 
     Parameters
     ----------
-    image_data : np.ndarray
-        3D or 4D image array of shape (z, y, x) or (t, z, y, x).
-    grid_spacing : int, optional
-        Spacing betweend grid points for sampling, by default 32.
+    frames_meta : pd.DataFrame
+        Dataframe containing all metadata.
+    ints_meta : pd.DataFrame
+        Metadata containing intensity statistics each z-slice and foreground fraction for masks.
+    input_dir : str
+        Directory containing images.
+    normalize_im : None or str
+        Normalization scheme for input images.
+    min_fraction : float
+        Minimum foreground fraction (in case of masks) for computing intensity statistics.
+        for computing intensity statistics.
 
     Returns
     -------
-    dict[str, float]
-        Dictionary with median and IQR statistics for normalization.
+    tuple[pd.DataFrame, pd.DataFrame]
+        Tuple containing:
+        - pd.DataFrame frames_meta: Dataframe containing all metadata
+        - pd.DataFrame ints_meta: Metadata containing intensity statistics of each z-slice
     """
-    # Handle different input shapes
-    if image_data.ndim == 4:
-        # Assume (t, z, y, x) and take first timepoint
-        image_data = image_data[0]
+    assert normalize_im in [
+        None,
+        "slice",
+        "volume",
+        "dataset",
+    ], 'normalize_im must be None or "slice" or "volume" or "dataset"'
 
-    if image_data.ndim == 3:
-        # Assume (z, y, x) and use middle z-slice if available
-        if image_data.shape[0] > 1:
-            z_mid = image_data.shape[0] // 2
-            image_data = image_data[z_mid]
-        else:
-            image_data = image_data[0]
+    if normalize_im is None:
+        # No normalization
+        frames_meta["zscore_median"] = 0
+        frames_meta["zscore_iqr"] = 1
+        return frames_meta
+    elif normalize_im == "dataset":
+        agg_cols = ["time_idx", "channel_idx", "dir_name"]
+    elif normalize_im == "volume":
+        agg_cols = ["time_idx", "channel_idx", "dir_name", "pos_idx"]
+    else:
+        agg_cols = ["time_idx", "channel_idx", "dir_name", "pos_idx", "slice_idx"]
+    # median and inter-quartile range are more robust than mean and std
+    ints_meta_sub = ints_meta[ints_meta["fg_frac"] >= min_fraction]
+    ints_agg_median = ints_meta_sub[agg_cols + ["intensity"]].groupby(agg_cols).median()
+    ints_agg_hq = (
+        ints_meta_sub[agg_cols + ["intensity"]].groupby(agg_cols).quantile(0.75)
+    )
+    ints_agg_lq = (
+        ints_meta_sub[agg_cols + ["intensity"]].groupby(agg_cols).quantile(0.25)
+    )
+    ints_agg = ints_agg_median
+    ints_agg.columns = ["zscore_median"]
+    ints_agg["zscore_iqr"] = ints_agg_hq["intensity"] - ints_agg_lq["intensity"]
+    ints_agg.reset_index(inplace=True)
 
-    # Now image_data should be 2D (y, x)
-    if image_data.ndim != 2:
-        raise ValueError(f"Expected 2D image after processing, got {image_data.ndim}D")
+    cols_to_merge = frames_meta.columns[
+        [col not in ["zscore_median", "zscore_iqr"] for col in frames_meta.columns]
+    ]
+    frames_meta = pd.merge(
+        frames_meta[cols_to_merge],
+        ints_agg,
+        how="left",
+        on=agg_cols,
+    )
+    if frames_meta["zscore_median"].isnull().values.any():
+        raise ValueError(
+            "Found NaN in normalization parameters. \
+        min_fraction might be too low or images might be corrupted."
+        )
+    frames_meta_filename = os.path.join(input_dir, "frames_meta.csv")
+    frames_meta.to_csv(frames_meta_filename, sep=",")
 
-    # Create sampling grid
-    y_indices = np.arange(0, image_data.shape[0], grid_spacing)
-    x_indices = np.arange(0, image_data.shape[1], grid_spacing)
+    cols_to_merge = ints_meta.columns[
+        [col not in ["zscore_median", "zscore_iqr"] for col in ints_meta.columns]
+    ]
+    ints_meta = pd.merge(
+        ints_meta[cols_to_merge],
+        ints_agg,
+        how="left",
+        on=agg_cols,
+    )
+    ints_meta["intensity_norm"] = (
+        ints_meta["intensity"] - ints_meta["zscore_median"]
+    ) / (ints_meta["zscore_iqr"] + sys.float_info.epsilon)
 
-    # Sample values at grid points
-    sampled_values = image_data[np.ix_(y_indices, x_indices)].flatten()
-
-    # Remove any NaN or infinite values
-    sampled_values = sampled_values[np.isfinite(sampled_values)]
-
-    if len(sampled_values) == 0:
-        return {"median": 0.0, "iqr": 1.0}
-
-    # Compute statistics
-    median = np.median(sampled_values)
-    q25 = np.percentile(sampled_values, 25)
-    q75 = np.percentile(sampled_values, 75)
-    iqr = q75 - q25
-
-    # Avoid zero IQR
-    if iqr == 0:
-        iqr = 1.0
-
-    return {"median": float(median), "iqr": float(iqr)}
+    return frames_meta, ints_meta

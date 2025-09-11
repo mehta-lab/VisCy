@@ -3,9 +3,10 @@ import math
 import os
 import re
 import tempfile
-from collections.abc import Callable, Sequence
+
+# from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
