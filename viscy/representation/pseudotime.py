@@ -98,7 +98,7 @@ class CytoDtw:
     
     def find_pattern_matches(self, reference_pattern: np.ndarray, 
                            filtered_lineages: list[tuple[str, list[int]]] = None,
-                           window_step_fraction: float = 0.25,
+                           window_step: int = 5,
                            num_candidates: int = 3, 
                            max_distance: float = float("inf"),
                            max_skew: float = 0.8,
@@ -114,8 +114,8 @@ class CytoDtw:
             Reference pattern to search for
         filtered_lineages : list[tuple[str, list[int]]], optional
             List of (fov_name, track_ids) to search in. If None, searches all.
-        window_step_fraction : float
-            Fraction of pattern length to use as window step
+        window_step : int
+            Step size for sliding window search
         num_candidates : int
             Number of best candidates per lineage
         max_distance : float
@@ -144,7 +144,7 @@ class CytoDtw:
             reference_pattern=reference_pattern,
             filtered_lineages=filtered_lineages,
             embeddings_dataset=self.embeddings,
-            window_step_fraction=window_step_fraction,
+            window_step=window_step,
             num_candidates=num_candidates,
             max_distance=max_distance,
             max_skew=max_skew,
@@ -207,7 +207,7 @@ class CytoDtw:
         reference_selection: str = "median_length",
         aggregation_method: str = "mean",
         annotations_name: str = "annotations"
-    ) -> np.ndarray:
+    ) -> dict:
         """
         Create consensus reference pattern from multiple annotated examples.
         
@@ -231,8 +231,11 @@ class CytoDtw:
             name of the annotations column
         Returns
         -------
-        np.ndarray
-            Consensus reference pattern
+        dict
+            Dictionary containing:
+            - 'consensus_pattern': np.ndarray - The consensus embedding pattern
+            - 'consensus_annotations': list - Consensus annotations (if available)
+            - 'metadata': dict - Information about consensus creation including method used
             
         Examples
         --------
@@ -275,7 +278,7 @@ class CytoDtw:
             aggregation_method=aggregation_method
         )
         
-        return consensus_data['consensus_pattern']
+        return consensus_data
     
     def align_patterns(
         self,
@@ -746,7 +749,7 @@ def find_pattern_matches(
     reference_pattern: np.ndarray,
     filtered_lineages: list[tuple[str, list[int]]],
     embeddings_dataset: xr.Dataset,
-    window_step_fraction: float = 0.25,
+    window_step: int = 5,
     num_candidates: int = 3,
     max_distance: float = float("inf"),
     max_skew: float = 0.8,
@@ -765,8 +768,8 @@ def find_pattern_matches(
         List of lineages to search in (fov_name, track_ids)
     embeddings_dataset : xr.Dataset
         Dataset containing embeddings
-    window_step_fraction : float
-        Fraction of reference pattern length to use as window step
+    window_step : int
+        Step size for sliding window search
     num_candidates : int
         Number of best candidates to consider per lineage
     max_distance : float
@@ -787,8 +790,8 @@ def find_pattern_matches(
     pd.DataFrame
         Match results with distances and warping paths
     """
-    # Calculate window step based on reference pattern length
-    window_step = max(1, int(len(reference_pattern) * window_step_fraction))
+    # Use window_step directly as step size
+    window_step = max(1, window_step)
 
     all_match_positions = {
         "fov_name": [],
