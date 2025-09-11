@@ -36,7 +36,8 @@ def calculate_dataloader_settings(
 
     Returns
     -------
-    dict: Recommended settings for DataLoader
+    dict:
+        Dictionary with recommended settings for DataLoader
     """
     # Get system resources if not provided
     if available_ram_gb is None:

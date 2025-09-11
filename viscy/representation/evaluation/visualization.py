@@ -580,7 +580,7 @@ class EmbeddingVisualizationApp:
         )
         def update_track_timeline(clickData: dict[str, Any] | None) -> html.Div:
             """Update the track timeline based on the clicked point
-            
+
             Parameters
             ----------
             clickData: dict[str, Any] | None
@@ -1632,7 +1632,7 @@ class EmbeddingVisualizationApp:
             "utf-8"
         )
 
-    def save_cache(self, cache_path: str |Path | None = None) -> None:
+    def save_cache(self, cache_path: str | Path | None = None) -> None:
         """Save the image cache to disk using pickle.
 
         Parameters

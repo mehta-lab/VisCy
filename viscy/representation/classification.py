@@ -20,6 +20,13 @@ class ClassificationPredictionWriter(BasePredictionWriter):
     """
 
     def __init__(self, output_path: Path) -> None:
+        """Initialize the prediction writer.
+
+        Parameters
+        ----------
+        output_path : Path
+            Path to the output CSV file.
+        """
         super().__init__("epoch")
         if Path(output_path).exists():
             raise FileExistsError(f"Output path {output_path} already exists.")
@@ -36,13 +43,13 @@ class ClassificationPredictionWriter(BasePredictionWriter):
 
         Parameters
         ----------
-        trainer : lightning.Trainer
+        trainer : Trainer
             PyTorch Lightning trainer instance.
-        pl_module : lightning.LightningModule
+        pl_module : LightningModule
             Lightning module being trained.
-        predictions : list
+        predictions : list[dict[str, Any]]
             List of prediction dictionaries from all batches.
-        batch_indices : list
+        batch_indices : list[int]
             Indices of batches processed during prediction.
         """
         all_predictions = []
@@ -68,6 +75,17 @@ class ClassificationModule(LightningModule):
         lr: float | None,
         loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
     ) -> None:
+        """Initialize the classification module.
+
+        Parameters
+        ----------
+        encoder : ContrastiveEncoder
+            Contrastive encoder model.
+        lr : float | None
+            Learning rate.
+        loss : nn.Module | None
+            Loss function. By default, BCEWithLogitsLoss with positive weight of 1.0.
+        """
         super().__init__()
         self.stem = encoder.stem
         self.backbone = encoder.encoder
@@ -166,7 +184,7 @@ class ClassificationModule(LightningModule):
         batch: tuple[torch.Tensor, torch.Tensor, dict[str, Any]],
         batch_idx: int,
         dataloader_idx: int | None = None,
-    ) -> dict[str, Any]:
+    ) -> dict[str, torch.Tensor]:
         """Execute prediction step with sigmoid activation for probabilities.
 
         Parameters
@@ -180,7 +198,7 @@ class ClassificationModule(LightningModule):
 
         Returns
         -------
-        dict
+        dict[str, torch.Tensor]
             Dictionary containing indices, labels, and sigmoid probabilities.
         """
         x, y, indices = batch

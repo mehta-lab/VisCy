@@ -4,13 +4,14 @@ from collections.abc import Sequence
 
 import numpy as np
 from matplotlib.pyplot import get_cmap
+from numpy.typing import NDArray
 from skimage.exposure import rescale_intensity
 from torch import Tensor
 
 
 def detach_sample(
     imgs: Sequence[Tensor], log_samples_per_batch: int
-) -> list[list[np.ndarray]]:
+) -> list[list[NDArray]]:
     """Detach example images from the batch and convert them to numpy arrays.
 
     Parameters
@@ -22,7 +23,7 @@ def detach_sample(
 
     Returns
     -------
-    list[list[np.ndarray]]
+    list[list[NDArray]]
         Grid of example images.
         Rows are samples, columns are channels.
     """
@@ -38,21 +39,19 @@ def detach_sample(
     return samples
 
 
-def render_images(
-    imgs: Sequence[Sequence[np.ndarray]], cmaps: list[str] = []
-) -> np.ndarray:
+def render_images(imgs: Sequence[Sequence[NDArray]], cmaps: list[str] = []) -> NDArray:
     """Render images in a grid.
 
     Parameters
     ----------
-    imgs : Sequence[Sequence[np.ndarray]]
+    imgs : Sequence[Sequence[NDArray]]
         Grid of images to render, output of `detach_sample`.
     cmaps : list[str], optional
         Colormaps for each column, by default []
 
     Returns
     -------
-    np.ndarray
+    NDArray
         Rendered RGB images grid.
     """
     images_grid = []

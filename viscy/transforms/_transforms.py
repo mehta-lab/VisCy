@@ -76,7 +76,18 @@ class NormalizeSampled(MapTransform):
 
 
 class RandInvertIntensityd(MapTransform, RandomizableTransform):
-    """Randomly invert the intensity of the image."""
+    """
+    Randomly invert the intensity of the image.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to invert the intensity of.
+    prob : float, optional
+        Probability of inverting the intensity. By default, 0.1.
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. By default, False.
+    """
 
     def __init__(
         self,
@@ -101,6 +112,15 @@ class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
     """Crop multiple tiled ROIs from an image.
 
     Used for deterministic cropping in validation.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to crop.
+    roi_size : tuple[int, int, int]
+        ROI size.
+    num_samples : int
+        Number of samples.
     """
 
     def __init__(
@@ -148,7 +168,13 @@ class TiledSpatialCropSamplesd(MapTransform, MultiSampleTrait):
 
 
 class StackChannelsd(MapTransform):
-    """Stack source and target channels."""
+    """Stack source and target channels.
+
+    Parameters
+    ----------
+    channel_map : ChannelMap
+        Channel map.
+    """
 
     def __init__(self, channel_map: ChannelMap) -> None:
         channel_names = []
@@ -165,7 +191,21 @@ class StackChannelsd(MapTransform):
 
 
 class BatchedZoom(Transform):
-    """Batched zoom transform using ``torch.nn.functional.interpolate``."""
+    """Batched zoom transform using ``torch.nn.functional.interpolate``.
+
+    Parameters
+    ----------
+    scale_factor : float | tuple[float, float, float]
+        Scale factor.
+    mode : Literal["nearest", "nearest-exact", "linear", "bilinear", "bicubic", "trilinear", "area"]
+        Mode.
+    align_corners : bool | None
+        Align corners.
+    recompute_scale_factor : bool | None
+        Recompute scale factor.
+    antialias : bool
+        Whether to use antialiasing.
+    """
 
     def __init__(
         self,
@@ -201,6 +241,8 @@ class BatchedZoom(Transform):
 
 
 class BatchedScaleIntensityRangePercentiles(ScaleIntensityRangePercentiles):
+    """Batched scale intensity range percentiles."""
+
     def _normalize(self, img: Tensor) -> Tensor:
         q_low = self.lower / 100.0
         q_high = self.upper / 100.0
@@ -245,6 +287,32 @@ class BatchedScaleIntensityRangePercentiles(ScaleIntensityRangePercentiles):
 
 
 class BatchedScaleIntensityRangePercentilesd(MapTransform):
+    """Batched scale intensity range percentiles.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to scale.
+    lower : float
+        Lower percentile.
+    upper : float
+        Upper percentile.
+    b_min : float | None
+        Minimum value.
+    b_max : float | None
+        Maximum value.
+    clip : bool
+        Whether to clip the values.
+    relative : bool
+        Whether to use relative scaling.
+    channel_wise : bool
+        Whether to use channel-wise scaling.
+    dtype : DTypeLike
+        Data type.
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. By default, False.
+    """
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -271,6 +339,28 @@ class BatchedScaleIntensityRangePercentilesd(MapTransform):
 
 
 class BatchedRandAffined(MapTransform):
+    """Batched random affine.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to affine.
+    prob : float, optional
+        Probability of affine. By default, 0.1.
+    rotate_range : Sequence[tuple[float, float] | float] | float | None
+        Rotate range.
+    shear_range : Sequence[tuple[float, float] | float] | float | None
+        Shear range.
+    translate_range : Sequence[tuple[float, float] | float] | float | None
+        Translate range.
+    scale_range : Sequence[tuple[float, float] | float] | float | None
+        Scale range.
+    mode : str, optional
+        Mode. By default, "bilinear".
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. By default, False.
+    """
+
     def __init__(
         self,
         keys: str | Iterable[str],
@@ -334,6 +424,8 @@ class BatchedRandAffined(MapTransform):
 
 
 class RandGaussianNoiseTensor(RandGaussianNoise):
+    """Rand Gaussian Noise Tensor."""
+
     def randomize(self, img: Tensor, mean: float | None = None) -> None:
         self._do_transform = self.R.rand() < self.prob
         if not self._do_transform:
@@ -349,6 +441,26 @@ class RandGaussianNoiseTensor(RandGaussianNoise):
 
 
 class RandGaussianNoiseTensord(RandGaussianNoised):
+    """Rand Gaussian Noise Tensor.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to noise.
+    prob : float, optional
+        Probability of noise. By default, 0.1.
+    mean : float, optional
+        Mean. By default, 0.0.
+    std : float, optional
+        Standard deviation. By default, 0.1.
+    dtype : DTypeLike, optional
+        Data type. By default, np.float32.
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. By default, False.
+    sample_std : bool, optional
+        Whether to sample the standard deviation. By default, True.
+    """
+
     def __init__(
         self,
         keys: str | Iterable[str],

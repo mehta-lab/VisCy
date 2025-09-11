@@ -187,7 +187,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             PyTorch Lightning module being used for predictions.
         prediction : torch.Tensor
             Batch of predictions from the model.
-        batch_indices : Optional[Sequence[int]]
+        batch_indices : Sequence[int] | None
             Indices of the batch samples.
         batch : Sample
             Input batch data.

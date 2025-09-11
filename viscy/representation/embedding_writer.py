@@ -6,6 +6,7 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import torch
+import xarray as xr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
@@ -22,7 +23,7 @@ __all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def read_embedding_dataset(path: Path) -> Dataset:
+def read_embedding_dataset(path: Path) -> xr.Dataset:
     """Read the embedding dataset written by the EmbeddingWriter callback.
 
     Supports both legacy datasets (without x/y coordinates) and new datasets.
@@ -34,7 +35,7 @@ def read_embedding_dataset(path: Path) -> Dataset:
 
     Returns
     -------
-    Dataset
+    xr.Dataset
         Xarray dataset with features and projections.
     """
     dataset = open_zarr(path)
@@ -60,8 +61,8 @@ def _move_and_stack_embeddings(
 
 
 def write_embedding_dataset(
-    output_path: Path,
-    features: np.ndarray,
+    output_path: str | Path,
+    features: NDArray,
     index_df: pd.DataFrame,
     projections: np.ndarray | None = None,
     umap_kwargs: dict[str, Any] | None = None,
@@ -74,9 +75,9 @@ def write_embedding_dataset(
 
     Parameters
     ----------
-    output_path : Path
+    output_path : str | Path
         Path to the zarr store.
-    features : np.ndarray
+    features : NDArray
         Array of shape (n_samples, n_features) containing the embeddings.
     index_df : pd.DataFrame
         DataFrame containing the index information for each embedding.
@@ -191,11 +192,12 @@ class EmbeddingWriter(BasePredictionWriter):
         Path to the zarr store.
     write_interval : Literal["batch", "epoch", "batch_and_epoch"], optional
         When to write the embeddings, by default 'epoch'.
-    umap_kwargs : dict, optional
+    umap_kwargs : dict[str, Any], optional
         Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed).
-    phate_kwargs : dict, optional
+    phate_kwargs : dict[str, Any], optional
         Keyword arguments passed to PHATE, by default PHATE is computed with default parameters.
-    pca_kwargs : dict, optional
+        Default configuration passed is: {"knn": 5, "decay": 40, "n_jobs": -1, "random_state": 42}.
+    pca_kwargs : dict[str, Any], optional
         Keyword arguments passed to PCA, by default PCA is computed with default parameters.
     """
 

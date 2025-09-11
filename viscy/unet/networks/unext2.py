@@ -71,7 +71,19 @@ def _get_convnext_stage(
 
 
 class UNeXt2Stem(nn.Module):
-    """Stem for UNeXt2 and ContrastiveEncoder networks."""
+    """Stem for UNeXt2 and ContrastiveEncoder networks.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels.
+    kernel_size : tuple[int, int, int]
+        Kernel size.
+    in_stack_depth : int
+        Number of input stack depth.
+    """
 
     def __init__(
         self,
@@ -94,12 +106,12 @@ class UNeXt2Stem(nn.Module):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Input tensor of shape (B, C, D, H, W) where D is the stack depth.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Output tensor with depth projected to channels, shape (B, C*D', H', W')
             where D' = D // kernel_size[0] after 3D convolution.
         """
@@ -111,7 +123,21 @@ class UNeXt2Stem(nn.Module):
 
 
 class StemDepthtoChannels(nn.Module):
-    """Stem with 3D convolution that maps depth to channels."""
+    """Stem with 3D convolution that maps depth to channels.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    in_stack_depth : int
+        Number of input stack depth.
+    in_channels_encoder : int
+        Number of input channels for the encoder.
+    stem_kernel_size : tuple[int, int, int]
+        Kernel size.
+    stem_stride : tuple[int, int, int]
+        Stride.
+    """
 
     def __init__(
         self,
@@ -134,7 +160,11 @@ class StemDepthtoChannels(nn.Module):
         )
 
     def compute_stem_channels(
-        self, in_stack_depth, stem_kernel_size, stem_stride_depth, in_channels_encoder
+        self,
+        in_stack_depth: int,
+        stem_kernel_size: tuple[int, int, int],
+        stem_stride_depth: int,
+        in_channels_encoder: int,
     ):
         """Compute required 3D stem output channels for encoder compatibility.
 
@@ -199,7 +229,24 @@ class UNeXt2UpStage(nn.Module):
     low-resolution features with high-resolution skip connections for multi-scale
     feature fusion.
 
-    # TODO: MANUAL_REVIEW - ConvNeXt block integration with skip connections
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    skip_channels : int
+        Number of skip channels.
+    out_channels : int
+        Number of output channels.
+    scale_factor : int
+        Scale factor.
+    mode : Literal["deconv", "pixelshuffle"]
+        Mode. "deconv" for deconvolution, "pixelshuffle" for pixel shuffle.
+    conv_blocks : int
+        Number of ConvNeXt blocks.
+    norm_name : str
+        Name of the normalization layer.
+    upsample_pre_conv : Literal["default"] | Callable | None
+        Upsample pre-convolution.
     """
 
     def __init__(
@@ -283,7 +330,18 @@ class PixelToVoxelHead(nn.Module):
     convolutions. Applies depth channel expansion and spatial upsampling to
     generate volumetric outputs from 2D feature representations.
 
-    # TODO: MANUAL_REVIEW - 2D to 3D reconstruction mechanism
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels.
+    out_stack_depth : int
+        Number of output stack depth.
+    expansion_ratio : int
+        Expansion ratio.
+    pool : bool
+        Whether to apply pooling in upsampling.
     """
 
     def __init__(
@@ -375,7 +433,20 @@ class UNeXt2Decoder(nn.Module):
     combining features from different encoder scales through skip connections.
     Each stage performs feature upsampling and refinement using ConvNeXt blocks.
 
-    # TODO: MANUAL_REVIEW - Multi-scale feature fusion strategy
+    Parameters
+    ----------
+    num_channels : list[int]
+        Number of channels for each stage.
+    norm_name : str
+        Name of the normalization layer.
+    mode : Literal["deconv", "pixelshuffle"]
+        Mode. "deconv" for deconvolution, "pixelshuffle" for pixel shuffle.
+    conv_blocks : int
+        Number of ConvNeXt blocks.
+    strides : list[int]
+        Strides for each stage.
+    upsample_pre_conv : Literal["default"] | Callable | None
+        Upsample pre-convolution.
     """
 
     def __init__(
@@ -434,7 +505,36 @@ class UNeXt2(nn.Module):
     2D multi-scale processing through ConvNeXt encoder-decoder, and 2D-to-3D
     reconstruction via specialized head modules.
 
-    # TODO: MANUAL_REVIEW - ConvNeXt transformer integration patterns
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels.
+    out_channels : int
+        Number of output channels.
+    in_stack_depth : int
+        Number of input stack depth.
+    out_stack_depth : int, optional
+        Number of output stack depth. By default, None, it is the same as the input stack depth.
+    backbone : str
+        Backbone model.
+    pretrained : bool
+        Whether to use pretrained weights.
+    stem_kernel_size : tuple[int, int, int]
+        Kernel size.
+    decoder_mode : Literal["deconv", "pixelshuffle"]
+        Mode. "deconv" for deconvolution, "pixelshuffle" for pixel shuffle.
+    decoder_conv_blocks : int
+        Number of ConvNeXt blocks. By default, 2.
+    decoder_norm_layer : str, optional
+        Name of the normalization layer. By default, "instance".
+    decoder_upsample_pre_conv : bool, optional
+        Whether to use upsample pre-convolution. By default, False.
+    head_pool : bool, optional
+        Whether to apply pooling in upsampling. By default, False.
+    head_expansion_ratio : int, optional
+        Expansion ratio. By default, 4.
+    drop_path_rate : float, optional
+        Drop path rate. By default, 0.0.
     """
 
     def __init__(
@@ -442,7 +542,7 @@ class UNeXt2(nn.Module):
         in_channels: int = 1,
         out_channels: int = 1,
         in_stack_depth: int = 5,
-        out_stack_depth: int = None,
+        out_stack_depth: int | None = None,
         backbone: str = "convnextv2_tiny",
         pretrained: bool = False,
         stem_kernel_size: tuple[int, int, int] = (5, 4, 4),

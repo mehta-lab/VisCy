@@ -19,7 +19,7 @@ def im_bit_convert(
 
     Parameters
     ----------
-    im : array_like
+    im : ArrayLike
         Input image to convert.
     bit : int, optional
         Target bit depth (8 or 16), by default 16.
@@ -31,7 +31,7 @@ def im_bit_convert(
 
     Returns
     -------
-    np.array
+    NDArray
         Image converted to specified bit depth.
     """
     im = im.astype(
@@ -61,7 +61,7 @@ def im_adjust(img: ArrayLike, tol: int | float = 1, bit: int = 8) -> NDArray[Any
 
     Parameters
     ----------
-    img : array_like
+    img : ArrayLike
         Input image to adjust.
     tol : int or float, optional
         Tolerance percentile for contrast stretching, by default 1.
@@ -70,7 +70,7 @@ def im_adjust(img: ArrayLike, tol: int | float = 1, bit: int = 8) -> NDArray[Any
 
     Returns
     -------
-    np.array
+    NDArray
         Contrast-adjusted image in specified bit depth.
     """
     limit = np.percentile(img, [tol, 100 - tol])
@@ -87,18 +87,18 @@ def grid_sample_pixel_values(
 
     Parameters
     ----------
-    im : np.array
+    im : NDArray
         2D image to sample from.
     grid_spacing : int
         Spacing of the grid points.
 
     Returns
     -------
-    row_ids : np.array
+    row_ids : NDArray
         Row indices of the grid points.
-    col_ids : np.array
+    col_ids : NDArray
         Column indices of the grid points.
-    sample_values : np.array
+    sample_values : NDArray
         Sampled pixel values at grid points.
     """
     im_shape = im.shape
@@ -134,9 +134,9 @@ def preprocess_image(
 
     Parameters
     ----------
-    im : np.array
+    im : ArrayLike
         Input image or image stack.
-    hist_clip_limits : tuple, optional
+    hist_clip_limits : tuple[float, float], optional
         Percentile histogram clipping limits (min_percentile, max_percentile),
         by default None.
     is_mask : bool, optional
@@ -150,7 +150,7 @@ def preprocess_image(
 
     Returns
     -------
-    np.array
+    NDArray
         Preprocessed image.
     """
     # remove singular dimension for 3D images

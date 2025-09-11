@@ -9,7 +9,7 @@ from skimage.exposure import equalize_adapthist
 
 
 def zscore(
-    input_image: ArrayLike, im_mean: float | None = None, im_std: float | None = None
+    input_image: NDArray, im_mean: float | None = None, im_std: float | None = None
 ) -> NDArray[Any]:
     """Perform z-score normalization.
 
@@ -17,7 +17,7 @@ def zscore(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Input image for intensity normalization.
     im_mean : float, optional
         Image mean, by default None.
@@ -26,7 +26,7 @@ def zscore(
 
     Returns
     -------
-    np.array
+    NDArray
         Z-score normalized image.
     """
     if not im_mean:
@@ -37,16 +37,14 @@ def zscore(
     return norm_img
 
 
-def unzscore(
-    im_norm: ArrayLike, zscore_median: float, zscore_iqr: float
-) -> NDArray[Any]:
+def unzscore(im_norm: NDArray, zscore_median: float, zscore_iqr: float) -> NDArray[Any]:
     """Revert z-score normalization applied during preprocessing.
 
     Necessary before computing SSIM.
 
     Parameters
     ----------
-    im_norm : array_like
+    im_norm : NDArray
         Normalized image for un-zscore.
     zscore_median : float
         Image median.
@@ -55,7 +53,7 @@ def unzscore(
 
     Returns
     -------
-    array_like
+    NDArray
         Image at its original scale.
     """
     im = im_norm * (zscore_iqr + sys.float_info.epsilon) + zscore_median
@@ -63,7 +61,7 @@ def unzscore(
 
 
 def hist_clipping(
-    input_image: ArrayLike,
+    input_image: NDArray,
     min_percentile: int | float = 2,
     max_percentile: int | float = 98,
 ) -> NDArray[Any]:
@@ -73,7 +71,7 @@ def hist_clipping(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Input image for intensity normalization.
     min_percentile : int or float, optional
         Min intensity percentile, by default 2.
@@ -82,7 +80,7 @@ def hist_clipping(
 
     Returns
     -------
-    np.array
+    NDArray
         Intensity clipped and rescaled image.
     """
     assert (min_percentile < max_percentile) and max_percentile <= 100
@@ -92,10 +90,10 @@ def hist_clipping(
 
 
 def hist_adapteq_2D(
-    input_image: NDArray[Any],
+    input_image: NDArray,
     kernel_size: int | list[int] | tuple[int, ...] | None = None,
     clip_limit: float | None = None,
-) -> NDArray[Any]:
+) -> NDArray:
     """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) on 2D images.
 
     skimage.exposure.equalize_adapthist works only for 2D. Extend to 3D or use
@@ -103,7 +101,7 @@ def hist_adapteq_2D(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Input image for intensity normalization.
     kernel_size : int or list, optional
         Neighbourhood to be used for histogram equalization. If None, use default
@@ -116,7 +114,7 @@ def hist_adapteq_2D(
 
     Returns
     -------
-    np.array
+    NDArray
         Adaptive histogram equalized image.
     """
     nrows, ncols = input_image.shape

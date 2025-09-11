@@ -1,33 +1,39 @@
 import os
 import sys
+from pathlib import Path
 
 import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
+from numpy.typing import NDArray
 
 import viscy.utils.mp_utils as mp_utils
 from viscy.utils.cli_utils import show_progress_bar
 
 
 def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
-    """Write 'metadata' to position's plate-level or FOV level .zattrs metadata.
+    """Write metadata to position's plate-level or FOV level .zattrs metadata.
 
-    Write 'metadata' to position's plate-level or FOV level .zattrs metadata by either
-    creating a new field (field_name) according to 'metadata', or updating the metadata
-    to an existing field if found,
-    or concatenating the metadata from different channels.
+    Write metadata to position's plate-level or FOV level .zattrs metadata by either
+    creating a new field (field_name) according to metadata, or updating the metadata
+    to an existing field if found, or concatenating the metadata from different channels.
 
-    Assumes that the zarr store group given follows the OMG-NGFF HCS
-    format as specified here:
-            https://ngff.openmicroscopy.org/latest/#hcs-layout
+    Assumes that the zarr store group given follows the OME-NGFF HCS
+    format as specified here: https://ngff.openmicroscopy.org/latest/#hcs-layout
 
     Warning: Dangerous. Writing metadata fields above the image-level of
-            an HCS hierarchy can break HCS compatibility
+    an HCS hierarchy can break HCS compatibility.
 
-    :param Position zarr_dir: NGFF position node object
-    :param dict metadata: metadata dictionary to write to JSON .zattrs
-    :param str subfield_name: name of subfield inside the the main field
-        (values for different channels)
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object.
+    metadata : dict
+        Metadata dictionary to write to JSON .zattrs.
+    field_name : str
+        Name of the main metadata field.
+    subfield_name : str
+        Name of subfield inside the main field (values for different channels).
     """
     if field_name in position.zattrs:
         if subfield_name in position.zattrs[field_name]:
@@ -47,10 +53,10 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
 
 
 def generate_normalization_metadata(
-    zarr_dir,
-    num_workers=4,
-    channel_ids=-1,
-    grid_spacing=32,
+    zarr_dir: str | Path,
+    num_workers: int = 4,
+    channel_ids: list[int] | int = -1,
+    grid_spacing: int = 32,
 ):
     """Generate pixel intensity metadata for on-the-fly normalization.
 
@@ -65,17 +71,22 @@ def generate_normalization_metadata(
         channel_idx : {
             dataset_statistics: dataset level normalization values (positive float),
             fov_statistics: field-of-view level normalization values (positive float)
-        },
-        .
-        .
-        .
+        }
     }
 
-    :param str zarr_dir: path to zarr store directory containing dataset.
-    :param int num_workers: number of cpu workers for multiprocessing, defaults to 4
-    :param list/int channel_ids: indices of channels to process in dataset arrays,
-                                    by default calculates all
-    :param int grid_spacing: distance between points in sampling grid
+    Warning: Dangerous. Writing metadata fields above the image-level of
+    an HCS hierarchy can break HCS compatibility.
+
+    Parameters
+    ----------
+    zarr_dir : str
+        Path to zarr store directory containing dataset.
+    num_workers : int, optional
+        Number of CPU workers for multiprocessing, by default 4.
+    channel_ids : list[int] | int, optional
+        Indices of channels to process in dataset arrays, by default -1 (all channels).
+    grid_spacing : int, optional
+        Distance between points in sampling grid, by default 32.
     """
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
@@ -172,12 +183,22 @@ def generate_normalization_metadata(
     print(f"Dataset-level statistics: {final_dataset_stats}")
 
 
-def compute_normalization_stats(image_data, grid_spacing=32):
+def compute_normalization_stats(
+    image_data: NDArray, grid_spacing: int = 32
+) -> dict[str, float]:
     """Compute normalization statistics from image data using grid sampling.
 
-    :param np.array image_data: 3D or 4D image array (z, y, x) or (t, z, y, x)
-    :param int grid_spacing: spacing between grid points for sampling
-    :return dict: dictionary with median and IQR statistics
+    Parameters
+    ----------
+    image_data : np.ndarray
+        3D or 4D image array of shape (z, y, x) or (t, z, y, x).
+    grid_spacing : int, optional
+        Spacing between grid points for sampling, by default 32.
+
+    Returns
+    -------
+    dict[str, float]
+        Dictionary with median and IQR statistics for normalization.
     """
     # Handle different input shapes
     if image_data.ndim == 4:

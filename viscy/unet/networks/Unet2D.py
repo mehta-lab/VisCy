@@ -184,7 +184,7 @@ class Unet2d(nn.Module):
                 kernel_size=self.kernel_size,
             )
 
-    def forward(self, x, validate_input=False):
+    def forward(self, x: torch.Tensor, validate_input: bool = False) -> torch.Tensor:
         """Forward pass through the 2D U-Net.
 
         Call order:
@@ -234,7 +234,7 @@ class Unet2d(nn.Module):
 
         return x.unsqueeze(2)
 
-    def register_modules(self, module_list, name):
+    def register_modules(self, module_list: list[nn.Module], name: str) -> None:
         """Helper function that registers modules stored in a list to the model object.
 
         So that they can be seen by PyTorch optimizer.

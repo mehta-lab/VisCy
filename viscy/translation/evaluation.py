@@ -12,7 +12,13 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class SegmentationMetrics2D(LightningModule):
-    """Test runner for 2D segmentation."""
+    """Test runner for 2D segmentation.
+
+    Parameters
+    ----------
+    aggregate_epoch : bool, optional
+        Whether to aggregate the metrics over the epoch. Defaults to False.
+    """
 
     def __init__(self, aggregate_epoch: bool = False) -> None:
         super().__init__()

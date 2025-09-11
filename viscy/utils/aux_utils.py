@@ -1,5 +1,7 @@
 """Auxiliary utility functions."""
 
+from pathlib import Path
+
 import iohub.ngff as ngff
 import yaml
 
@@ -44,7 +46,7 @@ def _assert_unique_subset(subset, superset, name):
 
 
 def validate_metadata_indices(
-    zarr_dir,
+    zarr_dir: str | Path,
     time_ids=[],
     channel_ids=[],
     slice_ids=[],
@@ -61,7 +63,7 @@ def validate_metadata_indices(
 
     Parameters
     ----------
-    zarr_dir : str
+    zarr_dir : str | Path
         HCS-compatible zarr directory to validate indices against.
     time_ids : list, optional
         Check availability of these timepoints in image metadata, by default [].
@@ -113,12 +115,12 @@ def validate_metadata_indices(
     return indices_metadata
 
 
-def read_config(config_fname):
+def read_config(config_fname: str | Path):
     """Read the config file in yml format.
 
     Parameters
     ----------
-    config_fname : str
+    config_fname : str | Path
         Filename of config yaml with its full path.
 
     Returns

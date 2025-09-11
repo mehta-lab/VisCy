@@ -3,23 +3,26 @@
 import collections
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 import torch
+from numpy.typing import NDArray
 from PIL import Image
+from torch.utils.data import DataLoader
 
 
-def unique_tags(directory):
+def unique_tags(directory: str | Path) -> dict[str, int]:
     """Return list of unique nume tags from data directory.
 
     Parameters
     ----------
-    directory : str
+    directory : str | Path
         Directory containing '.tif' files.
 
     Returns
     -------
-    dict
+    dict[str, int]
         Dictionary of unique tags and their counts.
 
     Notes
@@ -46,13 +49,18 @@ class MultiProcessProgressBar:
 
     Provides the ability to create & update a single progress bar for multi-depth
     multi-processed tasks by calling updates on a single object.
+
+    Parameters
+    ----------
+    total_updates : int
+        Total number of updates.
     """
 
-    def __init__(self, total_updates):
+    def __init__(self, total_updates: int) -> None:
         self.dataloader = list(range(total_updates))
         self.current = 0
 
-    def tick(self, process):
+    def tick(self, process: str) -> None:
         """Update progress bar with current process status.
 
         Parameters
@@ -64,14 +72,16 @@ class MultiProcessProgressBar:
         show_progress_bar(self.dataloader, self.current, process)
 
 
-def show_progress_bar(dataloader, current, process="training", interval=1):
+def show_progress_bar(
+    dataloader: DataLoader, current: int, process: str = "training", interval: int = 1
+) -> None:
     """Print TensorFlow-like progress bar for batch processing.
 
     Written instead of using tqdm to allow for custom progress bar readouts.
 
     Parameters
     ----------
-    dataloader : iterable
+    dataloader : DataLoader
         Dataloader currently being processed.
     current : int
         Current index in dataloader.
@@ -105,7 +115,14 @@ def show_progress_bar(dataloader, current, process="training", interval=1):
         print(output_string)
 
 
-def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
+def save_figure(
+    data: NDArray | torch.Tensor,
+    save_folder: str | Path,
+    name: str,
+    title: str | None = None,
+    vmax: float = 0,
+    ext: str = ".png",
+) -> None:
     """Save image data as PNG or JPEG figure.
 
     Saves .png or .jpeg figure of data to folder save_folder under 'name'.
@@ -113,9 +130,9 @@ def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
 
     Parameters
     ----------
-    data : numpy.ndarray or torch.Tensor
+    data : NDArray | torch.Tensor
         Input image/stack data to save in channels_first format.
-    save_folder : str
+    save_folder : str | Path
         Global path to folder where data is saved.
     name : str
         Name of data, no extension specified.
@@ -125,12 +142,17 @@ def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
         Value to normalize figure to, by default 0 (uses data max).
     ext : str, optional
         Image save file extension, by default ".png".
+
+    Raises
+    ------
+    AttributeError
+        If data is not a torch tensor or numpy array.
     """
     assert len(data.shape) == 3, f"'{len(data.shape)}d' data must be 3-dimensional"
 
     if isinstance(data, torch.Tensor):
         data = data.detach().cpu().numpy()
-    elif not isinstance(data, np.ndarray):
+    elif not isinstance(data, NDArray):
         raise AttributeError(
             f"'data' of type {type(data)} must be torch tensor or numpy array."
         )

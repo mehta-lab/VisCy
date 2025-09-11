@@ -8,7 +8,7 @@ from datetime import datetime
 import torch
 from jsonargparse import lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
-from lightning.pytorch.cli import LightningCLI
+from lightning.pytorch.cli import LightningArgumentParser, LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
 from viscy.trainer import VisCyTrainer
@@ -33,12 +33,12 @@ class VisCyCLI(LightningCLI):
         subcommands["precompute"] = subcommand_base_args
         return subcommands
 
-    def add_arguments_to_parser(self, parser) -> None:
+    def add_arguments_to_parser(self, parser: LightningArgumentParser) -> None:
         """Add default arguments to the Lightning CLI parser.
 
         Parameters
         ----------
-        parser
+        parser : LightningArgumentParser
             Lightning CLI parser instance to configure.
         """
         parser.set_defaults(

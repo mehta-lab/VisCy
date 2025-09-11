@@ -21,7 +21,7 @@ def create_otsu_mask(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Generate masks from this 3D image.
     sigma : float, optional
         Gaussian blur standard deviation, increase in value increases blur,
@@ -29,7 +29,7 @@ def create_otsu_mask(
 
     Returns
     -------
-    np.array
+    NDArray
         Volume mask of input_image, 3D binary array.
     """
     input_sz = input_image.shape
@@ -52,7 +52,7 @@ def create_membrane_mask(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Generate masks from this image.
     str_elem_size : int, optional
         Size of the laplacian filter used for contrast enhancement, odd number.
@@ -68,7 +68,7 @@ def create_membrane_mask(
 
     Returns
     -------
-    np.array
+    NDArray
         Binary mask of input_image.
     """
     input_image_blur = gaussian(input_image, sigma=sigma)
@@ -100,7 +100,7 @@ def get_unimodal_threshold(input_image: NDArray[Any]) -> float:
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Generate mask for this image.
 
     Returns
@@ -150,7 +150,7 @@ def create_unimodal_mask(
 
     Parameters
     ----------
-    input_image : np.array
+    input_image : NDArray
         Generate masks from this image.
     str_elem_size : int, optional
         Size of the structuring element, typically 3 or 5, by default 3.
@@ -159,7 +159,7 @@ def create_unimodal_mask(
 
     Returns
     -------
-    np.array
+    NDArray
         Binary mask of input_image.
     """
     input_image = gaussian(input_image, sigma=sigma)
@@ -189,7 +189,7 @@ def get_unet_border_weight_map(
 
     Parameters
     ----------
-    annotation : np.array
+    annotation : NDArray
         A 2D array of shape (image_height, image_width) containing annotation
         with each class labeled as an integer.
     w0 : int, optional
@@ -202,7 +202,7 @@ def get_unet_border_weight_map(
 
     Returns
     -------
-    np.array
+    NDArray
         Weight map for borders as specified in U-Net paper.
     """
     # if there is only one label, zero return the array as is

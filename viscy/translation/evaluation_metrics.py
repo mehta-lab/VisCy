@@ -1,20 +1,18 @@
 """Metrics for model evaluation."""
 
 from collections.abc import Sequence
-from typing import Union
-from warnings import warn
 
 import numpy as np
 import torch
 import torch.nn.functional as F
 from monai.metrics.regression import compute_ssim_and_cs
+from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
-from torchvision.ops import masks_to_boxes
 
 
-def VOI_metric(target, prediction):
+def VOI_metric(target: NDArray, prediction: NDArray) -> list[float]:
     """
     Variation of information metric.
 
@@ -22,14 +20,14 @@ def VOI_metric(target, prediction):
 
     Parameters
     ----------
-    target : np.array
+    target : NDArray
         Ground truth mask.
-    prediction : np.array
+    prediction : NDArray
         Model inferred FL image cellpose mask.
 
     Returns
     -------
-    list of float
+    list[float]
         VI for image masks.
     """
     # cellpose segmentation of predicted image: outputs labl mask
@@ -67,21 +65,28 @@ def VOI_metric(target, prediction):
     return [VI]
 
 
-def POD_metric(target_bin, pred_bin):
+def POD_metric(
+    target_bin: NDArray, pred_bin: NDArray
+) -> tuple[float, float, float, int, int]:
     """
     Probability of detection metric for object matching.
 
     Parameters
     ----------
-    target_bin : array_like
+    target_bin : NDArray
         Binary ground truth mask.
-    pred_bin : array_like
+    pred_bin : NDArray
         Binary predicted mask.
 
     Returns
     -------
-    tuple
+    tuple[float, float, float, int, int]
         POD and various detection statistics.
+        - POD: Probability of detection
+        - FAR: False alarm rate
+        - PCD: Probability of correct detection
+        - n_targObj: Number of target objects
+        - n_predObj: Number of predicted objects
     """
     # pred_bin = cpmask_array(prediction)
 
@@ -136,7 +141,7 @@ def POD_metric(target_bin, pred_bin):
     # probability of correct detection
     PCD = len(matching_targ) / len(props_targ)
 
-    return [POD, FAR, PCD, len(props_targ), len(props_pred)]
+    return (POD, FAR, PCD, len(props_targ), len(props_pred))
 
 
 def compute_3d_dice_score(
@@ -146,7 +151,26 @@ def compute_3d_dice_score(
     threshold: float = 0.5,
     aggregate: bool = True,
 ) -> torch.Tensor:
-    """Compute 3D Dice similarity coefficient."""
+    """Compute 3D Dice similarity coefficient.
+
+    Parameters
+    ----------
+    y_true : torch.Tensor
+        True labels.
+    y_pred : torch.Tensor
+        Predicted labels.
+    eps : float, optional
+        Epsilon to avoid division by zero. Defaults to 1e-8.
+    threshold : float, optional
+        Threshold for binarization. Defaults to 0.5.
+    aggregate : bool, optional
+        Whether to aggregate the dice score. Defaults to True.
+
+    Returns
+    -------
+    torch.Tensor
+        Dice score.
+    """
     y_pred_thresholded = (y_pred > threshold).float()
     intersection = torch.sum(y_true * y_pred_thresholded, dim=(-3, -2, -1))
     total = torch.sum(y_true + y_pred_thresholded, dim=(-3, -2, -1))
@@ -161,7 +185,22 @@ def compute_jaccard_index(
     y_pred: torch.Tensor,
     threshold: float = 0.5,
 ) -> torch.Tensor:
-    """Compute Jaccard index (IoU)."""
+    """Compute Jaccard index (IoU).
+
+    Parameters
+    ----------
+    y_true : torch.Tensor
+        True labels.
+    y_pred : torch.Tensor
+        Predicted labels.
+    threshold : float, optional
+        Threshold for binarization. Defaults to 0.5.
+
+    Returns
+    -------
+    torch.Tensor
+        Jaccard index.
+    """
     y_pred_thresholded = y_pred > threshold
     intersection = torch.sum(y_true & y_pred_thresholded, dim=(-3, -2, -1))
     union = torch.sum(y_true | y_pred_thresholded, dim=(-3, -2, -1))
@@ -171,7 +210,22 @@ def compute_jaccard_index(
 def compute_pearson_correlation_coefficient(
     y_true: torch.Tensor, y_pred: torch.Tensor, dim: Sequence[int] | None = None
 ) -> torch.Tensor:
-    """Compute Pearson correlation coefficient."""
+    """Compute Pearson correlation coefficient.
+
+    Parameters
+    ----------
+    y_true : torch.Tensor
+        True labels.
+    y_pred : torch.Tensor
+        Predicted labels.
+    dim : Sequence[int] | None, optional
+        Dimensions to compute the Pearson correlation coefficient. Defaults to None.
+
+    Returns
+    -------
+    torch.Tensor
+        Pearson correlation coefficient.
+    """
     if dim is None:
         # default to spatial dimensions
         dim = (-3, -2, -1)
@@ -192,7 +246,20 @@ def compute_pearson_correlation_coefficient(
 
 
 class MeanAveragePrecisionNuclei(MeanAveragePrecision):
-    """Mean Average Precision for nuclei detection."""
+    """Mean Average Precision for nuclei detection.
+
+    Parameters
+    ----------
+    min_area : int, optional
+        Minimum area of nuclei to be considered. Defaults to 20.
+    iou_threshold : float, optional
+        IoU threshold for matching. Defaults to 0.5.
+
+    Returns
+    -------
+    torch.Tensor
+        Mean average precision score.
+    """
 
     def __init__(self, min_area: int = 20, iou_threshold: float = 0.5) -> None:
         super().__init__(iou_thresholds=[iou_threshold])
@@ -283,7 +350,7 @@ def ssim_loss_25d(
 
     Returns
     -------
-    torch.Tensor or tuple[torch.Tensor, torch.Tensor]
+    torch.Tensor | tuple[torch.Tensor, torch.Tensor]
         SSIM for the batch, optionally with contrast sensitivity.
     """
     if preds.ndim != 5:

@@ -230,7 +230,15 @@ class Unet25d(nn.Module):
                 between them (decoder)
             => terminal block collapses to output dimensions
 
-        :param torch.tensor x: input image
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input image.
+
+        Returns
+        -------
+        torch.Tensor
+            Output image.
         """
         # encoder
         skip_tensors = []

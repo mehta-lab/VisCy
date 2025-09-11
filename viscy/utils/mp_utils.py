@@ -6,6 +6,7 @@ import iohub.ngff as ngff
 import numpy as np
 import scipy.stats
 import zarr
+from numpy.typing import NDArray
 
 import viscy.utils.image_utils as image_utils
 import viscy.utils.masks as mask_utils
@@ -61,7 +62,7 @@ def mp_create_and_write_mask(fn_args: list[tuple[Any, ...]], workers: int) -> li
 
 def add_channel(
     position: ngff.Position,
-    new_channel_array: np.ndarray,
+    new_channel_array: NDArray,
     new_channel_name: str,
     overwrite_ok: bool = False,
 ) -> None:
@@ -82,7 +83,7 @@ def add_channel(
     ----------
     position : ngff.Position
         NGFF position node object.
-    new_channel_array : np.ndarray
+    new_channel_array : NDArray
         Array to add as new channel with matching dimensions (except channel dim)
         and dtype.
     new_channel_name : str
@@ -229,7 +230,7 @@ def get_mask_slice(
     channel_index: int,
     mask_type: str,
     structure_elem_radius: int,
-) -> np.ndarray:
+) -> NDArray:
     """Compute mask for a single image slice.
 
     Given a set of indices, mask type, and structuring element,
@@ -251,7 +252,7 @@ def get_mask_slice(
 
     Returns
     -------
-    np.ndarray
+    NDArray
         2D mask for this slice.
     """
     # read and correct/preprocess slice
@@ -280,9 +281,17 @@ def mp_get_val_stats(fn_args: list[Any], workers: int) -> list[dict[str, float]]
     """
     Compute statistics of numpy arrays with multiprocessing
 
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned df from get_im_stats
+    Parameters
+    ----------
+    fn_args : list of tuple
+        List with tuples of function arguments.
+    workers : int
+        Max number of workers.
+
+    Returns
+    -------
+    list[dict[str, float]]
+        List of returned df from get_im_stats.
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
@@ -303,7 +312,7 @@ def get_val_stats(sample_values: list[float]) -> dict[str, float]:
 
     Returns
     -------
-    dict
+    dict[str, float]
         Dictionary with intensity data for image.
     """
     meta_row = {
@@ -320,9 +329,17 @@ def mp_sample_im_pixels(
 ) -> list[list[Any]]:
     """Read and computes statistics of images with multiprocessing
 
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of paths and corresponding returned df from get_im_stats
+    Parameters
+    ----------
+    fn_args : list[tuple[Any, ...]]
+        List with tuples of function arguments.
+    workers : int
+        Max number of workers.
+
+    Returns
+    -------
+    list[list[Any]]
+        List of paths and corresponding returned df from get_im_stats.
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
@@ -334,7 +351,7 @@ def sample_im_pixels(
     position: ngff.Position,
     grid_spacing: int,
     channel: int,
-) -> tuple[ngff.Position, np.ndarray]:
+) -> tuple[ngff.Position, NDArray]:
     # TODO move out of mp utils into normalization utils
     """Read and compute statistics of images for each point in a grid.
 
@@ -354,8 +371,8 @@ def sample_im_pixels(
 
     Returns
     -------
-    list
-        Dicts with intensity data for each grid point.
+    tuple[ngff.Position, NDArray]
+        Position and array with intensity data for each grid point.
     """
     image_zarr = position.data
 

@@ -96,7 +96,29 @@ class JointEncoders(nn.Module):
 
 
 class JointContrastiveModule(ContrastiveModule):
-    """CLIP-style model pair for self-supervised cross-modality representation learning."""
+    """CLIP-style model pair for self-supervised cross-modality representation learning.
+
+    Parameters
+    ----------
+    encoder : nn.Module | JointEncoders
+        Encoder model.
+    loss_function : nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
+        Loss function. By default, nn.TripletMarginLoss with margin 0.5.
+    lr : float
+        Learning rate. By default, 1e-3.
+    schedule : Literal["WarmupCosine", "Constant"]
+        Schedule for learning rate. By default, "Constant".
+    log_batches_per_epoch : int
+        Number of batches to log. By default, 8.
+    log_samples_per_batch : int
+        Number of samples to log. By default, 1.
+    log_embeddings : bool
+        Whether to log embeddings. By default, False.
+    example_input_array_shape : Sequence[int]
+        Shape of example input array.
+    prediction_arm : Literal["source", "target"]
+        Arm to use for prediction. By default, "source".
+    """
 
     def __init__(
         self,

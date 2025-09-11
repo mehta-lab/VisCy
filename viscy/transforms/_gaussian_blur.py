@@ -12,6 +12,25 @@ from torch import Tensor
 
 
 class RandomGaussianBlur(IntensityAugmentationBase3D):
+    """
+    Random Gaussian Blur.
+
+    Parameters
+    ----------
+    kernel_size : tuple[int, int, int] | int
+        Kernel size.
+    sigma : tuple[float, float, float] | Tensor
+        Sigma.
+    border_type : str, optional
+        Border type. By default, "reflect".
+    same_on_batch : bool, optional
+        Whether to apply the same transformation to all batches. By default, False.
+    p : float, optional
+        Probability of applying the transformation. By default, 0.5.
+    keepdim : bool, optional
+        Whether to keep the dimensions of the input tensor. By default, False.
+    """
+
     def __init__(
         self,
         kernel_size: tuple[int, int, int] | int,
@@ -44,6 +63,27 @@ class RandomGaussianBlur(IntensityAugmentationBase3D):
 
 
 class BatchedRandGaussianBlurd(MapTransform, RandomizableTransform):
+    """
+    Batched Random Gaussian Blur.
+
+    Parameters
+    ----------
+    keys : str | Iterable[str]
+        Keys to apply the transformation to.
+    kernel_size : tuple[int, int] | int
+        Kernel size.
+    sigma : tuple[float, float]
+        Sigma.
+    border_type : str, optional
+        Border type. By default, "reflect".
+    same_on_batch : bool, optional
+        Whether to apply the same transformation to all batches. By default, False.
+    prob : float, optional
+        Probability of applying the transformation. By default, 0.1.
+    allow_missing_keys : bool, optional
+        Whether to allow missing keys. By default, False.
+    """
+
     def __init__(
         self,
         keys: str | Iterable[str],

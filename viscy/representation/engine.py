@@ -2,10 +2,10 @@ import logging
 from collections.abc import Sequence
 from typing import Literal, TypedDict
 
-import numpy as np
 import torch
 import torch.nn.functional as F
 from lightning.pytorch import LightningModule
+from numpy.typing import NDArray
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 from umap import UMAP
@@ -29,7 +29,27 @@ class ContrastivePrediction(TypedDict):
 
 
 class ContrastiveModule(LightningModule):
-    """Contrastive Learning Model for self-supervised learning."""
+    """Contrastive Learning Model for self-supervised learning.
+
+    Parameters
+    ----------
+    encoder : nn.Module | ContrastiveEncoder
+        Encoder model.
+    loss_function : nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
+        Loss function. By default, nn.TripletMarginLoss with margin 0.5.
+    lr : float
+        Learning rate. By default, 1e-3.
+    schedule : Literal["WarmupCosine", "Constant"]
+        Schedule for learning rate. By default, "Constant".
+    log_batches_per_epoch : int
+        Number of batches to log. By default, 8.
+    log_samples_per_batch : int
+        Number of samples to log. By default, 1.
+    log_embeddings : bool
+        Whether to log embeddings. By default, False.
+    example_input_array_shape : Sequence[int]
+        Shape of example input array.
+    """
 
     def __init__(
         self,
@@ -86,7 +106,9 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{prefix}_mean: {mean}")
         _logger.debug(f"{prefix}_std: {std}")
 
-    def print_embedding_norms(self, anchor, positive, negative, phase):
+    def print_embedding_norms(
+        self, anchor: Tensor, positive: Tensor, negative: Tensor, phase: str
+    ):
         """Log L2 norms of embeddings for triplet components.
 
         Parameters
@@ -108,7 +130,12 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{phase}/negative_norm: {negative_norm}")
 
     def _log_metrics(
-        self, loss, anchor, positive, stage: Literal["train", "val"], negative=None
+        self,
+        loss: Tensor,
+        anchor: Tensor,
+        positive: Tensor,
+        stage: Literal["train", "val"],
+        negative: Tensor | None = None,
     ):
         self.log(
             f"loss/{stage}",
@@ -144,7 +171,7 @@ class ContrastiveModule(LightningModule):
             sync_dist=True,
         )
 
-    def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
+    def _log_samples(self, key: str, imgs: Sequence[Sequence[NDArray]]):
         grid = render_images(imgs, cmaps=["gray"] * 3)
         self.logger.experiment.add_image(
             key, grid, self.current_epoch, dataformats="HWC"
@@ -295,19 +322,19 @@ class ContrastiveModule(LightningModule):
 
         self.validation_step_outputs = []
 
-    def configure_optimizers(self):
+    def configure_optimizers(self) -> torch.optim.AdamW:
         """Configure optimizer for contrastive learning.
 
         Returns
         -------
-        torch.optim.Optimizer
+        torch.optim.AdamW
             AdamW optimizer with configured learning rate.
         """
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
     def predict_step(
-        self, batch: TripletSample, batch_idx, dataloader_idx=0
+        self, batch: TripletSample, batch_idx: int, dataloader_idx: int = 0
     ) -> ContrastivePrediction:
         """Prediction step for extracting embeddings."""
         features, projections = self.model(batch["anchor"])

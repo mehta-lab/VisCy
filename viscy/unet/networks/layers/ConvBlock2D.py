@@ -31,29 +31,33 @@ class ConvBlock2D(nn.Module):
     ) -> None:
         """Initialize convolutional block for lateral layers in U-Net.
 
-        Format for layer initialization is as follows:
-            if layer type specified
-            => for number of layers
-            => add layer to list of that layer type
-            => register elements of list
-        This is done to allow for dynamic layer number specification in the conv blocks,
-        which allows us to change the parameter numbers of the network.
+        Format for layer initialization allows dynamic layer number specification
+        in the conv blocks, enabling parameter number flexibility across the network.
 
-        :param int in_filters: number of images in in stack
-        :param int out_filters: number of images in out stack
-        :param float dropout: dropout probability (False => 0)
-        :param str norm: normalization type: 'batch', 'instance'
-        :param bool residual: as name
-        :param str activation: activation function: 'relu', 'leakyrelu', 'elu', 'selu'
-        :param bool transpose: as name
-        :param int/tuple kernel_size: convolutional kernel size
-        :param int num_repeats: number of times the layer_order layer sequence
-            is repeated in the block
-        :param str filter_steps: determines where in the block
-            the filters inflate channels (learn abstraction information):
-            'linear','first','last'
-        :param str layer_order: order of conv, norm, and act layers in block:
-            'can', 'cna', 'nca', etc
+        Parameters
+        ----------
+        in_filters : int
+            Number of input feature channels.
+        out_filters : int
+            Number of output feature channels.
+        dropout : float or bool, default=False
+            Dropout probability. If False, no dropout is applied.
+        norm : {"batch", "instance"}, default="batch"
+            Normalization type to apply.
+        residual : bool, default=True
+            Whether to include residual connections.
+        activation : {"relu", "leakyrelu", "elu", "selu", "linear"}, default="relu"
+            Activation function type.
+        transpose : bool, default=False
+            Whether to use transpose convolution layers.
+        kernel_size : int or tuple[int, int], default=3
+            2D convolutional kernel size.
+        num_repeats : int, default=3
+            Number of times the layer_order sequence is repeated in the block.
+        filter_steps : {"linear", "first", "last"}, default="first"
+            Strategy for channel dimension changes across layers.
+        layer_order : str, default="can"
+            Order of conv (c), activation (a), normalization (n) layers.
         """
         super().__init__()
         self.in_filters = in_filters
@@ -274,16 +278,14 @@ class ConvBlock2D(nn.Module):
         """Forward pass through the convolutional block.
 
         Order of layers within the block is defined by the 'layer_order' parameter,
-        which is a string of 'c's, 'a's and 'n's
-        in reference to convolution, activation, and normalization layers.
-        This sequence is repeated num_repeats times.
+        which is a string of 'c's, 'a's and 'n's in reference to convolution,
+        activation, and normalization layers. This sequence is repeated num_repeats times.
 
-        Recommended layer order:   convolution -> activation -> normalization
+        Recommended layer order: convolution -> activation -> normalization
 
-        Regardless of layer order,
-        the final layer sequence in the block always ends in activation.
-        This allows for usage of passthrough layers
-        or a final output activation function determined separately.
+        Regardless of layer order, the final layer sequence in the block always ends
+        in activation. This allows for usage of passthrough layers or a final output
+        activation function determined separately.
 
         Residual blocks:
             if input channels are greater than output channels,
@@ -291,9 +293,18 @@ class ConvBlock2D(nn.Module):
             if input channels are less than output channels,
             we zero-pad input channels to output channel size.
 
-        :param torch.tensor x: input tensor
-        :param bool validate_input: Deactivates assertions
-            which are redundant if forward pass is being traced by tensorboard writer.
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor for convolutional processing.
+        validate_input : bool, default=False
+            Deactivates assertions which are redundant if forward pass is being
+            traced by tensorboard writer.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor after convolutional block processing.
         """
         if validate_input:
             if isinstance(self.kernel_size, int):

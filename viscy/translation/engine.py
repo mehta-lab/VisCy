@@ -13,7 +13,7 @@ from monai.data.utils import collate_meta_tensor
 from monai.optimizers import WarmupCosineSchedule
 from monai.transforms import DivisiblePad, Rotate90
 from torch import Tensor, nn
-from torch.optim.lr_scheduler import ConstantLR
+from torch.optim.lr_scheduler import ConstantLR, LRScheduler
 from torchmetrics.functional import (
     accuracy,
     cosine_similarity,
@@ -73,19 +73,19 @@ class MixedLoss(nn.Module):
         self.ms_dssim_alpha = ms_dssim_alpha
 
     @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
-    def forward(self, preds: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    def forward(self, preds: Tensor, target: Tensor) -> Tensor:
         """Compute mixed reconstruction loss.
 
         Parameters
         ----------
-        preds : torch.Tensor
+        preds : Tensor
             Predicted tensor
-        target : torch.Tensor
+        target : Tensor
             Target tensor
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Combined loss value
         """
         loss = 0
@@ -109,23 +109,21 @@ class MaskedMSELoss(nn.Module):
     Computes MSE loss only for masked regions.
     """
 
-    def forward(
-        self, preds: torch.Tensor, original: torch.Tensor, mask: torch.Tensor
-    ) -> torch.Tensor:
+    def forward(self, preds: Tensor, original: Tensor, mask: Tensor) -> Tensor:
         """Compute masked MSE loss.
 
         Parameters
         ----------
-        preds : torch.Tensor
+        preds : Tensor
             Predicted tensor.
-        original : torch.Tensor
+        original : Tensor
             Original tensor.
-        mask : torch.Tensor
+        mask : Tensor
             Binary mask tensor.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Masked MSE loss value.
         """
         loss = F.mse_loss(preds, original, reduction="none")
@@ -240,31 +238,29 @@ class VSUNet(LightningModule):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Input tensor.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Model output.
         """
         return self.model(x)
 
-    def training_step(
-        self, batch: Sample | Sequence[Sample], batch_idx: int
-    ) -> torch.Tensor:
+    def training_step(self, batch: Sample | Sequence[Sample], batch_idx: int) -> Tensor:
         """Execute single training step.
 
         Parameters
         ----------
-        batch : Sample or Sequence[Sample]
+        batch : Sample | Sequence[Sample]
             Training batch data.
         batch_idx : int
             Batch index.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Training loss.
         """
         losses = []
@@ -306,8 +302,8 @@ class VSUNet(LightningModule):
             Validation batch data.
         batch_idx : int
             Batch index.
-        dataloader_idx : int, default=0
-            Dataloader index for multi-dataloader validation.
+        dataloader_idx : int
+            Dataloader index for multi-dataloader validation. By default, 0.
         """
         source: Tensor = batch["source"]
         target: Tensor = batch["target"]
@@ -390,7 +386,7 @@ class VSUNet(LightningModule):
             on_epoch=True,
         )
 
-    def _cellpose_predict(self, pred: Tensor, name: str) -> torch.ShortTensor:
+    def _cellpose_predict(self, pred: Tensor, name: str) -> Tensor:
         pred_labels_np = self.cellpose_model.eval(
             pred.cpu().numpy(), channels=[0, 0], diameter=self.test_cellpose_diameter
         )[0].astype(np.int16)
@@ -398,7 +394,7 @@ class VSUNet(LightningModule):
         return torch.from_numpy(pred_labels_np).to(self.device)
 
     def _log_segmentation_metrics(
-        self, pred_labels: torch.ShortTensor, target_labels: torch.ShortTensor
+        self, pred_labels: Tensor, target_labels: Tensor
     ) -> None:
         compute = pred_labels is not None
         if compute:
@@ -440,7 +436,7 @@ class VSUNet(LightningModule):
 
     def predict_step(
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
-    ) -> dict[str, Any]:
+    ) -> Tensor:
         """Execute single prediction step.
 
         Parameters
@@ -454,7 +450,7 @@ class VSUNet(LightningModule):
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Model prediction.
         """
         source = batch["source"]
@@ -475,12 +471,12 @@ class VSUNet(LightningModule):
 
         Parameters
         ----------
-        source : torch.Tensor
+        source : Tensor
             Input tensor.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Aggregated prediction.
         """
         # Save the yx coords to crop post rotations
@@ -531,7 +527,13 @@ class VSUNet(LightningModule):
         self.validation_losses.clear()
 
     def on_test_start(self) -> None:
-        """Load CellPose model for segmentation."""
+        """Load CellPose model for segmentation.
+
+        Raises
+        ------
+        ImportError
+            If CellPose is not installed.
+        """
         if self.test_cellpose_model_path is not None:
             try:
                 from cellpose.models import CellposeModel
@@ -555,13 +557,15 @@ class VSUNet(LightningModule):
         down_factor = 2**self.model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
-    def configure_optimizers(self) -> tuple[list[torch.optim.Optimizer], list[Any]]:
+    def configure_optimizers(
+        self,
+    ) -> tuple[list[torch.optim.Optimizer], list[LRScheduler]]:
         """Configure optimizer and learning rate scheduler.
 
         Returns
         -------
-        tuple
-            Tuple containing optimizer and scheduler lists.
+        tuple[list[torch.optim.Optimizer], list[LRScheduler]]
+            Tuple containing a list of optimizers and schedulers.
         """
         if self.freeze_encoder:
             self.model: FullyConvolutionalMAE
@@ -669,12 +673,12 @@ class AugmentedPredictionVSUNet(LightningModule):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Input tensor.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Model output.
         """
         return self.model(x)
@@ -702,12 +706,12 @@ class AugmentedPredictionVSUNet(LightningModule):
 
         Parameters
         ----------
-        preds : list[torch.Tensor]
+        preds : list[Tensor]
             List of prediction tensors.
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Reduced prediction tensor.
         """
         prediction = torch.stack(preds, dim=0)
@@ -733,7 +737,7 @@ class AugmentedPredictionVSUNet(LightningModule):
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Aggregated prediction from augmented inputs.
         """
         source = batch["source"]
@@ -811,14 +815,14 @@ class FcmaeUNet(VSUNet):
 
         Parameters
         ----------
-        x : torch.Tensor
+        x : Tensor
             Input tensor.
         mask_ratio : float, default=0.0
             Masking ratio for FCMAE mode.
 
         Returns
         -------
-        torch.Tensor or tuple
+        Tensor or tuple
             Model output, optionally with mask if mask_ratio > 0.
         """
         return self.model(x, mask_ratio)
@@ -837,7 +841,7 @@ class FcmaeUNet(VSUNet):
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor or None, torch.Tensor]
+        tuple[Tensor, Tensor or None, Tensor]
             Prediction, target (if requested), and loss.
         """
         x = batch["source"]
@@ -859,7 +863,7 @@ class FcmaeUNet(VSUNet):
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor, torch.Tensor]
+        tuple[Tensor, Tensor, Tensor]
             Prediction, target, and loss.
         """
         x = batch["source"]
@@ -885,7 +889,7 @@ class FcmaeUNet(VSUNet):
 
         Returns
         -------
-        tuple[torch.Tensor, torch.Tensor or None, torch.Tensor]
+        tuple[Tensor, Tensor | None, Tensor]
             Prediction, target, and loss.
         """
         if self.model.pretraining:
@@ -902,7 +906,7 @@ class FcmaeUNet(VSUNet):
 
         Parameters
         ----------
-        batch : list[dict[str, torch.Tensor]]
+        batch : list[dict[str, Tensor]]
             List of batch dictionaries from multiple data modules.
 
         Returns
@@ -933,7 +937,7 @@ class FcmaeUNet(VSUNet):
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Collated and transformed batch.
         """
         batch = self.datamodules[dataloader_idx].val_gpu_transforms(batch)
@@ -951,7 +955,7 @@ class FcmaeUNet(VSUNet):
 
         Returns
         -------
-        torch.Tensor
+        Tensor
             Training loss.
         """
         batch = self.train_transform_and_collate(batch)
