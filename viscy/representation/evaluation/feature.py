@@ -275,8 +275,8 @@ class CellFeatures:
         """
         # Convert 0-1 normalized image to uint8 (0-255)
         image_uint8 = (self.image_normalized * 255).astype(np.uint8)
-        texture_features = mh.features.haralick(image_uint8).ptp(0)
-        return np.mean(texture_features)
+        texture_features = mh.features.haralick(image_uint8)
+        return np.mean(np.ptp(texture_features, axis=0))
 
     def _compute_perimeter_area_ratio(self):
         """Compute the perimeter of the nuclear segmentations found inside the patch.

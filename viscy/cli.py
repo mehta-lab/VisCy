@@ -64,3 +64,7 @@ def main() -> None:
             "description": "Computer vision models for single-cell phenotyping."
         },
     )
+
+
+if __name__ == "__main__":
+    main()

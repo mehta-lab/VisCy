@@ -4,6 +4,7 @@ from typing import Sequence
 
 from monai.transforms import (
     CenterSpatialCropd,
+    Decollated,
     NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
@@ -15,8 +16,32 @@ from monai.transforms import (
     RandSpatialCropd,
     RandWeightedCropd,
     ScaleIntensityRangePercentilesd,
+    ToDeviced,
 )
 from numpy.typing import DTypeLike
+
+
+class Decollated(Decollated):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        detach: bool = True,
+        pad_batch: bool = True,
+        fill_value: float | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            keys=keys,
+            detach=detach,
+            pad_batch=pad_batch,
+            fill_value=fill_value,
+            **kwargs,
+        )
+
+
+class ToDeviced(ToDeviced):
+    def __init__(self, keys: Sequence[str] | str, **kwargs):
+        super().__init__(keys=keys, **kwargs)
 
 
 class NormalizeIntensityd(NormalizeIntensityd):

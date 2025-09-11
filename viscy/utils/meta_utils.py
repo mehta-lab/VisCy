@@ -4,9 +4,10 @@ import sys
 import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
+import tensorstore
+from tqdm import tqdm
 
-import viscy.utils.mp_utils as mp_utils
-from viscy.utils.cli_utils import show_progress_bar
+from viscy.utils.mp_utils import get_val_stats
 
 
 def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
@@ -45,11 +46,23 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
         position.zattrs[field_name] = field_metadata
 
 
+def _grid_sample(
+    position: ngff.Position, grid_spacing: int, channel_index: int, num_workers: int
+):
+    return (
+        position["0"]
+        .tensorstore(
+            context=tensorstore.Context(
+                {"data_copy_concurrency": {"limit": num_workers}}
+            )
+        )[:, channel_index, :, ::grid_spacing, ::grid_spacing]
+        .read()
+        .result()
+    )
+
+
 def generate_normalization_metadata(
-    zarr_dir,
-    num_workers=4,
-    channel_ids=-1,
-    grid_spacing=32,
+    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32
 ):
     """
     Generate pixel intensity metadata to be later used in on-the-fly normalization
@@ -89,31 +102,22 @@ def generate_normalization_metadata(
         mp_grid_sampler_args.append([position, grid_spacing])
 
     # sample values and use them to get normalization statistics
-    for i, channel in enumerate(channel_ids):
-        show_progress_bar(
-            dataloader=channel_ids,
-            current=i,
-            process="sampling channel values",
-        )
+    for i, channel_index in enumerate(channel_ids):
+        print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
-        channel_name = plate.channel_names[channel]
-        this_channels_args = tuple([args + [channel] for args in mp_grid_sampler_args])
+        channel_name = plate.channel_names[channel_index]
+        dataset_sample_values = []
+        position_and_statistics = []
 
-        # NOTE: Doing sequential mp with pool execution creates synchronization
-        #      points between each step. This could be detrimental to performance
-        positions, fov_sample_values = mp_utils.mp_sample_im_pixels(
-            this_channels_args, num_workers
-        )
-        dataset_sample_values = np.concatenate(
-            [arr.flatten() for arr in fov_sample_values]
-        )
-        fov_level_statistics = mp_utils.mp_get_val_stats(fov_sample_values, num_workers)
-        dataset_level_statistics = mp_utils.get_val_stats(dataset_sample_values)
+        for _, pos in tqdm(position_map, desc="Positions"):
+            samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
+            dataset_sample_values.append(samples)
+            fov_level_statistics = {"fov_statistics": get_val_stats(samples)}
+            position_and_statistics.append((pos, fov_level_statistics))
 
         dataset_statistics = {
-            "dataset_statistics": dataset_level_statistics,
+            "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
         }
-
         write_meta_field(
             position=plate,
             metadata=dataset_statistics,
@@ -121,22 +125,14 @@ def generate_normalization_metadata(
             subfield_name=channel_name,
         )
 
-        for j, pos in enumerate(positions):
-            show_progress_bar(
-                dataloader=position_map,
-                current=j,
-                process=f"calculating channel statistics {channel}/{list(channel_ids)}",
-            )
-            position_statistics = dataset_statistics | {
-                "fov_statistics": fov_level_statistics[j],
-            }
-
+        for pos, position_statistics in position_and_statistics:
             write_meta_field(
                 position=pos,
-                metadata=position_statistics,
+                metadata=dataset_statistics | position_statistics,
                 field_name="normalization",
                 subfield_name=channel_name,
             )
+
     plate.close()
 
 
