@@ -268,4 +268,3 @@ def get_val_stats(sample_values):
         "iqr": float(scipy.stats.iqr(sample_values)),
     }
     return meta_row
-

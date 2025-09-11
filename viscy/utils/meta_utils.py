@@ -47,10 +47,7 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
 
 
 def _grid_sample(
-    position: ngff.Position,
-    grid_spacing: int,
-    channel_index: int,
-    num_workers: int,
+    position: ngff.Position, grid_spacing: int, channel_index: int, num_workers: int
 ):
     return (
         position["0"]
@@ -65,10 +62,7 @@ def _grid_sample(
 
 
 def generate_normalization_metadata(
-    zarr_dir,
-    num_workers=4,
-    channel_ids=-1,
-    grid_spacing=32,
+    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32
 ):
     """
     Generate pixel intensity metadata to be later used in on-the-fly normalization
@@ -109,7 +103,7 @@ def generate_normalization_metadata(
 
     # sample values and use them to get normalization statistics
     for i, channel_index in enumerate(channel_ids):
-        print(f"Sampling channel index {channel_index} ({i}/{len(channel_ids)})")
+        print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
         channel_name = plate.channel_names[channel_index]
         dataset_sample_values = []
