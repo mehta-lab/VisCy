@@ -4,9 +4,13 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import pandas as pd
 import seaborn as sns
-from iohub.ngff import open_ome_zarr
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, classification_report, f1_score
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    f1_score,
+    roc_auc_score,
+)
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 
@@ -69,12 +73,14 @@ model = LogisticRegression(class_weight="balanced", random_state=42, solver="lib
 model = model.fit(train_features, train_annotation)
 train_prediction = model.predict(train_features)
 val_prediction = model.predict(val_features)
+val_prediction_score = model.predict_proba(val_features)
 
 print("Training\n", classification_report(train_annotation, train_prediction))
 print("Validation\n", classification_report(val_annotation, val_prediction))
 
 val_selected["label"] = val_selected["infection_state"].cat.codes
 val_selected["prediction_binary"] = val_prediction
+val_selected["prediction"] = val_prediction_score[:, 1]
 
 # %%
 prediction = val_selected
@@ -107,17 +113,22 @@ f1_by_t = prediction.groupby(["stage"]).apply(
     lambda x: float(f1_score(x["label"], x["prediction_binary"]))
 )
 
+roc_auc_by_t = prediction.groupby(["stage"]).apply(
+    lambda x: float(roc_auc_score(x["label"], x["prediction"]))
+)
+
 metrics_df = pd.DataFrame(
     data={
         "accuracy": accuracy_by_t.values,
         "F1": f1_by_t.values,
+        "ROC AUC": roc_auc_by_t.values,
     },
     index=f1_by_t.index,
 ).reset_index()
 
 metrics_long = metrics_df.melt(
     id_vars=["stage"],
-    value_vars=["accuracy"],
+    value_vars=["ROC AUC"],
     var_name="metric",
     value_name="score",
 )
@@ -133,7 +144,7 @@ with sns.axes_style("ticks"):
         legend=False,
         color="gray",
     )
-    g.set_axis_labels("HPI", "accuracy")
+    g.set_axis_labels("HPI", "ROC AUC")
     g.figure.set_size_inches(3.5, 0.75)
     g.set(xlim=(-1, 7), ylim=(0.9, 1.0))
     plt.show()

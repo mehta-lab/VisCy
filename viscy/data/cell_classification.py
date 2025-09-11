@@ -10,7 +10,6 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.hcs import _read_norm_meta
-from viscy.data.triplet import INDEX_COLUMNS
 
 
 class ClassificationDataset(Dataset):
@@ -42,6 +41,16 @@ class ClassificationDataset(Dataset):
             annotation["y"].between(*y_range, inclusive="neither")
             & annotation["x"].between(*x_range, inclusive="neither")
         ]
+        self._index_columns = [
+            "fov_name",
+            "track_id",
+            "t",
+            "id",
+            "parent_track_id",
+            "parent_id",
+            "y",
+            "x",
+        ]
 
     def __len__(self):
         return len(self.annotation)
@@ -68,7 +77,7 @@ class ClassificationDataset(Dataset):
             img = self.transform(img)
         label = torch.tensor(row["infection_state"]).float()[None]
         if self.return_indices:
-            return img, label, row[INDEX_COLUMNS].to_dict()
+            return img, label, row[self._index_columns].to_dict()
         else:
             return img, label
 
