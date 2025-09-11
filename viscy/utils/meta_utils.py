@@ -7,10 +7,10 @@ from pathlib import Path
 import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
-from numpy.typing import NDArray
+import tensorstore
+from tqdm import tqdm
 
-import viscy.utils.mp_utils as mp_utils
-from viscy.utils.cli_utils import show_progress_bar
+from viscy.utils.mp_utils import get_val_stats
 
 
 def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
@@ -52,6 +52,21 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
             subfield_name: metadata,
         }
         position.zattrs[field_name] = field_metadata
+
+
+def _grid_sample(
+    position: ngff.Position, grid_spacing: int, channel_index: int, num_workers: int
+):
+    return (
+        position["0"]
+        .tensorstore(
+            context=tensorstore.Context(
+                {"data_copy_concurrency": {"limit": num_workers}}
+            )
+        )[:, channel_index, :, ::grid_spacing, ::grid_spacing]
+        .read()
+        .result()
+    )
 
 
 def generate_normalization_metadata(
@@ -181,8 +196,7 @@ def generate_normalization_metadata(
                 subfield_name=str(channel_id),
             )
 
-    print(f"Generated normalization metadata for {len(channel_ids)} channels")
-    print(f"Dataset-level statistics: {final_dataset_stats}")
+    plate.close()
 
 
 def compute_normalization_stats(
