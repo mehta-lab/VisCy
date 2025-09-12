@@ -11,9 +11,9 @@ def calculate_cosine_similarity_cell(
     embedding_dataset: Dataset, fov_name: str, track_id: int
 ) -> tuple[NDArray, NDArray]:
     """
-    
+
     Extract embeddings and calculate cosine similarities for a specific cell
-    
+
     Parameters
     ----------
     embedding_dataset : Dataset

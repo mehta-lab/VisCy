@@ -78,7 +78,9 @@ def compute_phate(
     return phate_model, phate_embedding
 
 
-def compute_pca(embedding_dataset: NDArray | Dataset, n_components=None, normalize_features=True):
+def compute_pca(
+    embedding_dataset: NDArray | Dataset, n_components=None, normalize_features=True
+):
     """Compute PCA embeddings for features and optionally update dataset.
 
     Parameters
