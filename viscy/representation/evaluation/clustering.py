@@ -1,3 +1,5 @@
+"""Methods for evaluating clustering performance."""
+
 import numpy as np
 from numpy.typing import ArrayLike, NDArray
 from scipy.spatial.distance import cdist
@@ -10,12 +12,16 @@ from sklearn.metrics import (
 from sklearn.neighbors import KNeighborsClassifier
 
 
-def knn_accuracy(embeddings, annotations, k=5):
+def knn_accuracy(embeddings: NDArray, annotations: NDArray, k: int = 5) -> float:
     """
     Evaluate the k-NN classification accuracy.
 
     Parameters
     ----------
+    embeddings : NDArray
+        Embeddings to cluster.
+    annotations : NDArray
+        Ground truth labels.
     k : int, optional
         Number of neighbors to use for k-NN. Default is 5.
 

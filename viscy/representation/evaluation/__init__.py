@@ -18,19 +18,19 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 from pathlib import Path
 
 import pandas as pd
-import xarray as xr
 from viscy.data.triplet import TripletDataModule
+from xarray import DataArray
 
 
 def load_annotation(
-    da: xr.DataArray, path: str, name: str, categories: dict | None = None
+    da: DataArray, path: str, name: str, categories: dict | None = None
 ) -> pd.Series:
     """
     Load annotations from a CSV file and map them to the dataset.
 
     Parameters
     ----------
-    da : xr.DataArray
+    da : DataArray
         The dataset array containing 'fov_name' and 'id' coordinates.
     path : str
         Path to the CSV file containing annotations.

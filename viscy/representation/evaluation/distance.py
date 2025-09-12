@@ -2,14 +2,32 @@ from collections import defaultdict
 from typing import Literal
 
 import numpy as np
-import xarray as xr
+from numpy.typing import NDArray
 from sklearn.metrics.pairwise import cosine_similarity
+from xarray import Dataset
 
 
 def calculate_cosine_similarity_cell(
-    embedding_dataset: xr.Dataset, fov_name: str, track_id: int
-):
-    """Extract embeddings and calculate cosine similarities for a specific cell"""
+    embedding_dataset: Dataset, fov_name: str, track_id: int
+) -> tuple[NDArray, NDArray]:
+    """
+    
+    Extract embeddings and calculate cosine similarities for a specific cell
+    
+    Parameters
+    ----------
+    embedding_dataset : Dataset
+        Dataset containing embeddings and metadata
+    fov_name : str
+        Field of view identifier
+    track_id : int
+        Track identifier for the specific cell
+
+    Returns
+    -------
+    tuple[NDArray, NDArray]
+        Time points and cosine similarities for the specific cell
+    """
     filtered_data = embedding_dataset.where(
         (embedding_dataset["fov_name"] == fov_name)
         & (embedding_dataset["track_id"] == track_id),
@@ -25,7 +43,7 @@ def calculate_cosine_similarity_cell(
 
 
 def compute_displacement(
-    embedding_dataset: xr.Dataset,
+    embedding_dataset: Dataset,
     distance_metric: Literal["euclidean_squared", "cosine"] = "euclidean_squared",
 ) -> dict[int, list[float]]:
     """Compute the displacement or mean square displacement (MSD) of embeddings.
@@ -37,15 +55,13 @@ def compute_displacement(
 
     Parameters
     ----------
-    embedding_dataset : xarray.Dataset
+    embedding_dataset : Dataset
         Dataset containing embeddings and metadata
-    distance_metric : str
+    distance_metric : Literal["euclidean_squared", "cosine"]
         The metric to use for computing distances between embeddings.
         Valid options are:
-        - "euclidean": Euclidean distance (L2 norm)
         - "euclidean_squared": Squared Euclidean distance (for MSD, default)
         - "cosine": Cosine similarity
-        - "cosine_dissimilarity": 1 - cosine similarity
 
     Returns
     -------
@@ -152,13 +168,13 @@ def compute_dynamic_range(mean_displacement_per_tau: dict[int, float]):
     return max(displacements) - min(displacements)
 
 
-def compute_rms_per_track(embedding_dataset: xr.Dataset):
+def compute_rms_per_track(embedding_dataset: Dataset):
     """
     Compute RMS of the time derivative of embeddings per track.
 
     Parameters
     ----------
-    embedding_dataset : xarray.Dataset
+    embedding_dataset : Dataset
         The dataset containing embeddings, timepoints, fov_name, and track_id.
 
     Returns
@@ -204,13 +220,13 @@ def compute_rms_per_track(embedding_dataset: xr.Dataset):
 
 
 def calculate_normalized_euclidean_distance_cell(
-    embedding_dataset: xr.Dataset, fov_name: str, track_id: int
+    embedding_dataset: Dataset, fov_name: str, track_id: int
 ):
     """Calculate normalized euclidean distance for a specific cell track.
 
     Parameters
     ----------
-    embedding_dataset : xr.Dataset
+    embedding_dataset : Dataset
         Dataset containing embedding data with fov_name and track_id coordinates
     fov_name : str
         Field of view identifier

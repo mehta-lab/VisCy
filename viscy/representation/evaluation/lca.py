@@ -5,7 +5,6 @@ from collections.abc import Mapping
 import pandas as pd
 import torch
 import torch.nn as nn
-import xarray as xr
 from captum.attr import IntegratedGradients, Occlusion
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
@@ -13,10 +12,11 @@ from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
 from torch import Tensor
 from viscy.representation.contrastive import ContrastiveEncoder
+from xarray import DataArray
 
 
 def fit_logistic_regression(
-    features: xr.DataArray,
+    features: DataArray,
     annotations: pd.Series,
     train_fovs: list[str],
     remove_background_class: bool = True,
@@ -32,7 +32,7 @@ def fit_logistic_regression(
 
     Parameters
     ----------
-    features : xr.DataArray
+    features : DataArray
         Xarray of features.
     annotations : pd.Series
         Categorical class annotations with label values starting from 0.

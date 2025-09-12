@@ -1,25 +1,30 @@
+from typing import TYPE_CHECKING
+
 import pandas as pd
 import umap
-import xarray as xr
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
+from xarray import Dataset
+
+if TYPE_CHECKING:
+    from phate import PHATE
 
 
 def compute_phate(
-    embedding_dataset: NDArray | xr.Dataset,
+    embedding_dataset: NDArray | Dataset,
     n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
     update_dataset: bool = False,
     **phate_kwargs,
-) -> tuple[object, NDArray]:
+) -> tuple[PHATE, NDArray]:
     """
     Compute PHATE embeddings for features and optionally update dataset.
 
     Parameters
     ----------
-    embedding_dataset : xr.Dataset | NDArray
+    embedding_dataset : NDArray | Dataset
         The dataset containing embeddings, timepoints, fov_name, and track_id,
         or a numpy array of embeddings.
     n_components : int, optional
@@ -35,7 +40,7 @@ def compute_phate(
 
     Returns
     -------
-    tuple[object, NDArray]
+    tuple[phate.PHATE, NDArray]
         PHATE model and PHATE embeddings
 
     Raises
@@ -53,7 +58,7 @@ def compute_phate(
     # Get embeddings from dataset if needed
     embeddings = (
         embedding_dataset["features"].values
-        if isinstance(embedding_dataset, xr.Dataset)
+        if isinstance(embedding_dataset, Dataset)
         else embedding_dataset
     )
 
@@ -64,7 +69,7 @@ def compute_phate(
     phate_embedding = phate_model.fit_transform(embeddings)
 
     # Update dataset if requested
-    if update_dataset and isinstance(embedding_dataset, xr.Dataset):
+    if update_dataset and isinstance(embedding_dataset, Dataset):
         for i in range(
             min(2, phate_embedding.shape[1])
         ):  # Only update PHATE1 and PHATE2
@@ -73,12 +78,12 @@ def compute_phate(
     return phate_model, phate_embedding
 
 
-def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
+def compute_pca(embedding_dataset: NDArray | Dataset, n_components=None, normalize_features=True):
     """Compute PCA embeddings for features and optionally update dataset.
 
     Parameters
     ----------
-    embedding_dataset : xr.Dataset or NDArray
+    embedding_dataset : Dataset | NDArray
         The dataset containing embeddings, timepoints, fov_name, and track_id,
         or a numpy array of embeddings.
     n_components : int, optional
@@ -93,7 +98,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
     """
     embeddings = (
         embedding_dataset["features"].values
-        if isinstance(embedding_dataset, xr.Dataset)
+        if isinstance(embedding_dataset, Dataset)
         else embedding_dataset
     )
 
@@ -107,7 +112,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
     pc_features = PCA_features.fit_transform(scaled_features)
 
     # Create base dictionary with id and fov_name
-    if isinstance(embedding_dataset, xr.Dataset):
+    if isinstance(embedding_dataset, Dataset):
         pca_dict = {
             "id": embedding_dataset["id"].values,
             "fov_name": embedding_dataset["fov_name"].values,
@@ -139,13 +144,13 @@ def _fit_transform_umap(
 
 
 def compute_umap(
-    embedding_dataset: xr.Dataset, normalize_features: bool = True
+    embedding_dataset: Dataset, normalize_features: bool = True
 ) -> tuple[umap.UMAP, umap.UMAP, pd.DataFrame]:
     """Compute UMAP embeddings for features and projections.
 
     Parameters
     ----------
-    embedding_dataset : xr.Dataset
+    embedding_dataset : Dataset
         Xarray dataset with features and projections.
     normalize_features : bool, optional
         Scale the input to zero mean and unit variance before fitting UMAP,

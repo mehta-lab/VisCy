@@ -6,7 +6,6 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 import torch
-import xarray as xr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
@@ -23,7 +22,7 @@ __all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def read_embedding_dataset(path: Path) -> xr.Dataset:
+def read_embedding_dataset(path: Path) -> Dataset:
     """Read the embedding dataset written by the EmbeddingWriter callback.
 
     Supports both legacy datasets (without x/y coordinates) and new datasets.
@@ -35,7 +34,7 @@ def read_embedding_dataset(path: Path) -> xr.Dataset:
 
     Returns
     -------
-    xr.Dataset
+    Dataset
         Xarray dataset with features and projections.
     """
     dataset = open_zarr(path)
