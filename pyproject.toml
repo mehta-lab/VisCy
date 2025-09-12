@@ -104,6 +104,5 @@ ignore = [
   "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
   "D401", # First line should be in imperative mood; try rephrasing
 ]
-per-file-ignores."*/__init__.py" = ["F401"]
 per-file-ignores."tests/*" = ["D"]
 pydocstyle.convention = "numpy"

@@ -396,7 +396,20 @@ class CachedConcatDataModule(LightningDataModule):
 
     Concatenates multiple data modules with support for distributed
     sampling and caching optimizations for large-scale ML training.
-    # TODO: MANUAL_REVIEW - Verify caching behavior and memory usage
+
+    Parameters
+    ----------
+    data_modules : Sequence[LightningDataModule]
+        Data modules to concatenate.
+
+    Raises
+    ------
+    ValueError
+        If inconsistent number of workers or batch size across data modules.
+    NotImplementedError
+        If stage other than "fit" is requested.
+    ValueError
+        If patches per stack are inconsistent across data modules.
     """
 
     def __init__(self, data_modules: Sequence[LightningDataModule]):
