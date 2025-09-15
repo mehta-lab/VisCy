@@ -11,17 +11,25 @@ from scipy.spatial.distance import cdist
 from tqdm import tqdm
 from typing_extensions import TypedDict
 
-from viscy.representation.embedding_writer import read_embedding_dataset
-
 _logger = logging.getLogger("lightning.pytorch")
 
 #Annotated Example TypeDict
-class AnnotatedExample(TypedDict):
+class AnnotatedSample(TypedDict):
     fov_name: str
     track_id: int | list[int]
     timepoints: tuple[int, int]
     annotations: dict | list
     weight: float
+
+# DTW configuration
+class DTWConfig(TypedDict, total=False):
+    window_step: int
+    num_candidates: int
+    max_distance: float
+    max_skew: float
+    method: str
+    normalize: bool
+    metric: str
 
 @dataclass
 class DTWResult:
@@ -32,36 +40,52 @@ class DTWResult:
     
 
 class CytoDtw:    
-    def __init__(self, embedding_path: str | Path, tracks_path: Optional[str | Path] = None):
+    def __init__(self, embeddings: xr.Dataset, annotations_df: pd.DataFrame):
         """
         DTW for Dynamic Cell Embeddings 
                
         Parameters
         ----------
-        embedding_path : str | Path
-            Path to embedding dataset (zarr file)
-        tracks_path : str | Path, optional
-            Path to tracking data
+        embeddings  : xr.Dataset
+            Embedding dataset (zarr file)
         """
-        self.embedding_path = Path(embedding_path)
-        self.tracks_path = Path(tracks_path) if tracks_path else None
-        self._embeddings = None
-        self._tracking_df = None
+        self.embeddings=embeddings
+        self.annotations_df=annotations_df
+        self.lineages = None
+
+
+        self.consensus_data = None
+
+    def _validate_input(self):
+        raise NotImplementedError("Validation of input not implemented")
+    
+    def get_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
+        """Get identified lineages with specified minimum timepoints."""
+        return self._identify_lineages(min_timepoints)
         
-    @property
-    def embeddings(self) -> xr.Dataset:
-        """Load embeddings dataset lazily."""
-        if self._embeddings is None:
-            self._embeddings = read_embedding_dataset(str(self.embedding_path))
-        return self._embeddings
-    
-    @property  
-    def tracking_df(self) -> pd.DataFrame:
-        """Load tracking dataframe lazily."""
-        if self._tracking_df is None and self.tracks_path:
-            raise NotImplementedError("Tracking data loading not yet implemented")
-        return self._tracking_df
-    
+    def _identify_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
+        """Auto-identify lineages from the data."""
+        # Use parent_track_id if available for proper lineage identification
+        if 'parent_track_id' in self.annotations_df.columns:
+            all_lineages = identify_lineages(self.annotations_df, return_both_branches=False)
+        else:
+            # Fallback: treat each track as individual lineage
+            all_lineages = []
+            for (fov, track_id), group in self.annotations_df.groupby(['fov_name', 'track_id']):
+                all_lineages.append((fov, [track_id]))
+        
+        # Filter lineages by total timepoints across all tracks in lineage
+        filtered_lineages = []
+        for fov_id, track_ids in all_lineages:
+            lineage_rows = self.annotations_df[
+                (self.annotations_df["fov_name"] == fov_id) & (self.annotations_df["track_id"].isin(track_ids))
+            ]
+            total_timepoints = len(lineage_rows)
+            if total_timepoints >= min_timepoints:
+                filtered_lineages.append((fov_id, track_ids))
+        self.lineages=filtered_lineages
+        return self.lineages
+
     def get_reference_pattern(self, fov_name: str, track_id: int | list[int], 
                             timepoints: tuple[int, int]) -> np.ndarray:
         """
@@ -96,8 +120,8 @@ class CytoDtw:
         
         return reference_pattern
     
-    def find_pattern_matches(self, reference_pattern: np.ndarray, 
-                           filtered_lineages: list[tuple[str, list[int]]] = None,
+    def get_matches(self, reference_pattern: np.ndarray=None, 
+                           lineages: list[tuple[str, list[int]]] = None,
                            window_step: int = 5,
                            num_candidates: int = 3, 
                            max_distance: float = float("inf"),
@@ -112,7 +136,7 @@ class CytoDtw:
         ----------
         reference_pattern : np.ndarray
             Reference pattern to search for
-        filtered_lineages : list[tuple[str, list[int]]], optional
+        lineages : list[tuple[str, list[int]]], optional
             List of (fov_name, track_ids) to search in. If None, searches all.
         window_step : int
             Step size for sliding window search
@@ -136,13 +160,15 @@ class CytoDtw:
         pd.DataFrame
             Match results with distances and warping paths
         """
-        if filtered_lineages is None:
+        if reference_pattern is None:
+            reference_pattern = self.consensus_data['consensus_pattern']
+        if lineages is None:
             # FIXME: Auto-identify lineages from tracking data
-            raise NotImplementedError("Auto-identification of lineages not yet implemented")
+            lineages = pd.DataFrame(self.lineages, columns=["fov_name", "track_id"])
             
         return find_pattern_matches(
             reference_pattern=reference_pattern,
-            filtered_lineages=filtered_lineages,
+            filtered_lineages=lineages,
             embeddings_dataset=self.embeddings,
             window_step=window_step,
             num_candidates=num_candidates,
@@ -203,20 +229,20 @@ class CytoDtw:
     
     def create_consensus_reference_pattern(
         self, 
-        annotated_examples: list[AnnotatedExample],
+        annotated_samples: list[AnnotatedSample],
         reference_selection: str = "median_length",
         aggregation_method: str = "mean",
         annotations_name: str = "annotations"
     ) -> dict:
         """
-        Create consensus reference pattern from multiple annotated examples.
+        Create consensus reference pattern from multiple annotated samples.
         
         This method takes multiple manually annotated cell examples and creates a
         consensus reference pattern by aligning them with DTW and aggregating.
         
         Parameters
         ----------
-        annotated_examples : list[AnnotatedExample]
+        annotated_samples : list[AnnotatedSample]
             List of annotated examples, each containing:
             - 'fov_name': str - FOV identifier
             - 'track_id': int or list[int] - Track ID(s)
@@ -252,12 +278,12 @@ class CytoDtw:
         ... ]
         >>> consensus = analyzer.create_consensus_reference_pattern(examples)
         """
-        if not annotated_examples:
+        if not annotated_samples:
             raise ValueError("No annotated examples provided")
         
         # Extract embedding patterns from each example
         extracted_patterns = {}
-        for i, example in enumerate(annotated_examples):
+        for i, example in enumerate(annotated_samples):
             pattern = self.get_reference_pattern(
                 fov_name=example['fov_name'],
                 track_id=example['track_id'],
@@ -277,8 +303,8 @@ class CytoDtw:
             reference_selection=reference_selection,
             aggregation_method=aggregation_method
         )
-        
-        return consensus_data
+        self.consensus_data=consensus_data
+        return self.consensus_data
     
     def align_patterns(
         self,
