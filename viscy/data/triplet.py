@@ -440,6 +440,12 @@ class TripletDataModule(HCSDataModule):
         self._augmentation_transform = None
         self._no_augmentation_transform = None
         self._cache_pool_bytes = cache_pool_bytes
+        self._augmentation_transform = Compose(
+            self.normalizations + self.augmentations + [self._final_crop()]
+        )
+        self._no_augmentation_transform = Compose(
+            self.normalizations + [self._final_crop()]
+        )
 
     def _align_tracks_tables_with_positions(
         self,
@@ -475,12 +481,6 @@ class TripletDataModule(HCSDataModule):
         }
 
     def _setup_fit(self, dataset_settings: dict):
-        self._augmentation_transform = Compose(
-            self.normalizations + self.augmentations + [self._final_crop()]
-        )
-        self._no_augmentation_transform = Compose(
-            self.normalizations + [self._final_crop()]
-        )
         positions, tracks_tables = self._align_tracks_tables_with_positions()
         shuffled_indices = self._set_fit_global_state(len(positions))
         positions = [positions[i] for i in shuffled_indices]
