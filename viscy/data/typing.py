@@ -97,19 +97,20 @@ AnnotationColumns = Literal[
 
 
 # NOTE: The following labels are not mutable. They are used to map the labels to the integer values.
-class InfectionStateLabel(dict):
-    uninfected: 0
-    infected: 1
-    unknown: -1
+INFECTION_STATE_LABEL = {  
+    "uninfected": 0 ,
+    "infected": 1 ,
+    "unknown": -1  
+}
 
+CELL_CYCLE_PHASE_LABEL = {
+    "interphase": 0,
+    "mitosis": 1,
+    "unknown": -1,
+}
 
-class CellCyclePhaseLabel(dict):
-    interphase: 0
-    mitosis: 1
-    unknown: -1
-
-
-class CellRemodelingStateLabel(dict):
-    no_remodel: 0
-    remodeling: 1
-    unknown: -1
+CELL_REMODELING_STATE_LABEL = {
+    "no_remodel": 0,
+    "remodeling": 1,
+    "unknown": -1,
+}
