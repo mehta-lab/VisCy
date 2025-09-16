@@ -125,13 +125,13 @@ valid_annotated_examples=[
     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
     'weight': 1.0
 },
-{
-    'fov_name': "/C/1/001000",
-    'track_id': [47,48],
-    'timepoints': (45-n_timepoints_before, 45+n_timepoints_after+1),
-    'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
-    'weight': 1.0
-},
+# {
+#     'fov_name': "/C/1/001000",
+#     'track_id': [47,48],
+#     'timepoints': (45-n_timepoints_before, 45+n_timepoints_after+1),
+#     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
+#     'weight': 1.0
+# },
 {
     'fov_name': "/C/1/001000",
     'track_id': [59,60],
