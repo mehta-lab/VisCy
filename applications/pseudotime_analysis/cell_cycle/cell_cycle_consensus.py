@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 #%%
 import ast
 import logging
@@ -13,10 +12,6 @@ from sklearn.preprocessing import StandardScaler
 from viscy.data.triplet import TripletDataset
 from viscy.representation.embedding_writer import (
     read_embedding_dataset,
-)
-from viscy.representation.evaluation.pseudotime_plotting import (
-    align_image_stacks,
-    plot_pc_trajectories,
 )
 from viscy.representation.pseudotime import CytoDtw
 
@@ -267,27 +262,20 @@ alignment_results[name] = matches
 logger.info(f"Found {len(matches)} matches for {name}")
 
 #%%
-# Plot aligned PC trajectories for top N cells aligned to consensus
-import ast
+# Plot aligned PC trajectories using existing plotting utilities
+from viscy.representation.evaluation.pseudotime_plotting import plot_pc_trajectories
+
+
+from viscy.representation.pseudotime import _apply_warping_path
 
 top_matches = matches.head(top_n)
 
-# Get consensus pattern for PCA reference
-consensus_pattern = consensus_lineage
-
-# Prepare all data for consistent PCA fitting
-all_patterns_for_pca = [consensus_pattern]
+all_patterns_for_pca = [consensus_lineage]
 all_aligned_patterns = []
-
-# Extract and align each matched pattern
 for idx, row in top_matches.iterrows():
     fov_name = row['fov_name']
-    track_ids = row['track_ids']
-    if isinstance(track_ids, str):
-        track_ids = ast.literal_eval(track_ids)
-    warp_path = row['warp_path'] 
-    if isinstance(warp_path, str):
-        warp_path = ast.literal_eval(warp_path)
+    track_ids = ast.literal_eval(row['track_ids']) if isinstance(row['track_ids'], str) else row['track_ids']
+    warp_path = ast.literal_eval(row['warp_path']) if isinstance(row['warp_path'], str) else row['warp_path']
     start_time = row['start_timepoint']
     distance = row['distance']
     
@@ -306,7 +294,7 @@ for idx, row in top_matches.iterrows():
     lineage_embeddings = np.concatenate(lineage_embeddings, axis=0)
     
     # Create aligned pattern using warping path
-    aligned_pattern = np.zeros_like(consensus_pattern)
+    aligned_pattern = np.zeros_like(consensus_lineage)
     
     # Map each consensus timepoint to lineage timepoint via warping path
     ref_to_lineage = {}
@@ -317,7 +305,7 @@ for idx, row in top_matches.iterrows():
             aligned_pattern[ref_idx] = lineage_embeddings[lineage_idx]
     
     # Fill missing values with nearest neighbor
-    for ref_idx in range(len(consensus_pattern)):
+    for ref_idx in range(len(consensus_lineage)):
         if ref_idx not in ref_to_lineage and ref_to_lineage:
             closest_ref_idx = min(ref_to_lineage.keys(), key=lambda x: abs(x - ref_idx))
             aligned_pattern[ref_idx] = lineage_embeddings[ref_to_lineage[closest_ref_idx]]
@@ -336,9 +324,9 @@ pca = PCA(n_components=3)
 pca_data = pca.fit_transform(scaled_data)
 
 # Split back to individual patterns
-consensus_pca = pca_data[:len(consensus_pattern)]
+consensus_pca = pca_data[:len(consensus_lineage)]
 aligned_patterns_pca = []
-start_idx = len(consensus_pattern)
+start_idx = len(consensus_lineage)
 for pattern_data in all_aligned_patterns:
     end_idx = start_idx + len(pattern_data['pattern'])
     aligned_patterns_pca.append({
@@ -351,7 +339,7 @@ for pattern_data in all_aligned_patterns:
 fig, axes = plt.subplots(1, 3, figsize=(15, 5))
 
 colors = ['orange', 'purple', 'brown', 'pink', 'gray']
-time_axis = np.arange(len(consensus_pattern))
+time_axis = np.arange(len(consensus_lineage))
 
 for pc_idx in range(3):
     ax = axes[pc_idx]
@@ -378,9 +366,6 @@ for pc_idx in range(3):
     ax.set_ylabel(f'PC{pc_idx+1} ({pca.explained_variance_ratio_[pc_idx]:.2%})')
     ax.set_title(f'PC{pc_idx+1} Aligned Trajectories')
     ax.grid(True, alpha=0.3)
-    
-    # if pc_idx == 0:  # Only show legend on first subplot
-    #     ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
 
 plt.suptitle(f'Top {top_n} Cells Aligned to Consensus Pattern\nPC Trajectories Over Time')
 plt.tight_layout()
@@ -400,13 +385,10 @@ positions = []
 tracks_tables = []
 images_plate = open_ome_zarr(data_path)
 
-# Find the positions and tracks tables for the top n matches
-top_n_matches_df = top_matches.head(top_n)
 for _,pos in images_plate.positions():
-    if pos.zgroup.name in top_n_matches_df["fov_name"].values:
+    if pos.zgroup.name in top_matches["fov_name"].values:
         positions.append(pos)
-        # filter the tracks per positition append to a list of dataframes
-        tracks_df = cell_cycle_annotations_df[cell_cycle_annotations_df["fov_name"] == pos.zgroup.name]
+        tracks_df = cytodtw.annotations_df[cytodtw.annotations_df["fov_name"] == pos.zgroup.name]
         tracks_tables.append(tracks_df)
         
 dataset = TripletDataset(
@@ -427,71 +409,60 @@ dataset = TripletDataset(
 )
 
 # %%
-def get_candidate_sequences(dataset, candidates_df):
-    """Get image sequences for candidate lineages."""
+# Simplified sequence alignment using existing DTW results
+def get_aligned_image_sequences(dataset, candidates_df):
+    """Get image sequences aligned to consensus timeline using DTW warp paths."""
     import ast
     
-    sequences = {}
+    aligned_sequences = {}
     for idx, row in candidates_df.iterrows():
-        fov_name = row['fov_name'] 
+        fov_name = row['fov_name']
         track_ids = ast.literal_eval(row['track_ids']) if isinstance(row['track_ids'], str) else row['track_ids']
+        warp_path = ast.literal_eval(row['warp_path']) if isinstance(row['warp_path'], str) else row['warp_path']
+        start_time = int(row['start_timepoint']) if not pd.isna(row['start_timepoint']) else 0
         
-        # Find matching indices
+        # Determine alignment length from warp path
+        alignment_length = max(ref_idx for ref_idx, _ in warp_path) + 1
+        
+        # Find matching dataset indices
         matching_indices = []
         for dataset_idx in range(len(dataset.valid_anchors)):
             anchor_row = dataset.valid_anchors.iloc[dataset_idx]
             if (anchor_row['fov_name'] == fov_name and anchor_row['track_id'] in track_ids):
                 matching_indices.append(dataset_idx)
         
-        if matching_indices:
-            images = dataset.__getitems__(matching_indices)
-            images.sort(key=lambda x: x['index']['t'])  # Sort by time
-            sequences[idx] = {'images': images, 'row': row}
-    
-    return sequences
-
-def align_sequences_by_warp_path(sequences, consensus_length):
-    """Align sequences to consensus timeline using warp_path."""
-    import ast
-    
-    aligned_sequences = {}
-    for idx, seq_data in sequences.items():
-        row = seq_data['row']
-        images = seq_data['images']
-        
-        warp_path = ast.literal_eval(row['warp_path']) if isinstance(row['warp_path'], str) else row['warp_path']
-        start_time = int(row['start_timepoint']) if not pd.isna(row['start_timepoint']) else 0
-        
-        # Create mapping from actual time to image
+        if not matching_indices:
+            logger.warning(f"No matching indices found for FOV {fov_name}, tracks {track_ids}")
+            continue
+            
+        # Get images and sort by time
+        images = dataset.__getitems__(matching_indices)
+        images.sort(key=lambda x: x['index']['t'])
         time_to_image = {img['index']['t']: img for img in images}
         
-        # Create warp_path mapping: reference_idx -> query_idx
+        # Create warp_path mapping and align images
         ref_to_query = {ref_idx: query_idx for ref_idx, query_idx in warp_path}
+        aligned_images = [None] * alignment_length
         
-        # Create aligned sequence with consensus length
-        aligned_images = [None] * consensus_length
-        
-        for ref_idx in range(consensus_length):
+        for ref_idx in range(alignment_length):
             if ref_idx in ref_to_query:
-                query_idx = ref_to_query[ref_idx]
-                query_time = start_time + query_idx
-                
+                query_time = start_time + ref_to_query[ref_idx]
                 if query_time in time_to_image:
                     aligned_images[ref_idx] = time_to_image[query_time]
                 else:
                     # Find closest available time
                     available_times = list(time_to_image.keys())
-                    closest_time = min(available_times, key=lambda x: abs(x - query_time))
-                    aligned_images[ref_idx] = time_to_image[closest_time]
+                    if available_times:
+                        closest_time = min(available_times, key=lambda x: abs(x - query_time))
+                        aligned_images[ref_idx] = time_to_image[closest_time]
         
-        # Fill any None values with nearest neighbor
-        for i in range(consensus_length):
+        # Fill None values with nearest neighbor
+        for i in range(alignment_length):
             if aligned_images[i] is None:
-                # Find nearest non-None image
-                for offset in range(1, consensus_length):
+                for offset in range(1, alignment_length):
                     for direction in [-1, 1]:
                         neighbor_idx = i + direction * offset
-                        if 0 <= neighbor_idx < consensus_length and aligned_images[neighbor_idx] is not None:
+                        if 0 <= neighbor_idx < alignment_length and aligned_images[neighbor_idx] is not None:
                             aligned_images[i] = aligned_images[neighbor_idx]
                             break
                     if aligned_images[i] is not None:
@@ -500,23 +471,22 @@ def align_sequences_by_warp_path(sequences, consensus_length):
         aligned_sequences[idx] = {
             'aligned_images': aligned_images,
             'metadata': {
-                'fov_name': row['fov_name'],
-                'track_ids': ast.literal_eval(row['track_ids']) if isinstance(row['track_ids'], str) else row['track_ids'],
+                'fov_name': fov_name,
+                'track_ids': track_ids,
                 'distance': row['distance'],
-                'consensus_length': consensus_length
+                'alignment_length': alignment_length
             }
         }
     
     return aligned_sequences
 
-# Get sequences for top candidates
-sequences = get_candidate_sequences(dataset, top_n_matches_df)
-aligned_sequences = align_sequences_by_warp_path(sequences, len(consensus_lineage))
+# Get aligned sequences using consolidated function
+aligned_sequences = get_aligned_image_sequences(dataset, top_matches)
 
 logger.info(f"Retrieved {len(aligned_sequences)} aligned sequences")
 for idx, seq in aligned_sequences.items():
     meta = seq['metadata']
-    logger.info(f"Sequence {idx}: FOV {meta['fov_name']}, {meta['consensus_length']} aligned images, distance={meta['distance']:.3f}")
+    logger.info(f"Sequence {idx}: FOV {meta['fov_name']} aligned images, distance={meta['distance']:.3f}")
 
 # %%
 # Load aligned sequences into napari
