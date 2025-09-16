@@ -1,4 +1,4 @@
-from typing import Callable, NamedTuple, Sequence, TypedDict, TypeVar
+from typing import Callable, Literal, NamedTuple, Sequence, TypedDict, TypeVar
 
 from torch import ShortTensor, Tensor
 
@@ -88,3 +88,23 @@ class TripletSample(TypedDict):
     positive: NotRequired[Tensor]
     negative: NotRequired[Tensor]
     index: NotRequired[TrackingIndex]
+
+
+# NOTE: these are the only columns that are allowed for the annotation dataframe. 
+AnnotationColumns = Literal["infection_state", "cell_cycle_phase","cell_remodeling_state"]
+
+#NOTE: The following labels are not mutable. They are used to map the labels to the integer values.
+class InfectionStateLabel(dict):
+    uninfected: 0
+    infected: 1
+    unknown: -1
+
+class CellCyclePhaseLabel(dict):
+    interphase: 0
+    mitosis: 1
+    unknown: -1
+    
+class CellRemodelingStateLabel(dict):
+    no_remodel: 0
+    remodeling: 1
+    unknown: -1

@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.hcs import _read_norm_meta
 from viscy.data.triplet import INDEX_COLUMNS
+from viscy.data.typing import AnnotationColumns
 
 
 class ClassificationDataset(Dataset):
@@ -23,7 +24,7 @@ class ClassificationDataset(Dataset):
         transform: Callable | None,
         initial_yx_patch_size: tuple[int, int],
         return_indices: bool = False,
-        label_column: str = "infection_state",
+        label_column: AnnotationColumns = "infection_state",
     ):
         self.plate = plate
         self.z_range = z_range
