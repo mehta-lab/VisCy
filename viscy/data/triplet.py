@@ -511,10 +511,16 @@ class TripletDataModule(HCSDataModule):
         )
 
         # Choose transforms for validation based on augment_validation parameter
-        val_positive_transform = augment_transform if self.augment_validation else no_aug_transform
-        val_negative_transform = augment_transform if self.augment_validation else no_aug_transform
-        val_anchor_transform = anchor_transform if self.augment_validation else no_aug_transform
-        
+        val_positive_transform = (
+            augment_transform if self.augment_validation else no_aug_transform
+        )
+        val_negative_transform = (
+            augment_transform if self.augment_validation else no_aug_transform
+        )
+        val_anchor_transform = (
+            anchor_transform if self.augment_validation else no_aug_transform
+        )
+
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,

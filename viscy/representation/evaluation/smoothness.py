@@ -18,14 +18,17 @@ from viscy.representation.evaluation.clustering import (
 
 
 def compute_piece_wise_distance(
-    features_df: pd.DataFrame, cross_dist: NDArray, rank_fractions: NDArray,groupby:list[str] = ["fov_name", "track_id"]
-)->tuple[list[list[float]], list[list[float]]]:
+    features_df: pd.DataFrame,
+    cross_dist: NDArray,
+    rank_fractions: NDArray,
+    groupby: list[str] = ["fov_name", "track_id"],
+) -> tuple[list[list[float]], list[list[float]]]:
     """
     Computing the piece-wise distance and rank difference
     - Get the off diagonal per block and compute the mode
     - The blocks are not square, so we need to get the off diagonal elements
     - Get the 1 and 99 percentile of the off diagonal per block
-    
+
     Parameters
     ----------
     features_df : pd.DataFrame
@@ -62,9 +65,11 @@ def compute_piece_wise_distance(
     return piece_wise_dissimilarity_per_track, piece_wise_rank_difference_per_track
 
 
-def find_distribution_peak(data: np.ndarray, method: Literal["histogram", "kde_robust"] = "kde_robust") -> float:
-    """ Find the peak of a distribution
-    
+def find_distribution_peak(
+    data: np.ndarray, method: Literal["histogram", "kde_robust"] = "kde_robust"
+) -> float:
+    """Find the peak of a distribution
+
     Parameters
     ----------
     data: np.ndarray
@@ -76,18 +81,20 @@ def find_distribution_peak(data: np.ndarray, method: Literal["histogram", "kde_r
     -------
     float: The peak of the distribution (highest peak if multiple)
     """
-    if method == 'histogram':
+    if method == "histogram":
         # Simple histogram-based peak finding
         hist, bin_edges = np.histogram(data, bins=50, density=True)
         bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        peaks, properties = find_peaks(hist, height=np.max(hist) * 0.1)  # 10% of max height
+        peaks, properties = find_peaks(
+            hist, height=np.max(hist) * 0.1
+        )  # 10% of max height
         if len(peaks) == 0:
             return bin_centers[np.argmax(hist)]  # Fallback to global max
         # Return peak with highest density
-        peak_heights = properties['peak_heights']
+        peak_heights = properties["peak_heights"]
         return bin_centers[peaks[np.argmax(peak_heights)]]
 
-    elif method == 'kde_robust':
+    elif method == "kde_robust":
         # More robust KDE approach
         kde = gaussian_kde(data)
         x_range = np.linspace(np.min(data), np.max(data), 1000)
@@ -96,9 +103,8 @@ def find_distribution_peak(data: np.ndarray, method: Literal["histogram", "kde_r
         if len(peaks) == 0:
             return x_range[np.argmax(kde_vals)]  # Fallback to global max
         # Return peak with highest KDE value
-        peak_heights = properties['peak_heights']
+        peak_heights = properties["peak_heights"]
         return x_range[peaks[np.argmax(peak_heights)]]
-     
 
 
 def compute_embeddings_smoothness(
@@ -149,8 +155,8 @@ def compute_embeddings_smoothness(
 
     # Compute piece-wise distance and rank difference
     features_df = features["sample"].to_dataframe().reset_index(drop=True)
-    piecewise_distance_per_track, _ = (
-        compute_piece_wise_distance(features_df, cross_dist, rank_fractions)
+    piecewise_distance_per_track, _ = compute_piece_wise_distance(
+        features_df, cross_dist, rank_fractions
     )
 
     all_piecewise_distances = np.concatenate(piecewise_distance_per_track)
@@ -161,11 +167,12 @@ def compute_embeddings_smoothness(
     np.random.seed(42)
     i_indices = np.random.randint(0, len(cross_dist), size=n_samples)
     j_indices = np.random.randint(0, len(cross_dist), size=n_samples)
-    
+
     diagonal_mask = i_indices == j_indices
     while diagonal_mask.any():
-        j_indices[diagonal_mask] = np.random.randint(0, len(cross_dist),
-    size=diagonal_mask.sum())
+        j_indices[diagonal_mask] = np.random.randint(
+            0, len(cross_dist), size=diagonal_mask.sum()
+        )
         diagonal_mask = i_indices == j_indices
     sampled_values = cross_dist[i_indices, j_indices]
 
@@ -189,7 +196,7 @@ def compute_embeddings_smoothness(
         "random_frame_peak": float(random_peak),
         # "random_frame_distribution": sampled_values,
         "smoothness_score": float(smoothness_score),
-        "dynamic_range": float(dynamic_range), 
+        "dynamic_range": float(dynamic_range),
     }
     distributions = {
         "adjacent_frame_distribution": all_piecewise_distances,
@@ -201,4 +208,3 @@ def compute_embeddings_smoothness(
             print(f"{key}: {value}")
 
     return stats, distributions, piecewise_distance_per_track
-

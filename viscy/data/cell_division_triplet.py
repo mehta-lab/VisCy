@@ -22,11 +22,11 @@ class CellDivisionTripletDataset(Dataset):
     # Hardcoded channel mapping for .npy files
     CHANNEL_MAPPING = {
         # Channel 0 aliases (brightfield)
-        'bf': 0,
-        'brightfield': 0,
+        "bf": 0,
+        "brightfield": 0,
         # Channel 1 aliases (h2b)
-        'h2b': 1,
-        'nuclei': 1,
+        "h2b": 1,
+        "nuclei": 1,
     }
 
     def __init__(
@@ -346,14 +346,13 @@ class CellDivisionTripletDataModule(HCSDataModule):
         shuffled_indices = self._set_fit_global_state(len(self.npy_files))
         npy_files = [self.npy_files[i] for i in shuffled_indices]
 
-        #Se the train an dval positions
+        # Se the train an dval positions
         num_train_files = int(len(self.npy_files) * self.split_ratio)
         train_npy_files = npy_files[:num_train_files]
         val_npy_files = npy_files[num_train_files:]
 
         _logger.debug(f"Number of training files: {len(train_npy_files)}")
         _logger.debug(f"Number of validation files: {len(val_npy_files)}")
-
 
         # Determine anchor transform based on time interval
         anchor_transform = (

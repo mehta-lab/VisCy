@@ -108,7 +108,7 @@ class VaeEncoder(nn.Module):
         latent_dim: int = 1024,
         input_spatial_size: tuple[int, int] = (256, 256),
         stem_kernel_size: tuple[int, int, int] = (2, 4, 4),
-        stem_stride: tuple[int, int, int] = (2, 4, 4),  
+        stem_stride: tuple[int, int, int] = (2, 4, 4),
         drop_path_rate: float = 0.0,
         pretrained: bool = True,
     ):
@@ -134,7 +134,9 @@ class VaeEncoder(nn.Module):
             encoder.conv1 = nn.Identity()
             out_channels_encoder = num_channels[-1]
         else:
-            raise ValueError(f"Backbone {backbone} not supported. Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'")
+            raise ValueError(
+                f"Backbone {backbone} not supported. Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'"
+            )
 
         # Stem for 3d multichannel and to convert 3D to 2D
         self.stem = StemDepthtoChannels(
@@ -148,22 +150,24 @@ class VaeEncoder(nn.Module):
         self.num_channels = num_channels
         self.in_channels_encoder = in_channels_encoder
         self.out_channels_encoder = out_channels_encoder
-        
+
         # Calculate spatial size after stem
         stem_spatial_size_h = input_spatial_size[0] // stem_stride[1]
         stem_spatial_size_w = input_spatial_size[1] // stem_stride[2]
-        
+
         # Spatial size after backbone
         backbone_reduction = 2 ** (len(num_channels) - 1)
         final_spatial_size_h = stem_spatial_size_h // backbone_reduction
         final_spatial_size_w = stem_spatial_size_w // backbone_reduction
-        
-        flattened_size = out_channels_encoder * final_spatial_size_h * final_spatial_size_w
+
+        flattened_size = (
+            out_channels_encoder * final_spatial_size_h * final_spatial_size_w
+        )
 
         self.fc = nn.Linear(flattened_size, latent_dim)
         self.fc_mu = nn.Linear(latent_dim, latent_dim)
         self.fc_logvar = nn.Linear(latent_dim, latent_dim)
-        
+
         # Store final spatial size for decoder (assuming square for simplicity)
         self.encoder_spatial_size = final_spatial_size_h  # Assuming square output
 
@@ -189,9 +193,9 @@ class VaeEncoder(nn.Module):
 
         x_intermediate = self.fc(x_flat)
 
-        mu = self.fc_mu(x_intermediate)  
-        logvar = self.fc_logvar(x_intermediate)  
-        z = self.reparameterize(mu, logvar)  
+        mu = self.fc_mu(x_intermediate)
+        logvar = self.fc_logvar(x_intermediate)
+        z = self.reparameterize(mu, logvar)
 
         return SimpleNamespace(mean=mu, log_covariance=logvar, z=z)
 
@@ -207,7 +211,7 @@ class VaeDecoder(nn.Module):
         out_stack_depth: int = 16,
         head_expansion_ratio: int = 2,
         strides: list[int] = [2, 2, 2, 1],
-        encoder_spatial_size: int=16,
+        encoder_spatial_size: int = 16,
         head_pool: bool = False,
         upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
@@ -220,7 +224,6 @@ class VaeDecoder(nn.Module):
         self.out_channels = out_channels
         self.out_stack_depth = out_stack_depth
         self.decoder_channels = decoder_channels
-
 
         self.spatial_size = encoder_spatial_size
         self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
@@ -303,7 +306,7 @@ class BetaVae25D(nn.Module):
         upsample_pre_conv: Literal["default"] | Callable | None = None,
     ):
         super().__init__()
-        
+
         self.encoder = VaeEncoder(
             backbone=backbone,
             in_channels=in_channels,
@@ -320,8 +323,8 @@ class BetaVae25D(nn.Module):
         decoder_channels[-1] = (
             (out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
         )
-        
-        strides = [2] * (len(decoder_channels) - 1) + [1]   
+
+        strides = [2] * (len(decoder_channels) - 1) + [1]
 
         self.decoder = VaeDecoder(
             decoder_channels=decoder_channels,
@@ -342,19 +345,20 @@ class BetaVae25D(nn.Module):
         """Forward pass returning VAE outputs."""
         encoder_output = self.encoder(x)
         recon_x = self.decoder(encoder_output.z)
-        
+
         return SimpleNamespace(
             recon_x=recon_x,
             mean=encoder_output.mean,
             logvar=encoder_output.log_covariance,
-            z=encoder_output.z
+            z=encoder_output.z,
         )
 
 
 class BetaVaeMonai(nn.Module):
     """Beta-VAE with Monai architecture."""
 
-    def __init__(self, 
+    def __init__(
+        self,
         spatial_dims: int,
         in_shape: Sequence[int],
         out_channels: int,
@@ -366,8 +370,8 @@ class BetaVaeMonai(nn.Module):
         num_res_units: int = 0,
         use_sigmoid: bool = False,
         norm: Literal[Norm.BATCH, Norm.INSTANCE] = Norm.INSTANCE,
-        **kwargs
-        ):
+        **kwargs,
+    ):
         super().__init__()
 
         self.spatial_dims = spatial_dims
@@ -381,7 +385,7 @@ class BetaVaeMonai(nn.Module):
         self.num_res_units = num_res_units
         self.use_sigmoid = use_sigmoid
         self.norm = norm
-        
+
         self.model = VarAutoEncoder(
             spatial_dims=self.spatial_dims,
             in_shape=self.in_shape,
@@ -394,7 +398,7 @@ class BetaVaeMonai(nn.Module):
             num_res_units=self.num_res_units,
             use_sigmoid=self.use_sigmoid,
             norm=self.norm,
-            **kwargs
+            **kwargs,
         )
 
     def forward(self, x: Tensor) -> SimpleNamespace:

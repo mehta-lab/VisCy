@@ -22,6 +22,7 @@ _VAE_ARCHITECTURE = {
     "monai_beta": BetaVaeMonai,
 }
 
+
 class ContrastivePrediction(TypedDict):
     features: Tensor
     projections: Tensor
@@ -61,42 +62,44 @@ class ContrastiveModule(LightningModule):
     def on_train_start(self) -> None:
         """Log comprehensive hyperparameters including model architecture details."""
         super().on_train_start()
-        
+
         # Collect comprehensive hyperparameters
         hparams = {
             # Training hyperparameters
             "lr": self.lr,
             "schedule": self.schedule,
-            "input_shape": self.example_input_array, 
+            "input_shape": self.example_input_array,
             "loss_function_class": self.loss_function.__class__.__name__,
         }
-        
+
         # Add loss function specific parameters
-        if hasattr(self.loss_function, 'margin'):
+        if hasattr(self.loss_function, "margin"):
             hparams["loss_margin"] = self.loss_function.margin
-        if hasattr(self.loss_function, 'temperature'):
+        if hasattr(self.loss_function, "temperature"):
             hparams["loss_temperature"] = self.loss_function.temperature
-        if hasattr(self.loss_function, 'normalize_embeddings'):
-            hparams["loss_normalize_embeddings"] = self.loss_function.normalize_embeddings
-            
+        if hasattr(self.loss_function, "normalize_embeddings"):
+            hparams["loss_normalize_embeddings"] = (
+                self.loss_function.normalize_embeddings
+            )
+
         # Add encoder details if it's a ContrastiveEncoder
-        if hasattr(self.model, 'backbone'):
+        if hasattr(self.model, "backbone"):
             hparams["encoder_backbone"] = self.model.backbone
-        if hasattr(self.model, 'in_channels'):
+        if hasattr(self.model, "in_channels"):
             hparams["encoder_in_channels"] = self.model.in_channels
-        if hasattr(self.model, 'in_stack_depth'):
+        if hasattr(self.model, "in_stack_depth"):
             hparams["encoder_in_stack_depth"] = self.model.in_stack_depth
-        if hasattr(self.model, 'embedding_dim'):
+        if hasattr(self.model, "embedding_dim"):
             hparams["encoder_embedding_dim"] = self.model.embedding_dim
-        if hasattr(self.model, 'projection_dim'):
+        if hasattr(self.model, "projection_dim"):
             hparams["encoder_projection_dim"] = self.model.projection_dim
-        if hasattr(self.model, 'drop_path_rate'):
+        if hasattr(self.model, "drop_path_rate"):
             hparams["encoder_drop_path_rate"] = self.model.drop_path_rate
-        if hasattr(self.model, 'stem_kernel_size'):
+        if hasattr(self.model, "stem_kernel_size"):
             hparams["encoder_stem_kernel_size"] = str(self.model.stem_kernel_size)
-        if hasattr(self.model, 'stem_stride'):
+        if hasattr(self.model, "stem_stride"):
             hparams["encoder_stem_stride"] = str(self.model.stem_stride)
-            
+
         # Log to TensorBoard
         if self.logger is not None:
             self.logger.log_hyperparams(hparams)
@@ -267,11 +270,11 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-        
+
         # Log UMAP embeddings from validation set every N epochs
         if (
-            self.log_embeddings 
-            and self.current_epoch % self.embedding_log_frequency == 0 
+            self.log_embeddings
+            and self.current_epoch % self.embedding_log_frequency == 0
             and self.current_epoch > 0
         ):
             self._collect_and_log_embeddings()
@@ -284,7 +287,9 @@ class ContrastiveModule(LightningModule):
             # Get validation dataloader
             val_dataloaders = self.trainer.val_dataloaders
             if val_dataloaders is None:
-                _logger.warning("No validation dataloader available for embedding logging")
+                _logger.warning(
+                    "No validation dataloader available for embedding logging"
+                )
                 return
             elif isinstance(val_dataloaders, list):
                 val_dataloader = val_dataloaders[0] if val_dataloaders else None
@@ -292,32 +297,36 @@ class ContrastiveModule(LightningModule):
                 val_dataloader = val_dataloaders
 
             if val_dataloader is None:
-                _logger.warning("No validation dataloader available for embedding logging")
+                _logger.warning(
+                    "No validation dataloader available for embedding logging"
+                )
                 return
 
-            _logger.info(f"Collecting embeddings for visualization at epoch {self.current_epoch}")
-            
+            _logger.info(
+                f"Collecting embeddings for visualization at epoch {self.current_epoch}"
+            )
+
             # Collect embeddings, images, and metadata from validation set
             embeddings_list = []
             images_list = []
             labels_list = []
             max_samples = 500  # Reduced for memory efficiency with images
             sample_count = 0
-            
+
             self.eval()
             with torch.no_grad():
                 for batch in val_dataloader:
                     if sample_count >= max_samples:
                         break
-                    
+
                     # Move batch to device
                     anchor = batch["anchor"].to(self.device)
                     batch_size = anchor.size(0)
-                    
+
                     # Get embeddings (features, not projections)
                     features, _ = self(anchor)
                     embeddings_list.append(features.cpu())
-                    
+
                     # Collect images for sprite visualization
                     # Take middle slice for 3D data and first channel if multi-channel
                     if anchor.ndim == 5:  # (B, C, D, H, W)
@@ -326,7 +335,7 @@ class ContrastiveModule(LightningModule):
                     else:  # (B, C, H, W)
                         img_slice = anchor[:, 0].cpu()  # (B, H, W)
                     images_list.append(img_slice)
-                    
+
                     # Collect labels from index information
                     if "index" in batch and batch["index"] is not None:
                         for i, idx_info in enumerate(batch["index"][:batch_size]):
@@ -341,33 +350,35 @@ class ContrastiveModule(LightningModule):
                         # Fallback labels
                         for i in range(batch_size):
                             labels_list.append(f"sample_{sample_count + i}")
-                    
+
                     sample_count += batch_size
-                    
+
             if embeddings_list:
                 embeddings = torch.cat(embeddings_list, dim=0)[:max_samples]
                 images = torch.cat(images_list, dim=0)[:max_samples]
                 labels = labels_list[:max_samples]
-                
+
                 # Normalize images for visualization (0-1 range)
                 images = (images - images.min()) / (images.max() - images.min() + 1e-8)
-                
-                # Log UMAP visualization  
+
+                # Log UMAP visualization
                 self.log_embedding_umap(embeddings, tag="validation")
-                
+
                 # Log to TensorBoard's embedding projector with images and labels
                 self.logger.experiment.add_embedding(
                     embeddings,
                     metadata=labels,
                     label_img=images.unsqueeze(1),  # Add channel dimension
                     global_step=self.current_epoch,
-                    tag="validation_embeddings"
+                    tag="validation_embeddings",
                 )
-                
-                _logger.info(f"Logged {len(embeddings)} embeddings with images and labels")
+
+                _logger.info(
+                    f"Logged {len(embeddings)} embeddings with images and labels"
+                )
             else:
                 _logger.warning("No embeddings collected from validation set")
-                
+
         except Exception as e:
             _logger.error(f"Error collecting embeddings: {e}")
 
@@ -386,10 +397,11 @@ class ContrastiveModule(LightningModule):
             "index": batch["index"],
         }
 
+
 class BetaVaeModule(LightningModule):
     def __init__(
         self,
-        architecture: Literal["monai_beta","2.5D"],
+        architecture: Literal["monai_beta", "2.5D"],
         model_config: dict = {},
         loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
         beta: float = 1.0,
@@ -408,7 +420,7 @@ class BetaVaeModule(LightningModule):
     ):
         super().__init__()
 
-        net_class= _VAE_ARCHITECTURE.get(architecture)
+        net_class = _VAE_ARCHITECTURE.get(architecture)
         if not net_class:
             raise ValueError(
                 f"Architecture {architecture} not in {_VAE_ARCHITECTURE.keys()}"
@@ -426,14 +438,14 @@ class BetaVaeModule(LightningModule):
 
         self.lr = lr
         self.lr_schedule = lr_schedule
-        
+
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
 
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.compute_disentanglement = compute_disentanglement
         self.disentanglement_frequency = disentanglement_frequency
-        
+
         self.log_enhanced_visualizations = log_enhanced_visualizations
         self.log_enhanced_visualizations_frequency = (
             log_enhanced_visualizations_frequency
@@ -442,7 +454,7 @@ class BetaVaeModule(LightningModule):
         self.validation_step_outputs = []
 
         self._min_beta = 1e-15
-        self._logvar_minmax = (-20,20)
+        self._logvar_minmax = (-20, 20)
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
@@ -450,11 +462,13 @@ class BetaVaeModule(LightningModule):
             latent_dim = self.model_config["latent_dim"]
         elif "latent_size" in self.model_config:
             latent_dim = self.model_config["latent_size"]
-            
+
         if latent_dim is not None:
             self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
         else:
-            _logger.warning("No latent dimension provided for BetaVaeLogger. Using default with 128 dimensions.")
+            _logger.warning(
+                "No latent dimension provided for BetaVaeLogger. Using default with 128 dimensions."
+            )
             self.vae_logger = BetaVaeLogger()
 
     def setup(self, stage: str = None):
@@ -508,39 +522,56 @@ class BetaVaeModule(LightningModule):
         """Forward pass through Beta-VAE."""
 
         original_shape = x.shape
-        is_monai_2d = (self.architecture == "monai_beta" and 
-                      self.model_config.get("spatial_dims") == 2)
+        is_monai_2d = (
+            self.architecture == "monai_beta"
+            and self.model_config.get("spatial_dims") == 2
+        )
         if is_monai_2d and len(x.shape) == 5 and x.shape[2] == 1:
             x = x.squeeze(2)
-        
+
         # Handle different model output formats
         model_output = self.model(x)
-        
+
         recon_x = model_output.recon_x
         mu = model_output.mean
         logvar = model_output.logvar
         z = model_output.z
-        
+
         if is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1:
             # Convert back (B, C, H, W) to (B, C, 1, H, W)
             recon_x = recon_x.unsqueeze(2)
-
 
         current_beta = self._get_current_beta()
         batch_size = original_shape[0]
 
         # Use original input for loss computation to ensure shape consistency
-        x_original = x if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1) else x.unsqueeze(2)
+        x_original = (
+            x
+            if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1)
+            else x.unsqueeze(2)
+        )
         recon_loss = self.loss_function(recon_x, x_original)
         if isinstance(self.loss_function, nn.MSELoss):
-            if hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'sum':
+            if (
+                hasattr(self.loss_function, "reduction")
+                and self.loss_function.reduction == "sum"
+            ):
                 recon_loss = recon_loss / batch_size
-            elif hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'mean':
+            elif (
+                hasattr(self.loss_function, "reduction")
+                and self.loss_function.reduction == "mean"
+            ):
                 # Correct the over-normalization by PyTorch's mean reduction by multiplying by the number of elements per image
                 num_elements_per_image = x_original[0].numel()
                 recon_loss = recon_loss * num_elements_per_image
 
-        kl_loss = -0.5 * torch.sum(1 + torch.clamp(logvar,self._logvar_minmax[0],self._logvar_minmax[1]) - mu.pow(2) - logvar.exp(), dim=1)
+        kl_loss = -0.5 * torch.sum(
+            1
+            + torch.clamp(logvar, self._logvar_minmax[0], self._logvar_minmax[1])
+            - mu.pow(2)
+            - logvar.exp(),
+            dim=1,
+        )
         kl_loss = torch.mean(kl_loss)
 
         total_loss = recon_loss + current_beta * kl_loss
