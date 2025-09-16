@@ -43,6 +43,8 @@ class CytoDtw:
         self.annotations_df=annotations_df
         self.lineages = None
         self.consensus_data = None
+        self.reference_patterns = None
+
 
     def _validate_input(self):
         raise NotImplementedError("Validation of input not implemented")
@@ -158,7 +160,7 @@ class CytoDtw:
             Match results with distances and warping paths
         """
         if reference_pattern is None:
-            reference_pattern = self.consensus_data['consensus_pattern']
+            reference_pattern = self.consensus_data['pattern']
         if lineages is None:
             # FIXME: Auto-identify lineages from tracking data
             lineages = self.get_lineages()
@@ -854,8 +856,8 @@ def create_consensus_from_patterns(
     -------
     dict
         Dictionary containing:
-        - 'consensus_pattern': np.ndarray - The consensus embedding pattern
-        - 'consensus_annotations': list - Consensus annotations (if available)
+        - 'pattern': np.ndarray - The consensus embedding pattern
+        - 'annotations': list - Consensus annotations (if available)
         - 'metadata': dict - Information about the consensus creation process
     """
     if not patterns:
@@ -906,8 +908,8 @@ def create_consensus_from_patterns(
     consensus = _aggregate_aligned_patterns(aligned_patterns, aggregation_method)
     
     consensus = DtwSample(
-      pattern=consensus['consensus_pattern'],
-      annotations=consensus['consensus_annotations'],
+      pattern=consensus['pattern'],
+      annotations=consensus['annotations'],
       distance=alignment_result['distance'],
       skewness=alignment_result['skewness'],
       warping_path=alignment_result['warping_path']
@@ -1064,14 +1066,14 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
     
     # Aggregate embedding patterns
     if method == "mean":
-        consensus_pattern = np.mean(pattern_arrays, axis=0)
+        pattern = np.mean(pattern_arrays, axis=0)
     elif method == "median":
-        consensus_pattern = np.median(pattern_arrays, axis=0)
+        pattern = np.median(pattern_arrays, axis=0)
     elif method == "weighted_mean":
         weights = weights / np.sum(weights)
-        consensus_pattern = np.average(pattern_arrays, axis=0, weights=weights)
+        pattern = np.average(pattern_arrays, axis=0, weights=weights)
 
-    consensus['consensus_pattern'] = consensus_pattern
+    consensus['pattern'] = pattern
     
     # Aggregate annotations if present (use most common at each timepoint)
     annotation_lists = []
@@ -1080,8 +1082,8 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
             annotation_lists.append(pattern_data['annotations'])
     
     if annotation_lists:
-        consensus_annotations = []
-        time_length = consensus_pattern.shape[0]
+        annotations = []
+        time_length = pattern.shape[0]
         
         for t in range(time_length):
             annotations_at_t = []
@@ -1092,10 +1094,10 @@ def _aggregate_aligned_patterns(aligned_patterns: DtwSample, method: Literal["me
             if annotations_at_t:
                 # Find most common annotation
                 most_common = max(set(annotations_at_t), key=annotations_at_t.count)
-                consensus_annotations.append(most_common)
+                annotations.append(most_common)
             else:
-                consensus_annotations.append('Unknown')
+                annotations.append('Unknown')
         
-        consensus['consensus_annotations'] = consensus_annotations
+        consensus['annotations'] = annotations
     
     return consensus
