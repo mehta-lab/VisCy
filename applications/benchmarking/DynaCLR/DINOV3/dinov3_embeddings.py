@@ -5,38 +5,43 @@ from pathlib import Path
 from typing import Dict, List, Literal, Optional
 
 import click
+import numpy as np
 import torch
 import yaml
 from lightning.pytorch import LightningModule
-from sam2.sam2_image_predictor import SAM2ImagePredictor
+from PIL import Image
 from skimage.exposure import rescale_intensity
+from transformers import AutoImageProcessor, AutoModel
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import EmbeddingWriter
 from viscy.trainer import VisCyTrainer
 
 
-class SAM2Module(LightningModule):
+class DINOv3Module(LightningModule):
     def __init__(
         self,
-        model_name: str = "facebook/sam2-hiera-base-plus",
+        model_name: str = "facebook/dinov3-vitb16-pretrain-lvd1689m",
         channel_reduction_methods: Optional[
             Dict[str, Literal["middle_slice", "mean", "max"]]
         ] = None,
         channel_names: Optional[List[str]] = None,
+        pooling_method: Literal["mean", "max", "cls_token"] = "mean",  
         middle_slice_index: Optional[int] = None,
     ):
         """
-        SAM2 module for feature extraction.
+        DINOv3 module for feature extraction.
 
         Parameters
         ----------
         model_name : str, optional
-            SAM2 model name from HuggingFace Model Hub (default: "facebook/sam2-hiera-base-plus").
+            DINOv3 model name from HuggingFace Model Hub (default: "facebook/dinov3-vitb16-pretrain-lvd1689m").
         channel_reduction_methods : dict[str, {"middle_slice", "mean", "max"}], optional
             Dictionary mapping channel names to reduction methods for 5D inputs (default: None, uses "middle_slice").
         channel_names : list of str, optional
             List of channel names corresponding to input channels (default: None).
+        pooling_method : Literal["mean", "max", "cls_token"], optional
+            Method to pool spatial tokens from the model output (default: "mean").
         middle_slice_index : int, optional
             Specific z-slice index to use for "middle_slice" reduction (default: None, uses D//2).
 
@@ -45,24 +50,19 @@ class SAM2Module(LightningModule):
         self.model_name = model_name
         self.channel_reduction_methods = channel_reduction_methods or {}
         self.channel_names = channel_names or []
+        self.pooling_method = pooling_method
         self.middle_slice_index = middle_slice_index
 
         torch.set_float32_matmul_precision("high")
-        self.model = None  # Initialize in on_predict_start when device is set
+        self.model = None
+        self.processor = None
 
     def on_predict_start(self):
-        """
-        Initialize model with proper device when prediction starts.
-        
-        Notes
-        -----
-        This method is called automatically by Lightning when prediction begins.
-        It ensures the SAM2 model is properly initialized on the correct device.
-        """
         if self.model is None:
-            self.model = SAM2ImagePredictor.from_pretrained(
-                self.model_name, device=self.device
-            )
+            self.processor = AutoImageProcessor.from_pretrained(self.model_name)
+            self.model = AutoModel.from_pretrained(self.model_name)
+            self.model.eval()
+            self.model.to(self.device)
 
     def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -84,12 +84,11 @@ class SAM2Module(LightningModule):
         B, C, D, H, W = x.shape
         result = torch.zeros((B, C, H, W), device=x.device)
 
-        # Process all channels at once for each reduction method to minimize loops
+        # Group channels by reduction method
         middle_slice_indices = []
         mean_indices = []
         max_indices = []
 
-        # Group channels by reduction method
         for c in range(C):
             channel_name = (
                 self.channel_names[c] if c < len(self.channel_names) else f"channel_{c}"
@@ -100,106 +99,129 @@ class SAM2Module(LightningModule):
                 mean_indices.append(c)
             elif method == "max":
                 max_indices.append(c)
-            else:  # Default to middle_slice for any unknown method
+            else:  # Default to middle_slice
                 middle_slice_indices.append(c)
 
-        # Apply middle_slice reduction to all relevant channels at once
+        # Apply reductions
         if middle_slice_indices:
             indices = torch.tensor(middle_slice_indices, device=x.device)
             slice_idx = self.middle_slice_index if self.middle_slice_index is not None else D // 2
             result[:, indices] = x[:, indices, slice_idx]
 
-        # Apply mean reduction to all relevant channels at once
         if mean_indices:
             indices = torch.tensor(mean_indices, device=x.device)
             result[:, indices] = x[:, indices].mean(dim=2)
 
-        # Apply max reduction to all relevant channels at once
         if max_indices:
             indices = torch.tensor(max_indices, device=x.device)
             result[:, indices] = x[:, indices].max(dim=2)[0]
 
         return result
 
-    def _convert_to_rgb(self, x: torch.Tensor) -> list:
+    def _convert_to_pil_images(self, x: torch.Tensor) -> List[Image.Image]:
         """
-        Convert input tensor to 3-channel RGB format as needed for SAM2.
+        Convert tensor to list of PIL Images for DINOv3 processing.
 
         Parameters
         ----------
         x : torch.Tensor
-            Input tensor with 1, 2, or 3+ channels and shape (B, C, H, W).
+            Input tensor with shape (B, C, H, W).
 
         Returns
         -------
-        list of numpy.ndarray
-            List of numpy arrays in HWC format for SAM2 processing.
+        list of PIL.Image.Image
+            List of PIL Images ready for DINOv3 processing.
         """
-        # Convert to RGB and scale to [0, 255] range for SAM2
-        if x.shape[1] == 1:
-            x_rgb = x.repeat(1, 3, 1, 1) * 255.0
-        elif x.shape[1] == 2:
-            x_3ch = torch.zeros(
-                (x.shape[0], 3, x.shape[2], x.shape[3]), device=x.device
-            )
-            x[:, 0] = rescale_intensity(x[:, 0], out_range="uint8")
-            x[:, 1] = rescale_intensity(x[:, 1], out_range="uint8")
+        images = []
+        
+        for b in range(x.shape[0]):
+            img_tensor = x[b]  # (C, H, W)
+            
+            if img_tensor.shape[0] == 1:
+                # Single channel - convert to grayscale PIL
+                img_array = img_tensor[0].cpu().numpy()
+                # Normalize to 0-255
+                img_normalized = ((img_array - img_array.min()) / 
+                                (img_array.max() - img_array.min()) * 255).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode='L')
+                
+            elif img_tensor.shape[0] == 2:
+                # Two channels - create RGB with blend in blue
+                img_array = img_tensor.cpu().numpy()
+                rgb_array = np.zeros((img_array.shape[1], img_array.shape[2], 3), dtype=np.uint8)
+                
+                # Normalize each channel to 0-255
+                ch0_norm = rescale_intensity(img_array[0], out_range=(0, 255)).astype(np.uint8)
+                ch1_norm = rescale_intensity(img_array[1], out_range=(0, 255)).astype(np.uint8)
+                
+                rgb_array[:, :, 0] = ch0_norm  # Red
+                rgb_array[:, :, 1] = ch1_norm  # Green  
+                rgb_array[:, :, 2] = (ch0_norm + ch1_norm) // 2  # Blue as blend
+                
+                pil_img = Image.fromarray(rgb_array, mode='RGB')
+                
+            elif img_tensor.shape[0] == 3:
+                # Three channels - direct RGB
+                img_array = img_tensor.cpu().numpy().transpose(1, 2, 0)  # HWC
+                img_normalized = rescale_intensity(img_array, out_range=(0, 255)).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode='RGB')
+                
+            else:
+                # More than 3 channels - use first 3
+                img_array = img_tensor[:3].cpu().numpy().transpose(1, 2, 0)  # HWC
+                img_normalized = rescale_intensity(img_array, out_range=(0, 255)).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode='RGB')
+            
+            images.append(pil_img)
+        
+        return images
 
-            x_3ch[:, 0] = x[:, 0]
-            x_3ch[:, 1] = x[:, 1]
-            x_3ch[:, 2] = 0.5 * (x[:, 0] + x[:, 1])  # B channel as blend
-
-        elif x.shape[1] == 3:
-            x_rgb = rescale_intensity(x, out_range="uint8")
-        else:
-            # More than 3 channels, normalize first 3 and scale
-            x_3ch = x[:, :3]
-            x_rgb = rescale_intensity(x_3ch, out_range="uint8")
-
-        # Convert to list of numpy arrays in HWC format for SAM2
-        return [
-            x_rgb[i].cpu().numpy().transpose(1, 2, 0) for i in range(x_rgb.shape[0])
-        ]
-
-    def predict_step(self, batch, batch_idx, dataloader_idx=0):
+    def _pool_features(self, features: torch.Tensor) -> torch.Tensor:
         """
-        Extract features from the input images.
-
+        Pool spatial features from DINOv3 tokens.
+        
         Parameters
         ----------
-        batch : dict
-            Batch dictionary containing "anchor" key with input tensors.
-        batch_idx : int
-            Index of the current batch.
-        dataloader_idx : int, optional
-            Index of the dataloader (default: 0).
-
+        features : torch.Tensor
+            Token features with shape (B, num_tokens, hidden_dim).
+            
         Returns
         -------
-        dict
-            Dictionary containing:
-            - "features": Extracted features tensor
-            - "projections": Empty tensor for compatibility (B, 0)
-            - "index": Batch index information
+        torch.Tensor
+            Pooled features with shape (B, hidden_dim).
         """
+        if self.pooling_method == "cls_token":
+            # For ViT models, first token is usually CLS token
+            if "vit" in self.model_name.lower():
+                return features[:, 0, :]  # CLS token
+            else:
+                # For ConvNeXt, no CLS token, fall back to mean
+                return features.mean(dim=1)
+                
+        elif self.pooling_method == "max":
+            return features.max(dim=1)[0]
+        else:  # mean pooling
+            return features.mean(dim=1)
+
+    def predict_step(self, batch, batch_idx, dataloader_idx=0):
         x = batch["anchor"]
 
-        # Handle 5D input (B, C, D, H, W) using configured reduction methods
+        # Handle 5D input (B, C, D, H, W)
         if x.dim() == 5:
             x = self._reduce_5d_input(x)
 
-        # Convert input to RGB format and get list of numpy arrays in HWC format for SAM2
-        image_list = self._convert_to_rgb(x)
-        self.model.set_image_batch(image_list)
+        # Convert to PIL Images for DINOv3 processing
+        pil_images = self._convert_to_pil_images(x)
+        
+        # Batch process all images at once for better GPU utilization
+        inputs = self.processor(pil_images, return_tensors="pt")
+        inputs = {k: v.to(self.device) for k, v in inputs.items()}
+        
+        with torch.no_grad():
+            outputs = self.model(**inputs)
+            token_features = outputs.last_hidden_state  # (B, num_tokens, hidden_dim)
+            features = self._pool_features(token_features)  # (B, hidden_dim)
 
-        # Extract features
-        # features_0 = self.model._features["image_embed"].mean(dim=(2, 3))
-        # features_1 = self.model._features["high_res_feats"][0].mean(dim=(2, 3))
-        # features_2 = self.model._features["high_res_feats"][1].mean(dim=(2, 3))
-        # features = torch.concat([features_0, features_1, features_2], dim=1)
-        features = self.model._features["high_res_feats"][0].mean(dim=(2, 3))
-
-        # Return features and empty projections with correct batch dimension
         return {
             "features": features,
             "projections": torch.zeros((features.shape[0], 0), device=features.device),
@@ -208,51 +230,21 @@ class SAM2Module(LightningModule):
 
 
 def load_config(config_file):
-    """
-    Load configuration from a YAML file.
-    
-    Parameters
-    ----------
-    config_file : str or Path
-        Path to the YAML configuration file.
-        
-    Returns
-    -------
-    dict
-        Configuration dictionary loaded from the YAML file.
-    """
     with open(config_file, "r") as f:
         config = yaml.safe_load(f)
     return config
 
 
 def load_normalization_from_config(norm_config):
-    """
-    Load a normalization transform from a configuration dictionary.
-    
-    Parameters
-    ----------
-    norm_config : dict
-        Configuration dictionary containing "class_path" and optional "init_args".
-        
-    Returns
-    -------
-    object
-        Instantiated normalization transform object.
-    """
     class_path = norm_config["class_path"]
     init_args = norm_config.get("init_args", {})
 
-    # Split module and class name
     module_path, class_name = class_path.rsplit(".", 1)
 
-    # Import the module
     module = importlib.import_module(module_path)
 
-    # Get the class
     transform_class = getattr(module, class_name)
 
-    # Instantiate the transform
     return transform_class(**init_args)
 
 
@@ -266,7 +258,7 @@ def load_normalization_from_config(norm_config):
 )
 def main(config):
     """
-    Extract SAM2 embeddings and save to zarr format using VisCy Trainer.
+    Extract DINOv3 embeddings and save to zarr format using VisCy Trainer.
     
     Parameters
     ----------
@@ -274,18 +266,14 @@ def main(config):
         Path to the YAML configuration file containing all parameters for
         data loading, model configuration, and output settings.
     """
-    # Configure logging
     logging.basicConfig(level=logging.INFO)
     logger = logging.getLogger(__name__)
 
-    # Load config file
     cfg = load_config(config)
     logger.info(f"Loaded configuration from {config}")
 
-    # Prepare datamodule parameters
     dm_params = {}
 
-    # Add data and tracks paths from the paths section
     if "paths" not in cfg:
         raise ValueError("Configuration must contain a 'paths' section")
 
@@ -301,11 +289,9 @@ def main(config):
         )
     dm_params["tracks_path"] = cfg["paths"]["tracks_path"]
 
-    # Add datamodule parameters
     if "datamodule" not in cfg:
         raise ValueError("Configuration must contain a 'datamodule' section")
 
-    # Prepare normalizations
     if (
         "normalizations" not in cfg["datamodule"]
         or not cfg["datamodule"]["normalizations"]
@@ -318,7 +304,6 @@ def main(config):
     normalizations = [load_normalization_from_config(norm) for norm in norm_configs]
     dm_params["normalizations"] = normalizations
 
-    # Copy all other datamodule parameters
     for param, value in cfg["datamodule"].items():
         if param != "normalizations":
             # Handle patch sizes
@@ -328,29 +313,26 @@ def main(config):
             else:
                 dm_params[param] = value
 
-    # Set up the data module
     logger.info("Setting up data module")
     dm = TripletDataModule(**dm_params)
 
-    # Get model parameters for handling 5D inputs
-    channel_reduction_methods = {}
-    middle_slice_index = None
+    # Get model parameters
+    model_name = cfg["model"].get("model_name", "facebook/dinov3-vitb16-pretrain-lvd1689m")
+    pooling_method = cfg["model"].get("pooling_method", "mean")
+    channel_reduction_methods = cfg["model"].get("channel_reduction_methods", {})
+    channel_names = cfg["model"].get("channel_names", [])
+    middle_slice_index = cfg["model"].get("middle_slice_index", None)
 
-    if "model" in cfg:
-        if "channel_reduction_methods" in cfg["model"]:
-            channel_reduction_methods = cfg["model"]["channel_reduction_methods"]
-        if "middle_slice_index" in cfg["model"]:
-            middle_slice_index = cfg["model"]["middle_slice_index"]
-
-    # Initialize SAM2 model with reduction settings
-    logger.info("Loading SAM2 model")
-    model = SAM2Module(
-        model_name=cfg["model"]["model_name"],
+    # Initialize DINOv3 model
+    logger.info(f"Loading DINOv3 model: {model_name}")
+    model = DINOv3Module(
+        model_name=model_name,
+        pooling_method=pooling_method,
         channel_reduction_methods=channel_reduction_methods,
+        channel_names=channel_names,
         middle_slice_index=middle_slice_index,
     )
 
-    # Get dimensionality reduction parameters from config
     phate_kwargs = None
     pca_kwargs = None
 
@@ -359,7 +341,7 @@ def main(config):
             phate_kwargs = cfg["embedding"]["phate_kwargs"]
         if "pca_kwargs" in cfg["embedding"]:
             pca_kwargs = cfg["embedding"]["pca_kwargs"]
-    # Check if output path exists and should be overwritten
+
     if "output_path" not in cfg["paths"]:
         raise ValueError(
             "Output path is required in the configuration file (paths.output_path)"
@@ -376,7 +358,6 @@ def main(config):
         logger.warning(f"Output path {output_path} already exists, will overwrite")
         overwrite = True
 
-    # Set up EmbeddingWriter callback
     embedding_writer = EmbeddingWriter(
         output_path=output_path,
         phate_kwargs=phate_kwargs,
@@ -384,7 +365,6 @@ def main(config):
         overwrite=overwrite,
     )
 
-    # Set up and run VisCy trainer
     logger.info("Setting up VisCy trainer")
     trainer = VisCyTrainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",

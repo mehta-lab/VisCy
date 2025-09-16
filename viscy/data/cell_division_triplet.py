@@ -4,17 +4,13 @@ from pathlib import Path
 from typing import Literal, Sequence
 
 import numpy as np
-import pandas as pd
 import torch
 from monai.transforms import Compose, MapTransform
-from natsort import natsorted
 from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy.data.hcs import HCSDataModule
 from viscy.data.triplet import (
-    _gather_channels,
-    _scatter_channels,
     _transform_channel_wise,
 )
 from viscy.data.typing import DictTransform, TripletSample

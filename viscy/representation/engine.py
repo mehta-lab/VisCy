@@ -11,7 +11,6 @@ from umap import UMAP
 
 from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
-from viscy.representation.disentanglement_metrics import DisentanglementMetrics
 from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 from viscy.representation.vae_logging import BetaVaeLogger
 from viscy.utils.log_images import detach_sample, render_images
@@ -392,7 +391,7 @@ class BetaVaeModule(LightningModule):
         self,
         architecture: Literal["monai_beta","2.5D"],
         model_config: dict = {},
-        loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="mean"),
+        loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
         beta: float = 1.0,
         beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
         beta_min: float = 0.1,
@@ -443,6 +442,7 @@ class BetaVaeModule(LightningModule):
         self.validation_step_outputs = []
 
         self._min_beta = 1e-15
+        self._logvar_minmax = (-20,20)
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
@@ -527,20 +527,23 @@ class BetaVaeModule(LightningModule):
 
 
         current_beta = self._get_current_beta()
-        batch_size = x.size(0)
-        latent_dim = mu.size(1)  
-        normalizer = batch_size * latent_dim 
+        batch_size = original_shape[0]
 
-        recon_loss = self.loss_function(recon_x, x)
+        # Use original input for loss computation to ensure shape consistency
+        x_original = x if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1) else x.unsqueeze(2)
+        recon_loss = self.loss_function(recon_x, x_original)
+        if isinstance(self.loss_function, nn.MSELoss):
+            if hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'sum':
+                recon_loss = recon_loss / batch_size
+            elif hasattr(self.loss_function, 'reduction') and self.loss_function.reduction == 'mean':
+                # Correct the over-normalization by PyTorch's mean reduction by multiplying by the number of elements per image
+                num_elements_per_image = x_original[0].numel()
+                recon_loss = recon_loss * num_elements_per_image
 
-        kl_loss = (
-            -0.5
-            * current_beta
-            * torch.sum(1 + logvar - mu.pow(2) - logvar.exp())
-            / batch_size
-        )
+        kl_loss = -0.5 * torch.sum(1 + torch.clamp(logvar,self._logvar_minmax[0],self._logvar_minmax[1]) - mu.pow(2) - logvar.exp(), dim=1)
+        kl_loss = torch.mean(kl_loss)
 
-        total_loss = recon_loss + kl_loss
+        total_loss = recon_loss + current_beta * kl_loss
 
         return {
             "recon_x": recon_x,

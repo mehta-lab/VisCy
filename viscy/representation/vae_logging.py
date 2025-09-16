@@ -5,7 +5,6 @@ from typing import Optional, Tuple
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as F
 from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.manifold import TSNE
@@ -63,28 +62,15 @@ class BetaVaeLogger:
             lambda: getattr(lightning_module, "beta", 1.0),
         )()
 
-        # Record losses and reconstruction quality metrics
-        kl_recon_ratio = kl_loss / (recon_loss + 1e-8)
-
-        mae_loss = F.l1_loss(recon_x, x)
-
-        # Add gradient explosion diagnostics
+        # Check for explosion and NaN/Inf
         grad_diagnostics = self._compute_gradient_diagnostics(lightning_module)
-
-        # Add NaN/Inf detection
         nan_inf_diagnostics = self._check_nan_inf(recon_x, x, z)
 
-        # Shape diagnostics removed for cleaner logs
-
         metrics = {
-            # All losses in one consolidated group
-            f"loss/total/{stage}": total_loss,
-            f"loss/reconstruction/{stage}": recon_loss,
-            f"loss/kl/{stage}": kl_loss,
-            f"loss/mae/{stage}": mae_loss,
+            f"loss/{stage}/total": total_loss,
+            f"loss/{stage}/reconstruction": recon_loss,
+            f"loss/{stage}/kl": kl_loss,
             f"beta/{stage}": beta,
-            f"loss/kl_recon_ratio/{stage}": kl_recon_ratio,
-            f"loss/recon_contribution/{stage}": recon_loss / total_loss,
         }
 
         # Add diagnostic metrics
@@ -106,7 +92,7 @@ class BetaVaeLogger:
                 f"latent_statistics/std_avg/{stage}": torch.mean(latent_std),
                 f"latent_statistics/mean_max/{stage}": torch.max(latent_mean),
                 f"latent_statistics/std_max/{stage}": torch.max(latent_std),
-                f"latent_statistics/active_dims/{stage}": active_dims,
+                f"latent_statistics/active_dims/{stage}": active_dims.float(),
                 f"latent_statistics/effective_dim/{stage}": effective_dim,
                 f"latent_statistics/utilization/{stage}": active_dims / self.latent_dim,
             }

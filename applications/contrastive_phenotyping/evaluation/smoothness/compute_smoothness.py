@@ -2,46 +2,31 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
-from lightning.pytorch import seed_everything
-from matplotlib.patches import FancyArrowPatch
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.smoothness import compute_embeddings_smoothness
 
-colormap = {
-    2: "orange",
-    1: "steelblue",
-}
 #%%
 # FEATURES
 
 # openphenom_features_path = Path("/home/jason/projects/contrastive_phenotyping/data/open_phenom/features/open_phenom_features.csv")
 # imagenet_features_path = Path("/home/jason/projects/contrastive_phenotyping/data/imagenet/features/imagenet_features.csv")
 dynaclr_features_path = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_07_A549_SEC61_DENV/4-phenotyping/dtw_evaluation/SAM2/sam2_sensor_only.zarr")
-
-# ANNOTATIONS
-ann_root = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/supervised_inf_pred"
-)
-
-# TRACKS
-
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
-)
+dinov3_features_path = Path("/home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/DINOV3/embeddings_convnext_tiny_phase_only_2.zarr")
 
 # LOADING DATASETS
 # openphenom_features = read_embedding_dataset(openphenom_features_path)
 # imagenet_features = read_embedding_dataset(imagenet_features_path)
 dynaclr_embedding_dataset = read_embedding_dataset(dynaclr_features_path)
+dinov3_embedding_dataset = read_embedding_dataset(dinov3_features_path)
 #%%
 # Compute the smoothness of the features
 DISTANCE_METRIC = "cosine"
 feature_paths ={
-    "dynaclr": dynaclr_features_path,
+    # "dynaclr": dynaclr_features_path,
+    "dinov3": dinov3_features_path,
 }
 cmap = plt.get_cmap("tab10")  # or use "Set2", "tab20", etc.
 labels = list(feature_paths.keys())
@@ -108,20 +93,9 @@ for label, path in feature_paths.items():
       "random_frame_std": stats["random_frame_std"],
       "random_frame_median": stats["random_frame_median"],
       "random_frame_peak": stats["random_frame_peak"],
+      "smoothness_score": stats["smoothness_score"],
       "dynamic_range": stats["dynamic_range"]
     }
     # Create DataFrame with single row
-    stats_df = pd.DataFrame(stats)  # Note the list wrapper
+    stats_df = pd.DataFrame(scalar_metrics, index=[0])
     stats_df.to_csv(output_dir/f"{label}_smoothness_stats.csv", index=False)
-
-
-
-
-
-
-
-
-
-#%%
-
-#%%
