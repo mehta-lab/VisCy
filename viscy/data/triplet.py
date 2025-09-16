@@ -370,7 +370,9 @@ class TripletDataModule(HCSDataModule):
         batch_size : int, optional
             Batch size, by default 16
         num_workers : int, optional
-            Number of thread workers, by default 1
+            Number of thread workers.
+            Set to 0 to disable threading. Using more than 1 is not recommended.
+            by default 1
         normalizations : list[MapTransform], optional
             Normalization transforms, by default []
         augmentations : list[MapTransform], optional
