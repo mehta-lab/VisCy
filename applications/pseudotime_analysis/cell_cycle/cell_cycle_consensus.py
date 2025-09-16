@@ -7,7 +7,6 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
-import seaborn as sns
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
@@ -31,7 +30,6 @@ logger.addHandler(console_handler)
 
 """
 TODO
-
 - We need to find a way to save the annotations, features and track information into one file. 
 - We need to standardize the naming convention. i.e The annotations fov_name is missing a / at the beginning. 
 - It would be nice to also select which will be the reference lineages and add that as a column. 
@@ -111,54 +109,59 @@ annotations_df = pd.read_csv(cell_cycle_annotations_denv["annotations_path"])
 cytodtw=CytoDtw(embeddings,annotations_df)
 feature_df=cytodtw.annotations_df
 
-min_timepoints = 20
+min_timepoints = 25
 filtered_lineages = cytodtw.get_lineages(min_timepoints)
 filtered_lineages = pd.DataFrame(filtered_lineages, columns=["fov_name", "track_id"])
 logger.info(f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints")
 
 #%%
-n_timepoints_before = 10
-n_timepoints_after = 10
-valid_annotated_examples=[{
+n_timepoints_before = min_timepoints//2
+n_timepoints_after = min_timepoints//2
+valid_annotated_examples=[
+    {
+    'fov_name': "/A/2/001001",
+    'track_id': [136,137],
+    'timepoints': (43-n_timepoints_before, 43+n_timepoints_after+1),
+    'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
+    'weight': 1.0
+},
+{
     'fov_name': "/C/1/001000",
     'track_id': [47,48],
-    'timepoints': (45-n_timepoints_before, 45+n_timepoints_after),
+    'timepoints': (45-n_timepoints_before, 45+n_timepoints_after+1),
     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
     'weight': 1.0
 },
 {
     'fov_name': "/C/1/001000",
     'track_id': [59,60],
-    'timepoints': (52-n_timepoints_before, 52+n_timepoints_after),
+    'timepoints': (52-n_timepoints_before, 52+n_timepoints_after+1),
     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
     'weight': 1.0
 },
 {
     'fov_name': "/C/1/001001",
     'track_id': [93,94],
-    'timepoints': (29-n_timepoints_before, 29+n_timepoints_after),
+    'timepoints': (29-n_timepoints_before, 29+n_timepoints_after+1),
     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
     'weight': 1.0
 },
-# {
-#     'fov_name': "/C/1/001001",
-#     'track_id': [138,139],
-#     'timepoints': (11-n_timepoints_before, 11+n_timepoints_after),
-#     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
-#     'weight': 1.0
-# },
-]
 
+]
 #%% 
 # Extract all reference patterns
 patterns = []
 pattern_info = []
+REFERENCE_TYPE = "features"
+DTW_CONSTRAINT_TYPE="sakoe_chiba"
+DTW_BAND_WIDTH_RATIO=0.4
 
 for i, example in enumerate(valid_annotated_examples):
     pattern = cytodtw.get_reference_pattern(
         fov_name=example['fov_name'],
         track_id=example['track_id'],
-        timepoints=example['timepoints']
+        timepoints=example['timepoints'],
+        reference_type=REFERENCE_TYPE,
     )
     patterns.append(pattern)
     pattern_info.append({
@@ -171,6 +174,9 @@ for i, example in enumerate(valid_annotated_examples):
 
 # Concatenate all patterns to fit PCA on full dataset
 all_patterns_concat = np.vstack(patterns)
+
+#%%
+# Plot the sample patterns
 
 # Fit PCA on all data
 scaler = StandardScaler()
@@ -222,10 +228,11 @@ if len(valid_annotated_examples) >= 2:
     consensus_result = cytodtw.create_consensus_reference_pattern(
         annotated_samples=valid_annotated_examples,
         reference_selection="median_length", 
-        aggregation_method="mean"
+        aggregation_method="median",
+        reference_type=REFERENCE_TYPE,
     )
-    consensus_lineage = consensus_result['consensus_pattern']
-    consensus_annotations = consensus_result.get('consensus_annotations', None)
+    consensus_lineage = consensus_result['pattern']
+    consensus_annotations = consensus_result.get('annotations', None)
     consensus_metadata = consensus_result['metadata']
     
     logger.info(f"Created consensus pattern with shape: {consensus_lineage.shape}")
@@ -235,29 +242,6 @@ if len(valid_annotated_examples) >= 2:
         logger.info(f"Consensus annotations length: {len(consensus_annotations)}")
 else:
     logger.warning("Not enough valid lineages found to create consensus pattern")
-
-#%%
-#Plot the consensus pattern
-
-scaler = StandardScaler()
-scaled_consensus_lineage = scaler.fit_transform(consensus_lineage)
-pca = PCA(n_components=2)
-pca.fit(scaled_consensus_lineage)
-pca_consensus_lineage = pca.transform(scaled_consensus_lineage)
-
-# Plot the consensus pattern PC1 over time and PC2 over time
-plt.subplot(1, 2, 1)
-plt.plot(pca_consensus_lineage[:, 0])
-plt.xlabel("Time")
-plt.ylabel("PC1")
-plt.title("Consensus Pattern PC1 over Time")
-plt.subplot(1, 2, 2)
-plt.plot(pca_consensus_lineage[:, 1])
-plt.xlabel("Time")
-plt.ylabel("PC2")
-plt.title("Consensus Pattern PC2 over Time")
-plt.tight_layout()
-plt.show()
 
 #%% 
 # Perform DTW analysis for each embedding method
@@ -273,7 +257,10 @@ matches = cytodtw.get_matches(
     num_candidates=top_n,
     method="bernd_clifford",
     metric="cosine",
-    save_path=output_root / f"{name}_matching_lineages_cosine.csv"
+    save_path=output_root / f"{name}_matching_lineages_cosine.csv",
+    reference_type=REFERENCE_TYPE,
+    constraint_type=DTW_CONSTRAINT_TYPE,
+    band_width_ratio=DTW_BAND_WIDTH_RATIO
 )
 
 alignment_results[name] = matches
@@ -308,7 +295,7 @@ for idx, row in top_matches.iterrows():
     lineage_embeddings = []
     for track_id in track_ids:
         try:
-            track_emb = cytodtw.embeddings.sel(sample=(fov_name, track_id)).projections.values
+            track_emb = cytodtw.embeddings.sel(sample=(fov_name, track_id))[REFERENCE_TYPE].values
             lineage_embeddings.append(track_emb)
         except KeyError:
             continue
@@ -408,7 +395,6 @@ from viscy.data.triplet import TripletDataset
 z_range = slice(0, 1)
 initial_yx_patch_size = (192, 192)
 channel_names = ["Phase3D"]
-top_n = 20
 
 positions = []
 tracks_tables = []
