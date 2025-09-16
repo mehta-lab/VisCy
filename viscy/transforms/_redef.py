@@ -5,7 +5,6 @@ from typing import Sequence
 from monai.transforms import (
     CenterSpatialCropd,
     Decollated,
-    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
