@@ -112,7 +112,7 @@ if __name__ == "__main__":
     cache_pool_bytes = 32 << 30
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
-        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
+        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
         source_channel=["raw GFP EX488 EM525-45"],
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     )
     dm2 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
-        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
+        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
         source_channel=["Phase3D"],
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
