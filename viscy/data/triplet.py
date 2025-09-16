@@ -439,8 +439,6 @@ class TripletDataModule(HCSDataModule):
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
         self.return_negative = return_negative
-        self._augmentation_transform = None
-        self._no_augmentation_transform = None
         self._cache_pool_bytes = cache_pool_bytes
         self._augmentation_transform = Compose(
             self.normalizations + self.augmentations + [self._final_crop()]
