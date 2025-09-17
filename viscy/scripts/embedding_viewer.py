@@ -3,7 +3,6 @@ import logging
 import lightning.pytorch as pl
 import numpy as np
 import torch
-from cmap import Colormap
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch.utils.data import DataLoader, Dataset
 
@@ -12,7 +11,7 @@ logger = logging.getLogger(__name__)
 
 
 class DummyDataset(Dataset):
-    """Dummy dataset with synthetic RGB images using cmap."""
+    """Dummy dataset with synthetic grayscale images."""
     
     def __init__(self, size: int = 500, num_classes: int = 5, image_size: int = 64):
         self.size = size
@@ -28,50 +27,39 @@ class DummyDataset(Dataset):
             class_id = self.labels[i].item()
             self.annotations[i] = 1 if class_id in [0, 1, 2] else 0
         
-        self.images = self._generate_synthetic_rgb_images()
+        self.images = self._generate_synthetic_grayscale_images()
         
-    def _generate_synthetic_rgb_images(self):
-        """Generate synthetic RGB images using single colormaps per class."""
-        # Single colormap per class for simplicity
-        class_cmaps = [
-            'green',    # Class 0
-            'magenta',  # Class 1  
-            'cyan',     # Class 2
-            'orange',   # Class 3
-            'blue'      # Class 4
-        ]
-        
-        rgb_images = []
+    def _generate_synthetic_grayscale_images(self):
+        """Generate synthetic grayscale images with class-specific patterns."""
+        grayscale_images = []
         
         for i in range(self.size):
             class_id = self.labels[i].item()
-            cmap_name = class_cmaps[class_id]
             
-            # Create single channel pattern
             pattern = np.zeros((self.image_size, self.image_size))
             
-            # Class-specific geometric pattern
-            if class_id == 0:  # Circles
+            # Class-specific geometric pattern with different intensities
+            if class_id == 0:  # Circles - bright
                 y, x = np.meshgrid(np.arange(self.image_size), np.arange(self.image_size), indexing='ij')
                 center = self.image_size // 2
                 radius = self.image_size // 4
-                pattern = ((x - center) ** 2 + (y - center) ** 2 <= radius ** 2).astype(float)
+                pattern = ((x - center) ** 2 + (y - center) ** 2 <= radius ** 2).astype(float) * 0.8
                 
-            elif class_id == 1:  # Horizontal stripes
+            elif class_id == 1:  # Horizontal stripes - medium bright
                 for j in range(0, self.image_size, 8):
-                    pattern[j:j+4, :] = 1.0
+                    pattern[j:j+4, :] = 0.6
                     
-            elif class_id == 2:  # Vertical stripes  
+            elif class_id == 2:  # Vertical stripes - medium
                 for j in range(0, self.image_size, 8):
-                    pattern[:, j:j+4] = 1.0
+                    pattern[:, j:j+4] = 0.5
                     
-            elif class_id == 3:  # Diagonal pattern
+            elif class_id == 3:  # Diagonal pattern - medium dark
                 y, x = np.meshgrid(np.arange(self.image_size), np.arange(self.image_size), indexing='ij')
-                pattern = ((x + y) % 10 < 5).astype(float)
+                pattern = ((x + y) % 10 < 5).astype(float) * 0.4
                 
-            else:  # class_id == 4: Checkerboard
+            else:  # class_id == 4: Checkerboard - dark
                 y, x = np.meshgrid(np.arange(self.image_size), np.arange(self.image_size), indexing='ij')
-                pattern = ((x // 8 + y // 8) % 2).astype(float)
+                pattern = ((x // 8 + y // 8) % 2).astype(float) * 0.3
             
             # Add some Gaussian blobs
             y, x = np.meshgrid(np.arange(self.image_size), np.arange(self.image_size), indexing='ij')
@@ -80,30 +68,20 @@ class DummyDataset(Dataset):
                 cx, cy = center
                 sigma = self.image_size // 6
                 gaussian = np.exp(-((x - cx) ** 2 + (y - cy) ** 2) / (2 * sigma ** 2))
-                pattern += gaussian * 0.5
+                pattern += gaussian * 0.2
             
             # Normalize and add noise
             pattern = (pattern - pattern.min()) / (pattern.max() - pattern.min() + 1e-8)
-            noise = np.random.RandomState(i).randn(*pattern.shape) * 0.1
+            noise = np.random.RandomState(i).randn(*pattern.shape) * 0.05
             pattern = np.clip(pattern + noise, 0, 1)
             
-            # Apply colormap to create RGB
-            colormap = Colormap(cmap_name)
-            rgb_image = colormap(pattern)  # This returns (H, W, 3)
-            rgb_images.append(rgb_image)
+            grayscale_images.append(pattern)
             
-        # Convert to tensor format (N, C, H, W) - required by TensorBoard
-        rgb_images = np.stack(rgb_images)  # (N, H, W, 3)
+        #NOTE: Convert to tensor format (N, 1, H, W) - single channel grayscale
+        grayscale_images = np.stack(grayscale_images)  # (N, H, W)
+        grayscale_images = torch.from_numpy(grayscale_images).unsqueeze(1).float()  # (N, 1, H, W)
         
-        # Ensure we have exactly 3 channels for RGB
-        if rgb_images.shape[-1] == 4:
-            rgb_images = rgb_images[..., :3]
-        elif rgb_images.shape[-1] != 3:
-            raise ValueError(f"Expected 3 or 4 channels, got {rgb_images.shape[-1]}")
-            
-        rgb_images = torch.from_numpy(rgb_images).permute(0, 3, 1, 2).float()  # (N, 3, H, W)
-        
-        return rgb_images
+        return grayscale_images
         
     def __len__(self):
         return self.size
@@ -118,19 +96,17 @@ class DummyEmbeddingModel(pl.LightningModule):
         self.embedding_dim = embedding_dim
         self.num_samples = num_samples
         self.num_classes = num_classes
+
+        self.sample_indices = torch.arange(num_samples)
         
-        # Store all data for consistent embedding generation
-        self.register_buffer('sample_indices', torch.arange(num_samples))
-        
-        # Store RGB images and metadata for TensorBoard visualization
         if dataset is not None:
-            self.rgb_images = dataset.images  # Shape: (N, C, H, W)
-            self.register_buffer('class_labels', dataset.labels)
-            self.register_buffer('annotations', dataset.annotations)
+            self.grayscale_images = dataset.images  # Shape: (N, 1, H, W)
+            self.class_labels = dataset.labels
+            self.annotations = dataset.annotations
         else:
-            self.rgb_images = None
-            self.register_buffer('class_labels', torch.randint(0, num_classes, (num_samples,)))
-            self.register_buffer('annotations', torch.zeros(num_samples, dtype=torch.int))
+            self.grayscale_images = None
+            self.class_labels = torch.randint(0, num_classes, (num_samples,))
+            self.annotations = torch.zeros(num_samples, dtype=torch.int)
         
     def generate_embeddings(self, epoch: int, indices: torch.Tensor, labels: torch.Tensor):
         """Generate semi-random embeddings with decreasing noise/randomness based on epoch number and class labels."""
@@ -138,7 +114,6 @@ class DummyEmbeddingModel(pl.LightningModule):
         
         torch.manual_seed(42 + epoch)
         
-        # Centers for the distribution of the embeddings for each class
         class_centers = torch.tensor([
             [3.0, 3.0] + [0.1] * (self.embedding_dim - 2),    # Class 0: green circles
             [-3.0, 3.0] + [0.2] * (self.embedding_dim - 2),   # Class 1: magenta h-stripes  
@@ -177,7 +152,6 @@ class DummyEmbeddingModel(pl.LightningModule):
         """Training step - dummy loss."""
         inputs, labels = batch
         
-        # Generate embeddings for current epoch
         indices = inputs.long().squeeze()
         embeddings = self.generate_embeddings(self.current_epoch, indices, labels)
         
@@ -189,29 +163,38 @@ class DummyEmbeddingModel(pl.LightningModule):
         
     def on_train_epoch_end(self):
         """Log all embeddings with RGB images to TensorBoard at the end of each epoch."""
+        # Move tensors to device for computation
+        sample_indices = self.sample_indices.to(self.device)
+        class_labels = self.class_labels.to(self.device)
+        annotations = self.annotations.to(self.device)
+        
         all_embeddings = self.generate_embeddings(
             self.current_epoch, 
-            self.sample_indices, 
-            self.class_labels
+            sample_indices, 
+            class_labels
         )
+        
+        all_embeddings_cpu = all_embeddings.detach().cpu()
+        class_labels_cpu = class_labels.detach().cpu()
+        annotations_cpu = annotations.detach().cpu()
         
         # NOTE: Create metadata as list of lists for TensorBoard columns
         metadata_header = ["Class", "Annotation"]
         metadata = []
-        for i in range(len(self.class_labels)):
-            class_id = str(self.class_labels[i].item())
-            annotation_str = "positive" if self.annotations[i].item() == 1 else "negative"
+        for i in range(len(class_labels_cpu)):
+            class_id = str(class_labels_cpu[i].item())
+            annotation_str = "positive" if annotations_cpu[i].item() == 1 else "negative"
             # Each row is a list with [class, annotation]
             metadata.append([class_id, annotation_str])
     
         # NOTE: Prepare images for TensorBoard (needs to be in range [0, 1])
         images_for_tb = None
-        if self.rgb_images is not None:
-            images_for_tb = torch.clamp(self.rgb_images, 0, 1)
+        if self.grayscale_images is not None:
+            images_for_tb = torch.clamp(self.grayscale_images, 0, 1)
         
         tag = f"embeddings_epoch_{self.current_epoch}"
         self.logger.experiment.add_embedding(
-            all_embeddings.cpu(),
+            all_embeddings_cpu,
             metadata=metadata,
             metadata_header=metadata_header,
             label_img=images_for_tb,
@@ -255,7 +238,6 @@ def main():
         enable_progress_bar=True,
         log_every_n_steps=5
     )
-    # Train the dummy model with decreasing noise/randomness in the pseudo-embeddings
     trainer.fit(model, train_loader)
 
 
