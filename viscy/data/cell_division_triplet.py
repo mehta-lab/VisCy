@@ -19,7 +19,12 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class CellDivisionTripletDataset(Dataset):
-    # Hardcoded channel mapping for .npy files
+    """Dataset for triplet sampling of cell division data from npy files.
+    
+    For the dataset from the paper:
+    https://arxiv.org/html/2502.02182v1
+    """
+    #NOTE: Hardcoded channel mapping for .npy files
     CHANNEL_MAPPING = {
         # Channel 0 aliases (brightfield)
         "bf": 0,
@@ -140,10 +145,9 @@ class CellDivisionTripletDataset(Dataset):
             # Use future timepoint
             positive_t = anchor_t + self.time_interval
 
-        positive_patch = track["data"][positive_t]  # Shape: (C, Y, X)
-        # Add depth dimension only if not output_2d: (C, Y, X) -> (C, D=1, Y, X)
+        positive_patch = track["data"][positive_t]
         if not self.output_2d:
-            positive_patch = positive_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
+            positive_patch = positive_patch.unsqueeze(1)  
         return positive_patch
 
     def _sample_negative(self, anchor_info: dict) -> Tensor:
