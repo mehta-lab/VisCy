@@ -45,7 +45,6 @@ metrics = [
 phate = [
     "phate",
 ]
-
 examples = ["napari", "jupyter", "jupytext", "transformers>=4.51.3"]
 visual = [
     "ipykernel",
@@ -58,7 +57,7 @@ visual = [
     "dash",
 ]
 dev = [
-    "viscy[metrics,phate,examples,visual,optimization]",
+    "viscy[metrics,phate,examples,visual]",
     "pytest",
     "pytest-cov",
     "hypothesis",
