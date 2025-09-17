@@ -28,7 +28,9 @@ dependencies = [
     "matplotlib>=3.9.0",
     "numpy",
     "xarray",
-    "pytorch-metric-learning>2.0.0"]
+    "pytorch-metric-learning>2.0.0",
+    "anndata>=0.12.2",
+]
 dynamic = ["version"]
 
 [project.optional-dependencies]
@@ -38,7 +40,7 @@ metrics = [
     "imbalanced-learn>=0.12.0",
     "torchmetrics[detection]>=1.6.3",
     "ptflops>=0.7",
-    "umap-learn",
+    "umap-learn>=0.5.9",
     "captum>=0.7.0",
     "mahotas",
 ]

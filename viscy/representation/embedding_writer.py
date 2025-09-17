@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Sequence
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import torch
@@ -70,7 +71,7 @@ def write_embedding_dataset(
     overwrite: bool = False,
 ) -> None:
     """
-    Write embeddings to a zarr store in an Xarray-compatible format.
+    Write embeddings to an AnnData Zarr Store.
 
     Parameters
     ----------
@@ -118,7 +119,12 @@ def write_embedding_dataset(
 
     # Create a copy of the index DataFrame to avoid modifying the original
     ultrack_indices = index_df.copy()
+    ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
     n_samples = len(features)
+
+    adata = ad.AnnData(X=features, obs=ultrack_indices)
+    if projections is not None:
+        adata.obsm["X_projections"] = projections
 
     # Set up default kwargs for each method
     if umap_kwargs:
@@ -130,8 +136,7 @@ def write_embedding_dataset(
 
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
         _, UMAP = _fit_transform_umap(features, **umap_kwargs)
-        for i in range(UMAP.shape[1]):
-            ultrack_indices[f"UMAP{i + 1}"] = UMAP[:, i]
+        adata.obsm["X_umap"] = UMAP
 
     if phate_kwargs:
         # Update with user-provided kwargs
@@ -147,8 +152,7 @@ def write_embedding_dataset(
         try:
             _logger.debug("Computing PHATE")
             _, PHATE = compute_phate(features, **phate_kwargs)
-            for i in range(PHATE.shape[1]):
-                ultrack_indices[f"PHATE{i + 1}"] = PHATE[:, i]
+            adata.obsm["X_phate"] = PHATE
         except Exception as e:
             _logger.warning(f"PHATE computation failed: {str(e)}")
 
@@ -158,27 +162,12 @@ def write_embedding_dataset(
         try:
             _logger.debug("Computing PCA")
             PCA_features, _ = compute_pca(features, **pca_kwargs)
-            for i in range(PCA_features.shape[1]):
-                ultrack_indices[f"PCA{i + 1}"] = PCA_features[:, i]
+            adata.obsm["X_pca"] = PCA_features
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
 
-    # Create multi-index and dataset
-    index = pd.MultiIndex.from_frame(ultrack_indices)
-
-    # Create dataset dictionary with features
-    dataset_dict = {"features": (("sample", "features"), features)}
-
-    # Add projections if provided
-    if projections is not None:
-        dataset_dict["projections"] = (("sample", "projections"), projections)
-
-    # Create the dataset
-    dataset = Dataset(dataset_dict, coords={"sample": index}).reset_index("sample")
-
     _logger.debug(f"Writing dataset to {output_path}")
-    with dataset.to_zarr(output_path, mode="w") as zarr_store:
-        zarr_store.close()
+    adata.write_zarr(output_path)
 
 
 class EmbeddingWriter(BasePredictionWriter):
