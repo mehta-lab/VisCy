@@ -45,10 +45,6 @@ metrics = [
 phate = [
     "phate",
 ]
-optimization = [
-    "optuna",
-    "optuna-dashboard",
-]
 
 examples = ["napari", "jupyter", "jupytext", "transformers>=4.51.3"]
 visual = [
