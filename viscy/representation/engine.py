@@ -754,15 +754,6 @@ class BetaVaeModule(LightningModule):
                 lightning_module=self, n_dims=8, n_steps=7
             )
 
-            # Log latent space visualization (every 40 epochs to avoid overhead)
-            if self.current_epoch % 40 == 0:
-                self.vae_logger.log_latent_space_visualization(
-                    lightning_module=self,
-                    dataloader=val_dataloader,
-                    max_samples=500,
-                    method="pca",
-                )
-
         except Exception as e:
             _logger.error(f"Error logging enhanced visualizations: {e}")
 

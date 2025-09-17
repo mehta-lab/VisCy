@@ -1,6 +1,6 @@
 import io
 import logging
-from typing import Optional, Tuple
+from typing import Callable, Optional, Tuple
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -342,95 +342,8 @@ class BetaVaeLogger:
                 dataformats="CHW",
             )
 
-    def log_latent_space_visualization(
-        self, lightning_module, dataloader, max_samples: int = 500, method: str = "pca"
-    ):
-        """
-        Log 2D visualization of latent space using PCA or t-SNE.
-
-        Args:
-            lightning_module: Lightning module instance
-            dataloader: DataLoader for samples
-            max_samples: Maximum samples to visualize
-            method: Visualization method ("pca" or "tsne")
-        """
-        if not hasattr(lightning_module, "model"):
-            return
-
-        lightning_module.model.eval()
-
-        # Collect latent representations
-        latents = []
-        samples_collected = 0
-
-        with torch.no_grad():
-            for batch in dataloader:
-                if samples_collected >= max_samples:
-                    break
-
-                x = batch["anchor"].to(lightning_module.device)
-                model_output = lightning_module(x)  # Use lightning module forward
-                # Handle both Pythae dict format and object format
-                if isinstance(model_output, dict):
-                    z = model_output["z"]
-                else:
-                    z = (
-                        model_output.z
-                        if hasattr(model_output, "z")
-                        else model_output.embedding
-                    )
-
-                latents.append(z.cpu().numpy())
-                samples_collected += x.shape[0]
-
-        if not latents:
-            return
-
-        latents = np.vstack(latents)[:max_samples]
-
-        # Apply dimensionality reduction
-        if method == "pca":
-            reducer = PCA(n_components=2)
-            reduced = reducer.fit_transform(latents)
-            title = f"PCA Latent Space (Variance: {reducer.explained_variance_ratio_.sum():.2f})"
-        elif method == "tsne":
-            reducer = TSNE(n_components=2, random_state=42)
-            reduced = reducer.fit_transform(latents)
-            title = "t-SNE Latent Space"
-        else:
-            _logger.warning(f"Unknown method: {method}")
-            return
-
-        # Create scatter plot
-        plt.figure(figsize=(10, 8))
-        plt.scatter(reduced[:, 0], reduced[:, 1], alpha=0.6, s=20)
-        plt.title(title)
-        plt.xlabel("Component 1")
-        plt.ylabel("Component 2")
-        plt.grid(True, alpha=0.3)
-
-        # Convert to image
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
-        buf.seek(0)
-
-        # Log to TensorBoard
-        img = Image.open(buf)
-        img_array = np.array(img)
-        img_tensor = torch.from_numpy(img_array).permute(2, 0, 1) / 255.0
-
-        lightning_module.logger.experiment.add_image(
-            f"latent_space_{method}",
-            img_tensor,
-            lightning_module.current_epoch,
-            dataformats="CHW",
-        )
-
-        plt.close()
-        buf.close()
-
     def log_beta_schedule(
-        self, lightning_module, beta_schedule: Optional[callable] = None
+        self, lightning_module, beta_schedule: Optional[Callable] = None
     ):
         """
         Log β annealing schedule.
