@@ -17,11 +17,6 @@ from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
 
-_VAE_ARCHITECTURE = {
-    "2.5D": BetaVae25D,
-    "monai_beta": BetaVaeMonai,
-}
-
 
 class ContrastivePrediction(TypedDict):
     features: Tensor
@@ -59,50 +54,7 @@ class ContrastiveModule(LightningModule):
         self.log_embeddings = log_embeddings
         self.embedding_log_frequency = embedding_log_frequency
 
-    def on_train_start(self) -> None:
-        """Log comprehensive hyperparameters including model architecture details."""
-        super().on_train_start()
-
-        # Collect comprehensive hyperparameters
-        hparams = {
-            # Training hyperparameters
-            "lr": self.lr,
-            "schedule": self.schedule,
-            "input_shape": self.example_input_array,
-            "loss_function_class": self.loss_function.__class__.__name__,
-        }
-
-        # Add loss function specific parameters
-        if hasattr(self.loss_function, "margin"):
-            hparams["loss_margin"] = self.loss_function.margin
-        if hasattr(self.loss_function, "temperature"):
-            hparams["loss_temperature"] = self.loss_function.temperature
-        if hasattr(self.loss_function, "normalize_embeddings"):
-            hparams["loss_normalize_embeddings"] = (
-                self.loss_function.normalize_embeddings
-            )
-
-        # Add encoder details if it's a ContrastiveEncoder
-        if hasattr(self.model, "backbone"):
-            hparams["encoder_backbone"] = self.model.backbone
-        if hasattr(self.model, "in_channels"):
-            hparams["encoder_in_channels"] = self.model.in_channels
-        if hasattr(self.model, "in_stack_depth"):
-            hparams["encoder_in_stack_depth"] = self.model.in_stack_depth
-        if hasattr(self.model, "embedding_dim"):
-            hparams["encoder_embedding_dim"] = self.model.embedding_dim
-        if hasattr(self.model, "projection_dim"):
-            hparams["encoder_projection_dim"] = self.model.projection_dim
-        if hasattr(self.model, "drop_path_rate"):
-            hparams["encoder_drop_path_rate"] = self.model.drop_path_rate
-        if hasattr(self.model, "stem_kernel_size"):
-            hparams["encoder_stem_kernel_size"] = str(self.model.stem_kernel_size)
-        if hasattr(self.model, "stem_stride"):
-            hparams["encoder_stem_stride"] = str(self.model.stem_stride)
-
-        # Log to TensorBoard
-        if self.logger is not None:
-            self.logger.log_hyperparams(hparams)
+        self.save_hyperparameters()
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections.
@@ -270,117 +222,7 @@ class ContrastiveModule(LightningModule):
     def on_validation_epoch_end(self) -> None:
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
-
-        # Log UMAP embeddings from validation set every N epochs
-        if (
-            self.log_embeddings
-            and self.current_epoch % self.embedding_log_frequency == 0
-            and self.current_epoch > 0
-        ):
-            self._collect_and_log_embeddings()
-
         self.validation_step_outputs = []
-
-    def _collect_and_log_embeddings(self):
-        """Collect embeddings from validation dataloader and log UMAP visualization."""
-        try:
-            # Get validation dataloader
-            val_dataloaders = self.trainer.val_dataloaders
-            if val_dataloaders is None:
-                _logger.warning(
-                    "No validation dataloader available for embedding logging"
-                )
-                return
-            elif isinstance(val_dataloaders, list):
-                val_dataloader = val_dataloaders[0] if val_dataloaders else None
-            else:
-                val_dataloader = val_dataloaders
-
-            if val_dataloader is None:
-                _logger.warning(
-                    "No validation dataloader available for embedding logging"
-                )
-                return
-
-            _logger.info(
-                f"Collecting embeddings for visualization at epoch {self.current_epoch}"
-            )
-
-            # Collect embeddings, images, and metadata from validation set
-            embeddings_list = []
-            images_list = []
-            labels_list = []
-            max_samples = 500  # Reduced for memory efficiency with images
-            sample_count = 0
-
-            self.eval()
-            with torch.no_grad():
-                for batch in val_dataloader:
-                    if sample_count >= max_samples:
-                        break
-
-                    # Move batch to device
-                    anchor = batch["anchor"].to(self.device)
-                    batch_size = anchor.size(0)
-
-                    # Get embeddings (features, not projections)
-                    features, _ = self(anchor)
-                    embeddings_list.append(features.cpu())
-
-                    # Collect images for sprite visualization
-                    # Take middle slice for 3D data and first channel if multi-channel
-                    if anchor.ndim == 5:  # (B, C, D, H, W)
-                        mid_z = anchor.size(2) // 2
-                        img_slice = anchor[:, 0, mid_z].cpu()  # (B, H, W)
-                    else:  # (B, C, H, W)
-                        img_slice = anchor[:, 0].cpu()  # (B, H, W)
-                    images_list.append(img_slice)
-
-                    # Collect labels from index information
-                    if "index" in batch and batch["index"] is not None:
-                        for i, idx_info in enumerate(batch["index"][:batch_size]):
-                            if isinstance(idx_info, dict):
-                                # Create label from track_id and time info
-                                track_id = idx_info.get("track_id", "unknown")
-                                t = idx_info.get("t", "unknown")
-                                labels_list.append(f"track_{track_id}_t_{t}")
-                            else:
-                                labels_list.append(f"sample_{sample_count + i}")
-                    else:
-                        # Fallback labels
-                        for i in range(batch_size):
-                            labels_list.append(f"sample_{sample_count + i}")
-
-                    sample_count += batch_size
-
-            if embeddings_list:
-                embeddings = torch.cat(embeddings_list, dim=0)[:max_samples]
-                images = torch.cat(images_list, dim=0)[:max_samples]
-                labels = labels_list[:max_samples]
-
-                # Normalize images for visualization (0-1 range)
-                images = (images - images.min()) / (images.max() - images.min() + 1e-8)
-
-                # Log UMAP visualization
-                self.log_embedding_umap(embeddings, tag="validation")
-
-                # Log to TensorBoard's embedding projector with images and labels
-                self.logger.experiment.add_embedding(
-                    embeddings,
-                    metadata=labels,
-                    label_img=images.unsqueeze(1),  # Add channel dimension
-                    global_step=self.current_epoch,
-                    tag="validation_embeddings",
-                )
-
-                _logger.info(
-                    f"Logged {len(embeddings)} embeddings with images and labels"
-                )
-            else:
-                _logger.warning("No embeddings collected from validation set")
-
-        except Exception as e:
-            _logger.error(f"Error collecting embeddings: {e}")
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -401,8 +243,7 @@ class ContrastiveModule(LightningModule):
 class BetaVaeModule(LightningModule):
     def __init__(
         self,
-        architecture: Literal["monai_beta", "2.5D"],
-        model_config: dict = {},
+        vae: nn.Module | BetaVae25D | BetaVaeMonai,
         loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
         beta: float = 1.0,
         beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
@@ -420,15 +261,7 @@ class BetaVaeModule(LightningModule):
     ):
         super().__init__()
 
-        net_class = _VAE_ARCHITECTURE.get(architecture)
-        if not net_class:
-            raise ValueError(
-                f"Architecture {architecture} not in {_VAE_ARCHITECTURE.keys()}"
-            )
-
-        self.model = net_class(**model_config)
-        self.model_config = model_config
-        self.architecture = architecture
+        self.model = vae
         self.loss_function = loss_function
 
         self.beta = beta
@@ -458,10 +291,12 @@ class BetaVaeModule(LightningModule):
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
-        if "latent_dim" in self.model_config:
-            latent_dim = self.model_config["latent_dim"]
-        elif "latent_size" in self.model_config:
-            latent_dim = self.model_config["latent_size"]
+        if hasattr(self.model, 'latent_dim'):
+            latent_dim = self.model.latent_dim
+        elif hasattr(self.model, 'latent_size'):
+            latent_dim = self.model.latent_size
+        elif hasattr(self.model, 'encoder') and hasattr(self.model.encoder, 'latent_dim'):
+            latent_dim = self.model.encoder.latent_dim
 
         if latent_dim is not None:
             self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
@@ -517,14 +352,14 @@ class BetaVaeModule(LightningModule):
         else:
             return max(self.beta, self._min_beta)
 
-    @torch.amp.custom_fwd(device_type="cuda", cast_inputs=torch.float32)
     def forward(self, x: Tensor) -> dict:
         """Forward pass through Beta-VAE."""
 
         original_shape = x.shape
         is_monai_2d = (
-            self.architecture == "monai_beta"
-            and self.model_config.get("spatial_dims") == 2
+            isinstance(self.model, BetaVaeMonai)
+            and hasattr(self.model, 'spatial_dims')
+            and self.model.spatial_dims == 2
         )
         if is_monai_2d and len(x.shape) == 5 and x.shape[2] == 1:
             x = x.squeeze(2)
@@ -676,7 +511,6 @@ class BetaVaeModule(LightningModule):
         self._log_samples("val_reconstructions", self.validation_step_outputs)
         self.validation_step_outputs = []
 
-        # Compute disentanglement metrics periodically
         if (
             self.compute_disentanglement
             and self.current_epoch % self.disentanglement_frequency == 0
@@ -694,7 +528,6 @@ class BetaVaeModule(LightningModule):
     def _compute_and_log_disentanglement_metrics(self):
         """Compute and log disentanglement metrics."""
         try:
-            # Get validation dataloader - handle both single DataLoader and list cases
             val_dataloaders = self.trainer.val_dataloaders
             if val_dataloaders is None:
                 val_dataloader = None
@@ -709,7 +542,6 @@ class BetaVaeModule(LightningModule):
                 )
                 return
 
-            # Use the logger's disentanglement metrics method
             self.vae_logger.log_disentanglement_metrics(
                 lightning_module=self,
                 dataloader=val_dataloader,
@@ -722,7 +554,6 @@ class BetaVaeModule(LightningModule):
     def _log_enhanced_visualizations(self):
         """Log enhanced β-VAE visualizations."""
         try:
-            # Get validation dataloader - handle both single DataLoader and list cases
             val_dataloaders = self.trainer.val_dataloaders
             if val_dataloaders is None:
                 val_dataloader = None
@@ -739,17 +570,12 @@ class BetaVaeModule(LightningModule):
                 f"Logging enhanced β-VAE visualizations at epoch {self.current_epoch}"
             )
 
-            # Log latent traversals -for how recons change when moving along a latent dim
             self.vae_logger.log_latent_traversal(
                 lightning_module=self, n_dims=8, n_steps=11
             )
-
-            # Log latent interpolations - smooth transitions between different data points in the latent space
             self.vae_logger.log_latent_interpolation(
                 lightning_module=self, n_pairs=3, n_steps=11
             )
-
-            # Log factor traversal matrix - grid visualization how each dim affects the recon
             self.vae_logger.log_factor_traversal_matrix(
                 lightning_module=self, n_dims=8, n_steps=7
             )
