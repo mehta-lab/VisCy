@@ -590,6 +590,8 @@ class TripletDataModule(HCSDataModule):
         if self.trainer:
             if self.trainer.predicting:
                 return self._no_augmentation_transform
+            if self.trainer.validating and not self.augment_validation:
+                return self._no_augmentation_transform
         # NOTE: for backwards compatibility
         if key == "anchor" and self.time_interval in ("any", 0):
             return self._no_augmentation_transform
