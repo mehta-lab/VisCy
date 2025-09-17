@@ -151,31 +151,3 @@ def clustering_evaluation(embeddings, annotations, method="nmi"):
 
     return score
 
-
-def compute_track_msd_statistics(
-    msd_per_tau: dict[int, list[float]],
-) -> tuple[dict[int, float], dict[int, float]]:
-    """
-    Compute MSD statistics (mean and std) for a single track.
-
-    Parameters
-    ----------
-    features : ArrayLike
-        Feature matrix (n_timepoints, n_features) for a single track
-    timepoints : ArrayLike
-        Time points corresponding to each feature vector
-    metric : str, optional
-        Distance metric to use, by default "euclidean"
-
-    Returns
-    -------
-    tuple[dict[int, float], dict[int, float]]
-        Tuple of (mean_msd, std_msd) dictionaries mapping τ to statistics
-    """
-
-    mean_msd = {
-        tau: np.mean(displacements) for tau, displacements in msd_per_tau.items()
-    }
-    std_msd = {tau: np.std(displacements) for tau, displacements in msd_per_tau.items()}
-
-    return mean_msd, std_msd
