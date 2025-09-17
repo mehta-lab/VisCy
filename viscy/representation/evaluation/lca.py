@@ -81,17 +81,26 @@ def fit_logistic_regression(
         train_selection = fov_selection
         test_selection = ~fov_selection
     else:
-        # Use stratified sampling
-        n_samples = len(annotations_filtered)
-        indices = range(n_samples)
-        train_indices, test_indices = train_test_split(
-            indices,
+        unique_fovs = features_filtered["fov_name"].unique()
+
+        fov_class_dist = []
+        for fov in unique_fovs:
+            fov_mask = features_filtered["fov_name"] == fov
+            fov_classes = annotations_filtered[fov_mask]
+            # Use majority class for stratification or class distribution
+            majority_class = pd.Series(fov_classes).mode()[0]
+            fov_class_dist.append(majority_class)
+
+        # Split FOVs, not individual samples
+        train_fovs, test_fovs = train_test_split(
+            unique_fovs,
             test_size=1 - train_ratio,
-            stratify=annotations_filtered,
+            stratify=fov_class_dist,
             random_state=random_state,
         )
-        train_selection = pd.Series(False, index=range(n_samples))
-        train_selection.iloc[train_indices] = True
+
+        # Create selection based on FOV assignment
+        train_selection = features_filtered["fov_name"].isin(train_fovs)
         test_selection = ~train_selection
     train_features = features_filtered.values[train_selection]
     test_features = features_filtered.values[test_selection]
