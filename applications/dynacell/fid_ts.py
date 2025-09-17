@@ -97,10 +97,9 @@ def fid_from_features(f1, f2, eps=1e-6):
 
 @torch.no_grad()
 def encode_fovs(
-    fov_pairs,
+    fovs,
     vae,
-    channel_name1: str,
-    channel_name2: str,
+    channel_name: str,
     device: str = "cuda",
     batch_size: int = 4,
     input_spatial_size: tuple = (32, 512, 512), 
@@ -112,47 +111,33 @@ def encode_fovs(
         • feed through VAE in chunks of ≤ batch_size frames
         • average the resulting T latent vectors  →  one embedding / FOV
     Returns
-        emb1, emb2 : (N, latent_dim) tensors
+        emb: (N, latent_dim) tensors
     """
-    emb1, emb2 = [], []
+    emb = []
 
-    for pos1, pos2 in tqdm(fov_pairs, desc="Encoding FOVs"):
+    for pos in tqdm(fovs, desc="Encoding FOVs"):
         # ---------------- load & normalise ---------------- #
-        v1 = torch.as_tensor(
-            pos1.data[:, pos1.get_channel_index(channel_name1)],
+        v = torch.as_tensor(
+            pos.data[:, pos.get_channel_index(channel_name)],
             dtype=torch.float32, device=device,
         )                                                  # (T, D, H, W)
-        v2 = torch.as_tensor(
-            pos2.data[:, pos2.get_channel_index(channel_name2)],
-            dtype=torch.float32, device=device,
-        )
 
-        v1 = normalise(v1)                                 # still (T, D, H, W)
-        v2 = normalise(v2)
+        v = normalise(v)                                 # still (T, D, H, W)
 
         # ---------------- chunked VAE inference ----------- #
-        for t0 in range(0, v1.shape[0], batch_size):
-            slice1 = v1[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
-            slice2 = v2[t0 : t0 + batch_size].unsqueeze(1)
+        for t0 in range(0, v.shape[0], batch_size):
+            slice = v[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
 
             # resize to input spatial size
-            slice1 = torch.nn.functional.interpolate(
-                slice1, size=input_spatial_size, mode="trilinear", align_corners=False,
-            )  # (b, 1, D, H, W)
-            slice2 = torch.nn.functional.interpolate(
-                slice2, size=input_spatial_size, mode="trilinear", align_corners=False,
+            slice = torch.nn.functional.interpolate(
+                slice, size=input_spatial_size, mode="trilinear", align_corners=False,
             )  # (b, 1, D, H, W)
 
-            feat1 = vae.encode(slice1)[0]  # mean
-            feat2 = vae.encode(slice2)[0]  # mean
+            feat = vae.encode(slice)[0]  # mean, 
+            feat = feat.flatten(start_dim=1)  # (b, latent_dim)
+            emb.append(feat)
 
-            feat1 = feat1.flatten(start_dim=1)  # (b, latent_dim)
-            feat2 = feat2.flatten(start_dim=1)  # (b, latent_dim)
-
-            emb1.append(feat1)
-            emb2.append(feat2)
-
-    return torch.cat(emb1, 0), torch.cat(emb2, 0)
+    return torch.cat(emb, 0)
 
 # ----------------------------------------------------------------------------- #
 #                                   Main                                        #
@@ -184,21 +169,26 @@ def main(args) -> None:
 
     # ----------------- FOV list  ------------ #
     fovs1, fovs2 = read_zarr(args.data_path1), read_zarr(args.data_path2)
-    n = min(len(fovs1), len(fovs2))
     if args.max_fov:
-        n = min(n, args.max_fov)
-    pair_list = list(zip(fovs1[:n], fovs2[:n]))
+        fovs1 = fovs1[:args.max_fov]
+        fovs2 = fovs2[:args.max_fov]
 
     # ----------------- Embeddings ----------- #
     input_spatial_size = [int(dim) for dim in args.input_spatial_size.split(",")]
 
     if args.channel_name is not None:
         args.channel_name1 = args.channel_name2 = args.channel_name
+    
+    emb1 = encode_fovs(
+        fovs1, vae,
+        args.channel_name1, 
+        device, args.batch_size,
+        input_spatial_size,
+    )
 
-    emb1, emb2 = encode_fovs(
-        pair_list, vae,
-        args.channel_name1,
-        args.channel_name2,
+    emb2 = encode_fovs(
+        fovs2, vae,
+        args.channel_name2, 
         device, args.batch_size,
         input_spatial_size,
     )
