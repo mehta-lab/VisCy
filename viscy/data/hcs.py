@@ -590,21 +590,23 @@ class HCSDataModule(LightningDataModule):
         """(normalization -> maybe augmentation -> center crop)
         Deterministic center crop as the last step of training and validation."""
         # TODO: These have a fixed order for now... ()
-        final_crop = [
-            CenterSpatialCropd(
-                keys=self.source_channel + self.target_channel,
-                roi_size=(
-                    self.z_window_size,
-                    self.yx_patch_size[0],
-                    self.yx_patch_size[1],
-                ),
-            )
-        ]
+        final_crop = [self._final_crop()]
         train_transform = Compose(
             self.normalizations + self._train_transform() + final_crop
         )
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
+
+    def _final_crop(self) -> CenterSpatialCropd:
+        """Setup final cropping: center crop to the target size."""
+        return CenterSpatialCropd(
+            keys=self.source_channel + self.target_channel,
+            roi_size=(
+                self.z_window_size,
+                self.yx_patch_size[0],
+                self.yx_patch_size[1],
+            ),
+        )
 
     def _train_transform(self) -> list[Callable]:
         """Setup training augmentations: check input values,
