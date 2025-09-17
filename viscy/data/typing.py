@@ -97,11 +97,7 @@ AnnotationColumns = Literal[
 
 
 # NOTE: The following labels are not mutable. They are used to map the labels to the integer values.
-INFECTION_STATE_LABEL = {  
-    "uninfected": 0 ,
-    "infected": 1 ,
-    "unknown": -1  
-}
+INFECTION_STATE_LABEL = {"uninfected": 0, "infected": 1, "unknown": -1}
 
 CELL_CYCLE_PHASE_LABEL = {
     "interphase": 0,
