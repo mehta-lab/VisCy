@@ -123,21 +123,17 @@ def compute_embeddings_smoothness(
     Returns:
     -------
     stats: dict: Dictionary containing metrics including:
-        - adj_frame_mean: Mean of adjacent frame dissimilarity
-        - adj_frame_std: Standard deviation of adjacent frame dissimilarity
-        - adj_frame_median: Median of adjacent frame dissimilarity
-        - adj_frame_peak: Peak of adjacent frame distribution
-        - adj_frame_p99: 99th percentile of adjacent frame dissimilarity
-        - adj_frame_p1: 1st percentile of adjacent frame dissimilarity
-        - adj_frame_distribution: Full distribution of adjacent frame dissimilarities
+        - adjacent_frame_mean: Mean of adjacent frame dissimilarity
+        - adjacent_frame_std: Standard deviation of adjacent frame dissimilarity
+        - adjacent_frame_median: Median of adjacent frame dissimilarity
+        - adjacent_frame_peak: Peak of adjacent frame distribution
         - random_frame_mean: Mean of random sampling dissimilarity
         - random_frame_std: Standard deviation of random sampling dissimilarity
         - random_frame_median: Median of random sampling dissimilarity
         - random_frame_peak: Peak of random sampling distribution
-        - random_frame_distribution: Full distribution of random sampling dissimilarities
         - smoothness_score: Score of smoothness
         - dynamic_range: Difference between random and adjacent peaks
-    distributions: dict: Dictionary containing distributions including:
+    distributions: dict: Dictionary containing distributions including: 
         - adjacent_frame_distribution: Full distribution of adjacent frame dissimilarities
         - random_frame_distribution: Full distribution of random sampling dissimilarities
     piecewise_distance_per_track: list[list[float]]
