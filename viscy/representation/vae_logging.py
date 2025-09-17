@@ -1,13 +1,8 @@
-import io
 import logging
 from typing import Callable, Optional, Tuple
 
-import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from PIL import Image
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
 from torchvision.utils import make_grid
 
 from viscy.representation.disentanglement_metrics import DisentanglementMetrics

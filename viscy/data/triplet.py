@@ -507,7 +507,6 @@ class TripletDataModule(HCSDataModule):
             **dataset_settings,
         )
 
-
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,

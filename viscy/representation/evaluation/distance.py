@@ -1,6 +1,4 @@
-import logging
 from collections import defaultdict
-from typing import Literal
 
 import numpy as np
 import xarray as xr
