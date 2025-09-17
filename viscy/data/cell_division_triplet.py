@@ -346,7 +346,7 @@ class CellDivisionTripletDataModule(HCSDataModule):
         shuffled_indices = self._set_fit_global_state(len(self.npy_files))
         npy_files = [self.npy_files[i] for i in shuffled_indices]
 
-        # Se the train an dval positions
+        # Set the train and eval positions
         num_train_files = int(len(self.npy_files) * self.split_ratio)
         train_npy_files = npy_files[:num_train_files]
         val_npy_files = npy_files[num_train_files:]
