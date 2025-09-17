@@ -133,7 +133,7 @@ def compute_embeddings_smoothness(
         - random_frame_peak: Peak of random sampling distribution
         - smoothness_score: Score of smoothness
         - dynamic_range: Difference between random and adjacent peaks
-    distributions: dict: Dictionary containing distributions including: 
+    distributions: dict: Dictionary containing distributions including:
         - adjacent_frame_distribution: Full distribution of adjacent frame dissimilarities
         - random_frame_distribution: Full distribution of random sampling dissimilarities
     piecewise_distance_per_track: list[list[float]]

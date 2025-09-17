@@ -188,7 +188,6 @@ class CenterSpatialCropd(CenterSpatialCropd):
     ):
         super().__init__(keys=keys, roi_size=roi_size, **kwargs)
 
-
     class RandFlipd(RandFlipd):
         def __init__(
             self,

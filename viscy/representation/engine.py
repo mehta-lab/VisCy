@@ -291,11 +291,13 @@ class BetaVaeModule(LightningModule):
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
-        if hasattr(self.model, 'latent_dim'):
+        if hasattr(self.model, "latent_dim"):
             latent_dim = self.model.latent_dim
-        elif hasattr(self.model, 'latent_size'):
+        elif hasattr(self.model, "latent_size"):
             latent_dim = self.model.latent_size
-        elif hasattr(self.model, 'encoder') and hasattr(self.model.encoder, 'latent_dim'):
+        elif hasattr(self.model, "encoder") and hasattr(
+            self.model.encoder, "latent_dim"
+        ):
             latent_dim = self.model.encoder.latent_dim
 
         if latent_dim is not None:
@@ -358,7 +360,7 @@ class BetaVaeModule(LightningModule):
         original_shape = x.shape
         is_monai_2d = (
             isinstance(self.model, BetaVaeMonai)
-            and hasattr(self.model, 'spatial_dims')
+            and hasattr(self.model, "spatial_dims")
             and self.model.spatial_dims == 2
         )
         if is_monai_2d and len(x.shape) == 5 and x.shape[2] == 1:

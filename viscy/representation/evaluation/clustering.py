@@ -150,4 +150,3 @@ def clustering_evaluation(embeddings, annotations, method="nmi"):
         raise ValueError("Invalid method. Choose 'nmi' or 'ari'.")
 
     return score
-
