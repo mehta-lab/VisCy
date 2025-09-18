@@ -6,7 +6,7 @@ from typing_extensions import Iterable
 
 class BatchedRandHistogramShiftd(MapTransform, RandomizableTransform):
     """
-    
+
     Apply random histogram shifts to modify intensity distributions.
 
     Parameters
