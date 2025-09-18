@@ -40,9 +40,7 @@ def create_3d_phantom(shape=(64, 128, 128)):
     cyl_radius = sphere_radius // 2
     cyl_x_offset = x_center + sphere_radius * 2
     cyl_y_offset = y_center
-    cylinder_mask = (
-        (y - cyl_y_offset) ** 2 + (x - cyl_x_offset) ** 2
-    ) <= cyl_radius**2
+    cylinder_mask = ((y - cyl_y_offset) ** 2 + (x - cyl_x_offset) ** 2) <= cyl_radius**2
     phantom[cylinder_mask] = 0.7
 
     # Box
@@ -55,9 +53,9 @@ def create_3d_phantom(shape=(64, 128, 128)):
     box_x_end = box_x_start + box_size
 
     if box_z_start >= 0 and box_z_end < z_size:
-        phantom[
-            box_z_start:box_z_end, box_y_start:box_y_end, box_x_start:box_x_end
-        ] = 0.5
+        phantom[box_z_start:box_z_end, box_y_start:box_y_end, box_x_start:box_x_end] = (
+            0.5
+        )
 
     return phantom
 
@@ -100,9 +98,7 @@ def plot_3d_projections(phantom, title="3D Phantom Projections"):
     axes[1, 0].set_ylabel("Z")
     plt.colorbar(im3, ax=axes[1, 0])
 
-    im4 = axes[1, 1].imshow(
-        phantom[z_center, :, :], cmap="viridis", origin="lower"
-    )
+    im4 = axes[1, 1].imshow(phantom[z_center, :, :], cmap="viridis", origin="lower")
     axes[1, 1].set_title(f"Central XY slice (Z={z_center})")
     axes[1, 1].set_xlabel("X")
     axes[1, 1].set_ylabel("Y")
