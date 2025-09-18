@@ -152,6 +152,8 @@ if __name__ == "__main__":
     shear_names = ["s01", "s02", "s10", "s12", "s20", "s21"]
 
     """
+    s{ij}:
+
         [
             [1.0, params[0], params[1], 0.0],
             [params[2], 1.0, params[3], 0.0],
@@ -159,7 +161,7 @@ if __name__ == "__main__":
             [0.0, 0.0, 0.0, 1.0],
         ]
     """
-    
+
     for axis in range(6):
         shear = [0.0] * 6
         shear[axis] = 0.5
