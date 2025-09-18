@@ -1,7 +1,6 @@
 import pytest
 import torch
 from monai.transforms import Compose
-
 from viscy.transforms._crop import (
     BatchedCenterSpatialCrop,
     BatchedCenterSpatialCropd,

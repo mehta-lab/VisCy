@@ -6,7 +6,21 @@ from typing_extensions import Iterable
 
 
 class BatchedRandSharpend(MapTransform, RandomizableTransform):
-    """Batched random sharpening for microscopy images."""
+    """Apply random sharpening to enhance image edges and details.
+
+    Uses 3D convolution with sharpening kernel to enhance fine structures.
+
+    Parameters
+    ----------
+    keys : str or Iterable[str]
+        Keys of the corresponding items to be transformed.
+    alpha_range : tuple[float, float], optional
+        Range for random alpha blending values, by default (0.1, 0.5).
+    prob : float, optional
+        Probability of applying the transform, by default 0.1.
+    allow_missing_keys : bool, optional
+        Whether to ignore missing keys, by default False.
+    """
 
     def __init__(
         self,
@@ -40,6 +54,18 @@ class BatchedRandSharpend(MapTransform, RandomizableTransform):
         return self._cached_kernel
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply sharpening to sample data.
+
+        Parameters
+        ----------
+        sample : dict[str, Tensor]
+            Dictionary containing image tensors to transform.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with sharpened tensors.
+        """
         self.randomize(None)
         d = dict(sample)
 

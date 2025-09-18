@@ -207,8 +207,7 @@ class TripletDataset(Dataset):
         return self._tensorstores[fov_name]
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
-        """Exclude tracks that are too close to the border
-        or do not have the next time point.
+        """Exclude tracks that are too close to the border or do not have the next time point.
 
         Parameters
         ----------

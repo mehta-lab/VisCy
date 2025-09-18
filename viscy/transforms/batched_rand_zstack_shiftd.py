@@ -5,7 +5,25 @@ from typing_extensions import Iterable
 
 
 class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
-    """Batched random Z-axis shifts for 3D microscopy data."""
+    """Apply random shifts along Z-axis to simulate focal plane variations.
+
+    Shifts image data in the depth dimension to augment focal plane diversity.
+
+    Parameters
+    ----------
+    keys : str or Iterable[str]
+        Keys of the corresponding items to be transformed.
+    max_shift : int, optional
+        Maximum shift distance in Z direction, by default 3.
+    prob : float, optional
+        Probability of applying the transform, by default 0.1.
+    mode : str, optional
+        Padding mode for shifted regions, by default "constant".
+    cval : float, optional
+        Fill value for constant padding, by default 0.0.
+    allow_missing_keys : bool, optional
+        Whether to ignore missing keys, by default False.
+    """
 
     def __init__(
         self,
@@ -23,6 +41,18 @@ class BatchedRandZStackShiftd(MapTransform, RandomizableTransform):
         self.cval = cval
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply Z-axis shift to sample data.
+
+        Parameters
+        ----------
+        sample : dict[str, Tensor]
+            Dictionary containing image tensors to transform.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with Z-shifted tensors.
+        """
         self.randomize(None)
         d = dict(sample)
 
