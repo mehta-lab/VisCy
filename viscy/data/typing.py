@@ -92,7 +92,10 @@ class TripletSample(TypedDict):
 
 # NOTE: these are the only columns that are allowed for the annotation dataframe.
 AnnotationColumns = Literal[
-    "infection_state", "cell_division_state", "cell_remodeling_state", "cell_cycle_state"
+    "infection_state",
+    "cell_division_state",
+    "cell_remodeling_state",
+    "cell_cycle_state",
 ]
 
 
@@ -107,7 +110,7 @@ LABEL_CELL_DIVISION_STATE = {
 
 LABEL_CELL_CYCLE_STATE = {
     "G1": 0,
-    "S": 1, 
+    "S": 1,
     "G2": 2,
     "prophase": 3,
     "metaphase": 4,
