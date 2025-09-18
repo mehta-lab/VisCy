@@ -1,5 +1,4 @@
 from numpy.testing import assert_allclose
-
 from viscy.preprocessing.pixel_ratio import sematic_class_weights
 
 

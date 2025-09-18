@@ -1,7 +1,6 @@
 import numpy as np
 import torch
 from sklearn.linear_model import LogisticRegression
-
 from viscy.representation.evaluation.lca import linear_from_binary_logistic_regression
 
 

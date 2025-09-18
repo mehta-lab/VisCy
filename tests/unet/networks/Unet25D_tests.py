@@ -4,7 +4,6 @@ import unittest
 
 import numpy as np
 import torch
-
 import viscy.utils.cli_utils as io_utils
 from viscy.unet.networks.Unet25D import Unet25d
 

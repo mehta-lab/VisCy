@@ -124,6 +124,42 @@ class LiveCellTestDataset(Dataset):
 
 
 class LiveCellDataModule(GPUTransformDataModule):
+    """Data module for LiveCell microscopy dataset.
+
+    Provides train, validation, and test dataloaders for the LiveCell
+    dataset containing single-cell segmentation annotations for multiple
+    cell types in live-cell imaging.
+
+    Parameters
+    ----------
+    train_val_images : Path | None, optional
+        Path to the training and validation images.
+    test_images : Path | None, optional
+        Path to the test images.
+    train_annotations : Path | None, optional
+        Path to the training annotations.
+    val_annotations : Path | None, optional
+        Path to the validation annotations.
+    test_annotations : Path | None, optional
+        Path to the test annotations.
+    train_cpu_transforms : list[MapTransform], optional
+        List of CPU transforms for training.
+    val_cpu_transforms : list[MapTransform], optional
+        List of CPU transforms for validation.
+    train_gpu_transforms : list[MapTransform], optional
+        List of GPU transforms for training.
+    val_gpu_transforms : list[MapTransform], optional
+        List of GPU transforms for validation.
+    test_transforms : list[MapTransform], optional
+        List of transforms for testing.
+    batch_size : int, optional
+        Batch size, by default 16.
+    num_workers : int, optional
+        Number of dataloading workers, by default 8.
+    pin_memory : bool, optional
+        Pin memory for dataloaders, by default True.
+    """
+
     def __init__(
         self,
         train_val_images: Path | None = None,
@@ -172,21 +208,56 @@ class LiveCellDataModule(GPUTransformDataModule):
 
     @property
     def train_cpu_transforms(self) -> Compose:
+        """Get CPU transforms for training data augmentation.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on CPU during training.
+        """
         return self._train_cpu_transforms
 
     @property
     def val_cpu_transforms(self) -> Compose:
+        """Get CPU transforms for validation data processing.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on CPU during validation.
+        """
         return self._val_cpu_transforms
 
     @property
     def train_gpu_transforms(self) -> Compose:
+        """Get GPU transforms for training data augmentation.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on GPU during training.
+        """
         return self._train_gpu_transforms
 
     @property
     def val_gpu_transforms(self) -> Compose:
+        """Get GPU transforms for validation data processing.
+
+        Returns
+        -------
+        Compose
+            Composed transforms applied on GPU during validation.
+        """
         return self._val_gpu_transforms
 
     def setup(self, stage: str) -> None:
+        """Set up datasets based on the specified stage.
+
+        Parameters
+        ----------
+        stage : str
+            Either "fit" for training/validation or "test" for testing.
+        """
         if stage == "fit":
             self._setup_fit()
         elif stage == "test":
@@ -221,6 +292,13 @@ class LiveCellDataModule(GPUTransformDataModule):
         )
 
     def test_dataloader(self) -> DataLoader:
+        """Create test data loader.
+
+        Returns
+        -------
+        DataLoader
+            Test data loader with LiveCell test dataset.
+        """
         return DataLoader(
             self.test_dataset, batch_size=self.batch_size, num_workers=self.num_workers
         )

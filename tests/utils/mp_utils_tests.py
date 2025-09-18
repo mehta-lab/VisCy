@@ -5,11 +5,10 @@ import warnings
 import numpy as np
 import numpy.testing
 import skimage.io as sk_im_io
-from testfixtures import TempDirectory
-
 import viscy.utils.aux_utils as aux_utils
 import viscy.utils.image_utils as image_utils
 import viscy.utils.mp_utils as mp_utils
+from testfixtures import TempDirectory
 from viscy.utils.masks import create_otsu_mask
 
 

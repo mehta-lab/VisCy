@@ -5,7 +5,6 @@ import logging
 from lightning.pytorch import LightningModule
 from torchmetrics.functional import accuracy, jaccard_index
 from torchmetrics.functional.segmentation import dice_score
-
 from viscy.data.typing import SegmentationSample
 from viscy.translation.evaluation_metrics import mean_average_precision
 
@@ -13,13 +12,28 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class SegmentationMetrics2D(LightningModule):
-    """Test runner for 2D segmentation."""
+    """Test runner for 2D segmentation.
+
+    Parameters
+    ----------
+    aggregate_epoch : bool, optional
+        Whether to aggregate the metrics over the epoch. Defaults to False.
+    """
 
     def __init__(self, aggregate_epoch: bool = False) -> None:
         super().__init__()
         self.aggregate_epoch = aggregate_epoch
 
     def test_step(self, batch: SegmentationSample, batch_idx: int) -> None:
+        """Compute segmentation metrics for a test batch.
+
+        Parameters
+        ----------
+        batch : SegmentationSample
+            Batch containing prediction and target segmentation masks
+        batch_idx : int
+            Batch index
+        """
         pred = batch["pred"]
         target = batch["target"]
         if not pred.shape[0] == 1 and target.shape[0] == 1:

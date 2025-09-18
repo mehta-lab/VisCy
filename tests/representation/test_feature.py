@@ -4,7 +4,6 @@ import numpy as np
 import pandas as pd
 import pytest
 from iohub import open_ome_zarr
-
 from viscy.representation.evaluation.feature import (
     CellFeatures,
     DynamicFeatures,

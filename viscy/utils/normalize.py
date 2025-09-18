@@ -1,19 +1,33 @@
-"""Image normalization related functions"""
+"""Image normalization related functions."""
 
 import sys
+from typing import Any
 
 import numpy as np
+from numpy.typing import ArrayLike, NDArray
 from skimage.exposure import equalize_adapthist
 
 
-def zscore(input_image, im_mean=None, im_std=None):
-    """
-    Performs z-score normalization. Adds epsilon in denominator for robustness
+def zscore(
+    input_image: NDArray, im_mean: float | None = None, im_std: float | None = None
+) -> NDArray[Any]:
+    """Perform z-score normalization.
 
-    :param np.array input_image: input image for intensity normalization
-    :param float/None im_mean: Image mean
-    :param float/None im_std: Image std
-    :return np.array norm_img: z score normalized image
+    Adds epsilon in denominator for robustness.
+
+    Parameters
+    ----------
+    input_image : NDArray
+        Input image for intensity normalization.
+    im_mean : float, optional
+        Image mean, by default None.
+    im_std : float, optional
+        Image std, by default None.
+
+    Returns
+    -------
+    NDArray
+        Z-score normalized image.
     """
     if not im_mean:
         im_mean = np.nanmean(input_image)
@@ -23,50 +37,85 @@ def zscore(input_image, im_mean=None, im_std=None):
     return norm_img
 
 
-def unzscore(im_norm, zscore_median, zscore_iqr):
-    """
-    Revert z-score normalization applied during preprocessing. Necessary
-    before computing SSIM
+def unzscore(im_norm: NDArray, zscore_median: float, zscore_iqr: float) -> NDArray[Any]:
+    """Revert z-score normalization applied during preprocessing.
 
-    :param im_norm: Normalized image for un-zscore
-    :param zscore_median: Image median
-    :param zscore_iqr: Image interquartile range
-    :return im: image at its original scale
+    Necessary before computing SSIM.
+
+    Parameters
+    ----------
+    im_norm : NDArray
+        Normalized image for un-zscore.
+    zscore_median : float
+        Image median.
+    zscore_iqr : float
+        Image interquartile range.
+
+    Returns
+    -------
+    NDArray
+        Image at its original scale.
     """
     im = im_norm * (zscore_iqr + sys.float_info.epsilon) + zscore_median
     return im
 
 
-def hist_clipping(input_image, min_percentile=2, max_percentile=98):
-    """Clips and rescales histogram from min to max intensity percentiles
+def hist_clipping(
+    input_image: NDArray,
+    min_percentile: int | float = 2,
+    max_percentile: int | float = 98,
+) -> NDArray[Any]:
+    """Clip and rescale histogram from min to max intensity percentiles.
 
-    rescale_intensity with input check
+    rescale_intensity with input check.
 
-    :param np.array input_image: input image for intensity normalization
-    :param int/float min_percentile: min intensity percentile
-    :param int/flaot max_percentile: max intensity percentile
-    :return: np.float, intensity clipped and rescaled image
+    Parameters
+    ----------
+    input_image : NDArray
+        Input image for intensity normalization.
+    min_percentile : int or float, optional
+        Min intensity percentile, by default 2.
+    max_percentile : int or float, optional
+        Max intensity percentile, by default 98.
+
+    Returns
+    -------
+    NDArray
+        Intensity clipped and rescaled image.
     """
-
     assert (min_percentile < max_percentile) and max_percentile <= 100
     pmin, pmax = np.percentile(input_image, (min_percentile, max_percentile))
     hist_clipped_image = np.clip(input_image, pmin, pmax)
     return hist_clipped_image
 
 
-def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
-    """CLAHE on 2D images
+def hist_adapteq_2D(
+    input_image: NDArray,
+    kernel_size: int | list[int] | tuple[int, ...] | None = None,
+    clip_limit: float | None = None,
+) -> NDArray:
+    """Apply CLAHE (Contrast Limited Adaptive Histogram Equalization) on 2D images.
 
     skimage.exposure.equalize_adapthist works only for 2D. Extend to 3D or use
-    openCV? Not ideal, as it enhances noise in homogeneous areas
+    openCV? Not ideal, as it enhances noise in homogeneous areas.
 
-    :param np.array input_image: input image for intensity normalization
-    :param int/list kernel_size: Neighbourhood to be used for histogram
-     equalization. If none, use default of 1/8th image size.
-    :param float clip_limit: Clipping limit, normalized between 0 and 1
-     (higher values give more contrast, ~ max percent of voxels in any
-     histogram bin, if > this limit, the voxel intensities are redistributed).
-     if None, default=0.01
+    Parameters
+    ----------
+    input_image : NDArray
+        Input image for intensity normalization.
+    kernel_size : int or list, optional
+        Neighbourhood to be used for histogram equalization. If None, use default
+        of 1/8th image size, by default None.
+    clip_limit : float, optional
+        Clipping limit, normalized between 0 and 1 (higher values give more
+        contrast, ~ max percent of voxels in any histogram bin, if > this limit,
+        the voxel intensities are redistributed). If None, default=0.01,
+        by default None.
+
+    Returns
+    -------
+    NDArray
+        Adaptive histogram equalized image.
     """
     nrows, ncols = input_image.shape
     if kernel_size is not None:
@@ -78,9 +127,7 @@ def hist_adapteq_2D(input_image, kernel_size=None, clip_limit=None):
             raise ValueError("kernel size invalid: not an int / list / tuple")
 
     if clip_limit is not None:
-        assert 0 <= clip_limit <= 1, "Clip limit {} is out of range [0, 1]".format(
-            clip_limit
-        )
+        assert 0 <= clip_limit <= 1, f"Clip limit {clip_limit} is out of range [0, 1]"
 
     adapt_eq_image = equalize_adapthist(
         input_image, kernel_size=kernel_size, clip_limit=clip_limit

@@ -1,7 +1,6 @@
 import pytest
 import torch
 from monai.transforms import AdjustContrast, Compose
-
 from viscy.transforms import BatchedRandAdjustContrast, BatchedRandAdjustContrastd
 
 

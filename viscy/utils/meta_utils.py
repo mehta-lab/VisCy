@@ -10,24 +10,31 @@ from tqdm import tqdm
 from viscy.utils.mp_utils import get_val_stats
 
 
-def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
-    """
-    Writes 'metadata' to position's plate-level or FOV level .zattrs metadata by either
-    creating a new field (field_name) according to 'metadata', or updating the metadata
-    to an existing field if found,
-    or concatenating the metadata from different channels.
+def write_meta_field(
+    position: ngff.Position, metadata: dict, field_name: str, subfield_name: str
+):
+    """Write metadata to position's plate-level or FOV level .zattrs metadata.
 
-    Assumes that the zarr store group given follows the OMG-NGFF HCS
-    format as specified here:
-            https://ngff.openmicroscopy.org/latest/#hcs-layout
+    Write metadata to position's plate-level or FOV level .zattrs metadata by either
+    creating a new field (field_name) according to metadata, or updating the metadata
+    to an existing field if found, or concatenating the metadata from different channels.
+
+    Assumes that the zarr store group given follows the OME-NGFF HCS
+    format as specified here: https://ngff.openmicroscopy.org/latest/#hcs-layout
 
     Warning: Dangerous. Writing metadata fields above the image-level of
-            an HCS hierarchy can break HCS compatibility
+    an HCS hierarchy can break HCS compatibility.
 
-    :param Position zarr_dir: NGFF position node object
-    :param dict metadata: metadata dictionary to write to JSON .zattrs
-    :param str subfield_name: name of subfield inside the the main field
-        (values for different channels)
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object.
+    metadata : dict
+        Metadata dictionary to write to JSON .zattrs.
+    field_name : str
+        Name of the main metadata field.
+    subfield_name : str
+        Name of subfield inside the main field (values for different channels).
     """
     if field_name in position.zattrs:
         if subfield_name in position.zattrs[field_name]:
@@ -62,31 +69,32 @@ def _grid_sample(
 
 
 def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32
+    zarr_dir: str, num_workers: int = 4, channel_ids: int = -1, grid_spacing: int = 32
 ):
-    """
+    """Generate pixel intensity metadata for on-the-fly normalization.
+
     Generate pixel intensity metadata to be later used in on-the-fly normalization
     during training and inference. Sampling is used for efficient estimation of median
     and interquartile range for intensity values on both a dataset and field-of-view
-    level.
-
-    Normalization values are recorded in the image-level metadata in the corresponding
-    position of each zarr_dir store. Format of metadata is as follows:
-    {
         channel_idx : {
             dataset_statistics: dataset level normalization values (positive float),
             fov_statistics: field-of-view level normalization values (positive float)
-        },
-        .
-        .
-        .
+        }
     }
 
-    :param str zarr_dir: path to zarr store directory containing dataset.
-    :param int num_workers: number of cpu workers for multiprocessing, defaults to 4
-    :param list/int channel_ids: indices of channels to process in dataset arrays,
-                                    by default calculates all
-    :param int grid_spacing: distance between points in sampling grid
+    Warning: Dangerous. Writing metadata fields above the image-level of
+    an HCS hierarchy can break HCS compatibility.
+
+    Parameters
+    ----------
+    zarr_dir : str
+        Path to zarr store directory containing dataset.
+    num_workers : int, optional
+        Number of CPU workers for multiprocessing, by default 4.
+    channel_ids : list[int] | int, optional
+        Indices of channels to process in dataset arrays, by default -1 (all channels).
+    grid_spacing : int, optional
+        Distance between points in sampling grid, by default 32.
     """
     plate = ngff.open_ome_zarr(zarr_dir, mode="r+")
     position_map = list(plate.positions())
@@ -139,22 +147,31 @@ def generate_normalization_metadata(
 def compute_zscore_params(
     frames_meta, ints_meta, input_dir, normalize_im, min_fraction=0.99
 ):
-    """
-    Get zscore median and interquartile range
+    """Compute normalization statistics from image data using grid sampling.
 
-    :param pd.DataFrame frames_meta: Dataframe containing all metadata
-    :param pd.DataFrame ints_meta: Metadata containing intensity statistics
-        each z-slice and foreground fraction for masks
-    :param str input_dir: Directory containing images
-    :param None or str normalize_im: normalization scheme for input images
-    :param float min_fraction: Minimum foreground fraction (in case of masks)
+    Compute zscore median and interquartile range.
+
+    Parameters
+    ----------
+    frames_meta : pd.DataFrame
+        Dataframe containing all metadata.
+    ints_meta : pd.DataFrame
+        Metadata containing intensity statistics each z-slice and foreground fraction for masks.
+    input_dir : str
+        Directory containing images.
+    normalize_im : None or str
+        Normalization scheme for input images.
+    min_fraction : float
+        Minimum foreground fraction (in case of masks) for computing intensity statistics.
         for computing intensity statistics.
 
-    :return pd.DataFrame frames_meta: Dataframe containing all metadata
-    :return pd.DataFrame ints_meta: Metadata containing intensity statistics
-        each z-slice
+    Returns
+    -------
+    tuple[pd.DataFrame, pd.DataFrame]
+        Tuple containing:
+        - pd.DataFrame frames_meta: Dataframe containing all metadata
+        - pd.DataFrame ints_meta: Metadata containing intensity statistics of each z-slice
     """
-
     assert normalize_im in [
         None,
         "slice",

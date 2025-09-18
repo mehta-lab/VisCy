@@ -1,10 +1,10 @@
+from collections.abc import Sequence
 from logging import getLogger
-from typing import Literal, Sequence
+from typing import Literal
 
 import torch
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
-
 from viscy.data.typing import TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.representation.engine import ContrastiveModule
@@ -13,6 +13,20 @@ _logger = getLogger("lightning.pytorch")
 
 
 class JointEncoders(nn.Module):
+    """Joint multi-modal encoders for cross-modal representation learning.
+
+    Pairs source and target encoders for CLIP-style contrastive learning
+    across different modalities or channels. Enables cross-modal alignment
+    and similarity computation through joint feature extraction.
+
+    Parameters
+    ----------
+    source_encoder : nn.Module | ContrastiveEncoder
+        Encoder for source modality/channel data.
+    target_encoder : nn.Module | ContrastiveEncoder
+        Encoder for target modality/channel data.
+    """
+
     def __init__(
         self,
         source_encoder: nn.Module | ContrastiveEncoder,
@@ -25,19 +39,86 @@ class JointEncoders(nn.Module):
     def forward(
         self, source: Tensor, target: Tensor
     ) -> tuple[tuple[Tensor, Tensor], tuple[Tensor, Tensor]]:
+        """Forward pass through both encoders for multi-modal features.
+
+        Parameters
+        ----------
+        source : Tensor
+            Source modality input tensor.
+        target : Tensor
+            Target modality input tensor.
+
+        Returns
+        -------
+        tuple[tuple[Tensor, Tensor], tuple[Tensor, Tensor]]
+            Tuple of (source_features, source_projections) and
+            (target_features, target_projections) for cross-modal learning.
+        """
         return self.source_encoder(source), self.target_encoder(target)
 
     def forward_features(self, source: Tensor, target: Tensor) -> tuple[Tensor, Tensor]:
+        """Extract feature representations from both modalities.
+
+        Parameters
+        ----------
+        source : Tensor
+            Source modality input tensor.
+        target : Tensor
+            Target modality input tensor.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Feature representations from source and target encoders for
+            multi-modal representation learning.
+        """
         return self.source_encoder(source)[0], self.target_encoder(target)[0]
 
     def forward_projections(
         self, source: Tensor, target: Tensor
     ) -> tuple[Tensor, Tensor]:
+        """Extract projection representations for contrastive learning.
+
+        Parameters
+        ----------
+        source : Tensor
+            Source modality input tensor.
+        target : Tensor
+            Target modality input tensor.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Projection representations from source and target encoders for
+            cross-modal contrastive alignment and similarity computation.
+        """
         return self.source_encoder(source)[1], self.target_encoder(target)[1]
 
 
 class JointContrastiveModule(ContrastiveModule):
-    """CLIP-style model pair for self-supervised cross-modality representation learning."""
+    """CLIP-style model pair for self-supervised cross-modality representation learning.
+
+    Parameters
+    ----------
+    encoder : nn.Module | JointEncoders
+        Encoder model.
+    loss_function : nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
+        Loss function. By default, nn.TripletMarginLoss with margin 0.5.
+    lr : float
+        Learning rate. By default, 1e-3.
+    schedule : Literal["WarmupCosine", "Constant"]
+        Schedule for learning rate. By default, "Constant".
+    log_batches_per_epoch : int
+        Number of batches to log. By default, 8.
+    log_samples_per_batch : int
+        Number of samples to log. By default, 1.
+    log_embeddings : bool
+        Whether to log embeddings. By default, False.
+    example_input_array_shape : Sequence[int]
+        Shape of example input array.
+    prediction_arm : Literal["source", "target"]
+        Arm to use for prediction. By default, "source".
+    """
 
     def __init__(
         self,
@@ -67,6 +148,21 @@ class JointContrastiveModule(ContrastiveModule):
         self._prediction_arm = prediction_arm
 
     def forward(self, source: Tensor, target: Tensor) -> tuple[Tensor, Tensor]:
+        """Forward pass for cross-modal contrastive projections.
+
+        Parameters
+        ----------
+        source : Tensor
+            Source modality input tensor.
+        target : Tensor
+            Target modality input tensor.
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            Projection tensors from source and target encoders for
+            cross-modal contrastive learning and alignment.
+        """
         return self.model.forward_projections(source, target)
 
     def _info_nce_style_loss(self, z1: Tensor, z2: Tensor) -> Tensor:
@@ -110,12 +206,53 @@ class JointContrastiveModule(ContrastiveModule):
         return loss
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+        """Training step for cross-modal contrastive learning.
+
+        Parameters
+        ----------
+        batch : TripletSample
+            Batch containing anchor and positive samples for multi-modal
+            contrastive learning.
+        batch_idx : int
+            Batch index in current epoch.
+
+        Returns
+        -------
+        Tensor
+            Cross-modal contrastive loss for training optimization.
+        """
         return self._fit_forward_step(batch=batch, batch_idx=batch_idx, stage="train")
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+        """Validation step for cross-modal contrastive learning.
+
+        Parameters
+        ----------
+        batch : TripletSample
+            Batch containing anchor and positive samples for multi-modal
+            validation.
+        batch_idx : int
+            Batch index in current validation epoch.
+
+        Returns
+        -------
+        Tensor
+            Cross-modal contrastive loss for validation monitoring.
+        """
         return self._fit_forward_step(batch=batch, batch_idx=batch_idx, stage="val")
 
     def on_predict_start(self) -> None:
+        """Configure prediction encoder arm for multi-modal inference.
+
+        Sets up the appropriate encoder (source or target) and channel slice
+        based on the prediction_arm configuration for single-modality
+        inference from the trained cross-modal model.
+
+        Raises
+        ------
+        ValueError
+            If prediction_arm is not 'source' or 'target'.
+        """
         _logger.info(f"Using {self._prediction_arm} encoder for predictions.")
         if self._prediction_arm == "source":
             self._prediction_encoder = self.model.source_encoder
@@ -129,6 +266,27 @@ class JointContrastiveModule(ContrastiveModule):
     def predict_step(
         self, batch: TripletSample, batch_idx: int, dataloader_idx: int = 0
     ):
+        """Prediction step using selected encoder arm.
+
+        Extracts features and projections using the configured prediction
+        encoder (source or target) for single-modality inference from the
+        trained cross-modal model.
+
+        Parameters
+        ----------
+        batch : TripletSample
+            Batch containing anchor samples for prediction.
+        batch_idx : int
+            Batch index in current prediction run.
+        dataloader_idx : int, default=0
+            Index of dataloader when using multiple prediction dataloaders.
+
+        Returns
+        -------
+        dict
+            Dictionary containing 'features', 'projections', and 'index'
+            for the predicted samples from the selected modality encoder.
+        """
         features, projections = self._prediction_encoder(
             batch["anchor"][:, self._prediction_channel_slice]
         )

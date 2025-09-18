@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,64 +7,62 @@ import torch.nn.functional as F
 
 
 class ConvBlock3D(nn.Module):
+    """3D convolutional building block for volumetric neural networks.
+
+    A flexible 3D convolutional block designed for processing volumetric data
+    such as medical imaging, microscopy, and video sequences. Supports residual
+    connections, various normalization schemes, activation functions, and
+    configurable layer ordering for deep 3D U-Net architectures.
+
+    The block processes tensors in [..., z, x, y] or [..., z, y, x] format
+    and provides dynamic layer configuration with support for transpose
+    convolutions, dropout, and multiple padding strategies optimized for
+    volumetric convolution operations.
+
+    Parameters
+    ----------
+    in_filters : int
+        Number of input feature channels.
+    out_filters : int
+        Number of output feature channels.
+    dropout : float or bool, default=False
+        Dropout probability. If False, no dropout is applied.
+    norm : {"batch", "instance"}, default="batch"
+        Normalization type to apply.
+    residual : bool, default=True
+        Whether to include residual connections.
+    activation : {"relu", "leakyrelu", "elu", "selu", "linear"}, default="relu"
+        Activation function type.
+    transpose : bool, default=False
+        Whether to use transpose convolution layers.
+    kernel_size : int or tuple of int, default=(3, 3, 3)
+        3D convolutional kernel size.
+    num_repeats : int, default=3
+        Number of convolutional layers in the block.
+    filter_steps : {"linear", "first", "last"}, default="first"
+        Strategy for channel dimension changes across layers.
+    layer_order : str, default="can"
+        Order of conv (c), activation (a), normalization (n) layers.
+    padding : str, int, tuple or None, default=None
+        Padding strategy for convolutions.
+    """
+
     def __init__(
         self,
-        in_filters,
-        out_filters,
-        dropout=False,
-        norm="batch",
-        residual=True,
-        activation="relu",
-        transpose=False,
-        kernel_size=(3, 3, 3),
-        num_repeats=3,
-        filter_steps="first",
-        layer_order="can",
-        padding=None,
-    ):
-        """
-        Convolutional block for lateral layers in Unet.
-        This block only accepts tensors of dimensions in
-        order [...,z,x,y] or [...,z,y,x]
-
-        Format for layer initialization is as follows:
-            if layer type specified
-            => for number of layers
-            => add layer to list of that layer type
-        This is done to allow for dynamic layer number specification in the conv blocks,
-        which allows us to change the parameter numbers of the network.
-
-        Only 'same' convolutional padding is recommended,
-        as the conv blocks are intended for deep Unets.
-        However padding can be specified as follows:
-        padding -> token{'same', 'valid', 'valid_stack'} or tuple(int) or int:
-                    -> 'same': pads with same convolution
-                    -> 'valid': pads for valid convolution on all dimensions
-                    -> 'valid_stack': pads for valid convolution on xy dims (-1, -2),
-                        same on z dim (-3).
-                    -> tuple (int): pads above and below corresponding dimensions
-                    -> int: pads above and below all dimensions
-
-        :param int in_filters: number of images in in stack
-        :param int out_filters: number of images in out stack
-        :param float dropout: dropout probability (False => 0)
-        :param str norm: normalization type: 'batch', 'instance'
-        :param bool residual: as name
-        :param str activation: activation function: 'relu', 'leakyrelu', 'elu', 'selu'
-        :param bool transpose: as name
-        :param int/tuple kernel_size: convolutional kernel size
-        :param int num_repeats: as name
-        :param str filter_steps: determines where in the block
-            the filters inflate channels
-            (learn abstraction information): 'linear','first','last'
-        :param str layer_order: order of conv, norm, and act layers in block:
-            'can', 'cna', etc.
-            NOTE: for now conv must always come first as required by norm feature counts
-        :paramn str/tuple(int)/tuple/None padding: convolutional padding,
-            see docstring for details
-        """
-
-        super(ConvBlock3D, self).__init__()
+        in_filters: int,
+        out_filters: int,
+        dropout: float | bool = False,
+        norm: Literal["batch", "instance"] = "batch",
+        residual: bool = True,
+        activation: Literal["relu", "leakyrelu", "elu", "selu", "linear"] = "relu",
+        transpose: bool = False,
+        kernel_size: int | tuple[int, int, int] = (3, 3, 3),
+        num_repeats: int = 3,
+        filter_steps: Literal["linear", "first", "last"] = "first",
+        layer_order: str = "can",
+        padding: str | int | tuple[int, ...] | None = None,
+    ) -> None:
+        super().__init__()
         self.in_filters = in_filters
         self.out_filters = out_filters
         self.dropout = dropout
@@ -244,9 +244,9 @@ class ConvBlock3D(nn.Module):
             )
         self.register_modules(self.act_list, f"{self.activation}_act")
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
-        Forward call of convolutional block
+        Forward call of convolutional block.
 
         Order of layers within the block is defined by the 'layer_order' parameter,
         which is a string of 'c's, 'a's and 'n's in reference to
@@ -266,7 +266,15 @@ class ConvBlock3D(nn.Module):
             if input channels are less than output channels,
             we zero-pad input channels to output channel size
 
-        :param torch.tensor x: input tensor
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor.
         """
         x_0 = x
         for i in range(self.num_repeats):
@@ -310,12 +318,11 @@ class ConvBlock3D(nn.Module):
 
         return x
 
-    def model(self):
+    def model(self) -> nn.Sequential:
         """
-        Allows calling of parameters inside ConvBlock object:
-        'ConvBlock.model().parameters()''
+        Create sequential model from ConvBlock parameters.
 
-        Layer order:       convolution -> normalization -> activation
+        Layer order: convolution -> normalization -> activation
 
         We can make a list of layer modules and unpack them into nn.Sequential.
         Note: this is distinct from the forward call
@@ -323,6 +330,11 @@ class ConvBlock3D(nn.Module):
             since this is a residual block.
             The forward call performs the residual calculation,
             and all the parameters can be seen by the optimizer when given this model.
+
+        Returns
+        -------
+        nn.Sequential
+            Sequential model containing all layers in the block.
         """
         layers = []
 
@@ -337,16 +349,19 @@ class ConvBlock3D(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def register_modules(self, module_list, name):
+    def register_modules(self, module_list: list[nn.Module], name: str) -> None:
         """
-        Helper function that registers modules stored in a list to the model object
-        so that the can be seen by PyTorch optimizer.
+        Register modules for PyTorch optimizer visibility.
 
         Used to enable model graph creation
         with non-sequential model types and dynamic layer numbers
 
-        :param list(torch.nn.module) module_list: list of modules to register
-        :param str name: name of module type
+        Parameters
+        ----------
+        module_list : list[torch.nn.Module]
+            List of modules to register.
+        name : str
+            Name of module type.
         """
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)

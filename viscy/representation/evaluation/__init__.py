@@ -1,5 +1,6 @@
-"""
-This module enables evaluation of learned representations using annotations, such as
+"""Evaluation tools for learned representations using various annotation types.
+
+Enables evaluation of learned representations using annotations, such as:
 * cell division labels,
 * infection state labels,
 * labels predicted using supervised classifiers,
@@ -14,18 +15,22 @@ TODO: consider time- and condition-dependent clustering and UMAP visualization o
 https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 
+from pathlib import Path
+
 import pandas as pd
-
 from viscy.data.triplet import TripletDataModule
+from xarray import DataArray
 
 
-def load_annotation(da, path, name, categories: dict | None = None):
+def load_annotation(
+    da: DataArray, path: str, name: str, categories: dict | None = None
+) -> pd.Series:
     """
     Load annotations from a CSV file and map them to the dataset.
 
     Parameters
     ----------
-    da : xarray.DataArray
+    da : DataArray
         The dataset array containing 'fov_name' and 'id' coordinates.
     path : str
         Path to the CSV file containing annotations.
@@ -64,15 +69,41 @@ def load_annotation(da, path, name, categories: dict | None = None):
 
 
 def dataset_of_tracks(
-    data_path,
-    tracks_path,
-    fov_list,
-    track_id_list,
-    source_channel=["Phase3D", "RFP"],
-    z_range=(28, 43),
-    initial_yx_patch_size=(128, 128),
-    final_yx_patch_size=(128, 128),
+    data_path: str | Path,
+    tracks_path: str | Path,
+    fov_list: list[str],
+    track_id_list: list[int],
+    source_channel: list[str] = ["Phase3D", "RFP"],
+    z_range: tuple[int, int] = (28, 43),
+    initial_yx_patch_size: tuple[int, int] = (128, 128),
+    final_yx_patch_size: tuple[int, int] = (128, 128),
 ):
+    """Create a prediction dataset from tracks for evaluation.
+
+    Parameters
+    ----------
+    data_path : str
+        Path to the data directory containing image files.
+    tracks_path : str
+        Path to the tracks data file.
+    fov_list : list
+        List of field of view names to include.
+    track_id_list : list
+        List of track IDs to include.
+    source_channel : list, optional
+        List of source channel names, by default ["Phase3D", "RFP"].
+    z_range : tuple, optional
+        Z-stack range as (start, end), by default (28, 43).
+    initial_yx_patch_size : tuple, optional
+        Initial patch size in YX dimensions, by default (128, 128).
+    final_yx_patch_size : tuple, optional
+        Final patch size in YX dimensions, by default (128, 128).
+
+    Returns
+    -------
+    Dataset
+        Configured prediction dataset for evaluation.
+    """
     data_module = TripletDataModule(
         data_path=data_path,
         tracks_path=tracks_path,
@@ -84,7 +115,7 @@ def dataset_of_tracks(
         final_yx_patch_size=final_yx_patch_size,
         batch_size=1,
         num_workers=16,
-        normalizations=None,
+        normalizations=[],
         predict_cells=True,
     )
     # for train and val

@@ -1,8 +1,9 @@
 import logging
 import os
 import warnings
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Literal, Sequence
+from typing import Literal
 
 import pandas as pd
 import tensorstore as ts
@@ -65,6 +66,50 @@ def _transform_channel_wise(
 
 
 class TripletDataset(Dataset):
+    """Dataset for triplet sampling of tracked cells.
+
+    Generates anchor, positive, and negative triplets from tracked cell
+    patches for contrastive learning. Supports temporal sampling with
+    configurable time intervals.
+
+    Parameters
+    ----------
+    positions : list[Position]
+        OME-Zarr images with consistent channel order
+    tracks_tables : list[pd.DataFrame]
+        Data frames containing ultrack results
+    channel_names : list[str]
+        Input channel names
+    initial_yx_patch_size : tuple[int, int]
+        YX size of the initially sampled image patch before augmentation
+    z_range : slice
+        Range of Z-slices
+    anchor_transform : DictTransform | None, optional
+        Transforms applied to the anchor sample, by default None
+    positive_transform : DictTransform | None, optional
+        Transforms applied to the positve sample, by default None
+    negative_transform : DictTransform | None, optional
+        Transforms applied to the negative sample, by default None
+    fit : bool, optional
+        Fitting mode in which the full triplet will be sampled,
+        only sample anchor if ``False``, by default True
+    predict_cells : bool, optional
+        Only predict on selected cells, by default False
+    include_fov_names : list[str] | None, optional
+        Only predict on selected FOVs, by default None
+    include_track_ids : list[int] | None, optional
+        Only predict on selected track IDs, by default None
+    time_interval : Literal["any"] | int, optional
+        Future time interval to sample positive and anchor from,
+        by default "any"
+        (sample negative from another track any time point
+        and use the augmented anchor patch as positive)
+    return_negative : bool, optional
+        Whether to return the negative sample during the fit stage
+        (can be set to False when using a loss function like NT-Xent),
+        by default True
+    """
+
     def __init__(
         self,
         positions: list[Position],
@@ -162,8 +207,7 @@ class TripletDataset(Dataset):
         return self._tensorstores[fov_name]
 
     def _filter_tracks(self, tracks_tables: list[pd.DataFrame]) -> pd.DataFrame:
-        """Exclude tracks that are too close to the border
-        or do not have the next time point.
+        """Exclude tracks that are too close to the border or do not have the next time point.
 
         Parameters
         ----------
@@ -223,6 +267,7 @@ class TripletDataset(Dataset):
         return specific_tracks.reset_index(drop=True)
 
     def __len__(self) -> int:
+        """Return number of valid anchor samples."""
         return len(self.valid_anchors)
 
     def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
@@ -232,8 +277,21 @@ class TripletDataset(Dataset):
         return query.merge(self.tracks, on=["global_track_id", "t"], how="inner")
 
     def _sample_negative(self, anchor_row: pd.Series) -> pd.Series:
-        """Select a negative sample from a different track in the next time point
-        if an interval is specified, otherwise from any random time point."""
+        """Select a negative sample from a different track.
+
+        Selects from the next time point if an interval is specified,
+        otherwise from any random time point.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            Row containing anchor cell information.
+
+        Returns
+        -------
+        pd.Series
+            Row containing negative sample information.
+        """
         if self.time_interval == "any":
             tracks = self.tracks
         else:
@@ -288,6 +346,7 @@ class TripletDataset(Dataset):
         return torch.from_numpy(results), norms
 
     def __getitems__(self, indices: list[int]) -> dict[str, torch.Tensor]:
+        """Get batched triplet samples for efficient data loading."""
         anchor_rows = self.valid_anchors.iloc[indices]
         anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
         sample = {"anchor": anchor_patches, "anchor_norm_meta": anchor_norms}
@@ -322,10 +381,70 @@ class TripletDataset(Dataset):
 
 
 class TripletDataModule(HCSDataModule):
+    """Lightning data module for triplet sampling from tracked cells.
+
+    Provides train, validation, and prediction dataloaders for contrastive
+    learning on cell tracking data. Supports configurable time intervals
+    and spatial patch sampling.
+
+    Parameters
+    ----------
+    data_path : str | Path
+        Image dataset path
+    tracks_path : str | Path
+        Tracks labels dataset path
+    source_channel : str | Sequence[str]
+        List of input channel names
+    z_range : tuple[int, int]
+        Range of valid z-slices
+    initial_yx_patch_size : tuple[int, int], optional
+        XY size of the initially sampled image patch, by default (512, 512)
+    final_yx_patch_size : tuple[int, int], optional
+        Output patch size, by default (224, 224)
+    split_ratio : float, optional
+        Ratio of training samples, by default 0.8
+    batch_size : int, optional
+        Batch size, by default 16
+    num_workers : int, optional
+        Number of data-loading workers, by default 8
+    normalizations : list[MapTransform], optional
+        Normalization transforms, by default []
+    augmentations : list[MapTransform], optional
+        Augmentation transforms, by default []
+    caching : bool, optional
+        Whether to cache the dataset, by default False
+    fit_include_wells : list[str], optional
+        Only include these wells for fitting, by default None
+    fit_exclude_fovs : list[str], optional
+        Exclude these FOVs for fitting, by default None
+    predict_cells : bool, optional
+        Only predict for selected cells, by default False
+    include_fov_names : list[str] | None, optional
+        Only predict for selected FOVs, by default None
+    include_track_ids : list[int] | None, optional
+        Only predict for selected tracks, by default None
+    time_interval : Literal["any"] | int, optional
+        Future time interval to sample positive and anchor from,
+        "any" means sampling negative from another track any time point
+        and using the augmented anchor patch as positive), by default "any"
+    return_negative : bool, optional
+        Whether to return the negative sample during the fit stage
+        (can be set to False when using a loss function like NT-Xent),
+        by default True
+    persistent_workers : bool, optional
+        Whether to keep worker processes alive between iterations, by default False
+    prefetch_factor : int | None, optional
+        Number of batches loaded in advance by each worker, by default None
+    pin_memory : bool, optional
+        Whether to pin memory in CPU for faster GPU transfer, by default False
+    z_window_size : int, optional
+        Size of the final Z window, by default None (inferred from z_range)
+    """
+
     def __init__(
         self,
-        data_path: str,
-        tracks_path: str,
+        data_path: str | Path,
+        tracks_path: str | Path,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
         initial_yx_patch_size: tuple[int, int] = (512, 512),
@@ -450,13 +569,15 @@ class TripletDataModule(HCSDataModule):
     def _align_tracks_tables_with_positions(
         self,
     ) -> tuple[list[Position], list[pd.DataFrame]]:
-        """Parse positions in ome-zarr store containing tracking information
-        and assemble tracks tables for each position.
+        """Parse positions in ome-zarr store containing tracking information.
+
+        Assembles tracks tables for each position by matching position names
+        with corresponding CSV files in the tracks directory.
 
         Returns
         -------
         tuple[list[Position], list[pd.DataFrame]]
-            List of positions and list of tracks tables for each position
+            List of positions and list of tracks tables for each position.
         """
         positions = []
         tracks_tables = []
@@ -527,7 +648,14 @@ class TripletDataModule(HCSDataModule):
     def _setup_test(self, *args, **kwargs):
         raise NotImplementedError("Self-supervised model does not support testing")
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> ThreadDataLoader:
+        """Create training data loader for triplet sampling.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Training data loader with shuffling and thread workers.
+        """
         return ThreadDataLoader(
             self.train_dataset,
             use_thread_workers=True,
@@ -541,7 +669,14 @@ class TripletDataModule(HCSDataModule):
             collate_fn=lambda x: x,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> ThreadDataLoader:
+        """Create validation data loader for triplet sampling.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Validation data loader without shuffling.
+        """
         return ThreadDataLoader(
             self.val_dataset,
             use_thread_workers=True,
@@ -555,7 +690,14 @@ class TripletDataModule(HCSDataModule):
             collate_fn=lambda x: x,
         )
 
-    def predict_dataloader(self):
+    def predict_dataloader(self) -> ThreadDataLoader:
+        """Create prediction data loader for cell embedding extraction.
+
+        Returns
+        -------
+        ThreadDataLoader
+            Prediction data loader for anchor-only sampling.
+        """
         return ThreadDataLoader(
             self.predict_dataset,
             use_thread_workers=True,

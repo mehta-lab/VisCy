@@ -1,3 +1,5 @@
+"""VisCy transform package for data preprocessing and augmentation."""
+
 from viscy.transforms._adjust_contrast import (
     BatchedRandAdjustContrast,
     BatchedRandAdjustContrastd,

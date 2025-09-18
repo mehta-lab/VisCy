@@ -1,3 +1,5 @@
+from typing import Literal
+
 import numpy as np
 import torch
 import torch.nn as nn
@@ -5,49 +7,57 @@ import torch.nn.functional as F
 
 
 class ConvBlock2D(nn.Module):
+    """2D convolutional block for U-Net lateral layers with configurable architecture.
+
+    Supports dynamic layer configuration, normalization, activation functions,
+    residual connections, and various filter progression strategies.
+    """
+
     def __init__(
         self,
-        in_filters,
-        out_filters,
-        dropout=False,
-        norm="batch",
-        residual=True,
-        activation="relu",
-        transpose=False,
-        kernel_size=3,
-        num_repeats=3,
-        filter_steps="first",
-        layer_order="can",
-    ):
+        in_filters: int,
+        out_filters: int,
+        dropout: float | bool = False,
+        norm: Literal["batch", "instance"] = "batch",
+        residual: bool = True,
+        activation: Literal["relu", "leakyrelu", "elu", "selu", "linear"] = "relu",
+        transpose: bool = False,
+        kernel_size: int | tuple[int, int] = 3,
+        num_repeats: int = 3,
+        filter_steps: Literal["linear", "first", "last"] = "first",
+        layer_order: str = "can",
+    ) -> None:
+        """Initialize convolutional block for lateral layers in U-Net.
+
+        Format for layer initialization allows dynamic layer number specification
+        in the conv blocks, enabling parameter number flexibility across the network.
+
+        Parameters
+        ----------
+        in_filters : int
+            Number of input feature channels.
+        out_filters : int
+            Number of output feature channels.
+        dropout : float or bool, default=False
+            Dropout probability. If False, no dropout is applied.
+        norm : {"batch", "instance"}, default="batch"
+            Normalization type to apply.
+        residual : bool, default=True
+            Whether to include residual connections.
+        activation : {"relu", "leakyrelu", "elu", "selu", "linear"}, default="relu"
+            Activation function type.
+        transpose : bool, default=False
+            Whether to use transpose convolution layers.
+        kernel_size : int or tuple[int, int], default=3
+            2D convolutional kernel size.
+        num_repeats : int, default=3
+            Number of times the layer_order sequence is repeated in the block.
+        filter_steps : {"linear", "first", "last"}, default="first"
+            Strategy for channel dimension changes across layers.
+        layer_order : str, default="can"
+            Order of conv (c), activation (a), normalization (n) layers.
         """
-        Convolutional block for lateral layers in Unet
-
-        Format for layer initialization is as follows:
-            if layer type specified
-            => for number of layers
-            => add layer to list of that layer type
-            => register elements of list
-        This is done to allow for dynamic layer number specification in the conv blocks,
-        which allows us to change the parameter numbers of the network.
-
-        :param int in_filters: number of images in in stack
-        :param int out_filters: number of images in out stack
-        :param float dropout: dropout probability (False => 0)
-        :param str norm: normalization type: 'batch', 'instance'
-        :param bool residual: as name
-        :param str activation: activation function: 'relu', 'leakyrelu', 'elu', 'selu'
-        :param bool transpose: as name
-        :param int/tuple kernel_size: convolutional kernel size
-        :param int num_repeats: number of times the layer_order layer sequence
-            is repeated in the block
-        :param str filter_steps: determines where in the block
-            the filters inflate channels (learn abstraction information):
-            'linear','first','last'
-        :param str layer_order: order of conv, norm, and act layers in block:
-            'can', 'cna', 'nca', etc
-        """
-
-        super(ConvBlock2D, self).__init__()
+        super().__init__()
         self.in_filters = in_filters
         self.out_filters = out_filters
         self.dropout = dropout
@@ -262,21 +272,18 @@ class ConvBlock2D(nn.Module):
             )
         self.register_modules(self.act_list, f"{self.activation}_act")
 
-    def forward(self, x, validate_input=False):
-        """
-        Forward call of convolutional block
+    def forward(self, x: torch.Tensor, validate_input: bool = False) -> torch.Tensor:
+        """Forward pass through the convolutional block.
 
         Order of layers within the block is defined by the 'layer_order' parameter,
-        which is a string of 'c's, 'a's and 'n's
-        in reference to convolution, activation, and normalization layers.
-        This sequence is repeated num_repeats times.
+        which is a string of 'c's, 'a's and 'n's in reference to convolution,
+        activation, and normalization layers. This sequence is repeated num_repeats times.
 
-        Recommended layer order:   convolution -> activation -> normalization
+        Recommended layer order: convolution -> activation -> normalization
 
-        Regardless of layer order,
-        the final layer sequence in the block always ends in activation.
-        This allows for usage of passthrough layers
-        or a final output activation function determined separately.
+        Regardless of layer order, the final layer sequence in the block always ends
+        in activation. This allows for usage of passthrough layers or a final output
+        activation function determined separately.
 
         Residual blocks:
             if input channels are greater than output channels,
@@ -284,9 +291,18 @@ class ConvBlock2D(nn.Module):
             if input channels are less than output channels,
             we zero-pad input channels to output channel size.
 
-        :param torch.tensor x: input tensor
-        :param bool validate_input: Deactivates assertions
-            which are redundant if forward pass is being traced by tensorboard writer.
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor for convolutional processing.
+        validate_input : bool, default=False
+            Deactivates assertions which are redundant if forward pass is being
+            traced by tensorboard writer.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor after convolutional block processing.
         """
         if validate_input:
             if isinstance(self.kernel_size, int):
@@ -335,19 +351,24 @@ class ConvBlock2D(nn.Module):
 
         return x
 
-    def model(self):
-        """
-        Allows calling of parameters inside ConvBlock object:
-        'ConvBlock.model().parameters()''
+    def model(self) -> nn.Sequential:
+        """Create a sequential model from the convolutional block layers.
 
-        Layer order:       convolution -> normalization -> activation
+        Allows calling of parameters inside ConvBlock object:
+        'ConvBlock.model().parameters()'
+
+        Layer order: convolution -> normalization -> activation
 
         We can make a list of layer modules and unpack them into nn.Sequential.
-        Note: this is distinct from the forward call
-        because we want to use the forward call with addition,
-        since this is a residual block.
-        The forward call performs the residial calculation,
-        and all the parameters can be seen by the optimizer when given this model.
+        Note: this is distinct from the forward call because we want to use
+        the forward call with addition, since this is a residual block.
+        The forward call performs the residual calculation, and all the
+        parameters can be seen by the optimizer when given this model.
+
+        Returns
+        -------
+        nn.Sequential
+            Sequential model containing all layers in the block.
         """
         layers = []
 
@@ -362,16 +383,21 @@ class ConvBlock2D(nn.Module):
 
         return nn.Sequential(*layers)
 
-    def register_modules(self, module_list, name):
-        """
+    def register_modules(self, module_list: list[nn.Module], name: str) -> None:
+        """Register modules from a list to enable PyTorch optimizer access.
+
         Helper function that registers modules stored in a list to the model object
         so that they can be seen by PyTorch optimizer.
 
-        Used to enable model graph creation
-        with non-sequential model types and dynamic layer numbers
+        Used to enable model graph creation with non-sequential model types
+        and dynamic layer numbers.
 
-        :param list(torch.nn.module) module_list: list of modules to register
-        :param str name: name of module type
+        Parameters
+        ----------
+        module_list : list of torch.nn.Module
+            List of PyTorch modules to register.
+        name : str
+            Name prefix for the module type.
         """
         for i, module in enumerate(module_list):
             self.add_module(f"{name}_{str(i)}", module)

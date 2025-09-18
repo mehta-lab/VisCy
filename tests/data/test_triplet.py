@@ -1,7 +1,6 @@
 import pandas as pd
 from iohub import open_ome_zarr
 from pytest import mark
-
 from viscy.data.triplet import TripletDataModule
 
 

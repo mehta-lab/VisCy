@@ -15,6 +15,12 @@ _logger = logging.getLogger("lightning.pytorch")
 
 
 class VisCyTrainer(Trainer):
+    """Extended Lightning Trainer for VisCy with preprocessing and export capabilities.
+
+    Provides additional functionality for dataset preprocessing, model export,
+    and normalization metadata computation for computer vision training workflows.
+    """
+
     def preprocess(
         self,
         data_path: Path,
@@ -118,6 +124,29 @@ class VisCyTrainer(Trainer):
         exclude_fovs: list[str] | None = None,
         model: LightningModule | None = None,
     ):
+        """Precompute and normalize image arrays for efficient training.
+
+        Parameters
+        ----------
+        data_path : Path
+            Path to input HCS OME-Zarr dataset
+        output_path : Path
+            Path to save precomputed arrays
+        channel_names : list[str]
+            List of channel names to process
+        subtrahends : list[Literal["mean"] | float]
+            Subtraction values for normalization (per channel)
+        divisors : list[Literal["std"] | tuple[float, float]]
+            Division values for normalization (per channel)
+        image_array_key : str, optional
+            Array key in OME-Zarr structure, by default "0"
+        include_wells : list[str] | None, optional
+            Wells to include, by default None
+        exclude_fovs : list[str] | None, optional
+            Fields of view to exclude, by default None
+        model : LightningModule | None, optional
+            Ignored placeholder parameter, by default None
+        """
         precompute_array(
             data_path=data_path,
             output_path=output_path,

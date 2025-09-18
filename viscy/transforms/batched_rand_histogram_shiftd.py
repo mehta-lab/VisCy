@@ -5,7 +5,21 @@ from typing_extensions import Iterable
 
 
 class BatchedRandHistogramShiftd(MapTransform, RandomizableTransform):
-    """Batched random histogram shifting for intensity distribution changes."""
+    """
+
+    Apply random histogram shifts to modify intensity distributions.
+
+    Parameters
+    ----------
+    keys : str or Iterable[str]
+        Keys of the corresponding items to be transformed.
+    shift_range : tuple[float, float], optional
+        Range for random intensity shift values, by default (-0.1, 0.1).
+    prob : float, optional
+        Probability of applying the transform, by default 0.1.
+    allow_missing_keys : bool, optional
+        Whether to ignore missing keys, by default False.
+    """
 
     def __init__(
         self,
@@ -19,6 +33,18 @@ class BatchedRandHistogramShiftd(MapTransform, RandomizableTransform):
         self.shift_range = shift_range
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply histogram shift to sample data.
+
+        Parameters
+        ----------
+        sample : dict[str, Tensor]
+            Dictionary containing image tensors to transform.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with intensity-shifted tensors.
+        """
         self.randomize(None)
         d = dict(sample)
 

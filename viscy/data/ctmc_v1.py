@@ -10,6 +10,7 @@ from viscy.data.gpu_aug import CachedOmeZarrDataset, GPUTransformDataModule
 class CTMCv1DataModule(GPUTransformDataModule):
     """
     Autoregression data module for the CTMCv1 dataset.
+
     Training and validation datasets are stored in separate HCS OME-Zarr stores.
 
     Parameters
@@ -18,13 +19,13 @@ class CTMCv1DataModule(GPUTransformDataModule):
         Path to the training dataset.
     val_data_path : str or Path
         Path to the validation dataset.
-    train_cpu_transforms : list of MapTransform
+    train_cpu_transforms : list[MapTransform]
         List of CPU transforms for training.
-    val_cpu_transforms : list of MapTransform
+    val_cpu_transforms : list[MapTransform]
         List of CPU transforms for validation.
-    train_gpu_transforms : list of MapTransform
+    train_gpu_transforms : list[MapTransform]
         List of GPU transforms for training.
-    val_gpu_transforms : list of MapTransform
+    val_gpu_transforms : list[MapTransform]
         List of GPU transforms for validation.
     batch_size : int, optional
         Batch size, by default 16.
@@ -68,21 +69,38 @@ class CTMCv1DataModule(GPUTransformDataModule):
 
     @property
     def train_cpu_transforms(self) -> Compose:
+        """Get composed training CPU transforms."""
         return self._train_cpu_transforms
 
     @property
     def val_cpu_transforms(self) -> Compose:
+        """Get composed validation CPU transforms."""
         return self._val_cpu_transforms
 
     @property
     def train_gpu_transforms(self) -> Compose:
+        """Get composed training GPU transforms."""
         return self._train_gpu_transforms
 
     @property
     def val_gpu_transforms(self) -> Compose:
+        """Get composed validation GPU transforms."""
         return self._val_gpu_transforms
 
     def setup(self, stage: str) -> None:
+        """
+        Set up datasets for the specified stage.
+
+        Parameters
+        ----------
+        stage : str
+            The stage to set up for. Only "fit" is currently supported.
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not "fit".
+        """
         if stage != "fit":
             raise NotImplementedError("Only fit stage is supported")
         self._setup_fit()

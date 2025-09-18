@@ -12,12 +12,16 @@ from sklearn.metrics import (
 from sklearn.neighbors import KNeighborsClassifier
 
 
-def knn_accuracy(embeddings, annotations, k=5):
+def knn_accuracy(embeddings: NDArray, annotations: NDArray, k: int = 5) -> float:
     """
     Evaluate the k-NN classification accuracy.
 
     Parameters
     ----------
+    embeddings : NDArray
+        Embeddings to cluster.
+    annotations : NDArray
+        Ground truth labels.
     k : int, optional
         Number of neighbors to use for k-NN. Default is 5.
 
@@ -85,8 +89,9 @@ def select_block(distances: NDArray, index: NDArray) -> NDArray:
 def compare_time_offset(
     single_track_distances: NDArray, time_offset: int = 1
 ) -> NDArray:
-    """Extract the nearest neighbor distances/rankings
-    of the next sample compared to each sample.
+    """Extract the nearest neighbor distances/rankings of the next sample.
+
+    Compared to each sample.
 
     Parameters
     ----------
@@ -105,12 +110,14 @@ def compare_time_offset(
     return single_track_distances.diagonal(offset=-time_offset)
 
 
-def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
+def dbscan_clustering(embeddings: NDArray, eps=0.5, min_samples=5):
     """
     Apply DBSCAN clustering to the embeddings.
 
     Parameters
     ----------
+    embeddings : NDArray
+        Embeddings to cluster.
     eps : float, optional
         The maximum distance between two samples for them to be considered as in the same neighborhood. Default is 0.5.
     min_samples : int, optional
@@ -118,7 +125,7 @@ def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
 
     Returns
     -------
-    np.ndarray
+    NDArray
         Clustering labels assigned by DBSCAN.
     """
     dbscan = DBSCAN(eps=eps, min_samples=min_samples)
@@ -126,12 +133,16 @@ def dbscan_clustering(embeddings, eps=0.5, min_samples=5):
     return clusters
 
 
-def clustering_evaluation(embeddings, annotations, method="nmi"):
+def clustering_evaluation(embeddings: NDArray, annotations: NDArray, method="nmi"):
     """
     Evaluate the clustering of the embeddings compared to the ground truth labels.
 
     Parameters
     ----------
+    embeddings : NDArray
+        Embeddings to cluster.
+    annotations : NDArray
+        Ground truth labels.
     method : str, optional
         Metric to use for evaluation ('nmi' or 'ari'). Default is 'nmi'.
 

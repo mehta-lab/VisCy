@@ -1,6 +1,5 @@
 import pytest
 import torch
-
 from viscy.transforms._decollate import Decollate
 from viscy.transforms._transforms import (
     BatchedScaleIntensityRangePercentiles,

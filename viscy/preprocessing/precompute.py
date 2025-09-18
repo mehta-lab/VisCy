@@ -1,5 +1,3 @@
-"""Precompute normalization and store a plain C array"""
-
 from __future__ import annotations
 
 from pathlib import Path
@@ -8,7 +6,6 @@ from typing import Literal
 import dask.array as da
 from dask.diagnostics import ProgressBar
 from iohub.ngff import open_ome_zarr
-
 from viscy.data.select import _filter_fovs, _filter_wells
 
 
@@ -40,6 +37,27 @@ def precompute_array(
     include_wells: list[str] | None = None,
     exclude_fovs: list[str] | None = None,
 ) -> None:
+    """Precompute normalized image arrays for efficient data loading.
+
+    Parameters
+    ----------
+    data_path : Path
+        Path to HCS OME-Zarr dataset.
+    output_path : Path
+        Output path for precomputed arrays.
+    channel_names : list[str]
+        List of channel names to process.
+    subtrahends : list[Literal["mean"] | float]
+        Subtraction values for normalization per channel.
+    divisors : list[Literal["std"] | tuple[float, float]]
+        Division values for normalization per channel.
+    image_array_key : str, optional
+        Array key in zarr store, by default "0".
+    include_wells : list[str] | None, optional
+        Wells to include, by default None (all wells).
+    exclude_fovs : list[str] | None, optional
+        FOVs to exclude, by default None (no exclusions).
+    """
     normalized_images: list[da.Array] = []
     with open_ome_zarr(data_path, layout="hcs", mode="r") as dataset:
         channel_indices = [dataset.channel_names.index(c) for c in channel_names]

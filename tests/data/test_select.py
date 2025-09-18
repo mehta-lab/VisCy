@@ -1,6 +1,5 @@
 import pytest
 from iohub.ngff import open_ome_zarr
-
 from viscy.data.select import SelectWell
 
 

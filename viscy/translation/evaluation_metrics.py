@@ -7,18 +7,28 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from monai.metrics.regression import compute_ssim_and_cs
+from numpy.typing import NDArray
 from scipy.optimize import linear_sum_assignment
 from skimage.measure import label, regionprops
 from torchmetrics.detection.mean_ap import MeanAveragePrecision
 from torchvision.ops import masks_to_boxes
 
 
-def VOI_metric(target, prediction):
-    """variation of information metric
+def VOI_metric(target: np.array, prediction: np.array) -> float:
+    """Variation of information metric
+
     Reports overlap between predicted and ground truth mask
-    : param np.array target: ground truth mask
-    : param np.array prediction: model infered FL image cellpose mask
-    : return float VI: VI for image masks
+
+    Parameters
+    ----------
+    target : np.array
+        Ground truth mask
+    prediction : np.array
+        Model inferred FL image cellpose mask
+
+    Returns
+    -------
+    float VI: VI for image masks
     """
     # cellpose segmentation of predicted image: outputs labl mask
     pred_bin = prediction > 0
@@ -55,7 +65,27 @@ def VOI_metric(target, prediction):
     return [VI]
 
 
-def POD_metric(target_bin, pred_bin):
+def POD_metric(target_bin: NDArray, pred_bin: NDArray):
+    """
+    Probability of detection metric for object matching.
+
+    Parameters
+    ----------
+    target_bin : NDArray
+        Binary ground truth mask.
+    pred_bin : NDArray
+        Binary predicted mask.
+
+    Returns
+    -------
+    tuple[float, float, float, int, int]
+        POD and various detection statistics.
+        - POD: Probability of detection
+        - FAR: False alarm rate
+        - PCD: Probability of correct detection
+        - n_targObj: Number of target objects
+        - n_predObj: Number of predicted objects
+    """
     # pred_bin = cpmask_array(prediction)
 
     # relabel mask for ordered labelling across images for efficient LAP mapping
@@ -120,9 +150,16 @@ def POD_metric(target_bin, pred_bin):
 def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
     """Convert integer labels to a stack of boolean masks.
 
-    :param torch.ShortTensor labels: 2D labels where each value is an object
-        (0 is background)
-    :return torch.BoolTensor: Boolean masks of shape (objects, H, W)
+    Parameters
+    ----------
+    labels : torch.ShortTensor
+        2D labels where each value is an object (0 is background)
+
+    Returns
+    -------
+    torch.BoolTensor
+        Boolean masks of shape (objects, H, W)
+
     """
     if labels.ndim != 2:
         raise ValueError(f"Labels must be 2D, got shape {labels.shape}.")
@@ -141,9 +178,15 @@ def labels_to_masks(labels: torch.ShortTensor) -> torch.BoolTensor:
 def labels_to_detection(labels: torch.ShortTensor) -> dict[str, torch.Tensor]:
     """Convert integer labels to a torchvision/torchmetrics detection dictionary.
 
-    :param torch.ShortTensor labels: 2D labels where each value is an object
-        (0 is background)
-    :return dict[str, torch.Tensor]: detection boxes, scores, labels, and masks
+    Parameters
+    ----------
+    labels : torch.ShortTensor
+        2D labels where each value is an object (0 is background)
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        detection boxes, scores, labels, and masks
     """
     masks = labels_to_masks(labels)
     boxes = masks_to_boxes(masks)
@@ -166,11 +209,20 @@ def mean_average_precision(
 ) -> dict[str, torch.Tensor]:
     """Compute the mAP metric for instance segmentation.
 
-    :param torch.ShortTensor pred_labels: 2D integer prediction labels
-    :param torch.ShortTensor target_labels: 2D integer prediction labels
-    :param dict **kwargs: keyword arguments passed to
+    Parameters
+    ----------
+    pred_labels : torch.ShortTensor
+        2D integer prediction labels
+    target_labels : torch.ShortTensor
+        2D integer prediction labels
+    **kwargs : dict
+        Keyword arguments passed to
         :py:class:`torchmetrics.detection.MeanAveragePrecision`
-    :return dict[str, torch.Tensor]: COCO-style metrics
+
+    Returns
+    -------
+    dict[str, torch.Tensor]
+        COCO-style metrics
     """
     defaults = dict(
         iou_type="segm", box_format="xyxy", max_detection_thresholds=[1, 100, 10000]
@@ -191,15 +243,24 @@ def ssim_25d(
     return_contrast_sensitivity: bool = False,
 ) -> Union[torch.Tensor, tuple[torch.Tensor, torch.Tensor]]:
     """Multi-scale SSIM loss function for 2.5D volumes (3D with small depth).
+
     Uses uniform kernel (windows), depth-dimension window size equals to depth size.
 
-    :param torch.Tensor preds: predicted batch (B, C, D, W, H)
-    :param torch.Tensor target: target batch
-    :param tuple[int, int] in_plane_window_size: kernel width and height,
-        by default (11, 11)
-    :param bool return_contrast_sensitivity: whether to return contrast sensitivity
-    :return torch.Tensor: SSIM for the batch
-    :return Optional[torch.Tensor]: contrast sensitivity
+    Parameters
+    ----------
+    preds : torch.Tensor
+        predicted batch (B, C, D, W, H)
+    target : torch.Tensor
+        target batch
+    in_plane_window_size : tuple[int, int], optional
+        kernel width and height, by default (11, 11)
+    return_contrast_sensitivity : bool, optional
+        whether to return contrast sensitivity
+
+    Returns
+    -------
+    torch.Tensor: SSIM for the batch
+    Optional[torch.Tensor]: contrast sensitivity
     """
     if preds.ndim != 5:
         raise ValueError(
@@ -233,6 +294,7 @@ def ms_ssim_25d(
     betas: Sequence[float] = (0.0448, 0.2856, 0.3001, 0.2363, 0.1333),
 ) -> torch.Tensor:
     """Multi-scale SSIM for 2.5D volumes (3D with small depth).
+
     Uses uniform kernel (windows), depth-dimension window size equals to depth size.
     Depth dimension is not downsampled.
 
@@ -240,15 +302,23 @@ def ms_ssim_25d(
     Original license:
         Copyright The Lightning team, http://www.apache.org/licenses/LICENSE-2.0
 
-    :param torch.Tensor preds: predicted images
-    :param torch.Tensor target: target images
-    :param tuple[int, int] in_plane_window_size: kernel width and height,
-        defaults to (11, 11)
-    :param bool clamp: clamp to [1e-6, 1] for training stability when used in loss,
-        defaults to False
-    :param Sequence[float] betas: exponents of each resolution,
-        defaults to (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
-    :return torch.Tensor: multi-scale SSIM
+    Parameters
+    ----------
+    preds : torch.Tensor
+        predicted images
+    target : torch.Tensor
+        target images
+    in_plane_window_size : tuple[int, int], optional
+        kernel width and height, by default (11, 11)
+    clamp : bool, optional
+        clamp to [1e-6, 1] for training stability when used in loss,
+        by default False
+    betas : Sequence[float], optional
+        exponents of each resolution, by default (0.0448, 0.2856, 0.3001, 0.2363, 0.1333)
+
+    Returns
+    -------
+    torch.Tensor: multi-scale SSIM
     """
     base_min = 1e-4
     mcs_list = []

@@ -1,5 +1,4 @@
 import torch
-
 from viscy.unet.networks.fcmae import (
     FullyConvolutionalMAE,
     MaskedAdaptiveProjection,

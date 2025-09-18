@@ -1,6 +1,7 @@
 import logging
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Any, Dict, Literal, Optional, Sequence
+from typing import Any, Literal
 
 import numpy as np
 import pandas as pd
@@ -8,8 +9,6 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
-from xarray import Dataset, open_zarr
-
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
 from viscy.representation.evaluation.dimensionality_reduction import (
@@ -17,14 +16,15 @@ from viscy.representation.evaluation.dimensionality_reduction import (
     compute_pca,
     compute_phate,
 )
+from xarray import Dataset, open_zarr
 
 __all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset"]
 _logger = logging.getLogger("lightning.pytorch")
 
 
 def read_embedding_dataset(path: Path) -> Dataset:
-    """
-    Read the embedding dataset written by the EmbeddingWriter callback.
+    """Read the embedding dataset written by the EmbeddingWriter callback.
+
     Supports both legacy datasets (without x/y coordinates) and new datasets.
 
     Parameters
@@ -60,13 +60,13 @@ def _move_and_stack_embeddings(
 
 
 def write_embedding_dataset(
-    output_path: Path,
-    features: np.ndarray,
+    output_path: str | Path,
+    features: NDArray,
     index_df: pd.DataFrame,
-    projections: Optional[np.ndarray] = None,
-    umap_kwargs: Optional[Dict[str, Any]] = None,
-    phate_kwargs: Optional[Dict[str, Any]] = None,
-    pca_kwargs: Optional[Dict[str, Any]] = None,
+    projections: np.ndarray | None = None,
+    umap_kwargs: dict[str, Any] | None = None,
+    phate_kwargs: dict[str, Any] | None = None,
+    pca_kwargs: dict[str, Any] | None = None,
     overwrite: bool = False,
 ) -> None:
     """
@@ -74,9 +74,9 @@ def write_embedding_dataset(
 
     Parameters
     ----------
-    output_path : Path
+    output_path : str | Path
         Path to the zarr store.
-    features : np.ndarray
+    features : NDArray
         Array of shape (n_samples, n_features) containing the embeddings.
     index_df : pd.DataFrame
         DataFrame containing the index information for each embedding.
@@ -191,11 +191,12 @@ class EmbeddingWriter(BasePredictionWriter):
         Path to the zarr store.
     write_interval : Literal["batch", "epoch", "batch_and_epoch"], optional
         When to write the embeddings, by default 'epoch'.
-    umap_kwargs : dict, optional
+    umap_kwargs : dict[str, Any], optional
         Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed).
-    phate_kwargs : dict, optional
+    phate_kwargs : dict[str, Any], optional
         Keyword arguments passed to PHATE, by default PHATE is computed with default parameters.
-    pca_kwargs : dict, optional
+        Default configuration passed is: {"knn": 5, "decay": 40, "n_jobs": -1, "random_state": 42}.
+    pca_kwargs : dict[str, Any], optional
         Keyword arguments passed to PCA, by default PCA is computed with default parameters.
     """
 
@@ -221,6 +222,7 @@ class EmbeddingWriter(BasePredictionWriter):
         self.overwrite = overwrite
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Initialize prediction writing and validate output path."""
         if self.output_path.exists():
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")

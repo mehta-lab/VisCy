@@ -1,4 +1,4 @@
-"""PCA and UMAP dimensionality reduction."""
+from typing import TYPE_CHECKING
 
 import pandas as pd
 import umap
@@ -7,21 +7,24 @@ from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
 
+if TYPE_CHECKING:
+    from phate import PHATE
+
 
 def compute_phate(
-    embedding_dataset,
+    embedding_dataset: NDArray | Dataset,
     n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
     update_dataset: bool = False,
     **phate_kwargs,
-) -> tuple[object, NDArray]:
+) -> tuple[PHATE, NDArray]:
     """
     Compute PHATE embeddings for features and optionally update dataset.
 
     Parameters
     ----------
-    embedding_dataset : xarray.Dataset or NDArray
+    embedding_dataset : NDArray | Dataset
         The dataset containing embeddings, timepoints, fov_name, and track_id,
         or a numpy array of embeddings.
     n_components : int, optional
@@ -37,7 +40,7 @@ def compute_phate(
 
     Returns
     -------
-    tuple[object, NDArray]
+    tuple[phate.PHATE, NDArray]
         PHATE model and PHATE embeddings
 
     Raises
@@ -75,12 +78,14 @@ def compute_phate(
     return phate_model, phate_embedding
 
 
-def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
+def compute_pca(
+    embedding_dataset: NDArray | Dataset, n_components=None, normalize_features=True
+):
     """Compute PCA embeddings for features and optionally update dataset.
 
     Parameters
     ----------
-    embedding_dataset : xarray.Dataset or NDArray
+    embedding_dataset : Dataset | NDArray
         The dataset containing embeddings, timepoints, fov_name, and track_id,
         or a numpy array of embeddings.
     n_components : int, optional
@@ -93,7 +98,6 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
     tuple[NDArray, pd.DataFrame]
         PCA embeddings and PCA DataFrame
     """
-
     embeddings = (
         embedding_dataset["features"].values
         if isinstance(embedding_dataset, Dataset)

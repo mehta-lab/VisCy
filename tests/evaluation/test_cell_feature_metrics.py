@@ -2,7 +2,6 @@ import numpy as np
 import pandas as pd
 import pytest
 from skimage import measure
-
 from viscy.representation.evaluation.feature import CellFeatures, DynamicFeatures
 
 

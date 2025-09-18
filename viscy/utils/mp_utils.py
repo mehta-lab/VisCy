@@ -1,19 +1,35 @@
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor
+from typing import Any
 
 import iohub.ngff as ngff
 import numpy as np
 import scipy.stats
+import zarr
+from numpy.typing import NDArray
 
 import viscy.utils.image_utils as image_utils
 import viscy.utils.masks as mask_utils
 
 
-def mp_wrapper(fn, fn_args, workers):
-    """Create and save masks with multiprocessing
+def mp_wrapper(
+    fn: Callable[..., Any], fn_args: list[tuple[Any, ...]], workers: int
+) -> list[Any]:
+    """Create and save masks with multiprocessing.
 
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned dicts from create_save_mask
+    Parameters
+    ----------
+    fn : callable
+        Function to be applied with multiprocessing.
+    fn_args : list of tuple
+        List with tuples of function arguments.
+    workers : int
+        Max number of workers.
+
+    Returns
+    -------
+    list
+        List of returned dicts from create_save_mask.
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
@@ -21,13 +37,22 @@ def mp_wrapper(fn, fn_args, workers):
     return list(res)
 
 
-def mp_create_and_write_mask(fn_args, workers):
-    """Create and save masks with multiprocessing. For argument parameters
-    see mp_utils.create_and_write_mask.
+def mp_create_and_write_mask(fn_args: list[tuple[Any, ...]], workers: int) -> list[Any]:
+    """Create and save masks with multiprocessing.
 
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned dicts from create_save_mask
+    For argument parameters see mp_utils.create_and_write_mask.
+
+    Parameters
+    ----------
+    fn_args : list of tuple
+        List with tuples of function arguments.
+    workers : int
+        Max number of workers.
+
+    Returns
+    -------
+    list
+        List of returned dicts from create_save_mask.
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
@@ -37,29 +62,35 @@ def mp_create_and_write_mask(fn_args, workers):
 
 def add_channel(
     position: ngff.Position,
-    new_channel_array,
-    new_channel_name,
-    overwrite_ok=False,
-):
-    """
-    Adds a channels to the data array at position "position". Note that there is
-    only one 'tracked' data array in current HCS spec at each position. Also
-    updates the 'omero' channel-tracking metadata to track the new channel.
+    new_channel_array: NDArray,
+    new_channel_name: str,
+    overwrite_ok: bool = False,
+) -> None:
+    """Add a channel to the data array at specified position.
+
+    Note that there is only one 'tracked' data array in current HCS spec at each position.
+    Also updates the 'omero' channel-tracking metadata to track the new channel.
 
     The 'new_channel_array' must match the dimensions of the current array in
-    all positions but the channel position (1) and have the same datatype
+    all positions but the channel position (1) and have the same datatype.
 
     Note: to maintain HCS compatibility of the zarr store, all positions (wells)
     must maintain arrays with congruent channels. That is, if you add a channel
     to one position of an HCS compatible zarr store, an additional channel must
     be added to every position in that store to maintain HCS compatibility.
 
-    :param Position zarr_dir: NGFF position node object
-    :param np.ndarray new_channel_array: array to add as new channel with matching
-                            dimensions (except channel dim) and dtype
-    :param str new_channel_name: name of new channel
-    :param bool overwrite_ok: if true, if a channel with the same name as
-                            'new_channel_name' is found, will overwrite
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object.
+    new_channel_array : NDArray
+        Array to add as new channel with matching dimensions (except channel dim)
+        and dtype.
+    new_channel_name : str
+        Name of new channel.
+    overwrite_ok : bool, optional
+        If true, if a channel with the same name as 'new_channel_name' is found,
+        will overwrite, by default False.
     """
     assert len(new_channel_array.shape) == len(position.data.shape) - 1, (
         "New channel array must match all dimensions of the position array, "
@@ -82,20 +113,18 @@ def add_channel(
 
 def create_and_write_mask(
     position: ngff.Position,
-    time_indices,
-    channel_indices,
-    structure_elem_radius,
-    mask_type,
-    mask_name,
-    verbose=False,
-):
-    # TODO: rewrite docstring
-    """
-    Create mask *for all depth slices* at each time and channel index specified
-    in this position, and save them both as an additional channel in the data array
-    of the given zarr store and a separate 'untracked' array with specified name.
-    If output_channel_index is specified as an existing channel index, will overwrite
-    this channel instead.
+    time_indices: list[int],
+    channel_indices: list[int],
+    structure_elem_radius: int,
+    mask_type: str,
+    mask_name: str,
+    verbose: bool = False,
+) -> None:
+    """Create mask for all depth slices at specified time and channel indices.
+
+    Creates masks at each time and channel index specified in this position,
+    and saves them both as an additional channel in the data array of the given
+    zarr store and a separate 'untracked' array with specified name.
 
     Saves custom metadata related to the mask creation in the well-level
     .zattrs in the 'mask' field.
@@ -105,24 +134,25 @@ def create_and_write_mask(
     a timepoint-position basis. That is, it will be recorded as an average
     foreground fraction over all slices in any given timepoint.
 
-
-    :param str zarr_dir: directory to HCS compatible zarr store for usage
-    :param str position_path: path within store to position to generate masks for
-    :param list time_indices: list of time indices for mask generation,
-                            if an index is skipped over, will populate with
-                            zeros
-    :param list channel_indices: list of channel indices for mask generation,
-                            if more than 1 channel specified, masks from all
-                            channels are aggregated
-    :param int structure_elem_radius: size of structuring element used for binary
-                            opening. str_elem: disk or ball
-    :param str mask_type: thresholding type used for masking or str to map to
-                            masking function
-    :param str mask_name: name under which to save untracked copy of mask in
-                            position
-    :param bool verbose: whether this process should send updates to stdout
+    Parameters
+    ----------
+    position : ngff.Position
+        NGFF position node object.
+    time_indices : list
+        List of time indices for mask generation. If an index is skipped over,
+        will populate with zeros.
+    channel_indices : list
+        List of channel indices for mask generation. If more than 1 channel
+        specified, masks from all channels are aggregated.
+    structure_elem_radius : int
+        Size of structuring element used for binary opening. str_elem: disk or ball.
+    mask_type : str
+        Thresholding type used for masking or str to map to masking function.
+    mask_name : str
+        Name under which to save untracked copy of mask in position.
+    verbose : bool, optional
+        Whether this process should send updates to stdout, by default False.
     """
-
     shape = position.data.shape
     position_masks_shape = tuple([shape[0], len(channel_indices), *shape[2:]])
 
@@ -195,25 +225,35 @@ def create_and_write_mask(
 
 
 def get_mask_slice(
-    position_zarr,
-    time_index,
-    channel_index,
-    mask_type,
-    structure_elem_radius,
-):
-    """
+    position_zarr: zarr.Array,
+    time_index: int,
+    channel_index: int,
+    mask_type: str,
+    structure_elem_radius: int,
+) -> NDArray:
+    """Compute mask for a single image slice.
+
     Given a set of indices, mask type, and structuring element,
     pulls an image slice from the given zarr array, computes the
     requested mask and returns.
 
-    :param zarr.Array position_zarr: zarr array of the desired position
-    :param time_index: see name
-    :param channel_index: see name
-    :param mask_type: see name,
-                    options are {otsu, unimodal, mem_detection, borders_weight_loss_map}
-    :param int structure_elem_radius: creation radius for the structuring
-                    element
-    :return np.ndarray mask: 2d mask for this slice
+    Parameters
+    ----------
+    position_zarr : zarr.Array
+        Zarr array of the desired position.
+    time_index : int
+        Time index for the slice.
+    channel_index : int
+        Channel index for the slice.
+    mask_type : str
+        Mask type, options are {otsu, unimodal, mem_detection, borders_weight_loss_map}.
+    structure_elem_radius : int
+        Creation radius for the structuring element.
+
+    Returns
+    -------
+    NDArray
+        2D mask for this slice.
     """
     # read and correct/preprocess slice
     im = position_zarr[time_index, channel_index]
@@ -237,13 +277,20 @@ def get_mask_slice(
     return mask
 
 
-def mp_get_val_stats(fn_args, workers):
-    """
-    Computes statistics of numpy arrays with multiprocessing
+def mp_get_val_stats(fn_args: list[Any], workers: int) -> list[dict[str, float]]:
+    """Compute statistics of numpy arrays with multiprocessing.
 
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of returned df from get_im_stats
+    Parameters
+    ----------
+    fn_args : list of tuple
+        List with tuples of function arguments.
+    workers : int
+        Max number of workers.
+
+    Returns
+    -------
+    list[dict[str, float]]
+        List of returned df from get_im_stats.
     """
     with ProcessPoolExecutor(workers) as ex:
         # can't use map directly as it works only with single arg functions
@@ -251,16 +298,22 @@ def mp_get_val_stats(fn_args, workers):
     return list(res)
 
 
-def get_val_stats(sample_values):
-    """
+def get_val_stats(sample_values: list[float]) -> dict[str, float]:
+    """Compute statistics of a numpy array.
+
     Computes the statistics of a numpy array and returns a dictionary
     of metadata corresponding to input sample values.
 
-    :param list(float) sample_values: List of sample values at respective
-                                        indices
-    :return dict meta_row: Dict with intensity data for image
-    """
+    Parameters
+    ----------
+    sample_values : list of float
+        List of sample values at respective indices.
 
+    Returns
+    -------
+    dict[str, float]
+        Dictionary with intensity data for image.
+    """
     meta_row = {
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),

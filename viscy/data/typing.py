@@ -1,4 +1,5 @@
-from typing import Callable, NamedTuple, Sequence, TypedDict, TypeVar
+from collections.abc import Callable, Sequence
+from typing import NamedTuple, TypedDict, TypeVar
 
 from torch import ShortTensor, Tensor
 
@@ -13,6 +14,8 @@ OneOrSeq = T | Sequence[T]
 
 
 class LevelNormStats(TypedDict):
+    """Statistics for normalization at a specific level (dataset or FOV)."""
+
     mean: Tensor
     std: Tensor
     median: Tensor
@@ -20,6 +23,8 @@ class LevelNormStats(TypedDict):
 
 
 class ChannelNormStats(TypedDict):
+    """Normalization statistics for a channel at different levels."""
+
     dataset_statistics: LevelNormStats
     fov_statistics: LevelNormStats
 
@@ -39,6 +44,7 @@ class HCSStackIndex(NamedTuple):
 class Sample(TypedDict, total=False):
     """
     Image sample type for mini-batches.
+
     All fields are optional.
     """
 
@@ -54,9 +60,7 @@ class Sample(TypedDict, total=False):
 
 
 class SegmentationSample(TypedDict):
-    """
-    Segmentation sample type for mini-batches.
-    """
+    """Segmentation sample type for mini-batches."""
 
     pred: ShortTensor
     target: ShortTensor
@@ -72,17 +76,18 @@ class ChannelMap(TypedDict):
 
 
 class TrackingIndex(TypedDict):
-    """Tracking index extracted from ultrack result
-    Potentially collated by the dataloader"""
+    """
+    Tracking index extracted from ultrack result.
+
+    Potentially collated by the dataloader.
+    """
 
     fov_name: OneOrSeq[str]
     id: OneOrSeq[int]
 
 
 class TripletSample(TypedDict):
-    """
-    Triplet sample type for mini-batches.
-    """
+    """Triplet sample type for mini-batches."""
 
     anchor: Tensor
     positive: NotRequired[Tensor]

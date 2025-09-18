@@ -5,7 +5,29 @@ from typing_extensions import Iterable
 
 
 class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
-    """Batched 3D elastic deformation for biological structures."""
+    """Apply random 3D elastic deformation image data.
+
+    Uses Gaussian-smoothed displacement fields to simulate natural tissue deformation.
+
+    Parameters
+    ----------
+    keys : str or Iterable[str]
+        Keys of the corresponding items to be transformed.
+    sigma_range : tuple[float, float]
+        Range for random sigma values used in Gaussian smoothing.
+    magnitude_range : tuple[float, float]
+        Range for random displacement magnitude values.
+    spatial_size : tuple[int, int, int] or int or None, optional
+        Expected spatial size of input data.
+    prob : float, optional
+        Probability of applying the transform, by default 0.1.
+    mode : str, optional
+        Interpolation mode for grid sampling, by default "bilinear".
+    padding_mode : str, optional
+        Padding mode for grid sampling, by default "reflection".
+    allow_missing_keys : bool, optional
+        Whether to ignore missing keys, by default False.
+    """
 
     def __init__(
         self,
@@ -76,6 +98,18 @@ class BatchedRand3DElasticd(MapTransform, RandomizableTransform):
         return torch.stack(displacement_fields)
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply elastic deformation to sample data.
+
+        Parameters
+        ----------
+        sample : dict[str, Tensor]
+            Dictionary containing image tensors to transform.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with transformed tensors.
+        """
         self.randomize(None)
         d = dict(sample)
 

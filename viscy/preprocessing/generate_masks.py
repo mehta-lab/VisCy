@@ -1,41 +1,47 @@
-"""Generate masks from sum of flurophore channels"""
+"""Generate masks from sum of flurophore channels."""
+
+from pathlib import Path
+from typing import Literal
 
 import iohub.ngff as ngff
-
 import viscy.utils.aux_utils as aux_utils
 from viscy.utils.mp_utils import mp_create_and_write_mask
 
 
 class MaskProcessor:
-    """
-    Appends Masks to zarr directories
+    """Appends Masks to zarr directories.
+
+    Parameters
+    ----------
+    zarr_dir : Path
+        Directory of HCS zarr store to pull data from. Note: data in store is assumed to be stored in TCZYX format.
+    channel_ids : list[int] | int
+        Channel indices to be masked (typically just one)
+    time_ids : list[int] | int
+        Timepoints to consider
+    pos_ids : list[int] | int
+        Position (FOV) indices to use
+    num_workers : int, optional
+        Number of workers for multiprocessing, by default 4
+    mask_type : Literal["otsu", "unimodal", "mem_detection", "borders_weight_loss_map"], optional
+        Method to use for generating mask. Needed for mapping to the masking function.
+        One of: {'otsu', 'unimodal', 'mem_detection', 'borders_weight_loss_map'}, by default "otsu".
+    overwrite_ok : bool, optional
+        Overwrite existing masks, by default False.
     """
 
     def __init__(
         self,
-        zarr_dir,
-        channel_ids,
-        time_ids=-1,
-        pos_ids=-1,
-        num_workers=4,
-        mask_type="otsu",
-        overwrite_ok=False,
+        zarr_dir: Path,
+        channel_ids: list[int] | int,
+        time_ids: list[int] | int,
+        pos_ids: list[int] | int,
+        num_workers: int = 4,
+        mask_type: Literal[
+            "otsu", "unimodal", "mem_detection", "borders_weight_loss_map"
+        ] = "otsu",
+        overwrite_ok: bool = False,
     ):
-        """
-        :param str zarr_dir: directory of HCS zarr store to pull data from.
-                            Note: data in store is assumed to be stored in
-                            (time, channel, z, y, x) format.
-        :param list[int] channel_ids: Channel indices to be masked (typically
-            just one)
-        :param int/list channel_ids: generate mask from the sum of these
-            (flurophore) channel indices
-        :param list/int time_ids: timepoints to consider
-        :param int pos_ids: Position (FOV) indices to use
-        :param int num_workers: number of workers for multiprocessing
-        :param str mask_type: method to use for generating mask. Needed for
-            mapping to the masking function. One of:
-                {'otsu', 'unimodal', 'borders_weight_loss_map'}
-        """
         self.zarr_dir = zarr_dir
         self.num_workers = num_workers
 
@@ -72,8 +78,9 @@ class MaskProcessor:
                 print(f"Mask found in channel {mask_name}. Overwriting with this mask.")
         plate.close()
 
-    def generate_masks(self, structure_elem_radius=5):
-        """
+    def generate_masks(self, structure_elem_radius: int = 5):
+        """Generate foreground masks from fluorophore channels.
+
         The sum of flurophore channels is thresholded to generate a foreground
         mask.
 
@@ -84,10 +91,11 @@ class MaskProcessor:
         Masks are also saved as an additional untracked array named "mask" and
         tracked in the "mask" metadata field.
 
-        :param int structure_elem_radius: Radius of structuring element for
-                                morphological operations
+        Parameters
+        ----------
+        structure_elem_radius : int
+            Radius of structuring element for morphological operations
         """
-
         # Gather function arguments for each index pair at each position
         plate = ngff.open_ome_zarr(store_path=self.zarr_dir, mode="r+")
 

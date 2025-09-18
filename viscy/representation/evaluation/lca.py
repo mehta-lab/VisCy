@@ -1,6 +1,6 @@
 """Linear probing of trained encoder based on cell state labels."""
 
-from typing import Mapping
+from collections.abc import Mapping
 
 import pandas as pd
 import torch
@@ -11,9 +11,8 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
 from sklearn.preprocessing import StandardScaler
 from torch import Tensor
-from xarray import DataArray
-
 from viscy.representation.contrastive import ContrastiveEncoder
+from xarray import DataArray
 
 
 def fit_logistic_regression(
@@ -139,11 +138,37 @@ class AssembledClassifier(torch.nn.Module):
 
     @staticmethod
     def scale_features(x: Tensor) -> Tensor:
+        """Scale features using standardization.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor to scale
+
+        Returns
+        -------
+        Tensor
+            Scaled tensor with zero mean and unit variance
+        """
         m = x.mean(-2, keepdim=True)
         s = x.std(-2, unbiased=False, keepdim=True)
         return (x - m) / s
 
     def forward(self, x: Tensor, scale_features: bool = False) -> Tensor:
+        """Forward pass through the LCA backbone.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor
+        scale_features : bool, optional
+            Whether to apply feature scaling, by default False
+
+        Returns
+        -------
+        Tensor
+            Encoded feature representations
+        """
         x = self.backbone.stem(x)
         x = self.backbone.encoder(x)
         if scale_features:

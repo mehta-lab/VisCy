@@ -1,7 +1,6 @@
 import pytest
 import torch
 from monai.transforms import RandScaleIntensity
-
 from viscy.transforms import BatchedRandScaleIntensity, BatchedRandScaleIntensityd
 
 

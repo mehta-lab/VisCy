@@ -75,7 +75,34 @@ packages = ["viscy"]
 write_to = "viscy/_version.py"
 
 [tool.ruff]
-src = ["viscy", "tests"]
 line-length = 88
-lint.extend-select = ["I001"]
-lint.isort.known-first-party = ["viscy"]
+src = ["viscy", "tests"]
+extend-include = ["*.ipynb"]
+target-version = "py311"
+# Exclude the following for now. Later on we should check every Python file.
+extend-exclude = ["viscy/scripts/*", "applications/*", "examples/*"]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.ruff.lint]
+select = [
+  "D",      # pydocstyle
+  "I",      # isort
+]
+ignore = [
+  "D100", # Missing docstring in public module
+  "D104", # Missing docstring in public package
+  "D105", # __magic__ methods are often self-explanatory, allow missing docstrings
+  "D107", # Missing docstring in __init__
+  # Disable one in each pair of mutually incompatible rules
+  "D203", # We don’t want a blank line before a class docstring
+  "D213", # <> We want docstrings to start immediately after the opening triple quote
+  "D400", # first line should end with a period [Bug: doesn’t work with single-line docstrings]
+  "D401", # First line should be in imperative mood; try rephrasing
+]
+per-file-ignores."tests/*" = ["D"]
+pydocstyle.convention = "numpy"

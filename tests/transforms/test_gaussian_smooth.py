@@ -7,7 +7,6 @@ from kornia.filters import (
     get_gaussian_kernel3d,
 )
 from monai.transforms.intensity.array import GaussianSmooth
-
 from viscy.transforms import BatchedRandGaussianSmooth, BatchedRandGaussianSmoothd
 from viscy.transforms._gaussian_smooth import filter3d_separable
 

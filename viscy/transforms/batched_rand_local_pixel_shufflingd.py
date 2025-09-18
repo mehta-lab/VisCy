@@ -5,7 +5,23 @@ from typing_extensions import Iterable
 
 
 class BatchedRandLocalPixelShufflingd(MapTransform, RandomizableTransform):
-    """Batched random local pixel shuffling for texture augmentation."""
+    """Apply random local pixel shuffling to simulate texture variations.
+
+    Shuffles pixels within small local patches to add texture noise.
+
+    Parameters
+    ----------
+    keys : str or Iterable[str]
+        Keys of the corresponding items to be transformed.
+    patch_size : int, optional
+        Size of local patches for pixel shuffling, by default 3.
+    shuffle_prob : float, optional
+        Probability of shuffling within patches, by default 0.1.
+    prob : float, optional
+        Probability of applying the transform, by default 0.1.
+    allow_missing_keys : bool, optional
+        Whether to ignore missing keys, by default False.
+    """
 
     def __init__(
         self,
@@ -72,6 +88,18 @@ class BatchedRandLocalPixelShufflingd(MapTransform, RandomizableTransform):
         return result
 
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:
+        """Apply pixel shuffling to sample data.
+
+        Parameters
+        ----------
+        sample : dict[str, Tensor]
+            Dictionary containing image tensors to transform.
+
+        Returns
+        -------
+        dict[str, Tensor]
+            Dictionary with pixel-shuffled tensors.
+        """
         self.randomize(None)
         d = dict(sample)
 

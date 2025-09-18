@@ -33,8 +33,15 @@ def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
     """
     Ensure channel argument is a list of strings.
 
-    :param Union[str, Sequence[str]] str_or_seq: channel name or list of channel names
-    :return list[str]: list of channel names
+    Parameters
+    ----------
+    str_or_seq : str | Sequence[str]
+        Channel name or list of channel names
+
+    Returns
+    -------
+    list[str]
+        List of channel names
     """
     if isinstance(str_or_seq, str):
         return [str_or_seq]
@@ -49,7 +56,26 @@ def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
 
 def _search_int_in_str(pattern: str, file_name: str) -> str:
     """Search image indices in a file name with regex patterns and strip leading zeros.
-    E.g. ``'001'`` -> ``1``"""
+
+    E.g. ``'001'`` -> ``1``.
+
+    Parameters
+    ----------
+    pattern : str
+        Regex pattern to search for in filename
+    file_name : str
+        Filename to search within
+
+    Returns
+    -------
+    str
+        Extracted string with leading zeros stripped
+
+    Raises
+    ------
+    ValueError
+        If pattern is not found in filename
+    """
     match = re.search(pattern, file_name)
     if match:
         return match.group()
@@ -60,10 +86,17 @@ def _search_int_in_str(pattern: str, file_name: str) -> str:
 def _collate_samples(batch: Sequence[Sample]) -> Sample:
     """Collate samples into a batch sample.
 
-    :param Sequence[Sample] batch: a sequence of dictionaries,
+    Parameters
+    ----------
+    batch : Sequence[Sample]
+        A sequence of dictionaries,
         where each key may point to a value of a single tensor or a list of tensors,
         as is the case with ``train_patches_per_stack > 1``.
-    :return Sample: Batch sample (dictionary of tensors)
+
+    Returns
+    -------
+    Sample
+        Batch sample (dictionary of tensors)
     """
     collated: Sample = {}
     for key in batch[0].keys():
@@ -78,9 +111,19 @@ def _collate_samples(batch: Sequence[Sample]) -> Sample:
 
 
 def _read_norm_meta(fov: Position) -> NormMeta | None:
-    """
-    Read normalization metadata from the FOV.
+    """Read normalization metadata from the FOV.
+
     Convert to float32 tensors to avoid automatic casting to float64.
+
+    Parameters
+    ----------
+    fov : Position
+        OME-Zarr Position object containing metadata
+
+    Returns
+    -------
+    NormMeta | None
+        Normalization metadata dictionary or None if not available
     """
     norm_meta = fov.zattrs.get("normalization", None)
     if norm_meta is None:
@@ -97,15 +140,21 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
 
 
 class SlidingWindowDataset(Dataset):
-    """Torch dataset where each element is a window of
-    (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
+    """Torch dataset where each element is a window of (C, Z, Y, X).
 
-    :param list[Position] positions: FOVs to include in dataset
-    :param ChannelMap channels: source and target channel names,
+    Where C=2 (source and target) and Z is ``z_window_size``.
+
+    Parameters
+    ----------
+    positions : list[Position]
+        FOVs to include in dataset
+    channels : ChannelMap
+        Source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
-    :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param DictTransform | None transform:
-        a callable that transforms data, defaults to None
+    z_window_size : int
+        Z window size of the 2.5D U-Net, 1 for 2D
+    transform : DictTransform | None, optional
+        A callable that transforms data, by default None
     """
 
     def __init__(
@@ -131,8 +180,10 @@ class SlidingWindowDataset(Dataset):
         self._get_windows()
 
     def _get_windows(self) -> None:
-        """Count the sliding windows along T and Z,
-        and build an index-to-window LUT."""
+        """Count the sliding windows along T and Z.
+
+        And build an index-to-window LUT.
+        """
         w = 0
         self.window_keys = []
         self.window_arrays = []
@@ -163,16 +214,28 @@ class SlidingWindowDataset(Dataset):
 
     def _read_img_window(
         self, img: ImageArray, ch_idx: list[int], tz: int
-    ) -> tuple[list[Tensor], HCSStackIndex]:
+    ) -> tuple[tuple[Tensor, ...], tuple[str, int, int]]:
         """Read image window as tensor.
 
-        :param ImageArray img: NGFF image array
-        :param list[int] ch_idx: list of channel indices to read,
-            output channel ordering will reflect the sequence
-        :param int tz: window index within the FOV, counted Z-first
-        :return list[Tensor], HCSStackIndex:
+        Parameters
+        ----------
+        img : ImageArray
+            NGFF image array
+        ch_idx : list[int]
+            list of channel indices to read, output channel ordering will reflect the sequence
+        tz : int
+            window index within the FOV, counted Z-first
+
+        Returns
+        -------
+        tuple[tuple[Tensor], tuple[str, int, int]]
             list of (C=1, Z, Y, X) image tensors,
             tuple of image name, time index, and Z index
+
+        Raises
+        ------
+        IndexError
+            If the window index is out of bounds
         """
         zs = img.shape[-3] - self.z_window_size + 1
         t = (tz + zs) // zs - 1
@@ -185,6 +248,7 @@ class SlidingWindowDataset(Dataset):
         return torch.from_numpy(data).unbind(dim=1), (img.name, t, z)
 
     def __len__(self) -> int:
+        """Return total number of sliding windows across all FOVs."""
         return self._max_window
 
     # TODO: refactor to a top level function
@@ -203,6 +267,7 @@ class SlidingWindowDataset(Dataset):
         ]
 
     def __getitem__(self, index: int) -> Sample:
+        """Get sliding window sample by index."""
         img, tz, norm_meta = self._find_window(index)
         ch_names = self.channels["source"].copy()
         ch_idx = self.source_ch_idx.copy()
@@ -233,19 +298,27 @@ class SlidingWindowDataset(Dataset):
 
 
 class MaskTestDataset(SlidingWindowDataset):
-    """Torch dataset where each element is a window of
-    (C, Z, Y, X) where C=2 (source and target) and Z is ``z_window_size``.
-    This a testing stage version of :py:class:`viscy.data.hcs.SlidingWindowDataset`,
-    and can only be used with batch size 1 for efficiency (no padding for collation),
-    since the mask is not available for each stack.
+    """Torch dataset with ground truth masks for testing.
 
-    :param list[Position] positions: FOVs to include in dataset
-    :param ChannelMap channels: source and target channel names,
+    Each element is a window of (C, Z, Y, X) where C=2 (source and target)
+    and Z is ``z_window_size``. This is a testing stage version of
+    :py:class:`viscy.data.hcs.SlidingWindowDataset`, and can only be used
+    with batch size 1 for efficiency (no padding for collation), since the
+    mask is not available for each stack.
+
+    Parameters
+    ----------
+    positions : list[Position]
+        FOVs to include in dataset
+    channels : ChannelMap
+        Source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
-    :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
-    :param DictTransform transform:
-        a callable that transforms data, defaults to None
-    :param str | None ground_truth_masks: path to the ground truth masks
+    z_window_size : int
+        Z window size of the 2.5D U-Net, 1 for 2D
+    transform : DictTransform | None, optional
+        A callable that transforms data, by default None
+    ground_truth_masks : str | None, optional
+        Path to the ground truth masks, by default None
     """
 
     def __init__(
@@ -270,6 +343,7 @@ class MaskTestDataset(SlidingWindowDataset):
         _logger.info(str(self.masks))
 
     def __getitem__(self, index: int) -> Sample:
+        """Get sample with ground truth mask if available."""
         sample = super().__getitem__(index)
         img_name, t_idx, z_idx = sample["index"]
         position_name = int(img_name.split("/")[-2])
@@ -367,7 +441,14 @@ class HCSDataModule(LightningDataModule):
         self.pin_memory = pin_memory
 
     @property
-    def cache_path(self):
+    def cache_path(self) -> Path:
+        """Get the temporary cache path for HCS data.
+
+        Returns
+        -------
+        Path
+            Cache directory path in system temp with SLURM job ID if available
+        """
         return Path(
             tempfile.gettempdir(),
             os.getenv("SLURM_JOB_ID", "viscy_cache"),
@@ -375,7 +456,14 @@ class HCSDataModule(LightningDataModule):
         )
 
     @property
-    def maybe_cached_data_path(self):
+    def maybe_cached_data_path(self) -> Path:
+        """Get data path, using cache if caching is enabled.
+
+        Returns
+        -------
+        Path
+            Cache path if caching enabled, otherwise original data path
+        """
         return self.cache_path if self.caching else self.data_path
 
     def _data_log_path(self) -> Path:
@@ -387,7 +475,12 @@ class HCSDataModule(LightningDataModule):
         log_dir.mkdir(parents=True, exist_ok=True)
         return log_dir / "data.log"
 
-    def prepare_data(self):
+    def prepare_data(self) -> None:
+        """Prepare HCS data by caching if enabled.
+
+        Copies OME-Zarr data to temporary cache directory for improved
+        I/O performance during training.
+        """
         if not self.caching:
             return
         # setup logger
@@ -424,6 +517,18 @@ class HCSDataModule(LightningDataModule):
         }
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
+        """Set up datasets for the specified Lightning stage.
+
+        Parameters
+        ----------
+        stage : Literal["fit", "validate", "test", "predict"]
+            Current training stage for Lightning setup
+
+        Raises
+        ------
+        NotImplementedError
+            If stage is not supported
+        """
         dataset_settings = self._base_dataset_settings
         if stage in ("fit", "validate"):
             self._setup_fit(dataset_settings)
@@ -532,7 +637,7 @@ class HCSDataModule(LightningDataModule):
         )
 
     def on_before_batch_transfer(self, batch: Sample, dataloader_idx: int) -> Sample:
-        """Removes redundant Z slices if the target is 2D to save VRAM."""
+        """Remove redundant Z slices if the target is 2D to save VRAM."""
         predicting = False
         if self.trainer:
             if self.trainer.predicting:
@@ -546,7 +651,15 @@ class HCSDataModule(LightningDataModule):
             batch["target"] = batch["target"][:, :, slice(z_index, z_index + 1)]
         return batch
 
-    def train_dataloader(self):
+    def train_dataloader(self) -> DataLoader:
+        """Create training DataLoader for HCS data.
+
+        Returns
+        -------
+        DataLoader
+            Training DataLoader with shuffling, batch collation, and
+            multi-worker support for HCS sliding window sampling
+        """
         return DataLoader(
             self.train_dataset,
             batch_size=self.batch_size // self.train_patches_per_stack,
@@ -559,7 +672,15 @@ class HCSDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
         )
 
-    def val_dataloader(self):
+    def val_dataloader(self) -> DataLoader:
+        """Create validation DataLoader for HCS data.
+
+        Returns
+        -------
+        DataLoader
+            Validation DataLoader without shuffling for deterministic
+            validation evaluation on HCS datasets
+        """
         return DataLoader(
             self.val_dataset,
             batch_size=self.batch_size,
@@ -570,7 +691,15 @@ class HCSDataModule(LightningDataModule):
             pin_memory=self.pin_memory,
         )
 
-    def test_dataloader(self):
+    def test_dataloader(self) -> DataLoader:
+        """Create test DataLoader for HCS data with optional ground truth masks.
+
+        Returns
+        -------
+        DataLoader
+            Test DataLoader with batch size 1 for mask compatibility
+            and optional ground truth mask loading for segmentation metrics
+        """
         return DataLoader(
             self.test_dataset,
             batch_size=1,
@@ -578,7 +707,15 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
         )
 
-    def predict_dataloader(self):
+    def predict_dataloader(self) -> DataLoader:
+        """Create prediction DataLoader for HCS data.
+
+        Returns
+        -------
+        DataLoader
+            Prediction DataLoader for inference on HCS datasets
+            with metadata tracking enabled for transform inversion
+        """
         return DataLoader(
             self.predict_dataset,
             batch_size=self.batch_size,
@@ -587,8 +724,16 @@ class HCSDataModule(LightningDataModule):
         )
 
     def _fit_transform(self) -> tuple[Compose, Compose]:
-        """(normalization -> maybe augmentation -> center crop)
-        Deterministic center crop as the last step of training and validation."""
+        """Create training and validation transform pipelines.
+
+        (normalization -> maybe augmentation -> center crop)
+        Deterministic center crop as the last step of training and validation.
+
+        Returns
+        -------
+        tuple[Compose, Compose]
+            Training and validation transform compositions
+        """
         # TODO: These have a fixed order for now... ()
         final_crop = [self._final_crop()]
         train_transform = Compose(
@@ -609,8 +754,16 @@ class HCSDataModule(LightningDataModule):
         )
 
     def _train_transform(self) -> list[Callable]:
-        """Setup training augmentations: check input values,
-        and parse the number of Z slices and patches to sample per stack."""
+        """Set up training augmentations.
+
+        Check input values and parse the number of Z slices and patches to
+        sample per stack.
+
+        Returns
+        -------
+        list[Callable]
+            List of training augmentation transforms
+        """
         self.train_patches_per_stack = 1
         z_scale_range = None
         if self.augmentations:
