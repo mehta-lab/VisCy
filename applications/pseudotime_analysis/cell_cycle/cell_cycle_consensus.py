@@ -104,7 +104,7 @@ annotations_df = pd.read_csv(cell_cycle_annotations_denv["annotations_path"])
 cytodtw=CytoDtw(embeddings,annotations_df)
 feature_df=cytodtw.annotations_df
 
-min_timepoints = 25
+min_timepoints = 15
 filtered_lineages = cytodtw.get_lineages(min_timepoints)
 filtered_lineages = pd.DataFrame(filtered_lineages, columns=["fov_name", "track_id"])
 logger.info(f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints")
@@ -241,7 +241,7 @@ else:
 #%% 
 # Perform DTW analysis for each embedding method
 alignment_results = {}
-top_n = 20
+top_n = 30
 
 name = "consensus_lineage"
 # Find pattern matches
