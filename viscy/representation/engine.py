@@ -37,8 +37,6 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
-        log_embeddings: bool = True,
-        embedding_log_frequency: int = 20,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -51,8 +49,6 @@ class ContrastiveModule(LightningModule):
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.training_step_outputs = []
         self.validation_step_outputs = []
-        self.log_embeddings = log_embeddings
-        self.embedding_log_frequency = embedding_log_frequency
 
         self.save_hyperparameters()
 
