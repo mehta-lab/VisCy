@@ -53,6 +53,7 @@ def test_datamodule_setup_fit(
             assert fov_name not in exclude_fovs
     assert len(all_tracks) == len_total
     for batch in dm.train_dataloader():
+        dm.on_after_batch_transfer(batch, 0)
         assert batch["anchor"].shape == (
             batch_size,
             len(channel_names),
@@ -94,6 +95,7 @@ def test_datamodule_z_window_size(
     else:
         expected_z_shape = z_window_size
     for batch in dm.train_dataloader():
+        dm.on_after_batch_transfer(batch, 0)
         assert batch["anchor"].shape == (
             batch_size,
             len(channel_names),
