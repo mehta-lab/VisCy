@@ -40,7 +40,9 @@ def create_3d_phantom(shape=(64, 128, 128)):
     cyl_radius = sphere_radius // 2
     cyl_x_offset = x_center + sphere_radius * 2
     cyl_y_offset = y_center
-    cylinder_mask = ((y - cyl_y_offset) ** 2 + (x - cyl_x_offset) ** 2) <= cyl_radius**2
+    cylinder_mask = (
+        (y - cyl_y_offset) ** 2 + (x - cyl_x_offset) ** 2
+    ) <= cyl_radius**2
     phantom[cylinder_mask] = 0.7
 
     # Box
@@ -53,9 +55,9 @@ def create_3d_phantom(shape=(64, 128, 128)):
     box_x_end = box_x_start + box_size
 
     if box_z_start >= 0 and box_z_end < z_size:
-        phantom[box_z_start:box_z_end, box_y_start:box_y_end, box_x_start:box_x_end] = (
-            0.5
-        )
+        phantom[
+            box_z_start:box_z_end, box_y_start:box_y_end, box_x_start:box_x_end
+        ] = 0.5
 
     return phantom
 
@@ -98,7 +100,9 @@ def plot_3d_projections(phantom, title="3D Phantom Projections"):
     axes[1, 0].set_ylabel("Z")
     plt.colorbar(im3, ax=axes[1, 0])
 
-    im4 = axes[1, 1].imshow(phantom[z_center, :, :], cmap="viridis", origin="lower")
+    im4 = axes[1, 1].imshow(
+        phantom[z_center, :, :], cmap="viridis", origin="lower"
+    )
     axes[1, 1].set_title(f"Central XY slice (Z={z_center})")
     axes[1, 1].set_xlabel("X")
     axes[1, 1].set_ylabel("Y")
@@ -145,26 +149,30 @@ if __name__ == "__main__":
     phantom = create_3d_phantom((64, 128, 128))
 
     fig1 = plot_3d_projections(phantom, "Original Phantom")
-    print("shear tuple (sxy, sxz, syx, syz, szx, szy)")
+    shear_names = ["s01", "s02", "s10", "s12", "s20", "s21"]
 
-    shear_xy = [0.5, 0.0, 0.0, 0.0, 0.0, 0.0]
-    phantom_xy = apply_shear_transform(phantom, shear_xy)
-    fig2 = plot_3d_projections(phantom_xy, "Shear XY (sxy=0.5 rad)")
-
-    shear_yx = [0.0, 0.0, 0.5, 0.0, 0.0, 0.0]
-    phantom_yx = apply_shear_transform(phantom, shear_yx)
-    fig3 = plot_3d_projections(phantom_yx, "Shear YX (syx=0.5 rad)")
-
-    shear_yz = [0.0, 0.0, 0.0, 0.5, 0.0, 0.0]
-    phantom_yz = apply_shear_transform(phantom, shear_yz)
-    fig4 = plot_3d_projections(phantom_yz, "Shear YZ (syz=0.5 rad)")
-
-    shear_zx = [0.0, 0.0, 0.0, 0.0, 0.5, 0.0]
-    phantom_zx = apply_shear_transform(phantom, shear_zx)
-    fig5 = plot_3d_projections(phantom_zx, "Shear ZX (szx=0.5 rad)")
+    """
+        [
+            [1.0, params[0], params[1], 0.0],
+            [params[2], 1.0, params[3], 0.0],
+            [params[4], params[5], 1.0, 0.0],
+            [0.0, 0.0, 0.0, 1.0],
+        ]
+    """
+    
+    for axis in range(6):
+        shear = [0.0] * 6
+        shear[axis] = 0.5
+        phantom_sheared = apply_shear_transform(phantom, shear)
+        fig = plot_3d_projections(
+            phantom_sheared, f"Shear applied: {shear_names[axis]}=0.5"
+        )
+        plt.show()
 
     shear_combined = [0.2, 0.2, 0.0, 0.2, 0.0, 0.2]
     phantom_combined = apply_shear_transform(phantom, shear_combined)
     fig6 = plot_3d_projections(phantom_combined, "Combined Shears")
 
     plt.show()
+
+# %%
