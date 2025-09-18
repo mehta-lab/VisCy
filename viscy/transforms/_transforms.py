@@ -8,8 +8,6 @@ from kornia.augmentation import RandomAffine3D
 from monai.transforms import (
     MapTransform,
     MultiSampleTrait,
-    RandGaussianNoise,
-    RandGaussianNoised,
     RandomizableTransform,
     ScaleIntensityRangePercentiles,
     Transform,
@@ -421,58 +419,3 @@ class BatchedRandAffined(MapTransform):
                 d[key] = self.random_affine(data)
             assert d[key].device == data.device
         return d
-
-
-class RandGaussianNoiseTensor(RandGaussianNoise):
-    """Rand Gaussian Noise Tensor."""
-
-    def randomize(self, img: Tensor, mean: float | None = None) -> None:
-        self._do_transform = self.R.rand() < self.prob
-        if not self._do_transform:
-            return None
-        std = self.R.uniform(0, self.std) if self.sample_std else self.std
-        self.noise = torch.normal(
-            self.mean if mean is None else mean,
-            std,
-            size=img.shape,
-            device=img.device,
-            dtype=img.dtype,
-        )
-
-
-class RandGaussianNoiseTensord(RandGaussianNoised):
-    """Rand Gaussian Noise Tensor.
-
-    Parameters
-    ----------
-    keys : str | Iterable[str]
-        Keys to noise.
-    prob : float, optional
-        Probability of noise. By default, 0.1.
-    mean : float, optional
-        Mean. By default, 0.0.
-    std : float, optional
-        Standard deviation. By default, 0.1.
-    dtype : DTypeLike, optional
-        Data type. By default, np.float32.
-    allow_missing_keys : bool, optional
-        Whether to allow missing keys. By default, False.
-    sample_std : bool, optional
-        Whether to sample the standard deviation. By default, True.
-    """
-
-    def __init__(
-        self,
-        keys: str | Iterable[str],
-        prob: float = 0.1,
-        mean: float = 0.0,
-        std: float = 0.1,
-        dtype: DTypeLike = np.float32,
-        allow_missing_keys: bool = False,
-        sample_std: bool = True,
-    ) -> None:
-        MapTransform.__init__(self, keys, allow_missing_keys)
-        RandomizableTransform.__init__(self, prob)
-        self.rand_gaussian_noise = RandGaussianNoiseTensor(
-            mean=mean, std=std, prob=1.0, dtype=dtype, sample_std=sample_std
-        )

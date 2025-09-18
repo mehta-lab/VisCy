@@ -1,55 +1,45 @@
 # script to profile dataloading
 # use with a sampling profiler like py-spy
-from monai.transforms import (
-    Decollated,
-    RandAdjustContrastd,
-    RandGaussianSmoothd,
-    RandScaleIntensityd,
-    ToDeviced,
-)
-from pytorch_metric_learning.losses import NTXentLoss
+
+
+import logging
+
+import torch
+from lightning.pytorch import LightningModule, Trainer
 
 from viscy.data.combined import BatchedConcatDataModule
 from viscy.data.triplet import TripletDataModule
-from viscy.representation.engine import ContrastiveEncoder, ContrastiveModule
 from viscy.transforms import (
+    BatchedCenterSpatialCropd,
+    BatchedRandAdjustContrastd,
+    BatchedRandAffined,
+    BatchedRandGaussianNoised,
+    BatchedRandGaussianSmoothd,
+    BatchedRandScaleIntensityd,
+    BatchedScaleIntensityRangePercentilesd,
     NormalizeSampled,
 )
-from viscy.transforms._transforms import (
-    BatchedRandAffined,
-    BatchedScaleIntensityRangePercentilesd,
-    RandGaussianNoiseTensord,
-)
+
+_logger = logging.getLogger(__name__)
 
 
-def model(
-    input_channel_number: int = 1,
-    z_stack_depth: int = 30,
-    patch_size: int = 192,
-    temperature: float = 0.5,
-):
-    return ContrastiveModule(
-        encoder=ContrastiveEncoder(
-            backbone="convnext_tiny",
-            in_channels=input_channel_number,
-            in_stack_depth=z_stack_depth,
-            stem_kernel_size=(5, 4, 4),
-            embedding_dim=768,
-            projection_dim=32,
-            drop_path_rate=0.0,
-        ),
-        loss_function=NTXentLoss(temperature=temperature),
-        lr=0.00002,
-        log_batches_per_epoch=3,
-        log_samples_per_batch=3,
-        example_input_array_shape=[
-            1,
-            input_channel_number,
-            z_stack_depth,
-            patch_size,
-            patch_size,
-        ],
-    )
+class DummyModel(LightningModule):
+    def __init__(self):
+        super().__init__()
+        self.a = torch.nn.Parameter(torch.zeros(1, requires_grad=True))
+
+    def training_step(self, batch, batch_idx):
+        img = batch["anchor"]
+        _logger.info(img.shape)
+        return (img * self.a).mean()
+
+    def validation_step(self, batch, batch_idx):
+        img = batch["anchor"]
+        _logger.info(img.shape)
+        return (img * self.a).mean()
+
+    def configure_optimizers(self):
+        return torch.optim.Adam(self.parameters())
 
 
 def channel_augmentations(processing_channel: str):
@@ -61,25 +51,25 @@ def channel_augmentations(processing_channel: str):
             rotate_range=[1.0, 0.0, 0.0],
             shear_range=(0.2, 0.2, 0.0, 0.2, 0.0, 0.2),
         ),
-        Decollated(keys=[processing_channel]),
-        RandAdjustContrastd(
+        BatchedCenterSpatialCropd(keys=[processing_channel], roi_size=(32, 192, 192)),
+        BatchedRandAdjustContrastd(
             keys=[processing_channel],
             prob=0.5,
-            gamma=[0.8, 1.2],
+            gamma=(0.8, 1.2),
         ),
-        RandScaleIntensityd(
+        BatchedRandScaleIntensityd(
             keys=[processing_channel],
             prob=0.5,
             factors=0.5,
         ),
-        RandGaussianSmoothd(
+        BatchedRandGaussianSmoothd(
             keys=[processing_channel],
             prob=0.5,
-            sigma_x=[0.25, 0.75],
-            sigma_y=[0.25, 0.75],
-            sigma_z=[0.0, 0.0],
+            sigma_x=(0.25, 0.75),
+            sigma_y=(0.25, 0.75),
+            sigma_z=(0.0, 0.0),
         ),
-        RandGaussianNoiseTensord(
+        BatchedRandGaussianNoised(
             keys=[processing_channel],
             prob=0.5,
             mean=0.0,
@@ -103,7 +93,6 @@ def channel_normalization(
         ]
     elif fl_channel:
         return [
-            ToDeviced(keys=[fl_channel], device="cuda"),
             BatchedScaleIntensityRangePercentilesd(
                 keys=[fl_channel],
                 lower=50,
@@ -117,15 +106,19 @@ def channel_normalization(
 
 
 if __name__ == "__main__":
+    num_workers = 1
+    batch_size = 128
+    persistent_workers = True
+    cache_pool_bytes = 32 << 30
     dm1 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
-        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
+        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
         source_channel=["raw GFP EX488 EM525-45"],
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
-        batch_size=16,
-        num_workers=4,
+        batch_size=batch_size,
+        num_workers=num_workers,
         time_interval=1,
         augmentations=channel_augmentations("raw GFP EX488 EM525-45"),
         normalizations=channel_normalization(
@@ -133,37 +126,27 @@ if __name__ == "__main__":
         ),
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
         return_negative=False,
+        persistent_workers=persistent_workers,
+        cache_pool_bytes=cache_pool_bytes,
     )
     dm2 = TripletDataModule(
         data_path="/hpc/projects/organelle_phenotyping/datasets/organelle/SEC61B/2024_10_16_A549_SEC61_ZIKV_DENV/2024_10_16_A549_SEC61_ZIKV_DENV_2.zarr",
-        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
-        source_channel=["raw mCherry EX561 EM600-37"],
+        tracks_path="/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_10_16_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/3-track/2024_10_16_A549_SEC61_ZIKV_DENV_cropped.zarr",
+        source_channel=["Phase3D"],
         z_range=[5, 35],
         initial_yx_patch_size=(384, 384),
         final_yx_patch_size=(192, 192),
-        batch_size=16,
-        num_workers=4,
+        batch_size=batch_size,
+        num_workers=num_workers,
         time_interval=1,
-        augmentations=channel_augmentations("raw mCherry EX561 EM600-37"),
-        normalizations=channel_normalization(
-            phase_channel=None, fl_channel="raw mCherry EX561 EM600-37"
-        ),
+        augmentations=channel_augmentations("Phase3D"),
+        normalizations=channel_normalization(phase_channel="Phase3D", fl_channel=None),
         fit_include_wells=["B/3", "B/4", "C/3", "C/4"],
         return_negative=False,
+        persistent_workers=persistent_workers,
+        cache_pool_bytes=cache_pool_bytes,
     )
     dm = BatchedConcatDataModule(data_modules=[dm1, dm2])
-    dm.setup("fit")
-
-    print(len(dm1.train_dataset), len(dm2.train_dataset), len(dm.train_dataset))
-    n = 1
-
-    print("Training batches:")
-    for i, batch in enumerate(dm.train_dataloader()):
-        print(i, batch["anchor"].shape, batch["positive"].device)
-        if i == n - 1:
-            break
-    print("Validation batches:")
-    for i, batch in enumerate(dm.val_dataloader()):
-        print(i, batch["anchor"].shape, batch["positive"].device)
-        if i == n - 1:
-            break
+    model = DummyModel()
+    trainer = Trainer(max_epochs=4, limit_train_batches=8, limit_val_batches=8)
+    trainer.fit(model, dm)

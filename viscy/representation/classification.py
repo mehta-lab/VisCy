@@ -74,6 +74,8 @@ class ClassificationModule(LightningModule):
         Learning rate.
     loss : nn.Module | None
         Loss function. By default, BCEWithLogitsLoss with positive weight of 1.0.
+    example_input_array_shape : tuple[int, ...]
+        Shape of the example input array.
     """
 
     def __init__(
@@ -81,6 +83,7 @@ class ClassificationModule(LightningModule):
         encoder: ContrastiveEncoder,
         lr: float | None,
         loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
+        example_input_array_shape: tuple[int, ...] = (2, 1, 15, 160, 160),
     ) -> None:
         super().__init__()
         self.stem = encoder.stem
@@ -88,7 +91,7 @@ class ClassificationModule(LightningModule):
         self.backbone.head.fc = nn.Linear(768, 1)
         self.loss = loss
         self.lr = lr
-        self.example_input_array = torch.rand(2, 1, 15, 160, 160)
+        self.example_input_array = torch.rand(example_input_array_shape)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through stem and backbone for classification.
