@@ -10,6 +10,11 @@ This script demonstrates:
 
 from pathlib import Path
 
+import pandas as pd
+import seaborn as sns
+
+# Optional for plotting directly with AnnData objects w/o manual accessing patterns
+# import scanpy as sc 
 import xarray as xr
 
 from viscy.representation.evaluation import (
@@ -52,8 +57,6 @@ print(adata_annotated.obs)
 # %%
 # Simple Accessing and Plotting (matplotlib)
 # Plot the first two PCs colored by fov_name
-import seaborn as sns
-import pandas as pd
 
 sns.scatterplot(
     data=pd.DataFrame(adata.obsm["X_pca"], index=adata.obs_names).join(adata.obs),
@@ -66,6 +69,5 @@ sns.scatterplot(
 # %% 
 # Simple Plotting (scanpy)
 # Plot the first two PCs colored by fov_name
-import scanpy as sc
 
 sc.pl.pca(adata, color="fov_name")
