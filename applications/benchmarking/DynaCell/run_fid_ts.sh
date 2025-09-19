@@ -5,8 +5,7 @@ python fid_ts.py embed \
     -sc Nuclei-prediction \
     -tc Organelle \
     -c /hpc/projects/virtual_staining/models/huang-lab/fid/nucleus_vae_ts.pt \
-    -so nuclei_prediction_embeddings.zarr \
-    -to organelle_embeddings.zarr \
+    -o . \
     -b 4 \
     -d cuda
 
@@ -17,16 +16,15 @@ python fid_ts.py embed \
     -sc Membrane-prediction \
     -tc Membrane \
     -c /hpc/projects/virtual_staining/models/huang-lab/fid/membrane_vae_ts.pt \
-    -so membrane_prediction_embeddings.zarr \
-    -to membrane_embeddings.zarr \
+    -o . \
     -b 4 \
     -d cuda
 
 # Compute FID from separate embedding files
 python fid_ts.py compute-fid \
-    -sp nuclei_prediction_embeddings.zarr \
-    -tp organelle_embeddings.zarr
+    -s _Nuclei-prediction.zarr \
+    -t _Organelle.zarr
 
 python fid_ts.py compute-fid \
-    -sp membrane_prediction_embeddings.zarr \
-    -tp membrane_embeddings.zarr
+    -s _Membrane-prediction.zarr \
+    -t _Membrane.zarr

@@ -9,10 +9,6 @@ from iohub.ngff import Position, open_ome_zarr
 from torch import Tensor
 from tqdm import tqdm
 
-# ----------------------------------------------------------------------------- #
-#                              Helper functions                                 #
-# ----------------------------------------------------------------------------- #
-
 def normalise(volume: torch.Tensor) -> torch.Tensor:
     """Normalize volume to [-1, 1] range using min-max normalization.
     
@@ -140,69 +136,9 @@ def fid_from_features(f1, f2, eps=1e-6):
 
     return frechet_distance(mu1, sigma1, mu2, sigma2).clamp_min_(0).item()
 
-@torch.inference_mode()
-def encode_position(
-    position: Position,
-    vae: torch.nn.Module,
-    channel_name: str,
-    device: str = "cuda",
-    batch_size: int = 4,
-    input_spatial_size: tuple = (32, 512, 512), 
-):
-    """Encode position data using a variational autoencoder.
-    
-    - Extract all time-frames with shape (T, D, H, W)
-    - Normalize to [-1, 1] range
-    - Process through VAE in batches of ≤ batch_size frames
-    - Collect all latent vectors from all time points
-    
-    Parameters
-    ----------
-    position : Position
-        Single position object from zarr plate
-    vae : torch.nn.Module
-        Pre-trained VAE model for encoding
-    channel_name : str
-        Name of the channel to extract from the position
-    device : str, default="cuda"
-        Device to run computations on
-    batch_size : int, default=4
-        Number of frames to process simultaneously
-    input_spatial_size : tuple, default=(32, 512, 512)
-        Target spatial dimensions for VAE input (D, H, W)
-        
-    Returns
-    -------
-    torch.Tensor
-        Embeddings from all timepoints with shape (N_timepoints, latent_dim)
-    """
-    emb = []
-
-    # ---------------- load & normalise ---------------- #
-    v = torch.as_tensor(
-        position.data[:, position.get_channel_index(channel_name)],
-        dtype=torch.float32, device=device,
-    )                                                  # (T, D, H, W)
-
-    v = normalise(v)                                 # still (T, D, H, W)
-
-    # ---------------- chunked VAE inference ----------- #
-    for t0 in tqdm(range(0, v.shape[0], batch_size), desc="Encoding timepoints"):
-        slice = v[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
-
-        # resize to input spatial size
-        slice = torch.nn.functional.interpolate(
-            slice, size=input_spatial_size, mode="trilinear", align_corners=False,
-        )  # (b, 1, D, H, W)
-
-        feat = vae.encode(slice)[0]  # mean, 
-        feat = feat.flatten(start_dim=1)  # (b, latent_dim)
-        emb.append(feat)
-
-    return torch.cat(emb, 0)
 
 @torch.inference_mode()
-def encode_position_with_metadata(
+def embed_position(
     position: Position,
     vae: torch.nn.Module,
     channel_name: str,
@@ -220,8 +156,6 @@ def encode_position_with_metadata(
         Pre-trained VAE model for encoding
     channel_name : str
         Name of the channel to extract from the position
-    position_name : str
-        Name/identifier for this position (e.g., 'A/1/0')
     device : str, default="cuda"
         Device to run computations on
     batch_size : int, default=4
@@ -238,7 +172,6 @@ def encode_position_with_metadata(
     embeddings_list = []
     timepoints_list = []
 
-    # ---------------- load & normalise ---------------- #
     v = torch.as_tensor(
         position.data[:, position.get_channel_index(channel_name)],
         dtype=torch.float32, device=device,
@@ -246,28 +179,22 @@ def encode_position_with_metadata(
 
     v = normalise(v)                                 # still (T, D, H, W)
 
-    # ---------------- chunked VAE inference ----------- #
     timepoint = 0
     for t0 in tqdm(range(0, v.shape[0], batch_size), desc=f"Encoding {position_name}/{channel_name}"):
-        slice = v[t0 : t0 + batch_size].unsqueeze(1)  # (b, 1, D, H, W)
+        batch_slice = v[t0 : t0 + batch_size].unsqueeze(1)
+        batch_slice = torch.nn.functional.interpolate(
+            batch_slice, size=input_spatial_size, mode="trilinear", align_corners=False,
+        )
 
-        # resize to input spatial size
-        slice = torch.nn.functional.interpolate(
-            slice, size=input_spatial_size, mode="trilinear", align_corners=False,
-        )  # (b, 1, D, H, W)
-
-        feat = vae.encode(slice)[0]  # mean, 
+        feat = vae.encode(batch_slice)[0]  # mean, 
         feat = feat.flatten(start_dim=1)  # (b, latent_dim)
         
-        # Convert to numpy and collect embeddings
         feat_np = feat.cpu().numpy()
         for i, embedding in enumerate(feat_np):
             embeddings_list.append(embedding)
             timepoints_list.append(timepoint + i)
-        
         timepoint += feat.shape[0]
 
-    # Create xarray Dataset
     embeddings_array = np.stack(embeddings_list)
     n_samples, n_features = embeddings_array.shape
     
@@ -276,18 +203,13 @@ def encode_position_with_metadata(
     }, coords={
         'sample': range(n_samples),
         'feature': range(n_features),
-        'timepoint': ('sample', timepoints_list)
+        't': ('sample', timepoints_list)
     })
     
-    # Add metadata as attributes
     ds.attrs['position_name'] = position_name
     ds.attrs['channel_name'] = channel_name
     
     return ds
-
-# ----------------------------------------------------------------------------- #
-#                                   Main                                        #
-# ----------------------------------------------------------------------------- #
 
 @click.command()
 @click.option("--source_position", "-s", type=click.Path(exists=True, path_type=Path), required=True, help="Full path to source position (e.g., '/path/to/plate.zarr/A/1/0')")
@@ -301,10 +223,9 @@ def encode_position_with_metadata(
               help="Path to the VAE model checkpoint for loading.")
 @click.option("--batch_size", "-b", type=int, default=4)
 @click.option("--device", "-d", type=str, default="cuda")
-@click.option("--source_output", "-so", type=click.Path(path_type=Path), help="Path to save source embeddings")
-@click.option("--target_output", "-to", type=click.Path(path_type=Path), help="Path to save target embeddings")
+@click.option("--output_dir", "-o", type=click.Path(path_type=Path), help="Path to save source embeddings")
 def embed_dataset(source_position, target_position, source_channel, target_channel, z, y, x,
-         ckpt_path, batch_size, device, source_output, target_output) -> None:
+         ckpt_path, batch_size, device, output_dir) -> None:
     """Encode positions using a pre-trained VAE and optionally compute FID or save embeddings.
     
     This function loads two zarr positions, encodes them using a variational autoencoder,
@@ -332,39 +253,8 @@ def embed_dataset(source_position, target_position, source_channel, target_chann
         Number of timepoints to process simultaneously through the VAE
     device : str
         Device to run computations on ("cuda" or "cpu")
-        
-    Examples
-    --------
-    Compute FID score between two positions:
-    
-    $ python fid_ts.py \\
-        --source_position /path/to/dataset1.zarr/A/1/0 \\
-        --target_position /path/to/dataset2.zarr/A/1/0 \\
-        --source_channel phase \\
-        --target_channel phase \\
-        --ckpt_path /path/to/vae_model.pt \\
-        --compute_fid
-        
-    Save embeddings to parquet file:
-    
-    $ python fid_ts.py \\
-        --source_position /path/to/dataset1.zarr/A/1/0 \\
-        --target_position /path/to/dataset2.zarr/B/2/0 \\
-        --source_channel phase \\
-        --target_channel brightfield \\
-        --ckpt_path /path/to/vae_model.pt \\
-        --output_path embeddings.parquet
-        
-    Save embeddings and compute FID:
-    
-    $ python fid_ts.py \\
-        --source_position /path/to/dataset1.zarr/A/1/0 \\
-        --target_position /path/to/dataset2.zarr/B/2/0 \\
-        --source_channel phase \\
-        --target_channel brightfield \\
-        --ckpt_path /path/to/vae_model.pt \\
-        --output_path embeddings.parquet \\
-        --compute_fid
+    output_dir : Path
+        Path to save embeddings
     """
 
     # ----------------- VAE ----------------- #
@@ -375,7 +265,6 @@ def embed_dataset(source_position, target_position, source_channel, target_chann
     vae = torch.jit.load(ckpt_path).to(device)
     vae.eval()
 
-    # ----------------- Load positions ------------ #
     source_position = open_ome_zarr(source_position)
     source_channel_names = source_position.channel_names
     assert source_channel in source_channel_names, f"Channel {source_channel} not found in source position"
@@ -384,38 +273,36 @@ def embed_dataset(source_position, target_position, source_channel, target_chann
     target_channel_names = target_position.channel_names
     assert target_channel in target_channel_names, f"Channel {target_channel} not found in target position"
 
-    # ----------------- Embeddings ----------- #
     input_spatial_size = (z, y, x)
 
+    if output_dir:
+        output_dir = Path(output_dir)
+        source_name = source_position.zgroup.name.split('/')[-1] if source_position.zgroup.name else "source"
+        target_name = target_position.zgroup.name.split('/')[-1] if target_position.zgroup.name else "target"
+        source_output = output_dir / f"{source_name}_{source_channel}.zarr"
+        target_output = output_dir / f"{target_name}_{target_channel}.zarr"
 
-    if source_output or target_output:
-        # Generate source embeddings
-        if source_output:
-            source_ds = encode_position_with_metadata(
-                position=source_position, vae=vae,
-                channel_name=source_channel,
-                device=device, batch_size=batch_size,
-                input_spatial_size=input_spatial_size,
-            )
-            source_output.parent.mkdir(parents=True, exist_ok=True)
-            source_ds.to_zarr(source_output, mode='w')
-            print(f"Source embeddings saved to: {source_output}")
+        source_ds = embed_position(
+            position=source_position, vae=vae,
+            channel_name=source_channel,
+            device=device, batch_size=batch_size,
+            input_spatial_size=input_spatial_size,
+        )
+        source_ds.to_zarr(source_output, mode='w')
+        print(f"Source embeddings saved to: {source_output}")
         
-        # Generate target embeddings
-        if target_output:
-            target_ds = encode_position_with_metadata(
-                position=target_position, vae=vae,
-                channel_name=target_channel,
-                device=device, batch_size=batch_size,
-                input_spatial_size=input_spatial_size,
-            )
-            target_output.parent.mkdir(parents=True, exist_ok=True)
-            target_ds.to_zarr(target_output, mode='w')
-            print(f"Target embeddings saved to: {target_output}")
+        target_ds = embed_position(
+            position=target_position, vae=vae,
+            channel_name=target_channel,
+            device=device, batch_size=batch_size,
+            input_spatial_size=input_spatial_size,
+        )
+        target_ds.to_zarr(target_output, mode='w')
+        print(f"Target embeddings saved to: {target_output}")
 
 @click.command()
-@click.option("--source_path", "-sp", type=click.Path(exists=True, path_type=Path), required=True, help="Path to the source embeddings zarr file")
-@click.option("--target_path", "-tp", type=click.Path(exists=True, path_type=Path), required=True, help="Path to the target embeddings zarr file")
+@click.option("--source_path", "-s", type=click.Path(exists=True, path_type=Path), required=True, help="Path to the source embeddings zarr file")
+@click.option("--target_path", "-t", type=click.Path(exists=True, path_type=Path), required=True, help="Path to the target embeddings zarr file")
 def compute_fid_cli(source_path: Path, target_path: Path) -> None:
     """Compute FID score between two embedding datasets.
     
@@ -429,8 +316,8 @@ def compute_fid_cli(source_path: Path, target_path: Path) -> None:
     Examples
     --------
     $ python fid_ts.py compute-fid \\
-        -sp source_embeddings.zarr \\
-        -tp target_embeddings.zarr
+        -s source_embeddings.zarr \\
+        -t target_embeddings.zarr
     """
     # Load the datasets
     source_ds = xr.open_zarr(source_path)
