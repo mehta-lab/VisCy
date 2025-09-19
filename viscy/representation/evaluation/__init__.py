@@ -61,7 +61,7 @@ def load_annotation(da, path, name, categories: dict | None = None):
     return selected
 
 
-def load_annotation_adata(
+def load_annotation_anndata(
     adata: ad.AnnData, path: str, name: str, categories: dict | None = None
 ):
     """
