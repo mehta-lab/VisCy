@@ -67,7 +67,7 @@ sns.scatterplot(
 
 
 # %% 
-# Simple Plotting (scanpy)
+# Simple Plotting with scanpy if you have it installed.
 # Plot the first two PCs colored by fov_name
 
-sc.pl.pca(adata, color="fov_name")
+# sc.pl.pca(adata, color="fov_name")
