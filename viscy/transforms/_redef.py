@@ -43,6 +43,15 @@ class ToDeviced(ToDeviced):
         super().__init__(keys=keys, **kwargs)
 
 
+class NormalizeIntensityd(NormalizeIntensityd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, **kwargs)
+
+
 class RandWeightedCropd(RandWeightedCropd):
     def __init__(
         self,
