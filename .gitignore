@@ -47,4 +47,3 @@ slurm*.out
 
 #lightning_logs directory
 lightning_logs/
-data/
