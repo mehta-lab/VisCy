@@ -16,7 +16,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 dependencies = [
-    "iohub[tensorstore]>=0.2.2rc0",
+    "iohub[tensorstore]>=0.3.0a2",
     "kornia",
     "torch>=2.4.1",
     "timm>=0.9.5",
