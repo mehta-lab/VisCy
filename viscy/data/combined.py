@@ -244,8 +244,6 @@ class BatchedConcatDataModule(ConcatDataModule):
                     processed_micro_batch = dm.on_after_batch_transfer(
                         micro_batch, dataloader_idx
                     )
-                else:
-                    processed_micro_batch = micro_batch
             else:
                 # Handle case where micro_batch doesn't have _dataset_idx (e.g., from model summary)
                 processed_micro_batch = micro_batch
