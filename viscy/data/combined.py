@@ -231,15 +231,23 @@ class BatchedConcatDataModule(ConcatDataModule):
 
     def on_after_batch_transfer(self, batch, dataloader_idx: int):
         """Apply GPU transforms from constituent data modules to micro-batches."""
+        # FIXME: To create the Lightning Model Summary, we need a Tensor or dict not a list
+        if not isinstance(batch, list):
+            return batch
+
         processed_micro_batches = []
         for micro_batch in batch:
-            dataset_idx = micro_batch.pop("_dataset_idx")
-            dm = self.data_modules[dataset_idx]
-            if hasattr(dm, "on_after_batch_transfer"):
-                processed_micro_batch = dm.on_after_batch_transfer(
-                    micro_batch, dataloader_idx
-                )
+            if isinstance(micro_batch, dict) and "_dataset_idx" in micro_batch:
+                dataset_idx = micro_batch.pop("_dataset_idx")
+                dm = self.data_modules[dataset_idx]
+                if hasattr(dm, "on_after_batch_transfer"):
+                    processed_micro_batch = dm.on_after_batch_transfer(
+                        micro_batch, dataloader_idx
+                    )
+                else:
+                    processed_micro_batch = micro_batch
             else:
+                # Handle case where micro_batch doesn't have _dataset_idx (e.g., from model summary)
                 processed_micro_batch = micro_batch
             processed_micro_batches.append(processed_micro_batch)
         combined_batch = {}
