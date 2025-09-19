@@ -75,12 +75,8 @@ def fit_logistic_regression(
         features_filtered = features
         annotations_filtered = annotations
 
-    # Determine train/test split
-    if train_fovs is not None:
-        fov_selection = features_filtered["fov_name"].isin(train_fovs)
-        train_selection = fov_selection
-        test_selection = ~fov_selection
-    else:
+    # Determine train FOVs
+    if train_fovs is None:
         unique_fovs = features_filtered["fov_name"].unique()
 
         fov_class_dist = []
@@ -99,9 +95,9 @@ def fit_logistic_regression(
             random_state=random_state,
         )
 
-        # Create selection based on FOV assignment
-        train_selection = features_filtered["fov_name"].isin(train_fovs)
-        test_selection = ~train_selection
+    # Create train/test selections
+    train_selection = features_filtered["fov_name"].isin(train_fovs)
+    test_selection = ~train_selection
     train_features = features_filtered.values[train_selection]
     test_features = features_filtered.values[test_selection]
     train_annotations = annotations_filtered[train_selection]
