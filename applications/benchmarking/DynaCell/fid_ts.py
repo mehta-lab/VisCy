@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
 import argparse
 from pathlib import Path
 
 import torch
-from tqdm import tqdm
 from iohub.ngff import open_ome_zarr
 from torch import Tensor
+from tqdm import tqdm
 
 # ----------------------------------------------------------------------------- #
 #                              Helper functions                                 #
