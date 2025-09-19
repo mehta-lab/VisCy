@@ -1,6 +1,6 @@
-import argparse
 from pathlib import Path
 
+import click
 import torch
 from iohub.ngff import open_ome_zarr
 from torch import Tensor
@@ -15,7 +15,18 @@ def read_zarr(zarr_path: str):
     return [pos for _, pos in plate.positions()]
 
 def normalise(volume: torch.Tensor) -> torch.Tensor:
-    """Per-sample min max → [-1,1]. Shape: (D, H, W) or (B, D, H, W)."""
+    """Normalize volume to [-1, 1] range using min-max normalization.
+    
+    Parameters
+    ----------
+    volume : torch.Tensor
+        Input volume with shape (D, H, W) or (B, D, H, W)
+        
+    Returns
+    -------
+    torch.Tensor
+        Normalized volume in [-1, 1] range with same shape as input
+    """
     v_min = volume.amin(dim=(-3, -2, -1), keepdim=True)
     v_max = volume.amax(dim=(-3, -2, -1), keepdim=True)
     volume = (volume - v_min) / (v_max - v_min + 1e-6)        # → [0,1]
@@ -23,21 +34,28 @@ def normalise(volume: torch.Tensor) -> torch.Tensor:
 
 @torch.jit.script_if_tracing
 def sqrtm(sigma: Tensor) -> Tensor:
-    r"""Returns the square root of a positive semi-definite matrix.
+    r"""Compute the square root of a positive semi-definite matrix.
 
-    .. math:: \sqrt{\Sigma} = Q \sqrt{\Lambda} Q^T
-
+    Uses eigendecomposition: :math:`\sqrt{\Sigma} = Q \sqrt{\Lambda} Q^T`
     where :math:`Q \Lambda Q^T` is the eigendecomposition of :math:`\Sigma`.
 
-    Args:
-        sigma: A positive semi-definite matrix, :math:`(*, D, D)`.
-
-    Example:
-        >>> V = torch.randn(4, 4, dtype=torch.double)
-        >>> A = V @ V.T
-        >>> B = sqrtm(A @ A)
-        >>> torch.allclose(A, B)
-        True
+    Parameters
+    ----------
+    sigma : Tensor
+        A positive semi-definite matrix with shape (*, D, D)
+        
+    Returns
+    -------
+    Tensor
+        Square root of the input matrix with same shape
+        
+    Examples
+    --------
+    >>> V = torch.randn(4, 4, dtype=torch.double)
+    >>> A = V @ V.T
+    >>> B = sqrtm(A @ A)
+    >>> torch.allclose(A, B)
+    True
     """
 
     L, Q = torch.linalg.eigh(sigma)
@@ -52,27 +70,40 @@ def frechet_distance(
     mu_y: Tensor,
     sigma_y: Tensor,
 ) -> Tensor:
-    r"""Returns the Fréchet distance between two multivariate Gaussian distributions.
+    r"""Compute the Fréchet distance between two multivariate Gaussian distributions.
 
+    The Fréchet distance is given by:
     .. math:: d^2 = \left\| \mu_x - \mu_y \right\|_2^2 +
         \operatorname{tr} \left( \Sigma_x + \Sigma_y - 2 \sqrt{\Sigma_y^{\frac{1}{2}} \Sigma_x \Sigma_y^{\frac{1}{2}}} \right)
 
-    Wikipedia:
-        https://wikipedia.org/wiki/Frechet_distance
-
-    Args:
-        mu_x: The mean :math:`\mu_x` of the first distribution, :math:`(*, D)`.
-        sigma_x: The covariance :math:`\Sigma_x` of the first distribution, :math:`(*, D, D)`.
-        mu_y: The mean :math:`\mu_y` of the second distribution, :math:`(*, D)`.
-        sigma_y: The covariance :math:`\Sigma_y` of the second distribution, :math:`(*, D, D)`.
-
-    Example:
-        >>> mu_x = torch.arange(3).float()
-        >>> sigma_x = torch.eye(3)
-        >>> mu_y = 2 * mu_x + 1
-        >>> sigma_y = 2 * sigma_x + 1
-        >>> frechet_distance(mu_x, sigma_x, mu_y, sigma_y)
-        tensor(15.8710)
+    Parameters
+    ----------
+    mu_x : Tensor
+        Mean of the first distribution with shape (*, D)
+    sigma_x : Tensor
+        Covariance of the first distribution with shape (*, D, D)
+    mu_y : Tensor
+        Mean of the second distribution with shape (*, D)
+    sigma_y : Tensor
+        Covariance of the second distribution with shape (*, D, D)
+        
+    Returns
+    -------
+    Tensor
+        Fréchet distance between the two distributions
+        
+    References
+    ----------
+    .. [1] https://wikipedia.org/wiki/Frechet_distance
+        
+    Examples
+    --------
+    >>> mu_x = torch.arange(3).float()
+    >>> sigma_x = torch.eye(3)
+    >>> mu_y = 2 * mu_x + 1
+    >>> sigma_y = 2 * sigma_x + 1
+    >>> frechet_distance(mu_x, sigma_x, mu_y, sigma_y)
+    tensor(15.8710)
     """
 
     sigma_y_12 = sqrtm(sigma_y)
@@ -85,6 +116,22 @@ def frechet_distance(
 
 @torch.no_grad()
 def fid_from_features(f1, f2, eps=1e-6):
+    """Compute Fréchet Inception Distance (FID) from feature embeddings.
+    
+    Parameters
+    ----------
+    f1 : torch.Tensor
+        Features from first dataset with shape (N1, D)
+    f2 : torch.Tensor
+        Features from second dataset with shape (N2, D)
+    eps : float, default=1e-6
+        Small value added to diagonal for numerical stability
+        
+    Returns
+    -------
+    float
+        FID score between the two feature sets
+    """
     mu1, sigma1 = f1.mean(0), torch.cov(f1.T)
     mu2, sigma2 = f2.mean(0), torch.cov(f2.T)
 
@@ -94,7 +141,7 @@ def fid_from_features(f1, f2, eps=1e-6):
 
     return frechet_distance(mu1, sigma1, mu2, sigma2).clamp_min_(0).item()
 
-@torch.no_grad()
+@torch.inference_mode()
 def encode_fovs(
     fovs,
     vae,
@@ -103,14 +150,33 @@ def encode_fovs(
     batch_size: int = 4,
     input_spatial_size: tuple = (32, 512, 512), 
 ):
-    """
-    For each FOV pair:
-        • take all T time-frames  (shape: T, D, H, W)
-        • normalise to [-1, 1]
-        • feed through VAE in chunks of ≤ batch_size frames
-        • average the resulting T latent vectors  →  one embedding / FOV
+    """Encode field-of-view (FOV) data using a variational autoencoder.
+    
+    For each FOV:
+    - Extract all time-frames with shape (T, D, H, W)
+    - Normalize to [-1, 1] range
+    - Process through VAE in batches of ≤ batch_size frames
+    - Collect all latent vectors from all time points
+    
+    Parameters
+    ----------
+    fovs : list
+        List of FOV position objects
+    vae : torch.nn.Module
+        Pre-trained VAE model for encoding
+    channel_name : str
+        Name of the channel to extract from each FOV
+    device : str, default="cuda"
+        Device to run computations on
+    batch_size : int, default=4
+        Number of frames to process simultaneously
+    input_spatial_size : tuple, default=(32, 512, 512)
+        Target spatial dimensions for VAE input (D, H, W)
+        
     Returns
-        emb: (N, latent_dim) tensors
+    -------
+    torch.Tensor
+        Concatenated embeddings from all FOVs and timepoints with shape (N_total_timepoints, latent_dim)
     """
     emb = []
 
@@ -142,53 +208,54 @@ def encode_fovs(
 #                                   Main                                        #
 # ----------------------------------------------------------------------------- #
 
-def build_argparser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(add_help=False)
-    p.add_argument("--data_path1", type=Path, required=True)
-    p.add_argument("--data_path2", type=Path, required=True)
-    p.add_argument("--channel_name", type=str, default=None)
-    p.add_argument("--channel_name1", type=str, default=None)
-    p.add_argument("--channel_name2", type=str, default=None)
-    p.add_argument("--input_spatial_size", type=str, default="32,512,512",
-                   help="Input spatial size for the VAE, e.g. '32,512,512'.")
-    p.add_argument("--loadcheck_path", type=Path, default=None,
-                   help="Path to the VAE model checkpoint for loading.")
-    p.add_argument("--batch_size", type=int, default=4)
-    p.add_argument("--device", type=str, default="cuda")
-    p.add_argument("--max_fov", type=int, default=None,
-                   help="Limit number of FOV pairs (for quick tests).")
-    return p
-
-def main(args) -> None:
-    device = args.device
+@click.command()
+@click.option("--source_path", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option("--target_path", type=click.Path(exists=True, path_type=Path), required=True)
+@click.option("--channel_names", type=str, multiple=True, required=True,
+              help="Channel names for source and target (1 or 2 values). If 1 value, same channel used for both.")
+@click.option("--input_spatial_size", type=str, default="32,512,512",
+              help="Input spatial size for the VAE, e.g. '32,512,512'.")
+@click.option("--loadcheck_path", type=click.Path(exists=True, path_type=Path), default=None,
+              help="Path to the VAE model checkpoint for loading.")
+@click.option("--batch_size", type=int, default=4)
+@click.option("--device", type=str, default="cuda")
+@click.option("--max_fov", type=int, default=None,
+              help="Limit number of FOV pairs (for quick tests).")
+def main(source_path, target_path, channel_names, 
+         input_spatial_size, loadcheck_path, batch_size, device, max_fov) -> None:
 
     # ----------------- VAE ----------------- #
-    vae = torch.jit.load(args.loadcheck_path).to(device)
+    vae = torch.jit.load(loadcheck_path).to(device)
     vae.eval()
 
     # ----------------- FOV list  ------------ #
-    fovs1, fovs2 = read_zarr(args.data_path1), read_zarr(args.data_path2)
-    if args.max_fov:
-        fovs1 = fovs1[:args.max_fov]
-        fovs2 = fovs2[:args.max_fov]
+    fovs1, fovs2 = read_zarr(source_path), read_zarr(target_path)
+    if max_fov:
+        fovs1 = fovs1[:max_fov]
+        fovs2 = fovs2[:max_fov]
 
     # ----------------- Embeddings ----------- #
-    input_spatial_size = [int(dim) for dim in args.input_spatial_size.split(",")]
+    input_spatial_size = [int(dim) for dim in input_spatial_size.split(",")]
 
-    if args.channel_name is not None:
-        args.channel_name1 = args.channel_name2 = args.channel_name
+    # Handle channel names: use same for both if only one provided
+    if len(channel_names) == 1:
+        channel_name1 = channel_name2 = channel_names[0]
+    elif len(channel_names) == 2:
+        channel_name1, channel_name2 = channel_names
+    else:
+        raise ValueError("Must provide 1 or 2 channel names")
     
     emb1 = encode_fovs(
         fovs1, vae,
-        args.channel_name1, 
-        device, args.batch_size,
+        channel_name1, 
+        device, batch_size,
         input_spatial_size,
     )
 
     emb2 = encode_fovs(
         fovs2, vae,
-        args.channel_name2, 
-        device, args.batch_size,
+        channel_name2, 
+        device, batch_size,
         input_spatial_size,
     )
 
@@ -197,6 +264,4 @@ def main(args) -> None:
     print(f"\nFID: {fid_val:.6f}")
 
 if __name__ == "__main__":
-    parser = build_argparser()
-    args = parser.parse_args()
-    main(args)
+    main()
