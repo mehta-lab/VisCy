@@ -84,11 +84,11 @@ class CellDivisionTripletDataset(Dataset):
         # Load and process all data files
         self.cell_tracks = self._load_data(data_paths)
         self.valid_anchors = self._filter_anchors()
-        
+
         # Create arrays for vectorized operations
         self.track_ids = np.array([t["track_id"] for t in self.cell_tracks])
         self.cell_tracks_array = np.array(self.cell_tracks)
-        
+
         # Map channel names to indices using CHANNEL_MAPPING
         self.channel_indices = self._map_channel_indices(channel_names)
 
@@ -103,13 +103,15 @@ class CellDivisionTripletDataset(Dataset):
                 try:
                     channel_indices.append(int(name))
                 except ValueError:
-                    raise ValueError(f"Channel '{name}' not found in CHANNEL_MAPPING and is not a valid integer")
+                    raise ValueError(
+                        f"Channel '{name}' not found in CHANNEL_MAPPING and is not a valid integer"
+                    )
         return channel_indices
-    
+
     def _select_channels(self, patch: Tensor) -> Tensor:
         """Select only the requested channels from the patch."""
         return patch[self.channel_indices]
-    
+
     def _load_data(self, data_paths: list[Path]) -> list[dict]:
         """Load npy files."""
         all_tracks = []

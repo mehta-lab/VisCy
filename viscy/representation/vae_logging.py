@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torchvision.utils import make_grid
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -361,4 +360,3 @@ class BetaVaeLogger:
 
         lightning_module.log("beta_schedule", beta)
         return beta
-

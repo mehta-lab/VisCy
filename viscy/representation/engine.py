@@ -505,14 +505,12 @@ class BetaVaeModule(LightningModule):
         self._log_samples("val_reconstructions", self.validation_step_outputs)
         self.validation_step_outputs = []
 
-
         if (
             self.log_enhanced_visualizations
             and self.current_epoch % self.log_enhanced_visualizations_frequency == 0
             and self.current_epoch > 0
         ):
             self._log_enhanced_visualizations()
-
 
     def _log_enhanced_visualizations(self):
         """Log enhanced β-VAE visualizations."""
