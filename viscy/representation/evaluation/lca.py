@@ -104,9 +104,8 @@ def fit_logistic_regression(
     test_annotations = annotations_filtered[test_selection]
 
     if scale_features:
-        scaler = StandardScaler()
-        train_features = scaler.fit_transform(train_features)
-        test_features = scaler.transform(test_features)
+        train_features = StandardScaler().fit_transform(train_features)
+        test_features = StandardScaler().fit_transform(test_features)
     logistic_regression = LogisticRegression(
         class_weight=class_weight,
         random_state=random_state,
