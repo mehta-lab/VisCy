@@ -159,7 +159,7 @@ def write_embedding_dataset(
             _logger.debug("Computing PCA")
             PCA_features, _ = compute_pca(features, **pca_kwargs)
             for i in range(PCA_features.shape[1]):
-                ultrack_indices[f"PCA{i + 1}"] = PCA_features[:, i]
+                ultrack_indices[f"PC{i + 1}"] = PCA_features[:, i]
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
 

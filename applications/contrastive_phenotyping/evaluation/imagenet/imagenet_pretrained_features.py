@@ -1,16 +1,17 @@
 """Use pre-trained ImageNet models to extract features from images."""
 
 # %%
+from pathlib import Path
+
+import numpy as np
 import pandas as pd
 import seaborn as sns
 import timm
-import numpy as np
 import torch
 from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
-from pathlib import Path
-from sklearn.linear_model import LogisticRegression
 
 from viscy.data.triplet import TripletDataModule
 from viscy.transforms import ScaleIntensityRangePercentilesd
@@ -62,7 +63,7 @@ for i, feature in enumerate(pooled.T):
     tracks[f"feature_{i}"] = feature
 # add pca features to dataframe naming each column with pca_i
 for i, feature in enumerate(pca_features.T):
-    tracks[f"pca_{i}"] = feature
+    tracks[f"pc_{i}"] = feature
 
 # # save the dataframe as csv
 # tracks.to_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/code/ALFI/imagenet_pretrained_features.csv", index=False)
@@ -83,13 +84,13 @@ tracks["division"] = annotation["division"]
 
 # %%
 ax = sns.scatterplot(
-    x=tracks["pca_0"],
-    y=tracks["pca_1"],
+    x=tracks["pc_0"],
+    y=tracks["pc_1"],
     hue=tracks["division"],
     legend="full",
 )
-ax.set_xlabel("PCA1")
-ax.set_ylabel("PCA2")
+ax.set_xlabel("PC1")
+ax.set_ylabel("PC2")
 
 # %% compute the accuracy of the model using a linear classifier
 
@@ -117,8 +118,8 @@ x_train = data_train_val.drop(
         "id",
         "parent_id",
         "parent_track_id",
-        "pca_0",
-        "pca_1",
+        "pc_0",
+        "pc_1",
     ]
 )
 y_train = data_train_val["division"]
@@ -137,8 +138,8 @@ x_test = data_test.drop(
         "id",
         "parent_id",
         "parent_track_id",
-        "pca_0",
-        "pca_1",
+        "pc_0",
+        "pc_1",
     ]
 )
 y_test = data_test["division"]

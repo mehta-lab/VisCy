@@ -112,7 +112,7 @@ class EmbeddingVisualizationApp:
         dim_options = []
 
         # Check for PCA and compute if needed
-        if not any(col.startswith("PCA") for col in self.features_df.columns):
+        if not any(col.startswith("PC") for col in self.features_df.columns):
             # PCA transformation
             scaled_features = StandardScaler().fit_transform(features.values)
             pca = PCA(n_components=self.num_PC_components)
@@ -120,7 +120,7 @@ class EmbeddingVisualizationApp:
 
             # Add PCA coordinates to the features dataframe
             for i in range(self.num_PC_components):
-                self.features_df[f"PCA{i + 1}"] = pca_coords[:, i]
+                self.features_df[f"PC{i + 1}"] = pca_coords[:, i]
 
             # Store explained variance for PCA
             self.pca_explained_variance = [
@@ -130,8 +130,8 @@ class EmbeddingVisualizationApp:
 
             # Add PCA options
             for i, pc_label in enumerate(self.pca_explained_variance):
-                dim_options.append({"label": pc_label, "value": f"PCA{i + 1}"})
-                existing_dims.append(f"PCA{i + 1}")
+                dim_options.append({"label": pc_label, "value": f"PC{i + 1}"})
+                existing_dims.append(f"PC{i + 1}")
 
         # Check for UMAP coordinates
         umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
@@ -153,8 +153,8 @@ class EmbeddingVisualizationApp:
         self.dim_options = dim_options
 
         # Set default x and y axes based on available dimensions
-        self.default_x = existing_dims[0] if existing_dims else "PCA1"
-        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PCA2"
+        self.default_x = existing_dims[0] if existing_dims else "PC1"
+        self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PC2"
 
         # Process each FOV and its track IDs
         all_filtered_features = []
