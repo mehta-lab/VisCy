@@ -250,8 +250,6 @@ class BetaVaeModule(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         example_input_array_shape: Sequence[int] = (1, 2, 30, 256, 256),
-        compute_disentanglement: bool = True,
-        disentanglement_frequency: int = 10,
         log_enhanced_visualizations: bool = False,
         log_enhanced_visualizations_frequency: int = 30,
     ):
@@ -272,8 +270,6 @@ class BetaVaeModule(LightningModule):
         self.log_samples_per_batch = log_samples_per_batch
 
         self.example_input_array = torch.rand(*example_input_array_shape)
-        self.compute_disentanglement = compute_disentanglement
-        self.disentanglement_frequency = disentanglement_frequency
 
         self.log_enhanced_visualizations = log_enhanced_visualizations
         self.log_enhanced_visualizations_frequency = (
@@ -509,12 +505,6 @@ class BetaVaeModule(LightningModule):
         self._log_samples("val_reconstructions", self.validation_step_outputs)
         self.validation_step_outputs = []
 
-        if (
-            self.compute_disentanglement
-            and self.current_epoch % self.disentanglement_frequency == 0
-            and self.current_epoch > 0
-        ):
-            self._compute_and_log_disentanglement_metrics()
 
         if (
             self.log_enhanced_visualizations
@@ -523,31 +513,6 @@ class BetaVaeModule(LightningModule):
         ):
             self._log_enhanced_visualizations()
 
-    def _compute_and_log_disentanglement_metrics(self):
-        """Compute and log disentanglement metrics."""
-        try:
-            val_dataloaders = self.trainer.val_dataloaders
-            if val_dataloaders is None:
-                val_dataloader = None
-            elif isinstance(val_dataloaders, list):
-                val_dataloader = val_dataloaders[0] if val_dataloaders else None
-            else:
-                val_dataloader = val_dataloaders
-
-            if val_dataloader is None:
-                _logger.warning(
-                    "No validation dataloader available for disentanglement metrics"
-                )
-                return
-
-            self.vae_logger.log_disentanglement_metrics(
-                lightning_module=self,
-                dataloader=val_dataloader,
-                max_samples=200,
-            )
-
-        except Exception as e:
-            _logger.error(f"Error computing disentanglement metrics: {e}")
 
     def _log_enhanced_visualizations(self):
         """Log enhanced β-VAE visualizations."""

@@ -5,7 +5,6 @@ import numpy as np
 import torch
 from torchvision.utils import make_grid
 
-from viscy.representation.disentanglement_metrics import DisentanglementMetrics
 
 _logger = logging.getLogger(__name__)
 
@@ -21,13 +20,10 @@ class BetaVaeLogger:
     def __init__(self, latent_dim: int = 128):
         self.latent_dim = latent_dim
         self.device = None
-        self.disentanglement_metrics = None
 
     def setup(self, device: str):
         """Initialize device-dependent components."""
         self.device = device
-        if self.disentanglement_metrics is None:
-            self.disentanglement_metrics = DisentanglementMetrics(device=device)
 
     def log_enhanced_metrics(
         self, lightning_module, model_output: dict, batch: dict, stage: str = "train"
@@ -366,63 +362,3 @@ class BetaVaeLogger:
         lightning_module.log("beta_schedule", beta)
         return beta
 
-    def log_disentanglement_metrics(
-        self,
-        lightning_module,
-        dataloader: torch.utils.data.DataLoader,
-        max_samples: int = 500,
-        sync_dist: bool = True,
-    ):
-        """
-        Log disentanglement metrics to TensorBoard every 10 epochs.
-
-        Args:
-            lightning_module: Lightning module instance
-            dataloader: DataLoader for evaluation
-            max_samples: Maximum samples to use for evaluation
-        """
-        # Only compute every 10 epochs to save compute
-        if lightning_module.current_epoch % 10 != 0:
-            return
-
-        _logger.info(
-            f"Computing disentanglement metrics at epoch {lightning_module.current_epoch}"
-        )
-
-        try:
-            # Use the lightning module directly (no separate model attribute after refactoring)
-            vae_model = lightning_module
-
-            # Compute all disentanglement metrics
-            metrics = self.disentanglement_metrics.compute_all_metrics(
-                vae_model=vae_model,
-                dataloader=dataloader,
-                max_samples=max_samples,
-            )
-
-            # Log metrics with organized naming
-            tensorboard_metrics = {}
-            for metric_name, value in metrics.items():
-                tensorboard_metrics[f"disentanglement_metrics/{metric_name}"] = value
-
-            lightning_module.log_dict(
-                tensorboard_metrics,
-                on_step=False,
-                on_epoch=True,
-                logger=True,
-                sync_dist=sync_dist,
-            )
-
-            _logger.info(f"Logged disentanglement metrics: {metrics}")
-
-        except Exception as e:
-            _logger.warning(f"Failed to compute disentanglement metrics: {e}")
-            # Log a placeholder to indicate the attempt
-            lightning_module.log(
-                "disentanglement_metrics/computation_failed",
-                1.0,
-                on_step=False,
-                on_epoch=True,
-                logger=True,
-                sync_dist=sync_dist,
-            )
