@@ -1,11 +1,8 @@
-import logging
 from typing import Callable, Optional, Tuple
 
 import numpy as np
 import torch
 from torchvision.utils import make_grid
-
-_logger = logging.getLogger(__name__)
 
 
 class BetaVaeLogger:
