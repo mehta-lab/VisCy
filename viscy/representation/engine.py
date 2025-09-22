@@ -152,6 +152,9 @@ class ContrastiveModule(LightningModule):
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
+            # Normalize projections to unit sphere
+            anchor_projection = F.normalize(anchor_projection, dim=1)
+            positive_projection = F.normalize(positive_projection, dim=1)
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
             )
@@ -195,6 +198,9 @@ class ContrastiveModule(LightningModule):
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
+            # Normalize projections to unit sphere
+            anchor_projection = F.normalize(anchor_projection, dim=1)
+            positive_projection = F.normalize(positive_projection, dim=1)
             indices = torch.arange(
                 0, anchor_projection.size(0), device=anchor_projection.device
             )
