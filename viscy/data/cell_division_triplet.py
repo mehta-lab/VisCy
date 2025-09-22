@@ -88,7 +88,28 @@ class CellDivisionTripletDataset(Dataset):
         # Create arrays for vectorized operations
         self.track_ids = np.array([t["track_id"] for t in self.cell_tracks])
         self.cell_tracks_array = np.array(self.cell_tracks)
+        
+        # Map channel names to indices using CHANNEL_MAPPING
+        self.channel_indices = self._map_channel_indices(channel_names)
 
+    def _map_channel_indices(self, channel_names: list[str]) -> list[int]:
+        """Map channel names to their corresponding indices in the data array."""
+        channel_indices = []
+        for name in channel_names:
+            if name in self.CHANNEL_MAPPING:
+                channel_indices.append(self.CHANNEL_MAPPING[name])
+            else:
+                # Try to parse as integer if not in mapping
+                try:
+                    channel_indices.append(int(name))
+                except ValueError:
+                    raise ValueError(f"Channel '{name}' not found in CHANNEL_MAPPING and is not a valid integer")
+        return channel_indices
+    
+    def _select_channels(self, patch: Tensor) -> Tensor:
+        """Select only the requested channels from the patch."""
+        return patch[self.channel_indices]
+    
     def _load_data(self, data_paths: list[Path]) -> list[dict]:
         """Load npy files."""
         all_tracks = []
@@ -151,6 +172,7 @@ class CellDivisionTripletDataset(Dataset):
             positive_t = anchor_t + self.time_interval
 
         positive_patch = track["data"][positive_t]
+        positive_patch = self._select_channels(positive_patch)
         if not self.output_2d:
             positive_patch = positive_patch.unsqueeze(1)
         return positive_patch
@@ -173,9 +195,11 @@ class CellDivisionTripletDataset(Dataset):
             if available_times:
                 neg_t = random.choice(available_times)
                 negative_patch = track["data"][neg_t]
+                negative_patch = self._select_channels(negative_patch)
             else:
                 # Ultimate fallback: use same patch (transforms will differentiate)
                 negative_patch = track["data"][anchor_t]
+                negative_patch = self._select_channels(negative_patch)
         else:
             # Sample from different track
             neg_track = random.choice(negative_candidates)
@@ -192,6 +216,7 @@ class CellDivisionTripletDataset(Dataset):
                     neg_t = random.randint(0, neg_track["num_timepoints"] - 1)
 
             negative_patch = neg_track["data"][neg_t]
+            negative_patch = self._select_channels(negative_patch)
 
         # Add depth dimension only if not output_2d: (C, Y, X) -> (C, D=1, Y, X)
         if not self.output_2d:
@@ -203,10 +228,11 @@ class CellDivisionTripletDataset(Dataset):
         track = anchor_info["track"]
         anchor_t = anchor_info["timepoint"]
 
-        # Get anchor patch and add depth dimension only if not output_2d
+        # Get anchor patch and select requested channels
         anchor_patch = track["data"][anchor_t]  # Shape: (C, Y, X)
+        anchor_patch = self._select_channels(anchor_patch)
         if not self.output_2d:
-            anchor_patch = anchor_patch.unsqueeze(1)  # Shape: (C, 1, Y, X)
+            anchor_patch = anchor_patch.unsqueeze(1)
 
         sample = {"anchor": anchor_patch}
 
