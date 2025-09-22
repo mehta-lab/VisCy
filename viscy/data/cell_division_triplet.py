@@ -84,6 +84,10 @@ class CellDivisionTripletDataset(Dataset):
         # Load and process all data files
         self.cell_tracks = self._load_data(data_paths)
         self.valid_anchors = self._filter_anchors()
+        
+        # Create arrays for vectorized operations
+        self.track_ids = np.array([t["track_id"] for t in self.cell_tracks])
+        self.cell_tracks_array = np.array(self.cell_tracks)
 
     def _load_data(self, data_paths: list[Path]) -> list[dict]:
         """Load npy files."""
@@ -155,9 +159,9 @@ class CellDivisionTripletDataset(Dataset):
         """Select a negative sample from a different track."""
         anchor_track_id = anchor_info["track_id"]
 
-        negative_candidates = [
-            t for t in self.cell_tracks if t["track_id"] != anchor_track_id
-        ]
+        # Vectorized filtering using boolean indexing
+        mask = self.track_ids != anchor_track_id
+        negative_candidates = self.cell_tracks_array[mask].tolist()
 
         if not negative_candidates:
             # Fallback: use different timepoint from same track
