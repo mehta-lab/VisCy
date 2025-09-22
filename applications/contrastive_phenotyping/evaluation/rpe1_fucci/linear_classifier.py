@@ -10,9 +10,9 @@ from sklearn.model_selection import train_test_split
 from viscy.representation.embedding_writer import read_embedding_dataset
 
 test_data_features_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_rpe_fucci_leger_weigert/0-phenotyping/rpe_fucci_test_data_ckpt264.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_rpe_fucci_leger_weigert/0-phenotyping/bf_only_timeaware_ntxent_lr2e-5_temp_7e-2_tau1_w_augmentations_2_ckpt306.zarr"
 )
-cell_cycle_labels_path = "/hpc/projects/organelle_phenotyping/models/rpe_fucci/pseudolabels/cell_cycle_labels.csv"
+cell_cycle_labels_path = "/hpc/projects/organelle_phenotyping/models/rpe_fucci/dynaclr/pseudolabels/cell_cycle_labels_w_mitosis.csv"
 
 # %%
 # Load the data
@@ -23,8 +23,6 @@ test_embeddings = read_embedding_dataset(test_data_features_path)
 features = test_embeddings.features.values
 
 # %%
-# Create a combined identifier for matching
-# The sample coordinate contains (fov_name, id) tuples
 sample_coords = test_embeddings.coords["sample"].values
 fov_names = [coord[0] for coord in sample_coords]
 ids = [coord[1] for coord in sample_coords]
@@ -76,18 +74,18 @@ print(classification_report(y_test, y_test_pred))
 # Enhanced evaluation and visualization
 import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
 # 1. Confusion Matrix - shows which classes are confused with each other
 cm = confusion_matrix(y_test, y_test_pred)
 plt.figure(figsize=(8, 6))
-ConfusionMatrixDisplay(cm, display_labels=["G1", "G2", "S"]).plot(cmap="Blues")
+ConfusionMatrixDisplay(cm, display_labels=["G1", "G2", "S","M"]).plot(cmap="Blues")
 plt.title("Confusion Matrix")
 plt.show()
 
 # 2. Per-class errors breakdown
 print("\nDetailed per-class analysis:")
-for class_name in ["G1", "G2", "S"]:
+for class_name in ["G1", "G2", "S","M"]:
     mask = y_test == class_name
     correct = (y_test_pred[mask] == class_name).sum()
     total = mask.sum()
@@ -105,9 +103,9 @@ class_names = clf.classes_
 
 plt.figure(figsize=(12, 4))
 for i, class_name in enumerate(class_names):
-    plt.subplot(1, 3, i + 1)
+    plt.subplot(1, 4, i + 1)
     plt.hist(
-        y_test_proba[:, i], bins=20, alpha=0.7, color=["blue", "orange", "green"][i]
+        y_test_proba[:, i], bins=20, alpha=0.7, color=["blue", "orange", "green",'red'][i]
     )
     plt.title(f"Confidence for {class_name}")
     plt.xlabel("Probability")
