@@ -1,5 +1,7 @@
 datamodule_class: viscy.data.triplet.TripletDataModule
 datamodule:
+  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr
   batch_size: 32
   final_yx_patch_size:
   - 256
@@ -60,6 +62,4 @@ model:
   - Phase3D
 
 paths:
-  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr
-  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr
   output_path: /hpc/mydata/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/DINOV3/embeddings_convnext_tiny_mean.zarr
