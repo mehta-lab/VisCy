@@ -1,3 +1,4 @@
+datamodule_class: viscy.data.triplet.TripletDataModule
 datamodule:
   batch_size: 32
   final_yx_patch_size:

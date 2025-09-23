@@ -13,7 +13,6 @@ from PIL import Image
 from skimage.exposure import rescale_intensity
 from transformers import AutoImageProcessor, AutoModel
 
-from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import EmbeddingWriter
 from viscy.trainer import VisCyTrainer
 
@@ -314,7 +313,11 @@ def main(config):
                 dm_params[param] = value
 
     logger.info("Setting up data module")
-    dm = TripletDataModule(**dm_params)
+    class_path = cfg["datamodule_class"]
+    module_path, class_name = class_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    datamodule_class = getattr(module, class_name)
+    dm = datamodule_class(**dm_params)
 
     # Get model parameters
     model_name = cfg["model"].get("model_name", "facebook/dinov3-vitb16-pretrain-lvd1689m")

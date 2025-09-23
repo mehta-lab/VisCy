@@ -330,8 +330,13 @@ def main(config):
 
     # Set up the data module
     logger.info("Setting up data module")
-    dm = TripletDataModule(**dm_params)
 
+    class_path = cfg["datamodule_class"]
+    module_path, class_name = class_path.rsplit(".", 1)
+    module = importlib.import_module(module_path)
+    datamodule_class = getattr(module, class_name)
+    dm = datamodule_class(**dm_params)
+    
     # Get model parameters for handling 5D inputs
     channel_reduction_methods = {}
     middle_slice_index = None

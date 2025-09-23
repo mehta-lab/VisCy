@@ -16,6 +16,7 @@ model:
     "raw GFP EX488 EM525-45": "max"    
 
 # Data module configuration
+datamodule_class: viscy.data.triplet.TripletDataModule
 datamodule:
   source_channel: 
     - Phase3D

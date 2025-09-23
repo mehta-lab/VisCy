@@ -90,8 +90,15 @@ class VaeUpStage(nn.Module):
 
     def forward(self, inp: Tensor) -> Tensor:
         """
-        :param Tensor inp: Low resolution features
-        :return Tensor: High resolution features
+        Parameters
+        ----------
+        inp : Tensor
+            Low resolution features
+
+        Returns
+        -------
+        Tensor
+            High resolution features
         """
         inp = self.upsample(inp)
         return self.conv(inp)
