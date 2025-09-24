@@ -9,8 +9,8 @@ from tqdm import tqdm
 
 # %% create training and validation dataset
 # TODO: Modify path to the input data
-input_track_path='/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr'
-output_track_path='/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/classical/data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_classical_fake_tracks.zarr'
+input_track_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr"
+output_track_path = "/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/classical/data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_classical_fake_tracks.zarr"
 # TODO: Modify the channel name to the one you are using for the segmentation mask
 segmentation_channel_name = "nuclei_prediction_labels_labels"
 # TODO: Modify the z-slice to the one you are using for the segmentation mask
@@ -69,9 +69,9 @@ def main():
         mode="r",
     )
     chan_names = zarr_input.channel_names
-    assert (
-        segmentation_channel_name in chan_names
-    ), "Channel name not found in the input data"
+    assert segmentation_channel_name in chan_names, (
+        "Channel name not found in the input data"
+    )
 
     # Create the empty store for the tracking data
     position_names = []
@@ -86,7 +86,7 @@ def main():
         chunks=position.data.chunks,
         scale=position.scale,
     )
-#
+    #
     # Populate the tracking data
     with open_ome_zarr(output_track_path, layout="hcs", mode="r+") as track_store:
         # Create progress bar for wells and positions
