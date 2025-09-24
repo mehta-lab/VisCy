@@ -1,6 +1,5 @@
 import ast
 from pathlib import Path
-from typing import Literal, Optional
 
 import matplotlib.pyplot as plt
 import numpy as np
@@ -20,7 +19,7 @@ def plot_reference_aligned_average(
     save_path: str | None = None,
 ) -> np.ndarray:
     """Plot the reference embedding, aligned embeddings, and average aligned embedding.
-    
+
     Parameters
     ----------
     reference_pattern : np.ndarray
@@ -31,7 +30,7 @@ def plot_reference_aligned_average(
         Dataset containing embeddings
     save_path : str, optional
         Path to save the figure
-        
+
     Returns
     -------
     np.ndarray
@@ -177,7 +176,7 @@ def plot_reference_vs_full_lineages(
     save_path: str | None = None,
 ) -> None:
     """Visualize where the reference pattern matches in each full lineage.
-    
+
     Parameters
     ----------
     reference_pattern : np.ndarray
@@ -264,8 +263,12 @@ def plot_reference_vs_full_lineages(
             )
 
             # Add vertical lines to mark the start and end of the matched section
-            plt.axvline(x=min(matched_indices), color="orange", linestyle="--", alpha=0.5)
-            plt.axvline(x=max(matched_indices), color="orange", linestyle="--", alpha=0.5)
+            plt.axvline(
+                x=min(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
+            plt.axvline(
+                x=max(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
 
             # Add text labels
             plt.text(
@@ -313,8 +316,12 @@ def plot_reference_vs_full_lineages(
             )
 
             # Add vertical lines to mark the start and end of the matched section
-            plt.axvline(x=min(matched_indices), color="orange", linestyle="--", alpha=0.5)
-            plt.axvline(x=max(matched_indices), color="orange", linestyle="--", alpha=0.5)
+            plt.axvline(
+                x=min(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
+            plt.axvline(
+                x=max(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
 
             # Add text labels
             plt.text(
@@ -355,7 +362,7 @@ def plot_pc_trajectories(
     save_path: Path,
 ):
     """Visualize warping paths in PC space, comparing reference pattern with aligned lineages.
-    
+
     Parameters
     ----------
     reference_lineage_fov : str
@@ -501,8 +508,12 @@ def plot_pc_trajectories(
             )
 
             # Add vertical lines to mark the start and end of the matched section
-            plt.axvline(x=min(matched_indices), color="orange", linestyle="--", alpha=0.5)
-            plt.axvline(x=max(matched_indices), color="orange", linestyle="--", alpha=0.5)
+            plt.axvline(
+                x=min(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
+            plt.axvline(
+                x=max(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
 
             # Add text labels
             plt.text(
@@ -550,8 +561,12 @@ def plot_pc_trajectories(
             )
 
             # Add vertical lines to mark the start and end of the matched section
-            plt.axvline(x=min(matched_indices), color="orange", linestyle="--", alpha=0.5)
-            plt.axvline(x=max(matched_indices), color="orange", linestyle="--", alpha=0.5)
+            plt.axvline(
+                x=min(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
+            plt.axvline(
+                x=max(matched_indices), color="orange", linestyle="--", alpha=0.5
+            )
 
             # Add text labels
             plt.text(
@@ -587,7 +602,7 @@ def align_and_average_embeddings(
     use_median: bool = False,
 ) -> np.ndarray:
     """Align embeddings from multiple lineages to a reference pattern and compute their average.
-    
+
     Parameters
     ----------
     reference_pattern : np.ndarray
@@ -598,7 +613,7 @@ def align_and_average_embeddings(
         Dataset containing embeddings
     use_median : bool
         If True, use median instead of mean for averaging
-        
+
     Returns
     -------
     np.ndarray
@@ -666,7 +681,7 @@ def align_image_stacks(
     napari_viewer=None,
 ) -> tuple[list, list]:
     """Align image stacks from multiple lineages to a reference pattern.
-    
+
     Parameters
     ----------
     reference_pattern : np.ndarray
@@ -687,7 +702,7 @@ def align_image_stacks(
         If True, only show the section that matches the reference pattern
     napari_viewer : optional
         Optional napari viewer for visualization
-        
+
     Returns
     -------
     tuple[list, list]
@@ -813,7 +828,7 @@ def create_consensus_embedding(
     embeddings_dataset: xr.Dataset,
 ) -> np.ndarray:
     """Create a consensus embedding from multiple aligned embeddings using weighted approach.
-    
+
     Parameters
     ----------
     reference_pattern : np.ndarray
@@ -822,7 +837,7 @@ def create_consensus_embedding(
         DataFrame with alignment information
     embeddings_dataset : xr.Dataset
         Dataset containing embeddings
-        
+
     Returns
     -------
     np.ndarray
