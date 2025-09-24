@@ -397,9 +397,6 @@ dataset = TripletDataset(
     channel_names=channel_names,
     initial_yx_patch_size=initial_yx_patch_size,
     z_range=z_range,
-    anchor_transform=None,
-    positive_transform=None,
-    negative_transform=None,
     fit=False,
     predict_cells=False,
     include_fov_names=None,
@@ -436,7 +433,17 @@ def get_aligned_image_sequences(dataset, candidates_df):
             continue
             
         # Get images and sort by time
-        images = dataset.__getitems__(matching_indices)
+        batch_data = dataset.__getitems__(matching_indices)
+        
+        # Extract individual images from batch
+        images = []
+        for i in range(len(matching_indices)):
+            img_data = {
+                'anchor': batch_data['anchor'][i],
+                'index': batch_data['index'][i]
+            }
+            images.append(img_data)
+        
         images.sort(key=lambda x: x['index']['t'])
         time_to_image = {img['index']['t']: img for img in images}
         
