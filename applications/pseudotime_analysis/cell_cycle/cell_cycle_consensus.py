@@ -49,11 +49,11 @@ if NAPARI:
 # ANNOTATIONS
 cell_cycle_annotations_denv_dict= {
     # "tomm20_cc_1": 
-    #     {'data_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_21_A549_TOMM20_DENV/2-assemble/2024_11_21_A549_TOMM20_DENV.zarr",
+    #     {'data_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/2-assemble/2024_11_21_A549_TOMM20_DENV.zarr",
     #     'fov_name': "/C/2/001000",
-    #     'annotations_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_21_A549_TOMM20_DENV/4-phenotyping/0-annotations/track_cell_state_annotation.csv",
-    #     'features_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_21_A549_TOMM20_DENV/4-phenotyping/1-predictions/phase_160patch_104ckpt_ver3max.zarr",
-    #     # 'tracks_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_21_A549_TOMM20_DENV/2-assemble/tracking.zarr",
+    #     'annotations_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/0-annotations/track_cell_state_annotation.csv",
+    #     'features_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/1-predictions/phase_160patch_104ckpt_ver3max.zarr",
+    #     'tracks_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/2-assemble/tracking.zarr",
     #     },
     # "tomm20_cc_2": 
     #     {'data_path': "/hpc/projects/intracellular_dashboard/organelle_dynamics/rerun/2024_11_21_A549_TOMM20_DENV/2-assemble/2024_11_21_A549_TOMM20_DENV.zarr",
@@ -79,7 +79,7 @@ cell_cycle_annotations_denv_dict= {
         },
 }
 output_root = Path(
-    "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/output/cell_cycle_consensus"
+    "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/cell_cycle/output"
 )
 output_root.mkdir(parents=True, exist_ok=True)
 
@@ -268,7 +268,19 @@ matches = cytodtw.get_matches(
 
 alignment_results[name] = matches
 logger.info(f"Found {len(matches)} matches for {name}")
+#%%
+# Save matches
+print(f'Saving matches to {output_root / f"{name}_matching_lineages_cosine.csv"}')
+# cytodtw.save_consensus(output_root / f"{name}_consensus_lineage.pkl")
+# Add consensus path to the df all rows
+# Add a new column 'consensus_path' to the matches DataFrame, with the same value for all rows.
+# This is useful for downstream analysis to keep track of the consensus pattern used for matching.
+# Reference: pandas.DataFrame.assign
+matches['consensus_path'] = str(output_root / f"{name}_consensus_lineage.pkl")
+# Save the pkl
+cytodtw.save_consensus(output_root / f"{name}_consensus_lineage.pkl")
 
+matches.to_csv(output_root / f"{name}_matching_lineages_cosine.csv", index=False)
 #%%
 top_matches = matches.head(top_n)
 
@@ -542,4 +554,259 @@ if NAPARI and len(aligned_sequences) > 0:
             )
             logger.info(f"Added {layer_name} with shape {time_series.shape}")
 
-# %%
+
+#%%
+# Create concatenated aligned + unaligned sequences
+def create_concatenated_aligned_sequences(cytodtw, top_matches, consensus_lineage, reference_type="features"):
+    """
+    Create sequences that concatenate:
+    1. DTW-aligned portion (extracted from full lineage and aligned to consensus)
+    2. Remaining unaligned timepoints from full lineage (in original temporal order)
+    
+    This properly aligns the DTW-matched subsequences and appends the rest.
+    """
+    import ast
+    
+    concatenated_sequences = {}
+    
+    for idx, match_row in top_matches.iterrows():
+        fov_name = match_row['fov_name']
+        track_ids = ast.literal_eval(match_row['track_ids']) if isinstance(match_row['track_ids'], str) else match_row['track_ids']
+        warp_path = ast.literal_eval(match_row['warp_path']) if isinstance(match_row['warp_path'], str) else match_row['warp_path']
+        
+        # Get full lineage embeddings and timepoints
+        full_lineage_embeddings = []
+        full_timepoints = []
+        timepoint_to_global_idx = {}
+        
+        global_idx = 0
+        for track_id in track_ids:
+            try:
+                track_data = cytodtw.embeddings.sel(sample=(fov_name, track_id))
+                track_embeddings = track_data[reference_type].values
+                track_timepoints = track_data['t'].values
+                
+                full_lineage_embeddings.append(track_embeddings)
+                full_timepoints.extend(track_timepoints)
+                
+                # Map timepoints to global indices
+                for local_idx, t in enumerate(track_timepoints):
+                    timepoint_to_global_idx[t] = global_idx + local_idx
+                global_idx += len(track_embeddings)
+                
+            except KeyError:
+                continue
+        
+        if not full_lineage_embeddings:
+            continue
+            
+        # Concatenate all track embeddings
+        full_lineage = np.vstack(full_lineage_embeddings)
+        full_timepoints = np.array(sorted(set(full_timepoints)))
+        
+        # Step 1: Extract aligned portion using DTW warp path
+        aligned_portion = np.zeros_like(consensus_lineage)
+        aligned_timepoints = set()
+        
+        for consensus_idx, query_timepoint in warp_path:
+            aligned_timepoints.add(query_timepoint)
+            if query_timepoint in timepoint_to_global_idx:
+                lineage_idx = timepoint_to_global_idx[query_timepoint]
+                if 0 <= lineage_idx < len(full_lineage):
+                    aligned_portion[consensus_idx] = full_lineage[lineage_idx]
+        
+        # Fill gaps in aligned portion with interpolation
+        filled_indices = []
+        for i in range(len(aligned_portion)):
+            if any(np.array_equal(aligned_portion[i], full_lineage[timepoint_to_global_idx[t]]) 
+                  for t in aligned_timepoints if t in timepoint_to_global_idx):
+                filled_indices.append(i)
+        
+        if len(filled_indices) > 0:
+            for i in range(len(aligned_portion)):
+                if i not in filled_indices:
+                    closest_idx = filled_indices[np.argmin(np.abs(np.array(filled_indices) - i))]
+                    aligned_portion[i] = aligned_portion[closest_idx]
+        
+        # Step 2: Extract unaligned portion (timepoints NOT in DTW alignment)
+        unaligned_indices = []
+        unaligned_timepoints = []
+        for t in full_timepoints:
+            if t not in aligned_timepoints and t in timepoint_to_global_idx:
+                unaligned_indices.append(timepoint_to_global_idx[t])
+                unaligned_timepoints.append(t)
+        
+        # Sort to maintain temporal order
+        sorted_pairs = sorted(zip(unaligned_indices, unaligned_timepoints), key=lambda x: x[1])
+        unaligned_indices = [pair[0] for pair in sorted_pairs]
+        unaligned_timepoints = [pair[1] for pair in sorted_pairs]
+        
+        # Extract unaligned embeddings
+        if unaligned_indices:
+            unaligned_portion = full_lineage[unaligned_indices]
+        else:
+            unaligned_portion = np.array([]).reshape(0, full_lineage.shape[1])
+        
+        # Step 3: Concatenate aligned + unaligned portions
+        if unaligned_portion.size > 0:
+            concatenated = np.vstack([aligned_portion, unaligned_portion])
+            segment_boundaries = [len(aligned_portion)]
+        else:
+            concatenated = aligned_portion
+            segment_boundaries = []
+        
+        concatenated_sequences[idx] = {
+            'concatenated': concatenated,
+            'aligned_portion': aligned_portion,
+            'unaligned_portion': unaligned_portion,
+            'aligned_length': len(aligned_portion),
+            'unaligned_length': len(unaligned_indices),
+            'segment_boundaries': segment_boundaries,
+            'aligned_timepoints': sorted(aligned_timepoints),
+            'unaligned_timepoints': unaligned_timepoints,
+            'info': {
+                'fov_name': fov_name,
+                'track_ids': track_ids,
+                'distance': match_row.get('distance', np.nan),
+                'consensus_length': len(consensus_lineage),
+                'full_lineage_length': len(full_lineage)
+            }
+        }
+    
+    return concatenated_sequences
+
+# Create concatenated sequences
+concat_sequences = create_concatenated_aligned_sequences(cytodtw, top_matches, consensus_lineage, REFERENCE_TYPE)
+
+# Log concatenation details
+for idx, seq_data in concat_sequences.items():
+    info = seq_data['info']
+    n_aligned = seq_data['aligned_length']
+    n_unaligned = len(seq_data['concatenated']) - n_aligned
+    logger.info(f"Track {info['track_ids'][0]}: Aligned={n_aligned} + Unaligned={n_unaligned} = Total={len(seq_data['concatenated'])}")
+    logger.info(f"  Aligned timepoints: {seq_data['aligned_timepoints'][:5]}..." if len(seq_data['aligned_timepoints']) > 5 else f"  Aligned timepoints: {seq_data['aligned_timepoints']}")
+    logger.info(f"  Unaligned timepoints: {seq_data['unaligned_timepoints'][:5]}..." if len(seq_data['unaligned_timepoints']) > 5 else f"  Unaligned timepoints: {seq_data['unaligned_timepoints']}")
+
+# Prepare all data for PCA
+all_data_for_pca = [consensus_lineage]
+for seq_data in concat_sequences.values():
+    all_data_for_pca.append(seq_data['concatenated'])
+
+# Fit PCA on all concatenated data  
+all_concat = np.vstack(all_data_for_pca)
+scaler = StandardScaler()
+scaled_all = scaler.fit_transform(all_concat) 
+pca = PCA(n_components=3)
+pca_all = pca.fit_transform(scaled_all)
+
+# Split back to individual sequences
+consensus_pca = pca_all[:len(consensus_lineage)]
+start_idx = len(consensus_lineage)
+
+sequences_pca = {}
+for idx, seq_data in concat_sequences.items():
+    seq_len = len(seq_data['concatenated'])
+    seq_pca = pca_all[start_idx:start_idx + seq_len]
+    
+    sequences_pca[idx] = {
+        'pca': seq_pca,
+        'aligned_length': seq_data['aligned_length'],
+        'segment_boundaries': seq_data['segment_boundaries'], 
+        'info': seq_data['info']
+    }
+    start_idx += seq_len
+
+# Visualization with offsets - rows for PC components
+n_sequences = min(5, len(sequences_pca))
+fig, axes = plt.subplots(3, 1, figsize=(15, 12))
+colors = ['purple', 'brown', 'pink', 'gray', 'cyan']
+
+# Calculate offsets for each sequence
+y_offset_step = 2.0  # Vertical separation between tracks
+
+for pc_idx in range(3):
+    ax = axes[pc_idx]
+    
+    # Plot consensus (no offset)
+    consensus_time = np.arange(len(consensus_pca))
+    ax.plot(consensus_time, consensus_pca[:, pc_idx], 'o-', 
+           color='black', linewidth=4, markersize=8, 
+           label='Consensus', alpha=0.9, zorder=5)
+    
+    # Add consensus annotations
+    if consensus_annotations:
+        for t, annotation in enumerate(consensus_annotations):
+            if annotation == 'mitosis':
+                ax.axvline(t, color='orange', alpha=0.7, 
+                         linestyle='--', linewidth=2, zorder=1)
+    
+    # Plot each concatenated sequence with offset
+    for plot_idx, (seq_idx, seq_data) in enumerate(list(sequences_pca.items())[:n_sequences]):
+        if plot_idx >= len(colors):
+            break
+            
+        y_offset = -(plot_idx + 1) * y_offset_step  # Negative offset downward
+        seq_pca = seq_data['pca'][:, pc_idx] + y_offset
+        aligned_length = seq_data['aligned_length']
+        boundaries = seq_data['segment_boundaries']
+        info = seq_data['info']
+        
+        time_axis = np.arange(len(seq_pca))
+        
+        # Plot full concatenated sequence
+        ax.plot(time_axis, seq_pca, '.-', 
+               color=colors[plot_idx], linewidth=2, markersize=4,
+               alpha=0.8, label=f'Track {info["track_ids"][0]} (d={info["distance"]:.3f})')
+        
+        # Highlight aligned portion (anchor point) - first part of concatenated sequence
+        aligned_start = 0
+        aligned_end = aligned_length
+        aligned_time = time_axis[aligned_start:aligned_end]
+        aligned_values = seq_pca[aligned_start:aligned_end]
+        
+        ax.plot(aligned_time, aligned_values, 's-',
+               color=colors[plot_idx], linewidth=5, markersize=8, 
+               alpha=0.9, zorder=4, label='DTW Aligned' if plot_idx == 0 else "")
+        
+        # Highlight unaligned portion - second part of concatenated sequence
+        if len(boundaries) > 0:
+            unaligned_start = boundaries[0]
+            unaligned_end = len(seq_pca)
+            unaligned_time = time_axis[unaligned_start:unaligned_end]
+            unaligned_values = seq_pca[unaligned_start:unaligned_end]
+            
+            ax.plot(unaligned_time, unaligned_values, 'o-',
+                   color=colors[plot_idx], linewidth=2, markersize=3,
+                   alpha=0.6, zorder=3, label='Unaligned' if plot_idx == 0 else "")
+        
+        # Mark segment boundaries
+        for boundary in boundaries:
+            ax.axvline(boundary, color=colors[plot_idx], 
+                     alpha=0.5, linestyle=':', linewidth=1)
+        
+        # Add track label with alignment info
+        mid_point = len(time_axis) // 2
+        track_id = info["track_ids"][0]
+        n_aligned = seq_data['aligned_length'] 
+        n_total = len(seq_data['pca'])
+        n_unaligned = n_total - n_aligned
+        ax.text(mid_point, seq_pca[mid_point] - 0.5, 
+               f'Track {track_id}\nA:{n_aligned} U:{n_unaligned}', 
+               ha='center', va='top', fontsize=9,
+               bbox=dict(boxstyle='round,pad=0.3', facecolor=colors[plot_idx], alpha=0.3))
+    
+    ax.set_xlabel('Concatenated Time: [DTW Aligned] + [Remaining Unaligned]')
+    ax.set_ylabel(f'PC{pc_idx+1} ({pca.explained_variance_ratio_[pc_idx]:.2%}) + Offset')
+    ax.set_title(f'PC{pc_idx+1}: DTW Aligned Anchors → Unaligned Continuations')
+    ax.grid(True, alpha=0.3)
+    
+    if pc_idx == 0:
+        ax.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+
+plt.suptitle('DTW Partial Alignment Strategy: Anchor Points + Unperturbed Continuations\n'
+            'Orange squares = DTW-aligned cell division patterns, Circles = Remaining temporal trajectory',
+            fontsize=14)
+plt.tight_layout()
+plt.show()
+
+#%%
