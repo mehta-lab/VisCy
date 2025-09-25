@@ -49,6 +49,24 @@ class CytoDtw:
 
     def _validate_input(self):
         raise NotImplementedError("Validation of input not implemented")
+    
+    def save_consensus(self, path: str):
+        """Save consensus pattern to a file."""
+        if self.consensus_data is None:
+            raise ValueError("Consensus pattern not found")
+        self.consensus_data.to_csv(path)
+
+    def load_consensus(self, path: str):
+        """Load consensus pattern from a file."""
+        self.consensus_data = pd.read_csv(path)
+
+    def save_annotations(self, path: str):
+        """Save annotations to a file."""
+        self.annotations_df.to_csv(path)
+
+    def load_annotations(self, path: str):
+        """Load annotations from a file."""
+        self.annotations_df = pd.read_csv(path)
 
     def get_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
         """Get identified lineages with specified minimum timepoints."""
@@ -136,7 +154,7 @@ class CytoDtw:
         reference_pattern: np.ndarray = None,
         lineages: list[tuple[str, list[int]]] = None,
         window_step: int = 5,
-        num_candidates: int = 3,
+        num_candidates: int | None = None,
         max_distance: float = float("inf"),
         max_skew: float = 0.8,
         method: str = "bernd_clifford",
@@ -353,6 +371,7 @@ def identify_lineages(
                 all_lineages.append((fov_id, lineage_tracks[0]))
 
     return all_lineages
+
 
 
 def find_pattern_matches(
