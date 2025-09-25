@@ -52,21 +52,18 @@ class CytoDtw:
     
     def save_consensus(self, path: str):
         """Save consensus pattern to a file."""
+        import pickle
         if self.consensus_data is None:
             raise ValueError("Consensus pattern not found")
-        self.consensus_data.to_csv(path)
+        with open(path, 'wb') as f:
+            pickle.dump(self.consensus_data, f)
 
     def load_consensus(self, path: str):
         """Load consensus pattern from a file."""
-        self.consensus_data = pd.read_csv(path)
+        import pickle
+        with open(path, 'rb') as f:
+            self.consensus_data = pickle.load(f)
 
-    def save_annotations(self, path: str):
-        """Save annotations to a file."""
-        self.annotations_df.to_csv(path)
-
-    def load_annotations(self, path: str):
-        """Load annotations from a file."""
-        self.annotations_df = pd.read_csv(path)
 
     def get_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
         """Get identified lineages with specified minimum timepoints."""
