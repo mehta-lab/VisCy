@@ -6,6 +6,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from iohub import open_ome_zarr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
@@ -104,7 +105,7 @@ annotations_df = pd.read_csv(cell_cycle_annotations_denv["annotations_path"])
 cytodtw=CytoDtw(embeddings,annotations_df)
 feature_df=cytodtw.annotations_df
 
-min_timepoints = 15
+min_timepoints = 7
 filtered_lineages = cytodtw.get_lineages(min_timepoints)
 filtered_lineages = pd.DataFrame(filtered_lineages, columns=["fov_name", "track_id"])
 logger.info(f"Found {len(filtered_lineages)} lineages with at least {min_timepoints} timepoints")
@@ -128,12 +129,19 @@ valid_annotated_examples=[
 #     'weight': 1.0
 # },
 {
-    'fov_name': "/C/1/001000",
-    'track_id': [59,60],
-    'timepoints': (52-n_timepoints_before, 52+n_timepoints_after+1),
+    'fov_name': "/C/1/000000",
+    'track_id': [118,119],
+    'timepoints': (27-n_timepoints_before, 27+n_timepoints_after+1),
     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
     'weight': 1.0
 },
+# {
+#     'fov_name': "/C/1/001000",
+#     'track_id': [59,60],
+#     'timepoints': (52-n_timepoints_before, 52+n_timepoints_after+1),
+#     'annotations': ["interphase"] * (n_timepoints_before) + ["mitosis"] + ["interphase"] * (n_timepoints_after-1),
+#     'weight': 1.0
+# },
 {
     'fov_name': "/C/1/001001",
     'track_id': [93,94],
@@ -149,7 +157,7 @@ patterns = []
 pattern_info = []
 REFERENCE_TYPE = "features"
 DTW_CONSTRAINT_TYPE="sakoe_chiba"
-DTW_BAND_WIDTH_RATIO=0.4
+DTW_BAND_WIDTH_RATIO=0.3
 
 for i, example in enumerate(valid_annotated_examples):
     pattern = cytodtw.get_reference_pattern(
@@ -262,12 +270,6 @@ alignment_results[name] = matches
 logger.info(f"Found {len(matches)} matches for {name}")
 
 #%%
-# Plot aligned PC trajectories using existing plotting utilities
-from viscy.representation.evaluation.pseudotime_plotting import plot_pc_trajectories
-
-
-from viscy.representation.pseudotime import _apply_warping_path
-
 top_matches = matches.head(top_n)
 
 all_patterns_for_pca = [consensus_lineage]
@@ -276,7 +278,7 @@ for idx, row in top_matches.iterrows():
     fov_name = row['fov_name']
     track_ids = ast.literal_eval(row['track_ids']) if isinstance(row['track_ids'], str) else row['track_ids']
     warp_path = ast.literal_eval(row['warp_path']) if isinstance(row['warp_path'], str) else row['warp_path']
-    start_time = row['start_timepoint']
+    start_time = row['start_track_timepoint']
     distance = row['distance']
     
     # Get lineage embeddings
@@ -298,11 +300,24 @@ for idx, row in top_matches.iterrows():
     
     # Map each consensus timepoint to lineage timepoint via warping path
     ref_to_lineage = {}
-    for ref_idx, query_idx in warp_path:
-        lineage_idx = int(start_time + query_idx) if not pd.isna(start_time) else query_idx
-        if 0 <= lineage_idx < len(lineage_embeddings):
-            ref_to_lineage[ref_idx] = lineage_idx
-            aligned_pattern[ref_idx] = lineage_embeddings[lineage_idx]
+    for ref_idx, query_t in warp_path:
+        cumulative_idx = 0
+        found_idx = None
+        for track_id in track_ids:
+            try:
+                track_data = cytodtw.embeddings.sel(sample=(fov_name, track_id))
+                track_t_values = track_data['t'].values
+                if query_t in track_t_values:
+                    track_relative_idx = np.where(track_t_values == query_t)[0][0]
+                    found_idx = cumulative_idx + track_relative_idx
+                    break
+                cumulative_idx += len(track_t_values)
+            except KeyError:
+                continue
+        
+        if found_idx is not None and 0 <= found_idx < len(lineage_embeddings):
+            ref_to_lineage[ref_idx] = found_idx
+            aligned_pattern[ref_idx] = lineage_embeddings[found_idx]
     
     # Fill missing values with nearest neighbor
     for ref_idx in range(len(consensus_lineage)):
@@ -373,9 +388,6 @@ plt.show()
 
 #%%
 # Prototype video alignment based on DTW matches
-from iohub import open_ome_zarr
-
-from viscy.data.triplet import TripletDataset
 
 z_range = slice(0, 1)
 initial_yx_patch_size = (192, 192)
@@ -416,7 +428,7 @@ def get_aligned_image_sequences(dataset, candidates_df):
         fov_name = row['fov_name']
         track_ids = ast.literal_eval(row['track_ids']) if isinstance(row['track_ids'], str) else row['track_ids']
         warp_path = ast.literal_eval(row['warp_path']) if isinstance(row['warp_path'], str) else row['warp_path']
-        start_time = int(row['start_timepoint']) if not pd.isna(row['start_timepoint']) else 0
+        start_time = int(row['start_track_timepoint']) if not pd.isna(row['start_track_timepoint']) else 0
         
         # Determine alignment length from warp path
         alignment_length = max(ref_idx for ref_idx, _ in warp_path) + 1
@@ -448,12 +460,13 @@ def get_aligned_image_sequences(dataset, candidates_df):
         time_to_image = {img['index']['t']: img for img in images}
         
         # Create warp_path mapping and align images
-        ref_to_query = {ref_idx: query_idx for ref_idx, query_idx in warp_path}
+        # Note: query_idx is now actual t value, not relative index
+        ref_to_query = {ref_idx: query_t for ref_idx, query_t in warp_path}
         aligned_images = [None] * alignment_length
         
         for ref_idx in range(alignment_length):
             if ref_idx in ref_to_query:
-                query_time = start_time + ref_to_query[ref_idx]
+                query_time = ref_to_query[ref_idx]  # query_time is already actual t value
                 if query_time in time_to_image:
                     aligned_images[ref_idx] = time_to_image[query_time]
                 else:
@@ -493,7 +506,8 @@ aligned_sequences = get_aligned_image_sequences(dataset, top_matches)
 logger.info(f"Retrieved {len(aligned_sequences)} aligned sequences")
 for idx, seq in aligned_sequences.items():
     meta = seq['metadata']
-    logger.info(f"Sequence {idx}: FOV {meta['fov_name']} aligned images, distance={meta['distance']:.3f}")
+    index=seq['aligned_images'][0]['index']
+    logger.info(f"Track id {index['track_id']}: FOV {meta['fov_name']} aligned images, distance={meta['distance']:.3f}")
 
 # %%
 # Load aligned sequences into napari
@@ -503,6 +517,7 @@ if NAPARI and len(aligned_sequences) > 0:
     for idx, seq_data in aligned_sequences.items():
         aligned_images = seq_data['aligned_images']
         meta = seq_data['metadata']
+        index=seq_data['aligned_images'][0]['index']
         
         if len(aligned_images) == 0:
             continue
@@ -519,7 +534,7 @@ if NAPARI and len(aligned_sequences) > 0:
             time_series = np.stack(image_stack, axis=0)
             
             # Add to napari viewer  
-            layer_name = f"Seq_{idx}_FOV_{meta['fov_name']}_dist_{meta['distance']:.3f}"
+            layer_name = f"track_id_{index['track_id']}_FOV_{meta['fov_name']}_dist_{meta['distance']:.3f}"
             viewer.add_image(
                 time_series,
                 name=layer_name,

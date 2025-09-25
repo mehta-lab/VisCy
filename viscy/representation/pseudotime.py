@@ -373,7 +373,6 @@ def identify_lineages(
     return all_lineages
 
 
-
 def find_pattern_matches(
     reference_pattern: np.ndarray,
     filtered_lineages: list[tuple[str, list[int]]],
@@ -434,23 +433,24 @@ def find_pattern_matches(
         "distance": [],
         "skewness": [],
         "warp_path": [],
-        "start_timepoint": [],
-        "end_timepoint": [],
+        "start_track_timepoint": [],
+        "end_track_timepoint": [],
     }
 
     for fov_name, track_ids in tqdm(filtered_lineages, desc="Finding pattern matches"):
-        # Reconstruct the concatenated lineage
         lineages = []
+        t_values = []
         for track_id in track_ids:
-            track_embeddings = embeddings_dataset.sel(sample=(fov_name, track_id))[
-                reference_type
-            ].values
+            track_data = embeddings_dataset.sel(sample=(fov_name, track_id))
+            track_embeddings = track_data[reference_type].values
+            track_t = track_data['t'].values
 
             # Handle 1D arrays (PC components) by reshaping to (time, 1)
             if track_embeddings.ndim == 1:
                 track_embeddings = track_embeddings.reshape(-1, 1)
 
             lineages.append(track_embeddings)
+            t_values.extend(track_t)  # Add t values to our mapping
 
         lineage_embeddings = np.concatenate(lineages, axis=0)
 
@@ -489,15 +489,26 @@ def find_pattern_matches(
             best_dist = best_match["distance"]
             best_skew = best_match["skewness"]
 
+            #warping path is relative to the reference pattern
+            #query_idx is relative to the lineage
+            converted_path = []
+            for ref_idx, query_idx in best_path:
+                query_t_idx = best_pos + query_idx
+                if query_t_idx < len(t_values):
+                    actual_t = t_values[query_t_idx]
+                    converted_path.append((ref_idx, actual_t))
+            
+            start_t = t_values[best_pos] if best_pos < len(t_values) else None
+            end_pos = best_pos + len(reference_pattern) - 1
+            end_t = t_values[end_pos] if end_pos < len(t_values) else None
+
             all_match_positions["fov_name"].append(fov_name)
             all_match_positions["track_ids"].append(track_ids)
             all_match_positions["distance"].append(best_dist)
             all_match_positions["skewness"].append(best_skew)
-            all_match_positions["warp_path"].append(best_path)
-            all_match_positions["start_timepoint"].append(best_pos)
-            all_match_positions["end_timepoint"].append(
-                best_pos + len(reference_pattern)
-            )
+            all_match_positions["warp_path"].append(converted_path)
+            all_match_positions["start_track_timepoint"].append(start_t)
+            all_match_positions["end_track_timepoint"].append(end_t)
         else:
             # No matches found
             all_match_positions["fov_name"].append(fov_name)
@@ -505,8 +516,8 @@ def find_pattern_matches(
             all_match_positions["distance"].append(None)
             all_match_positions["skewness"].append(None)
             all_match_positions["warp_path"].append(None)
-            all_match_positions["start_timepoint"].append(None)
-            all_match_positions["end_timepoint"].append(None)
+            all_match_positions["start_track_timepoint"].append(None)
+            all_match_positions["end_track_timepoint"].append(None)
 
     # Convert to DataFrame and drop rows with no matches
     all_match_positions = pd.DataFrame(all_match_positions)
