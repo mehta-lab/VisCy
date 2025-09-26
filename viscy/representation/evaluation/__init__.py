@@ -17,12 +17,13 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 from pathlib import Path
 
 import anndata as ad
-import natsort as ns
 import numpy as np
 import pandas as pd
 import xarray as xr
+from natsort import natsorted
 
 from viscy.data.triplet import TripletDataModule
+from viscy.representation.embedding_writer import get_available_index_columns
 
 
 def load_annotation(da, path, name, categories: dict | None = None):
@@ -49,11 +50,12 @@ def load_annotation(da, path, name, categories: dict | None = None):
     annotation = pd.read_csv(path)
 
     # Set the index of the annotation DataFrame to ['fov_name', 'id']
+    annotation["fov_name"] = annotation["fov_name"].str.strip("/")
     annotation = annotation.set_index(["fov_name", "id"])
 
     # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
     mi = pd.MultiIndex.from_arrays(
-        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+        [da["fov_name"].to_pandas().str.strip("/"), da["id"].values], names=["fov_name", "id"]
     )
 
     # Select the annotations corresponding to the MultiIndex
@@ -87,12 +89,15 @@ def load_annotation_anndata(
     annotation["fov_name"] = annotation["fov_name"].str.strip("/")
 
     annotation = annotation.set_index(["fov_name", "id"])
-    print(annotation.head())
 
     mi = pd.MultiIndex.from_arrays(
         [adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"]
     )
-    selected = annotation.loc[mi][name]
+    
+    # Use reindex to handle missing annotations gracefully
+    # This will return NaN for observations that don't have annotations, then just drop'em
+    selected = annotation.reindex(mi)[name].dropna()
+    
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
     return selected
@@ -142,18 +147,10 @@ def convert_xarray_annotation_to_anndata(
         raise FileExistsError(f"Output path {output_path} already exists.")
 
     # Tracking
-    tracking_df = pd.DataFrame(
-        data={
-            "id": embeddings_ds.coords["id"].data,
-            "fov_name": embeddings_ds.coords["fov_name"].to_pandas().str.strip("/"),
-            "track_id": embeddings_ds.coords["track_id"].data,
-            "parent_track_id": embeddings_ds.coords["parent_track_id"].data,
-            "parent_id": embeddings_ds.coords["parent_id"].data,
-            "t": embeddings_ds.coords["t"].data,
-            "y": embeddings_ds.coords["y"].data,
-            "x": embeddings_ds.coords["x"].data,
-        },
-    )
+    available_cols = get_available_index_columns(embeddings_ds)
+    tracking_df = pd.DataFrame({
+        col: embeddings_ds.coords[col].data for col in available_cols
+    })
 
     obsm = {}
     # Projections
@@ -162,7 +159,7 @@ def convert_xarray_annotation_to_anndata(
 
     # Embeddings
     for embedding in ["PCA", "UMAP", "PHATE"]:
-        embedding_coords = ns.natsorted(
+        embedding_coords = natsorted(
             [coord for coord in embeddings_ds.coords if embedding in coord]
         )
         if embedding_coords:
@@ -170,7 +167,7 @@ def convert_xarray_annotation_to_anndata(
                 [embeddings_ds.coords[coord] for coord in embedding_coords]
             )
 
-    # X, "expression" matrix
+    # X, "expression" matrix (NN embedding features)
     X = embeddings_ds["features"].data
 
     adata = ad.AnnData(X=X, obs=tracking_df, obsm=obsm)
