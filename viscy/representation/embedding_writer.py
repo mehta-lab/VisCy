@@ -19,21 +19,28 @@ from viscy.representation.evaluation.dimensionality_reduction import (
     compute_phate,
 )
 
-__all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset", "get_available_index_columns"]
+__all__ = [
+    "read_embedding_dataset",
+    "EmbeddingWriter",
+    "write_embedding_dataset",
+    "get_available_index_columns",
+]
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def get_available_index_columns(dataset: Dataset, dataset_path: str | None = None) -> list[str]:
+def get_available_index_columns(
+    dataset: Dataset, dataset_path: str | None = None
+) -> list[str]:
     """
     Get available index columns from a dataset with logging for missing columns.
-    
+
     Parameters
     ----------
     dataset : Dataset
         The xarray dataset to check for index columns.
     dataset_path : str, optional
         Path to the dataset for logging purposes. If None, uses generic message.
-        
+
     Returns
     -------
     list[str]
@@ -41,14 +48,14 @@ def get_available_index_columns(dataset: Dataset, dataset_path: str | None = Non
     """
     available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
     missing_cols = set(INDEX_COLUMNS) - set(available_cols)
-    
+
     if missing_cols:
         path_msg = f" at {dataset_path}" if dataset_path else ""
         _logger.warning(
             f"Dataset{path_msg} is missing index columns: {sorted(missing_cols)}. "
             "This appears to be a legacy dataset format."
         )
-    
+
     return available_cols
 
 

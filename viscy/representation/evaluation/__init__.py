@@ -55,7 +55,8 @@ def load_annotation(da, path, name, categories: dict | None = None):
 
     # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
     mi = pd.MultiIndex.from_arrays(
-        [da["fov_name"].to_pandas().str.strip("/"), da["id"].values], names=["fov_name", "id"]
+        [da["fov_name"].to_pandas().str.strip("/"), da["id"].values],
+        names=["fov_name", "id"],
     )
 
     # Select the annotations corresponding to the MultiIndex
@@ -93,11 +94,11 @@ def load_annotation_anndata(
     mi = pd.MultiIndex.from_arrays(
         [adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"]
     )
-    
+
     # Use reindex to handle missing annotations gracefully
     # This will return NaN for observations that don't have annotations, then just drop'em
     selected = annotation.reindex(mi)[name].dropna()
-    
+
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
     return selected
@@ -148,9 +149,9 @@ def convert_xarray_annotation_to_anndata(
 
     # Tracking
     available_cols = get_available_index_columns(embeddings_ds)
-    tracking_df = pd.DataFrame({
-        col: embeddings_ds.coords[col].data for col in available_cols
-    })
+    tracking_df = pd.DataFrame(
+        {col: embeddings_ds.coords[col].data for col in available_cols}
+    )
 
     obsm = {}
     # Projections

@@ -193,7 +193,7 @@ def test_convert_xarray_annotation_to_anndata(xr_embeddings_dataset, tmp_path):
     adata_loaded = ad.read_zarr(output_path)
 
     np.testing.assert_allclose(adata_loaded.X, embeddings_ds["features"].values)
-    
+
     # Verify obs columns
     expected_obs_columns = [
         "id",
@@ -259,13 +259,15 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
 
     print(adata.obs)
 
-    A11_annotations_path = tracks_hcs_dataset / "A" / "1" / "1"/ "tracks.csv"
+    A11_annotations_path = tracks_hcs_dataset / "A" / "1" / "1" / "tracks.csv"
 
     A11_annotations_df = pd.read_csv(A11_annotations_path)
-    
+
     rng = np.random.default_rng(42)
     A11_annotations_df["fov_name"] = "A/1/1"
-    A11_annotations_df["infection_state"] = rng.choice([-1, 0, 1], size=len(A11_annotations_df))
+    A11_annotations_df["infection_state"] = rng.choice(
+        [-1, 0, 1], size=len(A11_annotations_df)
+    )
 
     print(A11_annotations_df)
 
@@ -283,4 +285,3 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     # # Only observations from A/1/1 should have non-NaN values
     # assert result.notna().sum() == 2  # Only 2 observations from A/1/1
     # assert result.isna().sum() == len(adata) - 2  # All others should be NaN
-    
