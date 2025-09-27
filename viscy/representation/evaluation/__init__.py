@@ -150,7 +150,12 @@ def convert_xarray_annotation_to_anndata(
     # Tracking
     available_cols = get_available_index_columns(embeddings_ds)
     tracking_df = pd.DataFrame(
-        {col: embeddings_ds.coords[col].data for col in available_cols}
+        {
+            col: embeddings_ds.coords[col].data
+            if col != "fov_name"
+            else embeddings_ds.coords[col].to_pandas().str.strip("/")
+            for col in available_cols
+        }
     )
 
     obsm = {}

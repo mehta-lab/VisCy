@@ -24,12 +24,13 @@ from viscy.representation.evaluation import (
 
 # %%
 # Define paths
-data_path = Path(
-    "/hpc/mydata/sricharan.varra/repos/VisCy/data/2024_11_21_A549_TOMM20_DENV/"
+embeddings_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/1-predictions/phase_160patch_104ckpt_ver3max.zarr"
 )
-annotations_path = data_path / "annotations" / "track_infection_annotation.csv"
-embeddings_path = data_path / "embeddings" / "phase_160patch_104ckpt_ver3max.zarr"
-output_path = data_path / "track_data_anndata.zarr"
+annotations_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/0-annotations/track_infection_annotation.csv"
+)
+output_path = Path("../output/track_data_anndata.zarr")
 
 # %%
 # Load embeddings
@@ -43,6 +44,7 @@ adata = convert_xarray_annotation_to_anndata(
     overwrite=True,
     return_anndata=True,
 )
+print(adata)
 
 # %%
 # Load annotations
@@ -54,14 +56,14 @@ adata_annotated = load_annotation_anndata(
 
 # %%
 # Show results
-print(adata_annotated.obs)
+print(adata_annotated)
 
 # %%
 # Simple Accessing and Plotting (matplotlib)
 # Plot the first two PCs colored by fov_name
 
 sns.scatterplot(
-    data=pd.DataFrame(adata.obsm["X_pca"], index=adata.obs_names).join(adata.obs),
+    data=pd.DataFrame(adata.obsm["X_phate"], index=adata.obs_names).join(adata.obs),
     x=0,
     y=1,
     hue="fov_name",
