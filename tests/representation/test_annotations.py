@@ -122,9 +122,7 @@ def anndata_embeddings(
     # Load the xarray dataset
     embeddings_ds = xr.open_zarr(xr_embeddings_dataset)
 
-    # Manually convert to AnnData format (mimicking convert_xarray_annotation_to_anndata)
     # Extract features as X matrix
-    n_obs = 10
     n_samples = len(embeddings_ds.coords["sample"])
 
     X = rng.normal(size=(n_samples, 32)).astype(np.float32)
@@ -257,8 +255,6 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     # Load the AnnData object
     adata = ad.read_zarr(anndata_embeddings)
 
-    print(adata.obs)
-
     A11_annotations_path = tracks_hcs_dataset / "A" / "1" / "1" / "tracks.csv"
 
     A11_annotations_df = pd.read_csv(A11_annotations_path)
@@ -269,8 +265,6 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
         [-1, 0, 1], size=len(A11_annotations_df)
     )
 
-    print(A11_annotations_df)
-
     # Save the modified annotations to a new CSV file
     annotations_path = tmp_path / "test_annotations.csv"
     A11_annotations_df.to_csv(annotations_path, index=False)
@@ -278,10 +272,12 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     # Test the function with the new CSV file
     result = load_annotation_anndata(adata, str(annotations_path), "infection_state")
 
-    print("asdf", result)
+    assert len(result) == 2  # Only 2 observations from A/1/1 have annotations
 
-    # Verify the result
-    # assert len(result) == len()
-    # # Only observations from A/1/1 should have non-NaN values
-    # assert result.notna().sum() == 2  # Only 2 observations from A/1/1
-    # assert result.isna().sum() == len(adata) - 2  # All others should be NaN
+    expected_values = A11_annotations_df["infection_state"].values
+    actual_values = result.values
+    np.testing.assert_array_equal(actual_values, expected_values)
+
+    # Verify the index structure
+    assert result.index.names == ["fov_name", "id"]
+    assert all(result.index.get_level_values("fov_name") == "A/1/1")

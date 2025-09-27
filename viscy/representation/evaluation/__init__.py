@@ -59,8 +59,8 @@ def load_annotation(da, path, name, categories: dict | None = None):
         names=["fov_name", "id"],
     )
 
-    # Select the annotations corresponding to the MultiIndex
-    selected = annotation.loc[mi][name]
+    # This will return NaN for observations that don't have annotations, then just drop'em
+    selected = annotation.reindex(mi)[name].dropna()
 
     # If categories are provided, rename the categories in the selected annotations
     if categories:
