@@ -60,7 +60,7 @@ print(adata_annotated)
 
 # %%
 # Simple Accessing and Plotting (matplotlib)
-# Plot the first two PCs colored by fov_name
+# Plot the first two Phate embeddings colored by fov_name
 
 sns.scatterplot(
     data=pd.DataFrame(adata.obsm["X_phate"], index=adata.obs_names).join(adata.obs),
@@ -72,6 +72,6 @@ sns.scatterplot(
 
 # %%
 # Simple Plotting with scanpy if you have it installed.
-# Plot the first two PCs colored by fov_name
+# Plot the first two Phate embeddings colored by fov_name
 
-# sc.pl.pca(adata, color="fov_name")
+# sc.pl.embedding(basis="phate", adata=adata, color="fov_name")
