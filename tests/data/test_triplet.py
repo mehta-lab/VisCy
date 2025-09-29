@@ -45,7 +45,7 @@ def test_datamodule_setup_fit(
     assert len(dm.train_dataset) == len_train
     assert len(dm.val_dataset) == len_val
     all_tracks = pd.concat([dm.train_dataset.tracks, dm.val_dataset.tracks])
-    filtered_fov_names = all_tracks["fov_name"].str[1:].unique()
+    filtered_fov_names = all_tracks["fov_name"].unique()
     for fov_name in filtered_fov_names:
         well_name, _ = fov_name.rsplit("/", 1)
         if include_wells is not None:
