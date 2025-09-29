@@ -2,11 +2,13 @@ import logging
 from pathlib import Path
 from typing import Literal, Tuple
 
+import anndata as ad
 import numpy as np
 import pandas as pd
-import xarray as xr
 from numpy.typing import ArrayLike
 from scipy.spatial.distance import cdist
+from sklearn.decomposition import PCA
+from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 from typing_extensions import TypedDict
 
@@ -32,17 +34,19 @@ class DtwSample(TypedDict, total=False):
 
 
 class CytoDtw:
-    def __init__(self, embeddings: xr.Dataset, annotations_df: pd.DataFrame):
+    def __init__(self, adata: ad.AnnData):
         """
         DTW for Dynamic Cell Embeddings
 
         Parameters
         ----------
-        embeddings  : xr.Dataset
-            Embedding dataset (zarr file)
+        adata : ad.AnnData
+            AnnData object containing:
+            - X: features/embeddings
+            - obs: tracking info (fov_name, track_id, t, x, y, etc.) and annotations
+            - obsm: multi-dimensional embeddings (X_PCA, X_UMAP, etc.)
         """
-        self.embeddings = embeddings
-        self.annotations_df = annotations_df
+        self.adata = adata
         self.lineages = None
         self.consensus_data = None
         self.reference_patterns = None
@@ -74,14 +78,14 @@ class CytoDtw:
     ) -> list[tuple[str, list[int]]]:
         """Auto-identify lineages from the data."""
         # Use parent_track_id if available for proper lineage identification
-        if "parent_track_id" in self.annotations_df.columns:
+        if "parent_track_id" in self.adata.obs.columns:
             all_lineages = identify_lineages(
-                self.annotations_df, return_both_branches=False
+                self.adata.obs, return_both_branches=False
             )
         else:
             # Fallback: treat each track as individual lineage
             all_lineages = []
-            for (fov, track_id), group in self.annotations_df.groupby(
+            for (fov, track_id), group in self.adata.obs.groupby(
                 ["fov_name", "track_id"]
             ):
                 all_lineages.append((fov, [track_id]))
@@ -89,9 +93,9 @@ class CytoDtw:
         # Filter lineages by total timepoints across all tracks in lineage
         filtered_lineages = []
         for fov_id, track_ids in all_lineages:
-            lineage_rows = self.annotations_df[
-                (self.annotations_df["fov_name"] == fov_id)
-                & (self.annotations_df["track_id"].isin(track_ids))
+            lineage_rows = self.adata.obs[
+                (self.adata.obs["fov_name"] == fov_id)
+                & (self.adata.obs["track_id"].isin(track_ids))
             ]
             total_timepoints = len(lineage_rows)
             if total_timepoints >= min_timepoints:
@@ -118,7 +122,7 @@ class CytoDtw:
         timepoints : tuple[int, int]
             Start and end timepoints (start, end)
         reference_type : str
-            Type of embedding to use for reference pattern
+            Type of embedding to use ('features' for X, or obsm key like 'X_PCA')
         Returns
         -------
         np.ndarray
@@ -129,9 +133,19 @@ class CytoDtw:
 
         reference_embeddings = []
         for tid in track_id:
-            track_emb = self.embeddings.sel(sample=(fov_name, tid))[
-                reference_type
-            ].values
+            # Filter by fov_name and track_id
+            mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == tid)
+            track_data = self.adata[mask]
+            
+            # Sort by timepoint to ensure correct order
+            time_order = np.argsort(track_data.obs['t'].values)
+            track_data = track_data[time_order]
+            
+            if reference_type == "features":
+                track_emb = track_data.X
+            else:
+                # Assume it's an obsm key
+                track_emb = track_data.obsm[reference_type]
 
             # Handle 1D arrays (PC components) by reshaping to (time, 1)
             if track_emb.ndim == 1:
@@ -201,7 +215,7 @@ class CytoDtw:
         return find_pattern_matches(
             reference_pattern=reference_pattern,
             filtered_lineages=lineages,
-            embeddings_dataset=self.embeddings,
+            adata=self.adata,
             window_step=window_step,
             num_candidates=num_candidates,
             max_distance=max_distance,
@@ -296,6 +310,253 @@ class CytoDtw:
         )
         return self.consensus_data
 
+    def create_enhanced_alignment_dataframe(
+        self,
+        top_matches: pd.DataFrame,
+        consensus_lineage: np.ndarray,
+        alignment_name: str = "cell_division",
+        reference_type: str = "features"
+    ) -> pd.DataFrame:
+        """
+        Create enhanced DataFrame that:
+        1. Preserves lineage relationships (lineage_id groups related tracks)
+        2. Supports multiple alignment types (cell_division, apoptosis, migration, etc.)
+        3. Stores computed features once, reused across alignments
+        4. Maintains original timepoint relationships
+
+        Parameters
+        ----------
+        top_matches : pd.DataFrame
+            DTW match results
+        consensus_lineage : np.ndarray
+            Consensus pattern for this alignment
+        alignment_name : str
+            Name for this alignment type (e.g., "cell_division", "apoptosis")
+        reference_type : str
+            Feature type to use
+
+        Returns
+        -------
+        pd.DataFrame
+            Enhanced DataFrame with lineage preservation and extensible alignments
+        """
+        enhanced_data = []
+        track_lineage_mapping = {}  # Map track_id to lineage_id
+
+        # Check what features are available in obsm
+        available_obsm = list(self.adata.obsm.keys())
+        # Detect all PC components dynamically - look for X_PCA or individual PC columns in obs
+        has_pca_obsm = 'X_PCA' in available_obsm
+        pc_components = []
+        
+        if has_pca_obsm:
+            # Use X_PCA from obsm
+            n_pca_components = self.adata.obsm['X_PCA'].shape[1]
+            pc_components = [f'PC{i+1}' for i in range(n_pca_components)]
+        else:
+            # Look for individual PC columns in obs
+            pc_components = [col for col in self.adata.obs.columns if col.startswith('PC') and col[2:].isdigit()]
+            pc_components.sort(key=lambda x: int(x[2:]))  # Sort PC1, PC2, PC3, etc.
+        
+        has_pc_components = len(pc_components) > 0
+        
+        # Build lineage mapping
+        lineage_counter = 0
+        for idx, match_row in top_matches.iterrows():
+            fov_name = match_row['fov_name']
+            track_ids = match_row['track_ids']
+
+            # Assign lineage ID (tracks in same match belong to same lineage)
+            lineage_id = lineage_counter
+            lineage_counter += 1
+
+            for track_id in track_ids:
+                track_lineage_mapping[(fov_name, track_id)] = lineage_id
+
+        # If no PC components available, compute PCA
+        pca = None
+        scaler = None
+        consensus_pca = None
+        
+        if not has_pc_components:
+            all_embeddings = []
+            
+            # Collect all embeddings for PCA
+            for idx, match_row in top_matches.iterrows():
+                fov_name = match_row['fov_name']
+                track_ids = match_row['track_ids']
+                
+                for track_id in track_ids:
+                    try:
+                        # Filter by fov_name and track_id
+                        mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == track_id)
+                        track_data = self.adata[mask]
+                        
+                        # Sort by timepoint to ensure correct order
+                        time_order = np.argsort(track_data.obs['t'].values)
+                        track_data = track_data[time_order]
+                        
+                        if reference_type == "features":
+                            track_embeddings = track_data.X
+                        else:
+                            track_embeddings = track_data.obsm[reference_type]
+                        
+                        all_embeddings.append(track_embeddings)
+                    except KeyError:
+                        continue
+
+            # Include consensus in PCA fit
+            all_embeddings.append(consensus_lineage)
+            all_concat = np.vstack(all_embeddings)
+
+            # Fit PCA for consistent feature computation
+            # Use min of 8 components or number of features available
+            n_components = min(8, all_concat.shape[1])
+            scaler = StandardScaler()
+            scaled_all = scaler.fit_transform(all_concat)
+            pca = PCA(n_components=n_components)
+            pca_all = pca.fit_transform(scaled_all)
+            
+            # Get consensus PCA
+            consensus_pca = pca_all[-len(consensus_lineage):]
+
+        # Process each matched track to create DataFrame rows
+        pca_start_idx = 0
+
+        for idx, match_row in top_matches.iterrows():
+            fov_name = match_row['fov_name']
+            track_ids = match_row['track_ids']
+            warp_path = match_row['warp_path']
+            dtw_distance = match_row.get('distance', np.nan)
+
+            # Create mapping from query timepoint to consensus timepoint
+            query_to_consensus = {}
+            for consensus_idx, query_timepoint in warp_path:
+                query_to_consensus[query_timepoint] = consensus_idx
+
+            # Process each track in this lineage
+            for track_id in track_ids:
+                try:
+                    # Filter by fov_name and track_id
+                    mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == track_id)
+                    track_data = self.adata[mask]
+                    
+                    # Sort by timepoint to ensure correct order
+                    time_order = np.argsort(track_data.obs['t'].values)
+                    track_data = track_data[time_order]
+                    
+                    track_timepoints = track_data.obs['t'].values
+
+                    # Get PC features - either from obsm/obs or computed PCA
+                    pc_values = {}
+                    if has_pc_components:
+                        if has_pca_obsm:
+                            # Extract from X_PCA obsm
+                            pca_data = track_data.obsm['X_PCA']
+                            for i, pc_name in enumerate(pc_components):
+                                pc_values[pc_name] = pca_data[:, i]
+                        else:
+                            # Extract from individual PC columns in obs
+                            for pc_name in pc_components:
+                                pc_values[pc_name] = track_data.obs[pc_name].values
+                    else:
+                        # Use computed PCA
+                        if reference_type == "features":
+                            track_embeddings = track_data.X
+                        else:
+                            track_embeddings = track_data.obsm[reference_type]
+                        scaled_embeddings = scaler.transform(track_embeddings)
+                        track_pca = pca.transform(scaled_embeddings)
+                        # Create PC values for all computed components
+                        for i in range(n_components):
+                            pc_name = f'PC{i+1}'
+                            pc_values[pc_name] = track_pca[:, i]
+
+                    # Get lineage ID for this track
+                    lineage_id = track_lineage_mapping.get((fov_name, track_id), -1)
+
+                    # Create row for each timepoint
+                    for i, t in enumerate(track_timepoints):
+                        # Get spatial coordinates from track_data.obs (which is already filtered)
+                        obs_row = track_data.obs.iloc[i]
+                        x_coord = obs_row.get('x', np.nan)
+                        y_coord = obs_row.get('y', np.nan)
+
+                        # Determine alignment status for this specific alignment type
+                        is_aligned = t in query_to_consensus
+                        consensus_mapping = query_to_consensus.get(t, np.nan)
+
+                        # Create dynamic column names based on alignment_name
+                        row_data = {
+                            # Core tracking info (preserves lineage relationships)
+                            'fov_name': fov_name,
+                            'lineage_id': lineage_id,
+                            'track_id': track_id,
+                            't': t,
+                            'x': x_coord,
+                            'y': y_coord,
+
+                            # Alignment-specific columns (dynamic based on alignment_name)
+                            f'dtw_{alignment_name}_consensus_mapping': consensus_mapping,
+                            f'dtw_{alignment_name}_aligned': is_aligned,
+                            f'dtw_{alignment_name}_distance': dtw_distance,
+                            f'dtw_{alignment_name}_match_rank': idx,
+
+                            # Placeholders for image-based features (to be computed later)
+                            'mean_intensity': np.nan,
+                            'cell_area': np.nan,
+                            'cell_perimeter': np.nan,
+                            'cell_eccentricity': np.nan,
+                        }
+                        
+                        # Add all PC components dynamically
+                        for pc_name, pc_vals in pc_values.items():
+                            row_data[pc_name] = pc_vals[i]
+                        enhanced_data.append(row_data)
+
+                except KeyError as e:
+                    _logger.warning(f"Could not find track {track_id} in FOV {fov_name}: {e}")
+                    continue
+
+        # Add consensus pattern as reference (special lineage_id = -1)
+        consensus_pc_values = {}
+        if has_pc_components:
+            # If PC components exist, we'd need the consensus to have them too
+            # For now, set to NaN - this might need adjustment based on how consensus is created
+            for pc_name in pc_components:
+                consensus_pc_values[pc_name] = [np.nan] * len(consensus_lineage)
+        else:
+            # Use computed PCA for consensus
+            for i in range(n_components):
+                pc_name = f'PC{i+1}'
+                consensus_pc_values[pc_name] = consensus_pca[:, i]
+
+        for i in range(len(consensus_lineage)):
+            consensus_row = {
+                'fov_name': 'consensus',
+                'lineage_id': -1,  # Special lineage for consensus
+                'track_id': -1,
+                't': i,
+                'x': np.nan,
+                'y': np.nan,
+                f'dtw_{alignment_name}_consensus_mapping': i,  # Maps to itself
+                f'dtw_{alignment_name}_aligned': True,
+                f'dtw_{alignment_name}_distance': 0.0,
+                f'dtw_{alignment_name}_match_rank': -1,
+                'mean_intensity': np.nan,
+                'cell_area': np.nan,
+                'cell_perimeter': np.nan,
+                'cell_eccentricity': np.nan,
+            }
+            
+            # Add all PC components dynamically for consensus
+            for pc_name, pc_vals in consensus_pc_values.items():
+                consensus_row[pc_name] = pc_vals[i]
+                
+            enhanced_data.append(consensus_row)
+
+        return pd.DataFrame(enhanced_data)
+
 
 def identify_lineages(
     tracking_df: pd.DataFrame, return_both_branches: bool = False
@@ -373,7 +634,7 @@ def identify_lineages(
 def find_pattern_matches(
     reference_pattern: np.ndarray,
     filtered_lineages: list[tuple[str, list[int]]],
-    embeddings_dataset: xr.Dataset,
+    adata: ad.AnnData,
     window_step: int = 5,
     num_candidates: int = 3,
     max_distance: float = float("inf"),
@@ -383,7 +644,7 @@ def find_pattern_matches(
     normalize: bool = True,
     metric: str = "euclidean",
     reference_type: Literal[
-        "features", "projections", "PC1", "PC2", "PC3"
+        "features", "X_PCA", "X_UMAP", "X_PHATE"
     ] = "features",
     constraint_type: str = "unconstrained",
     band_width_ratio: float = 0.0,
@@ -438,9 +699,21 @@ def find_pattern_matches(
         lineages = []
         t_values = []
         for track_id in track_ids:
-            track_data = embeddings_dataset.sel(sample=(fov_name, track_id))
-            track_embeddings = track_data[reference_type].values
-            track_t = track_data['t'].values
+            # Filter by fov_name and track_id
+            mask = (adata.obs['fov_name'] == fov_name) & (adata.obs['track_id'] == track_id)
+            track_data = adata[mask]
+            
+            # Sort by timepoint to ensure correct order
+            time_order = np.argsort(track_data.obs['t'].values)
+            track_data = track_data[time_order]
+            
+            if reference_type == "features":
+                track_embeddings = track_data.X
+            else:
+                # Assume it's an obsm key
+                track_embeddings = track_data.obsm[reference_type]
+            
+            track_t = track_data.obs['t'].values
 
             # Handle 1D arrays (PC components) by reshaping to (time, 1)
             if track_embeddings.ndim == 1:
@@ -843,10 +1116,8 @@ def dtw_with_matrix(
 
     warping_path.reverse()
 
-    # Get DTW distance
     dtw_distance = warping_matrix[n - 1, m - 1]
 
-    # Normalize by path length if requested
     if normalize:
         dtw_distance = dtw_distance / len(warping_path)
 
@@ -876,18 +1147,14 @@ def path_skew(warping_path: list, ref_len: int, query_len: int) -> float:
     diagonal_y = np.linspace(0, query_len - 1, len(warping_path))
     diagonal_path = np.column_stack((diagonal_x, diagonal_y))
 
-    # Calculate distances from points on the warping path to the diagonal
     max_distance = max(ref_len, query_len)
 
     distances = []
     for i, (x, y) in enumerate(warping_path):
-        # Find the closest point on the diagonal
         dx, dy = diagonal_path[i]
-        # Euclidean distance
         dist = np.sqrt((x - dx) ** 2 + (y - dy) ** 2)
         distances.append(dist)
 
-    # Average normalized distance as skewness metric
     skew = np.mean(distances) / max_distance
 
     return skew
