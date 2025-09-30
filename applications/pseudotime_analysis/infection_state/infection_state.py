@@ -221,7 +221,7 @@ for i, (pattern, info) in enumerate(zip(patterns, pattern_info)):
         
         annotations = info['annotations']
         for t, annotation in enumerate(annotations):
-            if annotation == 'infected':
+            if annotation == 'mitosis':
                 ax.axvline(t, color='orange', alpha=0.7, linestyle='--', linewidth=2)
                 ax.scatter(t, pc_pattern[t, pc_idx], c='orange', s=50, zorder=5)
         
@@ -370,6 +370,16 @@ enhanced_df = cytodtw.create_enhanced_alignment_dataframe(top_matches, consensus
 logger.info(f"Enhanced DataFrame created with {len(enhanced_df)} rows")
 logger.info(f"Lineages: {enhanced_df['lineage_id'].nunique()} (including consensus)")
 logger.info(f"Cell division aligned timepoints: {enhanced_df['dtw_cell_division_aligned'].sum()}/{len(enhanced_df)} ({100*enhanced_df['dtw_cell_division_aligned'].mean():.1f}%)")
+
+# Check for duplicate (fov_name, track_id, t) combinations
+duplicates = enhanced_df[enhanced_df.duplicated(subset=['fov_name', 'track_id', 't'], keep=False)]
+if len(duplicates) > 0:
+    logger.warning(f"Found {len(duplicates)} duplicate (fov_name, track_id, t) combinations!")
+    logger.warning("Sample duplicates:")
+    print(duplicates[['fov_name', 'track_id', 't', 'lineage_id', 'x', 'y']].head(10))
+else:
+    logger.info("✓ All (fov_name, track_id, t) combinations are unique")
+
 # PCA plotting and alignment visualization is now handled by the enhanced alignment dataframe method
 logger.info("Cell division consensus analysis completed successfully!")
 print(f"Enhanced DataFrame columns: {enhanced_df.columns.tolist()}")
@@ -638,8 +648,15 @@ def plot_concatenated_from_dataframe(df, alignment_name="cell_division",
             
         # Split into aligned and unaligned portions
         aligned_rows = lineage_df[lineage_df[aligned_col]].copy()
-        unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
-        
+
+        # Get max timepoint from aligned portion to filter unaligned continuation
+        if not aligned_rows.empty:
+            max_aligned_t = aligned_rows['t'].max()
+            # Only include unaligned timepoints that come AFTER the aligned portion
+            unaligned_rows = lineage_df[(~lineage_df[aligned_col]) & (lineage_df['t'] > max_aligned_t)].copy()
+        else:
+            unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
+
         # Create consensus-length aligned portion using mapping information
         aligned_portion = {}  # consensus_idx -> feature_values
         
@@ -695,12 +712,17 @@ def plot_concatenated_from_dataframe(df, alignment_name="cell_division",
             else:
                 concatenated_arrays[col] = aligned_arrays[col]
         
-        # Store concatenated data
+        # Store concatenated data with fov_name and track_id
+        fov_name = lineage_df['fov_name'].iloc[0]
+        track_ids = lineage_df['track_id'].unique()
+
         concatenated_lineages[lineage_id] = {
             'concatenated': concatenated_arrays,
             'aligned_length': len(aligned_arrays[feature_columns[0]]),
             'unaligned_length': len(unaligned_arrays[feature_columns[0]]),
-            'dtw_distance': lineage_df[distance_col].iloc[0] if not pd.isna(lineage_df[distance_col].iloc[0]) else np.nan
+            'dtw_distance': lineage_df[distance_col].iloc[0] if not pd.isna(lineage_df[distance_col].iloc[0]) else np.nan,
+            'fov_name': fov_name,
+            'track_ids': track_ids
         }
     
     # Plotting
@@ -742,9 +764,11 @@ def plot_concatenated_from_dataframe(df, alignment_name="cell_division",
             time_axis = np.arange(len(concat_values))
             
             # Plot full concatenated sequence
-            ax.plot(time_axis, concat_values, '.-', 
+            # Format track_ids for display
+            track_id_str = ','.join(map(str, data['track_ids']))
+            ax.plot(time_axis, concat_values, '.-',
                    color=color, linewidth=unaligned_linewidth, markersize=unaligned_markersize, alpha=0.8,
-                   label=f'Lineage {lineage_id} (d={data["dtw_distance"]:.3f})')
+                   label=f'{data["fov_name"]}, track={track_id_str} (d={data["dtw_distance"]:.3f})')
             
             # Highlight aligned portion with thicker line
             aligned_length = data['aligned_length']
@@ -873,8 +897,15 @@ def get_concatenated_image_sequences_from_dataframe(dataset, df, alignment_name=
         
         # Split DataFrame into aligned and unaligned portions
         aligned_rows = lineage_df[lineage_df[aligned_col]].copy()
-        unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
-        
+
+        # Get max timepoint from aligned portion to filter unaligned continuation
+        if not aligned_rows.empty:
+            max_aligned_t = aligned_rows['t'].max()
+            # Only include unaligned timepoints that come AFTER the aligned portion
+            unaligned_rows = lineage_df[(~lineage_df[aligned_col]) & (lineage_df['t'] > max_aligned_t)].copy()
+        else:
+            unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
+
         # Create consensus-length aligned portion using mapping information
         aligned_images = [None] * consensus_length
         
@@ -932,10 +963,12 @@ def get_concatenated_image_sequences_from_dataframe(dataset, df, alignment_name=
     return concatenated_sequences
 
 
-#%%
-# Create concatenated image sequences
-     
+#%%     
 # Create concatenated image sequences using the DataFrame alignment information
+# Filter for infection wells only
+
+enhanced_df = enhanced_df[enhanced_df['fov_name'].str.contains('C/2/') | enhanced_df['fov_name'].str.contains('consensus')]
+
 if dataset is not None:
     concatenated_image_sequences = get_concatenated_image_sequences_from_dataframe(
         dataset, enhanced_df, alignment_name="cell_division", max_lineages=30
@@ -999,6 +1032,8 @@ if NAPARI and dataset is not None and len(concatenated_image_sequences) > 0:
                 )
                 logger.info(f"Added {channel_name} channel for lineage {lineage_id} with shape {channel_data.shape}")
 # %%
+
+#Plot the features on the aligned dataframe
 computed_features_path='/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/1-predictions/quantify_remodeling/feature_list_TOMM20_DENV.csv'
 computed_features_df=pd.read_csv(computed_features_path)
 
@@ -1013,15 +1048,8 @@ alignment_and_cf_df= enhanced_df.merge(
     on=['fov_name','track_id','t','x','y'],
     how='left',
 )
-# Filter by infection wells
-# FIXME no need to have the consensus for plotting
-# FIXME update the legend to show the fov_name and track_id
-# FIXME remove the y displacement from the plotting.
-alignment_and_cf_df=alignment_and_cf_df[alignment_and_cf_df['fov_name'].str.contains('B/3/') | alignment_and_cf_df['fov_name'].str.contains('consensus')]
-
 #%%
 plot_concatenated_from_dataframe(alignment_and_cf_df, alignment_name="cell_division", 
-                                feature_columns=['edge_density','contrast','organelle_volume','energy'], max_lineages=15,
-                                
-                                aligned_scale=0.5, unaligned_scale=0.7)
+                                feature_columns=['PC1','edge_density','contrast','organelle_volume',], max_lineages=15,
+                                aligned_scale=0.5, unaligned_scale=0.7,y_offset_step=0.0)
 # %%
