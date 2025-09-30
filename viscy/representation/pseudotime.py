@@ -529,6 +529,325 @@ class CytoDtw:
 
         return pd.DataFrame(enhanced_data)
 
+    def get_concatenated_sequences(
+        self,
+        df: pd.DataFrame,
+        alignment_name: str = "cell_division",
+        feature_columns: list[str] = None,
+        max_lineages: int = None,
+    ) -> dict:
+        """
+        Extract concatenated [aligned + unaligned] sequences from enhanced DataFrame.
+
+        This is a shared method used by both plotting and image sequence functions.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Enhanced DataFrame with alignment information
+        alignment_name : str
+            Name of alignment type (e.g., "cell_division")
+        feature_columns : list[str], optional
+            Feature columns to extract. If None, extracts PC components only.
+        max_lineages : int, optional
+            Maximum number of lineages to process
+
+        Returns
+        -------
+        dict
+            Dictionary mapping lineage_id to:
+            - 'aligned_data': dict of consensus-length aligned arrays/dicts
+            - 'unaligned_data': dict of continuation arrays/dicts
+            - 'metadata': lineage metadata (fov_name, track_ids, etc.)
+        """
+        aligned_col = f'dtw_{alignment_name}_aligned'
+        mapping_col = f'dtw_{alignment_name}_consensus_mapping'
+        distance_col = f'dtw_{alignment_name}_distance'
+
+        if aligned_col not in df.columns:
+            _logger.error(f"Alignment '{alignment_name}' not found in DataFrame")
+            return {}
+
+        consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
+        lineages = df[df['lineage_id'] != -1]['lineage_id'].unique()
+
+        if max_lineages is not None:
+            lineages = lineages[:max_lineages]
+
+        if consensus_df.empty:
+            _logger.error("No consensus found in DataFrame")
+            return {}
+
+        consensus_length = len(consensus_df)
+        concatenated_sequences = {}
+
+        for lineage_id in lineages:
+            lineage_df = df[df['lineage_id'] == lineage_id].copy().sort_values('t')
+            if lineage_df.empty:
+                continue
+
+            aligned_rows = lineage_df[lineage_df[aligned_col]].copy()
+
+            # Only include unaligned timepoints AFTER the aligned portion
+            if not aligned_rows.empty:
+                max_aligned_t = aligned_rows['t'].max()
+                unaligned_rows = lineage_df[(~lineage_df[aligned_col]) & (lineage_df['t'] > max_aligned_t)].copy()
+            else:
+                unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
+
+            # Create consensus-length aligned portion using mapping
+            aligned_portion = {}
+            for _, row in aligned_rows.iterrows():
+                consensus_idx = row[mapping_col]
+                if not pd.isna(consensus_idx):
+                    consensus_idx = int(consensus_idx)
+                    if 0 <= consensus_idx < consensus_length:
+                        row_dict = {'t': row['t'], 'row': row}
+                        if feature_columns:
+                            row_dict.update({col: row[col] for col in feature_columns})
+                        aligned_portion[consensus_idx] = row_dict
+
+            # Fill gaps in aligned portion
+            filled_aligned = {}
+            if aligned_portion:
+                for i in range(consensus_length):
+                    if i in aligned_portion:
+                        filled_aligned[i] = aligned_portion[i]
+                    else:
+                        available_indices = list(aligned_portion.keys())
+                        if available_indices:
+                            closest_idx = min(available_indices, key=lambda x: abs(x - i))
+                            filled_aligned[i] = aligned_portion[closest_idx]
+                        else:
+                            consensus_row = consensus_df.iloc[i]
+                            row_dict = {'row': consensus_row}
+                            if feature_columns:
+                                row_dict.update({col: consensus_row[col] for col in feature_columns})
+                            filled_aligned[i] = row_dict
+
+            # Convert to arrays/lists for features
+            aligned_data = {'length': consensus_length, 'mapping': filled_aligned}
+            if feature_columns:
+                aligned_data['features'] = {}
+                for col in feature_columns:
+                    aligned_data['features'][col] = np.array([filled_aligned[i][col] for i in range(consensus_length)])
+
+            # Process unaligned portion
+            unaligned_data = {'length': len(unaligned_rows), 'rows': unaligned_rows}
+            if feature_columns and not unaligned_rows.empty:
+                unaligned_rows = unaligned_rows.sort_values('t')
+                unaligned_data['features'] = {}
+                for col in feature_columns:
+                    unaligned_data['features'][col] = unaligned_rows[col].values
+
+            concatenated_sequences[lineage_id] = {
+                'aligned_data': aligned_data,
+                'unaligned_data': unaligned_data,
+                'metadata': {
+                    'fov_name': lineage_df['fov_name'].iloc[0],
+                    'track_ids': list(lineage_df['track_id'].unique()),
+                    'dtw_distance': lineage_df[distance_col].iloc[0] if not pd.isna(lineage_df[distance_col].iloc[0]) else np.nan,
+                    'lineage_id': lineage_id,
+                    'consensus_length': consensus_length,
+                }
+            }
+
+        return concatenated_sequences
+
+    def plot_global_trends(
+        self,
+        df: pd.DataFrame,
+        alignment_name: str = "cell_division",
+        feature_columns: list[str] = None,
+        max_lineages: int = None,
+        plot_type: str = "mean_bands",
+        figsize: tuple = (15, 12),
+        colors: tuple = ("#1f77b4", "#ff7f0e"),
+        cmap: str = "RdBu_r",
+    ):
+        """
+        Plot global trends across all aligned lineages.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Enhanced DataFrame with alignment information
+        alignment_name : str
+            Name of alignment type
+        feature_columns : list[str], optional
+            Feature columns to plot. If None, uses PC1, PC2, PC3
+        max_lineages : int, optional
+            Maximum number of lineages to include
+        plot_type : str
+            Type of plot: "mean_bands", "heatmap", "quantile_bands", or "individual_with_mean"
+        figsize : tuple
+            Figure size
+        colors : tuple
+            Colors for (aligned, unaligned) portions in line plots
+        cmap : str
+            Colormap for heatmap plot
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The created figure
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.patches import Rectangle
+
+        if feature_columns is None:
+            feature_columns = ['PC1', 'PC2', 'PC3']
+
+        # Get concatenated sequences
+        concatenated_seqs = self.get_concatenated_sequences(
+            df=df,
+            alignment_name=alignment_name,
+            feature_columns=feature_columns,
+            max_lineages=max_lineages
+        )
+
+        if not concatenated_seqs:
+            _logger.error("No concatenated sequences found")
+            return None
+
+        # Get consensus for reference
+        consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
+        consensus_length = len(consensus_df)
+
+        n_features = len(feature_columns)
+        fig, axes = plt.subplots(n_features, 1, figsize=figsize)
+        if n_features == 1:
+            axes = [axes]
+
+        for feat_idx, feat_col in enumerate(feature_columns):
+            ax = axes[feat_idx]
+
+            # Collect all aligned and unaligned data
+            all_aligned = []
+            all_unaligned = []
+
+            for lineage_id, seq_data in concatenated_seqs.items():
+                aligned_features = seq_data['aligned_data']['features']
+                unaligned_features = seq_data['unaligned_data'].get('features', {})
+
+                all_aligned.append(aligned_features[feat_col])
+                if feat_col in unaligned_features:
+                    all_unaligned.append(unaligned_features[feat_col])
+
+            # Convert to arrays (aligned: n_lineages x consensus_length)
+            aligned_array = np.array(all_aligned)
+            max_unaligned_len = max([len(u) for u in all_unaligned]) if all_unaligned else 0
+
+            # Pad unaligned arrays to same length
+            if max_unaligned_len > 0:
+                unaligned_array = np.full((len(all_unaligned), max_unaligned_len), np.nan)
+                for i, u in enumerate(all_unaligned):
+                    unaligned_array[i, :len(u)] = u
+            else:
+                unaligned_array = np.array([]).reshape(0, 0)
+
+            if plot_type == "mean_bands":
+                # Plot mean ± SEM
+                aligned_mean = np.nanmean(aligned_array, axis=0)
+                aligned_sem = np.nanstd(aligned_array, axis=0) / np.sqrt(np.sum(~np.isnan(aligned_array), axis=0))
+
+                aligned_time = np.arange(consensus_length)
+                ax.plot(aligned_time, aligned_mean, '-', color=colors[0], linewidth=3, label='Aligned mean', zorder=3)
+                ax.fill_between(aligned_time, aligned_mean - aligned_sem, aligned_mean + aligned_sem,
+                               alpha=0.3, color=colors[0], zorder=2)
+
+                if unaligned_array.size > 0:
+                    unaligned_mean = np.nanmean(unaligned_array, axis=0)
+                    unaligned_sem = np.nanstd(unaligned_array, axis=0) / np.sqrt(np.sum(~np.isnan(unaligned_array), axis=0))
+                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
+
+                    ax.plot(unaligned_time, unaligned_mean, '--', color=colors[1], linewidth=3, label='Unaligned mean', zorder=3)
+                    ax.fill_between(unaligned_time, unaligned_mean - unaligned_sem, unaligned_mean + unaligned_sem,
+                                   alpha=0.3, color=colors[1], zorder=2)
+
+            elif plot_type == "quantile_bands":
+                # Plot median + quartiles
+                aligned_median = np.nanmedian(aligned_array, axis=0)
+                aligned_q25 = np.nanpercentile(aligned_array, 25, axis=0)
+                aligned_q75 = np.nanpercentile(aligned_array, 75, axis=0)
+
+                aligned_time = np.arange(consensus_length)
+                ax.plot(aligned_time, aligned_median, '-', color=colors[0], linewidth=3, label='Aligned median', zorder=3)
+                ax.fill_between(aligned_time, aligned_q25, aligned_q75, alpha=0.3, color=colors[0], zorder=2)
+
+                if unaligned_array.size > 0:
+                    unaligned_median = np.nanmedian(unaligned_array, axis=0)
+                    unaligned_q25 = np.nanpercentile(unaligned_array, 25, axis=0)
+                    unaligned_q75 = np.nanpercentile(unaligned_array, 75, axis=0)
+                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
+
+                    ax.plot(unaligned_time, unaligned_median, '--', color=colors[1], linewidth=3, label='Unaligned median', zorder=3)
+                    ax.fill_between(unaligned_time, unaligned_q25, unaligned_q75, alpha=0.3, color=colors[1], zorder=2)
+
+            elif plot_type == "heatmap":
+                # Stack all data for heatmap
+                full_data = []
+                for i in range(len(all_aligned)):
+                    if i < len(all_unaligned):
+                        full_seq = np.concatenate([all_aligned[i], all_unaligned[i]])
+                    else:
+                        full_seq = all_aligned[i]
+                    full_data.append(full_seq)
+
+                max_len = max([len(s) for s in full_data])
+                heatmap_data = np.full((len(full_data), max_len), np.nan)
+                for i, seq in enumerate(full_data):
+                    heatmap_data[i, :len(seq)] = seq
+
+                im = ax.imshow(heatmap_data, aspect='auto', cmap=cmap, interpolation='nearest')
+                ax.axvline(consensus_length - 0.5, color='black', linewidth=2, linestyle='--', alpha=0.7)
+                plt.colorbar(im, ax=ax, label=feat_col)
+                ax.set_ylabel('Lineage')
+
+            elif plot_type == "individual_with_mean":
+                # Plot all individual traces + mean overlay
+                aligned_time = np.arange(consensus_length)
+                for i in range(len(all_aligned)):
+                    ax.plot(aligned_time, all_aligned[i], '-', color=colors[0], alpha=0.2, linewidth=1, zorder=1)
+
+                if max_unaligned_len > 0:
+                    for i in range(len(all_unaligned)):
+                        unaligned_time = np.arange(consensus_length, consensus_length + len(all_unaligned[i]))
+                        ax.plot(unaligned_time, all_unaligned[i], '--', color=colors[1], alpha=0.2, linewidth=1, zorder=1)
+
+                # Overlay mean
+                aligned_mean = np.nanmean(aligned_array, axis=0)
+                ax.plot(aligned_time, aligned_mean, '-', color='black', linewidth=3, label='Mean', zorder=3)
+
+                if unaligned_array.size > 0:
+                    unaligned_mean = np.nanmean(unaligned_array, axis=0)
+                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
+                    ax.plot(unaligned_time, unaligned_mean, '--', color='black', linewidth=3, zorder=3)
+
+            # Mark alignment boundary
+            if plot_type != "heatmap":
+                ax.axvline(consensus_length, color='gray', alpha=0.5, linestyle=':', linewidth=2)
+                ax.text(consensus_length, ax.get_ylim()[1], ' Alignment end',
+                       rotation=90, verticalalignment='top', fontsize=9, alpha=0.7)
+
+            # Plot consensus reference
+            if plot_type != "heatmap":
+                consensus_values = consensus_df[feat_col].values
+                consensus_time = np.arange(len(consensus_values))
+                ax.plot(consensus_time, consensus_values, 'o-', color='black',
+                       linewidth=2, markersize=6, label=f'Consensus', alpha=0.6, zorder=4)
+
+            ax.set_ylabel(feat_col)
+            if feat_idx == 0:
+                ax.legend(loc='best')
+            if feat_idx == n_features - 1:
+                ax.set_xlabel('Time: [Aligned] | [Unaligned continuation]')
+            ax.set_title(f'{feat_col} - {plot_type} (n={len(concatenated_seqs)} lineages)')
+            ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+
 
 def identify_lineages(
     tracking_df: pd.DataFrame, return_both_branches: bool = False
