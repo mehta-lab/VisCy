@@ -8,7 +8,6 @@ from monai.transforms import (
     MultiSampleTrait,
     RandomizableTransform,
     ScaleIntensityRangePercentiles,
-    Transform,
 )
 from numpy.typing import DTypeLike
 from torch import Tensor
@@ -161,42 +160,6 @@ class StackChannelsd(MapTransform):
         for key, channels in self.channel_map.items():
             results[key] = torch.cat([sample[ch] for ch in channels], dim=0)
         return results
-
-
-class BatchedZoom(Transform):
-    "Batched zoom transform using ``torch.nn.functional.interpolate``."
-
-    def __init__(
-        self,
-        scale_factor: float | tuple[float, float, float],
-        mode: Literal[
-            "nearest",
-            "nearest-exact",
-            "linear",
-            "bilinear",
-            "bicubic",
-            "trilinear",
-            "area",
-        ],
-        align_corners: bool | None = None,
-        recompute_scale_factor: bool | None = None,
-        antialias: bool = False,
-    ) -> None:
-        self.scale_factor = scale_factor
-        self.mode = mode
-        self.align_corners = align_corners
-        self.recompute_scale_factor = recompute_scale_factor
-        self.antialias = antialias
-
-    def __call__(self, sample: Tensor) -> Tensor:
-        return torch.nn.functional.interpolate(
-            sample,
-            scale_factor=self.scale_factor,
-            mode=self.mode,
-            align_corners=self.align_corners,
-            recompute_scale_factor=self.recompute_scale_factor,
-            antialias=self.antialias,
-        )
 
 
 class BatchedScaleIntensityRangePercentiles(ScaleIntensityRangePercentiles):
