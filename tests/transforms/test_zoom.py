@@ -34,3 +34,19 @@ def test_batched_zoomd():
     expected_shape = (batch_size, channels, depth * 2, height * 2, width * 2)
     assert result["image"].shape == expected_shape
     assert result["label"].shape == expected_shape
+
+
+def test_batched_zoom_roundtrip():
+    """Test roundtrip zoom (2x then 0.5x) returns close to original."""
+    batch_size = 4
+    channels = 3
+    depth, height, width = 4, 8, 8
+    data = torch.rand(batch_size, channels, depth, height, width)
+
+    zoom_in = BatchedZoom(scale_factor=2.0, mode="nearest")
+    zoom_out = BatchedZoom(scale_factor=0.5, mode="nearest")
+
+    zoomed_in = zoom_in(data)
+    zoomed_out = zoom_out(zoomed_in)
+
+    assert torch.all(data == zoomed_out)
