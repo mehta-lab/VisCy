@@ -239,15 +239,16 @@ class CytoDtw:
         **kwargs,
     ) -> DtwSample:
         """
-        Create consensus reference pattern from multiple annotated samples.
+        Create consensus reference pattern from annotated samples.
 
-        This method takes multiple manually annotated cell examples and creates a
-        consensus reference pattern by aligning them with DTW and aggregating.
+        This method takes one or more annotated cell examples and creates a
+        consensus reference pattern. For single annotations, uses it directly. For
+        multiple annotations, aligns them with DTW and aggregates.
 
         Parameters
         ----------
         annotated_samples : list[AnnotatedSample]
-            List of annotated examples
+            List of annotated examples (minimum 1 required)
         reference_selection : str
             mode of selection of reference: "median_length", "first", "longest", "shortest"
         aggregation_method : str
@@ -283,7 +284,7 @@ class CytoDtw:
         >>> consensus = analyzer.create_consensus_reference_pattern(examples)
         """
         if not annotated_samples:
-            raise ValueError("No annotated examples provided")
+            raise ValueError("At least one annotated example is required")
 
         # Extract embedding patterns from each example
         extracted_patterns = {}
@@ -1168,10 +1169,10 @@ def create_consensus_from_patterns(
     constraint_type: str = "unconstrained",
     band_width_ratio: float = 0.0,
 ) -> dict:
-    """Create consensus pattern from multiple embedding patterns using DTW alignment.
+    """Create consensus pattern from one or more embedding patterns using DTW alignment.
 
-    This function is compatible with CytoDtw workflow and creates consensus
-    patterns from embedding vectors extracted from different cell examples.
+    For single patterns, uses it directly. For multiple patterns, aligns them with DTW
+    and aggregates.
 
     Parameters
     ----------
@@ -1197,7 +1198,7 @@ def create_consensus_from_patterns(
         - 'metadata': dict - Information about the consensus creation process
     """
     if not patterns:
-        raise ValueError("No patterns provided")
+        raise ValueError("At least one pattern is required")
 
     for pattern_id, pattern_data in patterns.items():
         if "pattern" not in pattern_data:
@@ -1205,6 +1206,30 @@ def create_consensus_from_patterns(
         if not isinstance(pattern_data["pattern"], np.ndarray):
             raise ValueError(f"Pattern '{pattern_id}' must be numpy array")
 
+    # Handle single pattern case - use it directly as consensus
+    if len(patterns) == 1:
+        pattern_id = list(patterns.keys())[0]
+        pattern_data = patterns[pattern_id]
+
+        consensus = DtwSample(
+            pattern=pattern_data["pattern"],
+            annotations=pattern_data.get("annotations"),
+            distance=0.0,
+            skewness=0.0,
+            warping_path=[(i, i) for i in range(len(pattern_data["pattern"]))],
+        )
+
+        consensus["metadata"] = {
+            "reference_pattern": pattern_id,
+            "source_patterns": [pattern_id],
+            "reference_selection": "single_pattern",
+            "aggregation_method": "none",
+            "n_patterns": 1,
+        }
+
+        return consensus
+
+    # Multiple patterns - perform DTW alignment and aggregation
     reference_id = _select_reference_pattern(patterns, reference_selection)
     reference_pattern = patterns[reference_id]["pattern"]
 
