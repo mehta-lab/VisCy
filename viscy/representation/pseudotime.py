@@ -342,39 +342,32 @@ class CytoDtw:
             Enhanced DataFrame with lineage preservation and extensible alignments
         """
         enhanced_data = []
-        track_lineage_mapping = {}  # Map track_id to lineage_id
+        track_lineage_mapping = {} 
 
-        # Check what features are available in obsm
         available_obsm = list(self.adata.obsm.keys())
-        # Detect all PC components dynamically - look for X_PCA or individual PC columns in obs
         has_pca_obsm = 'X_PCA' in available_obsm
         pc_components = []
         
         if has_pca_obsm:
-            # Use X_PCA from obsm
             n_pca_components = self.adata.obsm['X_PCA'].shape[1]
             pc_components = [f'PC{i+1}' for i in range(n_pca_components)]
         else:
-            # Look for individual PC columns in obs
             pc_components = [col for col in self.adata.obs.columns if col.startswith('PC') and col[2:].isdigit()]
             pc_components.sort(key=lambda x: int(x[2:]))  # Sort PC1, PC2, PC3, etc.
         
         has_pc_components = len(pc_components) > 0
         
-        # Build lineage mapping
         lineage_counter = 0
         for idx, match_row in top_matches.iterrows():
             fov_name = match_row['fov_name']
             track_ids = match_row['track_ids']
 
-            # Assign lineage ID (tracks in same match belong to same lineage)
             lineage_id = lineage_counter
             lineage_counter += 1
 
             for track_id in track_ids:
                 track_lineage_mapping[(fov_name, track_id)] = lineage_id
 
-        # If no PC components available, compute PCA
         pca = None
         scaler = None
         consensus_pca = None
@@ -382,18 +375,15 @@ class CytoDtw:
         if not has_pc_components:
             all_embeddings = []
             
-            # Collect all embeddings for PCA
             for idx, match_row in top_matches.iterrows():
                 fov_name = match_row['fov_name']
                 track_ids = match_row['track_ids']
                 
                 for track_id in track_ids:
                     try:
-                        # Filter by fov_name and track_id
                         mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == track_id)
                         track_data = self.adata[mask]
                         
-                        # Sort by timepoint to ensure correct order
                         time_order = np.argsort(track_data.obs['t'].values)
                         track_data = track_data[time_order]
                         
@@ -405,24 +395,15 @@ class CytoDtw:
                         all_embeddings.append(track_embeddings)
                     except KeyError:
                         continue
-
-            # Include consensus in PCA fit
             all_embeddings.append(consensus_lineage)
             all_concat = np.vstack(all_embeddings)
-
-            # Fit PCA for consistent feature computation
-            # Use min of 8 components or number of features available
             n_components = min(8, all_concat.shape[1])
             scaler = StandardScaler()
             scaled_all = scaler.fit_transform(all_concat)
             pca = PCA(n_components=n_components)
             pca_all = pca.fit_transform(scaled_all)
             
-            # Get consensus PCA
             consensus_pca = pca_all[-len(consensus_lineage):]
-
-        # Process each matched track to create DataFrame rows
-        pca_start_idx = 0
 
         for idx, match_row in top_matches.iterrows():
             fov_name = match_row['fov_name']
@@ -501,13 +482,7 @@ class CytoDtw:
                             f'dtw_{alignment_name}_consensus_mapping': consensus_mapping,
                             f'dtw_{alignment_name}_aligned': is_aligned,
                             f'dtw_{alignment_name}_distance': dtw_distance,
-                            f'dtw_{alignment_name}_match_rank': idx,
-
-                            # Placeholders for image-based features (to be computed later)
-                            'mean_intensity': np.nan,
-                            'cell_area': np.nan,
-                            'cell_perimeter': np.nan,
-                            'cell_eccentricity': np.nan,
+                            f'dtw_{alignment_name}_match_rank': idx
                         }
                         
                         # Add all PC components dynamically
@@ -519,15 +494,12 @@ class CytoDtw:
                     _logger.warning(f"Could not find track {track_id} in FOV {fov_name}: {e}")
                     continue
 
-        # Add consensus pattern as reference (special lineage_id = -1)
         consensus_pc_values = {}
         if has_pc_components:
-            # If PC components exist, we'd need the consensus to have them too
-            # For now, set to NaN - this might need adjustment based on how consensus is created
+
             for pc_name in pc_components:
                 consensus_pc_values[pc_name] = [np.nan] * len(consensus_lineage)
         else:
-            # Use computed PCA for consensus
             for i in range(n_components):
                 pc_name = f'PC{i+1}'
                 consensus_pc_values[pc_name] = consensus_pca[:, i]
@@ -535,7 +507,7 @@ class CytoDtw:
         for i in range(len(consensus_lineage)):
             consensus_row = {
                 'fov_name': 'consensus',
-                'lineage_id': -1,  # Special lineage for consensus
+                'lineage_id': -1,
                 'track_id': -1,
                 't': i,
                 'x': np.nan,
@@ -550,7 +522,6 @@ class CytoDtw:
                 'cell_eccentricity': np.nan,
             }
             
-            # Add all PC components dynamically for consensus
             for pc_name, pc_vals in consensus_pc_values.items():
                 consensus_row[pc_name] = pc_vals[i]
                 
@@ -578,7 +549,6 @@ def identify_lineages(
     """
     all_lineages = []
 
-    # Group by FOV to handle repeated track_ids across FOVs
     for fov_id, fov_df in tracking_df.groupby("fov_name"):
         # Create parent-child mapping
         child_to_parent = {}
