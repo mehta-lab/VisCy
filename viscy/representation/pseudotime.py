@@ -73,6 +73,96 @@ class CytoDtw:
         """Get identified lineages with specified minimum timepoints."""
         return self._identify_lineages(min_timepoints)
 
+    def get_track_statistics(self, lineages: list[tuple[str, list[int]]] = None, min_timepoints: int = 15, per_fov: bool = False) -> pd.DataFrame:
+        """Get statistics for tracks/lineages.
+
+        Parameters
+        ----------
+        lineages : list[tuple[str, list[int]]], optional
+            List of (fov_name, track_ids) to analyze. If None, uses all lineages.
+        min_timepoints : int
+            Minimum timepoints required for lineage identification if lineages is None
+        per_fov : bool
+            If True, return aggregated statistics per FOV. If False, return per-lineage statistics.
+
+        Returns
+        -------
+        pd.DataFrame
+            If per_fov=False: DataFrame with per-lineage statistics:
+            - fov_name: FOV identifier
+            - track_ids: List of track IDs in lineage
+            - n_tracks: Number of tracks in lineage
+            - total_timepoints: Total timepoints across all tracks
+            - mean_timepoints_per_track: Average timepoints per track
+            - std_timepoints_per_track: Standard deviation of timepoints per track
+            - min_t: Earliest timepoint
+            - max_t: Latest timepoint
+
+            If per_fov=True: DataFrame with aggregated per-FOV statistics:
+            - fov_name: FOV identifier
+            - n_lineages: Number of lineages in FOV
+            - total_tracks: Total number of tracks across all lineages
+            - mean_tracks_per_lineage: Average tracks per lineage
+            - std_tracks_per_lineage: Standard deviation of tracks per lineage
+            - mean_total_timepoints: Average total timepoints per lineage
+            - std_total_timepoints: Standard deviation of total timepoints
+            - mean_timepoints_per_track: Average timepoints per track across all tracks
+            - std_timepoints_per_track: Standard deviation across all tracks
+        """
+        if lineages is None:
+            lineages = self.get_lineages(min_timepoints)
+
+        stats_list = []
+        for fov_name, track_ids in lineages:
+            lineage_rows = self.adata.obs[
+                (self.adata.obs["fov_name"] == fov_name)
+                & (self.adata.obs["track_id"].isin(track_ids))
+            ]
+
+            total_timepoints = len(lineage_rows)
+            timepoints_per_track = []
+
+            for track_id in track_ids:
+                track_rows = lineage_rows[lineage_rows["track_id"] == track_id]
+                timepoints_per_track.append(len(track_rows))
+
+            stats_list.append({
+                "fov_name": fov_name,
+                "track_ids": track_ids,
+                "n_tracks": len(track_ids),
+                "total_timepoints": total_timepoints,
+                "mean_timepoints_per_track": np.mean(timepoints_per_track),
+                "std_timepoints_per_track": np.std(timepoints_per_track),
+                "timepoints_per_track": timepoints_per_track,
+                "min_t": lineage_rows["t"].min(),
+                "max_t": lineage_rows["t"].max(),
+            })
+
+        df = pd.DataFrame(stats_list)
+
+        if not per_fov:
+            return df.drop(columns=['timepoints_per_track'])
+
+        # Aggregate by FOV
+        fov_stats = []
+        for fov_name in df['fov_name'].unique():
+            fov_df = df[df['fov_name'] == fov_name]
+            all_timepoints = [tp for tps in fov_df['timepoints_per_track'] for tp in tps]
+
+            fov_stats.append({
+                'fov_name': fov_name,
+                'n_lineages': len(fov_df),
+                'total_tracks': fov_df['n_tracks'].sum(),
+                'mean_tracks_per_lineage': fov_df['n_tracks'].mean(),
+                'std_tracks_per_lineage': fov_df['n_tracks'].std(),
+                'mean_total_timepoints': fov_df['total_timepoints'].mean(),
+                'std_total_timepoints': fov_df['total_timepoints'].std(),
+                'mean_timepoints_per_track': np.mean(all_timepoints),
+                'std_timepoints_per_track': np.std(all_timepoints),
+            })
+
+        return pd.DataFrame(fov_stats)
+
     def _identify_lineages(
         self, min_timepoints: int = 15
     ) -> list[tuple[str, list[int]]]:
