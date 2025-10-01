@@ -10,6 +10,7 @@ from xarray import Dataset
 
 def compute_phate(
     embedding_dataset,
+    scale_embeddings: bool = False,
     n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
@@ -59,11 +60,18 @@ def compute_phate(
         else embedding_dataset
     )
 
+    if scale_embeddings:
+        scaler = StandardScaler()
+        embeddings_scaled = scaler.fit_transform(embeddings)
+    else:
+        embeddings_scaled = embeddings
+
     # Compute PHATE embeddings
     phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+        n_components=n_components, knn=knn, decay=decay, random_state=42, **phate_kwargs
     )
-    phate_embedding = phate_model.fit_transform(embeddings)
+
+    phate_embedding = phate_model.fit_transform(embeddings_scaled)
 
     # Update dataset if requested
     if update_dataset and isinstance(embedding_dataset, Dataset):
