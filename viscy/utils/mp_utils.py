@@ -260,11 +260,16 @@ def get_val_stats(sample_values):
                                         indices
     :return dict meta_row: Dict with intensity data for image
     """
+    p5 = float(np.nanpercentile(sample_values, 5))
+    p95 = float(np.nanpercentile(sample_values, 95))
 
     meta_row = {
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),
         "median": float(np.nanmedian(sample_values)),
         "iqr": float(scipy.stats.iqr(sample_values)),
+        "p5": p5,
+        "p95": p95,
+        "p95_p5": p95 - p5,  # Range for normalization
     }
     return meta_row
