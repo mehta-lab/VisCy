@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 from iohub import open_ome_zarr
-from pytest import TempPathFactory, fixture
+from pytest import FixtureRequest, TempPathFactory, fixture
 
 if TYPE_CHECKING:
     from numpy.typing import DTypeLike
@@ -20,12 +20,14 @@ def _build_hcs(
     zyx_shape: tuple[int, int, int],
     dtype: DTypeLike,
     max_value: int | float,
+    sharded: bool = False,
 ):
     dataset = open_ome_zarr(
         path,
         layout="hcs",
         mode="w",
         channel_names=channel_names,
+        version="0.4" if not sharded else "0.5",
     )
     for row in ("A", "B"):
         for col in ("1", "2"):
@@ -36,6 +38,10 @@ def _build_hcs(
                     (
                         np.random.rand(2, len(channel_names), *zyx_shape) * max_value
                     ).astype(dtype),
+                    chunks=(1, 1, 1, *zyx_shape[1:]),
+                    shards_ratio=(2, len(channel_names), zyx_shape[0], 1, 1)
+                    if sharded
+                    else None,
                 )
 
 
@@ -54,11 +60,15 @@ def preprocessed_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
-@fixture(scope="function")
-def small_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
+@fixture(scope="function", params=[False, True])
+def small_hcs_dataset(
+    tmp_path_factory: TempPathFactory, request: FixtureRequest
+) -> Path:
     """Provides a small, not preprocessed HCS OME-Zarr dataset."""
     dataset_path = tmp_path_factory.mktemp("small.zarr")
-    _build_hcs(dataset_path, channel_names, (12, 64, 64), np.uint16, 1)
+    _build_hcs(
+        dataset_path, channel_names, (12, 64, 64), np.uint16, 1, sharded=request.param
+    )
     return dataset_path
 
 
