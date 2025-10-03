@@ -33,10 +33,12 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
             f"T={t_index}, Z-sclice={z_slice}."
         )
         image.resize(
-            (max(t_index + 1, image.shape[0]),
-            image.channels,
-            max(z_slice.stop, image.shape[2]),
-            *image.shape[-2:])
+            (
+                max(t_index + 1, image.shape[0]),
+                image.channels,
+                max(z_slice.stop, image.shape[2]),
+                *image.shape[-2:],
+            )
         )
 
 
