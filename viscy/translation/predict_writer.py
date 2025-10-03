@@ -142,7 +142,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             self.plate = open_ome_zarr(
                 self.output_store, layout="hcs", mode="a", channel_names=channel_names
             )
-        _logger.info(f"Writing prediction to: '{self.plate.zgroup.store.path}'.")
+        _logger.info(f"Writing prediction to: '{self.plate.zgroup.store.root}'.")
         if self.write_input:
             self.source_index = self._get_channel_indices(source_channel)
             self.target_index = self._get_channel_indices(target_channel)
