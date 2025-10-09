@@ -53,27 +53,33 @@ class CytoDtw:
 
     def _validate_input(self):
         raise NotImplementedError("Validation of input not implemented")
-    
+
     def save_consensus(self, path: str):
         """Save consensus pattern to a file."""
         import pickle
+
         if self.consensus_data is None:
             raise ValueError("Consensus pattern not found")
-        with open(path, 'wb') as f:
+        with open(path, "wb") as f:
             pickle.dump(self.consensus_data, f)
 
     def load_consensus(self, path: str):
         """Load consensus pattern from a file."""
         import pickle
-        with open(path, 'rb') as f:
-            self.consensus_data = pickle.load(f)
 
+        with open(path, "rb") as f:
+            self.consensus_data = pickle.load(f)
 
     def get_lineages(self, min_timepoints: int = 15) -> list[tuple[str, list[int]]]:
         """Get identified lineages with specified minimum timepoints."""
         return self._identify_lineages(min_timepoints)
 
-    def get_track_statistics(self, lineages: list[tuple[str, list[int]]] = None, min_timepoints: int = 15, per_fov: bool = False) -> pd.DataFrame:
+    def get_track_statistics(
+        self,
+        lineages: list[tuple[str, list[int]]] = None,
+        min_timepoints: int = 15,
+        per_fov: bool = False,
+    ) -> pd.DataFrame:
         """Get statistics for tracks/lineages.
 
         Parameters
@@ -126,40 +132,46 @@ class CytoDtw:
                 track_rows = lineage_rows[lineage_rows["track_id"] == track_id]
                 timepoints_per_track.append(len(track_rows))
 
-            stats_list.append({
-                "fov_name": fov_name,
-                "track_ids": track_ids,
-                "n_tracks": len(track_ids),
-                "total_timepoints": total_timepoints,
-                "mean_timepoints_per_track": np.mean(timepoints_per_track),
-                "std_timepoints_per_track": np.std(timepoints_per_track),
-                "timepoints_per_track": timepoints_per_track,
-                "min_t": lineage_rows["t"].min(),
-                "max_t": lineage_rows["t"].max(),
-            })
+            stats_list.append(
+                {
+                    "fov_name": fov_name,
+                    "track_ids": track_ids,
+                    "n_tracks": len(track_ids),
+                    "total_timepoints": total_timepoints,
+                    "mean_timepoints_per_track": np.mean(timepoints_per_track),
+                    "std_timepoints_per_track": np.std(timepoints_per_track),
+                    "timepoints_per_track": timepoints_per_track,
+                    "min_t": lineage_rows["t"].min(),
+                    "max_t": lineage_rows["t"].max(),
+                }
+            )
 
         df = pd.DataFrame(stats_list)
 
         if not per_fov:
-            return df.drop(columns=['timepoints_per_track'])
+            return df.drop(columns=["timepoints_per_track"])
 
         # Aggregate by FOV
         fov_stats = []
-        for fov_name in df['fov_name'].unique():
-            fov_df = df[df['fov_name'] == fov_name]
-            all_timepoints = [tp for tps in fov_df['timepoints_per_track'] for tp in tps]
+        for fov_name in df["fov_name"].unique():
+            fov_df = df[df["fov_name"] == fov_name]
+            all_timepoints = [
+                tp for tps in fov_df["timepoints_per_track"] for tp in tps
+            ]
 
-            fov_stats.append({
-                'fov_name': fov_name,
-                'n_lineages': len(fov_df),
-                'total_tracks': fov_df['n_tracks'].sum(),
-                'mean_tracks_per_lineage': fov_df['n_tracks'].mean(),
-                'std_tracks_per_lineage': fov_df['n_tracks'].std(),
-                'mean_total_timepoints': fov_df['total_timepoints'].mean(),
-                'std_total_timepoints': fov_df['total_timepoints'].std(),
-                'mean_timepoints_per_track': np.mean(all_timepoints),
-                'std_timepoints_per_track': np.std(all_timepoints),
-            })
+            fov_stats.append(
+                {
+                    "fov_name": fov_name,
+                    "n_lineages": len(fov_df),
+                    "total_tracks": fov_df["n_tracks"].sum(),
+                    "mean_tracks_per_lineage": fov_df["n_tracks"].mean(),
+                    "std_tracks_per_lineage": fov_df["n_tracks"].std(),
+                    "mean_total_timepoints": fov_df["total_timepoints"].mean(),
+                    "std_total_timepoints": fov_df["total_timepoints"].std(),
+                    "mean_timepoints_per_track": np.mean(all_timepoints),
+                    "std_timepoints_per_track": np.std(all_timepoints),
+                }
+            )
 
         return pd.DataFrame(fov_stats)
 
@@ -169,9 +181,7 @@ class CytoDtw:
         """Auto-identify lineages from the data."""
         # Use parent_track_id if available for proper lineage identification
         if "parent_track_id" in self.adata.obs.columns:
-            all_lineages = identify_lineages(
-                self.adata.obs, return_both_branches=False
-            )
+            all_lineages = identify_lineages(self.adata.obs, return_both_branches=False)
         else:
             # Fallback: treat each track as individual lineage
             all_lineages = []
@@ -224,13 +234,15 @@ class CytoDtw:
         reference_embeddings = []
         for tid in track_id:
             # Filter by fov_name and track_id
-            mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == tid)
+            mask = (self.adata.obs["fov_name"] == fov_name) & (
+                self.adata.obs["track_id"] == tid
+            )
             track_data = self.adata[mask]
-            
+
             # Sort by timepoint to ensure correct order
-            time_order = np.argsort(track_data.obs['t'].values)
+            time_order = np.argsort(track_data.obs["t"].values)
             track_data = track_data[time_order]
-            
+
             if reference_type == "features":
                 track_emb = track_data.X
             else:
@@ -406,7 +418,7 @@ class CytoDtw:
         top_matches: pd.DataFrame,
         consensus_lineage: np.ndarray,
         alignment_name: str = "cell_division",
-        reference_type: str = "features"
+        reference_type: str = "features",
     ) -> pd.DataFrame:
         """
         Create alignment DataFrame that:
@@ -432,25 +444,29 @@ class CytoDtw:
             DataFrame with lineage preservation and extensible alignments
         """
         alignment_data = []
-        track_lineage_mapping = {} 
+        track_lineage_mapping = {}
 
         available_obsm = list(self.adata.obsm.keys())
-        has_pca_obsm = 'X_PCA' in available_obsm
+        has_pca_obsm = "X_PCA" in available_obsm
         pc_components = []
-        
+
         if has_pca_obsm:
-            n_pca_components = self.adata.obsm['X_PCA'].shape[1]
-            pc_components = [f'PC{i+1}' for i in range(n_pca_components)]
+            n_pca_components = self.adata.obsm["X_PCA"].shape[1]
+            pc_components = [f"PC{i+1}" for i in range(n_pca_components)]
         else:
-            pc_components = [col for col in self.adata.obs.columns if col.startswith('PC') and col[2:].isdigit()]
+            pc_components = [
+                col
+                for col in self.adata.obs.columns
+                if col.startswith("PC") and col[2:].isdigit()
+            ]
             pc_components.sort(key=lambda x: int(x[2:]))  # Sort PC1, PC2, PC3, etc.
-        
+
         has_pc_components = len(pc_components) > 0
-        
+
         lineage_counter = 0
         for idx, match_row in top_matches.iterrows():
-            fov_name = match_row['fov_name']
-            track_ids = match_row['track_ids']
+            fov_name = match_row["fov_name"]
+            track_ids = match_row["track_ids"]
 
             lineage_id = lineage_counter
             lineage_counter += 1
@@ -461,27 +477,29 @@ class CytoDtw:
         pca = None
         scaler = None
         consensus_pca = None
-        
+
         if not has_pc_components:
             all_embeddings = []
-            
+
             for idx, match_row in top_matches.iterrows():
-                fov_name = match_row['fov_name']
-                track_ids = match_row['track_ids']
-                
+                fov_name = match_row["fov_name"]
+                track_ids = match_row["track_ids"]
+
                 for track_id in track_ids:
                     try:
-                        mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == track_id)
+                        mask = (self.adata.obs["fov_name"] == fov_name) & (
+                            self.adata.obs["track_id"] == track_id
+                        )
                         track_data = self.adata[mask]
-                        
-                        time_order = np.argsort(track_data.obs['t'].values)
+
+                        time_order = np.argsort(track_data.obs["t"].values)
                         track_data = track_data[time_order]
-                        
+
                         if reference_type == "features":
                             track_embeddings = track_data.X
                         else:
                             track_embeddings = track_data.obsm[reference_type]
-                        
+
                         all_embeddings.append(track_embeddings)
                     except KeyError:
                         continue
@@ -492,14 +510,14 @@ class CytoDtw:
             scaled_all = scaler.fit_transform(all_concat)
             pca = PCA(n_components=n_components)
             pca_all = pca.fit_transform(scaled_all)
-            
-            consensus_pca = pca_all[-len(consensus_lineage):]
+
+            consensus_pca = pca_all[-len(consensus_lineage) :]
 
         for idx, match_row in top_matches.iterrows():
-            fov_name = match_row['fov_name']
-            track_ids = match_row['track_ids']
-            warp_path = match_row['warp_path']
-            dtw_distance = match_row.get('distance', np.nan)
+            fov_name = match_row["fov_name"]
+            track_ids = match_row["track_ids"]
+            warp_path = match_row["warp_path"]
+            dtw_distance = match_row.get("distance", np.nan)
 
             # Create mapping from query timepoint to consensus timepoint
             query_to_consensus = {}
@@ -510,21 +528,23 @@ class CytoDtw:
             for track_id in track_ids:
                 try:
                     # Filter by fov_name and track_id
-                    mask = (self.adata.obs['fov_name'] == fov_name) & (self.adata.obs['track_id'] == track_id)
+                    mask = (self.adata.obs["fov_name"] == fov_name) & (
+                        self.adata.obs["track_id"] == track_id
+                    )
                     track_data = self.adata[mask]
-                    
+
                     # Sort by timepoint to ensure correct order
-                    time_order = np.argsort(track_data.obs['t'].values)
+                    time_order = np.argsort(track_data.obs["t"].values)
                     track_data = track_data[time_order]
-                    
-                    track_timepoints = track_data.obs['t'].values
+
+                    track_timepoints = track_data.obs["t"].values
 
                     # Get PC features - either from obsm/obs or computed PCA
                     pc_values = {}
                     if has_pc_components:
                         if has_pca_obsm:
                             # Extract from X_PCA obsm
-                            pca_data = track_data.obsm['X_PCA']
+                            pca_data = track_data.obsm["X_PCA"]
                             for i, pc_name in enumerate(pc_components):
                                 pc_values[pc_name] = pca_data[:, i]
                         else:
@@ -541,7 +561,7 @@ class CytoDtw:
                         track_pca = pca.transform(scaled_embeddings)
                         # Create PC values for all computed components
                         for i in range(n_components):
-                            pc_name = f'PC{i+1}'
+                            pc_name = f"PC{i+1}"
                             pc_values[pc_name] = track_pca[:, i]
 
                     # Get lineage ID for this track
@@ -551,8 +571,8 @@ class CytoDtw:
                     for i, t in enumerate(track_timepoints):
                         # Get spatial coordinates from track_data.obs (which is already filtered)
                         obs_row = track_data.obs.iloc[i]
-                        x_coord = obs_row.get('x', np.nan)
-                        y_coord = obs_row.get('y', np.nan)
+                        x_coord = obs_row.get("x", np.nan)
+                        y_coord = obs_row.get("y", np.nan)
 
                         # Determine alignment status for this specific alignment type
                         is_aligned = t in query_to_consensus
@@ -561,27 +581,28 @@ class CytoDtw:
                         # Create dynamic column names based on alignment_name
                         row_data = {
                             # Core tracking info (preserves lineage relationships)
-                            'fov_name': fov_name,
-                            'lineage_id': lineage_id,
-                            'track_id': track_id,
-                            't': t,
-                            'x': x_coord,
-                            'y': y_coord,
-
+                            "fov_name": fov_name,
+                            "lineage_id": lineage_id,
+                            "track_id": track_id,
+                            "t": t,
+                            "x": x_coord,
+                            "y": y_coord,
                             # Alignment-specific columns (dynamic based on alignment_name)
-                            f'dtw_{alignment_name}_consensus_mapping': consensus_mapping,
-                            f'dtw_{alignment_name}_aligned': is_aligned,
-                            f'dtw_{alignment_name}_distance': dtw_distance,
-                            f'dtw_{alignment_name}_match_rank': idx
+                            f"dtw_{alignment_name}_consensus_mapping": consensus_mapping,
+                            f"dtw_{alignment_name}_aligned": is_aligned,
+                            f"dtw_{alignment_name}_distance": dtw_distance,
+                            f"dtw_{alignment_name}_match_rank": idx,
                         }
-                        
+
                         # Add all PC components dynamically
                         for pc_name, pc_vals in pc_values.items():
                             row_data[pc_name] = pc_vals[i]
                         alignment_data.append(row_data)
 
                 except KeyError as e:
-                    _logger.warning(f"Could not find track {track_id} in FOV {fov_name}: {e}")
+                    _logger.warning(
+                        f"Could not find track {track_id} in FOV {fov_name}: {e}"
+                    )
                     continue
 
         consensus_pc_values = {}
@@ -591,30 +612,30 @@ class CytoDtw:
                 consensus_pc_values[pc_name] = [np.nan] * len(consensus_lineage)
         else:
             for i in range(n_components):
-                pc_name = f'PC{i+1}'
+                pc_name = f"PC{i+1}"
                 consensus_pc_values[pc_name] = consensus_pca[:, i]
 
         for i in range(len(consensus_lineage)):
             consensus_row = {
-                'fov_name': 'consensus',
-                'lineage_id': -1,
-                'track_id': -1,
-                't': i,
-                'x': np.nan,
-                'y': np.nan,
-                f'dtw_{alignment_name}_consensus_mapping': i,  # Maps to itself
-                f'dtw_{alignment_name}_aligned': True,
-                f'dtw_{alignment_name}_distance': 0.0,
-                f'dtw_{alignment_name}_match_rank': -1,
-                'mean_intensity': np.nan,
-                'cell_area': np.nan,
-                'cell_perimeter': np.nan,
-                'cell_eccentricity': np.nan,
+                "fov_name": "consensus",
+                "lineage_id": -1,
+                "track_id": -1,
+                "t": i,
+                "x": np.nan,
+                "y": np.nan,
+                f"dtw_{alignment_name}_consensus_mapping": i,  # Maps to itself
+                f"dtw_{alignment_name}_aligned": True,
+                f"dtw_{alignment_name}_distance": 0.0,
+                f"dtw_{alignment_name}_match_rank": -1,
+                "mean_intensity": np.nan,
+                "cell_area": np.nan,
+                "cell_perimeter": np.nan,
+                "cell_eccentricity": np.nan,
             }
-            
+
             for pc_name, pc_vals in consensus_pc_values.items():
                 consensus_row[pc_name] = pc_vals[i]
-                
+
             alignment_data.append(consensus_row)
 
         return pd.DataFrame(alignment_data)
@@ -650,16 +671,16 @@ class CytoDtw:
             - 'unaligned_data': dict of continuation arrays/dicts
             - 'metadata': lineage metadata (fov_name, track_ids, etc.)
         """
-        aligned_col = f'dtw_{alignment_name}_aligned'
-        mapping_col = f'dtw_{alignment_name}_consensus_mapping'
-        distance_col = f'dtw_{alignment_name}_distance'
+        aligned_col = f"dtw_{alignment_name}_aligned"
+        mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+        distance_col = f"dtw_{alignment_name}_distance"
 
         if aligned_col not in df.columns:
             _logger.error(f"Alignment '{alignment_name}' not found in DataFrame")
             return {}
 
-        consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
-        lineages = df[df['lineage_id'] != -1]['lineage_id'].unique()
+        consensus_df = df[df["lineage_id"] == -1].sort_values("t").copy()
+        lineages = df[df["lineage_id"] != -1]["lineage_id"].unique()
 
         if max_lineages is not None:
             lineages = lineages[:max_lineages]
@@ -672,7 +693,7 @@ class CytoDtw:
         concatenated_sequences = {}
 
         for lineage_id in lineages:
-            lineage_df = df[df['lineage_id'] == lineage_id].copy().sort_values('t')
+            lineage_df = df[df["lineage_id"] == lineage_id].copy().sort_values("t")
             if lineage_df.empty:
                 continue
 
@@ -680,8 +701,10 @@ class CytoDtw:
 
             # Only include unaligned timepoints AFTER the aligned portion
             if not aligned_rows.empty:
-                max_aligned_t = aligned_rows['t'].max()
-                unaligned_rows = lineage_df[(~lineage_df[aligned_col]) & (lineage_df['t'] > max_aligned_t)].copy()
+                max_aligned_t = aligned_rows["t"].max()
+                unaligned_rows = lineage_df[
+                    (~lineage_df[aligned_col]) & (lineage_df["t"] > max_aligned_t)
+                ].copy()
             else:
                 unaligned_rows = lineage_df[~lineage_df[aligned_col]].copy()
 
@@ -692,7 +715,7 @@ class CytoDtw:
                 if not pd.isna(consensus_idx):
                     consensus_idx = int(consensus_idx)
                     if 0 <= consensus_idx < consensus_length:
-                        row_dict = {'t': row['t'], 'row': row}
+                        row_dict = {"t": row["t"], "row": row}
                         if feature_columns:
                             row_dict.update({col: row[col] for col in feature_columns})
                         aligned_portion[consensus_idx] = row_dict
@@ -706,40 +729,50 @@ class CytoDtw:
                     else:
                         available_indices = list(aligned_portion.keys())
                         if available_indices:
-                            closest_idx = min(available_indices, key=lambda x: abs(x - i))
+                            closest_idx = min(
+                                available_indices, key=lambda x: abs(x - i)
+                            )
                             filled_aligned[i] = aligned_portion[closest_idx]
                         else:
                             consensus_row = consensus_df.iloc[i]
-                            row_dict = {'row': consensus_row}
+                            row_dict = {"row": consensus_row}
                             if feature_columns:
-                                row_dict.update({col: consensus_row[col] for col in feature_columns})
+                                row_dict.update(
+                                    {col: consensus_row[col] for col in feature_columns}
+                                )
                             filled_aligned[i] = row_dict
 
             # Convert to arrays/lists for features
-            aligned_data = {'length': consensus_length, 'mapping': filled_aligned}
+            aligned_data = {"length": consensus_length, "mapping": filled_aligned}
             if feature_columns:
-                aligned_data['features'] = {}
+                aligned_data["features"] = {}
                 for col in feature_columns:
-                    aligned_data['features'][col] = np.array([filled_aligned[i][col] for i in range(consensus_length)])
+                    aligned_data["features"][col] = np.array(
+                        [filled_aligned[i][col] for i in range(consensus_length)]
+                    )
 
             # Process unaligned portion
-            unaligned_data = {'length': len(unaligned_rows), 'rows': unaligned_rows}
+            unaligned_data = {"length": len(unaligned_rows), "rows": unaligned_rows}
             if feature_columns and not unaligned_rows.empty:
-                unaligned_rows = unaligned_rows.sort_values('t')
-                unaligned_data['features'] = {}
+                unaligned_rows = unaligned_rows.sort_values("t")
+                unaligned_data["features"] = {}
                 for col in feature_columns:
-                    unaligned_data['features'][col] = unaligned_rows[col].values
+                    unaligned_data["features"][col] = unaligned_rows[col].values
 
             concatenated_sequences[lineage_id] = {
-                'aligned_data': aligned_data,
-                'unaligned_data': unaligned_data,
-                'metadata': {
-                    'fov_name': lineage_df['fov_name'].iloc[0],
-                    'track_ids': list(lineage_df['track_id'].unique()),
-                    'dtw_distance': lineage_df[distance_col].iloc[0] if not pd.isna(lineage_df[distance_col].iloc[0]) else np.nan,
-                    'lineage_id': lineage_id,
-                    'consensus_length': consensus_length,
-                }
+                "aligned_data": aligned_data,
+                "unaligned_data": unaligned_data,
+                "metadata": {
+                    "fov_name": lineage_df["fov_name"].iloc[0],
+                    "track_ids": list(lineage_df["track_id"].unique()),
+                    "dtw_distance": (
+                        lineage_df[distance_col].iloc[0]
+                        if not pd.isna(lineage_df[distance_col].iloc[0])
+                        else np.nan
+                    ),
+                    "lineage_id": lineage_id,
+                    "consensus_length": consensus_length,
+                },
             }
 
         return concatenated_sequences
@@ -782,7 +815,6 @@ class CytoDtw:
             Whether to clip outlier values for better visualization
         outlier_percentile : tuple
             (lower, upper) percentile bounds for clipping (default: 1st-99th percentile)
-
         Returns
         -------
         matplotlib.figure.Figure
@@ -792,21 +824,21 @@ class CytoDtw:
         from matplotlib.patches import Rectangle
 
         if feature_columns is None:
-            feature_columns = ['PC1', 'PC2', 'PC3']
+            feature_columns = ["PC1", "PC2", "PC3"]
 
         # Get concatenated sequences
         concatenated_seqs = self.get_concatenated_sequences(
             df=df,
             alignment_name=alignment_name,
             feature_columns=feature_columns,
-            max_lineages=max_lineages
+            max_lineages=max_lineages,
         )
 
         if not concatenated_seqs:
             _logger.error("No concatenated sequences found")
             return None
 
-        consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
+        consensus_df = df[df["lineage_id"] == -1].sort_values("t").copy()
         consensus_length = len(consensus_df)
 
         n_features = len(feature_columns)
@@ -821,15 +853,17 @@ class CytoDtw:
             all_unaligned = []
 
             for lineage_id, seq_data in concatenated_seqs.items():
-                aligned_features = seq_data['aligned_data']['features']
-                unaligned_features = seq_data['unaligned_data'].get('features', {})
+                aligned_features = seq_data["aligned_data"]["features"]
+                unaligned_features = seq_data["unaligned_data"].get("features", {})
 
                 all_aligned.append(aligned_features[feat_col])
                 if feat_col in unaligned_features:
                     all_unaligned.append(unaligned_features[feat_col])
 
             aligned_array = np.array(all_aligned)
-            max_unaligned_len = max([len(u) for u in all_unaligned]) if all_unaligned else 0
+            max_unaligned_len = (
+                max([len(u) for u in all_unaligned]) if all_unaligned else 0
+            )
 
             if remove_outliers:
                 all_values = []
@@ -845,34 +879,72 @@ class CytoDtw:
                 if len(all_values) > 0:
                     lower_bound = np.percentile(all_values, outlier_percentile[0])
                     upper_bound = np.percentile(all_values, outlier_percentile[1])
-                    _logger.info(f"{feat_col}: setting y-limits to [{lower_bound:.3f}, {upper_bound:.3f}]")
+                    _logger.info(
+                        f"{feat_col}: setting y-limits to [{lower_bound:.3f}, {upper_bound:.3f}]"
+                    )
 
             # Pad unaligned arrays to same length
             if max_unaligned_len > 0:
-                unaligned_array = np.full((len(all_unaligned), max_unaligned_len), np.nan)
+                unaligned_array = np.full(
+                    (len(all_unaligned), max_unaligned_len), np.nan
+                )
                 for i, u in enumerate(all_unaligned):
-                    unaligned_array[i, :len(u)] = u
+                    unaligned_array[i, : len(u)] = u
             else:
                 unaligned_array = np.array([]).reshape(0, 0)
 
             if plot_type == "mean_bands":
                 # Plot mean ± SEM
                 aligned_mean = np.nanmean(aligned_array, axis=0)
-                aligned_sem = np.nanstd(aligned_array, axis=0) / np.sqrt(np.sum(~np.isnan(aligned_array), axis=0))
+                aligned_sem = np.nanstd(aligned_array, axis=0) / np.sqrt(
+                    np.sum(~np.isnan(aligned_array), axis=0)
+                )
 
                 aligned_time = np.arange(consensus_length)
-                ax.plot(aligned_time, aligned_mean, '-', color=colors[0], linewidth=3, label='Aligned mean', zorder=3)
-                ax.fill_between(aligned_time, aligned_mean - aligned_sem, aligned_mean + aligned_sem,
-                               alpha=0.3, color=colors[0], zorder=2)
+                ax.plot(
+                    aligned_time,
+                    aligned_mean,
+                    "-",
+                    color=colors[0],
+                    linewidth=3,
+                    label="Aligned mean",
+                    zorder=3,
+                )
+                ax.fill_between(
+                    aligned_time,
+                    aligned_mean - aligned_sem,
+                    aligned_mean + aligned_sem,
+                    alpha=0.3,
+                    color=colors[0],
+                    zorder=2,
+                )
 
                 if unaligned_array.size > 0:
                     unaligned_mean = np.nanmean(unaligned_array, axis=0)
-                    unaligned_sem = np.nanstd(unaligned_array, axis=0) / np.sqrt(np.sum(~np.isnan(unaligned_array), axis=0))
-                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
+                    unaligned_sem = np.nanstd(unaligned_array, axis=0) / np.sqrt(
+                        np.sum(~np.isnan(unaligned_array), axis=0)
+                    )
+                    unaligned_time = np.arange(
+                        consensus_length, consensus_length + max_unaligned_len
+                    )
 
-                    ax.plot(unaligned_time, unaligned_mean, '--', color=colors[1], linewidth=3, label='Unaligned mean', zorder=3)
-                    ax.fill_between(unaligned_time, unaligned_mean - unaligned_sem, unaligned_mean + unaligned_sem,
-                                   alpha=0.3, color=colors[1], zorder=2)
+                    ax.plot(
+                        unaligned_time,
+                        unaligned_mean,
+                        "--",
+                        color=colors[1],
+                        linewidth=3,
+                        label="Unaligned mean",
+                        zorder=3,
+                    )
+                    ax.fill_between(
+                        unaligned_time,
+                        unaligned_mean - unaligned_sem,
+                        unaligned_mean + unaligned_sem,
+                        alpha=0.3,
+                        color=colors[1],
+                        zorder=2,
+                    )
 
             elif plot_type == "quantile_bands":
                 # Plot median + quartiles
@@ -881,17 +953,49 @@ class CytoDtw:
                 aligned_q75 = np.nanpercentile(aligned_array, 75, axis=0)
 
                 aligned_time = np.arange(consensus_length)
-                ax.plot(aligned_time, aligned_median, '-', color=colors[0], linewidth=3, label='Aligned median', zorder=3)
-                ax.fill_between(aligned_time, aligned_q25, aligned_q75, alpha=0.3, color=colors[0], zorder=2)
+                ax.plot(
+                    aligned_time,
+                    aligned_median,
+                    "-",
+                    color=colors[0],
+                    linewidth=3,
+                    label="Aligned median",
+                    zorder=3,
+                )
+                ax.fill_between(
+                    aligned_time,
+                    aligned_q25,
+                    aligned_q75,
+                    alpha=0.3,
+                    color=colors[0],
+                    zorder=2,
+                )
 
                 if unaligned_array.size > 0:
                     unaligned_median = np.nanmedian(unaligned_array, axis=0)
                     unaligned_q25 = np.nanpercentile(unaligned_array, 25, axis=0)
                     unaligned_q75 = np.nanpercentile(unaligned_array, 75, axis=0)
-                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
+                    unaligned_time = np.arange(
+                        consensus_length, consensus_length + max_unaligned_len
+                    )
 
-                    ax.plot(unaligned_time, unaligned_median, '--', color=colors[1], linewidth=3, label='Unaligned median', zorder=3)
-                    ax.fill_between(unaligned_time, unaligned_q25, unaligned_q75, alpha=0.3, color=colors[1], zorder=2)
+                    ax.plot(
+                        unaligned_time,
+                        unaligned_median,
+                        "--",
+                        color=colors[1],
+                        linewidth=3,
+                        label="Unaligned median",
+                        zorder=3,
+                    )
+                    ax.fill_between(
+                        unaligned_time,
+                        unaligned_q25,
+                        unaligned_q75,
+                        alpha=0.3,
+                        color=colors[1],
+                        zorder=2,
+                    )
 
             elif plot_type == "heatmap":
                 # Stack all data for heatmap
@@ -906,45 +1010,110 @@ class CytoDtw:
                 max_len = max([len(s) for s in full_data])
                 heatmap_data = np.full((len(full_data), max_len), np.nan)
                 for i, seq in enumerate(full_data):
-                    heatmap_data[i, :len(seq)] = seq
+                    heatmap_data[i, : len(seq)] = seq
 
-                im = ax.imshow(heatmap_data, aspect='auto', cmap=cmap, interpolation='nearest')
-                ax.axvline(consensus_length - 0.5, color='black', linewidth=2, linestyle='--', alpha=0.7)
+                im = ax.imshow(
+                    heatmap_data, aspect="auto", cmap=cmap, interpolation="nearest"
+                )
+                ax.axvline(
+                    consensus_length - 0.5,
+                    color="black",
+                    linewidth=2,
+                    linestyle="--",
+                    alpha=0.7,
+                )
                 plt.colorbar(im, ax=ax, label=feat_col)
-                ax.set_ylabel('Lineage')
+                ax.set_ylabel("Lineage")
 
             elif plot_type == "individual_with_mean":
                 # Plot all individual traces + mean overlay
                 aligned_time = np.arange(consensus_length)
                 for i in range(len(all_aligned)):
-                    ax.plot(aligned_time, all_aligned[i], '-', color=colors[0], alpha=0.2, linewidth=1, zorder=1)
+                    ax.plot(
+                        aligned_time,
+                        all_aligned[i],
+                        "-",
+                        color=colors[0],
+                        alpha=0.2,
+                        linewidth=1,
+                        zorder=1,
+                    )
 
                 if max_unaligned_len > 0:
                     for i in range(len(all_unaligned)):
-                        unaligned_time = np.arange(consensus_length, consensus_length + len(all_unaligned[i]))
-                        ax.plot(unaligned_time, all_unaligned[i], '--', color=colors[1], alpha=0.2, linewidth=1, zorder=1)
+                        unaligned_time = np.arange(
+                            consensus_length, consensus_length + len(all_unaligned[i])
+                        )
+                        ax.plot(
+                            unaligned_time,
+                            all_unaligned[i],
+                            "--",
+                            color=colors[1],
+                            alpha=0.2,
+                            linewidth=1,
+                            zorder=1,
+                        )
 
                 # Overlay mean
                 aligned_mean = np.nanmean(aligned_array, axis=0)
-                ax.plot(aligned_time, aligned_mean, '-', color='black', linewidth=3, label='Mean', zorder=3)
+                ax.plot(
+                    aligned_time,
+                    aligned_mean,
+                    "-",
+                    color="black",
+                    linewidth=3,
+                    label="Mean",
+                    zorder=3,
+                )
 
                 if unaligned_array.size > 0:
                     unaligned_mean = np.nanmean(unaligned_array, axis=0)
-                    unaligned_time = np.arange(consensus_length, consensus_length + max_unaligned_len)
-                    ax.plot(unaligned_time, unaligned_mean, '--', color='black', linewidth=3, zorder=3)
+                    unaligned_time = np.arange(
+                        consensus_length, consensus_length + max_unaligned_len
+                    )
+                    ax.plot(
+                        unaligned_time,
+                        unaligned_mean,
+                        "--",
+                        color="black",
+                        linewidth=3,
+                        zorder=3,
+                    )
 
             # Mark alignment boundary
             if plot_type != "heatmap":
-                ax.axvline(consensus_length, color='gray', alpha=0.5, linestyle=':', linewidth=2)
-                ax.text(consensus_length, ax.get_ylim()[1], ' Alignment end',
-                       rotation=90, verticalalignment='top', fontsize=9, alpha=0.7)
+                ax.axvline(
+                    consensus_length,
+                    color="gray",
+                    alpha=0.5,
+                    linestyle=":",
+                    linewidth=2,
+                )
+                ax.text(
+                    consensus_length,
+                    ax.get_ylim()[1],
+                    " Alignment end",
+                    rotation=90,
+                    verticalalignment="top",
+                    fontsize=9,
+                    alpha=0.7,
+                )
 
             # Plot consensus reference
             if plot_type != "heatmap":
                 consensus_values = consensus_df[feat_col].values.copy()
                 consensus_time = np.arange(len(consensus_values))
-                ax.plot(consensus_time, consensus_values, 'o-', color='black',
-                       linewidth=2, markersize=6, label=f'Consensus', alpha=0.6, zorder=4)
+                ax.plot(
+                    consensus_time,
+                    consensus_values,
+                    "o-",
+                    color="black",
+                    linewidth=2,
+                    markersize=6,
+                    label=f"Consensus",
+                    alpha=0.6,
+                    zorder=4,
+                )
 
             # Set y-axis limits based on outlier bounds if requested
             if remove_outliers and plot_type != "heatmap":
@@ -952,10 +1121,12 @@ class CytoDtw:
 
             ax.set_ylabel(feat_col)
             if feat_idx == 0:
-                ax.legend(loc='best')
+                ax.legend(loc="best")
             if feat_idx == n_features - 1:
-                ax.set_xlabel('Time: [Aligned] | [Unaligned continuation]')
-            ax.set_title(f'{feat_col} - {plot_type} (n={len(concatenated_seqs)} lineages)')
+                ax.set_xlabel("Time: [Aligned] | [Unaligned continuation]")
+            ax.set_title(
+                f"{feat_col} - {plot_type} (n={len(concatenated_seqs)} lineages)"
+            )
             ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
@@ -1017,14 +1188,14 @@ class CytoDtw:
         import matplotlib.pyplot as plt
 
         if feature_columns is None:
-            feature_columns = ['PC1', 'PC2', 'PC3']
+            feature_columns = ["PC1", "PC2", "PC3"]
 
         # Get concatenated sequences
         concatenated_seqs = self.get_concatenated_sequences(
             df=df,
             alignment_name=alignment_name,
             feature_columns=feature_columns,
-            max_lineages=max_lineages
+            max_lineages=max_lineages,
         )
 
         if not concatenated_seqs:
@@ -1032,7 +1203,7 @@ class CytoDtw:
             return None
 
         # Get consensus for reference
-        consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
+        consensus_df = df[df["lineage_id"] == -1].sort_values("t").copy()
         if consensus_df.empty:
             _logger.error("No consensus found in DataFrame")
             return None
@@ -1040,23 +1211,25 @@ class CytoDtw:
         # Prepare concatenated lineages data
         concatenated_lineages = {}
         for lineage_id, seq_data in concatenated_seqs.items():
-            aligned_features = seq_data['aligned_data']['features']
-            unaligned_features = seq_data['unaligned_data'].get('features', {})
+            aligned_features = seq_data["aligned_data"]["features"]
+            unaligned_features = seq_data["unaligned_data"].get("features", {})
 
             concatenated_arrays = {}
             for col in feature_columns:
                 if col in unaligned_features and len(unaligned_features[col]) > 0:
-                    concatenated_arrays[col] = np.concatenate([aligned_features[col], unaligned_features[col]])
+                    concatenated_arrays[col] = np.concatenate(
+                        [aligned_features[col], unaligned_features[col]]
+                    )
                 else:
                     concatenated_arrays[col] = aligned_features[col]
 
             concatenated_lineages[lineage_id] = {
-                'concatenated': concatenated_arrays,
-                'aligned_length': seq_data['aligned_data']['length'],
-                'unaligned_length': seq_data['unaligned_data']['length'],
-                'dtw_distance': seq_data['metadata']['dtw_distance'],
-                'fov_name': seq_data['metadata']['fov_name'],
-                'track_ids': seq_data['metadata']['track_ids']
+                "concatenated": concatenated_arrays,
+                "aligned_length": seq_data["aligned_data"]["length"],
+                "unaligned_length": seq_data["unaligned_data"]["length"],
+                "dtw_distance": seq_data["metadata"]["dtw_distance"],
+                "fov_name": seq_data["metadata"]["fov_name"],
+                "track_ids": seq_data["metadata"]["track_ids"],
             }
 
         # Compute outlier bounds per feature if requested
@@ -1066,7 +1239,7 @@ class CytoDtw:
                 all_values = []
                 all_values.extend(consensus_df[feat_col].values)
                 for data in concatenated_lineages.values():
-                    all_values.extend(data['concatenated'][feat_col])
+                    all_values.extend(data["concatenated"][feat_col])
 
                 all_values = np.array(all_values)
                 all_values = all_values[~np.isnan(all_values)]
@@ -1075,47 +1248,86 @@ class CytoDtw:
                     lower_bound = np.percentile(all_values, outlier_percentile[0])
                     upper_bound = np.percentile(all_values, outlier_percentile[1])
                     outlier_bounds[feat_col] = (lower_bound, upper_bound)
-                    _logger.info(f"{feat_col}: removing outliers outside [{lower_bound:.3f}, {upper_bound:.3f}]")
+                    _logger.info(
+                        f"{feat_col}: removing outliers outside [{lower_bound:.3f}, {upper_bound:.3f}]"
+                    )
 
         n_features = len(feature_columns)
         fig, axes = plt.subplots(n_features, 1, figsize=figsize)
         if n_features == 1:
             axes = [axes]
 
-        cmap = plt.cm.get_cmap('tab10' if len(concatenated_lineages) <= 10 else 'tab20' if len(concatenated_lineages) <= 20 else 'hsv')
-        colors = [cmap(i / max(len(concatenated_lineages), 1)) for i in range(len(concatenated_lineages))]
+        cmap = plt.cm.get_cmap(
+            "tab10"
+            if len(concatenated_lineages) <= 10
+            else "tab20" if len(concatenated_lineages) <= 20 else "hsv"
+        )
+        colors = [
+            cmap(i / max(len(concatenated_lineages), 1))
+            for i in range(len(concatenated_lineages))
+        ]
 
         for feat_idx, feat_col in enumerate(feature_columns):
             ax = axes[feat_idx]
 
             consensus_values = consensus_df[feat_col].values.copy()
             consensus_time = np.arange(len(consensus_values))
-            ax.plot(consensus_time, consensus_values, 'o-',
-                   color='black', linewidth=4, markersize=8,
-                   label=f'Consensus ({alignment_name})', alpha=0.9, zorder=5)
+            ax.plot(
+                consensus_time,
+                consensus_values,
+                "o-",
+                color="black",
+                linewidth=4,
+                markersize=8,
+                label=f"Consensus ({alignment_name})",
+                alpha=0.9,
+                zorder=5,
+            )
 
-            for lineage_idx, (lineage_id, data) in enumerate(concatenated_lineages.items()):
+            for lineage_idx, (lineage_id, data) in enumerate(
+                concatenated_lineages.items()
+            ):
                 y_offset = -(lineage_idx + 1) * y_offset_step
                 color = colors[lineage_idx]
 
-                concat_values = data['concatenated'][feat_col].copy() + y_offset
+                concat_values = data["concatenated"][feat_col].copy() + y_offset
                 time_axis = np.arange(len(concat_values))
 
-                track_id_str = ','.join(map(str, data['track_ids']))
-                ax.plot(time_axis, concat_values, '.-',
-                       color=color, linewidth=unaligned_linewidth, markersize=unaligned_markersize, alpha=0.8,
-                       label=f'{data["fov_name"]}, track={track_id_str} (d={data["dtw_distance"]:.3f})')
+                track_id_str = ",".join(map(str, data["track_ids"]))
+                ax.plot(
+                    time_axis,
+                    concat_values,
+                    ".-",
+                    color=color,
+                    linewidth=unaligned_linewidth,
+                    markersize=unaligned_markersize,
+                    alpha=0.8,
+                    label=f'{data["fov_name"]}, track={track_id_str} (d={data["dtw_distance"]:.3f})',
+                )
 
-                aligned_length = data['aligned_length']
+                aligned_length = data["aligned_length"]
                 if aligned_length > 0:
                     aligned_time = time_axis[:aligned_length]
                     aligned_vals = concat_values[:aligned_length]
-                    ax.plot(aligned_time, aligned_vals, 'o-',
-                           color=color, linewidth=aligned_linewidth, markersize=aligned_markersize,
-                           alpha=1.0, zorder=3)
+                    ax.plot(
+                        aligned_time,
+                        aligned_vals,
+                        "o-",
+                        color=color,
+                        linewidth=aligned_linewidth,
+                        markersize=aligned_markersize,
+                        alpha=1.0,
+                        zorder=3,
+                    )
 
                 if aligned_length > 0 and aligned_length < len(concat_values):
-                    ax.axvline(aligned_length - 0.5, color=color, linestyle=':', alpha=0.3, linewidth=1)
+                    ax.axvline(
+                        aligned_length - 0.5,
+                        color=color,
+                        linestyle=":",
+                        alpha=0.3,
+                        linewidth=1,
+                    )
 
             if remove_outliers and feat_col in outlier_bounds:
                 lower, upper = outlier_bounds[feat_col]
@@ -1123,9 +1335,11 @@ class CytoDtw:
                 ax.set_ylim(max_offset + lower - 1, upper + 1)
 
             ax.set_ylabel(feat_col)
-            ax.set_xlabel('Time: [DTW-aligned] + [unaligned continuation]')
-            ax.set_title(f'{feat_col} - Individual lineages (n={len(concatenated_lineages)})')
-            ax.legend(loc='best', fontsize=8, ncol=2)
+            ax.set_xlabel("Time: [DTW-aligned] + [unaligned continuation]")
+            ax.set_title(
+                f"{feat_col} - Individual lineages (n={len(concatenated_lineages)})"
+            )
+            ax.legend(loc="best", fontsize=8, ncol=2)
             ax.grid(True, alpha=0.3)
 
         plt.tight_layout()
@@ -1182,12 +1396,12 @@ def get_aligned_image_sequences(
     ...     image_loader_fn=load_images, max_lineages=10
     ... )
     """
-    aligned_col = f'dtw_{alignment_name}_aligned'
+    aligned_col = f"dtw_{alignment_name}_aligned"
     if aligned_col not in df.columns:
         _logger.error(f"Alignment '{alignment_name}' not found in DataFrame")
         return {}
 
-    consensus_df = df[df['lineage_id'] == -1].sort_values('t').copy()
+    consensus_df = df[df["lineage_id"] == -1].sort_values("t").copy()
     if consensus_df.empty:
         _logger.error("No consensus found in DataFrame")
         return {}
@@ -1196,7 +1410,7 @@ def get_aligned_image_sequences(
         df=df,
         alignment_name=alignment_name,
         feature_columns=None,
-        max_lineages=max_lineages
+        max_lineages=max_lineages,
     )
 
     if not concatenated_seqs:
@@ -1206,8 +1420,8 @@ def get_aligned_image_sequences(
     concatenated_image_sequences = {}
 
     for lineage_id, seq_data in concatenated_seqs.items():
-        fov_name = seq_data['metadata']['fov_name']
-        track_ids = seq_data['metadata']['track_ids']
+        fov_name = seq_data["metadata"]["fov_name"]
+        track_ids = seq_data["metadata"]["track_ids"]
 
         try:
             time_to_image = image_loader_fn(fov_name, track_ids)
@@ -1216,27 +1430,33 @@ def get_aligned_image_sequences(
             continue
 
         if not time_to_image:
-            _logger.warning(f"No images found for lineage {lineage_id}, FOV {fov_name}, tracks {track_ids}")
+            _logger.warning(
+                f"No images found for lineage {lineage_id}, FOV {fov_name}, tracks {track_ids}"
+            )
             continue
 
-        aligned_mapping = seq_data['aligned_data']['mapping']
-        consensus_length = seq_data['metadata']['consensus_length']
+        aligned_mapping = seq_data["aligned_data"]["mapping"]
+        consensus_length = seq_data["metadata"]["consensus_length"]
         aligned_images = [None] * consensus_length
 
         for i in range(consensus_length):
             if i in aligned_mapping:
-                timepoint = aligned_mapping[i]['t']
+                timepoint = aligned_mapping[i]["t"]
                 if timepoint in time_to_image:
                     aligned_images[i] = time_to_image[timepoint]
                 else:
                     available_times = list(time_to_image.keys())
                     if available_times:
-                        closest_time = min(available_times, key=lambda x: abs(x - timepoint))
+                        closest_time = min(
+                            available_times, key=lambda x: abs(x - timepoint)
+                        )
                         aligned_images[i] = time_to_image[closest_time]
 
         for i in range(consensus_length):
             if aligned_images[i] is None:
-                available_indices = [j for j, img in enumerate(aligned_images) if img is not None]
+                available_indices = [
+                    j for j, img in enumerate(aligned_images) if img is not None
+                ]
                 if available_indices:
                     closest_idx = min(available_indices, key=lambda x: abs(x - i))
                     aligned_images[i] = aligned_images[closest_idx]
@@ -1245,30 +1465,34 @@ def get_aligned_image_sequences(
 
         # Map unaligned portion
         unaligned_images = []
-        unaligned_rows = seq_data['unaligned_data']['rows']
+        unaligned_rows = seq_data["unaligned_data"]["rows"]
         if not unaligned_rows.empty:
-            unaligned_rows = unaligned_rows.sort_values('t')
+            unaligned_rows = unaligned_rows.sort_values("t")
             for _, row in unaligned_rows.iterrows():
-                timepoint = row['t']
+                timepoint = row["t"]
                 if timepoint in time_to_image:
                     unaligned_images.append(time_to_image[timepoint])
                 else:
                     # Find closest available time
                     available_times = list(time_to_image.keys())
                     if available_times:
-                        closest_time = min(available_times, key=lambda x: abs(x - timepoint))
+                        closest_time = min(
+                            available_times, key=lambda x: abs(x - timepoint)
+                        )
                         unaligned_images.append(time_to_image[closest_time])
 
         concatenated_images = aligned_images + unaligned_images
 
         concatenated_image_sequences[lineage_id] = {
-            'concatenated_images': concatenated_images,
-            'aligned_length': len(aligned_images),
-            'unaligned_length': len(unaligned_images),
-            'metadata': seq_data['metadata']
+            "concatenated_images": concatenated_images,
+            "aligned_length": len(aligned_images),
+            "unaligned_length": len(unaligned_images),
+            "metadata": seq_data["metadata"],
         }
 
-    _logger.debug(f"Created image sequences for {len(concatenated_image_sequences)} lineages")
+    _logger.debug(
+        f"Created image sequences for {len(concatenated_image_sequences)} lineages"
+    )
     return concatenated_image_sequences
 
 
@@ -1356,9 +1580,7 @@ def find_pattern_matches(
     method: str = "bernd_clifford",
     normalize: bool = True,
     metric: str = "euclidean",
-    reference_type: Literal[
-        "features", "X_PCA", "X_UMAP", "X_PHATE"
-    ] = "features",
+    reference_type: Literal["features", "X_PCA", "X_UMAP", "X_PHATE"] = "features",
     constraint_type: str = "unconstrained",
     band_width_ratio: float = 0.0,
 ) -> pd.DataFrame:
@@ -1413,20 +1635,22 @@ def find_pattern_matches(
         t_values = []
         for track_id in track_ids:
             # Filter by fov_name and track_id
-            mask = (adata.obs['fov_name'] == fov_name) & (adata.obs['track_id'] == track_id)
+            mask = (adata.obs["fov_name"] == fov_name) & (
+                adata.obs["track_id"] == track_id
+            )
             track_data = adata[mask]
-            
+
             # Sort by timepoint to ensure correct order
-            time_order = np.argsort(track_data.obs['t'].values)
+            time_order = np.argsort(track_data.obs["t"].values)
             track_data = track_data[time_order]
-            
+
             if reference_type == "features":
                 track_embeddings = track_data.X
             else:
                 # Assume it's an obsm key
                 track_embeddings = track_data.obsm[reference_type]
-            
-            track_t = track_data.obs['t'].values
+
+            track_t = track_data.obs["t"].values
 
             # Handle 1D arrays (PC components) by reshaping to (time, 1)
             if track_embeddings.ndim == 1:
@@ -1472,15 +1696,15 @@ def find_pattern_matches(
             best_dist = best_match["distance"]
             best_skew = best_match["skewness"]
 
-            #warping path is relative to the reference pattern
-            #query_idx is relative to the lineage
+            # warping path is relative to the reference pattern
+            # query_idx is relative to the lineage
             converted_path = []
             for ref_idx, query_idx in best_path:
                 query_t_idx = best_pos + query_idx
                 if query_t_idx < len(t_values):
                     actual_t = t_values[query_t_idx]
                     converted_path.append((ref_idx, actual_t))
-            
+
             start_t = t_values[best_pos] if best_pos < len(t_values) else None
             end_pos = best_pos + len(reference_pattern) - 1
             end_t = t_values[end_pos] if end_pos < len(t_values) else None
