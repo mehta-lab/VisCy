@@ -2,9 +2,20 @@ from typing import Literal
 
 import timm
 import torch.nn as nn
+from monai.networks.nets.resnet import ResNetFeatures
 from torch import Tensor
 
 from viscy.unet.networks.unext2 import StemDepthtoChannels
+
+
+def projection_mlp(in_dims: int, hidden_dims: int, out_dims: int) -> nn.Module:
+    return nn.Sequential(
+        nn.Linear(in_dims, hidden_dims),
+        nn.BatchNorm1d(hidden_dims),
+        nn.ReLU(inplace=True),
+        nn.Linear(hidden_dims, out_dims),
+        nn.BatchNorm1d(out_dims),
+    )
 
 
 class ContrastiveEncoder(nn.Module):
@@ -63,12 +74,8 @@ class ContrastiveEncoder(nn.Module):
             in_channels_encoder = encoder.conv1.out_channels
             encoder.conv1 = nn.Identity()
         # Save projection head separately and erase the projection head contained within the encoder.
-        projection = nn.Sequential(
-            nn.Linear(encoder.head.fc.in_features, embedding_dim),
-            nn.BatchNorm1d(embedding_dim),
-            nn.ReLU(inplace=True),
-            nn.Linear(embedding_dim, projection_dim),
-            nn.BatchNorm1d(projection_dim),
+        projection = projection_mlp(
+            encoder.head.fc.in_features, embedding_dim, projection_dim
         )
         encoder.head.fc = nn.Identity()
         # Create a new stem that can handle 3D multi-channel input.
@@ -100,5 +107,56 @@ class ContrastiveEncoder(nn.Module):
         """
         x = self.stem(x)
         embedding = self.encoder(x)
+        projections = self.projection(embedding)
+        return (embedding, projections)
+
+
+class ResNet3dEncoder(nn.Module):
+    """
+    3D ResNet encoder network that uses MONAI's ResNetFeatures.
+
+    Parameters
+    ----------
+    backbone : str
+        Name of the backbone model
+    in_channels : int, optional
+        Number of input channels
+    embedding_dim : int, optional
+        Embedded feature dimension that matches backbone output channels,
+        by default 512 (ResNet-18)
+    projection_dim : int, optional
+        Projection dimension for computing loss, by default 128
+    """
+
+    def __init__(
+        self,
+        backbone: str,
+        in_channels: int = 1,
+        embedding_dim: int = 512,
+        projection_dim: int = 128,
+    ) -> None:
+        super().__init__()
+        self.encoder = ResNetFeatures(
+            backbone, pretrained=True, spatial_dims=3, in_channels=in_channels
+        )
+        self.projection = projection_mlp(embedding_dim, embedding_dim, projection_dim)
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        """
+        Forward pass.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input image
+
+        Returns
+        -------
+        tuple[Tensor, Tensor]
+            The embedding tensor and the projection tensor
+        """
+        feature_map = self.encoder(x)[-1]
+        embedding = self.encoder.avgpool(feature_map)
+        embedding = embedding.view(embedding.size(0), -1)
         projections = self.projection(embedding)
         return (embedding, projections)
