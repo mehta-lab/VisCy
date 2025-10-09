@@ -23,6 +23,7 @@ from viscy.transforms._noise import (
 from viscy.transforms._redef import (
     CenterSpatialCropd,
     Decollated,
+    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
@@ -84,6 +85,7 @@ __all__ = [
     "Decollate",
     "Decollated",
     "NormalizeSampled",
+    "NormalizeIntensityd",
     "RandAdjustContrastd",
     "RandAffined",
     "RandFlipd",
