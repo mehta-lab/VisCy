@@ -105,6 +105,8 @@ def _crop_embedding(
         crop_mask = np.maximum(crop_mask, blurred_mask / blurred_mask.max())
 
         mu, sigma = np.mean(crop), np.std(crop)
+        # mu = np.median(crop)
+        # sigma = np.quantile(crop, 0.99) - mu
         crop = (crop - mu) / np.maximum(sigma, 1e-8)
 
         # removing background
