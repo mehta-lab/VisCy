@@ -12,6 +12,7 @@
 # ///
 
 from pathlib import Path
+import yaml
 import polars as pl
 import numpy as np
 import napari
@@ -49,7 +50,7 @@ def _pad(image: NDArray, shape: tuple[int, int]) -> NDArray:
 def _crop_embedding(
     frame: NDArray,
     mask: list[td.nodes.Mask],
-    shape: tuple[int, int],
+    final_shape: tuple[int, int],
     session: ort.InferenceSession,
     input_name: str,
     upscale: float = 1.0,
@@ -79,13 +80,27 @@ def _crop_embedding(
     """
     crops = []
     for m in mask:
-        crop = m.crop(frame, shape=shape).astype(np.float32)
-        crop = _pad(crop, shape)
-        # mean, std = crop.mean(), crop.std()
-        mean, std = np.median(crop), np.quantile(crop, 0.75) - np.quantile(crop, 0.25)
-        crop = (crop - mean) / (std + 1e-8)
-        if upscale != 1.0:
+        crop_shape = tuple(np.round(np.asarray(final_shape) / upscale).astype(int))
+
+        if frame.ndim == 3:
+            crop_shape = (1, *crop_shape)
+            upscale = (1, *upscale)
+
+        crop = m.crop(frame, shape=crop_shape).astype(np.float32)
+        crop = _pad(crop, crop_shape)
+
+        mu, sigma = np.median(crop), np.quantile(crop, 0.75) - np.quantile(crop, 0.25)
+        crop = (crop - mu) / (sigma + 1e-8)
+
+        if np.all(upscale != 1.0):
             crop = zoom(crop, upscale, order=1, mode="nearest")
+        
+        if crop.shape[-2:] != final_shape:
+            raise ValueError(f"Crop shape {crop.shape} does not match final shape {final_shape}")
+        
+        if crop.ndim == 3:
+            assert crop.shape[0] == 1, f"Expected 1 z-slice in 3D crop. Found {crop.shape[0]}"
+            crop = crop[0]
 
         crops.append(crop)
 
@@ -105,6 +120,8 @@ def _add_dynaclr_attrs(
     model_path: Path,
     graph: td.graph.InMemoryGraph,
     images: NDArray,
+    dataset_scale: tuple[float, float],
+    model_scale: tuple[float, float],
 ) -> None:
     """
     Add DynaCLR embedding attributes to each node in the graph
@@ -129,10 +146,10 @@ def _add_dynaclr_attrs(
     print(f"Expected input type: {input_type}")
 
     crop_attr_func = _crop_embedding(
-        shape=(64, 64),
+        final_shape=(192, 192),
         session=session,
         input_name=input_name,
-        upscale=1.0,
+        upscale=np.asarray(model_scale) / np.asarray(dataset_scale),
     )
 
     print("Adding DynaCLR embedding attributes ...")
@@ -154,8 +171,10 @@ def _add_dynaclr_attrs(
 def track_single_dataset(
     dataset_dir: Path,
     dataset_num: str,
+    dataset_scale: tuple[float, float],
     show_napari_viewer: bool,
     dynaclr_model_path: Path | None,
+    model_scale: tuple[float, float],
 ) -> None:
     """
     Main function to track cells in a dataset.
@@ -166,10 +185,14 @@ def track_single_dataset(
         Path to the dataset directory.
     dataset_num : str
         Number of the dataset.
+    dataset_scale: tuple[float, float],
+        The scale of the dataset.
     show_napari_viewer : bool
         Whether to show the napari viewer.
     dynaclr_model_path : Path | None
         Path to the DynaCLR model. If None, the model will not be used.
+    model_scale : tuple[float, float]
+        The scale of the model.
     """
     assert dataset_dir.exists(), f"Data directory {dataset_dir} does not exist."
 
@@ -203,7 +226,13 @@ def track_single_dataset(
     dist_weight = (-td.EdgeAttr(td.DEFAULT_ATTR_KEYS.EDGE_DIST) / dist_operator.distance_threshold).exp()
 
     if dynaclr_model_path is not None:
-        _add_dynaclr_attrs(dynaclr_model_path, graph, images)
+        _add_dynaclr_attrs(
+            dynaclr_model_path,
+            graph,
+            images,
+            dataset_scale=dataset_scale,
+            model_scale=model_scale,
+        )
         # decrease dynaclr similarity given the distance?
         edge_weight = -td.EdgeAttr("dynaclr_similarity") * dist_weight
 
@@ -247,26 +276,33 @@ def track_single_dataset(
     return metrics
 
 
-if __name__ == "__main__":
-
-    model_paths = [
-        None,
-        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"),
-        Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_classical_gfp_rfp_ph_temp0p5_batch128_ckpt146.onnx"),
-        Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_timeaware_gfp_rfp_ph_temp0p5_batch128_ckpt185.onnx"),
+def main() -> None:
+    models = [
+        # (None, (1, 1)),
+        (Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_phase_brightfield_temp0p2_batch256_ckpt33.onnx"), (0.325, 0.325)),
+        (Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"), (0.325, 0.325)),
+        (Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_classical_gfp_rfp_ph_temp0p5_batch128_ckpt146.onnx"), (0.150, 0.150)),
+        (Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_timeaware_gfp_rfp_ph_temp0p5_batch128_ckpt185.onnx"), (0.150, 0.150)),
     ]
 
     results = []
 
     dataset_root = Path("/hpc/reference/group.royer/CTC/training/")
 
-    for model_path in model_paths:
+    scale_metadata_fpath = dataset_root.parent / "metadata.yaml"
+    with open(scale_metadata_fpath, "r") as f:
+        scale_metadata = yaml.safe_load(f)
+
+    for model_path, model_scale in models:
         for dataset_dir in list(dataset_root.iterdir()):
 
+            # FIXME: include 3D datasets with center crop
             # executing only 2D datasets
             if "2D" not in dataset_dir.name:
                 print(f"Skipping {dataset_dir.name} because it is not a 2D dataset")
                 continue
+
+            dataset_scale = scale_metadata[dataset_dir.name]
 
             for dataset_num in ["01", "02"]:
                 # processing only datasets with segmentation (linking challenge)
@@ -278,8 +314,10 @@ if __name__ == "__main__":
                 metrics = track_single_dataset(
                     dataset_dir=dataset_dir,
                     dataset_num=dataset_num,
+                    dataset_scale=dataset_scale[-2:],
                     show_napari_viewer=False,
                     dynaclr_model_path=model_path,
+                    model_scale=model_scale,
                 )
                 metrics["model"] = "None" if model_path is None else model_path.stem
                 metrics["dataset"] = dataset_dir.name
@@ -295,3 +333,7 @@ if __name__ == "__main__":
             "model", "dataset", "LNK", "BIO(0)", "OP_CLB(0)", "CHOTA"
         )
     )
+
+
+if __name__ == "__main__":
+    main()
