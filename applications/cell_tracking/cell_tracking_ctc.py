@@ -23,7 +23,7 @@ from dask.array.image import imread
 from numpy.typing import NDArray
 from toolz import curry
 from rich import print
-from scipy.ndimage import zoom
+from scipy.ndimage import gaussian_filter
 
 import tracksdata as td
 
@@ -32,7 +32,7 @@ def _seg_dir(dataset_dir: Path, dataset_num: str) -> Path:
     return dataset_dir / f"{dataset_num}_ERR_SEG"
 
 
-def _pad(image: NDArray, shape: tuple[int, int]) -> NDArray:
+def _pad(image: NDArray, shape: tuple[int, int], mode: str) -> NDArray:
     """
     Pad the image to the given shape.
     """
@@ -44,7 +44,7 @@ def _pad(image: NDArray, shape: tuple[int, int]) -> NDArray:
     left = diff // 2
     right = diff - left
 
-    return np.pad(image, tuple(zip(left, right)), mode="reflect")
+    return np.pad(image, tuple(zip(left, right)), mode=mode)
 
 
 @curry
@@ -54,7 +54,7 @@ def _crop_embedding(
     final_shape: tuple[int, int],
     session: ort.InferenceSession,
     input_name: str,
-    upscale: tuple[float, float],
+    padding: int, 
 ) -> NDArray[np.float32]:
     """
     Crop the frame and compute the DynaCLR embedding.
@@ -71,36 +71,53 @@ def _crop_embedding(
         The session to use for the embedding.
     input_name : str
         The name of the input tensor.
-    upscale : float, optional
-        The upscale factor to apply to the crop.
+    padding : int, optional
+        The padding to apply to the crop.
 
     Returns
     -------
     NDArray[np.float32]
         The embedding of the crop.
     """
+    label_img = np.zeros_like(frame, dtype=np.int16)
+    
     crops = []
-    for m in mask:
-        crop_shape = tuple(np.ceil(np.asarray(final_shape) / upscale).astype(int))
+    for i, m in enumerate(mask, start=1):
+
+        ndim = len(m.bbox) // 2
+        bbox_start = m.bbox[:ndim]
+        bbox_end = m.bbox[ndim:]
+        max_length = (bbox_end - bbox_start)[-2:].max() + 2 * padding
+
+        crop_shape = np.minimum(final_shape, max_length)
 
         if frame.ndim == 3:
             crop_shape = (1, *crop_shape)
+        
+        label_img[m.mask_indices()] = i
 
         crop = m.crop(frame, shape=crop_shape).astype(np.float32)
-        crop = _pad(crop, crop_shape)
+        crop_mask = (m.crop(label_img, shape=crop_shape) == i).astype(np.float32)
 
         if crop.ndim == 3:
             assert crop.shape[0] == 1, f"Expected 1 z-slice in 3D crop. Found {crop.shape[0]}"
             crop = crop[0]
+            crop_mask = crop_mask[0]
+
+        crop = _pad(crop, final_shape, mode="reflect")
+        crop_mask = _pad(crop_mask, final_shape, mode="constant")
+
+        blurred_mask = gaussian_filter(crop_mask, sigma=5)
+        crop_mask = np.maximum(crop_mask, blurred_mask / blurred_mask.max())
 
         mu, sigma = np.median(crop), np.quantile(crop, 0.75) - np.quantile(crop, 0.25)
         crop = (crop - mu) / (sigma + 1e-8)
 
-        if np.all(upscale != 1.0):
-            crop = zoom(crop, upscale, order=2, mode="nearest")
-        
+        # removing background
+        crop = crop * crop_mask
+
         if crop.shape != final_shape:
-            warnings.warn(f"Crop shape {crop.shape} does not match final shape {final_shape}")
+            raise ValueError(f"Crop shape {crop.shape} does not match final shape {final_shape}")
         
         crops.append(crop)
 
@@ -108,6 +125,12 @@ def _crop_embedding(
     crops = np.stack(crops, axis=0)
     crops = crops[:, np.newaxis, np.newaxis, ...]
     output = session.run(None, {input_name: crops})
+
+    # import napari
+    # viewer = napari.Viewer()
+    # viewer.add_image(frame)
+    # viewer.add_image(np.squeeze(crops))
+    # napari.run()
 
     # embedding = output[-1]   # projected 32-dimensional embedding
     embedding = output[0]  # 768-dimensional embedding
@@ -120,8 +143,6 @@ def _add_dynaclr_attrs(
     model_path: Path,
     graph: td.graph.InMemoryGraph,
     images: NDArray,
-    dataset_scale: tuple[float, float],
-    model_scale: tuple[float, float],
 ) -> None:
     """
     Add DynaCLR embedding attributes to each node in the graph
@@ -145,13 +166,11 @@ def _add_dynaclr_attrs(
     print(f"Expected input dimensions: {input_dim}")
     print(f"Expected input type: {input_type}")
 
-    cell_zoom_factor = 1
-    upscale = cell_zoom_factor * np.asarray(model_scale) / np.asarray(dataset_scale)
     crop_attr_func = _crop_embedding(
         final_shape=(64, 64),
         session=session,
         input_name=input_name,
-        upscale=upscale,
+        padding=3,
     )
 
     print("Adding DynaCLR embedding attributes ...")
@@ -173,10 +192,8 @@ def _add_dynaclr_attrs(
 def track_single_dataset(
     dataset_dir: Path,
     dataset_num: str,
-    dataset_scale: tuple[float, float],
     show_napari_viewer: bool,
     dynaclr_model_path: Path | None,
-    model_scale: tuple[float, float],
 ) -> None:
     """
     Main function to track cells in a dataset.
@@ -187,18 +204,14 @@ def track_single_dataset(
         Path to the dataset directory.
     dataset_num : str
         Number of the dataset.
-    dataset_scale: tuple[float, float],
-        The scale of the dataset.
     show_napari_viewer : bool
         Whether to show the napari viewer.
     dynaclr_model_path : Path | None
         Path to the DynaCLR model. If None, the model will not be used.
-    model_scale : tuple[float, float]
-        The scale of the model.
     """
     assert dataset_dir.exists(), f"Data directory {dataset_dir} does not exist."
 
-    print(f"Loading labels from '{dataset_dir}' with scale {dataset_scale} ...")
+    print(f"Loading labels from '{dataset_dir}'...")
     labels = imread(str(_seg_dir(dataset_dir, dataset_num) / "*.tif"))
     images = imread(str(dataset_dir / dataset_num / "*.tif"))
 
@@ -232,8 +245,6 @@ def track_single_dataset(
             dynaclr_model_path,
             graph,
             images,
-            dataset_scale=dataset_scale,
-            model_scale=model_scale,
         )
         # decrease dynaclr similarity given the distance?
         edge_weight = -td.EdgeAttr("dynaclr_similarity") * dist_weight
@@ -250,7 +261,7 @@ def track_single_dataset(
         edge_weight=edge_weight,
         appearance_weight=0,
         disappearance_weight=0,
-        division_weight=0.5,
+        division_weight=0.0,
         node_weight=-10,  # we assume all segmentations are correct
     )
 
@@ -280,28 +291,19 @@ def track_single_dataset(
 
 def main() -> None:
     models = [
-        # (None, (1, 1)),
-        (Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_phase_brightfield_temp0p2_batch256_ckpt33.onnx"), (0.325, 0.325)),
-        (Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"), (0.325, 0.325)),
-        (Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_classical_gfp_rfp_ph_temp0p5_batch128_ckpt146.onnx"), (0.150, 0.150)),
-        (Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_timeaware_gfp_rfp_ph_temp0p5_batch128_ckpt185.onnx"), (0.150, 0.150)),
+        None,
+        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_phase_brightfield_temp0p2_batch256_ckpt33.onnx"),
+        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"),
+        Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_classical_gfp_rfp_ph_temp0p5_batch128_ckpt146.onnx"),
+        Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_timeaware_gfp_rfp_ph_temp0p5_batch128_ckpt185.onnx"),
     ]
 
     results = []
 
     dataset_root = Path("/hpc/reference/group.royer/CTC/training/")
 
-    scale_metadata_fpath = dataset_root.parent / "metadata.yaml"
-    with open(scale_metadata_fpath, "r") as f:
-        scale_metadata = yaml.safe_load(f)
-
-    for model_path, model_scale in models:
-        for dataset_dir in list(dataset_root.iterdir()):
-            # FIXME: remove this
-            # if "-ce" not in dataset_dir.name.lower():
-            #     continue
-
-            dataset_scale = scale_metadata[dataset_dir.name]
+    for model_path in models:
+        for dataset_dir in sorted(dataset_root.iterdir()):
 
             for dataset_num in ["01", "02"]:
                 # processing only datasets with segmentation (linking challenge)
@@ -313,10 +315,8 @@ def main() -> None:
                 metrics = track_single_dataset(
                     dataset_dir=dataset_dir,
                     dataset_num=dataset_num,
-                    dataset_scale=dataset_scale[-2:],
                     show_napari_viewer=False,
                     dynaclr_model_path=model_path,
-                    model_scale=model_scale,
                 )
                 metrics["model"] = "None" if model_path is None else model_path.stem
                 metrics["dataset"] = dataset_dir.name
