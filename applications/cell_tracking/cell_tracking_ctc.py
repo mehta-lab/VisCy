@@ -54,7 +54,6 @@ def _crop_embedding(
     final_shape: tuple[int, int],
     session: ort.InferenceSession,
     input_name: str,
-    padding: int, 
 ) -> NDArray[np.float32]:
     """
     Crop the frame and compute the DynaCLR embedding.
@@ -84,15 +83,10 @@ def _crop_embedding(
     crops = []
     for i, m in enumerate(mask, start=1):
 
-        ndim = len(m.bbox) // 2
-        bbox_start = m.bbox[:ndim]
-        bbox_end = m.bbox[ndim:]
-        max_length = (bbox_end - bbox_start)[-2:].max() + 2 * padding
-
-        crop_shape = np.minimum(final_shape, max_length)
-
         if frame.ndim == 3:
-            crop_shape = (1, *crop_shape)
+            crop_shape = (1, *final_shape)
+        else:
+            crop_shape = final_shape
         
         label_img[m.mask_indices()] = i
 
@@ -110,8 +104,8 @@ def _crop_embedding(
         blurred_mask = gaussian_filter(crop_mask, sigma=5)
         crop_mask = np.maximum(crop_mask, blurred_mask / blurred_mask.max())
 
-        mu, sigma = np.median(crop), np.quantile(crop, 0.75) - np.quantile(crop, 0.25)
-        crop = (crop - mu) / (sigma + 1e-8)
+        mu, sigma = np.mean(crop), np.std(crop)
+        crop = (crop - mu) / np.maximum(sigma, 1e-8)
 
         # removing background
         crop = crop * crop_mask
@@ -170,7 +164,6 @@ def _add_dynaclr_attrs(
         final_shape=(64, 64),
         session=session,
         input_name=input_name,
-        padding=3,
     )
 
     print("Adding DynaCLR embedding attributes ...")
@@ -261,7 +254,7 @@ def track_single_dataset(
         edge_weight=edge_weight,
         appearance_weight=0,
         disappearance_weight=0,
-        division_weight=0.0,
+        division_weight=0.5,
         node_weight=-10,  # we assume all segmentations are correct
     )
 
@@ -291,11 +284,11 @@ def track_single_dataset(
 
 def main() -> None:
     models = [
-        None,
-        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_phase_brightfield_temp0p2_batch256_ckpt33.onnx"),
-        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"),
         Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_classical_gfp_rfp_ph_temp0p5_batch128_ckpt146.onnx"),
         Path("/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_ph_2D/deploy/dynaclr2d_timeaware_gfp_rfp_ph_temp0p5_batch128_ckpt185.onnx"),
+        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_phase_brightfield_temp0p2_batch256_ckpt33.onnx"),
+        Path("/hpc/projects/organelle_phenotyping/models/dynamorph_microglia/deploy/dynaclr2d_timeaware_phase_brightfield_temp0p2_batch256_ckpt13.onnx"),
+        None,
     ]
 
     results = []
@@ -324,8 +317,9 @@ def main() -> None:
                 print(metrics)
                 results.append(metrics)
 
-    df = pl.DataFrame(results)
-    df.write_csv("results.csv")
+                # update for every new result
+                df = pl.DataFrame(results)
+                df.write_csv("results.csv")
 
     print(
         df.group_by("model", "dataset").mean().select(
