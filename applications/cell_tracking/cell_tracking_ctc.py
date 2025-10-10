@@ -3,7 +3,7 @@
 # /// script
 # requires-python = ">=3.10"
 # dependencies = [
-#   "tracksdata",
+#   "tracksdata @ git+https://github.com/royerlab/tracksdata.git",
 #   "onnxruntime-gpu",
 #   "napari[pyqt5]",
 #   "gurobipy",
@@ -17,6 +17,7 @@ import polars as pl
 import numpy as np
 import napari
 import onnxruntime as ort
+import warnings
 
 from dask.array.image import imread
 from numpy.typing import NDArray
@@ -43,7 +44,7 @@ def _pad(image: NDArray, shape: tuple[int, int]) -> NDArray:
     left = diff // 2
     right = diff - left
 
-    return np.pad(image, ((left[0], right[0]), (left[1], right[1])), mode="reflect")
+    return np.pad(image, tuple(zip(left, right)), mode="reflect")
 
 
 @curry
@@ -53,7 +54,7 @@ def _crop_embedding(
     final_shape: tuple[int, int],
     session: ort.InferenceSession,
     input_name: str,
-    upscale: float = 1.0,
+    upscale: tuple[float, float],
 ) -> NDArray[np.float32]:
     """
     Crop the frame and compute the DynaCLR embedding.
@@ -80,28 +81,27 @@ def _crop_embedding(
     """
     crops = []
     for m in mask:
-        crop_shape = tuple(np.round(np.asarray(final_shape) / upscale).astype(int))
+        crop_shape = tuple(np.ceil(np.asarray(final_shape) / upscale).astype(int))
 
         if frame.ndim == 3:
             crop_shape = (1, *crop_shape)
-            upscale = (1, *upscale)
 
         crop = m.crop(frame, shape=crop_shape).astype(np.float32)
         crop = _pad(crop, crop_shape)
+
+        if crop.ndim == 3:
+            assert crop.shape[0] == 1, f"Expected 1 z-slice in 3D crop. Found {crop.shape[0]}"
+            crop = crop[0]
 
         mu, sigma = np.median(crop), np.quantile(crop, 0.75) - np.quantile(crop, 0.25)
         crop = (crop - mu) / (sigma + 1e-8)
 
         if np.all(upscale != 1.0):
-            crop = zoom(crop, upscale, order=1, mode="nearest")
+            crop = zoom(crop, upscale, order=2, mode="nearest")
         
-        if crop.shape[-2:] != final_shape:
-            raise ValueError(f"Crop shape {crop.shape} does not match final shape {final_shape}")
+        if crop.shape != final_shape:
+            warnings.warn(f"Crop shape {crop.shape} does not match final shape {final_shape}")
         
-        if crop.ndim == 3:
-            assert crop.shape[0] == 1, f"Expected 1 z-slice in 3D crop. Found {crop.shape[0]}"
-            crop = crop[0]
-
         crops.append(crop)
 
     # expanding batch, channel, and z dimensions
@@ -145,11 +145,13 @@ def _add_dynaclr_attrs(
     print(f"Expected input dimensions: {input_dim}")
     print(f"Expected input type: {input_type}")
 
+    cell_zoom_factor = 1
+    upscale = cell_zoom_factor * np.asarray(model_scale) / np.asarray(dataset_scale)
     crop_attr_func = _crop_embedding(
-        final_shape=(192, 192),
+        final_shape=(64, 64),
         session=session,
         input_name=input_name,
-        upscale=np.asarray(model_scale) / np.asarray(dataset_scale),
+        upscale=upscale,
     )
 
     print("Adding DynaCLR embedding attributes ...")
@@ -196,7 +198,7 @@ def track_single_dataset(
     """
     assert dataset_dir.exists(), f"Data directory {dataset_dir} does not exist."
 
-    print(f"Loading labels from {dataset_dir} ...")
+    print(f"Loading labels from '{dataset_dir}' with scale {dataset_scale} ...")
     labels = imread(str(_seg_dir(dataset_dir, dataset_num) / "*.tif"))
     images = imread(str(dataset_dir / dataset_num / "*.tif"))
 
@@ -295,12 +297,9 @@ def main() -> None:
 
     for model_path, model_scale in models:
         for dataset_dir in list(dataset_root.iterdir()):
-
-            # FIXME: include 3D datasets with center crop
-            # executing only 2D datasets
-            if "2D" not in dataset_dir.name:
-                print(f"Skipping {dataset_dir.name} because it is not a 2D dataset")
-                continue
+            # FIXME: remove this
+            # if "-ce" not in dataset_dir.name.lower():
+            #     continue
 
             dataset_scale = scale_metadata[dataset_dir.name]
 
