@@ -1080,6 +1080,30 @@ class CytoDtw:
                         zorder=3,
                     )
 
+            # Mark infection state if available in consensus
+            if self.consensus_data is not None:
+                consensus_annotations = self.consensus_data.get("annotations", None)
+                if consensus_annotations and "infected" in consensus_annotations:
+                    infection_t = consensus_annotations.index("infected")
+                    if plot_type == "heatmap":
+                        ax.axvline(
+                            infection_t,
+                            color="orange",
+                            linewidth=2,
+                            linestyle="--",
+                            alpha=0.8,
+                            label="Infection",
+                        )
+                    else:
+                        ax.axvline(
+                            infection_t,
+                            color="orange",
+                            alpha=0.7,
+                            linestyle="--",
+                            linewidth=2.5,
+                            label="Infection",
+                        )
+
             # Mark alignment boundary
             if plot_type != "heatmap":
                 ax.axvline(
@@ -1327,6 +1351,21 @@ class CytoDtw:
                         linestyle=":",
                         alpha=0.3,
                         linewidth=1,
+                    )
+
+            # Mark infection state if available in consensus
+            if self.consensus_data is not None:
+                consensus_annotations = self.consensus_data.get("annotations", None)
+                if consensus_annotations and "infected" in consensus_annotations:
+                    infection_t = consensus_annotations.index("infected")
+                    ax.axvline(
+                        infection_t,
+                        color="orange",
+                        alpha=0.7,
+                        linestyle="--",
+                        linewidth=2.5,
+                        label="Infection",
+                        zorder=6,
                     )
 
             if remove_outliers and feat_col in outlier_bounds:
