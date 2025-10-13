@@ -263,7 +263,7 @@ class IntensityMetrics(LightningModule):
                     )
                 else:  # 2D case
                     metrics_dict["ssim"] = structural_similarity_index_measure(
-                        pred, target, data_range=1.0
+                        pred, target
                     )
             elif metric == "ms_ssim":
                 if pred.ndim > 1:
