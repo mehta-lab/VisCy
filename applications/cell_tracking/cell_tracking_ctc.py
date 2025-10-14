@@ -8,16 +8,15 @@
 #   "napari[pyqt5]",
 #   "gurobipy",
 #   "py-ctcmetrics",
+#   "spatial-graph",
 # ]
 # ///
 
 from pathlib import Path
-import yaml
 import polars as pl
 import numpy as np
 import napari
 import onnxruntime as ort
-import warnings
 
 from dask.array.image import imread
 from numpy.typing import NDArray
@@ -102,7 +101,9 @@ def _crop_embedding(
         crop_mask = _pad(crop_mask, final_shape, mode="constant")
 
         blurred_mask = gaussian_filter(crop_mask, sigma=5)
-        crop_mask = np.maximum(crop_mask, blurred_mask / blurred_mask.max())
+        blurred_coef = blurred_mask.max()
+        if blurred_coef > 1e-8:  # if too small use the binary mask
+            crop_mask = np.maximum(crop_mask, blurred_mask / blurred_coef)
 
         mu, sigma = np.mean(crop), np.std(crop)
         # mu = np.median(crop)
@@ -272,7 +273,9 @@ def track_single_dataset(
 
     if show_napari_viewer:
         print("Converting to napari format ...")
-        labels, tracks_df, track_graph = td.functional.to_napari_format(graph, labels.shape)
+        tracks_df, track_graph, labels = td.functional.to_napari_format(
+            graph, labels.shape, mask_key=td.DEFAULT_ATTR_KEYS.MASK
+        )
 
         print("Opening napari viewer ...")
         viewer = napari.Viewer()
