@@ -34,7 +34,7 @@ organelle_channel_name = "GFP EX488 EM525-45"
 
 output_root = (
     Path(
-        "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/infection_state/output"
+        "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output"
     )
     / input_path.stem
 )
