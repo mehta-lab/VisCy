@@ -66,6 +66,6 @@ predict:
         - 256
         - 256
       caching: false
-    pyramid_resolution: "0"
+    array_key: "0"
   return_predictions: false
   ckpt_path: null
