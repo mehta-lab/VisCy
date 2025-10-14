@@ -1,0 +1,45 @@
+datamodule:
+  batch_size: 32
+  final_yx_patch_size:
+  - 160
+  - 160
+  include_fov_names: null
+  include_track_ids: null
+  initial_yx_patch_size:
+  - 160
+  - 160
+  normalizations:
+  - class_path: viscy.transforms.ScaleIntensityRangePercentilesd
+    init_args:
+      b_max: 1.0
+      b_min: 0.0
+      keys:
+      - RFP
+      lower: 50
+      upper: 99
+  num_workers: 60
+  source_channel:
+  - RFP
+  z_range:
+  - 15
+  - 45
+embedding:
+  pca_kwargs:
+    n_components: 8
+  phate_kwargs:
+    decay: 40
+    knn: 5
+    n_components: 2
+    n_jobs: -1
+    random_state: 42
+execution:
+  overwrite: true
+  save_config: true
+  show_config: true
+model:
+  channel_reduction_methods:
+    RFP: max
+paths:
+  data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr
+  output_path: /home/eduardo.hirata/repos/viscy/applications/benchmarking/DynaCLR/ImageNet/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr
+  tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr

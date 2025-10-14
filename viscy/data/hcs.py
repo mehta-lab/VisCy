@@ -357,6 +357,7 @@ class HCSDataModule(LightningDataModule):
         persistent_workers=False,
         prefetch_factor=None,
         array_key: str = "0",
+        pin_memory=False,
     ):
         super().__init__()
         self.data_path = Path(data_path)
@@ -376,6 +377,7 @@ class HCSDataModule(LightningDataModule):
         self.persistent_workers = persistent_workers
         self.prefetch_factor = prefetch_factor
         self.array_key = array_key
+        self.pin_memory = pin_memory
 
     @property
     def cache_path(self):
@@ -568,6 +570,7 @@ class HCSDataModule(LightningDataModule):
             persistent_workers=self.persistent_workers,
             collate_fn=_collate_samples,
             drop_last=True,
+            pin_memory=self.pin_memory,
         )
 
     def val_dataloader(self):
@@ -578,6 +581,7 @@ class HCSDataModule(LightningDataModule):
             shuffle=False,
             prefetch_factor=self.prefetch_factor if self.num_workers else None,
             persistent_workers=self.persistent_workers,
+            pin_memory=self.pin_memory,
         )
 
     def test_dataloader(self):
@@ -600,21 +604,23 @@ class HCSDataModule(LightningDataModule):
         """(normalization -> maybe augmentation -> center crop)
         Deterministic center crop as the last step of training and validation."""
         # TODO: These have a fixed order for now... ()
-        final_crop = [
-            CenterSpatialCropd(
-                keys=self.source_channel + self.target_channel,
-                roi_size=(
-                    self.z_window_size,
-                    self.yx_patch_size[0],
-                    self.yx_patch_size[1],
-                ),
-            )
-        ]
+        final_crop = [self._final_crop()]
         train_transform = Compose(
             self.normalizations + self._train_transform() + final_crop
         )
         val_transform = Compose(self.normalizations + final_crop)
         return train_transform, val_transform
+
+    def _final_crop(self) -> CenterSpatialCropd:
+        """Setup final cropping: center crop to the target size."""
+        return CenterSpatialCropd(
+            keys=self.source_channel + self.target_channel,
+            roi_size=(
+                self.z_window_size,
+                self.yx_patch_size[0],
+                self.yx_patch_size[1],
+            ),
+        )
 
     def _train_transform(self) -> list[Callable]:
         """Setup training augmentations: check input values,

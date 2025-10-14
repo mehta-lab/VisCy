@@ -26,8 +26,7 @@ def log_feature(feature_map, name, log_save_folder, debug_mode):
         if debug_mode:
             now = datetime.datetime.now()
             log_save_folder = (
-                f"feature_map_{now.year}_{now.month}_"
-                f"{now.day}_{now.hour}_{now.minute}/"
+                f"feature_map_{now.year}_{now.month}_{now.day}_{now.hour}_{now.minute}/"
             )
             logger = FeatureLogger(
                 save_folder=log_save_folder,
@@ -117,7 +116,7 @@ class FeatureLogger:
             dim_names = ["dim_" + str(i) for i in range(len(num_dims))]
         else:
             assert len(dim_names) + self.spatial_dims == num_dims, (
-                "dim_names must be " "same length as nonspatial tensor dim length"
+                "dim_names must be same length as nonspatial tensor dim length"
             )
         self.dim_names = dim_names
 

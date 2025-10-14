@@ -3,15 +3,43 @@
 from typing import Sequence
 
 from monai.transforms import (
+    CenterSpatialCropd,
+    Decollated,
     RandAdjustContrastd,
     RandAffined,
+    RandFlipd,
     RandGaussianNoised,
     RandGaussianSmoothd,
     RandScaleIntensityd,
+    RandSpatialCropd,
     RandWeightedCropd,
     ScaleIntensityRangePercentilesd,
+    ToDeviced,
 )
 from numpy.typing import DTypeLike
+
+
+class Decollated(Decollated):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        detach: bool = True,
+        pad_batch: bool = True,
+        fill_value: float | None = None,
+        **kwargs,
+    ):
+        super().__init__(
+            keys=keys,
+            detach=detach,
+            pad_batch=pad_batch,
+            fill_value=fill_value,
+            **kwargs,
+        )
+
+
+class ToDeviced(ToDeviced):
+    def __init__(self, keys: Sequence[str] | str, **kwargs):
+        super().__init__(keys=keys, **kwargs)
 
 
 class RandWeightedCropd(RandWeightedCropd):
@@ -37,9 +65,9 @@ class RandAffined(RandAffined):
         self,
         keys: Sequence[str] | str,
         prob: float,
-        rotate_range: Sequence[float] | float,
-        shear_range: Sequence[float] | float,
-        scale_range: Sequence[float] | float,
+        rotate_range: Sequence[float | Sequence[float]] | float,
+        shear_range: Sequence[float | Sequence[float]] | float,
+        scale_range: Sequence[float | Sequence[float]] | float,
         **kwargs,
     ):
         super().__init__(
@@ -132,3 +160,40 @@ class ScaleIntensityRangePercentilesd(ScaleIntensityRangePercentilesd):
             dtype=dtype,
             allow_missing_keys=allow_missing_keys,
         )
+
+
+class RandSpatialCropd(RandSpatialCropd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        roi_size: Sequence[int] | int,
+        random_center: bool = True,
+        **kwargs,
+    ):
+        super().__init__(
+            keys=keys,
+            roi_size=roi_size,
+            random_center=random_center,
+            **kwargs,
+        )
+
+
+class CenterSpatialCropd(CenterSpatialCropd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        roi_size: Sequence[int] | int,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, roi_size=roi_size, **kwargs)
+
+
+class RandFlipd(RandFlipd):
+    def __init__(
+        self,
+        keys: Sequence[str] | str,
+        prob: float,
+        spatial_axis: Sequence[int] | int,
+        **kwargs,
+    ):
+        super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)

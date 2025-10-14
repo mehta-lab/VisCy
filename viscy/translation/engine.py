@@ -477,6 +477,41 @@ class VSUNet(LightningModule):
 
 
 class AugmentedPredictionVSUNet(LightningModule):
+    """Apply arbitrary collection of test-time augmentations
+    for image translation prediction.
+
+    Parameters
+    ----------
+    model : nn.Module
+        The model to be used for prediction.
+    forward_transforms : list[Callable[[Tensor], Tensor]]
+        A collection of transforms to apply to the input image before passing it to the model.
+        Each one is applied independently.
+        For example, resizing the input to match the expected voxel size of the model.
+    inverse_transforms : list[Callable[[Tensor], Tensor]]
+        Inverse transforms to apply to the model output before reduction.
+        They should be the inverse of each forward transform.
+        For example, resizing the output to match the original input shape for storage.
+    reduction : Literal["mean", "median"], optional
+        The reduction method to apply to the predictions, by default "mean"
+
+    Notes
+    -----
+    Given sample tensor ``x``,
+    model instance ``model()``,
+    a list of forward transforms ``[f1(), f2()]``,
+    a list of inverse transforms ``[i1(), i2()]``,
+    and reduction method ``reduce()``,
+    the prediction is computed as follows:
+
+        prediction = reduce(
+            [
+                i1(model(f1(x))),
+                i2(model(f2(x))),
+            ]
+        )
+    """
+
     def __init__(
         self,
         model: nn.Module,

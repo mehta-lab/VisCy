@@ -1,10 +1,11 @@
 # %%
 import torch
-from kornia.augmentation import RandomAffine3D
 from lightning.pytorch import seed_everything
 from monai.data.meta_obj import set_track_meta
-from monai.transforms import RandAffine
+from monai.transforms import RandSpatialCrop
 from torch.utils.benchmark import Timer
+
+from viscy.transforms import BatchedRandSpatialCrop
 
 seed_everything(42)
 
@@ -12,53 +13,50 @@ seed_everything(42)
 x = torch.rand(32, 2, 15, 512, 512, device="cuda")
 
 # %%
-monai_transform = RandAffine(
-    prob=1.0,
-    rotate_range=(torch.pi, 0, 0),
-    scale_range=(0.2, 0.3, 0.3),
-    padding_mode="zeros",
-)
+roi_size = [8, 256, 256]
 
-kornia_transform = RandomAffine3D(
-    degrees=(360.0, 0.0, 0.0),
-    scale=((0.8, 1.2), (0.7, 1.3), (0.7, 1.3)),
-    p=1.0,
+monai_transform = RandSpatialCrop(
+    roi_size=roi_size, random_center=True, random_size=False
 )
+batched_transform = BatchedRandSpatialCrop(roi_size=roi_size, random_center=True)
 
 
 # %%
 def bench_monai(x):
     set_track_meta(False)
     with torch.inference_mode():
+        results = []
         for sample in x:
-            _ = monai_transform(sample)
+            cropped = monai_transform(sample)
+            results.append(cropped)
+        return torch.stack(results)
 
 
-def bench_kornia(x):
+def bench_batched(x):
     with torch.inference_mode():
-        _ = kornia_transform(x)
+        return batched_transform(x)
 
 
 # %%
 globals_injection = {
     "x": x,
-    "monai_transform": monai_transform,
-    "kornia_transform": kornia_transform,
+    "bench_monai": bench_monai,
+    "bench_batched": bench_batched,
 }
 
 monai_timer = Timer(
     stmt="bench_monai(x)",
     globals=globals_injection,
-    label="monai",
+    label="MONAI (loop)",
     setup="from __main__ import bench_monai",
     # num_threads=16,
 )
 
-kornia_timer = Timer(
-    stmt="bench_kornia(x)",
+batched_timer = Timer(
+    stmt="bench_batched(x)",
     globals=globals_injection,
-    label="kornia",
-    setup="from __main__ import bench_kornia",
+    label="Batched (gather)",
+    setup="from __main__ import bench_batched",
     # num_threads=16,
 )
 
@@ -66,6 +64,6 @@ kornia_timer = Timer(
 monai_timer.timeit(10)
 
 # %%
-kornia_timer.timeit(10)
+batched_timer.timeit(10)
 
 # %%

@@ -1,13 +1,19 @@
+import bisect
+import logging
+from collections import defaultdict
 from enum import Enum
 from typing import Literal, Sequence
 
 import torch
 from lightning.pytorch import LightningDataModule
 from lightning.pytorch.utilities.combined_loader import CombinedLoader
+from monai.data import ThreadDataLoader
 from torch.utils.data import ConcatDataset, DataLoader, Dataset
 
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _collate_samples
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class CombineMode(Enum):
@@ -82,6 +88,40 @@ class CombinedDataModule(LightningDataModule):
         )
 
 
+class BatchedConcatDataset(ConcatDataset):
+    def __getitem__(self, idx):
+        raise NotImplementedError
+
+    def _get_sample_indices(self, idx: int) -> tuple[int, int]:
+        if idx < 0:
+            if -idx > len(self):
+                raise ValueError(
+                    "absolute value of index should not exceed dataset length"
+                )
+            idx = len(self) + idx
+        dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+        if dataset_idx == 0:
+            sample_idx = idx
+        else:
+            sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+        return dataset_idx, sample_idx
+
+    def __getitems__(self, indices: list[int]) -> list[dict[str, torch.Tensor]]:
+        grouped_indices = defaultdict(list)
+        for idx in indices:
+            dataset_idx, sample_indices = self._get_sample_indices(idx)
+            grouped_indices[dataset_idx].append(sample_indices)
+        _logger.debug(f"Grouped indices: {grouped_indices}")
+
+        micro_batches = []
+        for dataset_idx, sample_indices in grouped_indices.items():
+            micro_batch = self.datasets[dataset_idx].__getitems__(sample_indices)
+            micro_batch["_dataset_idx"] = dataset_idx
+            micro_batches.append(micro_batch)
+
+        return micro_batches
+
+
 class ConcatDataModule(LightningDataModule):
     """
     Concatenate multiple data modules.
@@ -96,11 +136,16 @@ class ConcatDataModule(LightningDataModule):
         Data modules to concatenate.
     """
 
+    _ConcatDataset = ConcatDataset
+
     def __init__(self, data_modules: Sequence[LightningDataModule]):
         super().__init__()
         self.data_modules = data_modules
         self.num_workers = data_modules[0].num_workers
         self.batch_size = data_modules[0].batch_size
+        self.persistent_workers = data_modules[0].persistent_workers
+        self.prefetch_factor = data_modules[0].prefetch_factor
+        self.pin_memory = data_modules[0].pin_memory
         for dm in data_modules:
             if dm.num_workers != self.num_workers:
                 raise ValueError("Inconsistent number of workers")
@@ -124,29 +169,103 @@ class ConcatDataModule(LightningDataModule):
                     raise ValueError("Inconsistent patches per stack")
         if stage != "fit":
             raise NotImplementedError("Only fit stage is supported")
-        self.train_dataset = ConcatDataset(
+        self.train_dataset = self._ConcatDataset(
             [dm.train_dataset for dm in self.data_modules]
         )
-        self.val_dataset = ConcatDataset([dm.val_dataset for dm in self.data_modules])
+        self.val_dataset = self._ConcatDataset(
+            [dm.val_dataset for dm in self.data_modules]
+        )
+
+    def _dataloader_kwargs(self) -> dict:
+        return {
+            "num_workers": self.num_workers,
+            "persistent_workers": self.persistent_workers,
+            "prefetch_factor": self.prefetch_factor if self.num_workers else None,
+            "pin_memory": self.pin_memory,
+        }
 
     def train_dataloader(self):
         return DataLoader(
             self.train_dataset,
-            batch_size=self.batch_size // self.train_patches_per_stack,
-            num_workers=self.num_workers,
             shuffle=True,
-            persistent_workers=bool(self.num_workers),
+            batch_size=self.batch_size // self.train_patches_per_stack,
             collate_fn=_collate_samples,
+            drop_last=True,
+            **self._dataloader_kwargs(),
         )
 
     def val_dataloader(self):
         return DataLoader(
             self.val_dataset,
-            batch_size=self.batch_size,
-            num_workers=self.num_workers,
             shuffle=False,
-            persistent_workers=bool(self.num_workers),
+            batch_size=self.batch_size,
+            drop_last=False,
+            **self._dataloader_kwargs(),
         )
+
+
+class BatchedConcatDataModule(ConcatDataModule):
+    _ConcatDataset = BatchedConcatDataset
+
+    def train_dataloader(self):
+        return ThreadDataLoader(
+            self.train_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            shuffle=True,
+            drop_last=True,
+            collate_fn=lambda x: x,
+            **self._dataloader_kwargs(),
+        )
+
+    def val_dataloader(self):
+        return ThreadDataLoader(
+            self.val_dataset,
+            use_thread_workers=True,
+            batch_size=self.batch_size,
+            shuffle=False,
+            drop_last=False,
+            collate_fn=lambda x: x,
+            **self._dataloader_kwargs(),
+        )
+
+    def on_after_batch_transfer(self, batch, dataloader_idx: int):
+        """Apply GPU transforms from constituent data modules to micro-batches."""
+        if not isinstance(batch, list):
+            return batch
+
+        processed_micro_batches = []
+        for micro_batch in batch:
+            if isinstance(micro_batch, dict) and "_dataset_idx" in micro_batch:
+                dataset_idx = micro_batch.pop("_dataset_idx")
+                dm = self.data_modules[dataset_idx]
+                if hasattr(dm, "on_after_batch_transfer"):
+                    processed_micro_batch = dm.on_after_batch_transfer(
+                        micro_batch, dataloader_idx
+                    )
+                else:
+                    processed_micro_batch = micro_batch
+            else:
+                # Handle case where micro_batch doesn't have _dataset_idx (e.g., from model summary)
+                processed_micro_batch = micro_batch
+            processed_micro_batches.append(processed_micro_batch)
+        combined_batch = {}
+        for key in processed_micro_batches[0].keys():
+            if isinstance(processed_micro_batches[0][key], list):
+                combined_batch[key] = []
+                for micro_batch in processed_micro_batches:
+                    if key in micro_batch:
+                        combined_batch[key].extend(micro_batch[key])
+            else:
+                tensors_to_concat = [
+                    micro_batch[key]
+                    for micro_batch in processed_micro_batches
+                    if key in micro_batch
+                ]
+                if tensors_to_concat:
+                    combined_batch[key] = torch.cat(tensors_to_concat, dim=0)
+
+        return combined_batch
 
 
 class CachedConcatDataModule(LightningDataModule):

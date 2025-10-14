@@ -66,7 +66,7 @@ def add_channel(
         "except in the inferred channel dimension: "
         f"array shape: {position.data.shape}, "
         "expected channel shape: "
-        f"{(position.data.shape[0], ) + position.data.shape[2:]}, "
+        f"{(position.data.shape[0],) + position.data.shape[2:]}, "
         f"received channel shape: {new_channel_array.shape}"
     )
     # determine whether to overwrite or append
@@ -146,7 +146,7 @@ def create_and_write_mask(
             else:
                 # print progress update
                 if verbose:
-                    time_progress = f"time {time_index+1}/{shape[0]}"
+                    time_progress = f"time {time_index + 1}/{shape[0]}"
                     channel_progress = f"chan {channel_index}/{channel_indices}"
                     position_progress = f"pos {position.zgroup.name}"
                     p = (
@@ -268,55 +268,3 @@ def get_val_stats(sample_values):
         "iqr": float(scipy.stats.iqr(sample_values)),
     }
     return meta_row
-
-
-def mp_sample_im_pixels(fn_args, workers):
-    """Read and computes statistics of images with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of paths and corresponding returned df from get_im_stats
-    """
-
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(sample_im_pixels, *zip(*fn_args))
-    return list(map(list, zip(*list(res))))
-
-
-def sample_im_pixels(
-    position: ngff.Position,
-    grid_spacing,
-    channel,
-):
-    # TODO move out of mp utils into normalization utils
-    """
-    Read and computes statistics of images for each point in a grid.
-    Grid spacing determines distance in pixels between grid points
-    for rows and cols.
-    By default, samples from every time position and every z-depth, and
-    assumes that the data in the zarr store is stored in [T,C,Z,Y,X] format,
-    for time, channel, z, y, x.
-
-    :param Position zarr_dir: NGFF position node object
-    :param int grid_spacing: spacing of sampling grid in x and y
-    :param int channel: channel to sample from
-
-    :return list meta_rows: Dicts with intensity data for each grid point
-    """
-    image_zarr = position.data
-
-    all_sample_values = []
-    all_time_indices = list(range(image_zarr.shape[0]))
-    all_z_indices = list(range(image_zarr.shape[2]))
-
-    for time_index in all_time_indices:
-        for z_index in all_z_indices:
-            image_slice = image_zarr[time_index, channel, z_index, :, :]
-            _, _, sample_values = image_utils.grid_sample_pixel_values(
-                image_slice, grid_spacing
-            )
-            all_sample_values.append(sample_values)
-    sample_values = np.stack(all_sample_values, 0).flatten()
-
-    return position, sample_values

@@ -56,9 +56,9 @@ class Unet25d(nn.Module):
         self.num_blocks = num_blocks
         self.kernel_size = xy_kernel_size
         self.residual = residual
-        assert (
-            dropout >= 0 and dropout <= 0.5
-        ), f"Dropout {dropout} not in allowed range: [0, 0.5]"
+        assert dropout >= 0 and dropout <= 0.5, (
+            f"Dropout {dropout} not in allowed range: [0, 0.5]"
+        )
         self.dropout = dropout
         self.task = task
         self.debug_mode = False

@@ -18,8 +18,8 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.distributed import ShardedDistributedSampler
 from viscy.data.hcs import _ensure_channel_list, _read_norm_meta
+from viscy.data.select import SelectWell
 from viscy.data.typing import DictTransform, NormMeta
-from viscy.preprocessing.precompute import _filter_fovs, _filter_wells
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -171,22 +171,6 @@ class CachedOmeZarrDataset(Dataset):
         if not isinstance(sample, list):
             sample = [sample]
         return sample
-
-
-class SelectWell:
-    _include_wells: list[str] | None
-    _exclude_fovs: list[str] | None
-
-    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
-        positions = []
-        for well in _filter_wells(plate, include_wells=self._include_wells):
-            for fov in _filter_fovs(well, exclude_fovs=self._exclude_fovs):
-                positions.append(fov)
-        if len(positions) < 2:
-            raise ValueError(
-                "At least 2 FOVs are required for training and validation."
-            )
-        return positions
 
 
 class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
