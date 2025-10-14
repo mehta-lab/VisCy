@@ -17,7 +17,7 @@ def main() -> None:
 
     alt.renderers.enable("browser")  # use system browser
 
-    metric = "LNK"
+    metric = "OP_CLB(0)"
     p = gdf.plot.bar(x="model", y=metric, color="model")
     p = p.properties(
         title=metric,
