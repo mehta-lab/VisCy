@@ -1,3 +1,4 @@
+import pytest
 from iohub import open_ome_zarr
 
 from viscy.data.hcs import HCSDataModule
@@ -13,12 +14,16 @@ def test_pad_shape():
     assert _pad_shape(full_shape, 5) == full_shape
 
 
-def test_predict_writer(preprocessed_hcs_dataset, tmp_path):
+@pytest.mark.parametrize("array_key", ["0", "1"])
+def test_predict_writer(preprocessed_hcs_dataset, tmp_path, array_key):
     z_window_size = 5
     data_path = preprocessed_hcs_dataset
     channel_split = 2
     with open_ome_zarr(data_path) as dataset:
         channel_names = dataset.channel_names
+        expected_shape = list(next(dataset.positions())[1][array_key].shape)
+        expected_shape[1] = len(channel_names) - channel_split
+        expected_shape = tuple(expected_shape)
     dm = HCSDataModule(
         data_path=data_path,
         source_channel=channel_names[:channel_split],
@@ -27,6 +32,7 @@ def test_predict_writer(preprocessed_hcs_dataset, tmp_path):
         target_2d=bool(z_window_size == 1),
         batch_size=2,
         num_workers=0,
+        array_key=array_key,
     )
 
     model = VSUNet(
@@ -59,4 +65,5 @@ def test_predict_writer(preprocessed_hcs_dataset, tmp_path):
     assert output_path.exists()
     with open_ome_zarr(output_path) as result:
         for _, pos in result.positions():
-            assert pos["0"][:].any()
+            assert pos[array_key][:].any()
+            assert pos[array_key].shape == expected_shape
