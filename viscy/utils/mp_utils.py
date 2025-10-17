@@ -2,7 +2,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 import iohub.ngff as ngff
 import numpy as np
-import scipy.stats
 
 import viscy.utils.image_utils as image_utils
 import viscy.utils.masks as mask_utils
