@@ -36,6 +36,13 @@ class VisCyCLI(LightningCLI):
             }
         )
 
+    def _parse_ckpt_path(self) -> None:
+        try:
+            return super()._parse_ckpt_path()
+        except SystemExit:
+            # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
+            return None
+
 
 def _setup_environment() -> None:
     """Set log level and TF32 precision."""

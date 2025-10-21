@@ -104,8 +104,12 @@ class SlidingWindowDataset(Dataset):
     :param ChannelMap channels: source and target channel names,
         e.g. ``{'source': 'Phase', 'target': ['Nuclei', 'Membrane']}``
     :param int z_window_size: Z window size of the 2.5D U-Net, 1 for 2D
+    :param str array_key:
+        Name of the image arrays (multiscales level), by default "0"
     :param DictTransform | None transform:
         a callable that transforms data, defaults to None
+    :param bool load_normalization_metadata:
+        whether to load normalization metadata, defaults to True
     """
 
     def __init__(
@@ -113,7 +117,9 @@ class SlidingWindowDataset(Dataset):
         positions: list[Position],
         channels: ChannelMap,
         z_window_size: int,
+        array_key: str = "0",
         transform: DictTransform | None = None,
+        load_normalization_metadata: bool = True,
     ) -> None:
         super().__init__()
         self.positions = positions
@@ -128,7 +134,9 @@ class SlidingWindowDataset(Dataset):
         )
         self.z_window_size = z_window_size
         self.transform = transform
+        self.array_key = array_key
         self._get_windows()
+        self.load_normalization_metadata = load_normalization_metadata
 
     def _get_windows(self) -> None:
         """Count the sliding windows along T and Z,
@@ -138,7 +146,7 @@ class SlidingWindowDataset(Dataset):
         self.window_arrays = []
         self.window_norm_meta: list[NormMeta | None] = []
         for fov in self.positions:
-            img_arr: ImageArray = fov["0"]
+            img_arr: ImageArray = fov[str(self.array_key)]
             ts = img_arr.frames
             zs = img_arr.slices - self.z_window_size + 1
             if zs < 1:
@@ -225,10 +233,11 @@ class SlidingWindowDataset(Dataset):
         sample = {
             "index": sample_index,
             "source": self._stack_channels(sample_images, "source"),
-            "norm_meta": norm_meta,
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
+        if self.load_normalization_metadata:
+            sample["norm_meta"] = norm_meta
         return sample
 
 
@@ -326,6 +335,8 @@ class HCSDataModule(LightningDataModule):
     prefetch_factor : int or None, optional
         Number of samples loaded in advance by each worker during fitting,
         defaults to None (2 per PyTorch default).
+    array_key : str, optional
+        Name of the image arrays (multiscales level), by default "0"
     """
 
     def __init__(
@@ -345,6 +356,7 @@ class HCSDataModule(LightningDataModule):
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
         prefetch_factor=None,
+        array_key: str = "0",
         pin_memory=False,
     ):
         super().__init__()
@@ -364,6 +376,7 @@ class HCSDataModule(LightningDataModule):
         self.prepare_data_per_node = True
         self.persistent_workers = persistent_workers
         self.prefetch_factor = prefetch_factor
+        self.array_key = array_key
         self.pin_memory = pin_memory
 
     @property
@@ -421,6 +434,7 @@ class HCSDataModule(LightningDataModule):
         return {
             "channels": {"source": self.source_channel},
             "z_window_size": self.z_window_size,
+            "array_key": self.array_key,
         }
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):

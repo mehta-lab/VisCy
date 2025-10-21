@@ -2,7 +2,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 import iohub.ngff as ngff
 import numpy as np
-import scipy.stats
 
 import viscy.utils.image_utils as image_utils
 import viscy.utils.masks as mask_utils
@@ -260,11 +259,21 @@ def get_val_stats(sample_values):
                                         indices
     :return dict meta_row: Dict with intensity data for image
     """
-
+    percentiles = [1, 5, 25, 50, 75, 95, 99]
+    percentile_values = {
+        k: float(v)
+        for k, v in zip(percentiles, np.nanpercentile(sample_values, percentiles))
+    }
     meta_row = {
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),
-        "median": float(np.nanmedian(sample_values)),
-        "iqr": float(scipy.stats.iqr(sample_values)),
+        "median": percentile_values[50],
+        "iqr": percentile_values[75] - percentile_values[25],
+        "p5": percentile_values[5],
+        "p95": percentile_values[95],
+        "p95_p5": percentile_values[95] - percentile_values[5],
+        "p1": percentile_values[1],
+        "p99": percentile_values[99],
+        "p99_p1": percentile_values[99] - percentile_values[1],
     }
     return meta_row
