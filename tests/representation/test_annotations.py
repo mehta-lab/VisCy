@@ -297,11 +297,13 @@ def test_cli_with_jsonargparse(xr_embeddings_dataset, tmp_path):
     parser.add_function_arguments(main)
 
     # Parse arguments
-    args = parser.parse_args([
-        f"--input_path={xr_embeddings_dataset}",
-        f"--output_path={output_path}",
-        "--overwrite=false",
-    ])
+    args = parser.parse_args(
+        [
+            f"--input_path={xr_embeddings_dataset}",
+            f"--output_path={output_path}",
+            "--overwrite=false",
+        ]
+    )
 
     main(**vars(args))
 
@@ -315,9 +317,11 @@ def test_cli_with_jsonargparse(xr_embeddings_dataset, tmp_path):
     with pytest.raises(
         FileExistsError, match=f"Output path {output_path} already exists"
     ):
-        args = parser.parse_args([
-            f"--input_path={xr_embeddings_dataset}",
-            f"--output_path={output_path}",
-            "--overwrite=false",
-        ])
+        args = parser.parse_args(
+            [
+                f"--input_path={xr_embeddings_dataset}",
+                f"--output_path={output_path}",
+                "--overwrite=false",
+            ]
+        )
         main(**vars(args))
