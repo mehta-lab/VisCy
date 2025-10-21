@@ -21,6 +21,7 @@ def _build_hcs(
     dtype: DTypeLike,
     max_value: int | float,
     sharded: bool = False,
+    multiscales: bool = False,
 ):
     dataset = open_ome_zarr(
         path,
@@ -43,13 +44,17 @@ def _build_hcs(
                     if sharded
                     else None,
                 )
+                if multiscales:
+                    pos["1"] = pos["0"][::2, :, ::2, ::2, ::2]
 
 
 @fixture(scope="session")
 def preprocessed_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     """Provides a preprocessed HCS OME-Zarr dataset."""
     dataset_path = tmp_path_factory.mktemp("preprocessed.zarr")
-    _build_hcs(dataset_path, channel_names, (12, 256, 256), np.float32, 1.0)
+    _build_hcs(
+        dataset_path, channel_names, (12, 256, 256), np.float32, 1.0, multiscales=True
+    )
     # U[0, 1)
     expected = {"mean": 0.5, "std": 1 / np.sqrt(12), "median": 0.5, "iqr": 0.5}
     norm_meta = {channel: {"dataset_statistics": expected} for channel in channel_names}

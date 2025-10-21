@@ -23,7 +23,7 @@ This repository provides a pipeline for the following.
 > **Note:**
 VisCy is under active development.
 While we strive to maintain stability,
-the main branch may occasionally be updated with break-incompatible changes
+the main branch may occasionally be updated with backward-incompatible changes
 which are subsequently shipped in releases following [semantic versioning](https://semver.org/).
 Please choose a stable release from PyPI for production use.
 

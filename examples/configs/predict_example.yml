@@ -66,5 +66,6 @@ predict:
         - 256
         - 256
       caching: false
+    array_key: "0"
   return_predictions: false
   ckpt_path: null

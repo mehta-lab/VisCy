@@ -180,7 +180,7 @@ class TripletDataset(Dataset):
         y_exclude, x_exclude = (self.yx_patch_size[0] // 2, self.yx_patch_size[1] // 2)
         for pos, tracks in zip(self.positions, tracks_tables, strict=True):
             tracks["position"] = [pos] * len(tracks)
-            tracks["fov_name"] = pos.zgroup.name
+            tracks["fov_name"] = pos.zgroup.name.strip("/")
             tracks["global_track_id"] = tracks["fov_name"].str.cat(
                 tracks["track_id"].astype(str), sep="_"
             )
