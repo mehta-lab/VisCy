@@ -11,9 +11,9 @@ from iohub import open_ome_zarr
 from pytest import TempPathFactory
 
 from viscy.representation.evaluation import (
-    convert_xarray_annotation_to_anndata,
     load_annotation_anndata,
 )
+from viscy.representation.evaluation.annotation import convert
 
 
 @pytest.fixture(scope="function")
@@ -167,7 +167,7 @@ def test_convert_xarray_annotation_to_anndata(xr_embeddings_dataset, tmp_path):
     output_path = tmp_path / "test_converted.zarr"
 
     # Convert to AnnData using the function we're testing
-    adata_result = convert_xarray_annotation_to_anndata(
+    adata_result = convert(
         embeddings_ds=embeddings_ds,
         output_path=output_path,
         overwrite=True,
@@ -177,7 +177,7 @@ def test_convert_xarray_annotation_to_anndata(xr_embeddings_dataset, tmp_path):
     with pytest.raises(
         FileExistsError, match=f"Output path {output_path} already exists"
     ):
-        convert_xarray_annotation_to_anndata(
+        convert(
             embeddings_ds=embeddings_ds,
             output_path=output_path,
             overwrite=False,
@@ -278,6 +278,46 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     actual_values = result.values
     np.testing.assert_array_equal(actual_values, expected_values)
 
-    # Verify the index structure
     assert result.index.names == ["fov_name", "id"]
     assert all(result.index.get_level_values("fov_name") == "A/1/1")
+
+
+def test_cli_with_jsonargparse(xr_embeddings_dataset, tmp_path):
+    """Test CLI using jsonargparse ArgumentParser.
+
+    The CLI call is simulated by parsing arguments and invoking the main function.
+    """
+    from jsonargparse import ArgumentParser
+
+    from viscy.representation.evaluation.annotation import main
+
+    output_path = tmp_path / "cli_output.zarr"
+
+    parser = ArgumentParser()
+    parser.add_function_arguments(main)
+
+    # Parse arguments
+    args = parser.parse_args([
+        f"--input_path={xr_embeddings_dataset}",
+        f"--output_path={output_path}",
+        "--overwrite=false",
+    ])
+
+    main(**vars(args))
+
+    assert output_path.exists()
+
+    # Verify the output
+    adata = ad.read_zarr(output_path)
+    assert isinstance(adata, ad.AnnData)
+    assert len(adata) > 0
+
+    with pytest.raises(
+        FileExistsError, match=f"Output path {output_path} already exists"
+    ):
+        args = parser.parse_args([
+            f"--input_path={xr_embeddings_dataset}",
+            f"--output_path={output_path}",
+            "--overwrite=false",
+        ])
+        main(**vars(args))

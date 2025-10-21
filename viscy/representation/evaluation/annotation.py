@@ -9,7 +9,7 @@ from natsort import natsorted
 from viscy.representation.embedding_writer import get_available_index_columns
 
 
-def convert_xarray_annotation_to_anndata(
+def convert(
     embeddings_ds: xr.Dataset | Path,
     output_path: Path,
     overwrite: bool = False,
@@ -108,7 +108,7 @@ def main(
     overwrite : bool, optional
         Whether to overwrite existing output, by default False.
     """
-    return convert_xarray_annotation_to_anndata(
+    return convert(
         embeddings_ds=input_path,
         output_path=output_path,
         overwrite=overwrite,
