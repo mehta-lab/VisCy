@@ -129,15 +129,14 @@ class VaeEncoder(nn.Module):
             features_only=True,
             drop_path_rate=drop_path_rate,
         )
+        num_channels = encoder.feature_info.channels()
+        in_channels_encoder = num_channels[0]
+        out_channels_encoder = num_channels[-1]
 
         if "convnext" in backbone:
             num_channels = encoder.feature_info.channels()
-            in_channels_encoder = num_channels[0]
             encoder.stem_0 = nn.Identity()
-            out_channels_encoder = num_channels[-1]
         elif "resnet" in backbone:
-            num_channels = encoder.feature_info.channels()
-            in_channels_encoder = num_channels[0]
             encoder.conv1 = nn.Identity()
             out_channels_encoder = num_channels[-1]
         else:
@@ -230,7 +229,6 @@ class VaeDecoder(nn.Module):
         self.latent_dim = latent_dim
         self.out_channels = out_channels
         self.out_stack_depth = out_stack_depth
-        self.decoder_channels = decoder_channels
 
         self.spatial_size = encoder_spatial_size
         self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
@@ -325,13 +323,15 @@ class BetaVae25D(nn.Module):
             drop_path_rate=drop_path_rate,
         )
 
-        decoder_channels = self.encoder.num_channels.copy()
-        decoder_channels.reverse()
-        decoder_channels[-1] = (
+        base_channels = self.encoder.num_channels[-1]
+        decoder_channels = [base_channels]
+        for i in range(decoder_stages - 1):
+            decoder_channels.append(base_channels // (2 ** (i + 1)))
+        decoder_channels.append(
             (out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
         )
 
-        strides = [2] * (len(decoder_channels) - 1) + [1]
+        strides = [2] * decoder_stages + [1]
 
         self.decoder = VaeDecoder(
             decoder_channels=decoder_channels,
@@ -376,7 +376,7 @@ class BetaVaeMonai(nn.Module):
         up_kernel_size: Sequence[int] | int = 3,
         num_res_units: int = 0,
         use_sigmoid: bool = False,
-        norm: Literal[Norm.BATCH, Norm.INSTANCE] = Norm.INSTANCE,
+        norm: Literal["batch", "instance"] = "instance",
         **kwargs,
     ):
         super().__init__()
@@ -392,6 +392,12 @@ class BetaVaeMonai(nn.Module):
         self.num_res_units = num_res_units
         self.use_sigmoid = use_sigmoid
         self.norm = norm
+        if self.norm not in ["batch", "instance"]:
+            raise ValueError("norm must be 'batch' or 'instance'")
+        if self.norm == "batch":
+            self.norm = Norm.BATCH
+        else:
+            self.norm = Norm.INSTANCE
 
         self.model = VarAutoEncoder(
             spatial_dims=self.spatial_dims,
