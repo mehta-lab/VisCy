@@ -33,10 +33,12 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
             f"T={t_index}, Z-sclice={z_slice}."
         )
         image.resize(
-            max(t_index + 1, image.shape[0]),
-            image.channels,
-            max(z_slice.stop, image.shape[2]),
-            *image.shape[-2:],
+            (
+                max(t_index + 1, image.shape[0]),
+                image.channels,
+                max(z_slice.stop, image.shape[2]),
+                *image.shape[-2:],
+            )
         )
 
 
@@ -142,7 +144,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             self.plate = open_ome_zarr(
                 self.output_store, layout="hcs", mode="a", channel_names=channel_names
             )
-        _logger.info(f"Writing prediction to: '{self.plate.zgroup.store.path}'.")
+        _logger.info(f"Writing prediction to: '{self.plate.zgroup.store.root}'.")
         if self.write_input:
             self.source_index = self._get_channel_indices(source_channel)
             self.target_index = self._get_channel_indices(target_channel)

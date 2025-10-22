@@ -31,7 +31,15 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
     """
     if field_name in position.zattrs:
         if subfield_name in position.zattrs[field_name]:
-            position.zattrs[field_name][subfield_name].update(metadata)
+            # Need to create a new dict and reassign to trigger zarr write
+            updated_subfield = {
+                **position.zattrs[field_name][subfield_name],
+                **metadata,
+            }
+            position.zattrs[field_name] = {
+                **position.zattrs[field_name],
+                subfield_name: updated_subfield,
+            }
         else:
             D1 = position.zattrs[field_name]
             field_metadata = {

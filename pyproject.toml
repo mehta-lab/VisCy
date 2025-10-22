@@ -27,7 +27,8 @@ dependencies = [
     "scikit-image",
     "matplotlib>=3.9.0",
     "numpy",
-    "xarray",
+    # temporary pin for xarray#10851
+    "xarray<=2025.9.0",
     "pytorch-metric-learning>2.0.0"]
 dynamic = ["version"]
 

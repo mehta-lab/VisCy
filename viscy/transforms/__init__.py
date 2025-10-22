@@ -43,12 +43,12 @@ from viscy.transforms._transforms import (
     BatchedRandAffined,
     BatchedScaleIntensityRangePercentiles,
     BatchedScaleIntensityRangePercentilesd,
-    BatchedZoom,
     NormalizeSampled,
     RandInvertIntensityd,
     StackChannelsd,
     TiledSpatialCropSamplesd,
 )
+from viscy.transforms._zoom import BatchedZoom, BatchedZoomd
 from viscy.transforms.batched_rand_3d_elasticd import BatchedRand3DElasticd
 from viscy.transforms.batched_rand_histogram_shiftd import BatchedRandHistogramShiftd
 from viscy.transforms.batched_rand_local_pixel_shufflingd import (
@@ -81,6 +81,7 @@ __all__ = [
     "BatchedScaleIntensityRangePercentiles",
     "BatchedScaleIntensityRangePercentilesd",
     "BatchedZoom",
+    "BatchedZoomd",
     "CenterSpatialCropd",
     "Decollate",
     "Decollated",
