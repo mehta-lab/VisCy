@@ -627,10 +627,6 @@ class CytoDtw:
                 f"dtw_{alignment_name}_aligned": True,
                 f"dtw_{alignment_name}_distance": 0.0,
                 f"dtw_{alignment_name}_match_rank": -1,
-                "mean_intensity": np.nan,
-                "cell_area": np.nan,
-                "cell_perimeter": np.nan,
-                "cell_eccentricity": np.nan,
             }
 
             for pc_name, pc_vals in consensus_pc_values.items():
@@ -1153,6 +1149,305 @@ class CytoDtw:
             )
             ax.grid(True, alpha=0.3)
 
+        plt.tight_layout()
+        return fig
+
+    def plot_sample_patterns(
+        self,
+        annotated_samples: list[AnnotatedSample],
+        reference_type: str = "features",
+        n_pca_components: int = 3,
+        figsize: tuple = None,
+    ):
+        """
+        Plot PCA projections of reference patterns with annotations before consensus creation.
+
+        This method provides quality control visualization of the reference patterns
+        before creating a consensus. It extracts patterns from annotated samples,
+        computes PCA for dimensionality reduction, and plots each pattern's trajectory
+        in PC space with annotation markers (e.g., mitosis, infection).
+
+        Parameters
+        ----------
+        annotated_samples : list[AnnotatedSample]
+            List of annotated examples to extract and plot patterns from. Each should contain:
+            - fov_name: str - FOV identifier
+            - track_id: int | list[int] - Track ID(s)
+            - timepoints: tuple[int, int] - (start, end) timepoints
+            - annotations: list - Optional annotations for each timepoint
+        reference_type : str
+            Type of embedding to use ("features" for X, or obsm key like "X_PCA")
+        n_pca_components : int
+            Number of PCA components to compute and plot (default 3)
+        figsize : tuple, optional
+            Figure size (width, height). If None, auto-computed based on number of patterns.
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The created matplotlib figure
+
+        Examples
+        --------
+        >>> cytodtw = CytoDtw(adata)
+        >>> samples = [
+        ...     {'fov_name': 'A/2/001', 'track_id': [10],
+        ...      'timepoints': (0, 30), 'annotations': ['G1']*15 + ['mitosis'] + ['G1']*14}
+        ... ]
+        >>> fig = cytodtw.plot_sample_patterns(samples)
+        """
+        import matplotlib.pyplot as plt
+
+        # Extract patterns from annotated samples
+        patterns = []
+        pattern_info = []
+
+        for i, example in enumerate(annotated_samples):
+            pattern = self.get_reference_pattern(
+                fov_name=example["fov_name"],
+                track_id=example["track_id"],
+                timepoints=example["timepoints"],
+                reference_type=reference_type,
+            )
+            patterns.append(pattern)
+            pattern_info.append({
+                "index": i,
+                "fov_name": example["fov_name"],
+                "track_id": example["track_id"],
+                "timepoints": example["timepoints"],
+                "annotations": example.get("annotations", None),
+            })
+
+        # Concatenate all patterns and fit PCA
+        all_patterns_concat = np.vstack(patterns)
+        scaler = StandardScaler()
+        scaled_patterns = scaler.fit_transform(all_patterns_concat)
+        pca = PCA(n_components=n_pca_components)
+        pca.fit(scaled_patterns)
+
+        # Create figure
+        n_patterns = len(patterns)
+        if figsize is None:
+            figsize = (12, 3 * n_patterns)
+
+        fig, axes = plt.subplots(n_patterns, n_pca_components, figsize=figsize)
+        if n_patterns == 1:
+            axes = axes.reshape(1, -1)
+
+        # Plot each pattern
+        for i, (pattern, info) in enumerate(zip(patterns, pattern_info)):
+            scaled_pattern = scaler.transform(pattern)
+            pc_pattern = pca.transform(scaled_pattern)
+            time_axis = np.arange(len(pattern))
+
+            for pc_idx in range(n_pca_components):
+                ax = axes[i, pc_idx]
+
+                ax.plot(
+                    time_axis,
+                    pc_pattern[:, pc_idx],
+                    "o-",
+                    color="blue",
+                    linewidth=2,
+                    markersize=4,
+                )
+
+                # Add annotation markers
+                annotations = info.get("annotations")
+                if annotations:
+                    for t, annotation in enumerate(annotations):
+                        if annotation == "mitosis":
+                            ax.axvline(t, color="orange", alpha=0.7, linestyle="--", linewidth=2)
+                            ax.scatter(t, pc_pattern[t, pc_idx], c="orange", s=50, zorder=5)
+                        elif annotation == "infected":
+                            ax.axvline(t, color="red", alpha=0.5, linestyle="--", linewidth=1)
+                            ax.scatter(t, pc_pattern[t, pc_idx], c="red", s=30, zorder=5)
+                            break  # Only mark the first infection timepoint
+
+                ax.set_xlabel("Time")
+                ax.set_ylabel(f"PC{pc_idx+1}")
+                ax.set_title(
+                    f'Pattern {i+1}: FOV {info["fov_name"]}, Tracks {info["track_id"]}\nPC{pc_idx+1} over time'
+                )
+                ax.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        return fig
+
+    def plot_consensus_validation(
+        self,
+        annotated_samples: list[AnnotatedSample],
+        reference_type: str = "features",
+        metric: str = "cosine",
+        constraint_type: str = "unconstrained",
+        band_width_ratio: float = 0.0,
+        n_pca_components: int = 3,
+        figsize: tuple = (18, 5),
+    ):
+        """
+        Plot DTW-aligned reference patterns overlaid with consensus for quality validation.
+
+        This method validates consensus quality by aligning all reference patterns to the
+        consensus using DTW, then visualizing them together in PCA space. This helps verify
+        that the consensus captures the common structure across all reference patterns.
+
+        Parameters
+        ----------
+        annotated_samples : list[AnnotatedSample]
+            List of annotated examples that were used to create the consensus
+        reference_type : str
+            Type of embedding to use ("features" for X, or obsm key like "X_PCA")
+        metric : str
+            Distance metric for DTW alignment (default "cosine")
+        constraint_type : str
+            DTW constraint type ("unconstrained", "sakoe_chiba")
+        band_width_ratio : float
+            DTW band width ratio for Sakoe-Chiba constraint (default 0.0)
+        n_pca_components : int
+            Number of PCA components to compute and plot (default 3)
+        figsize : tuple
+            Figure size (width, height)
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            The created matplotlib figure
+
+        Raises
+        ------
+        ValueError
+            If consensus_data has not been set in the instance
+
+        Examples
+        --------
+        >>> cytodtw = CytoDtw(adata)
+        >>> samples = [...]
+        >>> consensus = cytodtw.create_consensus_reference_pattern(samples)
+        >>> fig = cytodtw.plot_consensus_validation(samples)
+        """
+        import matplotlib.pyplot as plt
+
+        if self.consensus_data is None:
+            raise ValueError(
+                "Consensus data not found. Please create or load consensus first using "
+                "create_consensus_reference_pattern() or load_consensus()."
+            )
+
+        consensus_lineage = self.consensus_data["pattern"]
+        consensus_annotations = self.consensus_data.get("annotations", None)
+
+        # Extract and align patterns to consensus
+        aligned_patterns_list = []
+        aligned_annotations_list = []
+        all_patterns_for_pca = []
+
+        for i, example in enumerate(annotated_samples):
+            # Extract pattern
+            pattern = self.get_reference_pattern(
+                fov_name=example["fov_name"],
+                track_id=example["track_id"],
+                timepoints=example["timepoints"],
+                reference_type=reference_type,
+            )
+
+            # Align to consensus
+            if len(pattern) == len(consensus_lineage):
+                # Already same length, likely the reference pattern
+                aligned_patterns_list.append(pattern)
+                aligned_annotations_list.append(example.get("annotations", None))
+            else:
+                # Align to consensus using DTW
+                alignment_result = align_embedding_patterns(
+                    query_pattern=pattern,
+                    reference_pattern=consensus_lineage,
+                    metric=metric,
+                    query_annotations=example.get("annotations", None),
+                    constraint_type=constraint_type,
+                    band_width_ratio=band_width_ratio,
+                )
+                aligned_patterns_list.append(alignment_result["pattern"])
+                aligned_annotations_list.append(alignment_result.get("annotations", None))
+
+            all_patterns_for_pca.append(aligned_patterns_list[-1])
+
+        # Add consensus to patterns for PCA fitting
+        all_patterns_for_pca.append(consensus_lineage)
+        all_patterns_concat = np.vstack(all_patterns_for_pca)
+
+        # Fit PCA on all patterns (aligned references + consensus)
+        scaler = StandardScaler()
+        scaled_patterns = scaler.fit_transform(all_patterns_concat)
+        pca = PCA(n_components=n_pca_components)
+        pca.fit(scaled_patterns)
+
+        # Create figure
+        fig, axes = plt.subplots(1, n_pca_components, figsize=figsize)
+        if n_pca_components == 1:
+            axes = [axes]
+
+        # Plot each aligned pattern
+        for pc_idx in range(n_pca_components):
+            ax = axes[pc_idx]
+
+            # Transform each aligned pattern to PC space and plot
+            for i, pattern in enumerate(aligned_patterns_list):
+                scaled_ref = scaler.transform(pattern)
+                pc_ref = pca.transform(scaled_ref)
+
+                time_axis = np.arange(len(pc_ref))
+                ax.plot(
+                    time_axis,
+                    pc_ref[:, pc_idx],
+                    "o-",
+                    label=f"Ref {i+1}",
+                    alpha=0.7,
+                    linewidth=2,
+                    markersize=4,
+                )
+
+                # Mark infection timepoint for this aligned trajectory
+                if aligned_annotations_list[i] and "infected" in aligned_annotations_list[i]:
+                    infection_t = aligned_annotations_list[i].index("infected")
+                    ax.axvline(
+                        infection_t, color="orange", alpha=0.4, linestyle="--", linewidth=1
+                    )
+
+            # Overlay consensus pattern
+            scaled_consensus = scaler.transform(consensus_lineage)
+            pc_consensus = pca.transform(scaled_consensus)
+            time_axis = np.arange(len(pc_consensus))
+            ax.plot(
+                time_axis,
+                pc_consensus[:, pc_idx],
+                "s-",
+                color="black",
+                linewidth=3,
+                markersize=6,
+                label="Consensus",
+                zorder=10,
+            )
+
+            # Mark consensus infection timepoint with a thicker, more prominent line
+            if consensus_annotations and "infected" in consensus_annotations:
+                consensus_infection_t = consensus_annotations.index("infected")
+                ax.axvline(
+                    consensus_infection_t,
+                    color="orange",
+                    alpha=0.9,
+                    linestyle="--",
+                    linewidth=2.5,
+                    label="Infection",
+                )
+
+            ax.set_xlabel("Aligned Time")
+            ax.set_ylabel(f"PC{pc_idx+1}")
+            ax.set_title(f"PC{pc_idx+1}: All DTW-Aligned References + Consensus")
+            ax.grid(True, alpha=0.3)
+            ax.legend()
+
+        plt.suptitle(
+            "Consensus Validation: DTW-Aligned References + Computed Consensus", fontsize=14
+        )
         plt.tight_layout()
         return fig
 
@@ -1765,16 +2060,13 @@ def find_pattern_matches(
             all_match_positions["start_track_timepoint"].append(None)
             all_match_positions["end_track_timepoint"].append(None)
 
-    # Convert to DataFrame and drop rows with no matches
     all_match_positions = pd.DataFrame(all_match_positions)
     all_match_positions = all_match_positions.dropna()
 
-    # Sort by distance (primary) and skewness (secondary)
     all_match_positions = all_match_positions.sort_values(
         by=["distance", "skewness"], ascending=[True, True]
     )
 
-    # Save to CSV if path is provided
     if save_path:
         all_match_positions.to_csv(save_path, index=False)
 
@@ -1904,20 +2196,15 @@ def find_best_match_dtw_bernd_clifford(
         return pd.DataFrame(columns=["position", "path", "distance", "skewness"])
 
     for i in range(0, n_windows, window_step):
+
         window = lineage[i : i + len(reference_pattern)]
-
-        # Create distance matrix
         distance_matrix = cdist(reference_pattern, window, metric=metric)
-
-        # Apply DTW
         distance, _, path = dtw_with_matrix(
             distance_matrix,
             normalize=normalize,
             constraint_type=constraint_type,
             band_width_ratio=band_width_ratio,
         )
-
-        # Calculate skewness
         skewness = path_skew(path, len(reference_pattern), len(window))
 
         # Only add if both thresholds are met
