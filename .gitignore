@@ -47,3 +47,5 @@ slurm*.out
 
 #lightning_logs directory
 lightning_logs/
+
+applications/dynacell/test
