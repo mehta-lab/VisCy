@@ -68,21 +68,13 @@ class VaeUpStage(nn.Module):
 
             for i in range(conv_blocks):
                 block_out_channels = out_channels
-                conv_layers.extend(
-                    [
-                        nn.Conv2d(
-                            current_channels,
-                            block_out_channels,
-                            kernel_size=3,
-                            padding=1,
-                        ),
-                        (
-                            nn.BatchNorm2d(block_out_channels)
-                            if norm_name == "batch"
-                            else nn.InstanceNorm2d(block_out_channels)
-                        ),
-                        nn.ReLU(inplace=True),
-                    ]
+                conv_layers.append(
+                    ResidualUnit(
+                        spatial_dims=spatial_dims,
+                        in_channels=current_channels,
+                        out_channels=block_out_channels,
+                        norm=norm_name,
+                    )
                 )
                 current_channels = block_out_channels
 
