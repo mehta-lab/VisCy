@@ -363,7 +363,7 @@ class BetaVaeMonai(nn.Module):
         out_channels: int,
         latent_size: int,
         channels: Sequence[int],
-        strides: Sequence[int],
+        strides: Sequence[int] | Sequence[Sequence[int]],
         kernel_size: Sequence[int] | int = 3,
         up_kernel_size: Sequence[int] | int = 3,
         num_res_units: int = 0,
