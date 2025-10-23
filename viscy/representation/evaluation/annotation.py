@@ -89,34 +89,3 @@ def convert(
     adata.write_zarr(output_path)
     if return_anndata:
         return adata
-
-
-def main(
-    input_path: Path,
-    output_path: Path,
-    overwrite: bool = False,
-):
-    """
-    CLI entry point for converting Xarray embeddings to AnnData format.
-
-    Parameters
-    ----------
-    input_path : Path
-        Path to the input Xarray zarr store.
-    output_path : Path
-        Path to the output AnnData zarr store.
-    overwrite : bool, optional
-        Whether to overwrite existing output, by default False.
-    """
-    return convert(
-        embeddings_ds=input_path,
-        output_path=output_path,
-        overwrite=overwrite,
-        return_anndata=False,
-    )
-
-
-if __name__ == "__main__":
-    from jsonargparse import CLI
-
-    CLI(main)

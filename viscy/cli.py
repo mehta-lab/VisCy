@@ -22,6 +22,7 @@ class VisCyCLI(LightningCLI):
         subcommands["preprocess"] = subcommand_base_args
         subcommands["export"] = subcommand_base_args
         subcommands["precompute"] = subcommand_base_args
+        subcommands["convert_xarray_to_anndata"] = subcommand_base_args
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
@@ -58,8 +59,17 @@ def main() -> None:
     Set default random seed to 42.
     """
     _setup_environment()
-    require_model = {"preprocess", "precompute"}.isdisjoint(sys.argv)
-    require_data = {"preprocess", "precompute", "export"}.isdisjoint(sys.argv)
+    require_model = {
+        "preprocess",
+        "precompute",
+        "convert_xarray_to_anndata",
+    }.isdisjoint(sys.argv)
+    require_data = {
+        "preprocess",
+        "precompute",
+        "export",
+        "convert_xarray_to_anndata",
+    }.isdisjoint(sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
         datamodule_class=LightningDataModule if require_data else None,

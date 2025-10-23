@@ -9,6 +9,7 @@ from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
 from viscy.preprocessing.precompute import precompute_array
+from viscy.representation.evaluation.annotation import convert
 from viscy.utils.meta_utils import generate_normalization_metadata
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -127,4 +128,48 @@ class VisCyTrainer(Trainer):
             image_array_key=image_array_key,
             include_wells=include_wells,
             exclude_fovs=exclude_fovs,
+        )
+
+    def convert_xarray_to_anndata(
+        self,
+        embeddings_ds_path: Path,
+        output_anndata_path: Path,
+        overwrite: bool = False,
+        model: LightningModule | None = None,
+    ):
+        """
+        Convert an xarray dataset to an anndata dataset.
+
+        Parameters
+        ----------
+        embeddings_ds_path: Path
+            Path to the embeddings dataset.
+        output_anndata_path: Path
+            Path to the output anndata dataset.
+        overwrite: bool, optional
+            Whether to overwrite existing output, by default False.
+
+        Examples
+        --------
+        >>> viscy convert_xarray_to_anndata \
+        ... --embeddings_ds_path ./embeddings_dataset.zarr \
+        ... --output_anndata_path ./anndata_dataset.zarr \
+        ... --overwrite true
+        >>> viscy convert_xarray_to_anndata -c examples/configs/convert_xarray_to_anndata_example.yml
+
+        Notes
+        -----
+        See the configuration file in examples/configs/convert_xarray_to_anndata_example.yml 
+        for an example of how to use a yaml configuration file.
+        """
+        if model is not None:
+            _logger.warning(
+                "Ignoring model configuration during conversion to AnnData."
+            )
+
+        convert(
+            embeddings_ds=embeddings_ds_path,
+            output_path=output_anndata_path,
+            overwrite=overwrite,
+            return_anndata=False,
         )

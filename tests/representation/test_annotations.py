@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import anndata as ad
@@ -282,46 +283,54 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     assert all(result.index.get_level_values("fov_name") == "A/1/1")
 
 
-def test_cli_with_jsonargparse(xr_embeddings_dataset, tmp_path):
-    """Test CLI using jsonargparse ArgumentParser.
-
-    The CLI call is simulated by parsing arguments and invoking the main function.
-    """
-    from jsonargparse import ArgumentParser
-
-    from viscy.representation.evaluation.annotation import main
-
+def test_cli_convert_xarray_to_anndata(xr_embeddings_dataset, tmp_path):
+    """Test CLI command: viscy convert_xarray_to_anndata"""
     output_path = tmp_path / "cli_output.zarr"
 
-    parser = ArgumentParser()
-    parser.add_function_arguments(main)
-
-    # Parse arguments
-    args = parser.parse_args(
+    # First conversion should succeed
+    result = subprocess.run(
         [
-            f"--input_path={xr_embeddings_dataset}",
-            f"--output_path={output_path}",
-            "--overwrite=false",
-        ]
+            "viscy",
+            "convert_xarray_to_anndata",
+            "--embeddings_ds_path",
+            str(xr_embeddings_dataset),
+            "--output_anndata_path",
+            str(output_path),
+            "--overwrite",
+            "false",
+        ],
+        capture_output=True,
+        text=True,
     )
 
-    main(**vars(args))
-
+    assert result.returncode == 0, f"CLI failed: {result.stderr}"
     assert output_path.exists()
 
-    # Verify the output
+    # Verify basic correctness
     adata = ad.read_zarr(output_path)
     assert isinstance(adata, ad.AnnData)
     assert len(adata) > 0
 
-    with pytest.raises(
-        FileExistsError, match=f"Output path {output_path} already exists"
-    ):
-        args = parser.parse_args(
-            [
-                f"--input_path={xr_embeddings_dataset}",
-                f"--output_path={output_path}",
-                "--overwrite=false",
-            ]
-        )
-        main(**vars(args))
+    # Second run with overwrite=false should fail
+    result_retry = subprocess.run(
+        [
+            "viscy",
+            "convert_xarray_to_anndata",
+            "--embeddings_ds_path",
+            str(xr_embeddings_dataset),
+            "--output_anndata_path",
+            str(output_path),
+            "--overwrite",
+            "false",
+        ],
+        capture_output=True,
+        text=True,
+    )
+
+    assert result_retry.returncode != 0, (
+        "Should fail when file exists with overwrite=false"
+    )
+    assert (
+        "exists" in result_retry.stderr.lower()
+        or "FileExistsError" in result_retry.stderr
+    )
