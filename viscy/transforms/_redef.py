@@ -5,6 +5,7 @@ from typing import Sequence
 from monai.transforms import (
     CenterSpatialCropd,
     Decollated,
+    NormalizeIntensityd,
     RandAdjustContrastd,
     RandAffined,
     RandFlipd,
@@ -187,13 +188,17 @@ class CenterSpatialCropd(CenterSpatialCropd):
     ):
         super().__init__(keys=keys, roi_size=roi_size, **kwargs)
 
+    class RandFlipd(RandFlipd):
+        def __init__(
+            self,
+            keys: Sequence[str] | str,
+            prob: float,
+            spatial_axis: Sequence[int] | int,
+            **kwargs,
+        ):
+            super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)
 
-class RandFlipd(RandFlipd):
-    def __init__(
-        self,
-        keys: Sequence[str] | str,
-        prob: float,
-        spatial_axis: Sequence[int] | int,
-        **kwargs,
-    ):
-        super().__init__(keys=keys, prob=prob, spatial_axis=spatial_axis, **kwargs)
+
+class NormalizeIntensityd(NormalizeIntensityd):
+    def __init__(self, keys: Sequence[str] | str, **kwargs):
+        super().__init__(keys=keys, **kwargs)
