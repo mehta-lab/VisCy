@@ -29,7 +29,9 @@ dependencies = [
     "numpy",
     # temporary pin for xarray#10851
     "xarray<=2025.9.0",
-    "pytorch-metric-learning>2.0.0"]
+    "pytorch-metric-learning>2.0.0",
+    "anndata>=0.12.2",
+]
 dynamic = ["version"]
 
 [project.optional-dependencies]
