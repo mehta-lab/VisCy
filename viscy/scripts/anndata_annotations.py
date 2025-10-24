@@ -17,10 +17,8 @@ import seaborn as sns
 # import scanpy as sc
 import xarray as xr
 
-from viscy.representation.evaluation import (
-    convert_xarray_annotation_to_anndata,
-    load_annotation_anndata,
-)
+from viscy.representation.evaluation import load_annotation_anndata
+from viscy.representation.evaluation.annotation import convert
 
 # %%
 # Define paths
@@ -30,7 +28,9 @@ embeddings_path = Path(
 annotations_path = Path(
     "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/0-annotations/track_infection_annotation.csv"
 )
-output_path = Path("../output/track_data_anndata.zarr")
+output_path = Path(
+    "./hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_21_A549_TOMM20_DENV/4-phenotyping/1-predictions/anndata/tmp/track_data_anndata.zarr"
+)
 
 # %%
 # Load embeddings
@@ -38,7 +38,7 @@ embeddings_dataset = xr.open_zarr(embeddings_path)
 
 # %%
 # Convert xarray to AnnData
-adata = convert_xarray_annotation_to_anndata(
+adata = convert(
     embeddings_dataset,
     output_path,
     overwrite=True,
