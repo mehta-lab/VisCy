@@ -132,7 +132,7 @@ class VisCyTrainer(Trainer):
 
     def convert_xarray_to_anndata(
         self,
-        embeddings_ds_path: Path,
+        embeddings_path: Path,
         output_anndata_path: Path,
         overwrite: bool = False,
         model: LightningModule | None = None,
@@ -142,7 +142,7 @@ class VisCyTrainer(Trainer):
 
         Parameters
         ----------
-        embeddings_ds_path: Path
+        embeddings_path: Path
             Path to the embeddings dataset.
         output_anndata_path: Path
             Path to the output anndata dataset.
@@ -152,7 +152,7 @@ class VisCyTrainer(Trainer):
         Examples
         --------
         >>> viscy convert_xarray_to_anndata \
-        ... --embeddings_ds_path ./embeddings_dataset.zarr \
+        ... --embeddings_path ./embeddings_dataset.zarr \
         ... --output_anndata_path ./anndata_dataset.zarr \
         ... --overwrite true
         >>> viscy convert_xarray_to_anndata -c examples/configs/convert_xarray_to_anndata_example.yml
@@ -168,7 +168,7 @@ class VisCyTrainer(Trainer):
             )
 
         convert(
-            embeddings_ds=embeddings_ds_path,
+            embeddings_ds=embeddings_path,
             output_path=output_anndata_path,
             overwrite=overwrite,
             return_anndata=False,
