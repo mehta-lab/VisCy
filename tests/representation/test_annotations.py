@@ -283,15 +283,15 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     assert all(result.index.get_level_values("fov_name") == "A/1/1")
 
 
-def test_cli_convert_xarray_to_anndata(xr_embeddings_dataset, tmp_path):
-    """Test CLI command: viscy convert_xarray_to_anndata"""
+def test_cli_convert_to_anndata(xr_embeddings_dataset, tmp_path):
+    """Test CLI command: viscy convert_to_anndata"""
     output_path = tmp_path / "cli_output.zarr"
 
     # First conversion should succeed
     result = subprocess.run(
         [
             "viscy",
-            "convert_xarray_to_anndata",
+            "convert_to_anndata",
             "--embeddings_ds_path",
             str(xr_embeddings_dataset),
             "--output_anndata_path",
@@ -315,7 +315,7 @@ def test_cli_convert_xarray_to_anndata(xr_embeddings_dataset, tmp_path):
     result_retry = subprocess.run(
         [
             "viscy",
-            "convert_xarray_to_anndata",
+            "convert_to_anndata",
             "--embeddings_ds_path",
             str(xr_embeddings_dataset),
             "--output_anndata_path",
@@ -327,9 +327,9 @@ def test_cli_convert_xarray_to_anndata(xr_embeddings_dataset, tmp_path):
         text=True,
     )
 
-    assert result_retry.returncode != 0, (
-        "Should fail when file exists with overwrite=false"
-    )
+    assert (
+        result_retry.returncode != 0
+    ), "Should fail when file exists with overwrite=false"
     assert (
         "exists" in result_retry.stderr.lower()
         or "FileExistsError" in result_retry.stderr

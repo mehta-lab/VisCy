@@ -130,7 +130,7 @@ class VisCyTrainer(Trainer):
             exclude_fovs=exclude_fovs,
         )
 
-    def convert_xarray_to_anndata(
+    def convert_to_anndata(
         self,
         embeddings_path: Path,
         output_anndata_path: Path,
@@ -151,15 +151,15 @@ class VisCyTrainer(Trainer):
 
         Examples
         --------
-        >>> viscy convert_xarray_to_anndata \
+        >>> viscy convert_to_anndata \
         ... --embeddings_path ./embeddings_dataset.zarr \
         ... --output_anndata_path ./anndata_dataset.zarr \
         ... --overwrite true
-        >>> viscy convert_xarray_to_anndata -c examples/configs/convert_xarray_to_anndata_example.yml
+        >>> viscy convert_to_anndata -c examples/configs/convert_to_anndata_example.yml
 
         Notes
         -----
-        See the configuration file in examples/configs/convert_xarray_to_anndata_example.yml 
+        See the configuration file in examples/configs/convert_to_anndata_example.yml 
         for an example of how to use a yaml configuration file.
         """
         if model is not None:
