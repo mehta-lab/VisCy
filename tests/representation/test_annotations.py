@@ -292,7 +292,7 @@ def test_cli_convert_to_anndata(xr_embeddings_dataset, tmp_path):
         [
             "viscy",
             "convert_to_anndata",
-            "--embeddings_ds_path",
+            "--embeddings_path",
             str(xr_embeddings_dataset),
             "--output_anndata_path",
             str(output_path),
@@ -316,7 +316,7 @@ def test_cli_convert_to_anndata(xr_embeddings_dataset, tmp_path):
         [
             "viscy",
             "convert_to_anndata",
-            "--embeddings_ds_path",
+            "--embeddings_path",
             str(xr_embeddings_dataset),
             "--output_anndata_path",
             str(output_path),
