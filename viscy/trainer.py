@@ -173,3 +173,4 @@ class VisCyTrainer(Trainer):
             overwrite=overwrite,
             return_anndata=False,
         )
+        _logger.info(f"Anndata saved at: {output_anndata_path}")
