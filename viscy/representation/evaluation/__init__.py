@@ -64,10 +64,16 @@ def load_annotation(da, path, name, categories: dict | None = None):
 
 
 def load_annotation_anndata(
-    adata: ad.AnnData, path: str, name: str, categories: dict | None = None
+    adata: ad.AnnData,
+    path: str,
+    name: str,
+    categories: dict | None = None,
+    filtered: bool = True,
 ):
     """
     Load annotations from a CSV file and map them to the AnnData object.
+    Returns a filtered AnnData with only annotated observations and the annotation
+    added to the .obs dataframe.
 
     Parameters
     ----------
@@ -79,6 +85,14 @@ def load_annotation_anndata(
         The column name in the CSV file to be used as annotations.
     categories : dict, optional
         A dictionary to rename categories in the annotation column. Default is None.
+    filtered : bool, optional
+        If True, returns a filtered AnnData with only annotated observations. Default is True.
+
+    Returns
+    -------
+    anndata.AnnData
+        A filtered AnnData object containing only observations with annotations.
+        The annotation column is added to .obs[name].
     """
     annotation = pd.read_csv(path)
     annotation["fov_name"] = annotation["fov_name"].str.strip("/")
@@ -95,7 +109,20 @@ def load_annotation_anndata(
 
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
-    return selected
+
+    if filtered:
+        # Filter AnnData to include only annotated observations
+        matching_mask = mi.isin(selected.index)
+        adata = adata[matching_mask].copy()
+
+    adata.obs[name] = selected.reindex(
+        pd.MultiIndex.from_arrays(
+            [adata.obs["fov_name"], adata.obs["id"]],
+            names=["fov_name", "id"],
+        )
+    ).values
+
+    return adata
 
 
 def dataset_of_tracks(
