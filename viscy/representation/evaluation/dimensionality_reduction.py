@@ -139,12 +139,17 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
 
 
 def _fit_transform_umap(
-    embeddings: NDArray, n_components: int = 2, normalize: bool = True
+    embeddings: NDArray,
+    n_components: int = 2,
+    n_neighbors: int = 15,
+    normalize: bool = True,
 ) -> tuple[umap.UMAP, NDArray]:
     """Fit UMAP model and transform embeddings."""
     if normalize:
         embeddings = StandardScaler().fit_transform(embeddings)
-    umap_model = umap.UMAP(n_components=n_components, random_state=42)
+    umap_model = umap.UMAP(
+        n_components=n_components, n_neighbors=n_neighbors, random_state=42
+    )
     umap_embedding = umap_model.fit_transform(embeddings)
     return umap_model, umap_embedding
 
