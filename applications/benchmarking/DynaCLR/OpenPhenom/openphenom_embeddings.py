@@ -1,9 +1,10 @@
-import torch
-from transformers import AutoModel
-from typing import Dict, List, Literal, Optional
-
 import sys
 from pathlib import Path
+from typing import Dict, List, Literal, Optional
+
+import torch
+from transformers import AutoModel
+
 sys.path.append(str(Path(__file__).parent.parent))
 
 from base_embedding_module import BaseEmbeddingModule, create_embedding_cli
@@ -19,7 +20,7 @@ class OpenPhenomModule(BaseEmbeddingModule):
         middle_slice_index: Optional[int] = None,
     ):
         super().__init__(channel_reduction_methods, channel_names, middle_slice_index)
-        
+
         try:
             self.model = AutoModel.from_pretrained(
                 "recursionpharma/OpenPhenom", trust_remote_code=True
@@ -27,8 +28,7 @@ class OpenPhenomModule(BaseEmbeddingModule):
             self.model.eval()
         except ImportError:
             raise ImportError(
-                "Please install the OpenPhenom dependencies: "
-                "pip install transformers"
+                "Please install the OpenPhenom dependencies: pip install transformers"
             )
 
     @classmethod
@@ -36,7 +36,7 @@ class OpenPhenomModule(BaseEmbeddingModule):
         """Create model instance from configuration."""
         model_config = cfg.get("model", {})
         dm_config = cfg.get("datamodule", {})
-        
+
         return cls(
             channel_reduction_methods=model_config.get("channel_reduction_methods", {}),
             channel_names=dm_config.get("source_channel", []),

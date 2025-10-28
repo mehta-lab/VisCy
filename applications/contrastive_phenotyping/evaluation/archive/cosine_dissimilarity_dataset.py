@@ -3,9 +3,14 @@ from pathlib import Path
 from typing import Optional
 
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-from sklearn.preprocessing import StandardScaler
 from numpy.typing import NDArray
+from scipy.optimize import minimize_scalar
+from scipy.stats import gaussian_kde
+from sklearn.preprocessing import StandardScaler
+from tqdm import tqdm
 
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.clustering import (
@@ -14,13 +19,6 @@ from viscy.representation.evaluation.clustering import (
     rank_nearest_neighbors,
     select_block,
 )
-import numpy as np
-from tqdm import tqdm
-import pandas as pd
-
-from scipy.stats import gaussian_kde
-from scipy.optimize import minimize_scalar
-
 
 plt.style.use("../evaluation/figure.mplstyle")
 

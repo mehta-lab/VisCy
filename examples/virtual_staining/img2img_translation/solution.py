@@ -29,7 +29,6 @@
 # - Evaluate the model on test data.
 
 # %% Imports
-import os
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -51,10 +50,8 @@ from tqdm import tqdm
 
 # HCSDataModule makes it easy to load data during training.
 from viscy.data.hcs import HCSDataModule
-
-# Trainer class and UNet.
-from viscy.translation.engine import MixedLoss, VSUNet
 from viscy.trainer import VisCyTrainer
+
 # training augmentations
 from viscy.transforms import (
     NormalizeSampled,
@@ -66,13 +63,16 @@ from viscy.transforms import (
     RandWeightedCropd,
 )
 
+# Trainer class and UNet.
+from viscy.translation.engine import MixedLoss, VSUNet
+
 # %%
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
 
 # Paths to data and log directory
 # TODO: Change this to point to your data directory.
-top_dir = Path(f"~/data").expanduser()
+top_dir = Path("~/data").expanduser()
 
 data_path = top_dir / "img2img/training/a549_hoechst_cellmask_train_val.zarr"
 log_dir = top_dir / "img2img/logs/"
@@ -854,7 +854,7 @@ for i, sample in enumerate(test_data.test_dataloader()):
 # %% [markdown] tags=[]
 """
 <div class="alert alert-success">
-<h2> 
+<h2>
 🎉 The end of the notebook 🎉
 </h2>
 

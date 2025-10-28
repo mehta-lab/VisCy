@@ -10,6 +10,19 @@ then make an editable installation with all the development dependencies:
 pip install -e ".[dev]"
 ```
 
+Install pre-commit hooks to automatically check and format code before commits:
+
+```sh
+pre-commit install
+```
+
+To run pre-commit checks manually:
+
+```sh
+# Run on staged files only
+pre-commit run
+```
+
 ## CI requirements
 
 Lint and format with Ruff:

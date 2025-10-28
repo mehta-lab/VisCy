@@ -11,14 +11,14 @@ model:
   # Default is "middle_slice" if not specified
   channel_reduction_methods:
     "Phase3D": "middle_slice"  # For phase contrast, middle slice often works well
-    "raw GFP EX488 EM525-45": "max"    
+    "raw GFP EX488 EM525-45": "max"
 
 # Data module configuration
 datamodule_class: viscy.data.triplet.TripletDataModule
 datamodule:
   data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_DENV.zarr
   tracks_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr
-  source_channel: 
+  source_channel:
     - Phase3D
     - "raw GFP EX488 EM525-45"
   z_range: [25, 40]

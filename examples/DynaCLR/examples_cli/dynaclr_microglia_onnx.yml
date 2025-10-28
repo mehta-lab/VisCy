@@ -53,6 +53,3 @@ model:
 ckpt_path: /epoch=19-step=12960.ckpt #TODO: change to the checkpoint path
 format: onnx
 export_path: dynaclr_microglia.onnx #TODO: change to the export path
-
-
-

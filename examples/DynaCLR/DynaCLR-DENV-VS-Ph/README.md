@@ -1,6 +1,6 @@
 # Cell Infection Analysis Demo: ImageNet vs DynaCLR-DENV-VS+Ph model
 
-This demo compares different feature extraction methods for analyzing infected vs uninfected cells using microscopy images. 
+This demo compares different feature extraction methods for analyzing infected vs uninfected cells using microscopy images.
 
 As the cells get infected, the red fluorescence protein (RFP) translocates from the cytoplasm into the nucleus.
 
@@ -8,7 +8,7 @@ As the cells get infected, the red fluorescence protein (RFP) translocates from 
 
 The `demo_infection.py` script demonstrates:
 
-  - PHATE plots from the embeddings generated from  DynaCLR and ImageNet 
+  - PHATE plots from the embeddings generated from  DynaCLR and ImageNet
   - Show the infection progression in cells via Phase and RFP (viral sensor) channels
   - Highlighted trajectories for sample infected and uninfected cells over time
 
@@ -37,7 +37,7 @@ input_data_path = "/path/to/registered_test.zarr"
 tracks_path = "/path/to/track_test.zarr"
 ann_path = "/path/to/extracted_inf_state.csv"
 
-# Update paths to features 
+# Update paths to features
 dynaclr_features_path = "/path/to/dynaclr_features.zarr"
 imagenet_features_path = "/path/to/imagenet_features.zarr"
 ```
@@ -45,7 +45,7 @@ imagenet_features_path = "/path/to/imagenet_features.zarr"
 Check out the demo's output visualization:
 
 - [Open Visualization](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/cell_infection_visualization.html)
- 
+
 Note: You may need to press pause/play for the image to show
 
 ## (OPTIONAL) Generating DynaCLR-DENV-VS+PH Features

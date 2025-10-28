@@ -107,7 +107,7 @@ def compute_features(
     # convert the xarray to dataframe structure and add columns for computed features
     embedding_df = embedding_dataset["sample"].to_dataframe().reset_index(drop=True)
     feature_columns = pd.DataFrame(
-        features_npy, columns=[f"feature_{i+1}" for i in range(768)]
+        features_npy, columns=[f"feature_{i + 1}" for i in range(768)]
     )
 
     embedding_df = pd.concat([embedding_df, feature_columns], axis=1)
@@ -167,7 +167,6 @@ def compute_features(
     unique_fov_names = sorted(list(set(fov_names_list)))
 
     for fov_name in unique_fov_names:
-
         unique_track_ids = embedding_df[embedding_df["fov_name"] == fov_name][
             "track_id"
         ].unique()
@@ -180,7 +179,6 @@ def compute_features(
                 (embedding_df["fov_name"] == fov_name)
                 & (embedding_df["track_id"] == track_id)
             ].empty:
-
                 prediction_dataset = dataset_of_tracks(
                     data_path,
                     tracks_path,
@@ -214,7 +212,6 @@ def compute_features(
                         & (embedding_df["track_id"] == track_id)
                     ]["t"]
                 ):
-
                     # Basic statistical features for both channels
                     phase_features = CellFeatures(phase[i], nucl_mask[i])
                     PF = phase_features.compute_all_features()

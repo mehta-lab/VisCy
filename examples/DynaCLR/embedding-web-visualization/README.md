@@ -1,4 +1,4 @@
-# Web-based embedding exploration 
+# Web-based embedding exploration
 
 ## Overview
 

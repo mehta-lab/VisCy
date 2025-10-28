@@ -25,9 +25,9 @@ bash download_data.sh
 
 For this demo, we will use the `DynaCLR-DENV-VS-Ph` model as an example.
 
-The datasets and config files for the models can be found: 
+The datasets and config files for the models can be found:
 -  [Test datasets](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/)
--  [Models](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/)  
+-  [Models](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/)
 
 
 ### Modify the Config File
@@ -49,10 +49,10 @@ Point to the downloaded checkpoint for the desired model (e.g., `DynaCLR-DENV-VS
 ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
 ```
 
---- 
+---
 ### DynaCLR with classical triplet sampling
 
-To train DynaCLR models using the classical triplet sampling, you need to generate pseudo-tracking data from 2D segmentation masks. 
+To train DynaCLR models using the classical triplet sampling, you need to generate pseudo-tracking data from 2D segmentation masks.
 
 These pseudo-tracks are used to run the same. For more information: [README.md](./DynaCLR-classical-sampling/README.md)
 

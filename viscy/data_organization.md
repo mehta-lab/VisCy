@@ -87,11 +87,11 @@ virtual_staining:
                 yyyymmdd-hhmmss:
                     ...
             # Inference and/or Evaluation of selected models.
-            test: 
+            test:
                 # config for prediction with test dataset.
                 test_<suffix>.yml # config used for inference, optionally copies ground truth and input for evaluation. This config will follow the lightning CLI/config format.
 
-                # inference output on test dataset, may include copies of input and ground truth to facilitate visualization of model performance. 
+                # inference output on test dataset, may include copies of input and ground truth to facilitate visualization of model performance.
                 test_<suffix>.zarr # Not all test datasets need to have human curated ground truth.
                 ...
 
@@ -103,7 +103,7 @@ virtual_staining:
                 evaluation_metrics_<suffix>.csv
                 ...
                 # (optional) tensorboard logs generated to visualize distribution of metrics or specific samples of input, prediction, ground truth.
-                evaluation_logs: 
+                evaluation_logs:
             # (optional) exported models for deployment
             deployment:
                 <task>_<input_shape>.onnx
@@ -119,7 +119,7 @@ This data hierarchy is deprecated, and is documented for archiving purposes.
 The hierarchy organizes subdirectories of config files, models/training logs and data first according to the data related to the computational experiment, then by the specific experiment. Each set of config files should have a corresponding sibling-level training log, and parent-level dataset in their respective directories
 
 ```yaml
-# project root directory 
+# project root directory
 torch_microDL:
 
     #training and test data
@@ -142,8 +142,8 @@ torch_microDL:
                 config0_<config_type>.yml
                 config1_<config_type>.yml
                 ...
-            ... 
-        ... 
+            ...
+        ...
 
     # training logs and saved models
     models:
@@ -169,5 +169,5 @@ torch_microDL:
                 ...
             ...
         ...
-          
+
 ```
