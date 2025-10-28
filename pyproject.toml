@@ -78,6 +78,6 @@ write_to = "viscy/_version.py"
 
 [tool.ruff]
 line-length = 88
-src = [ "tests", "viscy" ]
+src = [ "applications", "examples", "tests", "viscy" ]
 lint.extend-select = [ "I001" ]
 lint.isort.known-first-party = [ "viscy" ]
