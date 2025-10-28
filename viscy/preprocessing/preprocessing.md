@@ -105,7 +105,7 @@ FOV level statistics added to every position as well as the dataset_statistics t
                 "std": 976.02392578125
             }
         },
-        "Phase3D": {           
+        "Phase3D": {
             "dataset_statistics": {
                 "iqr": 0.0011349652777425945,
                 "mean": -1.9603044165705796e-06,

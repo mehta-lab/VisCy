@@ -16,8 +16,10 @@ repos:
       - id: ruff-check
         types_or: [python, pyi, jupyter]
         args: [--fix, --exit-non-zero-on-fix, --unsafe-fixes]
+        exclude: (\.ipynb$|^examples/virtual_staining/vcp_tutorials/.*\.py$|^applications/)
       - id: ruff-format
         types_or: [python, pyi, jupyter]
+        exclude: (\.ipynb$|^examples/virtual_staining/vcp_tutorials/.*\.py$|^applications/)
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v6.0.0
     hooks:

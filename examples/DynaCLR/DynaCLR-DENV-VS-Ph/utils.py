@@ -96,7 +96,7 @@ def plot_phate_time_trajectories(
     # Generate plots for each time step
     for t_idx, t in enumerate(all_times):
         plt.close("all")
-        fig, ax = plt.figure(figsize=(10, 10)), plt.subplot(111)
+        _fig, ax = plt.figure(figsize=(10, 10)), plt.subplot(111)
 
         # Plot historical points in gray (all points from previous time steps)
         if t_idx > 0:
@@ -1181,7 +1181,7 @@ def create_combined_visualization(
     )
 
     main_fig.update_layout(
-        title=f"Cell Images and PHATE Embeddings",
+        title="Cell Images and PHATE Embeddings",
         width=plot_size_xy[0],
         height=plot_size_xy[1],
         sliders=[
@@ -1234,7 +1234,8 @@ def create_combined_visualization(
     main_fig.frames = frames
 
     main_fig.update_layout(
-        transition={"duration": 0}, updatemenus=[]  # Remove any animation buttons
+        transition={"duration": 0},
+        updatemenus=[],  # Remove any animation buttons
     )
 
     return main_fig

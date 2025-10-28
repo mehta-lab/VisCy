@@ -35,7 +35,7 @@ if NAPARI:
     import os
 
     import napari
-s
+
     os.environ["DISPLAY"] = ":1"
     viewer = napari.Viewer()
 # %%

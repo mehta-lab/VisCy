@@ -207,7 +207,7 @@ if included_cells:
 # Show distance distribution
 plt.subplot(2, 3, 6)
 distances = dtw_matrix[reference_cell, 1:]  # Skip distance to self
-plt.hist(distances, bins=10)s
+plt.hist(distances, bins=10)
 plt.axvline(
     distance_threshold,
     color="r",

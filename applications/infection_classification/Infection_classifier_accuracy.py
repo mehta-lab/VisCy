@@ -23,7 +23,6 @@ for well_id, well_data in data_out.wells():
     well_name, well_no = well_id.split("/")
 
     for pos_name, pos_data in well_data.positions():
-
         out_data = pos_data.data.numpy()
         T, C, Z, Y, X = out_data.shape
 

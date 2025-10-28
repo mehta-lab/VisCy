@@ -138,7 +138,6 @@ def plot_confusion_matrix(confusion_matrix, index_to_label_dict):
 
 
 class SemanticSegUNet2D(pl.LightningModule):
-
     # Model for semantic segmentation.
 
     def __init__(
@@ -174,9 +173,7 @@ class SemanticSegUNet2D(pl.LightningModule):
             log_samples_per_batch  # Set the number of samples to log per batch
         )
         self.training_step_outputs = []  # Initialize the list of training step outputs
-        self.validation_step_outputs = (
-            []
-        )  # Initialize the list of validation step outputs
+        self.validation_step_outputs = []  # Initialize the list of validation step outputs
 
         self.pred_cm = None  # Initialize the confusion matrix
         self.index_to_label_dict = ["Infected", "Uninfected"]
@@ -257,7 +254,6 @@ class SemanticSegUNet2D(pl.LightningModule):
 
     # Define the prediction step
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0):
-
         source = self._predict_pad(batch["source"])  # Pad the source
         logits = self._predict_pad.inverse(
             self.forward(source)
