@@ -6,18 +6,20 @@
 This example shows how to virtually stain HEK293T cells using the _VSCyto3D_ model.
 The model is trained to predict the membrane and nuclei channels from the phase channel.
 """
+
 # %% Imports and paths
 from pathlib import Path
 
 from iohub import open_ome_zarr
 from plot import plot_vs_n_fluor
+
 from viscy.data.hcs import HCSDataModule
+from viscy.trainer import VisCyTrainer
+from viscy.transforms import NormalizeSampled
 
 # Viscy classes for the trainer and model
 from viscy.translation.engine import VSUNet
 from viscy.translation.predict_writer import HCSPredictionWriter
-from viscy.trainer import VisCyTrainer
-from viscy.transforms import NormalizeSampled
 
 # %% [markdown]
 """

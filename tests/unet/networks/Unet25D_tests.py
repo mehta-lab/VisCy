@@ -192,7 +192,7 @@ class TestUnet25d(unittest.TestCase):
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
                     )
-                except:
+                except Exception:
                     failed_tests[i].append(args)
                     failed_tests[i].append(self.excep)
             elif test == "failing":
@@ -211,20 +211,20 @@ class TestUnet25d(unittest.TestCase):
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
                     )
-                except:
+                except Exception:
                     failed_tests[i].append(args)
                     failed_tests[i].append(self.excep)
             elif test == "residual":
                 # test residual
                 resid_index = 2
-                if args[resid_index] == False:
+                if not args[resid_index]:
                     params, resid_params = self._get_residual_params(args, resid_index)
                     try:
                         fail_message = f"\t Residual params tests failed on config {i + 1} \n args: {args}"
                         np.testing.assert_equal(
                             len(list(params)), len(list(resid_params)), fail_message
                         )
-                    except:
+                    except Exception:
                         failed_tests[i].append(args)
                         failed_tests[i].append(self.excep)
 
@@ -234,7 +234,7 @@ class TestUnet25d(unittest.TestCase):
                 f"Testing complete! {len(configs_list) - len(failed_tests)}/{len(configs_list)} passed."
             )
             if len(failed_tests) > 0:
-                print(f"Failed messages:")
+                print("Failed messages:")
                 for key in failed_tests:
                     print(f"Config {key}: {failed_tests[key]}")
 

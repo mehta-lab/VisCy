@@ -69,7 +69,7 @@ labels = label2rgb(
 
 for t, (a, rgb) in enumerate(zip(img_ax.flatten(), labels)):
     a.imshow(rgb)
-    a.set_title(f"{(t+t_slice.start)/2 + 3} HPI")
+    a.set_title(f"{(t + t_slice.start) / 2 + 3} HPI")
     a.axis("off")
 
 line_fig = subfigs[1]

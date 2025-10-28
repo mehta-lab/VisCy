@@ -238,11 +238,11 @@ for i, time in enumerate(selected_time_points):
     ax[0, i].set_title(f"{hpi} HPI")
     ax[1, i].imshow(inf_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[1, i].set_title(
-        f"infected: {prob:.3f}\n" f"label: {inf_binary}",
+        f"infected: {prob:.3f}\nlabel: {inf_binary}",
     )
     ax[2, i].imshow(div_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[2, i].set_title(
-        f"dividing: {division_probs[time].item():.3f}\n" f"label: {div_binary}",
+        f"dividing: {division_probs[time].item():.3f}\nlabel: {div_binary}",
     )
 for a in ax.ravel():
     a.axis("off")

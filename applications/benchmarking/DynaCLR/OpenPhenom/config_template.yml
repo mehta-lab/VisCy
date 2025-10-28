@@ -13,11 +13,11 @@ model:
   # Default is "middle_slice" if not specified
   channel_reduction_methods:
     "Phase3D": "middle_slice"  # For phase contrast, middle slice often works well
-    "raw GFP EX488 EM525-45": "max"    
+    "raw GFP EX488 EM525-45": "max"
 
 # Data module configuration
 datamodule:
-  source_channel: 
+  source_channel:
     - Phase3D
     - "raw GFP EX488 EM525-45"
   z_range: [25, 40]

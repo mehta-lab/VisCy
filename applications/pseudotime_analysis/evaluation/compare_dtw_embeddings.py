@@ -11,15 +11,11 @@ from plotting_utils import (
     find_pattern_matches,
     identify_lineages,
     plot_pc_trajectories,
-    plot_reference_vs_full_lineages,
 )
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
-from viscy.representation.evaluation.dimensionality_reduction import compute_pca
 
 logger = logging.getLogger("viscy")
 logger.setLevel(logging.INFO)
@@ -35,7 +31,7 @@ if NAPARI:
     import os
 
     import napari
-s
+
     os.environ["DISPLAY"] = ":1"
     viewer = napari.Viewer()
 # %%

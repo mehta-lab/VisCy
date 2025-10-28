@@ -1,7 +1,9 @@
 # %%
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import numpy as np
+
 from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.distance import (
     compute_displacement,

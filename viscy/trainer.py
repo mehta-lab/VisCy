@@ -159,7 +159,7 @@ class VisCyTrainer(Trainer):
 
         Notes
         -----
-        See the configuration file in examples/configs/convert_to_anndata_example.yml 
+        See the configuration file in examples/configs/convert_to_anndata_example.yml
         for an example of how to use a yaml configuration file.
         """
         if model is not None:

@@ -17,7 +17,7 @@ segmentation_channel_name = "nuclei_prediction_labels_labels"
 Z_SLICE = 0
 # %%
 """
-Add csvs with fake tracking to tracking data. 
+Add csvs with fake tracking to tracking data.
 
 The tracking data is a csv with the following columns:
 - track_id: from segmentation mask, list of labels

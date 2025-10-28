@@ -6,6 +6,7 @@
 This example shows how to virtually stain A549 cells using the _VSCyto2D_ model.
 The model is trained to predict the membrane and nuclei channels from the phase channel.
 """
+
 # %% Imports and paths
 from pathlib import Path
 
@@ -14,10 +15,10 @@ from plot import plot_vs_n_fluor
 
 # Viscy classes for the trainer and model
 from viscy.data.hcs import HCSDataModule
-from viscy.translation.engine import FcmaeUNet
-from viscy.translation.predict_writer import HCSPredictionWriter
 from viscy.trainer import VisCyTrainer
 from viscy.transforms import NormalizeSampled
+from viscy.translation.engine import FcmaeUNet
+from viscy.translation.predict_writer import HCSPredictionWriter
 
 # %% [markdown] tags=[]
 #

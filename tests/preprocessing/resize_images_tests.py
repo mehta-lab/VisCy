@@ -53,7 +53,7 @@ class TestResizeImages(unittest.TestCase):
         Tear down temporary folder and file structure
         """
         TempDirectory.cleanup_all()
-        nose.tools.assert_equal(os.path.isdir(self.temp_path), False)
+        assert os.path.isdir(self.temp_path) is False
 
     def test_downsample(self):
         # Half the image size
