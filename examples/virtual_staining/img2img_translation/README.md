@@ -9,7 +9,7 @@ In this exercise, you will:
 
 ## Setup
 
-**Close your shell, and login again.** 
+**Close your shell, and login again.**
 
 Run the setup script to create the environment for this exercise and download the dataset.
 ```bash

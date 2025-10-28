@@ -57,8 +57,7 @@ class OpenPhenomModule(LightningModule):
             self.model.eval()
         except ImportError:
             raise ImportError(
-                "Please install the OpenPhenom dependencies: "
-                "pip install transformers"
+                "Please install the OpenPhenom dependencies: pip install transformers"
             )
 
     def on_predict_start(self):

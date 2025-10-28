@@ -105,13 +105,13 @@ for dim in range(4):
         plt.plot(
             range(num_timepoints),
             cell_embeddings[i, :, dim],
-            label=f"Cell {i+1}",
+            label=f"Cell {i + 1}",
             linewidth=2,
         )
 
-    plt.title(f"Dimension {dim+1} over time")
+    plt.title(f"Dimension {dim + 1} over time")
     plt.xlabel("Timepoint")
-    plt.ylabel(f"Value (Dim {dim+1})")
+    plt.ylabel(f"Value (Dim {dim + 1})")
     plt.grid(alpha=0.3)
 
     if dim == 0:
@@ -136,7 +136,7 @@ def compute_dtw_matrix(s1, s2):
         best_path: The optimal warping path
     """
     # Compute pairwise distances between all timepoints
-    distance_matrix = cdist(s1, s2, metric='cosine')
+    distance_matrix = cdist(s1, s2, metric="cosine")
 
     n, m = distance_matrix.shape
 
@@ -211,7 +211,7 @@ for i in range(num_cells):
         dtw_results.append(
             (i + 1, dist, path, warping_matrix)
         )  # Store cell number, distance, path, matrix
-        print(f"DTW distance between Cell 1 and Cell {i+1} dist: {dist:.4f}")
+        print(f"DTW distance between Cell 1 and Cell {i + 1} dist: {dist:.4f}")
 
 # %%
 # Visualize the DTW distances
@@ -391,7 +391,7 @@ for dim in range(4):
                 aligned_cell[:, dim],
                 "b-",
                 linewidth=2,
-                label=f"Cell 1 (Reference)",
+                label="Cell 1 (Reference)",
             )
         else:
             # Other aligned cells
@@ -404,9 +404,9 @@ for dim in range(4):
                 label=f"Cell {cell_id} (Aligned)" if i == 1 else None,
             )
 
-    plt.title(f"Dimension {dim+1}: Aligned Cells")
+    plt.title(f"Dimension {dim + 1}: Aligned Cells")
     plt.xlabel("Reference Timepoint")
-    plt.ylabel(f"Value (Dim {dim+1})")
+    plt.ylabel(f"Value (Dim {dim + 1})")
     plt.grid(alpha=0.3)
     plt.legend()
 
@@ -475,9 +475,9 @@ for dim in range(4):
         label="Average Embedding",
     )
 
-    plt.title(f"Dimension {dim+1}: Original vs Average")
+    plt.title(f"Dimension {dim + 1}: Original vs Average")
     plt.xlabel("Timepoint")
-    plt.ylabel(f"Value (Dim {dim+1})")
+    plt.ylabel(f"Value (Dim {dim + 1})")
     plt.grid(alpha=0.3)
     plt.legend()
 
@@ -504,7 +504,7 @@ for i in range(num_cells):
     warping_matrix, _ = compute_dtw_matrix(average_embedding, cell_embeddings[i])
 
     average_dtw_results.append((i + 1, dist, path, warping_matrix))
-    print(f"DTW distance between Average and Cell {i+1} dist: {dist:.4f}")
+    print(f"DTW distance between Average and Cell {i + 1} dist: {dist:.4f}")
 
 # %%
 # Compare distances: Cell 1 as reference vs Average as reference

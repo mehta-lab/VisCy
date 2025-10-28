@@ -2,7 +2,6 @@ import pytest
 import torch
 from kornia.filters import (
     filter3d,
-    get_gaussian_erf_kernel1d,
     get_gaussian_kernel1d,
     get_gaussian_kernel3d,
 )

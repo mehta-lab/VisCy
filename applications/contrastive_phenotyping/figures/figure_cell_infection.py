@@ -154,7 +154,7 @@ data["fov_name"] = fov_name_list_filtered
 
 # Add all 768 features to the dataframe
 for i in range(768):
-    data[f"feature_{i+1}"] = feature_npy_filtered[:, i]
+    data[f"feature_{i + 1}"] = feature_npy_filtered[:, i]
 
 # %% manually split the dataset into training and testing set by well name
 
@@ -174,7 +174,7 @@ data_test = data[
 
 # %% train a linear classifier to predict infection state from PCA components
 
-from sklearn.linear_model import LogisticRegression
+from sklearn.linear_model import LogisticRegression  # noqa: E402
 
 x_train = data_train_val.drop(
     columns=[
@@ -214,8 +214,8 @@ y_pred = clf.predict(x_test)
 
 # %% construct confusion matrix to compare the true and predicted infection state
 
-import seaborn as sns
-from sklearn.metrics import confusion_matrix
+import seaborn as sns  # noqa: E402
+from sklearn.metrics import confusion_matrix  # noqa: E402
 
 cm = confusion_matrix(y_test, y_pred)
 cm_percentage = cm.astype("float") / cm.sum(axis=1)[:, np.newaxis] * 100
@@ -359,7 +359,7 @@ june_data["fov_name"] = june_features["fov_name"].values
 # Add all 768 features to the dataframe
 june_features_npy = june_features.values
 for i in range(768):
-    june_data[f"feature_{i+1}"] = june_features_npy[:, i]
+    june_data[f"feature_{i + 1}"] = june_features_npy[:, i]
 
 # use one mock and one dengue infecected well only
 june_data = june_data[
@@ -578,7 +578,7 @@ for time in range(48):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*0.5+3} HPI")
+    plt.suptitle(f"Time: {time * 0.5 + 3} HPI")
     plt.ylim(-10, 20)
     plt.xlim(2, 18)
     plt.savefig(
@@ -605,7 +605,7 @@ for time in range(48):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*0.5+3} HPI")
+    plt.suptitle(f"Time: {time * 0.5 + 3} HPI")
     plt.ylim(-10, 18)
     plt.xlim(2, 18)
     plt.savefig(
@@ -632,7 +632,7 @@ for time in range(12):
     )
     handles, _ = plt.gca().get_legend_handles_labels()
     plt.legend(handles=handles, labels=["uninfected", "infected"])
-    plt.suptitle(f"Time: {time*2+3} HPI")
+    plt.suptitle(f"Time: {time * 2 + 3} HPI")
     plt.ylim(-8, 10)
     plt.xlim(-5, 5)
     plt.savefig(

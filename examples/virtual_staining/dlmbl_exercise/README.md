@@ -1,6 +1,6 @@
 # Exercise 6: Image translation - Part 1
 
-This demo script was developed for the DL@MBL 2024 course by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).  
+This demo script was developed for the DL@MBL 2024 course by Eduardo Hirata-Miyasaki, Ziwen Liu and Shalin Mehta, with many inputs and bugfixes by [Morgan Schwartz](https://github.com/msschwartz21), [Caroline Malin-Mayor](https://github.com/cmalinmayor), and [Peter Park](https://github.com/peterhpark).
 
 
 # Image translation (Virtual Staining)
@@ -49,7 +49,7 @@ Make sure that you can use conda to switch environments.
 conda init
 ```
 
-**Close your shell, and login again.** 
+**Close your shell, and login again.**
 
 Run the setup script to create the environment for this exercise and download the dataset.
 ```bash

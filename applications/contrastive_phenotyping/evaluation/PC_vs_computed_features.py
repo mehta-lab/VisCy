@@ -1,13 +1,14 @@
-""" Script to compute the correlation between PCA and UMAP features and computed features
+"""Script to compute the correlation between PCA and UMAP features and computed features
 * finds the computed features best representing the PCA and UMAP components
 * outputs a heatmap of the correlation between PCA and UMAP features and computed features
 """
 
 # %%
 from pathlib import Path
+
 import matplotlib.pyplot as plt
 import seaborn as sns
-from compute_pca_features import compute_features, compute_correlation_and_save_png
+from compute_pca_features import compute_correlation_and_save_png, compute_features
 
 # %% for sensor features
 
@@ -44,7 +45,7 @@ features_sensor.to_csv(
 # features_sensor = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv")
 
 # take a subset without the 768 features
-feature_columns = [f"feature_{i+1}" for i in range(768)]
+feature_columns = [f"feature_{i + 1}" for i in range(768)]
 features_subset_sensor = features_sensor.drop(columns=feature_columns)
 correlation_sensor = compute_correlation_and_save_png(
     features_subset_sensor,

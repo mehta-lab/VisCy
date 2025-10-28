@@ -42,9 +42,7 @@ def plot_reference_aligned_average(
 
         # Reconstruct the concatenated lineage
         lineages = []
-        track_offsets = (
-            {}
-        )  # To keep track of where each track starts in the concatenated array
+        track_offsets = {}  # To keep track of where each track starts in the concatenated array
         current_offset = 0
 
         for track_id in track_ids:
@@ -365,9 +363,7 @@ def align_and_average_embeddings(
 
         # Reconstruct the concatenated lineage
         lineages = []
-        track_offsets = (
-            {}
-        )  # To keep track of where each track starts in the concatenated array
+        track_offsets = {}  # To keep track of where each track starts in the concatenated array
         current_offset = 0
 
         for track_id in track_ids:
@@ -586,7 +582,6 @@ def find_pattern_matches(
     Returns:
         DataFrame with match positions and distances
     """
-    from scipy.spatial.distance import cdist
     from tqdm import tqdm
 
     # Calculate window step based on reference pattern length
@@ -610,9 +605,7 @@ def find_pattern_matches(
         print(f"Finding pattern matches for {fov_name} with track ids: {track_ids}")
         # Reconstruct the concatenated lineage
         lineages = []
-        track_offsets = (
-            {}
-        )  # To keep track of where each track starts in the concatenated array
+        track_offsets = {}  # To keep track of where each track starts in the concatenated array
         current_offset = 0
 
         for track_id in track_ids:
@@ -1012,11 +1005,12 @@ def plot_pc_trajectories(
         save_path: Path to save the figure
     """
     import ast
-    from sklearn.decomposition import PCA
-    from sklearn.preprocessing import StandardScaler
+
     import matplotlib.pyplot as plt
     import numpy as np
     import pandas as pd
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
 
     # Get reference pattern
     ref_pattern = None

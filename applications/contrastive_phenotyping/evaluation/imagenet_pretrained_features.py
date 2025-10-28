@@ -111,7 +111,7 @@ data_test = tracks[
 
 x_train = data_train_val.drop(
     columns=[
-         "division",
+        "division",
         "fov_name",
         "t",
         "track_id",

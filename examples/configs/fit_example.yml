@@ -93,4 +93,3 @@ data:
           sigma_y: [0.25, 1.5]
           sigma_x: [0.25, 1.5]
     caching: false
-
