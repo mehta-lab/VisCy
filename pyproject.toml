@@ -78,6 +78,10 @@ write_to = "viscy/_version.py"
 
 [tool.ruff]
 line-length = 88
-src = [ "applications", "examples", "tests", "viscy" ]
+src = [ "viscy" ]
 lint.extend-select = [ "I001" ]
+lint.per-file-ignores."applications/**/*.py" = [ "E402" ]
+lint.per-file-ignores."examples/**/*.ipynb" = [ "E402" ]
+lint.per-file-ignores."examples/**/*.py" = [ "E402", "F821" ]
+lint.per-file-ignores."tests/**/*.py" = [ "E402" ]
 lint.isort.known-first-party = [ "viscy" ]

@@ -22,7 +22,7 @@ cell_trajectories[cells - 2] += np.sin(np.linspace(0, 5, timepoints)) * 3
 # plot cell trajectories
 plt.figure(figsize=(8, 5))
 for i in range(cells):
-    plt.plot(cell_trajectories[i], label=f"Cell {i+1}")
+    plt.plot(cell_trajectories[i], label=f"Cell {i + 1}")
 plt.legend()
 plt.title("Original Cell Trajectories")
 plt.show()
@@ -40,7 +40,7 @@ for i in range(cells):
 # Print distance matrix for examination
 print("DTW Distance Matrix:")
 for i in range(cells):
-    print(f"Cell {i+1}: {dtw_matrix[reference_cell, i]:.2f}")
+    print(f"Cell {i + 1}: {dtw_matrix[reference_cell, i]:.2f}")
 
 # Plot distance heatmap
 plt.figure(figsize=(8, 6))
@@ -56,7 +56,7 @@ linkage_matrix = linkage(dtw_matrix, method="ward")
 
 # Plot the dendrogram
 plt.figure(figsize=(8, 5))
-dendrogram(linkage_matrix, labels=[f"Cell {i+1}" for i in range(cells)])
+dendrogram(linkage_matrix, labels=[f"Cell {i + 1}" for i in range(cells)])
 plt.xlabel("Cells")
 plt.ylabel("DTW Distance")
 plt.title("Hierarchical Clustering of Cells Based on DTW")
@@ -78,7 +78,7 @@ for i in range(cells):
         if distance <= distance_threshold or i == reference_cell
         else "Excluded (too dissimilar)"
     )
-    print(f"Cell {i+1}: {distance:.2f} - {status}")
+    print(f"Cell {i + 1}: {distance:.2f} - {status}")
 
 # Initialize aligned trajectories with the reference cell
 aligned_cell_trajectories = [cell_trajectories[reference_cell].copy()]
@@ -121,12 +121,12 @@ for i in range(1, cells):
 plt.figure(figsize=(10, 6))
 
 # Plot reference cell first
-plt.plot(aligned_cell_trajectories[0], "k-", linewidth=2.5, label=f"Reference (Cell 1)")
+plt.plot(aligned_cell_trajectories[0], "k-", linewidth=2.5, label="Reference (Cell 1)")
 
 # Plot other cells that were successfully aligned
 for i in range(1, cells):
     if alignment_status[i]:
-        plt.plot(aligned_cell_trajectories[i], label=f"Cell {i+1}")
+        plt.plot(aligned_cell_trajectories[i], label=f"Cell {i + 1}")
 
 plt.legend()
 plt.title("Aligned Cell Trajectories (Filtered by DTW Distance)")
@@ -150,8 +150,10 @@ for idx, target_cell in enumerate(included_cells[: min(2, len(included_cells))])
     )
 
     # Plot both signals
-    plt.plot(cell_trajectories[reference_cell], label=f"Reference", linewidth=2)
-    plt.plot(cell_trajectories[target_cell], label=f"Cell {target_cell+1}", linewidth=2)
+    plt.plot(cell_trajectories[reference_cell], label="Reference", linewidth=2)
+    plt.plot(
+        cell_trajectories[target_cell], label=f"Cell {target_cell + 1}", linewidth=2
+    )
 
     # Plot warping connections
     for ref_idx, query_idx in path:
@@ -166,7 +168,7 @@ for idx, target_cell in enumerate(included_cells[: min(2, len(included_cells))])
         )
 
     plt.title(
-        f"Included - Cell {target_cell+1} (Dist: {dtw_matrix[reference_cell, target_cell]:.2f})"
+        f"Included - Cell {target_cell + 1} (Dist: {dtw_matrix[reference_cell, target_cell]:.2f})"
     )
     plt.legend()
 
@@ -174,12 +176,14 @@ for idx, target_cell in enumerate(included_cells[: min(2, len(included_cells))])
 for idx, target_cell in enumerate(excluded_cells[: min(2, len(excluded_cells))]):
     plt.subplot(2, 3, 3 + idx)
 
-    plt.plot(cell_trajectories[reference_cell], label=f"Reference", linewidth=2)
-    plt.plot(cell_trajectories[target_cell], label=f"Cell {target_cell+1}", linewidth=2)
+    plt.plot(cell_trajectories[reference_cell], label="Reference", linewidth=2)
+    plt.plot(
+        cell_trajectories[target_cell], label=f"Cell {target_cell + 1}", linewidth=2
+    )
 
     # Show distance value
     plt.title(
-        f"Excluded - Cell {target_cell+1} (Dist: {dtw_matrix[reference_cell, target_cell]:.2f})"
+        f"Excluded - Cell {target_cell + 1} (Dist: {dtw_matrix[reference_cell, target_cell]:.2f})"
     )
     plt.legend()
 
@@ -191,17 +195,17 @@ if included_cells:
     plt.plot(cell_trajectories[reference_cell], label="Reference", linewidth=2)
     plt.plot(
         cell_trajectories[target_cell],
-        label=f"Original Cell {target_cell+1}",
+        label=f"Original Cell {target_cell + 1}",
         linewidth=2,
         linestyle="--",
         alpha=0.7,
     )
     plt.plot(
         aligned_cell_trajectories[target_cell],
-        label=f"Aligned Cell {target_cell+1}",
+        label=f"Aligned Cell {target_cell + 1}",
         linewidth=2,
     )
-    plt.title(f"Alignment Example (Included)")
+    plt.title("Alignment Example (Included)")
     plt.legend()
 
 # Show distance distribution
