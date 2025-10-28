@@ -25,6 +25,7 @@ from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.typing import ChannelMap, DictTransform, HCSStackIndex, NormMeta, Sample
+from viscy.utils.engine_state import set_fit_global_state
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -448,12 +449,6 @@ class HCSDataModule(LightningDataModule):
         else:
             raise NotImplementedError(f"{stage} stage")
 
-    def _set_fit_global_state(self, num_positions: int) -> torch.Tensor:
-        # disable metadata tracking in MONAI for performance
-        set_track_meta(False)
-        # shuffle positions, randomness is handled globally
-        return torch.randperm(num_positions)
-
     def _setup_fit(self, dataset_settings: dict):
         """Set up the training and validation datasets."""
         train_transform, val_transform = self._fit_transform()
@@ -463,7 +458,7 @@ class HCSDataModule(LightningDataModule):
 
         # shuffle positions, randomness is handled globally
         positions = [pos for _, pos in plate.positions()]
-        shuffled_indices = self._set_fit_global_state(len(positions))
+        shuffled_indices = set_fit_global_state(len(positions))
         positions = list(positions[i] for i in shuffled_indices)
         num_train_fovs = int(len(positions) * self.split_ratio)
         # training set needs to sample more Z range for augmentation
