@@ -1,6 +1,7 @@
 from pathlib import Path
 from typing import Literal
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
@@ -8,7 +9,6 @@ from scipy.signal import find_peaks
 from scipy.stats import gaussian_kde
 from sklearn.preprocessing import StandardScaler
 
-from viscy.representation.embedding_writer import read_embedding_dataset
 from viscy.representation.evaluation.clustering import (
     compare_time_offset,
     pairwise_distance_matrix,
@@ -108,7 +108,7 @@ def find_distribution_peak(
 
 
 def compute_embeddings_smoothness(
-    prediction_path: Path,
+    features_ad: ad.AnnData,
     distance_metric: Literal["cosine", "euclidean"] = "cosine",
     verbose: bool = False,
 ) -> tuple[dict, dict, list[list[float]]]:
@@ -116,8 +116,8 @@ def compute_embeddings_smoothness(
     Compute the smoothness statistics of embeddings
 
     Parameters
-    ----------
-    prediction_path: Path to the embedding dataset
+    --------
+    features_ad: adAnnData
     distance_metric: Distance metric to use, by default "cosine"
 
     Returns:
@@ -139,18 +139,15 @@ def compute_embeddings_smoothness(
     piecewise_distance_per_track: list[list[float]]
         Piece-wise distance per track
     """
-
-    # Read the dataset
-    embeddings = read_embedding_dataset(prediction_path)
-    features = embeddings["features"]
-    scaled_features = StandardScaler().fit_transform(features.values)
+    features = features_ad.X
+    scaled_features = StandardScaler().fit_transform(features)
 
     # Compute the distance matrix
     cross_dist = pairwise_distance_matrix(scaled_features, metric=distance_metric)
     rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
 
     # Compute piece-wise distance and rank difference
-    features_df = features["sample"].to_dataframe().reset_index(drop=True)
+    features_df = features_ad.obs.reset_index(drop=True)
     piecewise_distance_per_track, _ = compute_piece_wise_distance(
         features_df, cross_dist, rank_fractions
     )
