@@ -1,10 +1,11 @@
+import sys
+from pathlib import Path
+from typing import Dict, List, Literal, Optional
+
 import torch
 from sam2.sam2_image_predictor import SAM2ImagePredictor
 from skimage.exposure import rescale_intensity
-from typing import Dict, List, Literal, Optional
 
-import sys
-from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent))
 
 from base_embedding_module import BaseEmbeddingModule, create_embedding_cli
@@ -28,7 +29,7 @@ class SAM2Module(BaseEmbeddingModule):
     def from_config(cls, cfg):
         """Create model instance from configuration."""
         model_config = cfg.get("model", {})
-        
+
         return cls(
             model_name=model_config.get("model_name", "facebook/sam2-hiera-base-plus"),
             channel_reduction_methods=model_config.get("channel_reduction_methods", {}),

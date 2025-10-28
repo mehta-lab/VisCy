@@ -2,7 +2,6 @@
 from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 import seaborn as sns
 
@@ -99,21 +98,21 @@ plt.legend(bbox_to_anchor=(1.05, 1), loc="upper left")
 # plot the 3D PHATE embedding (Note: seaborn scatterplot doesn't support 3D, using matplotlib)
 
 fig = plt.figure(figsize=(10, 10))
-ax = fig.add_subplot(111, projection='3d')
+ax = fig.add_subplot(111, projection="3d")
 
 for state in ["G1", "G2", "S"]:
     mask = cell_cycle_states == state
     ax.scatter(
         test_features["PHATE1"][merged_indices][mask],
-        test_features["PHATE2"][merged_indices][mask], 
+        test_features["PHATE2"][merged_indices][mask],
         test_features["PHATE3"][merged_indices][mask],
         c=cycle_colors[state],
         alpha=0.6,
-        label=state
+        label=state,
     )
 
 ax.set_xlabel("PHATE1")
-ax.set_ylabel("PHATE2") 
+ax.set_ylabel("PHATE2")
 ax.set_zlabel("PHATE3")
 ax.set_title("3D PHATE Embedding Colored by Cell Cycle State")
 ax.legend()

@@ -154,7 +154,7 @@ class TestPairwiseDistanceMatrix:
 
     def test_float32_input_preserves_precision(self):
         """Test that float32 input is converted to float64 for precision."""
-        torch = pytest.importorskip("torch")
+        pytest.importorskip("torch")
 
         features_f32 = np.random.randn(10, 32).astype(np.float32)
 

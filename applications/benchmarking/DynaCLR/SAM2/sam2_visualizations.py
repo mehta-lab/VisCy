@@ -4,15 +4,12 @@ Test script to visualize SAM2 input images and feature processing.
 This script helps debug what images are being passed to SAM2 and how they're processed.
 """
 
-import matplotlib.pyplot as plt
-import numpy as np
-import torch
-import yaml
-from pathlib import Path
-import sys
 import os
+from pathlib import Path
 
+import matplotlib.pyplot as plt
 from sam2_embeddings import SAM2Module, load_config, load_normalization_from_config
+
 from viscy.data.triplet import TripletDataModule
 
 
@@ -52,16 +49,28 @@ def visualize_rgb_conversion(x_original, x_rgb_list, save_dir="./debug_images"):
     ax = axes[2, 0]
     # Normalize to 0-1 for display
     rgb_display = rgb_img.copy()
-    rgb_display = (rgb_display - rgb_display.min()) / (rgb_display.max() - rgb_display.min())
+    rgb_display = (rgb_display - rgb_display.min()) / (
+        rgb_display.max() - rgb_display.min()
+    )
     im = ax.imshow(rgb_display)
     ax.set_title("Merged RGB Image")
     ax.axis("off")
 
     # Check if RGB is properly scaled to 0-255
     ax = axes[2, 1]
-    ax.text(0.1, 0.8, f"RGB Range: [{rgb_img.min():.1f}, {rgb_img.max():.1f}]", transform=ax.transAxes)
-    ax.text(0.1, 0.6, f"Expected: [0, 255]", transform=ax.transAxes)
-    ax.text(0.1, 0.4, f"Properly scaled: {rgb_img.min() >= 0 and rgb_img.max() <= 255}", transform=ax.transAxes)
+    ax.text(
+        0.1,
+        0.8,
+        f"RGB Range: [{rgb_img.min():.1f}, {rgb_img.max():.1f}]",
+        transform=ax.transAxes,
+    )
+    ax.text(0.1, 0.6, "Expected: [0, 255]", transform=ax.transAxes)
+    ax.text(
+        0.1,
+        0.4,
+        f"Properly scaled: {rgb_img.min() >= 0 and rgb_img.max() <= 255}",
+        transform=ax.transAxes,
+    )
     ax.text(0.1, 0.2, f"Mean: {rgb_img.mean():.1f}", transform=ax.transAxes)
     ax.set_title("RGB Scaling Check")
     ax.axis("off")
@@ -123,7 +132,7 @@ def test_sam2_processing(config_path, num_samples=3):
         if i >= num_samples:
             break
 
-        print(f"\n--- Sample {i+1} ---")
+        print(f"\n--- Sample {i + 1} ---")
         x = batch["anchor"]
         print(f"Input tensor shape: {x.shape}")
         print(f"Input tensor range: [{x.min():.3f}, {x.max():.3f}]")

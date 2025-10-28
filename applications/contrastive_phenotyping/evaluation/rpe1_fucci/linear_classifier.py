@@ -73,23 +73,22 @@ print(classification_report(y_test, y_test_pred))
 # %%
 # Enhanced evaluation and visualization
 import matplotlib.pyplot as plt
-import seaborn as sns
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
 # 1. Confusion Matrix - shows which classes are confused with each other
 cm = confusion_matrix(y_test, y_test_pred)
 plt.figure(figsize=(8, 6))
-ConfusionMatrixDisplay(cm, display_labels=["G1", "G2", "S","M"]).plot(cmap="Blues")
+ConfusionMatrixDisplay(cm, display_labels=["G1", "G2", "S", "M"]).plot(cmap="Blues")
 plt.title("Confusion Matrix")
 plt.show()
 
 # 2. Per-class errors breakdown
 print("\nDetailed per-class analysis:")
-for class_name in ["G1", "G2", "S","M"]:
+for class_name in ["G1", "G2", "S", "M"]:
     mask = y_test == class_name
     correct = (y_test_pred[mask] == class_name).sum()
     total = mask.sum()
-    print(f"{class_name}: {correct}/{total} correct ({correct/total:.3f})")
+    print(f"{class_name}: {correct}/{total} correct ({correct / total:.3f})")
 
     # Show what this class was misclassified as
     if total > correct:
@@ -105,7 +104,10 @@ plt.figure(figsize=(12, 4))
 for i, class_name in enumerate(class_names):
     plt.subplot(1, 4, i + 1)
     plt.hist(
-        y_test_proba[:, i], bins=20, alpha=0.7, color=["blue", "orange", "green",'red'][i]
+        y_test_proba[:, i],
+        bins=20,
+        alpha=0.7,
+        color=["blue", "orange", "green", "red"][i],
     )
     plt.title(f"Confidence for {class_name}")
     plt.xlabel("Probability")

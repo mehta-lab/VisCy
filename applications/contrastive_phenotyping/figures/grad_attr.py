@@ -9,16 +9,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import torch
+import xarray as xr
 from cmap import Colormap
 from lightning.pytorch import seed_everything
 from skimage.exposure import rescale_intensity
-from sklearn.metrics import (
-    accuracy_score,
-    auc,
-    f1_score,
-    precision_recall_curve,
-    roc_auc_score,
-)
 
 from viscy.data.triplet import TripletDataModule
 from viscy.representation.embedding_writer import read_embedding_dataset
@@ -68,8 +62,8 @@ dm = TripletDataModule(
             keys=["RFP"], lower=50, upper=99, b_min=0.0, b_max=1.0
         ),
         Decollated(
-            keys=["Phase3D","RFP"],
-        )
+            keys=["Phase3D", "RFP"],
+        ),
     ],
     predict_cells=True,
     include_fov_names=[fov] * len(track),
@@ -92,6 +86,7 @@ model = ContrastiveModule.load_from_checkpoint(
         projection_dim=32,
     ),
 ).eval()
+
 
 # %%
 def load_and_combine_datasets(
@@ -145,8 +140,6 @@ def load_and_combine_datasets(
                 1.0: 1,
                 0.0: 0,
                 2: 2,
-                1: 1,
-                0: 0,
             }
         elif target_type == "division":
             standardization_mapping = {
@@ -159,8 +152,6 @@ def load_and_combine_datasets(
                 1.0: 1,
                 0.0: 0,
                 2: 2,
-                1: 1,
-                0: 0,
             }
 
     for emb_path, ann_path, train_fovs in datasets:
@@ -505,7 +496,9 @@ selected_div_states = [False] * 3 + [True]
 
 icefire = Colormap("icefire").to_mpl()
 
-f, ax = plt.subplots(3,  len(selected_time_points), figsize=(5.5, 3), layout="compressed")
+f, ax = plt.subplots(
+    3, len(selected_time_points), figsize=(5.5, 3), layout="compressed"
+)
 for i, time in enumerate(selected_time_points):
     hpi = 3 + 0.5 * time
     prob = infection_probs[time].item()
@@ -515,11 +508,11 @@ for i, time in enumerate(selected_time_points):
     ax[0, i].set_title(f"{hpi} HPI")
     ax[1, i].imshow(inf_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[1, i].set_title(
-        f"infected: {prob:.3f}\n" f"label: {inf_binary}",
+        f"infected: {prob:.3f}\nlabel: {inf_binary}",
     )
     ax[2, i].imshow(div_render[time], cmap=icefire, vmin=0, vmax=1)
     ax[2, i].set_title(
-        f"dividing: {division_probs[time].item():.3f}\n" f"label: {div_binary}",
+        f"dividing: {division_probs[time].item():.3f}\nlabel: {div_binary}",
     )
 for a in ax.ravel():
     a.axis("off")
@@ -627,7 +620,8 @@ def animate(frame):
 
     return [im1, im2, im3]
 
-#%%
+
+# %%
 
 # Create animation
 anim = animation.FuncAnimation(

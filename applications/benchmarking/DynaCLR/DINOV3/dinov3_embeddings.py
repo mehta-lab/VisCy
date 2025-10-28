@@ -27,7 +27,7 @@ class DINOv3Module(BaseEmbeddingModule):
         super().__init__(channel_reduction_methods, channel_names, middle_slice_index)
         self.model_name = model_name
         self.pooling_method = pooling_method
-        
+
         self.model = None
         self.processor = None
 
@@ -36,7 +36,9 @@ class DINOv3Module(BaseEmbeddingModule):
         """Create model instance from configuration."""
         model_config = cfg.get("model", {})
         return cls(
-            model_name=model_config.get("model_name", "facebook/dinov3-vitb16-pretrain-lvd1689m"),
+            model_name=model_config.get(
+                "model_name", "facebook/dinov3-vitb16-pretrain-lvd1689m"
+            ),
             pooling_method=model_config.get("pooling_method", "mean"),
             channel_reduction_methods=model_config.get("channel_reduction_methods", {}),
             channel_names=model_config.get("channel_names", []),
@@ -58,12 +60,12 @@ class DINOv3Module(BaseEmbeddingModule):
         """Extract features using DINOv3 model."""
         inputs = self.processor(pil_images, return_tensors="pt")
         inputs = {k: v.to(self.device) for k, v in inputs.items()}
-        
+
         with torch.no_grad():
             outputs = self.model(**inputs)
             token_features = outputs.last_hidden_state
             features = self._pool_features(token_features)
-        
+
         return features
 
     def _convert_to_pil_images(self, x: torch.Tensor) -> List[Image.Image]:
@@ -81,56 +83,69 @@ class DINOv3Module(BaseEmbeddingModule):
             List of PIL Images ready for DINOv3 processing.
         """
         images = []
-        
+
         for b in range(x.shape[0]):
             img_tensor = x[b]  # (C, H, W)
-            
+
             if img_tensor.shape[0] == 1:
                 # Single channel - convert to grayscale PIL
                 img_array = img_tensor[0].cpu().numpy()
                 # Normalize to 0-255
-                img_normalized = ((img_array - img_array.min()) / 
-                                (img_array.max() - img_array.min()) * 255).astype(np.uint8)
-                pil_img = Image.fromarray(img_normalized, mode='L')
-                
+                img_normalized = (
+                    (img_array - img_array.min())
+                    / (img_array.max() - img_array.min())
+                    * 255
+                ).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode="L")
+
             elif img_tensor.shape[0] == 2:
                 img_array = img_tensor.cpu().numpy()
-                rgb_array = np.zeros((img_array.shape[1], img_array.shape[2], 3), dtype=np.uint8)
-                
-                ch0_norm = rescale_intensity(img_array[0], out_range=(0, 255)).astype(np.uint8)
-                ch1_norm = rescale_intensity(img_array[1], out_range=(0, 255)).astype(np.uint8)
-                
+                rgb_array = np.zeros(
+                    (img_array.shape[1], img_array.shape[2], 3), dtype=np.uint8
+                )
+
+                ch0_norm = rescale_intensity(img_array[0], out_range=(0, 255)).astype(
+                    np.uint8
+                )
+                ch1_norm = rescale_intensity(img_array[1], out_range=(0, 255)).astype(
+                    np.uint8
+                )
+
                 rgb_array[:, :, 0] = ch0_norm  # Red
-                rgb_array[:, :, 1] = ch1_norm  # Green  
+                rgb_array[:, :, 1] = ch1_norm  # Green
                 rgb_array[:, :, 2] = (ch0_norm + ch1_norm) // 2  # Blue
-                
-                pil_img = Image.fromarray(rgb_array, mode='RGB')
-                
+
+                pil_img = Image.fromarray(rgb_array, mode="RGB")
+
             elif img_tensor.shape[0] == 3:
                 # Three channels - direct RGB
                 img_array = img_tensor.cpu().numpy().transpose(1, 2, 0)  # HWC
-                img_normalized = rescale_intensity(img_array, out_range=(0, 255)).astype(np.uint8)
-                pil_img = Image.fromarray(img_normalized, mode='RGB')
-                
+                img_normalized = rescale_intensity(
+                    img_array, out_range=(0, 255)
+                ).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode="RGB")
+
             else:
                 # More than 3 channels - use first 3
                 img_array = img_tensor[:3].cpu().numpy().transpose(1, 2, 0)  # HWC
-                img_normalized = rescale_intensity(img_array, out_range=(0, 255)).astype(np.uint8)
-                pil_img = Image.fromarray(img_normalized, mode='RGB')
-            
+                img_normalized = rescale_intensity(
+                    img_array, out_range=(0, 255)
+                ).astype(np.uint8)
+                pil_img = Image.fromarray(img_normalized, mode="RGB")
+
             images.append(pil_img)
-        
+
         return images
 
     def _pool_features(self, features: torch.Tensor) -> torch.Tensor:
         """
         Pool spatial features from DINOv3 tokens.
-        
+
         Parameters
         ----------
         features : torch.Tensor
             Token features with shape (B, num_tokens, hidden_dim).
-            
+
         Returns
         -------
         torch.Tensor
@@ -143,7 +158,7 @@ class DINOv3Module(BaseEmbeddingModule):
             else:
                 # For ConvNeXt, no CLS token, fall back to mean
                 return features.mean(dim=1)
-                
+
         elif self.pooling_method == "max":
             return features.max(dim=1)[0]
         else:  # mean pooling
