@@ -1,10 +1,10 @@
-import gradio as gr
 import numpy as np
 import torch
 from huggingface_hub import hf_hub_download
 from numpy.typing import ArrayLike
 from skimage import exposure
 
+import gradio as gr
 from viscy.light.engine import VSUNet
 
 
