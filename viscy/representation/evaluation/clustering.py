@@ -33,8 +33,13 @@ def knn_accuracy(embeddings, annotations, k=5):
     return accuracy
 
 
-def pairwise_distance_matrix(features: ArrayLike, metric: str = "cosine") -> NDArray:
+def pairwise_distance_matrix(
+    features: ArrayLike, metric: str = "cosine", device: str = "auto"
+) -> NDArray:
     """Compute pairwise distances between all samples in the feature matrix.
+
+    Uses PyTorch with GPU acceleration when available for significant speedup.
+    Falls back to scipy for unsupported metrics or when PyTorch is unavailable.
 
     Parameters
     ----------
@@ -42,13 +47,58 @@ def pairwise_distance_matrix(features: ArrayLike, metric: str = "cosine") -> NDA
         Feature matrix (n_samples, n_features)
     metric : str, optional
         Distance metric to use, by default "cosine"
+        Supports "cosine" and "euclidean" with PyTorch acceleration.
+        Other scipy metrics will use scipy fallback.
+    device : str, optional
+        Device to use for computation, by default "auto"
+        - "auto": automatically use GPU if available, otherwise CPU
+        - "cuda" or "gpu": force GPU usage
+        - "cpu": force CPU usage
+        - None or "scipy": force scipy fallback
 
     Returns
     -------
     NDArray
         Distance matrix of shape (n_samples, n_samples)
     """
-    return cdist(features, features, metric=metric)
+    if device in (None, "scipy") or metric not in ("cosine", "euclidean"):
+        return cdist(features, features, metric=metric)
+
+    try:
+        import torch
+
+        if device == "auto":
+            device_torch = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        elif device in ("cuda", "gpu"):
+            if not torch.cuda.is_available():
+                raise RuntimeError("CUDA requested but not available")
+            device_torch = torch.device("cuda")
+        elif device == "cpu":
+            device_torch = torch.device("cpu")
+        else:
+            raise ValueError(
+                f"Invalid device: {device}. Use 'auto', 'cuda', 'cpu', or 'scipy'"
+            )
+        features_array = np.asarray(features)
+        if features_array.dtype == np.float32:
+            features_tensor = torch.from_numpy(features_array).double().to(device_torch)
+        else:
+            features_tensor = torch.from_numpy(features_array).to(device_torch)
+            if features_tensor.dtype not in (torch.float32, torch.float64):
+                features_tensor = features_tensor.double()
+
+        if metric == "cosine":
+            features_norm = torch.nn.functional.normalize(features_tensor, p=2, dim=1)
+            similarity = features_norm @ features_norm.T
+            distances = 1 - similarity
+        elif metric == "euclidean":
+            distances = torch.cdist(features_tensor, features_tensor, p=2)
+        return distances.cpu().numpy()
+
+    except ImportError:
+        return cdist(features, features, metric=metric)
+    except (RuntimeError, torch.cuda.OutOfMemoryError):
+        return cdist(features, features, metric=metric)
 
 
 def rank_nearest_neighbors(

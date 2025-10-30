@@ -9,6 +9,7 @@ from captum.attr import IntegratedGradients, Occlusion
 from numpy.typing import NDArray
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import classification_report
+from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from torch import Tensor
 from xarray import DataArray
@@ -19,7 +20,8 @@ from viscy.representation.contrastive import ContrastiveEncoder
 def fit_logistic_regression(
     features: DataArray,
     annotations: pd.Series,
-    train_fovs: list[str],
+    train_fovs: list[str] | None = None,
+    train_ratio: float = 0.8,
     remove_background_class: bool = True,
     scale_features: bool = False,
     class_weight: Mapping | str | None = "balanced",
@@ -38,8 +40,14 @@ def fit_logistic_regression(
     annotations : pd.Series
         Categorical class annotations with label values starting from 0.
         Must have 3 classes (when remove background is True) or 2 classes.
-    train_fovs : list[str]
+    train_fovs : list[str] | None, optional
         List of FOVs to use for training. The rest will be used for testing.
+        If None, uses stratified sampling based on train_ratio.
+    train_ratio : float, optional
+        Proportion of samples to use for training (0.0 to 1.0).
+        Used when train_fovs is None.
+        Uses stratified sampling to ensure balanced class representation.
+        Default is 0.8 (80% training, 20% testing).
     remove_background_class : bool, optional
         Remove background class (0), by default True
     scale_features : bool, optional
@@ -56,23 +64,48 @@ def fit_logistic_regression(
     tuple[LogisticRegression, tuple[tuple[NDArray, NDArray], tuple[NDArray, NDArray]]]
         Trained classifier and data split [[X_train, y_train], [X_test, y_test]].
     """
-    fov_selection = features["fov_name"].isin(train_fovs)
-    train_selection = fov_selection
-    test_selection = ~fov_selection
     annotations = annotations.cat.codes.values.copy()
+
+    # Handle background class removal before splitting for stratification
     if remove_background_class:
-        label_selection = annotations != 0
-        train_selection &= label_selection
-        test_selection &= label_selection
-        annotations -= 1
-    train_features = features.values[train_selection]
-    test_features = features.values[test_selection]
+        valid_indices = annotations != 0
+        features_filtered = features[valid_indices]
+        annotations_filtered = annotations[valid_indices] - 1
+    else:
+        features_filtered = features
+        annotations_filtered = annotations
+
+    # Determine train FOVs
+    if train_fovs is None:
+        unique_fovs = features_filtered["fov_name"].unique()
+
+        fov_class_dist = []
+        for fov in unique_fovs:
+            fov_mask = features_filtered["fov_name"] == fov
+            fov_classes = annotations_filtered[fov_mask]
+            # Use majority class for stratification or class distribution
+            majority_class = pd.Series(fov_classes).mode()[0]
+            fov_class_dist.append(majority_class)
+
+        # Split FOVs, not individual samples
+        train_fovs, test_fovs = train_test_split(
+            unique_fovs,
+            test_size=1 - train_ratio,
+            stratify=fov_class_dist,
+            random_state=random_state,
+        )
+
+    # Create train/test selections
+    train_selection = features_filtered["fov_name"].isin(train_fovs)
+    test_selection = ~train_selection
+    train_features = features_filtered.values[train_selection]
+    test_features = features_filtered.values[test_selection]
+    train_annotations = annotations_filtered[train_selection]
+    test_annotations = annotations_filtered[test_selection]
+
     if scale_features:
-        scaler = StandardScaler()
-        train_features = scaler.fit_transform(train_features)
-        test_features = scaler.fit_transform(test_features)
-    train_annotations = annotations[train_selection]
-    test_annotations = annotations[test_selection]
+        train_features = StandardScaler().fit_transform(train_features)
+        test_features = StandardScaler().fit_transform(test_features)
     logistic_regression = LogisticRegression(
         class_weight=class_weight,
         random_state=random_state,
