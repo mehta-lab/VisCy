@@ -112,7 +112,6 @@ logger.info(
 # %%
 # Aligning condition embeddings to infection
 # OPTION 1: Use the infection annotations to find the reference lineage
-reference_lineage_fov = "/C/2/001000"
 
 # Option 2: from the filtered lineages find one from FOV C/2/000001
 reference_lineage_fov = "/C/2/000001"
