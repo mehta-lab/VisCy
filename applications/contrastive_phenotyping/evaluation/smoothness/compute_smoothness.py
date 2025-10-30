@@ -51,7 +51,7 @@ for label, path in feature_paths.items():
 
     # Compute displacements
     stats, distributions, _ = compute_embeddings_smoothness(
-        prediction_path=Path(path),
+        embedding_dataset=embedding_dataset,
         distance_metric=DISTANCE_METRIC,
         verbose=True,
     )
