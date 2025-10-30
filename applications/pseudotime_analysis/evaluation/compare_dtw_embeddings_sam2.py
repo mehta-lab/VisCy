@@ -114,7 +114,6 @@ logger.info(
 # OPTION 1: Use the infection annotations to find the reference lineage
 reference_lineage_fov = "/C/2/001000"
 reference_lineage_track_id = [129]
-reference_timepoints = [8, 70]  # sensor rellocalization and partial remodelling
 
 # Option 2: from the filtered lineages find one from FOV C/2/000001
 reference_lineage_fov = "/C/2/000001"
