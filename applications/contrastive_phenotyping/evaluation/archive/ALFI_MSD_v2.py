@@ -183,7 +183,7 @@ for label, path in feature_paths.items():
 
 # %%
 # Plot histograms
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 6))
+ax1, ax2 = plt.subplots(1, 2, figsize=(15, 6))[1]
 
 for model_type, steps in all_step_data.items():
     color = interval_colors.get(model_type, "#1f77b4")
