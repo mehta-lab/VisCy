@@ -57,7 +57,7 @@ for label, path in feature_paths.items():
     )
 
     # Plot the piecewise distances
-    fig = plt.figure()
+    plt.figure()
     sns.histplot(
         distributions["adjacent_frame_distribution"],
         bins=30,
