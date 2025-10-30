@@ -345,7 +345,7 @@ class CellDivisionTripletDataModule(HCSDataModule):
             split_ratio=split_ratio,
             batch_size=batch_size,
             num_workers=num_workers,
-            target_2d=False,  #  Set to False since we're adding depth dimension
+            target_2d=False,  # Set to False since we're adding depth dimension
             yx_patch_size=final_yx_patch_size,
             normalizations=normalizations,
             augmentations=augmentations,
