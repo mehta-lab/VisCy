@@ -52,7 +52,7 @@ def visualize_rgb_conversion(x_original, x_rgb_list, save_dir="./debug_images"):
     rgb_display = (rgb_display - rgb_display.min()) / (
         rgb_display.max() - rgb_display.min()
     )
-    im = ax.imshow(rgb_display)
+    ax.imshow(rgb_display)
     ax.set_title("Merged RGB Image")
     ax.axis("off")
 
