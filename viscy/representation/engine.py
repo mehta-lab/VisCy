@@ -36,6 +36,7 @@ class ContrastiveModule(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         log_embeddings: bool = False,
+        log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -49,6 +50,7 @@ class ContrastiveModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.log_embeddings = log_embeddings
+        self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections.
@@ -107,6 +109,34 @@ class ContrastiveModule(LightningModule):
             log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = (
                 euclidean_dist_neg
             )
+        elif isinstance(self.loss_function, NTXentLoss):
+            if self.current_epoch % self.log_negative_metrics_every_n_epochs == 0:
+                batch_size = anchor.size(0)
+
+                anchor_norm = F.normalize(anchor, dim=1)
+                positive_norm = F.normalize(positive, dim=1)
+                all_embeddings = torch.cat([anchor_norm, positive_norm], dim=0)
+                sim_matrix = torch.mm(anchor_norm, all_embeddings.t())
+
+                mask = torch.ones_like(sim_matrix, dtype=torch.bool)
+                mask[range(batch_size), range(batch_size)] = False  # Exclude self
+                mask[range(batch_size), range(batch_size, 2 * batch_size)] = (
+                    False  # Exclude positive
+                )
+
+                negative_sims = sim_matrix[mask].view(batch_size, -1)
+
+                mean_neg_sim = negative_sims.mean()
+                sum_neg_sim = negative_sims.sum(dim=1).mean()
+                margin = cosine_sim_pos - mean_neg_sim
+
+                log_metric_dict.update(
+                    {
+                        f"metrics/cosine_similarity_negative_mean/{stage}": mean_neg_sim,
+                        f"metrics/cosine_similarity_negative_sum/{stage}": sum_neg_sim,
+                        f"metrics/margin_positive_negative/{stage}": margin,
+                    }
+                )
 
         self.log_dict(
             log_metric_dict,
