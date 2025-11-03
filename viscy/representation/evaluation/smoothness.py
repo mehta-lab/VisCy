@@ -105,6 +105,9 @@ def find_distribution_peak(
         peak_heights = properties["peak_heights"]
         return x_range[peaks[np.argmax(peak_heights)]]
 
+    else:
+        raise ValueError(f"Unknown method: {method}. Use 'histogram' or 'kde_robust'.")
+
 
 def compute_embeddings_smoothness(
     features_ad: ad.AnnData,
