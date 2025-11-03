@@ -335,6 +335,7 @@ class TripletDataModule(HCSDataModule):
         num_workers: int = 1,
         normalizations: list[MapTransform] = [],
         augmentations: list[MapTransform] = [],
+        augment_validation: bool = True,
         caching: bool = False,
         fit_include_wells: list[str] | None = None,
         fit_exclude_fovs: list[str] | None = None,
@@ -377,6 +378,9 @@ class TripletDataModule(HCSDataModule):
             Normalization transforms, by default []
         augmentations : list[MapTransform], optional
             Augmentation transforms, by default []
+        augment_validation : bool, optional
+            Apply augmentations to validation data, by default True.
+            Set to False for VAE training where clean validation is needed.
         caching : bool, optional
             Whether to cache the dataset, by default False
         fit_include_wells : list[str], optional
@@ -439,6 +443,7 @@ class TripletDataModule(HCSDataModule):
         self.include_track_ids = include_track_ids
         self.time_interval = time_interval
         self.return_negative = return_negative
+        self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
         self._augmentation_transform = Compose(
             self.normalizations + self.augmentations + [self._final_crop()]
@@ -501,6 +506,7 @@ class TripletDataModule(HCSDataModule):
             return_negative=self.return_negative,
             **dataset_settings,
         )
+
         self.val_dataset = TripletDataset(
             positions=val_positions,
             tracks_tables=val_tracks_tables,
@@ -583,6 +589,8 @@ class TripletDataModule(HCSDataModule):
     def _find_transform(self, key: str):
         if self.trainer:
             if self.trainer.predicting:
+                return self._no_augmentation_transform
+            if self.trainer.validating and not self.augment_validation:
                 return self._no_augmentation_transform
         # NOTE: for backwards compatibility
         if key == "anchor" and self.time_interval in ("any", 0):
