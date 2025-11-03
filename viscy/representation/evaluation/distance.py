@@ -23,6 +23,7 @@ def calculate_cosine_similarity_cell(embedding_dataset, fov_name, track_id):
     cosine_similarities = cosine_similarity(
         first_time_point_embedding, features
     ).flatten()
+    cosine_similarities = np.clip(cosine_similarities, -1.0, 1.0)
     return time_points, cosine_similarities.tolist()
 
 
