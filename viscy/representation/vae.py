@@ -299,7 +299,7 @@ class BetaVae25D(nn.Module):
         head_pool: bool = False,
         upsample_mode: Literal["deconv", "pixelshuffle"] = "pixelshuffle",
         conv_blocks: int = 2,
-        norm_name: str = "batch",
+        norm_name: Literal["batch", "instance"] = "batch",
         upsample_pre_conv: Literal["default"] | Callable | None = None,
     ):
         super().__init__()
