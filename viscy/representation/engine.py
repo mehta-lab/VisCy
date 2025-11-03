@@ -37,6 +37,8 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
+        log_embeddings: bool = False,
+        log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
     ) -> None:
         super().__init__()
@@ -49,8 +51,8 @@ class ContrastiveModule(LightningModule):
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.training_step_outputs = []
         self.validation_step_outputs = []
-
-        self.save_hyperparameters()
+        self.log_embeddings = log_embeddings
+        self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections.
@@ -96,8 +98,8 @@ class ContrastiveModule(LightningModule):
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
         log_metric_dict = {
-            f"metrics/cosine_similarity_positive/{stage}": cosine_sim_pos,
-            f"metrics/euclidean_distance_positive/{stage}": euclidean_dist_pos,
+            f"metrics/cosine_similarity/positive/{stage}": cosine_sim_pos,
+            f"metrics/euclidean_distance/positive/{stage}": euclidean_dist_pos,
         }
 
         if negative is not None:
@@ -109,6 +111,46 @@ class ContrastiveModule(LightningModule):
             log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = (
                 euclidean_dist_neg
             )
+        elif isinstance(self.loss_function, NTXentLoss):
+            if self.current_epoch % self.log_negative_metrics_every_n_epochs == 0:
+                batch_size = anchor.size(0)
+
+                # Cosine similarity metrics
+                anchor_norm = F.normalize(anchor, dim=1)
+                positive_norm = F.normalize(positive, dim=1)
+                all_embeddings_norm = torch.cat([anchor_norm, positive_norm], dim=0)
+                sim_matrix = torch.mm(anchor_norm, all_embeddings_norm.t())
+
+                mask = torch.ones_like(sim_matrix, dtype=torch.bool)
+                mask[range(batch_size), range(batch_size)] = False  # Exclude self
+                mask[range(batch_size), range(batch_size, 2 * batch_size)] = (
+                    False  # Exclude positive
+                )
+
+                negative_sims = sim_matrix[mask].view(batch_size, -1)
+
+                mean_neg_sim = negative_sims.mean()
+                sum_neg_sim = negative_sims.sum(dim=1).mean()
+                margin_cosine = cosine_sim_pos - mean_neg_sim
+
+                all_embeddings = torch.cat([anchor, positive], dim=0)
+                dist_matrix = torch.cdist(anchor, all_embeddings, p=2)
+                negative_dists = dist_matrix[mask].view(batch_size, -1)
+
+                mean_neg_dist = negative_dists.mean()
+                sum_neg_dist = negative_dists.sum(dim=1).mean()
+                margin_euclidean = mean_neg_dist - euclidean_dist_pos
+
+                log_metric_dict.update(
+                    {
+                        f"metrics/cosine_similarity/negative_mean/{stage}": mean_neg_sim,
+                        f"metrics/cosine_similarity/negative_sum/{stage}": sum_neg_sim,
+                        f"metrics/margin_positive/negative/{stage}": margin_cosine,
+                        f"metrics/euclidean_distance/negative_mean/{stage}": mean_neg_dist,
+                        f"metrics/euclidean_distance/negative_sum/{stage}": sum_neg_dist,
+                        f"metrics/margin_euclidean_positive/negative/{stage}": margin_euclidean,
+                    }
+                )
 
         self.log_dict(
             log_metric_dict,
