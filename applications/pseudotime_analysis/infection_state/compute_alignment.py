@@ -11,10 +11,9 @@ from iohub import open_ome_zarr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from viscy.data.triplet import INDEX_COLUMNS, TripletDataset
+from viscy.data.triplet import TripletDataset
 from viscy.representation.pseudotime import (
     CytoDtw,
-    align_embedding_patterns,
     get_aligned_image_sequences,
 )
 
@@ -35,9 +34,9 @@ logger.addHandler(console_handler)
 
 """
 TODO
-- We need to find a way to save the annotations, features and track information into one file. 
-- We need to standardize the naming convention. i.e The annotations fov_name is missing a / at the beginning. 
-- It would be nice to also select which will be the reference lineages and add that as a column. 
+- We need to find a way to save the annotations, features and track information into one file.
+- We need to standardize the naming convention. i.e The annotations fov_name is missing a / at the beginning.
+- It would be nice to also select which will be the reference lineages and add that as a column.
 - Figure out what is the best format to save the consensus lineage
 - Does the consensus track generalize?
 - There is a lot of fragmentation. Which tracking was used for the annotations? There is a script that unifies this but no record of which one was it. We can append these as extra columns
@@ -70,7 +69,8 @@ perturbations_dict = {
         "features_path_phase": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/phase_160patch_104ckpt_ver3max.zarr",
         "features_path_organelle": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/organelle_160patch_104ckpt_ver3max.zarr",
         "computed_features_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/feature_list_all.csv",
-        "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_segs_features.csv",
+        # "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_mito_features.csv",
+        "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/train_test_mito_seg_2/train_test_mito_seg_2_mito_features_nellie.csv",
     },
 }
 
@@ -149,7 +149,7 @@ for key in perturbations_dict.keys():
     feature_df = cytodtw.adata.obs
     break
 
-min_timepoints = 20
+min_timepoints = 10
 filtered_lineages = cytodtw.get_lineages(min_timepoints)
 filtered_lineages = pd.DataFrame(filtered_lineages, columns=["fov_name", "track_id"])
 logger.info(
@@ -350,6 +350,16 @@ logger.info(f"Reference pattern: {consensus_metadata['reference_pattern']}")
 if consensus_annotations:
     logger.info(f"Consensus annotations length: {len(consensus_annotations)}")
 
+# Extract raw infection timepoint from consensus annotations
+raw_infection_timepoint = None
+if consensus_annotations is not None and "infected" in consensus_annotations:
+    consensus_infection_idx = consensus_annotations.index("infected")
+    # For apoptotic infections, find the reference cell's infection timepoint
+    # We'll update this after alignment with the top-1 cell's actual timepoint
+    logger.info(
+        f"Consensus infection marker at index {consensus_infection_idx} in consensus space"
+    )
+
 # %%
 # Perform DTW analysis for each embedding method
 alignment_results = {}
@@ -375,7 +385,7 @@ alignment_results[name] = matches
 logger.info(f"Found {len(matches)} matches for {name}")
 # %%
 # Save matches
-print(f'Saving matches to {output_root / f"{name}_matching_lineages_cosine.csv"}')
+print(f"Saving matches to {output_root / f'{name}_matching_lineages_cosine.csv'}")
 matches["consensus_path"] = str(output_root / f"{name}.pkl")
 cytodtw.save_consensus(output_root / f"{name}.pkl")
 matches.to_csv(output_root / f"{name}_matching_lineages_cosine.csv", index=False)
@@ -393,9 +403,43 @@ alignment_df = cytodtw.create_alignment_dataframe(
 logger.info(f"Enhanced DataFrame created with {len(alignment_df)} rows")
 logger.info(f"Lineages: {alignment_df['lineage_id'].nunique()} (including consensus)")
 
+# Extract reference cell info from top-1 matched cell
+# This provides the full trajectory timeline (not just aligned window)
+top_match = top_matches.iloc[0]
+reference_cell_info = {
+    "fov_name": top_match["fov_name"],
+    "track_ids": top_match["track_ids"],
+    "dtw_distance": top_match.get("distance", np.nan),
+    "lineage_id": 0,  # Top match is lineage_id 0
+}
+
+# Map consensus infection index to raw timepoint using the top match's warp path
+if consensus_annotations is not None and "infected" in consensus_annotations:
+    warp_path = top_match["warp_path"]
+
+    # warp_path is a list of (consensus_idx, query_timepoint) tuples
+    # Find which query timepoint corresponds to the consensus infection index
+    for consensus_idx, query_t in warp_path:
+        if consensus_idx == consensus_infection_idx:
+            raw_infection_timepoint = query_t
+            logger.info(
+                f"Mapped consensus infection (idx={consensus_infection_idx}) to raw timepoint t={raw_infection_timepoint}"
+            )
+            logger.info(
+                f"Reference cell: {reference_cell_info['fov_name']}, track_ids={reference_cell_info['track_ids']}"
+            )
+            break
+
+    if raw_infection_timepoint is None:
+        logger.warning(
+            f"Could not map consensus infection index {consensus_infection_idx} to raw timepoint"
+        )
+        logger.warning(f"Warp path: {warp_path[:5]}... (showing first 5 entries)")
+
+reference_cell_info["raw_infection_timepoint"] = raw_infection_timepoint
+
 # %%
 # Prototype video alignment based on DTW matches
-
 z_range = slice(0, 1)
 initial_yx_patch_size = (192, 192)
 
@@ -497,7 +541,7 @@ if dataset is not None:
 
     # Filter alignment_df to only aligned rows for loading just the aligned region
     alignment_col = f"dtw_{ALIGN_TYPE}_aligned"
-    aligned_only_df = alignment_df[alignment_df[alignment_col] == True].copy()
+    aligned_only_df = alignment_df[alignment_df[alignment_col]].copy()
 
     # Use filtered alignment_df since get_aligned_image_sequences expects 'track_id' column
     aligned_sequences = get_aligned_image_sequences(
@@ -522,9 +566,8 @@ for idx, seq in aligned_sequences.items():
         )
 
 # %%
-# Enhanced DataFrame was already created above with PCA plotting - skip duplicate
 logger.info(
-    f"{ALIGN_TYPE.capitalize()} aligned timepoints: {alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].sum()}/{len(alignment_df)} ({100*alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].mean():.1f}%)"
+    f"{ALIGN_TYPE.capitalize()} aligned timepoints: {alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].sum()}/{len(alignment_df)} ({100 * alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].mean():.1f}%)"
 )
 logger.info(f"Columns: {list(alignment_df.columns)}")
 
@@ -698,12 +741,12 @@ if segmentation_features_path is not None or Path(segmentation_features_path).ex
             "segs_circularity_mean": group["circularity"].mean(),
             "segs_circularity_std": group["circularity"].std(),
             # Intensity metrics
-            "segs_mean_intensity": group["mean_intensity"].mean(),
-            "segs_std_intensity_across_mitos": group["mean_intensity"].std(),
-            "segs_mean_max_intensity": group["max_intensity"].mean(),
+            # "segs_mean_intensity": group["mean_intensity"].mean(),
+            # "segs_std_intensity_across_mitos": group["mean_intensity"].std(),
+            # "segs_mean_max_intensity": group["max_intensity"].mean(),
             # Texture metrics (aggregated)
-            "segs_mean_texture_contrast": group["texture_contrast"].mean(),
-            "segs_mean_texture_homogeneity": group["texture_homogeneity"].mean(),
+            # "segs_mean_texture_contrast": group["texture_contrast"].mean(),
+            # "segs_mean_texture_homogeneity": group["texture_homogeneity"].mean(),
             # Frangi filter metrics (tubularity/network structure)
             "segs_mean_frangi_mean": group["frangi_mean_intensity"].mean(),
             "segs_mean_frangi_std": group["frangi_std_intensity"].mean(),
@@ -736,16 +779,7 @@ computed_features_df = computed_features_df.rename(columns={"time_point": "t"})
 # Remove the first forward slash from the fov_name
 computed_features_df["fov_name"] = computed_features_df["fov_name"].str.lstrip("/")
 
-# Population-based normalization to measure conserved remodeling states across cells
-cf_of_interests = ["homogeneity", "contrast", "edge_density", "organelle_volume"]
-percentile = 10
 
-for cf in cf_of_interests:
-    # Use population-wide baseline (same for all cells) to preserve absolute differences
-    population_baseline = computed_features_df[cf].quantile(percentile / 100)
-    computed_features_df[f"normalized_{cf}"] = (
-        computed_features_df[cf] - population_baseline
-    ) / (population_baseline + 1e-6)
 # %%
 if segmentation_features_path is not None and Path(segmentation_features_path).exists():
     # Merge the computed features and mitochondria population features
@@ -760,7 +794,7 @@ for channel, adata in ad_features.items():
 
     # Add PC columns with channel prefix
     for i in range(n_pca_components):
-        pcs_df[f"{channel}_PC{i+1}"] = adata.obsm["X_pca"][:, i]
+        pcs_df[f"{channel}_PC{i + 1}"] = adata.obsm["X_pca"][:, i]
 
     # Merge with combined features
     combined_features_df = combined_features_df.merge(
@@ -793,7 +827,9 @@ metadata = {
     "consensus_pattern": consensus_lineage,
     "consensus_annotations": consensus_annotations,
     "consensus_metadata": consensus_metadata,
-    "infection_timepoint": None,  # Will be computed in visualization script
+    "reference_cell_info": reference_cell_info,  # Top-1 cell's full trajectory info
+    "raw_infection_timepoint": raw_infection_timepoint,  # Infection timepoint in raw data space
+    "infection_timepoint": raw_infection_timepoint,  # Backward compatibility
     "aligned_region_bounds": None,  # Will be computed in visualization script
     "alignment_type": ALIGN_TYPE,
     "alignment_channel": ALIGNMENT_CHANNEL,
@@ -804,6 +840,6 @@ with open(metadata_path, "wb") as f:
 logger.info(f"Saved alignment metadata to {metadata_path}")
 
 logger.info("\n## Pipeline Complete!")
-logger.info(f"To visualize results, run visualize_alignment.py with the saved outputs:")
+logger.info("To visualize results, run visualize_alignment.py with the saved outputs:")
 
 # %%
