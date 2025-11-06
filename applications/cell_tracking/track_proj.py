@@ -87,7 +87,7 @@ def main() -> None:
         img,
         segm,
         dist_edge_kwargs={"delta_t": 1},
-        ilp_kwargs={"division_weight": 0.75},
+        ilp_kwargs={"division_weight": 0.95},
     )
 
     gt_tracks_df, gt_track_graph, gt_labels = td.functional.to_napari_format(
