@@ -13,6 +13,7 @@
 # ///
 
 from pathlib import Path
+from typing import Any
 import polars as pl
 import numpy as np
 import napari
@@ -185,34 +186,30 @@ def _add_dynaclr_attrs(
     ).add_edge_attrs(graph)
 
 
-def track_single_dataset(
-    dataset_dir: Path,
-    dataset_num: str,
-    show_napari_viewer: bool,
+def _track(
     dynaclr_model_path: Path | None,
-) -> None:
+    images: NDArray,
+    labels: NDArray,
+    dist_edge_kwargs: dict[str, Any] | None = None,
+    ilp_kwargs: dict[str, Any] | None = None,
+) -> tuple[td.graph.InMemoryGraph, td.graph.InMemoryGraph]:
     """
-    Main function to track cells in a dataset.
+    Track cells in a graph.
 
     Parameters
     ----------
-    dataset_dir : Path
-        Path to the dataset directory.
-    dataset_num : str
-        Number of the dataset.
-    show_napari_viewer : bool
-        Whether to show the napari viewer.
     dynaclr_model_path : Path | None
         Path to the DynaCLR model. If None, the model will not be used.
+    images : NDArray
+        The images to use for the embedding.
+    labels : NDArray
+        The labels to use for the tracking.
+
+    Returns
+    -------
+    tuple[td.graph.InMemoryGraph, td.graph.InMemoryGraph]
+        The original graph and the solution graph.
     """
-    assert dataset_dir.exists(), f"Data directory {dataset_dir} does not exist."
-
-    print(f"Loading labels from '{dataset_dir}'...")
-    labels = imread(str(_seg_dir(dataset_dir, dataset_num) / "*.tif"))
-    images = imread(str(dataset_dir / dataset_num / "*.tif"))
-
-    gt_graph = td.graph.InMemoryGraph.from_ctc(dataset_dir / f"{dataset_num}_GT" / "TRA")
-
     print("Starting tracking ...")
     graph = td.graph.InMemoryGraph()
 
@@ -220,10 +217,14 @@ def track_single_dataset(
     nodes_operator.add_nodes(graph, labels=labels)
     print(f"Number of nodes: {graph.num_nodes}")
 
+    if dist_edge_kwargs is None:
+        dist_edge_kwargs = {}
+
     dist_operator = td.edges.DistanceEdges(
-        distance_threshold=325.0, # 50,
-        n_neighbors=10,
-        delta_t=5, # 30,
+        distance_threshold=dist_edge_kwargs.pop("distance_threshold", 325.0),
+        n_neighbors=dist_edge_kwargs.pop("n_neighbors", 10),
+        delta_t=dist_edge_kwargs.pop("delta_t", 5),
+        **dist_edge_kwargs,
     )
     dist_operator.add_edges(graph)
     print(f"Number of edges: {graph.num_edges}")
@@ -253,15 +254,56 @@ def track_single_dataset(
 
     edge_weight = edge_weight / td.EdgeAttr("delta_t").clip(lower_bound=1)
 
+    if ilp_kwargs is None:
+        ilp_kwargs = {}
+
     solver = td.solvers.ILPSolver(
         edge_weight=edge_weight,
-        appearance_weight=0,
-        disappearance_weight=0,
-        division_weight=0.5,
-        node_weight=-10,  # we assume all segmentations are correct
+        appearance_weight=ilp_kwargs.pop("appearance_weight", 0),
+        disappearance_weight=ilp_kwargs.pop("disappearance_weight", 0),
+        division_weight=ilp_kwargs.pop("division_weight", 0.5),
+        node_weight=ilp_kwargs.pop("node_weight", -10),
+        **ilp_kwargs,
     )
 
     solution_graph = solver.solve(graph)
+
+    return graph, solution_graph
+
+
+def track_single_dataset(
+    dataset_dir: Path,
+    dataset_num: str,
+    show_napari_viewer: bool,
+    dynaclr_model_path: Path | None,
+) -> None:
+    """
+    Main function to track cells in a dataset.
+
+    Parameters
+    ----------
+    dataset_dir : Path
+        Path to the dataset directory.
+    dataset_num : str
+        Number of the dataset.
+    show_napari_viewer : bool
+        Whether to show the napari viewer.
+    dynaclr_model_path : Path | None
+        Path to the DynaCLR model. If None, the model will not be used.
+    """
+    assert dataset_dir.exists(), f"Data directory {dataset_dir} does not exist."
+
+    print(f"Loading labels from '{dataset_dir}'...")
+    labels = imread(str(_seg_dir(dataset_dir, dataset_num) / "*.tif"))
+    images = imread(str(dataset_dir / dataset_num / "*.tif"))
+
+    gt_graph = td.graph.InMemoryGraph.from_ctc(dataset_dir / f"{dataset_num}_GT" / "TRA")
+
+    graph, solution_graph = _track(
+        dynaclr_model_path,
+        images,
+        labels,
+    )
 
     print("Evaluating results ...")
     metrics = td.metrics.evaluate_ctc_metrics(
