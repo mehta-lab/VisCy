@@ -7,7 +7,7 @@
 #   "onnxruntime-gpu",
 #   "napari[pyqt5]",
 #   "gurobipy",
-#   "py-ctcmetrics",
+#   "py-ctcmetrics==1.2.2",
 #   "spatial-graph",
 # ]
 # ///
