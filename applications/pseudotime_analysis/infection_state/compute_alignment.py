@@ -157,6 +157,7 @@ logger.info(
 )
 
 # %%
+# TODO: cleanup annotations
 # Annotations
 n_timepoints_before = min_timepoints // 2
 n_timepoints_after = min_timepoints // 2
@@ -390,11 +391,9 @@ matches["consensus_path"] = str(output_root / f"{name}.pkl")
 cytodtw.save_consensus(output_root / f"{name}.pkl")
 matches.to_csv(output_root / f"{name}_matching_lineages_cosine.csv", index=False)
 # %%
-top_matches = matches.head(top_n)
-
-# Use the new alignment dataframe method instead of manual alignment
+# Filtering and creating one with just the top n matches
 alignment_df = cytodtw.create_alignment_dataframe(
-    top_matches,
+    matches,
     consensus_lineage,
     alignment_name=ALIGN_TYPE,
     reference_type=REFERENCE_TYPE,
@@ -403,45 +402,54 @@ alignment_df = cytodtw.create_alignment_dataframe(
 logger.info(f"Enhanced DataFrame created with {len(alignment_df)} rows")
 logger.info(f"Lineages: {alignment_df['lineage_id'].nunique()} (including consensus)")
 
-# Extract reference cell info from top-1 matched cell
-# This provides the full trajectory timeline (not just aligned window)
-top_match = top_matches.iloc[0]
+# Extract reference cell info from alignment_df
+distance_col = f"dtw_{ALIGN_TYPE}_distance"
+consensus_mapping_col = f"dtw_{ALIGN_TYPE}_consensus_mapping"
+
+# Find reference cell: cell with minimum DTW distance (NaN distances are automatically skipped)
+reference_lineage_id = alignment_df.loc[
+    alignment_df[distance_col].idxmin(), "lineage_id"
+]
+reference_cell_rows = alignment_df[
+    alignment_df["lineage_id"] == reference_lineage_id
+].copy()
+
+# Build reference cell info
 reference_cell_info = {
-    "fov_name": top_match["fov_name"],
-    "track_ids": top_match["track_ids"],
-    "dtw_distance": top_match.get("distance", np.nan),
-    "lineage_id": 0,  # Top match is lineage_id 0
+    "fov_name": reference_cell_rows.iloc[0]["fov_name"],
+    "track_ids": reference_cell_rows["track_id"].unique().tolist(),
+    "dtw_distance": reference_cell_rows.iloc[0][distance_col],
+    "lineage_id": reference_lineage_id,
 }
 
-# Map consensus infection index to raw timepoint using the top match's warp path
-if consensus_annotations is not None and "infected" in consensus_annotations:
-    warp_path = top_match["warp_path"]
-
-    # warp_path is a list of (consensus_idx, query_timepoint) tuples
-    # Find which query timepoint corresponds to the consensus infection index
-    for consensus_idx, query_t in warp_path:
-        if consensus_idx == consensus_infection_idx:
-            raw_infection_timepoint = query_t
-            logger.info(
-                f"Mapped consensus infection (idx={consensus_infection_idx}) to raw timepoint t={raw_infection_timepoint}"
-            )
-            logger.info(
-                f"Reference cell: {reference_cell_info['fov_name']}, track_ids={reference_cell_info['track_ids']}"
-            )
-            break
-
-    if raw_infection_timepoint is None:
-        logger.warning(
-            f"Could not map consensus infection index {consensus_infection_idx} to raw timepoint"
-        )
-        logger.warning(f"Warp path: {warp_path[:5]}... (showing first 5 entries)")
-
+# Map consensus infection index to raw timepoint
+matching_row = reference_cell_rows[
+    reference_cell_rows[consensus_mapping_col] == consensus_infection_idx
+]
+raw_infection_timepoint = matching_row.iloc[0]["t"] if len(matching_row) > 0 else None
 reference_cell_info["raw_infection_timepoint"] = raw_infection_timepoint
+
+logger.info(
+    f"Reference cell (top-1 match): FOV={reference_cell_info['fov_name']}, "
+    f"lineage_id={reference_lineage_id}, "
+    f"track_ids={reference_cell_info['track_ids']}, "
+    f"distance={reference_cell_info['dtw_distance']:.4f}"
+)
+
+if raw_infection_timepoint is not None:
+    logger.info(
+        f"Mapped consensus infection (idx={consensus_infection_idx}) to raw timepoint t={raw_infection_timepoint}"
+    )
+else:
+    logger.warning(
+        f"Could not map consensus infection index {consensus_infection_idx} to raw timepoint for reference cell"
+    )
 
 # %%
 # Prototype video alignment based on DTW matches
 z_range = slice(0, 1)
 initial_yx_patch_size = (192, 192)
+top_matches = alignment_df.head(top_n)
 
 positions = []
 tracks_tables = []
@@ -647,22 +655,103 @@ else:
     print("Skipping image sequence creation - no valid dataset available")
     concatenated_image_sequences = {}
 
-# Load concatenated sequences into napari (includes unaligned + aligned + unaligned timepoints)
+# Load concatenated sequences into napari using ABSOLUTE TIME coordinates
 if NAPARI and dataset is not None and len(concatenated_image_sequences) > 0:
     import numpy as np
 
-    for lineage_id, seq_data in concatenated_image_sequences.items():
-        concatenated_images = seq_data["concatenated_images"]
-        meta = seq_data["metadata"]
-        aligned_length = seq_data["aligned_length"]
-        unaligned_length = seq_data["unaligned_length"]
+    # Configuration: crop to absolute time bounds [0, max_time] to align all cells
+    CROP_TO_ABSOLUTE_BOUNDS = True
 
-        if len(concatenated_images) == 0:
+    # First, find the global time range across all cells
+    all_timepoints = set()
+    for lineage_id, seq_data in concatenated_image_sequences.items():
+        fov_name = seq_data["metadata"]["fov_name"]
+        track_ids = seq_data["metadata"]["track_ids"]
+
+        # Get all timepoints for this lineage from alignment_df
+        lineage_rows = filtered_alignment_df[
+            (filtered_alignment_df["fov_name"] == fov_name)
+            & (filtered_alignment_df["track_id"].isin(track_ids))
+        ]
+        all_timepoints.update(lineage_rows["t"].unique())
+
+    if CROP_TO_ABSOLUTE_BOUNDS:
+        # Crop to absolute bounds: [0, max_absolute_time]
+        min_time = 0
+        max_time = filtered_alignment_df["t"].max()
+        logger.info(
+            f"Using ABSOLUTE time coordinates: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+        )
+        logger.info(
+            "All cells will be displayed in their original absolute time coordinates"
+        )
+    else:
+        # Use the natural range across all cells
+        min_time = min(all_timepoints)
+        max_time = max(all_timepoints)
+        logger.info(
+            f"Natural time range: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+        )
+
+    time_range = int(max_time - min_time + 1)
+
+    # Load into napari using absolute timepoints
+    for lineage_id, seq_data in concatenated_image_sequences.items():
+        meta = seq_data["metadata"]
+        fov_name = meta["fov_name"]
+        track_ids = meta["track_ids"]
+        aligned_length = seq_data["aligned_length"]
+
+        # Get absolute timepoints for this lineage
+        lineage_rows = filtered_alignment_df[
+            (filtered_alignment_df["fov_name"] == fov_name)
+            & (filtered_alignment_df["track_id"].isin(track_ids))
+        ].sort_values("t")
+
+        if len(lineage_rows) == 0:
             continue
 
-        # Stack images into time series (T, C, Z, Y, X)
+        # Load images at their absolute timepoints
+        time_to_image = load_images_from_triplet_dataset(fov_name, track_ids)
+
+        # DEBUG: Print absolute timepoints
+        actual_timepoints = sorted(time_to_image.keys())
+        aligned_rows = lineage_rows[lineage_rows[f"dtw_{ALIGN_TYPE}_aligned"]]
+        aligned_timepoints = sorted(aligned_rows["t"].unique())
+
+        logger.info(f"Lineage {lineage_id} ({fov_name}, {track_ids}):")
+        logger.info(f"  Total frames: {len(actual_timepoints)}")
+        logger.info(
+            f"  Absolute time range: t={min(actual_timepoints)} to t={max(actual_timepoints)}"
+        )
+        logger.info(f"  Aligned timepoints (first 10): {aligned_timepoints[:10]}")
+        logger.info(f"  Aligned region length: {len(aligned_timepoints)} frames")
+
+        # Create a sparse array indexed by absolute time
+        # Initialize with None for all timepoints in global range
+        time_series_list = [None] * time_range
+
+        for _, row in lineage_rows.iterrows():
+            t_abs = int(row["t"])
+            t_idx = int(t_abs - min_time)  # Convert to 0-indexed
+
+            if t_abs in time_to_image:
+                time_series_list[t_idx] = time_to_image[t_abs]
+
+        # Fill gaps with nearest neighbor (for visualization continuity)
+        valid_indices = [i for i, img in enumerate(time_series_list) if img is not None]
+
+        if len(valid_indices) == 0:
+            continue
+
+        for i in range(time_range):
+            if time_series_list[i] is None and len(valid_indices) > 0:
+                closest_idx = min(valid_indices, key=lambda x: abs(x - i))
+                time_series_list[i] = time_series_list[closest_idx]
+
+        # Stack into time series
         image_stack = []
-        for img_sample in concatenated_images:
+        for img_sample in time_series_list:
             if img_sample is not None:
                 img_tensor = img_sample["anchor"]
                 img_np = img_tensor.cpu().numpy()
@@ -673,10 +762,10 @@ if NAPARI and dataset is not None and len(concatenated_image_sequences) > 0:
             n_channels = time_series.shape[1]
 
             logger.info(
-                f"Processing lineage {lineage_id} with {n_channels} channels, shape {time_series.shape}"
+                f"Processed lineage {lineage_id} with {n_channels} channels, shape {time_series.shape}"
             )
             logger.info(
-                f"  Aligned length: {aligned_length}, Unaligned length: {unaligned_length}, Total: {len(image_stack)}"
+                f"  Time series covers absolute time [{min_time}, {max_time}] ({len(image_stack)} frames)"
             )
 
             # Set up colormap based on number of channels
@@ -696,8 +785,8 @@ if NAPARI and dataset is not None and len(concatenated_image_sequences) > 0:
                     if channel_idx < len(processing_channels)
                     else f"ch{channel_idx}"
                 )
-                # Indicate that this includes full trajectory (unaligned + aligned + unaligned)
-                layer_name = f"FULL_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_{channel_name}"
+                # Use ABSTIME prefix to indicate absolute time coordinates
+                layer_name = f"ABSTIME_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_{channel_name}"
 
                 viewer.add_image(
                     channel_data,
