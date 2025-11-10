@@ -11,6 +11,7 @@ from iohub import open_ome_zarr
 from viscy.data.triplet import TripletDataset
 from viscy.representation.pseudotime import (
     CytoDtw,
+    filter_tracks_by_fov_and_length,
     get_aligned_image_sequences,
 )
 
@@ -42,6 +43,11 @@ output_root = Path(
 ALIGN_TYPE = "infection_apoptotic"  # Options: "cell_division" or "infection_state" or "apoptosis"
 ALIGNMENT_CHANNEL = "sensor"  # sensor, phase, organelle
 
+# Cropping configuration
+CROP_TO_ABSOLUTE_BOUNDS = (
+    True  # If True, crop before/after regions to stay within [0, max_absolute_time]
+)
+
 NORMALIZE_N_TIMEPOINTS = 3
 # FOV filtering configuration
 # Modify these for different datasets/experimental conditions
@@ -60,6 +66,7 @@ segmentation_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/20
 features_path_sensor = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/sensor_160patch_104ckpt_ver3max.zarr"
 features_path_phase = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/phase_160patch_104ckpt_ver3max.zarr"
 features_path_organelle = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/organelle_160patch_104ckpt_ver3max.zarr"
+metadata_path = output_root / f"alignment_metadata_{ALIGN_TYPE}_{ALIGNMENT_CHANNEL}.pkl"
 
 # %%
 # Load master features dataframe
@@ -71,66 +78,6 @@ logger.info(f"Loaded master features from {master_features_path}")
 logger.info(f"Shape: {master_df.shape}")
 logger.info(f"Columns: {list(master_df.columns)}")
 
-# Load alignment metadata
-import pickle
-
-metadata_path = output_root / f"alignment_metadata_{ALIGN_TYPE}_{ALIGNMENT_CHANNEL}.pkl"
-with open(metadata_path, "rb") as f:
-    metadata = pickle.load(f)
-
-consensus_lineage = metadata["consensus_pattern"]
-consensus_annotations = metadata["consensus_annotations"]
-consensus_metadata = metadata["consensus_metadata"]
-reference_cell_info = metadata.get("reference_cell_info")
-raw_infection_timepoint = metadata.get("raw_infection_timepoint")
-aligned_region_bounds = metadata.get("aligned_region_bounds")
-
-# Use raw infection timepoint from metadata (mapped from top-1 cell)
-# This is the actual timepoint in the data, not the consensus index
-infection_timepoint = raw_infection_timepoint
-
-if infection_timepoint is not None:
-    logger.info(f"Using raw infection timepoint from metadata: t={infection_timepoint}")
-    if reference_cell_info is not None:
-        logger.info(
-            f"Reference cell: {reference_cell_info['fov_name']}, "
-            f"track_ids={reference_cell_info['track_ids']}, "
-            f"DTW distance={reference_cell_info.get('dtw_distance', 'N/A'):.3f}"
-        )
-else:
-    # Fallback: compute from consensus annotations (legacy, likely incorrect for raw data)
-    if consensus_annotations is not None and "infected" in consensus_annotations:
-        infection_timepoint = consensus_annotations.index("infected")
-        logger.warning(
-            f"WARNING: Using consensus index as infection timepoint (t={infection_timepoint}). "
-            f"This is likely INCORRECT for raw data! Re-run compute_alignment.py to fix."
-        )
-
-# Compute aligned region bounds from the consensus pattern length
-if aligned_region_bounds is None:
-    # Compute aligned region in RAW time space using reference cell info
-    if reference_cell_info is not None and raw_infection_timepoint is not None:
-        # The aligned region spans the consensus length centered around infection
-        consensus_half_length = len(consensus_lineage) // 2
-        aligned_region_bounds = (
-            raw_infection_timepoint - consensus_half_length,
-            raw_infection_timepoint + (len(consensus_lineage) - consensus_half_length),
-        )
-        logger.info(
-            f"Computed aligned region in raw time space: {aligned_region_bounds} "
-            f"(centered around infection t={raw_infection_timepoint}, consensus_length={len(consensus_lineage)})"
-        )
-    else:
-        # Fallback: no meaningful bounds
-        aligned_region_bounds = None
-        logger.warning(
-            "Could not compute aligned region bounds - missing reference cell info or raw infection timepoint"
-        )
-
-logger.info(f"Loaded alignment metadata from {metadata_path}")
-logger.info(f"Infection timepoint: {infection_timepoint}")
-logger.info(f"Aligned region: {aligned_region_bounds}")
-
 # Load AnnData for CytoDtw methods (needed for plotting)
 ad_features_alignment = read_zarr(
     features_path_sensor
@@ -139,250 +86,48 @@ ad_features_alignment = read_zarr(
         features_path_phase if ALIGNMENT_CHANNEL == "phase" else features_path_organelle
     )
 )
+
 cytodtw = CytoDtw(ad_features_alignment)
+cytodtw.load_consensus(metadata_path)
 
-# Set the consensus pattern in CytoDtw instance for plotting methods
-cytodtw.consensus_data = {
-    "pattern": consensus_lineage,
-    "annotations": consensus_annotations,
-    "metadata": consensus_metadata,
-}
-logger.info("Set consensus pattern in CytoDtw instance for plotting")
+# TODO: we should get rid of this redundancy later
+metadata = cytodtw.consensus_data
+consensus_lineage = metadata.get("consensus_pattern")
+consensus_annotations = metadata.get("consensus_annotations")
+consensus_metadata = metadata.get("consensus_metadata")
+reference_cell_info = metadata.get("reference_cell_info")
+alignment_infection_timepoint = metadata.get("raw_infection_timepoint")
+aligned_region_bounds = metadata.get("aligned_region_bounds")
 
-
-# %%
-# Baseline normalization utilities
-def compute_baseline_from_aggregated_trajectory(
-    df: pd.DataFrame,
-    feature_columns: list,
-    baseline_timepoints: tuple = None,
-    n_baseline_timepoints: int = 10,
-) -> dict:
-    """
-    Compute baseline values from early timepoints of an aggregated trajectory.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Aggregated trajectory dataframe with 't' and '{feature}_median' columns
-    feature_columns : list
-        Raw feature names (will look for '{feature}_median' columns)
-    baseline_timepoints : tuple, optional
-        (start, end) timepoint range for baseline. If None, uses first n timepoints
-    n_baseline_timepoints : int
-        Number of initial timepoints to use as baseline (only if baseline_timepoints is None)
-
-    Returns
-    -------
-    dict
-        Baseline values for each feature: {feature: baseline_value}
-    """
-    baseline_values = {}
-
-    if baseline_timepoints is not None:
-        baseline_mask = df["t"].between(baseline_timepoints[0], baseline_timepoints[1])
-    else:
-        sorted_times = sorted(df["t"].unique())
-        baseline_times = sorted_times[:n_baseline_timepoints]
-        baseline_mask = df["t"].isin(baseline_times)
-
-    for feature in feature_columns:
-        median_col = f"{feature}_median"
-
-        if median_col not in df.columns:
-            baseline_values[feature] = None
-            continue
-
-        baseline_vals = df.loc[baseline_mask, median_col].dropna()
-
-        if len(baseline_vals) > 0:
-            baseline_values[feature] = baseline_vals.mean()
-        else:
-            baseline_values[feature] = None
-
-    return baseline_values
-
-
-def normalize_aggregated_trajectory(
-    df: pd.DataFrame,
-    feature_columns: list,
-    baseline_timepoints: tuple = None,
-    n_baseline_timepoints: int = 10,
-    suffix: str = "_normalized",
-) -> pd.DataFrame:
-    """
-    Add baseline-normalized features to an aggregated trajectory dataframe.
-
-    Modular function that operates on a single dataframe. Computes baselines from
-    the dataframe itself and adds normalized columns.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Aggregated trajectory dataframe with 't' and '{feature}_median' columns
-    feature_columns : list
-        Raw feature names to normalize
-    baseline_timepoints : tuple, optional
-        (start, end) timepoint range for baseline. If None, uses first n timepoints
-    n_baseline_timepoints : int
-        Number of initial timepoints to use as baseline (only if baseline_timepoints is None)
-    suffix : str
-        Suffix for normalized column names (default: "_normalized")
-
-    Returns
-    -------
-    pd.DataFrame
-        Dataframe with normalized feature columns added (e.g., '{feature}_median_normalized')
-    """
-    df = df.copy()
-
-    # Compute baselines from this dataframe
-    baselines = compute_baseline_from_aggregated_trajectory(
-        df, feature_columns, baseline_timepoints, n_baseline_timepoints
-    )
-
-    # Add normalized columns for each feature
-    for feature in feature_columns:
-        median_col = f"{feature}_median"
-        baseline = baselines.get(feature)
-
-        # Skip CV/SEM features (already relative metrics)
-        if feature.endswith("_cv") or feature.endswith("_sem"):
-            continue
-
-        # Skip pre-normalized features
-        if feature.startswith("normalized_"):
-            continue
-
-        if median_col in df.columns and baseline is not None:
-            df[f"{median_col}{suffix}"] = (df[median_col] - baseline) / (
-                np.abs(baseline) + 1e-6
-            )
-
-            # Also normalize q25 and q75 if present
-            q25_col = f"{feature}_q25"
-            q75_col = f"{feature}_q75"
-            if q25_col in df.columns:
-                df[f"{q25_col}{suffix}"] = (df[q25_col] - baseline) / (
-                    np.abs(baseline) + 1e-6
-                )
-            if q75_col in df.columns:
-                df[f"{q75_col}{suffix}"] = (df[q75_col] - baseline) / (
-                    np.abs(baseline) + 1e-6
-                )
-
-    return df
-
-
-# %%
-# Unified trajectory aggregation function
-def aggregate_trajectory_by_time(
-    df: pd.DataFrame,
-    feature_columns: list,
-) -> pd.DataFrame:
-    """
-    Unified function to aggregate trajectory data by timepoint.
-
-    Parameters
-    ----------
-    df : pd.DataFrame
-        Pre-filtered dataframe with features and 't' column
-    feature_columns : list
-        Features to aggregate
-
-    Returns
-    -------
-    pd.DataFrame
-        Aggregated trajectory with columns: t, n_cells, {feature}_{stat}
-        where stat is one of: mean, median, std, q25, q75
-    """
-    aggregated_data = []
-
-    for t in sorted(df["t"].unique()):
-        time_slice = df[df["t"] == t]
-
-        row_data = {
-            "t": t,
-            "n_cells": len(time_slice),
-        }
-
-        # Compute statistics for each feature
-        for feature in feature_columns:
-            if feature not in time_slice.columns:
-                # Feature doesn't exist - set all stats to NaN
-                row_data[f"{feature}_median"] = np.nan
-                row_data[f"{feature}_mean"] = np.nan
-                row_data[f"{feature}_std"] = np.nan
-                row_data[f"{feature}_q25"] = np.nan
-                row_data[f"{feature}_q75"] = np.nan
-                continue
-
-            values = time_slice[feature].dropna()
-
-            if len(values) == 0:
-                # No valid values - set all stats to NaN
-                row_data[f"{feature}_median"] = np.nan
-                row_data[f"{feature}_mean"] = np.nan
-                row_data[f"{feature}_std"] = np.nan
-                row_data[f"{feature}_q25"] = np.nan
-                row_data[f"{feature}_q75"] = np.nan
-                continue
-
-            # Compute all statistics
-            row_data[f"{feature}_mean"] = values.mean()
-            row_data[f"{feature}_median"] = values.median()
-            row_data[f"{feature}_std"] = values.std()
-            row_data[f"{feature}_q25"] = values.quantile(0.25)
-            row_data[f"{feature}_q75"] = values.quantile(0.75)
-
-        aggregated_data.append(row_data)
-
-    result_df = pd.DataFrame(aggregated_data)
-
-    logger.info(
-        f"Aggregated {len(result_df)} timepoints from {len(df)} total observations"
-    )
-
-    return result_df
-
+# TODO this only works for non-cyclical patterns as it returns the first occurrence
+absolute_infection_timepoint = consensus_annotations.index("infected")
 
 # %%
 # Data filtering and preparation
 min_track_length = 20
 
-# Filter to infected cells using configured pattern
-filtered_infected_df = master_df[
-    master_df["fov_name"].str.contains(INFECTED_FOV_PATTERN)
-].copy()
-
-# Filter by track length
-track_lengths = filtered_infected_df.groupby(["fov_name", "track_id"]).size()
-valid_tracks = track_lengths[track_lengths >= min_track_length].index
-filtered_infected_df = filtered_infected_df[
-    filtered_infected_df.set_index(["fov_name", "track_id"]).index.isin(valid_tracks)
-].reset_index(drop=True)
-
+# Filter to infected and uninfected cells using utility function
+filtered_infected_df = filter_tracks_by_fov_and_length(
+    master_df,
+    fov_pattern=INFECTED_FOV_PATTERN,
+    min_timepoints=min_track_length,
+)
 logger.info(
-    f"Filtered {INFECTED_LABEL} cells ({INFECTED_FOV_PATTERN}): "
-    f"{len(valid_tracks)} tracks with >= {min_track_length} timepoints"
+    f"Filtered {INFECTED_LABEL} cells: "
+    f"{filtered_infected_df.groupby(['fov_name', 'track_id']).ngroups} tracks"
 )
 
-# Filter to uninfected cells using configured pattern
-uninfected_filtered_df = master_df[
-    master_df["fov_name"].str.contains(UNINFECTED_FOV_PATTERN)
-].copy()
-
-# Filter by track length
-track_lengths = uninfected_filtered_df.groupby(["fov_name", "track_id"]).size()
-valid_tracks = track_lengths[track_lengths >= min_track_length].index
-uninfected_filtered_df = uninfected_filtered_df[
-    uninfected_filtered_df.set_index(["fov_name", "track_id"]).index.isin(valid_tracks)
-].reset_index(drop=True)
-
-logger.info(
-    f"Filtered {UNINFECTED_LABEL} cells ({UNINFECTED_FOV_PATTERN}): "
-    f"{len(valid_tracks)} tracks with >= {min_track_length} timepoints"
+uninfected_filtered_df = filter_tracks_by_fov_and_length(
+    master_df,
+    fov_pattern=UNINFECTED_FOV_PATTERN,
+    min_timepoints=min_track_length,
 )
+logger.info(
+    f"Filtered {UNINFECTED_LABEL} cells: "
+    f"{uninfected_filtered_df.groupby(['fov_name', 'track_id']).ngroups} tracks"
+)
+
+consensus_df = master_df[master_df["lineage_id"] == -1].copy()
 
 # %%
 # Select features for analysis
@@ -408,171 +153,54 @@ common_response_features = [
 ]
 
 # %%
-# Compute aggregated trajectories
-
-# 1. Common response from top N aligned cells
+# Compute aggregated trajectories of the common response from top N aligned cells
 top_n_cells = 10
 alignment_col = f"dtw_{ALIGN_TYPE}_aligned"
 
 # Get aligned cells only
-aligned_cells = filtered_infected_df[filtered_infected_df[alignment_col]].copy()
-
-# Select top N lineages by distance
-if "distance" in aligned_cells.columns and "lineage_id" in aligned_cells.columns:
-    top_lineages = (
-        aligned_cells.drop_duplicates("lineage_id")
-        .nsmallest(top_n_cells, "distance")["lineage_id"]
-        .tolist()
-    )
-    logger.info(
-        f"Selected top {len(top_lineages)} lineages by DTW distance: {top_lineages}"
-    )
-else:
-    top_lineages = aligned_cells["lineage_id"].unique()[:top_n_cells].tolist()
-    logger.info(f"Selected {len(top_lineages)} lineages (no distance info)")
-
-# Filter to top lineages - include ALL timepoints (aligned and unaligned)
-top_cells_df = filtered_infected_df[
-    filtered_infected_df["lineage_id"].isin(top_lineages)
+aligned_cells = filtered_infected_df[
+    filtered_infected_df[alignment_col].fillna(False)
 ].copy()
 
-logger.info(
-    f"Filtered to {len(top_cells_df)} observations from {len(top_lineages)} lineages"
-)
-
-# Aggregate common response
-common_response_df = aggregate_trajectory_by_time(
-    top_cells_df,
-    feature_columns=common_response_features,
-)
-
-# 2. Uninfected baseline
-uninfected_baseline_df = aggregate_trajectory_by_time(
-    uninfected_filtered_df,
-    feature_columns=common_response_features,
-)
-
-# 3. Global infected average (all B/2 cells)
-global_infected_df = aggregate_trajectory_by_time(
-    filtered_infected_df,
-    feature_columns=common_response_features,
-)
-
-logger.info(f"Common response shape: {common_response_df.shape}")
-logger.info(f"Uninfected baseline shape: {uninfected_baseline_df.shape}")
-logger.info(f"Global infected shape: {global_infected_df.shape}")
-
-# Apply baseline normalization to each dataframe independently
-logger.info("Normalizing each trajectory to its own baseline (first 10 timepoints)")
-common_response_df = normalize_aggregated_trajectory(
-    common_response_df,
-    feature_columns=common_response_features,
-    n_baseline_timepoints=NORMALIZE_N_TIMEPOINTS,
-)
-uninfected_baseline_df = normalize_aggregated_trajectory(
-    uninfected_baseline_df,
-    feature_columns=common_response_features,
-    n_baseline_timepoints=NORMALIZE_N_TIMEPOINTS,
-)
-global_infected_df = normalize_aggregated_trajectory(
-    global_infected_df,
-    feature_columns=common_response_features,
-    n_baseline_timepoints=NORMALIZE_N_TIMEPOINTS,
-)
-
-
-# %%
-# Legacy function for backward compatibility with plotting functions
-# NOTE: This function is deprecated. Use normalize_aggregated_trajectory() instead,
-# which adds normalized columns directly to dataframes (per-dataframe approach).
-def compute_baseline_normalization_values(
-    infected_df: pd.DataFrame,
-    uninfected_df: pd.DataFrame,
-    global_infected_df: pd.DataFrame,
-    feature_columns: list,
-    n_baseline_timepoints: int = 10,
-):
-    """
-    [DEPRECATED] Compute baseline normalization values from the first n timepoints of each trajectory.
-
-    This function returns a nested dict for backward compatibility with plotting functions.
-    For new code, use normalize_aggregated_trajectory() which operates on individual dataframes.
-
-    Parameters
-    ----------
-    infected_df : pd.DataFrame
-        Infected common response aggregated dataframe with 't' column
-    uninfected_df : pd.DataFrame
-        Uninfected baseline aggregated dataframe with 't' column
-    global_infected_df : pd.DataFrame
-        Global infected average aggregated dataframe with 't' column
-    feature_columns : list
-        Features to compute baselines for
-    n_baseline_timepoints : int
-        Number of initial timepoints to use as baseline (default: 10)
-
-    Returns
-    -------
-    dict
-        Baseline values for each feature and trajectory type
-    """
-    baseline_values = {}
-
-    logger.info(
-        f"Computing baseline from first {n_baseline_timepoints} timepoints of each trajectory"
-    )
-
-    for feature in feature_columns:
-        median_col = f"{feature}_median"
-        baseline_values[feature] = {}
-
-        # Infected trajectory baseline
-        if median_col in infected_df.columns:
-            sorted_times = sorted(infected_df["t"].unique())
-            baseline_times = sorted_times[:n_baseline_timepoints]
-            baseline_mask = infected_df["t"].isin(baseline_times)
-            baseline_vals = infected_df.loc[baseline_mask, median_col].dropna()
-            if len(baseline_vals) > 0:
-                baseline_values[feature]["infected"] = baseline_vals.mean()
-            else:
-                baseline_values[feature]["infected"] = None
-
-        # Uninfected trajectory baseline
-        if median_col in uninfected_df.columns:
-            sorted_times = sorted(uninfected_df["t"].unique())
-            baseline_times = sorted_times[:n_baseline_timepoints]
-            baseline_mask = uninfected_df["t"].isin(baseline_times)
-            baseline_vals = uninfected_df.loc[baseline_mask, median_col].dropna()
-            if len(baseline_vals) > 0:
-                baseline_values[feature]["uninfected"] = baseline_vals.mean()
-            else:
-                baseline_values[feature]["uninfected"] = None
-
-        # Global infected trajectory baseline
-        if global_infected_df is not None and median_col in global_infected_df.columns:
-            sorted_times = sorted(global_infected_df["t"].unique())
-            baseline_times = sorted_times[:n_baseline_timepoints]
-            baseline_mask = global_infected_df["t"].isin(baseline_times)
-            baseline_vals = global_infected_df.loc[baseline_mask, median_col].dropna()
-            if len(baseline_vals) > 0:
-                baseline_values[feature]["global"] = baseline_vals.mean()
-            else:
-                baseline_values[feature]["global"] = None
-
-    return baseline_values
-
-
-baseline_normalization_values = compute_baseline_normalization_values(
-    common_response_df,
-    uninfected_baseline_df,
-    global_infected_df,
-    feature_columns=common_response_features,
-    n_baseline_timepoints=NORMALIZE_N_TIMEPOINTS,  # Match baseline timepoints from compute_alignment.py (1-10)
-)
+# Select top N lineages by DTW distance
+top_lineages_df = aligned_cells.drop_duplicates(["fov_name", "lineage_id"]).nsmallest(
+    top_n_cells, f"dtw_{ALIGN_TYPE}_distance"
+)[["fov_name", "lineage_id"]]
 
 logger.info(
-    f"Computed baseline values for {len(baseline_normalization_values)} features"
+    f"Selected top {len(top_lineages_df)} lineages by DTW distance from fovs {top_lineages_df['fov_name'].unique()}"
 )
+
+# Filter using merge
+top_cells_df = filtered_infected_df.merge(
+    top_lineages_df, on=["fov_name", "lineage_id"], how="inner"
+).copy()
+
+# # %%
+# logger.info("\n" + "=" * 70)
+# logger.info("Computing WARPED-TIME aggregated trajectories")
+# logger.info("=" * 70)
+
+# # TODO: make a function that uses the metadata of the alignment to align everything in time.
+# # TODO: make another function that then crops
+
+# # Aggregate in warped time using absolute time anchor from DTW alignment
+# top_cells_with_consensus_df = pd.concat([top_cells_df, consensus_df], ignore_index=True)
+# common_response_warped_df, anchor_metadata = (
+#     cytodtw.aggregate_with_absolute_time_anchor(
+#         df=top_cells_with_consensus_df,
+#         alignment_name=ALIGN_TYPE,
+#         feature_columns=common_response_features,
+#         max_lineages=top_n_cells,
+#     )
+# )
+
+# logger.info(f"Anchor metadata: {anchor_metadata}")
+
+# # Now that we have anchor_metadata, aggregate uninfected baseline using the same absolute time window
+# logger.info(
+#     f"Using absolute time window from warped aggregation: t={anchor_metadata['window_start']} to t={anchor_metadata['window_end']}"
+# )
 
 
 # %%
@@ -583,7 +211,6 @@ def plot_binned_period_comparison(
     periods: dict,
     baseline_period_name: str = None,
     infection_time: int = None,
-    baseline_values: dict = None,
     global_infected_df: pd.DataFrame = None,
     output_root: Path = None,
     figsize=(18, 14),
@@ -612,8 +239,6 @@ def plot_binned_period_comparison(
         If None, uses the first period in the periods dict.
     infection_time : int, optional
         Infection timepoint (only used to mark infection event on plot)
-    baseline_values : dict, optional
-        Pre-computed baseline normalization values
     global_infected_df : pd.DataFrame, optional
         Global average of all infected cells
     output_root : Path, optional
@@ -945,6 +570,19 @@ def plot_binned_period_comparison(
     for idx in range(n_features, len(axes)):
         axes[idx].axis("off")
 
+    # Create a single shared legend for the entire figure
+    # Get handles and labels from the first subplot (they're all the same)
+    handles, labels = axes[0].get_legend_handles_labels()
+    # Place legend on the right side of the figure
+    fig.legend(
+        handles,
+        labels,
+        loc="center right",
+        bbox_to_anchor=(0.98, 0.5),
+        fontsize=9,
+        frameon=True,
+    )
+
     # Create title with statistical note
     title = "Binned Period Comparison: Fold-Change Across Infection Phases"
     if add_stats:
@@ -955,10 +593,14 @@ def plot_binned_period_comparison(
         fontsize=14,
         y=1.00,
     )
-    plt.tight_layout()
+    # Use tight_layout with extra space on the right for the shared legend
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
 
     if output_root is not None:
-        save_path = output_root / f"binned_period_comparison_{ALIGN_TYPE}.png"
+        # Detect if this is warped time by checking the label
+        is_warped = "DTW-aligned" in infected_label
+        suffix = "warped" if is_warped else "absolute"
+        save_path = output_root / f"binned_period_comparison_{ALIGN_TYPE}_{suffix}.png"
         plt.savefig(save_path, dpi=150, bbox_inches="tight")
         logger.info(f"Saved binned period comparison to {save_path}")
 
@@ -1006,24 +648,24 @@ def plot_infected_vs_uninfected_comparison(
     infected_df: pd.DataFrame,
     uninfected_df: pd.DataFrame,
     feature_columns: list,
-    baseline_values: dict = None,
     infection_time: int = None,
     aligned_region: tuple = None,
+    anchor_metadata: dict = None,
     figsize=(18, 14),
     n_consecutive_divergence: int = 5,
     global_infected_df: pd.DataFrame = None,
     normalize_to_baseline: bool = True,
     infected_label: str = "Infected",
     uninfected_label: str = "Uninfected",
+    output_root: Path = None,
 ):
     """
     Plot comparison of infected (DTW-aligned) vs uninfected (baseline) trajectories.
 
     Shows where infected cells diverge from normal behavior (crossover points).
 
-    This function preferentially uses pre-computed normalized columns from dataframes
-    (e.g., '{feature}_median_normalized') if they exist. Otherwise, it falls back to
-    computing normalization on-the-fly using baseline_values.
+    Uses pre-computed normalized columns from dataframes (e.g., '{feature}_median_normalized')
+    added by normalize_aggregated_trajectory().
 
     NOTE: Features ending in '_cv' or '_sem' are plotted as raw values without baseline
     normalization, since CV and SEM are already relative/uncertainty metrics.
@@ -1031,26 +673,29 @@ def plot_infected_vs_uninfected_comparison(
     Parameters
     ----------
     infected_df : pd.DataFrame
-        Infected common response with 't' column and optional '{feature}_*_normalized' columns
+        Infected common response with 't' column and '{feature}_*_normalized' columns
     uninfected_df : pd.DataFrame
-        Uninfected baseline with optional '{feature}_*_normalized' columns
+        Uninfected baseline with '{feature}_*_normalized' columns
     feature_columns : list
         Features to plot
-    baseline_values : dict, optional
-        Pre-computed baseline normalization values for each feature and trajectory.
-        Only used if normalized columns don't exist in dataframes (legacy fallback).
     infection_time : int, optional
         Pre-computed infection timepoint in raw time
     aligned_region : tuple, optional
-        Pre-computed aligned region boundaries (start, end)
+        Pre-computed aligned region boundaries (start, end). Deprecated, use anchor_metadata instead.
+    anchor_metadata : dict, optional
+        Metadata from DTW alignment containing anchor region bounds:
+        - anchor_start: absolute time where aligned region starts
+        - anchor_end: absolute time where aligned region ends
+        - window_start: absolute time where aggregated data starts
+        - window_end: absolute time where aggregated data ends
     figsize : tuple
         Figure size
     n_consecutive_divergence : int
         Number of consecutive timepoints required to confirm divergence (default: 5)
     global_infected_df : pd.DataFrame, optional
-        Global average of ALL infected cells without alignment, with optional normalized columns
+        Global average of ALL infected cells without alignment, with normalized columns
     normalize_to_baseline : bool
-        If True, use normalized columns or compute normalization to show fold-change
+        If True, use normalized columns to show fold-change
     infected_label : str
         Label for infected condition in plots
     uninfected_label : str
@@ -1069,11 +714,6 @@ def plot_infected_vs_uninfected_comparison(
     uninfected_color = "#1f77b4"  # blue
     infected_color = "#ff7f0e"  # orange
 
-    # Use pre-computed baseline values or initialize empty dict
-    if baseline_values is None:
-        baseline_values = {}
-        logger.warning("No baseline_values provided - plots will not be normalized")
-
     for idx, feature in enumerate(feature_columns):
         ax = axes[idx]
 
@@ -1090,8 +730,21 @@ def plot_infected_vs_uninfected_comparison(
             ax.set_title(feature)
             continue
 
-        # Highlight aligned region first (background layer)
-        if aligned_region is not None:
+        # Highlight aligned/anchor region first (background layer)
+        # Prefer anchor_metadata if available, fallback to aligned_region for backward compatibility
+        if anchor_metadata is not None:
+            anchor_start = anchor_metadata.get("anchor_start")
+            anchor_end = anchor_metadata.get("anchor_end")
+            if anchor_start is not None and anchor_end is not None:
+                ax.axvspan(
+                    anchor_start,
+                    anchor_end,
+                    alpha=0.15,
+                    color="gray",
+                    label="DTW anchor region",
+                    zorder=0,
+                )
+        elif aligned_region is not None:
             ax.axvspan(
                 aligned_region[0],
                 aligned_region[1],
@@ -1118,7 +771,7 @@ def plot_infected_vs_uninfected_comparison(
             and normalized_q75_col in uninfected_df.columns
         )
 
-        # Use pre-computed normalized columns if available and requested
+        # Use normalized columns if available and requested
         if (
             normalize_to_baseline
             and not is_cv_feature
@@ -1129,25 +782,10 @@ def plot_infected_vs_uninfected_comparison(
             uninfected_q25 = uninfected_df[normalized_q25_col].values
             uninfected_q75 = uninfected_df[normalized_q75_col].values
         else:
-            # Fall back to raw values
+            # Use raw values
             uninfected_median = uninfected_df[median_col].values
             uninfected_q25 = uninfected_df[q25_col].values
             uninfected_q75 = uninfected_df[q75_col].values
-
-            # Apply baseline normalization on-the-fly if needed (legacy approach)
-            if (
-                normalize_to_baseline
-                and not is_cv_feature
-                and not is_prenormalized
-                and feature in baseline_values
-                and baseline_values[feature]["uninfected"] is not None
-            ):
-                baseline = baseline_values[feature]["uninfected"]
-                uninfected_median = (uninfected_median - baseline) / (
-                    np.abs(baseline) + 1e-6
-                )
-                uninfected_q25 = (uninfected_q25 - baseline) / (np.abs(baseline) + 1e-6)
-                uninfected_q75 = (uninfected_q75 - baseline) / (np.abs(baseline) + 1e-6)
 
         ax.plot(
             uninfected_time,
@@ -1175,7 +813,7 @@ def plot_infected_vs_uninfected_comparison(
             and normalized_q75_col in infected_df.columns
         )
 
-        # Use pre-computed normalized columns if available and requested
+        # Use normalized columns if available and requested
         if (
             normalize_to_baseline
             and not is_cv_feature
@@ -1186,25 +824,10 @@ def plot_infected_vs_uninfected_comparison(
             infected_q25 = infected_df[normalized_q25_col].values
             infected_q75 = infected_df[normalized_q75_col].values
         else:
-            # Fall back to raw values
+            # Use raw values
             infected_median = infected_df[median_col].values
             infected_q25 = infected_df[q25_col].values
             infected_q75 = infected_df[q75_col].values
-
-            # Apply baseline normalization on-the-fly if needed (legacy approach)
-            if (
-                normalize_to_baseline
-                and not is_cv_feature
-                and not is_prenormalized
-                and feature in baseline_values
-                and baseline_values[feature]["infected"] is not None
-            ):
-                baseline = baseline_values[feature]["infected"]
-                infected_median = (infected_median - baseline) / (
-                    np.abs(baseline) + 1e-6
-                )
-                infected_q25 = (infected_q25 - baseline) / (np.abs(baseline) + 1e-6)
-                infected_q75 = (infected_q75 - baseline) / (np.abs(baseline) + 1e-6)
 
         ax.plot(
             infected_time,
@@ -1233,7 +856,7 @@ def plot_infected_vs_uninfected_comparison(
                 and normalized_q75_col in global_infected_df.columns
             )
 
-            # Use pre-computed normalized columns if available and requested
+            # Use normalized columns if available and requested
             if (
                 normalize_to_baseline
                 and not is_cv_feature
@@ -1244,7 +867,7 @@ def plot_infected_vs_uninfected_comparison(
                 global_q25 = global_infected_df[normalized_q25_col].values
                 global_q75 = global_infected_df[normalized_q75_col].values
             else:
-                # Fall back to raw values
+                # Use raw values
                 global_median = global_infected_df[median_col].values
                 global_q25 = (
                     global_infected_df[q25_col].values
@@ -1256,23 +879,6 @@ def plot_infected_vs_uninfected_comparison(
                     if q75_col in global_infected_df.columns
                     else None
                 )
-
-                # Apply baseline normalization on-the-fly if needed (legacy approach)
-                if (
-                    normalize_to_baseline
-                    and not is_cv_feature
-                    and not is_prenormalized
-                    and feature in baseline_values
-                    and baseline_values[feature]["global"] is not None
-                ):
-                    baseline = baseline_values[feature]["global"]
-                    global_median = (global_median - baseline) / (
-                        np.abs(baseline) + 1e-6
-                    )
-                    if global_q25 is not None:
-                        global_q25 = (global_q25 - baseline) / (np.abs(baseline) + 1e-6)
-                    if global_q75 is not None:
-                        global_q75 = (global_q75 - baseline) / (np.abs(baseline) + 1e-6)
 
             ax.plot(
                 global_time,
@@ -1322,9 +928,8 @@ def plot_infected_vs_uninfected_comparison(
                     )
 
                     # Find timepoints where infected is significantly different
+                    # Allow divergence detection across all timepoints (including before infection)
                     overlap_mask = (infected_time >= min_t) & (infected_time <= max_t)
-                    if infection_time is not None:
-                        overlap_mask = overlap_mask & (infected_time >= infection_time)
 
                     overlap_times = infected_time[overlap_mask]
                     overlap_infected = infected_median[overlap_mask]
@@ -1370,24 +975,44 @@ def plot_infected_vs_uninfected_comparison(
             ax.set_ylabel(f"{feature}\n(raw SEM)")
         elif is_prenormalized:
             ax.set_ylabel(f"{feature}\n(pre-normalized, baseline t=1-10)")
-        elif normalize_to_baseline and feature in baseline_values:
+        elif normalize_to_baseline and has_normalized_columns:
             ax.set_ylabel(f"{feature}\n(fold-change from baseline)")
         else:
             ax.set_ylabel(feature)
         ax.set_title(feature)
         ax.grid(True, alpha=0.3)
-        ax.legend(loc="best", fontsize=7)
 
     # Hide unused subplots
     for idx in range(n_features, len(axes)):
         axes[idx].axis("off")
 
-    plt.tight_layout()
-    plt.savefig(
-        output_root / f"infected_vs_uninfected_comparison_{ALIGN_TYPE}.png",
-        dpi=150,
-        bbox_inches="tight",
+    # Create a single shared legend for the entire figure
+    # Get handles and labels from the first subplot (they're all the same)
+    handles, labels = axes[0].get_legend_handles_labels()
+    # Place legend on the right side of the figure
+    fig.legend(
+        handles,
+        labels,
+        loc="center right",
+        bbox_to_anchor=(0.98, 0.5),
+        fontsize=9,
+        frameon=True,
     )
+
+    # Use tight_layout with extra space on the right for the shared legend
+    plt.tight_layout(rect=[0, 0, 0.85, 1])
+
+    # Save with appropriate filename (check if this is warped or absolute time)
+    if output_root is not None:
+        # Detect if this is warped time by checking the label
+        is_warped = "DTW-aligned" in infected_label
+        suffix = "warped" if is_warped else "absolute"
+        save_path = (
+            output_root / f"infected_vs_uninfected_comparison_{ALIGN_TYPE}_{suffix}.png"
+        )
+        plt.savefig(save_path, dpi=150, bbox_inches="tight")
+        logger.info(f"Saved comparison plot to {save_path}")
+
     plt.show()
 
 
@@ -1427,6 +1052,7 @@ fig = cytodtw.plot_individual_lineages(
     aligned_linewidth=2.5,
     unaligned_linewidth=1.4,
     y_offset_step=0.0,
+    crop_to_absolute_bounds=CROP_TO_ABSOLUTE_BOUNDS,
 )
 
 # %%
@@ -1449,52 +1075,130 @@ fig = cytodtw.plot_global_trends(
         "segs_mean_frangi_mean",
     ],
     max_lineages=8,
+    crop_to_absolute_bounds=CROP_TO_ABSOLUTE_BOUNDS,
 )
 
 # %%
-# Binned period comparison
-if infection_timepoint is not None:
-    # Define biologically meaningful periods relative to infection
-    periods = {
-        "Baseline": (0, NORMALIZE_N_TIMEPOINTS),
-        "Pre-infection": (infection_timepoint - 5, infection_timepoint),
-        "Infection": (infection_timepoint - 1, infection_timepoint + 1),
-        "post_infection": (infection_timepoint + 5, infection_timepoint + 10),
-    }
+# Binned period comparison - ABSOLUTE TIME
+# TODO: Uncomment these plotting sections after defining aggregated trajectory variables
+# infection_timepoint = absolute_infection_timepoint  # Use the computed value from line 103
+# if infection_timepoint is not None:
+#     logger.info("\n" + "=" * 70)
+#     logger.info("ABSOLUTE TIME: Binned Period Comparison")
+#     logger.info("=" * 70)
 
-    plot_binned_period_comparison(
-        common_response_df,
-        uninfected_baseline_df,
-        common_response_features,
-        periods=periods,
-        baseline_period_name="Baseline",
-        infection_time=infection_timepoint,
-        baseline_values=baseline_normalization_values,
-        global_infected_df=global_infected_df,
-        output_root=output_root,
-        plot_type="line",
-        add_stats=True,
-        infected_label=INFECTED_LABEL,
-        uninfected_label=UNINFECTED_LABEL,
-        figsize=(20, 20),
-    )
+#     # Define biologically meaningful periods relative to infection
+#     periods = {
+#         "Baseline": (0, NORMALIZE_N_TIMEPOINTS),
+#         "Pre-infection": (infection_timepoint - 5, infection_timepoint),
+#         "Infection": (infection_timepoint - 1, infection_timepoint + 1),
+#         "post_infection": (infection_timepoint + 5, infection_timepoint + 10),
+#     }
+
+#     plot_binned_period_comparison(
+#         common_response_df,
+#         uninfected_baseline_df,
+#         common_response_features,
+#         periods=periods,
+#         baseline_period_name="Baseline",
+#         infection_time=infection_timepoint,
+#         global_infected_df=global_infected_df,
+#         output_root=output_root,
+#         plot_type="line",
+#         add_stats=True,
+#         infected_label=INFECTED_LABEL,
+#         uninfected_label=UNINFECTED_LABEL,
+#         figsize=(20, 20),
+#     )
 
 # %%
-# Infected vs uninfected comparison
-plot_infected_vs_uninfected_comparison(
-    common_response_df,
-    uninfected_baseline_df,
-    common_response_features,
-    baseline_values=baseline_normalization_values,
-    infection_time=infection_timepoint,
-    aligned_region=aligned_region_bounds,
-    figsize=(18, 14),
-    n_consecutive_divergence=5,
-    global_infected_df=global_infected_df,
-    normalize_to_baseline=True,
-    infected_label=INFECTED_LABEL,
-    uninfected_label=UNINFECTED_LABEL,
-)
+# Binned period comparison - WARPED TIME
+# TODO: Uncomment after defining aggregated trajectory variables
+# if len(common_response_warped_df) > 0:
+#     logger.info("\n" + "=" * 70)
+#     logger.info("WARPED TIME: Binned Period Comparison")
+#     logger.info("=" * 70)
+
+#     # For warped time, define periods based on consensus indices
+#     # The consensus pattern is centered, so we can define early/middle/late phases
+#     consensus_length = (
+#         len(consensus_lineage)
+#         if consensus_lineage is not None
+#         else len(common_response_warped_df)
+#     )
+#     consensus_third = consensus_length // 3
+
+#     warped_periods = {
+#         "Early": (0, consensus_third),
+#         "Middle": (consensus_third, 2 * consensus_third),
+#         "Late": (2 * consensus_third, consensus_length),
+#     }
+
+#     logger.info(f"Warped period definitions (consensus_length={consensus_length}):")
+#     for period_name, (start, end) in warped_periods.items():
+#         logger.info(f"  {period_name}: warped_t={start} to {end}")
+
+#     # warped_t was already renamed to t during normalization
+#     plot_binned_period_comparison(
+#         common_response_warped_df,
+#         uninfected_baseline_df,
+#         common_response_features,
+#         periods=warped_periods,
+#         baseline_period_name="Early",
+#         infection_time=None,  # No absolute infection time in warped space
+#         global_infected_df=global_infected_df,
+#         output_root=output_root,
+#         plot_type="line",
+#         add_stats=True,
+#         infected_label=f"{INFECTED_LABEL} (DTW-aligned)",
+#         uninfected_label=UNINFECTED_LABEL,
+#         figsize=(20, 20),
+#     )
+
+# %%
+# Infected vs uninfected comparison - ABSOLUTE TIME
+# TODO: Uncomment after defining aggregated trajectory variables
+# logger.info("\n" + "=" * 70)
+# logger.info("ABSOLUTE TIME: Infected vs Uninfected Comparison")
+# logger.info("=" * 70)
+# plot_infected_vs_uninfected_comparison(
+#     common_response_df,
+#     uninfected_baseline_df,
+#     common_response_features,
+#     infection_time=infection_timepoint,
+#     anchor_metadata=anchor_metadata,
+#     figsize=(18, 14),
+#     n_consecutive_divergence=5,
+#     global_infected_df=global_infected_df,
+#     normalize_to_baseline=True,
+#     infected_label=INFECTED_LABEL,
+#     uninfected_label=UNINFECTED_LABEL,
+#     output_root=output_root,
+# )
+
+# %%
+# Infected vs uninfected comparison - WARPED TIME
+# TODO: Uncomment after defining aggregated trajectory variables
+# if len(common_response_warped_df) > 0:
+#     logger.info("\n" + "=" * 70)
+#     logger.info("WARPED TIME: Infected Aligned Response")
+#     logger.info("=" * 70)
+
+#     # Since warped aggregation now uses absolute time anchor, we can show infection time
+#     plot_infected_vs_uninfected_comparison(
+#         common_response_warped_df,
+#         uninfected_baseline_df,
+#         common_response_features,
+#         infection_time=infection_timepoint,  # Show infection time in absolute time
+#         anchor_metadata=anchor_metadata,  # Show anchor region in absolute time
+#         figsize=(18, 14),
+#         n_consecutive_divergence=5,
+#         global_infected_df=global_infected_df,
+#         normalize_to_baseline=True,
+#         infected_label=f"{INFECTED_LABEL} (DTW-aligned)",
+#         uninfected_label=UNINFECTED_LABEL,
+#         output_root=output_root,
+#     )
 
 # %%
 # Napari visualization
@@ -1696,6 +1400,7 @@ if NAPARI:
             alignment_name=ALIGN_TYPE,
             image_loader_fn=load_images_from_triplet_dataset,
             max_lineages=30,
+            crop_to_absolute_bounds=CROP_TO_ABSOLUTE_BOUNDS,
         )
 
         # Load segmentation sequences
@@ -1707,56 +1412,127 @@ if NAPARI:
                 alignment_name=ALIGN_TYPE,
                 image_loader_fn=load_segmentations_from_zarr,
                 max_lineages=30,
+                crop_to_absolute_bounds=CROP_TO_ABSOLUTE_BOUNDS,
             )
             print(
                 f"Loaded segmentation sequences for {len(concatenated_segmentation_sequences)} lineages"
             )
 
-        # Compute maximum unaligned_before_length for padding
-        max_before_length = max(
-            seq_data["unaligned_before_length"]
-            for seq_data in concatenated_image_sequences.values()
-        )
-        logger.info(f"Maximum unaligned_before_length: {max_before_length}")
+        # Instead of using concatenated sequences, we need to load images in ABSOLUTE time coordinates
+        # This matches what the plots show (absolute timepoints 0-70, not concatenated sequences)
 
-        # Load into napari with padding
+        # First, find the global time range across all cells
+        all_timepoints = set()
         for lineage_id, seq_data in concatenated_image_sequences.items():
-            concatenated_images = seq_data["concatenated_images"]
-            meta = seq_data["metadata"]
-            unaligned_before_length = seq_data["unaligned_before_length"]
-            aligned_length = seq_data["aligned_length"]
-            unaligned_after_length = seq_data["unaligned_after_length"]
+            fov_name = seq_data["metadata"]["fov_name"]
+            track_ids = seq_data["metadata"]["track_ids"]
 
-            if len(concatenated_images) == 0:
+            # Get all timepoints for this lineage from master_df
+            lineage_rows = master_df[
+                (master_df["fov_name"] == fov_name)
+                & (master_df["track_id"].isin(track_ids))
+            ]
+            all_timepoints.update(lineage_rows["t"].unique())
+
+        if CROP_TO_ABSOLUTE_BOUNDS:
+            # Crop to absolute bounds: [0, max_absolute_time]
+            # This ensures all cells fit within the same time window as uninfected controls
+            min_time = 0
+            max_time = master_df[master_df["lineage_id"] != -1]["t"].max()
+            logger.info(
+                f"CROPPED time range: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+            )
+            logger.info(
+                "All cells will fit within [0, max_absolute_time] for comparison with controls"
+            )
+        else:
+            # Use the natural range across all cells (may vary per cell)
+            min_time = min(all_timepoints)
+            max_time = max(all_timepoints)
+            logger.info(
+                f"Natural time range: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+            )
+            logger.info("This represents the union of all cell timepoints")
+
+        time_range = int(max_time - min_time + 1)
+
+        # Load into napari using absolute timepoints
+        for lineage_id, seq_data in concatenated_image_sequences.items():
+            meta = seq_data["metadata"]
+            fov_name = meta["fov_name"]
+            track_ids = meta["track_ids"]
+
+            # Get absolute timepoints for this lineage and alignment status
+            lineage_rows = master_df[
+                (master_df["fov_name"] == fov_name)
+                & (master_df["track_id"].isin(track_ids))
+            ].sort_values("t")
+
+            if len(lineage_rows) == 0:
                 continue
 
-            # Calculate padding needed
-            padding_needed = max_before_length - unaligned_before_length
-            logger.info(
-                f"Lineage {lineage_id}: before={unaligned_before_length}, "
-                f"aligned={aligned_length}, after={unaligned_after_length}, padding={padding_needed}"
-            )
+            # Load images at their absolute timepoints
+            time_to_image = load_images_from_triplet_dataset(fov_name, track_ids)
 
-            # Stack images into time series
+            # Create a sparse array indexed by absolute time
+            # Initialize with None for all timepoints in global range
+            time_series_list = [None] * time_range
+
+            for _, row in lineage_rows.iterrows():
+                t_abs = int(row["t"])
+                t_idx = int(t_abs - min_time)  # Convert to 0-indexed
+
+                if t_abs in time_to_image:
+                    time_series_list[t_idx] = time_to_image[t_abs]
+
+            # The aligned region should be the SAME for all cells (from metadata)
+            # This is the consensus aligned region in absolute time coordinates
+            aligned_frames_set = set()
+            if aligned_region_bounds is not None:
+                aligned_start_abs = aligned_region_bounds[0]
+                aligned_end_abs = aligned_region_bounds[1]
+
+                # Convert to 0-indexed relative to min_time
+                for t_abs in range(int(aligned_start_abs), int(aligned_end_abs) + 1):
+                    if min_time <= t_abs <= max_time:
+                        t_idx = int(t_abs - min_time)
+                        aligned_frames_set.add(t_idx)
+
+            # Fill gaps with nearest neighbor (for visualization continuity)
+            valid_indices = [
+                i for i, img in enumerate(time_series_list) if img is not None
+            ]
+
+            if len(valid_indices) == 0:
+                continue
+
+            for i in range(time_range):
+                if time_series_list[i] is None and len(valid_indices) > 0:
+                    closest_idx = min(valid_indices, key=lambda x: abs(x - i))
+                    time_series_list[i] = time_series_list[closest_idx]
+
+            # Stack into time series
             image_stack = []
-            for img_sample in concatenated_images:
+            for img_sample in time_series_list:
                 if img_sample is not None:
                     img_tensor = img_sample["anchor"]
                     img_np = img_tensor.cpu().numpy()
                     image_stack.append(img_np)
+                else:
+                    # This shouldn't happen after gap filling, but just in case
+                    # Create a black frame
+                    if len(image_stack) > 0:
+                        dummy_frame = np.zeros_like(image_stack[0])
+                        image_stack.append(dummy_frame)
 
             if len(image_stack) > 0:
                 time_series = np.stack(image_stack, axis=0)
                 n_channels = time_series.shape[1]
 
-                # Add padding frames at the beginning (zeros)
-                if padding_needed > 0:
-                    padding_shape = (padding_needed,) + time_series.shape[1:]
-                    padding_frames = np.zeros(padding_shape, dtype=time_series.dtype)
-                    time_series = np.concatenate([padding_frames, time_series], axis=0)
-                    logger.info(
-                        f"Added {padding_needed} padding frames. New shape: {time_series.shape}"
-                    )
+                logger.info(
+                    f"Lineage {lineage_id}: Loaded {time_series.shape[0]} frames "
+                    f"(t={min_time} to t={max_time}), {len(aligned_frames_set)} aligned frames"
+                )
 
                 # Set up colormap
                 if n_channels == 2:
@@ -1788,12 +1564,7 @@ if NAPARI:
                     )
 
                 # Create shape layer with circle marker for aligned frames
-                # The circle appears only during aligned frames
-                aligned_start_frame = (
-                    max_before_length  # After padding, all aligned regions start here
-                )
-                aligned_end_frame = aligned_start_frame + aligned_length
-
+                # The circle appears only during frames marked as aligned in the DTW result
                 # Create circle coordinates for top-left corner (approximately 10% from edges)
                 img_height = time_series.shape[3]  # y dimension
                 img_width = time_series.shape[4]  # x dimension
@@ -1806,7 +1577,7 @@ if NAPARI:
                 # Create circles for each aligned frame
                 # For napari 4D ellipses: need 4 corner vertices defining the bounding box
                 shapes_data = []
-                for frame_idx in range(aligned_start_frame, aligned_end_frame):
+                for frame_idx in sorted(aligned_frames_set):
                     # Ellipse is defined by 4 corners of bounding box in order: top-left, top-right, bottom-right, bottom-left
                     ellipse = np.array(
                         [
@@ -1849,62 +1620,333 @@ if NAPARI:
                         name=f"ALIGNED_MARKER_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}",
                         ndim=4,
                     )
+                    aligned_frame_indices = sorted(aligned_frames_set)
                     logger.info(
                         f"Added alignment marker for lineage {lineage_id} "
-                        f"(frames {aligned_start_frame} to {aligned_end_frame})"
+                        f"({len(aligned_frame_indices)} aligned frames at indices: "
+                        f"{aligned_frame_indices[:5]}...{aligned_frame_indices[-5:] if len(aligned_frame_indices) > 5 else ''})"
                     )
 
-                # Add segmentation labels layer if available
-                if (
-                    lineage_id in concatenated_segmentation_sequences
-                    and len(
-                        concatenated_segmentation_sequences[lineage_id][
-                            "concatenated_images"
-                        ]
+                # Add segmentation labels layer if available (using absolute time)
+                if len(seg_positions) > 0:
+                    # Load segmentations at absolute timepoints
+                    seg_time_to_image = load_segmentations_from_zarr(
+                        fov_name, track_ids
                     )
-                    > 0
-                ):
-                    seg_images = concatenated_segmentation_sequences[lineage_id][
-                        "concatenated_images"
+
+                    # Create sparse array for segmentations
+                    seg_time_series_list = [None] * time_range
+
+                    for _, row in lineage_rows.iterrows():
+                        t_abs = int(row["t"])
+                        t_idx = int(t_abs - min_time)
+
+                        if t_abs in seg_time_to_image:
+                            seg_time_series_list[t_idx] = seg_time_to_image[t_abs]
+
+                    # Fill gaps
+                    valid_seg_indices = [
+                        i
+                        for i, seg in enumerate(seg_time_series_list)
+                        if seg is not None
                     ]
-                    seg_stack = []
-                    for seg_sample in seg_images:
-                        if seg_sample is not None:
-                            seg_tensor = seg_sample["anchor"]
-                            seg_np = seg_tensor.cpu().numpy()
-                            # Segmentation is typically channel 0 only, squeeze out channel dim
-                            seg_np_squeezed = seg_np[0, 0, :, :]  # (z, y, x) -> (y, x)
-                            seg_stack.append(seg_np_squeezed)
 
-                    if len(seg_stack) > 0:
-                        seg_time_series = np.stack(seg_stack, axis=0)  # (t, y, x)
+                    if len(valid_seg_indices) > 0:
+                        for i in range(time_range):
+                            if seg_time_series_list[i] is None:
+                                closest_idx = min(
+                                    valid_seg_indices, key=lambda x: abs(x - i)
+                                )
+                                seg_time_series_list[i] = seg_time_series_list[
+                                    closest_idx
+                                ]
 
-                        # Add padding to segmentation to match image padding
-                        if padding_needed > 0:
-                            seg_padding_shape = (
-                                padding_needed,
-                            ) + seg_time_series.shape[1:]
-                            seg_padding_frames = np.zeros(
-                                seg_padding_shape, dtype=seg_time_series.dtype
+                        # Stack segmentations
+                        seg_stack = []
+                        for seg_sample in seg_time_series_list:
+                            if seg_sample is not None:
+                                seg_tensor = seg_sample["anchor"]
+                                seg_np = seg_tensor.cpu().numpy()
+                                seg_np_squeezed = seg_np[
+                                    0, 0, :, :
+                                ]  # (z, y, x) -> (y, x)
+                                seg_stack.append(seg_np_squeezed)
+                            else:
+                                # Black segmentation frame
+                                if len(seg_stack) > 0:
+                                    dummy_seg = np.zeros_like(seg_stack[0])
+                                    seg_stack.append(dummy_seg)
+
+                        if len(seg_stack) > 0:
+                            seg_time_series = np.stack(seg_stack, axis=0)  # (t, y, x)
+                            seg_time_series = seg_time_series[
+                                :, np.newaxis, :, :
+                            ]  # (t, 1, y, x)
+
+                            layer_name = f"FULL_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_segmentation"
+                            viewer.add_labels(
+                                seg_time_series.astype(np.uint16),
+                                name=layer_name,
                             )
-                            seg_time_series = np.concatenate(
-                                [seg_padding_frames, seg_time_series], axis=0
-                            )
-                            logger.info(
-                                f"Added {padding_needed} padding frames to segmentation. New shape: {seg_time_series.shape}"
+                            logger.debug(
+                                f"Added segmentation labels for lineage {lineage_id}"
                             )
 
-                        seg_time_series = seg_time_series[
-                            :, np.newaxis, :, :
-                        ]  # (t, 1, y, x)
-                        layer_name = f"FULL_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_segmentation"
-                        viewer.add_labels(
-                            seg_time_series.astype(np.uint16),
-                            name=layer_name,
-                        )
-                        logger.debug(
-                            f"Added segmentation labels for lineage {lineage_id}"
-                        )
+        # ====================================================================
+        # DTW-WARPED SEQUENCES VISUALIZATION
+        # Now add the DTW-warped sequences for comparison
+        # These are in "warped time" (consensus coordinates)
+        # ====================================================================
+        logger.info("\n" + "=" * 70)
+        logger.info("Adding DTW-warped sequences to napari for comparison")
+        logger.info("=" * 70)
+
+        # First pass: find the maximum unaligned lengths to pad all sequences uniformly
+        max_unaligned_before = 0
+        max_unaligned_after = 0
+        consensus_aligned_length = None
+
+        for lineage_id, seq_data in concatenated_image_sequences.items():
+            max_unaligned_before = max(
+                max_unaligned_before, seq_data["unaligned_before_length"]
+            )
+            max_unaligned_after = max(
+                max_unaligned_after, seq_data["unaligned_after_length"]
+            )
+            if consensus_aligned_length is None:
+                consensus_aligned_length = seq_data["aligned_length"]
+
+        logger.info(f"Consensus aligned length: {consensus_aligned_length}")
+        logger.info(f"Max unaligned before across all cells: {max_unaligned_before}")
+        logger.info(f"Max unaligned after across all cells: {max_unaligned_after}")
+        logger.info(
+            f"Total synchronized warped time length: {max_unaligned_before + consensus_aligned_length + max_unaligned_after}"
+        )
+
+        for lineage_id, seq_data in concatenated_image_sequences.items():
+            meta = seq_data["metadata"]
+            concatenated_images = seq_data["concatenated_images"]
+
+            unaligned_before_length = seq_data["unaligned_before_length"]
+            aligned_length = seq_data["aligned_length"]
+            unaligned_after_length = seq_data["unaligned_after_length"]
+
+            # Build the warped time series from concatenated images
+            image_stack = []
+            for img_sample in concatenated_images:
+                if img_sample is not None:
+                    img_tensor = img_sample["anchor"]
+                    img_np = img_tensor.cpu().numpy()
+                    image_stack.append(img_np)
+
+            if len(image_stack) == 0:
+                continue
+
+            # Stack the raw concatenated sequence
+            concatenated_stack = np.stack(image_stack, axis=0)
+            n_channels = concatenated_stack.shape[1]
+
+            # Now pad to create synchronized warped time
+            # Strategy: pad before/after regions so all aligned regions start at the same frame
+            pad_before = max_unaligned_before - unaligned_before_length
+            pad_after = max_unaligned_after - unaligned_after_length
+
+            # Create black frames for padding
+            dummy_frame = np.zeros_like(concatenated_stack[0])
+
+            # Pad before
+            padded_before = [dummy_frame] * pad_before
+            # Pad after
+            padded_after = [dummy_frame] * pad_after
+
+            # Create synchronized sequence: [padding_before] + [unaligned_before] + [aligned] + [unaligned_after] + [padding_after]
+            synchronized_frames = (
+                padded_before + list(concatenated_stack) + padded_after
+            )
+            warped_time_series = np.stack(synchronized_frames, axis=0)
+
+            logger.info(
+                f"Lineage {lineage_id}: Synchronized warped sequence with {warped_time_series.shape[0]} frames "
+                f"(pad_before={pad_before}, unaligned_before={unaligned_before_length}, "
+                f"aligned={aligned_length}, unaligned_after={unaligned_after_length}, pad_after={pad_after})"
+            )
+
+            # Set up colormap
+            if n_channels == 2:
+                colormap = ["green", "magenta"]
+            elif n_channels == 3:
+                colormap = ["gray", "green", "magenta"]
+            else:
+                colormap = ["gray"] * n_channels
+
+            # Add each channel as a separate layer
+            for channel_idx in range(n_channels):
+                channel_data = warped_time_series[:, channel_idx, :, :, :]
+                channel_name = (
+                    processing_channels[channel_idx]
+                    if channel_idx < len(processing_channels)
+                    else f"ch{channel_idx}"
+                )
+                layer_name = f"WARPED_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_{channel_name}"
+
+                viewer.add_image(
+                    channel_data,
+                    name=layer_name,
+                    contrast_limits=(channel_data.min(), channel_data.max()),
+                    colormap=colormap[channel_idx],
+                    blending="additive",
+                )
+                logger.debug(
+                    f"Added WARPED {channel_name} channel for lineage {lineage_id}"
+                )
+
+            # Create shape markers for aligned region in synchronized warped time
+            # All aligned regions now start at max_unaligned_before (same for all cells)
+            aligned_start_idx = max_unaligned_before
+            aligned_end_idx = max_unaligned_before + aligned_length
+
+            aligned_frames_warped = set(range(aligned_start_idx, aligned_end_idx))
+
+            # Create circle coordinates for top-left corner
+            img_height = warped_time_series.shape[3]  # y dimension
+            img_width = warped_time_series.shape[4]  # x dimension
+            circle_center_y = img_height * 0.1
+            circle_center_x = img_width * 0.1
+            circle_radius = min(img_height, img_width) * 0.05  # 5% of smaller dimension
+
+            # Create circles for each aligned frame in warped time
+            shapes_data_warped = []
+            for frame_idx in sorted(aligned_frames_warped):
+                ellipse = np.array(
+                    [
+                        [
+                            frame_idx,
+                            0,
+                            circle_center_y - circle_radius,
+                            circle_center_x - circle_radius,
+                        ],  # top-left
+                        [
+                            frame_idx,
+                            0,
+                            circle_center_y - circle_radius,
+                            circle_center_x + circle_radius,
+                        ],  # top-right
+                        [
+                            frame_idx,
+                            0,
+                            circle_center_y + circle_radius,
+                            circle_center_x + circle_radius,
+                        ],  # bottom-right
+                        [
+                            frame_idx,
+                            0,
+                            circle_center_y + circle_radius,
+                            circle_center_x - circle_radius,
+                        ],  # bottom-left
+                    ]
+                )
+                shapes_data_warped.append(ellipse)
+
+            if len(shapes_data_warped) > 0:
+                # Add shapes layer with circles marking aligned frames in warped time
+                viewer.add_shapes(
+                    shapes_data_warped,
+                    shape_type="ellipse",
+                    edge_width=3,
+                    edge_color="cyan",  # Different color to distinguish from absolute time markers
+                    face_color="transparent",
+                    name=f"WARPED_ALIGNED_MARKER_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}",
+                    ndim=4,
+                )
+                logger.info(
+                    f"Added WARPED alignment marker for lineage {lineage_id} "
+                    f"(frames {aligned_start_idx} to {aligned_end_idx - 1} in warped time)"
+                )
+
+            # Add segmentation labels for warped sequence if available
+            if (
+                len(seg_positions) > 0
+                and lineage_id in concatenated_segmentation_sequences
+            ):
+                seg_seq_data = concatenated_segmentation_sequences[lineage_id]
+                concatenated_segs = seg_seq_data["concatenated_images"]
+
+                seg_stack_warped = []
+                for seg_sample in concatenated_segs:
+                    if seg_sample is not None:
+                        seg_tensor = seg_sample["anchor"]
+                        seg_np = seg_tensor.cpu().numpy()
+                        seg_np_squeezed = seg_np[0, 0, :, :]  # (z, y, x) -> (y, x)
+                        seg_stack_warped.append(seg_np_squeezed)
+
+                if len(seg_stack_warped) > 0:
+                    # Stack the raw concatenated segmentations
+                    concatenated_seg_stack = np.stack(
+                        seg_stack_warped, axis=0
+                    )  # (t, y, x)
+
+                    # Apply same padding as images for synchronization
+                    seg_unaligned_before_length = seg_seq_data[
+                        "unaligned_before_length"
+                    ]
+                    seg_unaligned_after_length = seg_seq_data["unaligned_after_length"]
+                    seg_pad_before = max_unaligned_before - seg_unaligned_before_length
+                    seg_pad_after = max_unaligned_after - seg_unaligned_after_length
+
+                    # Create zero segmentation frames for padding
+                    dummy_seg_frame = np.zeros_like(concatenated_seg_stack[0])
+                    padded_seg_before = [dummy_seg_frame] * seg_pad_before
+                    padded_seg_after = [dummy_seg_frame] * seg_pad_after
+
+                    # Create synchronized segmentation sequence
+                    synchronized_seg_frames = (
+                        padded_seg_before
+                        + list(concatenated_seg_stack)
+                        + padded_seg_after
+                    )
+                    seg_time_series_warped = np.stack(
+                        synchronized_seg_frames, axis=0
+                    )  # (t, y, x)
+                    seg_time_series_warped = seg_time_series_warped[
+                        :, np.newaxis, :, :
+                    ]  # (t, 1, y, x)
+
+                    layer_name = f"WARPED_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_segmentation"
+                    viewer.add_labels(
+                        seg_time_series_warped.astype(np.uint16),
+                        name=layer_name,
+                    )
+                    logger.debug(
+                        f"Added WARPED segmentation labels for lineage {lineage_id}"
+                    )
+
+        logger.info("\n" + "=" * 70)
+        logger.info("Napari visualization complete!")
+        logger.info("=" * 70)
+        logger.info("Legend:")
+        logger.info("  - FULL_* layers: Images at ABSOLUTE timepoints (raw data)")
+        logger.info("  - WARPED_* layers: Images in DTW-WARPED SYNCHRONIZED time")
+        logger.info(
+            "  - Orange circles: Aligned region in absolute time (same for all cells)"
+        )
+        logger.info(
+            "  - Cyan circles: Aligned region in warped time (SYNCHRONIZED - all cells aligned)"
+        )
+        logger.info("")
+        logger.info("Warped time structure:")
+        logger.info(
+            f"  - Frames 0-{max_unaligned_before - 1}: Padding/unaligned before (black = padding)"
+        )
+        logger.info(
+            f"  - Frames {max_unaligned_before}-{max_unaligned_before + consensus_aligned_length - 1}: ALIGNED REGION (cyan circles)"
+        )
+        logger.info(
+            f"  - Frames {max_unaligned_before + consensus_aligned_length}-end: Unaligned after/padding"
+        )
+        logger.info(
+            "  - All cells show the SAME consensus state at the same warped time!"
+        )
+        logger.info("=" * 70)
 
 # %%
 from cmap import Colormap
@@ -1935,6 +1977,9 @@ for img_sample in concatenated_images:
         time_series = np.stack(image_stack, axis=0)
         n_channels = time_series.shape[1]
 
+infection_timepoint = (
+    absolute_infection_timepoint  # Use the computed value from line 103
+)
 tidx_figures = [
     min(0, infection_timepoint - 5),
     infection_timepoint,

@@ -90,9 +90,9 @@ def extract_features_zyx(
     """
 
     if intensity_zyx is not None:
-        assert (
-            intensity_zyx.shape == labels_zyx.shape
-        ), "Image and labels must have same shape"
+        assert intensity_zyx.shape == labels_zyx.shape, (
+            "Image and labels must have same shape"
+        )
 
     Z, _, _ = labels_zyx.shape
 
@@ -138,7 +138,7 @@ def extract_features_zyx(
 
     # Check if we have any objects to process
     if labels_processed.max() == 0:
-        warning.warn(f"Warning: No objects found")
+        return pd.DataFrame()
 
     # Compute base regionprops features (those that support spacing)
     props_with_spacing = [p for p in properties if p not in ["moments_hu"]]
@@ -153,6 +153,7 @@ def extract_features_zyx(
         df = pd.DataFrame(props_dict)
     except Exception as e:
         warning.warn(f"Error computing base regionprops: {e}")
+        return pd.DataFrame()
 
     # Add Hu moments separately (without spacing)
     if "moments_hu" in properties or "moments_hu" in extra_properties:

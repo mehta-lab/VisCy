@@ -1,5 +1,6 @@
 # %%
 import os
+from logging import warning
 from pathlib import Path
 
 import numpy as np
@@ -9,42 +10,64 @@ from extract_features import (
 )
 from iohub import open_ome_zarr
 from joblib import Parallel, delayed
-from matplotlib import pyplot as plt
-from segment_organelles import (
-    calculate_nellie_sigmas,
-    segment_zyx,
-)
-from skimage.exposure import rescale_intensity
-from tqdm import tqdm
 
 
-# %% library of feature extraction methods
+# %%
 def get_patch(data, cell_centroid, PATCH_SIZE):
+    """
+    Extract a patch of PATCH_SIZE x PATCH_SIZE centered on the cell centroid.
+    If the patch would extend beyond image boundaries, slide it to fit while
+    keeping the centroid within the patch.
 
+    Returns None if the image is smaller than PATCH_SIZE in any dimension.
+    """
     x_centroid, y_centroid = cell_centroid
-    # ensure patch boundaries stay within data dimensions
-    x_start = max(0, x_centroid - PATCH_SIZE // 2)
-    x_end = min(data.shape[1], x_centroid + PATCH_SIZE // 2)
-    y_start = max(0, y_centroid - PATCH_SIZE // 2)
-    y_end = min(data.shape[0], y_centroid + PATCH_SIZE // 2)
+    height, width = data.shape
 
-    # get patch of PATCH_SIZE centered on centroid
+    # Check if image is large enough for patch
+    if height < PATCH_SIZE or width < PATCH_SIZE:
+        return None
+
+    # Calculate ideal patch boundaries centered on centroid
+    x_start = x_centroid - PATCH_SIZE // 2
+    x_end = x_centroid + PATCH_SIZE // 2
+    y_start = y_centroid - PATCH_SIZE // 2
+    y_end = y_centroid + PATCH_SIZE // 2
+
+    # Slide patch if it extends beyond left/top boundaries
+    if x_start < 0:
+        x_start = 0
+        x_end = PATCH_SIZE
+    if y_start < 0:
+        y_start = 0
+        y_end = PATCH_SIZE
+
+    # Slide patch if it extends beyond right/bottom boundaries
+    if x_end > width:
+        x_end = width
+        x_start = width - PATCH_SIZE
+    if y_end > height:
+        y_end = height
+        y_start = height - PATCH_SIZE
+
+    # Extract patch (should always be PATCH_SIZE x PATCH_SIZE now)
     patch = data[int(y_start) : int(y_end), int(x_start) : int(x_end)]
     return patch
+
+
+# TODO add the intesnity zarr and parsing
 
 
 def process_position(
     well_id,
     pos_id,
-    input_path,
+    segmentations_zarr,
     nuclear_labels_path,
-    organelle_channel,
     patch_size,
-    frangi_params,
 ):
     """Process a single position and return the features DataFrame."""
     # Open zarr stores (each worker needs its own file handles)
-    input_zarr = open_ome_zarr(input_path, mode="r")
+    input_zarr = open_ome_zarr(segmentations_zarr, mode="r")
 
     well_name, well_no = well_id.split("/")
 
@@ -62,118 +85,97 @@ def process_position(
         nuclear_labels_path, well_id + "/" + pos_id + "/" + file_name
     )
     nuclear_labels_df = pd.read_csv(nuclear_labels_csv)
-    organelle_data = in_data[:, channel_names.index(organelle_channel)]
+
+    for chan_name in channel_names:
+        if "_labels" in chan_name:
+            labels_cidx = channel_names.index(chan_name)
+        if "_vesselness" in chan_name:
+            vesselness_cidx = channel_names.index(chan_name)
+
+    labels = in_data[:, labels_cidx]
+    vesselness = in_data[:, vesselness_cidx]
 
     # Initialize an empty list to store values from each row of the csv
     position_features = []
     for idx, row in nuclear_labels_df.iterrows():
+        cell_centroid = row["x"], row["y"]
+        timepoint = row["t"]
 
-        if (
-            row["x"] > patch_size // 2
-            and row["y"] > patch_size // 2
-            and row["x"] < X - patch_size // 2
-            and row["y"] < Y - patch_size // 2
-        ):
-            cell_centroid = row["x"], row["y"]
+        # Extract patches (will slide to fit within boundaries)
+        labels_patch = get_patch(labels[int(timepoint), 0], cell_centroid, patch_size)
+        vesselness_patch = get_patch(
+            vesselness[int(timepoint), 0], cell_centroid, patch_size
+        )
 
-            timepoint = row["t"]
-            organelle_patch = get_patch(
-                organelle_data[int(timepoint), 0], cell_centroid, patch_size
-            )
+        # Skip if patches couldn't be extracted (image too small)
+        if labels_patch is None or vesselness_patch is None:
+            continue
 
-            organelle_patch = organelle_patch[np.newaxis]
-            organelle_patch = rescale_intensity(
-                organelle_patch,
-                out_range=(0, 1),
-            )
-            min_radius_um = 0.15  # 300 nm diameter = ~2 pixels
-            max_radius_um = 0.6  # 1 µm diameter = ~6.7 pixels
-            sigma_range = calculate_nellie_sigmas(
-                min_radius_um,
-                max_radius_um,
-                scale_um[-1],  # use the highest res axis (XY)
-                num_sigma=frangi_params["sigma_steps"],
-            )
+        label_patch = labels_patch[np.newaxis].astype(np.uint32)
+        vesselness_patch = vesselness_patch[np.newaxis]
 
-            labels, vesselness, optimal_sigma = segment_zyx(
-                organelle_patch, sigma_range=sigma_range, **frangi_params
-            )
-            features_df = extract_features_zyx(
-                labels_zyx=labels,
-                intensity_zyx=organelle_patch,
-                frangi_zyx=vesselness,
-                spacing=(scale_um[-1], scale_um[-1]),
-                extra_properties=[
-                    "aspect_ratio",
-                    "circularity",
-                    "frangi_intensity",
-                    "texture",
-                    "moments_hu",
-                ],
-            )
+        features_df = extract_features_zyx(
+            labels_zyx=label_patch,
+            intensity_zyx=None,
+            frangi_zyx=vesselness_patch,
+            spacing=(scale_um[-1], scale_um[-1]),
+            extra_properties=[
+                "aspect_ratio",
+                "circularity",
+                "eccentricity",
+                "solidity",
+                "frangi_intensity",
+                "texture",
+                "moments_hu",
+            ],
+        )
 
-            if not features_df.empty:
-                features_df["fov_name"] = well_id + "/" + pos_id
-                features_df["track_id"] = row["track_id"]
-                features_df["t"] = timepoint
-                features_df["x"] = row["x"]
-                features_df["y"] = row["y"]
-
+        if not features_df.empty:
+            features_df["fov_name"] = well_id + "/" + pos_id
+            features_df["track_id"] = row["track_id"]
+            features_df["t"] = timepoint
+            features_df["x"] = row["x"]
+            features_df["y"] = row["y"]
             position_features.append(features_df)
 
+    input_zarr.close()
     if position_features:
         # Concatenate the list of DataFrames
         position_df = pd.concat(position_features, ignore_index=True)
         return position_df
     else:
+        warning(f"No valid features extracted for position {well_id}/{pos_id}.")
         return pd.DataFrame()
-
-    input_zarr.close()
-    # nuclear_labels_zarr.close()
 
 
 # %%
 if __name__ == "__main__":
-    input_path = Path(
-        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr"
+    segmentations_zarr = Path(
+        "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/train_test_mito_seg_2.zarr"
     )
-    input_zarr = open_ome_zarr(input_path, mode="r")
+    input_zarr = open_ome_zarr(segmentations_zarr, mode="r")
     in_chans = input_zarr.channel_names
-    organelle_channel = "GFP EX488 EM525-45"
 
     nuclear_labels_path = "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/1-preprocess/label-free/3-track/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_cropped.zarr"
-    # nuclear_labels_zarr = open_ome_zarr(nuclear_labels_path, mode="r")
-    # nuclear_labels_chans = nuclear_labels_zarr.channel_names
-    # nuclear_labels = "nuclei_prediction_labels_labels"
 
     output_root = (
         Path(
             "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output"
         )
-        / input_path.stem
+        / segmentations_zarr.stem
     )
     output_root.mkdir(parents=True, exist_ok=True)
 
-    output_csv = output_root / f"{input_path.stem}_mito_features.csv"
+    output_csv = output_root / f"{segmentations_zarr.stem}_mito_features_nellie.csv"
 
     PATCH_SIZE = 160
-    frangi_params = {
-        "clahe_clip_limit": 0.01,  # Mild contrast enhancement (0.01-0.03 range)
-        "sigma_steps": 2,  # Multiple scales to capture size variation
-        "auto_optimize_sigma": False,  # Use multi-scale (max across scales)
-        "frangi_alpha": 0.5,  # Standard tubular structure sensitivity
-        "frangi_beta": 0.5,  # Standard blob rejection
-        "threshold_method": "nellie_max",  # CRITICAL: Manual threshold where auto methods fail
-        "min_object_size": 10,  # Remove small noise clusters (20-50 pixels)
-        "apply_morphology": False,  # Connect fragmented mitochondria
-    }
 
     # Number of parallel jobs - adjust based on your system
     # -1 means use all available cores, or set to a specific number
     n_jobs = -1
 
     # Collect all (well_id, pos_id) pairs to process
-    with open_ome_zarr(input_path, mode="r") as input_zarr:
+    with open_ome_zarr(segmentations_zarr, mode="r") as input_zarr:
         positions_to_process = []
         for well_id, well_data in input_zarr.wells():
             for pos_id, pos_data in well_data.positions():
@@ -188,11 +190,9 @@ if __name__ == "__main__":
         delayed(process_position)(
             well_id=well_id,
             pos_id=pos_id,
-            input_path=input_path,
+            segmentations_zarr=segmentations_zarr,
             nuclear_labels_path=nuclear_labels_path,
-            organelle_channel=organelle_channel,
             patch_size=PATCH_SIZE,
-            frangi_params=frangi_params,
         )
         for well_id, pos_id in positions_to_process
     )
@@ -205,3 +205,5 @@ if __name__ == "__main__":
         output_csv.parent.mkdir(parents=True, exist_ok=True)
         final_df.to_csv(output_csv, index=False)
         print(f"Saved {len(final_df)} features to {output_csv}")
+
+# %%

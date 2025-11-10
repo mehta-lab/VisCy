@@ -475,7 +475,9 @@ class CytoDtw:
                 reference_type=reference_type,
             )
 
-            extracted_patterns[f"example_{i}"] = {
+            extracted_patterns[
+                f"example_{example['fov_name']}_{example['track_id']}"
+            ] = {
                 "pattern": pattern,
                 "annotations": example.get(annotations_name, None),
                 "weight": example.get("weight", 1.0),
