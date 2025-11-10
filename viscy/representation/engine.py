@@ -443,7 +443,7 @@ class BetaVaeModule(LightningModule):
             ):
                 positive_input = positive_sample.squeeze(2)
 
-            positive_output = self.model.encoder(positive_input)
+            positive_output = self.model(positive_input)
             z_positive = positive_output.z
 
             temporal_loss = F.mse_loss(z, z_positive, reduction="mean")
