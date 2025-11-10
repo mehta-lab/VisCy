@@ -49,6 +49,13 @@ class BetaVaeLogger:
             lambda: getattr(lightning_module, "beta", 1.0),
         )()
 
+        # Get current temporal_weight (scheduled value, if available)
+        temporal_weight = getattr(
+            lightning_module,
+            "_get_current_temporal_weight",
+            lambda: 0.0,
+        )()
+
         # Check for explosion and NaN/Inf
         grad_diagnostics = self._compute_gradient_diagnostics(lightning_module)
         nan_inf_diagnostics = self._check_nan_inf(recon_x, x, z)
@@ -58,6 +65,7 @@ class BetaVaeLogger:
             f"loss/{stage}/reconstruction": recon_loss,
             f"loss/{stage}/kl": kl_loss,
             f"beta/{stage}": beta,
+            f"temporal_weight/{stage}": temporal_weight,
         }
 
         # Add diagnostic metrics
