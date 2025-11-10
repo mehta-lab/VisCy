@@ -556,8 +556,8 @@ class BetaVaeModule(LightningModule):
             reconstructions = []
 
             for sample in samples_list:
-                orig = sample["original"][:, :, mid_z].numpy()
-                recon = sample["reconstruction"][:, :, mid_z].numpy()
+                orig = sample["original"][:, :, mid_z].float().numpy()
+                recon = sample["reconstruction"][:, :, mid_z].float().numpy()
 
                 originals.extend([orig[i] for i in range(orig.shape[0])])
                 reconstructions.extend([recon[i] for i in range(recon.shape[0])])
