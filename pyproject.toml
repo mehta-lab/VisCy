@@ -39,6 +39,7 @@ dependencies = [
 optional-dependencies.dev = [
   "hypothesis",
   "onnxruntime",
+  "pre-commit",
   "pytest",
   "pytest-cov",
   "ruff",
