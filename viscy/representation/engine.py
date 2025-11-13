@@ -376,7 +376,11 @@ class BetaVaeModule(LightningModule):
         return self.temporal_weight_scheduler.get_value(self.current_epoch)
 
     def forward(self, x: Tensor, positive_sample: Tensor | None = None) -> dict:
-        """Forward pass through Beta-VAE."""
+        """Forward pass through Beta-VAE.
+
+        NOTE: When positive_sample is provided, computes reconstruction and KL loss for both
+        anchor and positive images to ensure symmetric training similar to DynaMorph.
+        """
 
         original_shape = x.shape
         is_monai_2d = (
@@ -433,6 +437,9 @@ class BetaVaeModule(LightningModule):
         kl_loss = torch.mean(kl_loss)
 
         temporal_loss = torch.tensor(0.0, device=x.device)
+        recon_loss_positive = torch.tensor(0.0, device=x.device)
+        kl_loss_positive = torch.tensor(0.0, device=x.device)
+
         if positive_sample is not None:
             positive_original_shape = positive_sample.shape
             positive_input = positive_sample
@@ -443,14 +450,68 @@ class BetaVaeModule(LightningModule):
             ):
                 positive_input = positive_sample.squeeze(2)
 
+            # Forward pass for positive sample
             positive_output = self.model(positive_input)
             z_positive = positive_output.z
+            recon_x_positive = positive_output.recon_x
+            mu_positive = positive_output.mean
+            logvar_positive = positive_output.logvar
 
+            if (
+                is_monai_2d
+                and len(positive_original_shape) == 5
+                and positive_original_shape[2] == 1
+            ):
+                recon_x_positive = recon_x_positive.unsqueeze(2)
+
+            # Compute reconstruction loss for positive
+            positive_original = (
+                positive_input
+                if not (
+                    is_monai_2d
+                    and len(positive_original_shape) == 5
+                    and positive_original_shape[2] == 1
+                )
+                else positive_input.unsqueeze(2)
+            )
+            recon_loss_positive = self.reconstruction_loss_fn(
+                recon_x_positive, positive_original
+            )
+            if isinstance(self.reconstruction_loss_fn, nn.MSELoss):
+                if (
+                    hasattr(self.reconstruction_loss_fn, "reduction")
+                    and self.reconstruction_loss_fn.reduction == "sum"
+                ):
+                    recon_loss_positive = recon_loss_positive / batch_size
+                elif (
+                    hasattr(self.reconstruction_loss_fn, "reduction")
+                    and self.reconstruction_loss_fn.reduction == "mean"
+                ):
+                    num_elements_per_image = positive_original[0].numel()
+                    recon_loss_positive = recon_loss_positive * num_elements_per_image
+
+            # Compute KL loss for positive
+            kl_loss_positive = -0.5 * torch.sum(
+                1
+                + torch.clamp(
+                    logvar_positive, self._logvar_minmax[0], self._logvar_minmax[1]
+                )
+                - mu_positive.pow(2)
+                - logvar_positive.exp(),
+                dim=1,
+            )
+            kl_loss_positive = torch.mean(kl_loss_positive)
+
+            # Temporal matching loss between anchor and positive latents
             temporal_loss = F.mse_loss(z, z_positive, reduction="mean")
+
             current_temporal_weight = self._get_current_temporal_weight()
+
+            # Total loss includes reconstruction and KL for both anchor and positive
             total_loss = (
                 recon_loss
-                + current_beta * kl_loss
+                + recon_loss_positive
+                + current_beta * (kl_loss + kl_loss_positive)
                 + current_temporal_weight * temporal_loss
             )
         else:
@@ -463,6 +524,8 @@ class BetaVaeModule(LightningModule):
             "logvar": logvar,
             "recon_loss": recon_loss,
             "kl_loss": kl_loss,
+            "recon_loss_positive": recon_loss_positive,
+            "kl_loss_positive": kl_loss_positive,
             "temporal_loss": temporal_loss,
             "total_loss": total_loss,
         }
@@ -480,11 +543,14 @@ class BetaVaeModule(LightningModule):
             lightning_module=self, model_output=model_output, batch=batch, stage="train"
         )
 
-        # Log temporal loss separately if active (not in vae_logger)
+        # Log temporal loss and positive sample losses if active
         if positive is not None:
-            self.log(
-                "loss/temporal_train",
-                model_output["temporal_loss"],
+            self.log_dict(
+                {
+                    "loss/temporal_train": model_output["temporal_loss"],
+                    "loss/recon_positive_train": model_output["recon_loss_positive"],
+                    "loss/kl_positive_train": model_output["kl_loss_positive"],
+                },
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,
@@ -509,11 +575,14 @@ class BetaVaeModule(LightningModule):
             lightning_module=self, model_output=model_output, batch=batch, stage="val"
         )
 
-        # Log temporal loss if active
+        # Log temporal loss and positive sample losses if active
         if positive is not None:
-            self.log(
-                "loss/temporal_val",
-                model_output["temporal_loss"],
+            self.log_dict(
+                {
+                    "loss/temporal_val": model_output["temporal_loss"],
+                    "loss/recon_positive_val": model_output["recon_loss_positive"],
+                    "loss/kl_positive_val": model_output["kl_loss_positive"],
+                },
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,
