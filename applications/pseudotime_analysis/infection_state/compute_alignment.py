@@ -14,6 +14,8 @@ from sklearn.preprocessing import StandardScaler
 from viscy.data.triplet import TripletDataset
 from viscy.representation.pseudotime import (
     CytoDtw,
+    compute_hpi_from_absolute_time,
+    create_synchronized_warped_sequences,
     get_aligned_image_sequences,
 )
 
@@ -45,6 +47,8 @@ TODO
 
 # Configuration
 NAPARI = True
+TIME_INTERVAL_MINUTES = 30  # Frame sampling interval in minutes
+
 if NAPARI:
     import os
 
@@ -281,7 +285,7 @@ patterns = []
 pattern_info = []
 REFERENCE_TYPE = "features"
 DTW_CONSTRAINT_TYPE = "sakoe_chiba"
-DTW_BAND_WIDTH_RATIO = 0.3
+DTW_BAND_WIDTH_RATIO = 0.4
 
 for i, example in enumerate(aligning_annotations):
     pattern = cytodtw.get_reference_pattern(
@@ -449,7 +453,10 @@ else:
 # Prototype video alignment based on DTW matches
 z_range = slice(0, 1)
 initial_yx_patch_size = (192, 192)
-top_matches = alignment_df.head(top_n)
+# Top matches should be unique fov_name and lineage_id combinations
+top_matches = alignment_df.drop_duplicates(subset=["fov_name", "lineage_id"]).head(
+    top_n
+)
 
 positions = []
 tracks_tables = []
@@ -649,155 +656,193 @@ if dataset is not None:
         df=filtered_alignment_df,
         alignment_name=ALIGN_TYPE,
         image_loader_fn=load_images_from_triplet_dataset,
-        max_lineages=30,
+        max_lineages=10,
     )
 else:
     print("Skipping image sequence creation - no valid dataset available")
     concatenated_image_sequences = {}
 
-# Load concatenated sequences into napari using ABSOLUTE TIME coordinates
+# Load concatenated sequences into napari using WARPED SYNCHRONIZED coordinates
 if NAPARI and dataset is not None and len(concatenated_image_sequences) > 0:
     import numpy as np
 
-    # Configuration: crop to absolute time bounds [0, max_time] to align all cells
-    CROP_TO_ABSOLUTE_BOUNDS = True
+    logger.info("\n" + "=" * 70)
+    logger.info("Creating synchronized warped sequences for napari visualization")
+    logger.info("=" * 70)
 
-    # First, find the global time range across all cells
-    all_timepoints = set()
-    for lineage_id, seq_data in concatenated_image_sequences.items():
-        fov_name = seq_data["metadata"]["fov_name"]
-        track_ids = seq_data["metadata"]["track_ids"]
+    # Create synchronized warped sequences with HPI metadata
+    warped_result = create_synchronized_warped_sequences(
+        concatenated_image_sequences=concatenated_image_sequences,
+        alignment_df=filtered_alignment_df,
+        alignment_name=ALIGN_TYPE,
+        consensus_infection_idx=consensus_infection_idx,
+        time_interval_minutes=TIME_INTERVAL_MINUTES,
+    )
 
-        # Get all timepoints for this lineage from alignment_df
-        lineage_rows = filtered_alignment_df[
-            (filtered_alignment_df["fov_name"] == fov_name)
-            & (filtered_alignment_df["track_id"].isin(track_ids))
-        ]
-        all_timepoints.update(lineage_rows["t"].unique())
+    warped_sequences = warped_result["warped_sequences"]
+    alignment_shifts = warped_result["alignment_shifts"]
+    warped_metadata = warped_result["warped_metadata"]
 
-    if CROP_TO_ABSOLUTE_BOUNDS:
-        # Crop to absolute bounds: [0, max_absolute_time]
-        min_time = 0
-        max_time = filtered_alignment_df["t"].max()
+    # Log HPI mapping information
+    logger.info("\n" + "=" * 70)
+    logger.info("Alignment Shifts and HPI Metadata")
+    logger.info("=" * 70)
+    for lineage_id, shift_info in alignment_shifts.items():
+        logger.info(f"\nLineage {lineage_id}:")
         logger.info(
-            f"Using ABSOLUTE time coordinates: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+            f"  FOV: {shift_info['fov_name']}, tracks: {shift_info['track_ids']}"
         )
         logger.info(
-            "All cells will be displayed in their original absolute time coordinates"
+            f"  first_aligned_t (pseudotime 0): {shift_info['first_aligned_t']}"
         )
-    else:
-        # Use the natural range across all cells
-        min_time = min(all_timepoints)
-        max_time = max(all_timepoints)
         logger.info(
-            f"Natural time range: t={min_time} to t={max_time} ({int(max_time - min_time + 1)} frames)"
+            f"  infection_t_abs (biological event): {shift_info['infection_t_abs']}"
         )
-
-    time_range = int(max_time - min_time + 1)
-
-    # Load into napari using absolute timepoints
-    for lineage_id, seq_data in concatenated_image_sequences.items():
-        meta = seq_data["metadata"]
-        fov_name = meta["fov_name"]
-        track_ids = meta["track_ids"]
-        aligned_length = seq_data["aligned_length"]
-
-        # Get absolute timepoints for this lineage
-        lineage_rows = filtered_alignment_df[
-            (filtered_alignment_df["fov_name"] == fov_name)
-            & (filtered_alignment_df["track_id"].isin(track_ids))
-        ].sort_values("t")
-
-        if len(lineage_rows) == 0:
-            continue
-
-        # Load images at their absolute timepoints
-        time_to_image = load_images_from_triplet_dataset(fov_name, track_ids)
-
-        # DEBUG: Print absolute timepoints
-        actual_timepoints = sorted(time_to_image.keys())
-        aligned_rows = lineage_rows[lineage_rows[f"dtw_{ALIGN_TYPE}_aligned"]]
-        aligned_timepoints = sorted(aligned_rows["t"].unique())
-
-        logger.info(f"Lineage {lineage_id} ({fov_name}, {track_ids}):")
-        logger.info(f"  Total frames: {len(actual_timepoints)}")
+        logger.info(f"  shift (t_viz = t_abs + shift): {shift_info['shift']}")
         logger.info(
-            f"  Absolute time range: t={min(actual_timepoints)} to t={max(actual_timepoints)}"
+            f"  infection_offset_in_viz: {shift_info['infection_offset_in_viz']} frames from pseudotime 0"
         )
-        logger.info(f"  Aligned timepoints (first 10): {aligned_timepoints[:10]}")
-        logger.info(f"  Aligned region length: {len(aligned_timepoints)} frames")
 
-        # Create a sparse array indexed by absolute time
-        # Initialize with None for all timepoints in global range
-        time_series_list = [None] * time_range
+        # Example HPI calculation
+        example_t = shift_info["infection_t_abs"] + 5
+        example_hpi = compute_hpi_from_absolute_time(
+            t_abs=example_t,
+            alignment_shifts=alignment_shifts,
+            lineage_id=lineage_id,
+            time_interval_minutes=TIME_INTERVAL_MINUTES,
+        )
+        logger.info(
+            f"  Example: t_abs={example_t} → HPI={example_hpi:.2f} hours post infection"
+        )
 
-        for _, row in lineage_rows.iterrows():
-            t_abs = int(row["t"])
-            t_idx = int(t_abs - min_time)  # Convert to 0-indexed
+    # Load into napari using warped coordinates
+    logger.info("\n" + "=" * 70)
+    logger.info("Loading warped sequences into napari")
+    logger.info("=" * 70)
 
-            if t_abs in time_to_image:
-                time_series_list[t_idx] = time_to_image[t_abs]
+    aligned_start_idx = warped_metadata["aligned_region_start_idx"]
+    aligned_end_idx = warped_metadata["aligned_region_end_idx"]
 
-        # Fill gaps with nearest neighbor (for visualization continuity)
-        valid_indices = [i for i, img in enumerate(time_series_list) if img is not None]
+    logger.info(
+        f"Warped time structure: {warped_metadata['total_warped_length']} total frames"
+    )
+    logger.info(f"  Frames [0 to {aligned_start_idx - 1}]: Before aligned region")
+    logger.info(
+        f"  Frames [{aligned_start_idx} to {aligned_end_idx - 1}]: ALIGNED REGION (synchronized!)"
+    )
+    logger.info(f"  Frames [{aligned_end_idx} to end]: After aligned region")
+    logger.info("  Black frames = zero-padding (cell has no data at this warped time)")
 
-        if len(valid_indices) == 0:
-            continue
+    for lineage_id, warped_time_series in warped_sequences.items():
+        meta = concatenated_image_sequences[lineage_id]["metadata"]
+        n_channels = warped_time_series.shape[1]
 
-        for i in range(time_range):
-            if time_series_list[i] is None and len(valid_indices) > 0:
-                closest_idx = min(valid_indices, key=lambda x: abs(x - i))
-                time_series_list[i] = time_series_list[closest_idx]
+        logger.info(
+            f"Lineage {lineage_id}: {warped_time_series.shape[0]} warped frames, {n_channels} channels"
+        )
 
-        # Stack into time series
-        image_stack = []
-        for img_sample in time_series_list:
-            if img_sample is not None:
-                img_tensor = img_sample["anchor"]
-                img_np = img_tensor.cpu().numpy()
-                image_stack.append(img_np)
+        # Set up colormap based on number of channels
+        # FIXME: This is hardcoded for specific datasets - improve logic as needed
+        if n_channels == 2:
+            colormap = ["green", "magenta"]
+        elif n_channels == 3:
+            colormap = ["gray", "green", "magenta"]
+        else:
+            colormap = ["gray"] * n_channels  # Default fallback
 
-        if len(image_stack) > 0:
-            time_series = np.stack(image_stack, axis=0)
-            n_channels = time_series.shape[1]
+        # Add each channel as a separate layer in napari
+        for channel_idx in range(n_channels):
+            channel_data = warped_time_series[:, channel_idx, :, :, :]
+            channel_name = (
+                processing_channels[channel_idx]
+                if channel_idx < len(processing_channels)
+                else f"ch{channel_idx}"
+            )
+            # Use WARPED prefix to indicate warped/synchronized time coordinates
+            layer_name = f"WARPED_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_{channel_name}"
 
-            logger.info(
-                f"Processed lineage {lineage_id} with {n_channels} channels, shape {time_series.shape}"
+            viewer.add_image(
+                channel_data,
+                name=layer_name,
+                contrast_limits=(channel_data.min(), channel_data.max()),
+                colormap=colormap[channel_idx],
+                blending="additive",
+            )
+            logger.debug(f"Added {channel_name} channel for lineage {lineage_id}")
+
+        # Create shapes layer with circle markers for aligned region
+        img_height = warped_time_series.shape[3]  # y dimension
+        img_width = warped_time_series.shape[4]  # x dimension
+        circle_center_y = img_height * 0.1  # 10% from top
+        circle_center_x = img_width * 0.1  # 10% from left
+        circle_radius = min(img_height, img_width) * 0.05  # 5% of smaller dimension
+
+        # Create circles for each aligned frame in warped time
+        shapes_data_warped = []
+        for frame_idx in range(aligned_start_idx, aligned_end_idx):
+            # Ellipse defined by 4 corners of bounding box: [t, z, y, x]
+            ellipse = np.array(
+                [
+                    [
+                        frame_idx,
+                        0,
+                        circle_center_y - circle_radius,
+                        circle_center_x - circle_radius,
+                    ],  # top-left
+                    [
+                        frame_idx,
+                        0,
+                        circle_center_y - circle_radius,
+                        circle_center_x + circle_radius,
+                    ],  # top-right
+                    [
+                        frame_idx,
+                        0,
+                        circle_center_y + circle_radius,
+                        circle_center_x + circle_radius,
+                    ],  # bottom-right
+                    [
+                        frame_idx,
+                        0,
+                        circle_center_y + circle_radius,
+                        circle_center_x - circle_radius,
+                    ],  # bottom-left
+                ]
+            )
+            shapes_data_warped.append(ellipse)
+
+        if len(shapes_data_warped) > 0:
+            # Add shapes layer with cyan circles marking aligned frames
+            viewer.add_shapes(
+                shapes_data_warped,
+                shape_type="ellipse",
+                edge_width=3,
+                edge_color="cyan",
+                face_color="transparent",
+                name=f"WARPED_ALIGNED_MARKER_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}",
+                ndim=4,
             )
             logger.info(
-                f"  Time series covers absolute time [{min_time}, {max_time}] ({len(image_stack)} frames)"
+                f"Added alignment marker for lineage {lineage_id} "
+                f"(frames {aligned_start_idx} to {aligned_end_idx - 1} marked with cyan circles)"
             )
 
-            # Set up colormap based on number of channels
-            # FIXME: This is hardcoded for specific datasets - improve logic as needed
-            if n_channels == 2:
-                colormap = ["green", "magenta"]
-            elif n_channels == 3:
-                colormap = ["gray", "green", "magenta"]
-            else:
-                colormap = ["gray"] * n_channels  # Default fallback
-
-            # Add each channel as a separate layer in napari
-            for channel_idx in range(n_channels):
-                channel_data = time_series[:, channel_idx, :, :, :]
-                channel_name = (
-                    processing_channels[channel_idx]
-                    if channel_idx < len(processing_channels)
-                    else f"ch{channel_idx}"
-                )
-                # Use ABSTIME prefix to indicate absolute time coordinates
-                layer_name = f"ABSTIME_track_id_{meta['track_ids'][0]}_FOV_{meta['fov_name']}_dist_{meta['dtw_distance']:.3f}_{channel_name}"
-
-                viewer.add_image(
-                    channel_data,
-                    name=layer_name,
-                    contrast_limits=(channel_data.min(), channel_data.max()),
-                    colormap=colormap[channel_idx],
-                    blending="additive",
-                )
-                logger.debug(
-                    f"Added {channel_name} channel for lineage {lineage_id} with shape {channel_data.shape}"
-                )
+    logger.info("\n" + "=" * 70)
+    logger.info("Napari visualization complete!")
+    logger.info("=" * 70)
+    logger.info("All cells are synchronized:")
+    logger.info(
+        f"  - Frame {aligned_start_idx} = START of aligned region (pseudotime 0)"
+    )
+    logger.info(
+        f"  - Frame {aligned_start_idx + consensus_infection_idx} = INFECTION EVENT"
+    )
+    logger.info(f"  - Frame {aligned_end_idx - 1} = END of aligned region")
+    logger.info("\nVisual indicators:")
+    logger.info("  - Cyan circles in top-left corner = ALIGNED frames (synchronized!)")
+    logger.info("  - Black frames = zero-padding (cell has no data at that time)")
+    logger.info("\nScrub through frames to see synchronized biological progression!")
+    logger.info("=" * 70)
 # %%
 if segmentation_features_path is not None or Path(segmentation_features_path).exists():
     # Get the segmentation based features and compute per-cell aggregates
@@ -911,7 +956,7 @@ output_path = output_root / f"master_features_{ALIGN_TYPE}_{ALIGNMENT_CHANNEL}.c
 master_features_df.to_csv(output_path, index=False)
 logger.info(f"Saved master features dataframe to {output_path}")
 
-# Save alignment metadata
+# Save alignment metadata (including warped visualization metadata if available)
 metadata = {
     "consensus_pattern": consensus_lineage,
     "consensus_annotations": consensus_annotations,
@@ -922,7 +967,15 @@ metadata = {
     "aligned_region_bounds": None,  # Will be computed in visualization script
     "alignment_type": ALIGN_TYPE,
     "alignment_channel": ALIGNMENT_CHANNEL,
+    "time_interval_minutes": TIME_INTERVAL_MINUTES,  # For HPI conversion
 }
+
+# Add warped visualization metadata if napari visualization was run
+if NAPARI and "alignment_shifts" in locals():
+    metadata["alignment_shifts"] = alignment_shifts
+    metadata["warped_metadata"] = warped_metadata
+    logger.info("Added warped visualization metadata to save file")
+
 metadata_path = output_root / f"alignment_metadata_{ALIGN_TYPE}_{ALIGNMENT_CHANNEL}.pkl"
 with open(metadata_path, "wb") as f:
     pickle.dump(metadata, f)

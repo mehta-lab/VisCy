@@ -790,6 +790,7 @@ class CytoDtw:
                 unaligned_after_rows = pd.DataFrame()
 
             # Create consensus-length aligned portion using mapping
+            # Make dict to map pseudotime to real time
             aligned_portion = {}
             for _, row in aligned_rows.iterrows():
                 consensus_idx = row[mapping_col]
@@ -2128,6 +2129,7 @@ def get_aligned_image_sequences(
         consensus_length = seq_data["metadata"]["consensus_length"]
         aligned_images = [None] * consensus_length
 
+        # pseudotime-indexed image array for the aligned portion
         for i in range(consensus_length):
             if i in aligned_mapping:
                 timepoint = aligned_mapping[i]["t"]
@@ -2141,6 +2143,7 @@ def get_aligned_image_sequences(
                         )
                         aligned_images[i] = time_to_image[closest_time]
 
+        # Gap filling for any missing aligned images
         for i in range(consensus_length):
             if aligned_images[i] is None:
                 available_indices = [
@@ -2207,6 +2210,323 @@ def get_aligned_image_sequences(
         f"Created image sequences for {len(concatenated_image_sequences)} lineages"
     )
     return concatenated_image_sequences
+
+
+def create_synchronized_warped_sequences(
+    concatenated_image_sequences: dict,
+    alignment_df: pd.DataFrame,
+    alignment_name: str,
+    consensus_infection_idx: int,
+    time_interval_minutes: float = 30,
+) -> dict:
+    """
+    Create synchronized warped sequences with zero-padding and HPI metadata tracking.
+
+    This function takes concatenated image sequences (from get_aligned_image_sequences)
+    and creates synchronized warped sequences where all cells' aligned regions start
+    at the same frame index. It also computes metadata for mapping to Hours Post Infection (HPI).
+
+    Parameters
+    ----------
+    concatenated_image_sequences : dict
+        Output from get_aligned_image_sequences(), mapping lineage_id to:
+        - 'concatenated_images': List of [before + aligned + after] images
+        - 'unaligned_before_length': Number of frames before aligned region
+        - 'aligned_length': Number of aligned frames (consensus_length)
+        - 'unaligned_after_length': Number of frames after aligned region
+        - 'metadata': Lineage metadata (fov_name, track_ids, etc.)
+    alignment_df : pd.DataFrame
+        Enhanced DataFrame with DTW alignment columns including:
+        - 'fov_name', 'track_id', 't' (absolute time)
+        - f'dtw_{alignment_name}_aligned': Boolean marking aligned frames
+        - f'dtw_{alignment_name}_consensus_mapping': Pseudotime index (0 to consensus_length-1)
+    alignment_name : str
+        Name of alignment (e.g., "cell_division", "infection_state")
+    consensus_infection_idx : int
+        Pseudotime index where biological event occurs (e.g., infection starts)
+        This is used to map the event to absolute time for each cell.
+    time_interval_minutes : float, optional
+        Time between frames in minutes (default: 30)
+
+    Returns
+    -------
+    dict
+        Dictionary containing:
+        - 'warped_sequences': dict mapping lineage_id to synchronized numpy arrays with shape
+          (time, channels, z, y, x). All arrays have the same time dimension.
+        - 'alignment_shifts': dict mapping lineage_id to:
+            - 'fov_name': FOV name
+            - 'track_ids': List of track IDs
+            - 'first_aligned_t': Absolute time where pseudotime 0 starts
+            - 'infection_t_abs': Absolute time where biological event occurs
+            - 'shift': Value to add to absolute time for pseudotime-anchored coordinates
+            - 'infection_offset_in_viz': Frame offset where event occurs in warped coordinates
+        - 'warped_metadata': dict with:
+            - 'max_unaligned_before': Maximum frames before aligned region across all cells
+            - 'max_unaligned_after': Maximum frames after aligned region across all cells
+            - 'consensus_aligned_length': Length of aligned region (same for all cells)
+            - 'time_interval_minutes': Time interval for HPI conversion
+
+    Notes
+    -----
+    Coordinate Systems:
+    1. Absolute time (t_abs): Original experimental timepoints
+    2. Pseudotime (consensus_idx): DTW-aligned indices (0 to consensus_length-1)
+    3. Visualization time (t_viz): Pseudotime-anchored coordinates where t_viz=0 at pseudotime 0
+    4. Warped frame index: Synchronized frame indices in output arrays
+    5. Hours Post Infection (HPI): Biological time relative to event
+
+    Conversions:
+    - t_viz = t_abs + shift (where shift = -first_aligned_t)
+    - HPI = (t_abs - infection_t_abs) * (time_interval_minutes / 60)
+    - warped_frame_idx = max_unaligned_before + (varies by cell's history)
+
+    Warped Time Structure:
+    - Frames [0 to max_unaligned_before-1]: Before aligned region (padded with zeros where needed)
+    - Frames [max_unaligned_before to max_unaligned_before+consensus_length-1]: ALIGNED region (synchronized!)
+    - Frames [max_unaligned_before+consensus_length to end]: After aligned region (padded where needed)
+
+    Examples
+    --------
+    >>> result = create_synchronized_warped_sequences(
+    ...     concatenated_image_sequences,
+    ...     alignment_df,
+    ...     alignment_name="infection_state",
+    ...     consensus_infection_idx=5,
+    ...     time_interval_minutes=30
+    ... )
+    >>> warped_arrays = result['warped_sequences']
+    >>> shifts = result['alignment_shifts']
+    >>>
+    >>> # Get Hours Post Infection for a specific cell at absolute time t=25
+    >>> lineage_id = 1
+    >>> t_abs = 25
+    >>> infection_t_abs = shifts[lineage_id]['infection_t_abs']
+    >>> hpi = (t_abs - infection_t_abs) * (30 / 60)  # Convert to hours
+    """
+    import numpy as np
+
+    if len(concatenated_image_sequences) == 0:
+        _logger.warning("No concatenated sequences provided")
+        return {
+            "warped_sequences": {},
+            "alignment_shifts": {},
+            "warped_metadata": {},
+        }
+
+    # Step 1: Find maximum unaligned lengths across all cells
+    max_unaligned_before = 0
+    max_unaligned_after = 0
+    consensus_aligned_length = None
+
+    for lineage_id, seq_data in concatenated_image_sequences.items():
+        max_unaligned_before = max(
+            max_unaligned_before, seq_data["unaligned_before_length"]
+        )
+        max_unaligned_after = max(
+            max_unaligned_after, seq_data["unaligned_after_length"]
+        )
+        if consensus_aligned_length is None:
+            consensus_aligned_length = seq_data["aligned_length"]
+
+    _logger.info(f"Consensus aligned length: {consensus_aligned_length}")
+    _logger.info(f"Max unaligned before across all cells: {max_unaligned_before}")
+    _logger.info(f"Max unaligned after across all cells: {max_unaligned_after}")
+
+    total_warped_length = (
+        max_unaligned_before + consensus_aligned_length + max_unaligned_after
+    )
+    _logger.info(f"Total synchronized warped time length: {total_warped_length}")
+
+    # Prepare output dictionaries
+    warped_sequences = {}
+    alignment_shifts = {}
+
+    # Column names for alignment
+    aligned_col = f"dtw_{alignment_name}_aligned"
+    consensus_mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+
+    # Step 2: Process each lineage
+    for lineage_id, seq_data in concatenated_image_sequences.items():
+        meta = seq_data["metadata"]
+        fov_name = meta["fov_name"]
+        track_ids = meta["track_ids"]
+        concatenated_images = seq_data["concatenated_images"]
+
+        unaligned_before_length = seq_data["unaligned_before_length"]
+        seq_data["aligned_length"]
+        unaligned_after_length = seq_data["unaligned_after_length"]
+
+        # Extract images from concatenated sequence
+        image_stack = []
+        for img_sample in concatenated_images:
+            if img_sample is not None:
+                img_tensor = img_sample["anchor"]
+                img_np = img_tensor.cpu().numpy()
+                image_stack.append(img_np)
+
+        if len(image_stack) == 0:
+            _logger.warning(f"No images found for lineage {lineage_id}")
+            continue
+
+        # Stack the raw concatenated sequence
+        concatenated_stack = np.stack(image_stack, axis=0)
+
+        # Compute padding needed for synchronization
+        pad_before = max_unaligned_before - unaligned_before_length
+        pad_after = max_unaligned_after - unaligned_after_length
+
+        # Create zero frames for padding (same shape as images)
+        dummy_frame = np.zeros_like(concatenated_stack[0])
+
+        # Pad before and after
+        padded_before = [dummy_frame] * pad_before
+        padded_after = [dummy_frame] * pad_after
+
+        # Create synchronized sequence
+        synchronized_frames = padded_before + list(concatenated_stack) + padded_after
+        warped_time_series = np.stack(synchronized_frames, axis=0)
+
+        warped_sequences[lineage_id] = warped_time_series
+
+        # Step 3: Compute alignment shifts and HPI metadata
+        # Get alignment information for this lineage from alignment_df
+        lineage_rows = alignment_df[
+            (alignment_df["fov_name"] == fov_name)
+            & (alignment_df["track_id"].isin(track_ids))
+        ].copy()
+
+        if len(lineage_rows) == 0:
+            _logger.warning(
+                f"No alignment data found for lineage {lineage_id} (FOV: {fov_name}, tracks: {track_ids})"
+            )
+            continue
+
+        # Find aligned rows (where DTW matched)
+        aligned_rows = lineage_rows[lineage_rows[aligned_col]].copy()
+
+        if len(aligned_rows) == 0:
+            _logger.warning(f"No aligned frames found for lineage {lineage_id}")
+            continue
+
+        # Find first_aligned_t: absolute time where pseudotime 0 starts
+        # This is the minimum absolute time among frames mapped to consensus_idx == 0
+        pseudotime_zero_rows = aligned_rows[
+            aligned_rows[consensus_mapping_col] == 0
+        ].copy()
+
+        if len(pseudotime_zero_rows) > 0:
+            first_aligned_t = pseudotime_zero_rows["t"].min()
+        else:
+            # Fallback: use minimum aligned time
+            first_aligned_t = aligned_rows["t"].min()
+            _logger.warning(
+                f"No consensus_idx=0 found for lineage {lineage_id}, using min aligned time"
+            )
+
+        # Find infection_t_abs: absolute time where biological event occurs
+        infection_rows = aligned_rows[
+            aligned_rows[consensus_mapping_col] == consensus_infection_idx
+        ].copy()
+
+        if len(infection_rows) > 0:
+            infection_t_abs = infection_rows["t"].iloc[0]
+        else:
+            # Fallback: estimate based on first_aligned_t
+            infection_t_abs = first_aligned_t + consensus_infection_idx
+            _logger.warning(
+                f"No consensus_idx={consensus_infection_idx} found for lineage {lineage_id}, estimating infection time"
+            )
+
+        # Compute shift for pseudotime-anchored coordinates
+        shift = -first_aligned_t
+
+        # Compute infection offset in visualization coordinates
+        infection_offset_in_viz = infection_t_abs - first_aligned_t
+
+        # Store shift metadata
+        alignment_shifts[lineage_id] = {
+            "fov_name": fov_name,
+            "track_ids": track_ids,
+            "first_aligned_t": float(first_aligned_t),
+            "infection_t_abs": float(infection_t_abs),
+            "shift": float(shift),
+            "infection_offset_in_viz": float(infection_offset_in_viz),
+        }
+
+        _logger.debug(
+            f"Lineage {lineage_id}: first_aligned_t={first_aligned_t}, "
+            f"infection_t_abs={infection_t_abs}, shift={shift}, "
+            f"warped_shape={warped_time_series.shape}"
+        )
+
+    # Step 4: Create metadata summary
+    warped_metadata = {
+        "max_unaligned_before": int(max_unaligned_before),
+        "max_unaligned_after": int(max_unaligned_after),
+        "consensus_aligned_length": int(consensus_aligned_length),
+        "time_interval_minutes": float(time_interval_minutes),
+        "total_warped_length": int(total_warped_length),
+        "aligned_region_start_idx": int(max_unaligned_before),
+        "aligned_region_end_idx": int(max_unaligned_before + consensus_aligned_length),
+    }
+
+    _logger.info(
+        f"Created synchronized warped sequences for {len(warped_sequences)} lineages"
+    )
+    _logger.info(
+        f"Aligned region in warped coordinates: frames [{warped_metadata['aligned_region_start_idx']} to {warped_metadata['aligned_region_end_idx'] - 1}]"
+    )
+
+    return {
+        "warped_sequences": warped_sequences,
+        "alignment_shifts": alignment_shifts,
+        "warped_metadata": warped_metadata,
+    }
+
+
+def compute_hpi_from_absolute_time(
+    t_abs: float,
+    alignment_shifts: dict,
+    lineage_id: int,
+    time_interval_minutes: float = 30,
+) -> float:
+    """
+    Convert absolute time to Hours Post Infection (HPI) for a specific cell.
+
+    Parameters
+    ----------
+    t_abs : float
+        Absolute timepoint from experimental data
+    alignment_shifts : dict
+        Alignment shifts dictionary from create_synchronized_warped_sequences()
+    lineage_id : int
+        Lineage ID to compute HPI for
+    time_interval_minutes : float, optional
+        Time between frames in minutes (default: 30)
+
+    Returns
+    -------
+    float
+        Hours post infection (negative values = before infection)
+
+    Examples
+    --------
+    >>> # Get HPI for cell 1 at absolute time t=25
+    >>> hpi = compute_hpi_from_absolute_time(
+    ...     t_abs=25,
+    ...     alignment_shifts=shifts,
+    ...     lineage_id=1,
+    ...     time_interval_minutes=30
+    ... )
+    >>> print(f"t=25 corresponds to {hpi:.2f} hours post infection")
+    """
+    if lineage_id not in alignment_shifts:
+        raise ValueError(f"Lineage {lineage_id} not found in alignment_shifts")
+
+    infection_t_abs = alignment_shifts[lineage_id]["infection_t_abs"]
+    hpi = (t_abs - infection_t_abs) * (time_interval_minutes / 60.0)
+    return hpi
 
 
 def identify_lineages(
