@@ -73,8 +73,8 @@ perturbations_dict = {
         "features_path_phase": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/phase_160patch_104ckpt_ver3max.zarr",
         "features_path_organelle": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/anndata_predictions/organelle_160patch_104ckpt_ver3max.zarr",
         "computed_features_path": "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/feature_list_all.csv",
-        # "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_mito_features.csv",
-        "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/train_test_mito_seg_2/train_test_mito_seg_2_mito_features_nellie.csv",
+        "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_mito_features.csv",
+        # "segmentation_features_path": "/home/eduardo.hirata/repos/viscy/applications/pseudotime_analysis/organelle_segmentation/output/train_test_mito_seg_2/train_test_mito_seg_2_mito_features_nellie.csv",
     },
 }
 

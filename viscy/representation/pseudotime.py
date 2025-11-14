@@ -878,6 +878,224 @@ class CytoDtw:
 
         return concatenated_sequences
 
+    def add_warped_coordinates(
+        self,
+        df: pd.DataFrame,
+        alignment_name: str = "cell_division",
+    ) -> pd.DataFrame:
+        """
+        Add warped time coordinates to dataframe for synchronized pseudotime analysis.
+
+        This method computes synchronized pseudotime coordinates (warped_t) for all cells
+        aligned with the specified alignment type. Warped time synchronizes all cells so
+        their aligned regions start at the same timepoint, enabling proper aggregation
+        across cells in biological time rather than experimental time.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Master dataframe with DTW alignment columns (dtw_{alignment}_aligned,
+            dtw_{alignment}_consensus_mapping, etc.)
+        alignment_name : str
+            Which alignment to compute warped coordinates for
+            (e.g., "infection_state", "cell_division", "apoptosis")
+
+        Returns
+        -------
+        pd.DataFrame
+            Augmented dataframe with new columns:
+            - dtw_{alignment_name}_warped_t : int
+                Synchronized pseudotime coordinate (0 to total_warped_length-1).
+                All cells' aligned regions start at max_unaligned_before.
+            - dtw_{alignment_name}_warped_offset : int
+                Per-lineage padding offset to synchronize sequences.
+
+        Notes
+        -----
+        Warped time structure:
+        - [0 to max_unaligned_before-1]: Before aligned region (padded/variable per cell)
+        - [max_unaligned_before to max_unaligned_before+consensus_length-1]: ALIGNED region (synchronized)
+        - [max_unaligned_before+consensus_length to end]: After aligned region (padded/variable per cell)
+
+        The metadata is stored in self.consensus_data['warped_metadata'] containing:
+        - max_unaligned_before, max_unaligned_after, consensus_length, total_warped_length
+
+        Examples
+        --------
+        >>> # Add warped coordinates for infection alignment
+        >>> master_df = cytodtw.add_warped_coordinates(
+        ...     master_df,
+        ...     alignment_name="infection_state"
+        ... )
+        >>> # Now aggregate in warped time
+        >>> warped_agg = master_df.groupby('dtw_infection_state_warped_t').median()
+        """
+        import numpy as np
+        import pandas as pd
+
+        aligned_col = f"dtw_{alignment_name}_aligned"
+        mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+
+        # Check if this alignment exists
+        if aligned_col not in df.columns:
+            raise ValueError(
+                f"Alignment '{alignment_name}' not found in dataframe. "
+                f"Expected column '{aligned_col}' not present."
+            )
+
+        # Get consensus length
+        consensus_df = df[df["lineage_id"] == -1].copy()
+        if consensus_df.empty:
+            raise ValueError(
+                "No consensus pattern found in dataframe (lineage_id == -1)"
+            )
+        consensus_length = len(consensus_df)
+
+        # Pass 1: Compute global offsets
+        _logger.info(f"Computing warped coordinates for alignment: {alignment_name}")
+        _logger.info("Pass 1: Computing global offsets across all lineages...")
+
+        max_unaligned_before = 0
+        max_unaligned_after = 0
+        lineage_info = {}
+
+        # Get unique lineages (excluding consensus)
+        lineages = df[df["lineage_id"] != -1]["lineage_id"].unique()
+
+        for lineage_id in lineages:
+            lineage_df = df[df["lineage_id"] == lineage_id].copy().sort_values("t")
+            if lineage_df.empty:
+                continue
+
+            # Get aligned rows
+            aligned_rows = lineage_df[lineage_df[aligned_col].fillna(False)].copy()
+
+            if not aligned_rows.empty:
+                # Find unaligned before and after regions
+                min_aligned_t = aligned_rows["t"].min()
+                max_aligned_t = aligned_rows["t"].max()
+
+                unaligned_before = lineage_df[
+                    (~lineage_df[aligned_col].fillna(False))
+                    & (lineage_df["t"] < min_aligned_t)
+                ]
+                unaligned_after = lineage_df[
+                    (~lineage_df[aligned_col].fillna(False))
+                    & (lineage_df["t"] > max_aligned_t)
+                ]
+
+                unaligned_before_length = len(unaligned_before)
+                unaligned_after_length = len(unaligned_after)
+
+                # Update global maxes
+                max_unaligned_before = max(
+                    max_unaligned_before, unaligned_before_length
+                )
+                max_unaligned_after = max(max_unaligned_after, unaligned_after_length)
+
+                # Store lineage info for pass 2
+                lineage_info[lineage_id] = {
+                    "unaligned_before_length": unaligned_before_length,
+                    "unaligned_after_length": unaligned_after_length,
+                    "min_aligned_t": min_aligned_t,
+                    "max_aligned_t": max_aligned_t,
+                }
+
+        total_warped_length = (
+            max_unaligned_before + consensus_length + max_unaligned_after
+        )
+
+        _logger.info(f"  Max unaligned before: {max_unaligned_before}")
+        _logger.info(f"  Consensus length: {consensus_length}")
+        _logger.info(f"  Max unaligned after: {max_unaligned_after}")
+        _logger.info(f"  Total warped length: {total_warped_length}")
+
+        # Store metadata in consensus_data
+        if self.consensus_data is None:
+            self.consensus_data = {}
+        self.consensus_data["warped_metadata"] = {
+            "max_unaligned_before": max_unaligned_before,
+            "max_unaligned_after": max_unaligned_after,
+            "consensus_length": consensus_length,
+            "total_warped_length": total_warped_length,
+        }
+
+        # Pass 2: Assign warped_t to each row
+        _logger.info("Pass 2: Assigning warped_t coordinates to all rows...")
+
+        warped_t_col = f"dtw_{alignment_name}_warped_t"
+        warped_offset_col = f"dtw_{alignment_name}_warped_offset"
+
+        # Initialize new columns
+        df[warped_t_col] = np.nan
+        df[warped_offset_col] = np.nan
+
+        for lineage_id in lineages:
+            if lineage_id not in lineage_info:
+                continue
+
+            lineage_mask = df["lineage_id"] == lineage_id
+            lineage_df = df[lineage_mask].copy().sort_values("t")
+
+            info = lineage_info[lineage_id]
+            warped_offset = max_unaligned_before - info["unaligned_before_length"]
+
+            # Assign warped_t for each row
+            for idx, row in lineage_df.iterrows():
+                t = row["t"]
+                is_aligned = row[aligned_col]
+
+                if pd.isna(is_aligned):
+                    is_aligned = False
+
+                if is_aligned:
+                    # Aligned region: use consensus mapping
+                    consensus_idx = row[mapping_col]
+                    if not pd.isna(consensus_idx):
+                        warped_t = max_unaligned_before + int(consensus_idx)
+                    else:
+                        warped_t = np.nan
+                elif t < info["min_aligned_t"]:
+                    # Unaligned before
+                    before_rows = lineage_df[
+                        lineage_df["t"] < info["min_aligned_t"]
+                    ].sort_values("t")
+                    position_in_before = before_rows.index.get_loc(idx)
+                    warped_t = warped_offset + position_in_before
+                elif t > info["max_aligned_t"]:
+                    # Unaligned after
+                    after_rows = lineage_df[
+                        lineage_df["t"] > info["max_aligned_t"]
+                    ].sort_values("t")
+                    position_in_after = after_rows.index.get_loc(idx)
+                    warped_t = (
+                        max_unaligned_before + consensus_length + position_in_after
+                    )
+                else:
+                    warped_t = np.nan
+
+                # Assign to dataframe
+                df.loc[idx, warped_t_col] = warped_t
+                df.loc[idx, warped_offset_col] = warped_offset
+
+        # Also add warped_t for consensus rows (maps to itself in aligned region)
+        consensus_mask = df["lineage_id"] == -1
+        for idx, row in df[consensus_mask].iterrows():
+            consensus_idx = (
+                int(row[mapping_col]) if not pd.isna(row[mapping_col]) else row.name
+            )
+            df.loc[idx, warped_t_col] = max_unaligned_before + consensus_idx
+            df.loc[idx, warped_offset_col] = 0
+
+        _logger.info(
+            f"Added warped coordinates: {warped_t_col} and {warped_offset_col}"
+        )
+        _logger.info(
+            f"Warped time range: [0, {total_warped_length - 1}] ({total_warped_length} timepoints)"
+        )
+
+        return df
+
     def plot_global_trends(
         self,
         df: pd.DataFrame,
@@ -1883,6 +2101,25 @@ class CytoDtw:
                 "track_ids": seq_data["metadata"]["track_ids"],
             }
 
+        # Find maximum concatenated length across ALL features and lineages
+        # This ensures all features have the same x-axis length
+        max_concat_length = 0
+        for lineage_data in concatenated_lineages.values():
+            for feat_array in lineage_data["concatenated"].values():
+                max_concat_length = max(max_concat_length, len(feat_array))
+
+        # Pad all feature arrays to max_concat_length to ensure consistent plot lengths
+        for lineage_data in concatenated_lineages.values():
+            for col in feature_columns:
+                current_array = lineage_data["concatenated"][col]
+                if len(current_array) < max_concat_length:
+                    # Pad with NaN at the end
+                    padding_length = max_concat_length - len(current_array)
+                    padded_array = np.concatenate(
+                        [current_array, np.full(padding_length, np.nan)]
+                    )
+                    lineage_data["concatenated"][col] = padded_array
+
         # Compute outlier bounds per feature if requested
         outlier_bounds = {}
         if remove_outliers:
@@ -1920,6 +2157,10 @@ class CytoDtw:
             for i in range(len(concatenated_lineages))
         ]
 
+        # Create a single time axis for all features based on max_concat_length
+        # This ensures all feature plots show the same x-axis range
+        time_axis = np.arange(max_concat_length)
+
         for feat_idx, feat_col in enumerate(feature_columns):
             ax = axes[feat_idx]
 
@@ -1948,7 +2189,6 @@ class CytoDtw:
                 color = colors[lineage_idx]
 
                 concat_values = data["concatenated"][feat_col].copy() + y_offset
-                time_axis = np.arange(len(concat_values))
 
                 track_id_str = ",".join(map(str, data["track_ids"]))
                 ax.plot(
@@ -2027,10 +2267,20 @@ class CytoDtw:
             ax.set_title(
                 f"{feat_col} - Individual lineages (n={len(concatenated_lineages)})"
             )
-            ax.legend(loc="best", fontsize=8, ncol=2)
+            # Only add legend to first subplot - all subplots have same legend
+            if feat_idx == 0:
+                ax.legend(
+                    loc="upper left",
+                    bbox_to_anchor=(1.01, 1),
+                    fontsize=8,
+                    ncol=1,
+                    frameon=True,
+                )
             ax.grid(True, alpha=0.3)
+            # Set explicit x-axis limits to ensure all feature subplots show the same range
+            ax.set_xlim(0, max_concat_length - 1)
 
-        plt.tight_layout()
+        plt.tight_layout(rect=[0, 0, 0.85, 1])  # Leave space for legend on right
         return fig
 
 
