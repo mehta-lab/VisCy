@@ -1744,15 +1744,12 @@ def load_images_from_triplet_dataset(fov_name, track_ids):
     return {img["index"]["t"]: img for img in images}
 
 
-# Filter alignment_df_for_plotting to only aligned rows for loading just the aligned region
-alignment_col = f"dtw_{ALIGN_TYPE}_aligned"
-aligned_only_df = alignment_df_for_plotting[
-    alignment_df_for_plotting[alignment_col]
-].copy()
-
+# Use alignment_df_for_plotting directly to get full concatenated sequences
+# (includes unaligned before + aligned + unaligned after)
+# The function internally handles filtering to aligned cells and extracting all timepoints
 concatenated_image_sequences = get_aligned_image_sequences(
     cytodtw_instance=cytodtw,
-    df=aligned_only_df,
+    df=alignment_df_for_plotting,
     alignment_name=ALIGN_TYPE,
     image_loader_fn=load_images_from_triplet_dataset,
     max_lineages=30,
@@ -1767,7 +1764,7 @@ magenta_cmap = Colormap("magenta")
 seq_values = list(concatenated_image_sequences.keys())
 
 # Taking the first lineage for example
-lineage_id = seq_values[len(seq_values) - 6]
+lineage_id = seq_values[0]
 
 concatenated_images = concatenated_image_sequences[lineage_id]["concatenated_images"]
 
