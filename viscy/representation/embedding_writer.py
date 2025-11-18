@@ -223,7 +223,6 @@ class EmbeddingWriter(BasePredictionWriter):
             "knn": 5,
             "decay": 40,
             "n_jobs": -1,
-            "random_state": 42,
         },
         pca_kwargs: dict | None = {"n_components": 8},
         overwrite: bool = False,
