@@ -162,9 +162,8 @@ class VaeEncoder(nn.Module):
             out_channels_encoder * final_spatial_size_h * final_spatial_size_w
         )
 
-        self.fc = nn.Linear(flattened_size, latent_dim)
-        self.fc_mu = nn.Linear(latent_dim, latent_dim)
-        self.fc_logvar = nn.Linear(latent_dim, latent_dim)
+        self.fc_mu = nn.Linear(flattened_size, latent_dim)
+        self.fc_logvar = nn.Linear(flattened_size, latent_dim)
 
         # Store final spatial size for decoder (assuming square for simplicity)
         self.encoder_spatial_size = final_spatial_size_h  # Assuming square output
@@ -189,10 +188,9 @@ class VaeEncoder(nn.Module):
             x = features  # [B, C, H, W]
         x_flat = x.flatten(1)  # [B, C*H*W] - flatten from dim 1 onwards
 
-        x_intermediate = self.fc(x_flat)
-
-        mu = self.fc_mu(x_intermediate)
-        logvar = self.fc_logvar(x_intermediate)
+        # Project directly from flattened features to latent distribution parameters
+        mu = self.fc_mu(x_flat)
+        logvar = self.fc_logvar(x_flat)
         z = self.reparameterize(mu, logvar)
 
         return SimpleNamespace(mean=mu, log_covariance=logvar, z=z)

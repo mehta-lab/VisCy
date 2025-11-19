@@ -452,7 +452,6 @@ class BetaVaeModule(LightningModule):
 
             # Forward pass for positive sample
             positive_output = self.model(positive_input)
-            z_positive = positive_output.z
             recon_x_positive = positive_output.recon_x
             mu_positive = positive_output.mean
             logvar_positive = positive_output.logvar
@@ -503,7 +502,7 @@ class BetaVaeModule(LightningModule):
             kl_loss_positive = torch.mean(kl_loss_positive)
 
             # Temporal matching loss between anchor and positive latents
-            temporal_loss = F.mse_loss(z, z_positive, reduction="mean")
+            temporal_loss = F.mse_loss(mu, mu_positive, reduction="mean")
 
             current_temporal_weight = self._get_current_temporal_weight()
 
