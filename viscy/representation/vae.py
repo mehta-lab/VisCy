@@ -221,7 +221,17 @@ class VaeDecoder(nn.Module):
         self.out_stack_depth = out_stack_depth
 
         self.spatial_size = encoder_spatial_size
-        self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
+
+        # Validate that latent_dim is divisible by spatial_size² to avoid information loss
+        spatial_size_squared = self.spatial_size * self.spatial_size
+        if latent_dim % spatial_size_squared != 0:
+            raise ValueError(
+                f"latent_dim ({latent_dim}) must be divisible by "
+                f"spatial_size² ({spatial_size_squared}). "
+                f"Valid latent_dim values: {spatial_size_squared * (latent_dim // spatial_size_squared)} "
+                f"or {spatial_size_squared * (latent_dim // spatial_size_squared + 1)}"
+            )
+        self.spatial_channels = latent_dim // spatial_size_squared
 
         self.latent_reshape = nn.Linear(
             latent_dim, self.spatial_channels * self.spatial_size * self.spatial_size
@@ -317,6 +327,7 @@ class BetaVae25D(nn.Module):
         decoder_channels = [base_channels]
         for i in range(decoder_stages - 1):
             decoder_channels.append(base_channels // (2 ** (i + 1)))
+        # The +2 term matches PixelToVoxelHead expects input channels to be divisible by (out_stack_depth + 2) for 2D→3D conversion
         decoder_channels.append(
             (out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
         )

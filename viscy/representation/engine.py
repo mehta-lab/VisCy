@@ -283,7 +283,7 @@ class BetaVaeModule(LightningModule):
     def __init__(
         self,
         vae: nn.Module | BetaVae25D | BetaVaeMonai,
-        reconstruction_loss_fn: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
+        reconstruction_loss_fn: nn.Module | nn.MSELoss = nn.MSELoss(reduction="mean"),
         beta: float = 1.0,
         beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
         beta_min: float = 0.1,
@@ -339,7 +339,11 @@ class BetaVaeModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
-        self._logvar_minmax = (-20, 20)
+        # Clamp logvar to (-10, 10) to prevent numerical instability
+        # This corresponds to variance range of approximately [4.5e-5, 2.2e4]
+        # More conservative than (-20, 20) but still allows reasonable uncertainty modeling
+        # Common practice in Beta-VAE implementations (e.g., Higgins et al., 2017)
+        self._logvar_minmax = (-10, 10)
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
@@ -412,20 +416,18 @@ class BetaVaeModule(LightningModule):
             if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1)
             else x.unsqueeze(2)
         )
+        # Standard practice for microscopy: MSE with mean reduction automatically
+        # normalizes by number of elements, making loss scale-independent
         recon_loss = self.reconstruction_loss_fn(recon_x, x_original)
+        # Handle sum reduction for backward compatibility
         if isinstance(self.reconstruction_loss_fn, nn.MSELoss):
             if (
                 hasattr(self.reconstruction_loss_fn, "reduction")
                 and self.reconstruction_loss_fn.reduction == "sum"
             ):
-                recon_loss = recon_loss / batch_size
-            elif (
-                hasattr(self.reconstruction_loss_fn, "reduction")
-                and self.reconstruction_loss_fn.reduction == "mean"
-            ):
-                # Correct the over-normalization by PyTorch's mean reduction by multiplying by the number of elements per image
+                # Normalize by batch size and number of elements per image
                 num_elements_per_image = x_original[0].numel()
-                recon_loss = recon_loss * num_elements_per_image
+                recon_loss = recon_loss / (batch_size * num_elements_per_image)
 
         kl_loss = -0.5 * torch.sum(
             1
@@ -473,21 +475,22 @@ class BetaVaeModule(LightningModule):
                 )
                 else positive_input.unsqueeze(2)
             )
+            # Standard practice for microscopy: MSE with mean reduction automatically
+            # normalizes by number of elements, making loss scale-independent
             recon_loss_positive = self.reconstruction_loss_fn(
                 recon_x_positive, positive_original
             )
+            # Handle sum reduction for backward compatibility
             if isinstance(self.reconstruction_loss_fn, nn.MSELoss):
                 if (
                     hasattr(self.reconstruction_loss_fn, "reduction")
                     and self.reconstruction_loss_fn.reduction == "sum"
                 ):
-                    recon_loss_positive = recon_loss_positive / batch_size
-                elif (
-                    hasattr(self.reconstruction_loss_fn, "reduction")
-                    and self.reconstruction_loss_fn.reduction == "mean"
-                ):
+                    # Normalize by batch size and number of elements per image
                     num_elements_per_image = positive_original[0].numel()
-                    recon_loss_positive = recon_loss_positive * num_elements_per_image
+                    recon_loss_positive = recon_loss_positive / (
+                        batch_size * num_elements_per_image
+                    )
 
             # Compute KL loss for positive
             kl_loss_positive = -0.5 * torch.sum(
