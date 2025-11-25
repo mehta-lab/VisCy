@@ -90,11 +90,11 @@ if "get_ipython" in globals():
 
 # %%
 # Download the example tracks data
-# !wget -m -np -nH --cut-dirs=7 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/track_test.zarr/"
+# !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/track_test.zarr/"
 # Download the example registered timelapse data
-# !wget -m -np -nH --cut-dirs=7 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/registered_test.zarr/"
+# !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/registered_test.zarr/"
 # Download the model checkpoint
-# !wget -m -np -nH --cut-dirs=5 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/DynaCLR-DENV/VS_n_Ph/epoch=94-step=2375.ckpt"
+# !wget -m -np -nH --cut-dirs=5 "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/DynaCLR-DENV/VS_n_Ph/epoch=94-step=2375.ckpt"
 
 # %% [markdown]
 """
@@ -116,7 +116,10 @@ from viscy.trainer import VisCyTrainer  # noqa: E402
 from viscy.transforms import NormalizeSampled  # noqa: E402
 from viscy.representation.embedding_writer import EmbeddingWriter  # noqa: E402
 from viscy.representation.engine import ContrastiveModule  # noqa: E402
-from anndata import read_zarr
+from anndata import read_zarr # noqa: E402
+import matplotlib.pyplot as plt # noqa: E402
+import seaborn as sns # noqa: E402
+import pandas as pd # noqa: E402
 
 # %%
 # NOTE: Nothing needs to be changed in this code block for the example to work.
@@ -137,14 +140,8 @@ annotations_path = root_dir / "extracted_inf_state.csv"
 output_path = root_dir / "dynaclr_prediction.zarr"
 
 #%%
-# NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
-fov_name_mock = "/A/3/9"
-track_id_mock = [19]
-fov_name_inf = "/B/4/9"
-track_id_inf = [42]
-
 # Default parameters for the test dataset
-z_range = (24, 29)
+z_range = (15, 45)
 yx_patch_size = (160, 160)
 channels_to_display = ["Phase3D", "RFP"]
 
@@ -164,7 +161,7 @@ datamodule = TripletDataModule(
     initial_yx_patch_size=yx_patch_size,
     final_yx_patch_size=yx_patch_size,
     predict_cells=True,
-    batch_size=1,
+    batch_size=8,
 )
 datamodule.setup("predict")
 
@@ -193,7 +190,7 @@ dynaclr_model = ContrastiveEncoder.load_from_checkpoint(
 # Visualize the model graph
 model_graph = draw_graph(
     dynaclr_model,
-    torch.ones((1,2,5,256,256),
+    torch.ones((1,2,30,256,256),
     graph_name="DynaCLR",
     roll=True,
     depth=3,
@@ -213,10 +210,10 @@ model_graph.visual_graph
 # %%
 # Initialize the trainer
 # The prediction writer callback will save the predictions to an OME-Zarr store
-trainer = VisCyTrainer(callbacks=[EmbeddingWriter(output_path, pca_kwargs={"n_components":8})])
+trainer = VisCyTrainer(callbacks=[EmbeddingWriter(output_path, pca_kwargs={"n_components":8}, phate_kwargs={"knn":5, "decay":40,"n_jobs":-1})])
 
 # Run prediction
-trainer.predict(model=dynaclr_model, datamodule=data_module, return_predictions=False)
+trainer.predict(model=dynaclr_model, datamodule=datamodule, return_predictions=False)
 
 # %% [markdown]
 """
@@ -225,10 +222,84 @@ trainer.predict(model=dynaclr_model, datamodule=data_module, return_predictions=
 The model outputs are also stored in an ANNData. The embeddings can then be visualized with a dimensionality reduction method (i.e UMAP, PHATE, PCA)
 """
 
-embeddings_anndata = read_zarr(output_path)
-annotations = pd.read_csv(annotations_path)
+# NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
+features_anndata = read_zarr(output_path)
+annotation = pd.read_csv(annotations_path)
+ANNOTATION_COLUMN = 'infection-state'
+
+# Combine embeddings and annotations
+annotation["fov_name"] = annotation["fov_name"].str.strip("/")
+annotation["fov_name"] = annotation["fov_name"].str.strip("/")
+
+annotation = annotation.set_index(["fov_name", "id"])
+
+mi = pd.MultiIndex.from_arrays(
+    [features_anndata.obs["fov_name"], features_anndata.obs["id"]], names=["fov_name", "id"]
+)
+features_anndata.obs['annotations_infections_state'] = annotation.reindex(mi)[ANNOTATION_COLUMN] 
+
+# Plot the PCA and PHATE embeddings colored by infection state
+# Prepare data for plotting
+plot_df = pd.DataFrame({
+    'PC1': features_anndata.obsm['X_pca'][:, 0],
+    'PC2': features_anndata.obsm['X_pca'][:, 1],
+    'PHATE1': features_anndata.obsm['X_phate'][:, 0],
+    'PHATE2': features_anndata.obsm['X_phate'][:, 1],
+    'infection_state': features_anndata.obs['annotations_infections_state'].fillna('unknown')
+})
+
+# Define color palette
+color_palette = {
+    'infected': 'orange',
+    'uninfected': 'blue',
+    'unknown': 'gray'
+}
+
+# Create figure with two subplots
+fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+
+# Plot PCA
+sns.scatterplot(
+    data=plot_df,
+    x='PC1',
+    y='PC2',
+    hue='infection_state',
+    palette=color_palette,
+    ax=axes[0],
+    alpha=0.6,
+    s=20
+)
+axes[0].set_title('PCA Embedding')
+axes[0].set_xlabel('PC1')
+axes[0].set_ylabel('PC2')
+
+# Plot PHATE
+sns.scatterplot(
+    data=plot_df,
+    x='PHATE1',
+    y='PHATE2',
+    hue='infection_state',
+    palette=color_palette,
+    ax=axes[1],
+    alpha=0.6,
+    s=20
+)
+axes[1].set_title('PHATE Embedding')
+axes[1].set_xlabel('PHATE 1')
+axes[1].set_ylabel('PHATE 2')
+
+plt.tight_layout()
+plt.show()
+
 
 # %%
+# NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
+fov_name_mock = "A/3/9"
+track_id_mock = [19]
+fov_name_inf = "B/4/9"
+track_id_inf = [42]
+
+## Show the images over time
 def get_patch(data, cell_centroid, patch_size):
     """Extract patch centered on cell centroid across all channels.
 
@@ -258,6 +329,26 @@ def get_patch(data, cell_centroid, patch_size):
         patch = data[int(y_start) : int(y_end), int(x_start) : int(x_end)]
     return patch
 
+# Open the dataset
+plate = open_ome_zarr(input_data_path)
+uninfected_position = plate[fov_name_mock][0]
+infected_position = plate[fov_name_inf][0]
+
+# Filter the centroids of these two tracks
+filtered_centroid_mock = features_anndata[(features_anndata["fov_name"] == fov_name_mock) &(features_anndata['track_id']==track_id_mock)]
+filtered_centroid_inf = features_anndata[(features_anndata["fov_name"] == fov_name_inf) &(features_anndata['track_id']==track_id_inf)]
+
+uinfected_stack= []
+for idx, row in filtered_centroid_mock.iterrows():
+    uinfected_stack.append(get_patch(cyx,(row['y'],row['x']),patch_size))
+uinfected_stack = np.array(uinfected_stack)
+
+infected_stack = []
+for idx, row in filtered_centroid_mock.iterrows():
+    infected_stack.append(get_patch(cyx,(row['y'],row['x']),patch_size))
+infected_stack = np.array(infected_stack)
+
+# Plot 10 timepoints 
 
 # %% [markdown]
 """
