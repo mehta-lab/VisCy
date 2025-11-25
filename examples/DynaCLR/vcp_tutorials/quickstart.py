@@ -348,7 +348,85 @@ for idx, row in filtered_centroid_mock.iterrows():
     infected_stack.append(get_patch(cyx,(row['y'],row['x']),patch_size))
 infected_stack = np.array(infected_stack)
 
-# Plot 10 timepoints 
+# Interactive visualization for Google Colab
+# This creates an interactive widget to scrub through timepoints
+try:
+    from ipywidgets import interact, IntSlider
+    import numpy as np
+
+    max_t = min(len(uinfected_stack), len(infected_stack))
+
+    def plot_timepoint(t):
+        """Plot both infected and uninfected cells at a specific timepoint"""
+        fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+        fig.suptitle(f'Timepoint: {t}', fontsize=16)
+
+        # Plot uninfected cell
+        for channel_idx in range(3):
+            ax = axes[0, channel_idx]
+            img = uinfected_stack[t, channel_idx, :, :]
+            ax.imshow(img, cmap='gray')
+            ax.set_title(f'Uninfected - Ch {channel_idx}')
+            ax.axis('off')
+
+        # Plot infected cell
+        for channel_idx in range(3):
+            ax = axes[1, channel_idx]
+            img = infected_stack[t, channel_idx, :, :]
+            ax.imshow(img, cmap='gray')
+            ax.set_title(f'Infected - Ch {channel_idx}')
+            ax.axis('off')
+
+        plt.tight_layout()
+        plt.show()
+
+    # Create interactive slider
+    interact(plot_timepoint, t=IntSlider(min=0, max=max_t-1, step=1, value=0, description='Timepoint:'))
+
+except ImportError:
+    # Fallback to static plot if ipywidgets not available
+    print("ipywidgets not available, showing static plots instead")
+
+    # Plot 10 equally spaced timepoints
+    n_timepoints = 10
+    max_t = min(len(uinfected_stack), len(infected_stack))
+    timepoint_indices = np.linspace(0, max_t - 1, n_timepoints, dtype=int)
+
+    # Create figure with 3 rows (channels) x 10 columns (timepoints) for uninfected
+    fig, axes = plt.subplots(3, n_timepoints, figsize=(20, 6))
+    fig.suptitle('Uninfected Cell Over Time', fontsize=16, y=1.02)
+
+    for channel_idx in range(3):
+        for col_idx, t_idx in enumerate(timepoint_indices):
+            ax = axes[channel_idx, col_idx]
+            img = uinfected_stack[t_idx, channel_idx, :, :]
+            ax.imshow(img, cmap='gray')
+            ax.axis('off')
+            if channel_idx == 0:
+                ax.set_title(f't={t_idx}', fontsize=10)
+            if col_idx == 0:
+                ax.set_ylabel(f'Channel {channel_idx}', fontsize=12)
+
+    plt.tight_layout()
+    plt.show()
+
+    # Create figure with 3 rows (channels) x 10 columns (timepoints) for infected
+    fig, axes = plt.subplots(3, n_timepoints, figsize=(20, 6))
+    fig.suptitle('Infected Cell Over Time', fontsize=16, y=1.02)
+
+    for channel_idx in range(3):
+        for col_idx, t_idx in enumerate(timepoint_indices):
+            ax = axes[channel_idx, col_idx]
+            img = infected_stack[t_idx, channel_idx, :, :]
+            ax.imshow(img, cmap='gray')
+            ax.axis('off')
+            if channel_idx == 0:
+                ax.set_title(f't={t_idx}', fontsize=10)
+            if col_idx == 0:
+                ax.set_ylabel(f'Channel {channel_idx}', fontsize=12)
+
+    plt.tight_layout()
+    plt.show() 
 
 # %% [markdown]
 """
