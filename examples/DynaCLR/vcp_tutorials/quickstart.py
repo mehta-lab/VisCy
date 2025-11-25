@@ -427,8 +427,17 @@ for idx, row in filtered_centroid_mock.iterrows():
     img_data = uninfected_position.data[
         t, channels_to_display_idx, z_range[0] : z_range[1]
     ]
-    # Take max projection along Z axis to get CYX
-    cyx = img_data.max(axis=1)
+    # For Phase3D take middle slice, for fluorescence take max projection
+    cyx = []
+    for ch_idx, ch_name in enumerate(channels_to_display):
+        if ch_name == "Phase3D":
+            # Take middle Z slice for phase
+            mid_z = img_data.shape[1] // 2
+            cyx.append(img_data[ch_idx, mid_z, :, :])
+        else:
+            # Max projection for fluorescence
+            cyx.append(img_data[ch_idx].max(axis=0))
+    cyx = np.array(cyx)
     uinfected_stack.append(get_patch(cyx, (row["y"], row["x"]), patch_size))
 uinfected_stack = np.array(uinfected_stack)
 
@@ -440,8 +449,17 @@ for idx, row in filtered_centroid_inf.iterrows():
     img_data = infected_position.data[
         t, channels_to_display_idx, z_range[0] : z_range[1]
     ]
-    # Take max projection along Z axis to get CYX
-    cyx = img_data.max(axis=1)
+    # For Phase3D take middle slice, for fluorescence take max projection
+    cyx = []
+    for ch_idx, ch_name in enumerate(channels_to_display):
+        if ch_name == "Phase3D":
+            # Take middle Z slice for phase
+            mid_z = img_data.shape[1] // 2
+            cyx.append(img_data[ch_idx, mid_z, :, :])
+        else:
+            # Max projection for fluorescence
+            cyx.append(img_data[ch_idx].max(axis=0))
+    cyx = np.array(cyx)
     infected_stack.append(get_patch(cyx, (row["y"], row["x"]), patch_size))
 infected_stack = np.array(infected_stack)
 
