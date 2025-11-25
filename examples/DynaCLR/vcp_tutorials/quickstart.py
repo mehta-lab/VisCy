@@ -132,34 +132,18 @@ from viscy.transforms import (  # noqa: E402
 # If using your own data, please modify the paths below.
 
 # TODO: Set download paths, by default the working directory is used
-root_dir = Path("/hpc/websites/public.czbiohub.org/comp.micro/viscy")
+root_dir = Path("")
 # TODO: modify the path to the input dataset
-input_data_path = (
-    root_dir
-    / "DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse"
-    / "registered_test.zarr"
-)
+input_data_path = root_dir / "registered_test.zarr"
 # TODO: modify the path to the track dataset
-tracks_path = (
-    root_dir
-    / "DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse"
-    / "track_test.zarr"
-)
+tracks_path = root_dir / "track_test.zarr"
 # TODO: modify the path to the model checkpoint
-model_ckpt_path = (
-    root_dir / "DynaCLR_models/DynaCLR-DENV/VS_n_Ph" / "epoch=94-step=2375.ckpt"
-)
+model_ckpt_path = root_dir / "epoch=94-step=2375.ckpt"
 # TODO" modify the path to load the extracted infected cell annotation
-annotations_path = (
-    root_dir
-    / "DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse"
-    / "extracted_inf_state.csv"
-)
+annotations_path = root_dir / "extracted_inf_state.csv"
 
 # TODO: modify the path to save the predictions
-output_path = (
-    Path("/home/eduardo.hirata/mydata/tmp/dynaclr_demo") / "dynaclr_prediction.zarr"
-)
+output_path = root_dir / "dynaclr_prediction.zarr"
 
 # %%
 # Default parameters for the test dataset
@@ -170,8 +154,8 @@ channels_to_display = ["Phase3D", "RFP"]  # label-free and viral sensor
 # %%
 # Configure the data module for loading example images in prediction mode.
 # See API documentation for how to use it with a different dataset.
-# For example, View the documentation for the HCSDataModule class by running:
-# ?HCSDataModule
+# For example, View the documentation for the TripletDataModule class by running:
+# ?TripletDataModule
 
 # %%
 # Setup the data module to use the example dataset
@@ -207,7 +191,8 @@ datamodule.setup("predict")
 # Load the DynaCLR checkpoint from the downloaded checkpoint
 # See this module for options to configure the model:
 
-# ?contrastive.ContrastiveEncoder
+# ?ContrastiveModule
+# ?ContrastiveEncoder
 
 # %%
 dynaclr_model = ContrastiveModule.load_from_checkpoint(
@@ -268,7 +253,7 @@ trainer.predict(model=dynaclr_model, datamodule=datamodule, return_predictions=F
 
 The model outputs are also stored in an ANNData. The embeddings can then be visualized with a dimensionality reduction method (i.e UMAP, PHATE, PCA)
 """
-
+# %%
 # NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
 features_anndata = read_zarr(output_path)
 annotation = pd.read_csv(annotations_path)
@@ -355,6 +340,11 @@ axes[1].set_ylabel("PHATE 2")
 plt.tight_layout()
 plt.show()
 
+
+# %% [markdown]
+"""
+# Visualize the images over time. This shows the phase images and fluorescence images of the uninfected and infected cells over time.
+"""
 
 # %%
 # NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
