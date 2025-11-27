@@ -134,7 +134,7 @@ from viscy.transforms import (  # noqa: E402
 # TODO: Set download paths, by default the working directory is used
 root_dir = Path("")
 # TODO: modify the path to the input dataset
-input_data_path = root_dir / "registered_test.zarr"
+input_data_path = root_dir / "registered_test_demo_cropped.zarr"
 # TODO: modify the path to the track dataset
 tracks_path = root_dir / "track_test.zarr"
 # TODO: modify the path to the model checkpoint
@@ -147,7 +147,7 @@ output_path = root_dir / "dynaclr_prediction.zarr"
 
 # %%
 # Default parameters for the test dataset
-z_range = [15, 45]
+z_range = [0, 30]
 yx_patch_size = (160, 160)
 channels_to_display = ["Phase3D", "RFP"]  # label-free and viral sensor
 
@@ -343,7 +343,8 @@ plt.show()
 
 # %% [markdown]
 """
-# Visualize the images over time. This shows the phase images and fluorescence images of the uninfected and infected cells over time.
+## Visualize Images Over Time
+Below we show phase and fluorescence images of the uninfected and infected cells over time.
 """
 
 # %%
