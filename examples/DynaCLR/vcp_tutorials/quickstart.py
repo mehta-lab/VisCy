@@ -1,13 +1,14 @@
 # %% [markdown]
 """
-# Quick Start: DynaCLR (Cell Dynamics Contrastive Learning of Representations)
+# Quick Start: DynaCLR
+## Cell Dynamics Contrastive Learning of Representations
 
-**Estimated time to complete:** 25 minutes
+**Estimated time to complete:** 25-30 minutes
 """
 
 # %% [markdown]
 """
-# Learning Goals
+## Learning Goals
 
 * Download the DynaCLR model and run it on an example dataset
 * Visualize the learned embeddings
@@ -16,18 +17,18 @@
 # %% [markdown]
 """
 # Prerequisites
-Python>=3.11
+- Python>=3.11
 
 """
 
 # %% [markdown]
 """
-# Introduction
+## Introduction
 
-## Model
+### Model
 The DynaCLR model architecture consists of three main components designed to map 3D multi-channel patches of single cells to a temporally regularized embedding space.
 
-## Example Dataset
+### Example Dataset
 
 The A549 example dataset used in this quick-start guide contains
 quantitative phase and paired fluorescence images of viral sensor reporter.
@@ -39,7 +40,7 @@ It has pre-computed statistics for normalization, generated using the `viscy pre
 Refer to our [preprint](https://arxiv.org/abs/2410.11281) for more details
 about how the dataset and model were generated.
 
-## User Data
+### User Data
 
 The DynaCLR-DENV-VS+Ph model only requires label-free (quantitative phase) and fluorescence images for inference.
 
@@ -56,28 +57,24 @@ with the `viscy preprocess` CLI
 # Setup
 
 The commands below will install the required packages and download the example dataset and model checkpoint.
-It may take a few minutes to download all the files.
 
-## Setup Google Colab
+Setup notes:
 
-To run this quick-start guide using Google Colab,
-choose the 'T4' GPU runtime from the "Connect" dropdown menu
-in the upper-right corner of this notebook for faster execution.
+-  **Setting up Google Colab**: To run this quickstart guide using Google Colab, choose the 'T4' GPU runtime from the "Connect" dropdown menu in the upper-right corner of this notebook for faster execution.
 Using a GPU significantly speeds up running model inference, but CPU compute can also be used.
 
-## Setup Local Environment
-
-The commands below assume a Unix-like shell with `wget` installed.
+-  **Setting up local environment**: The commands below assume a Unix-like shell with `wget` installed. On Windows, the files can be downloaded manually from the URLs.
 On Windows, the files can be downloaded manually from the URLs.
-"""
 
+"""
+### Install VisCy
 # %%
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
 # !pip install "viscy[metrics,visual]==0.4.0a3"
 
 # %%
-# restart kernel if running in Google Colab
+# Restart kernel if running in Google Colab
 if "get_ipython" in globals():
     session = get_ipython()  # noqa: F821
     if "google.colab" in str(session):
@@ -89,16 +86,18 @@ if "get_ipython" in globals():
 # !viscy --help
 
 # %%
-# Download the example tracks data
+# Estimated download time: 15-20 minutes wall clock time
+#
+# Download the example tracks data (5-8 minutes)
 # !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/track_test.zarr/"
-# Download the example registered timelapse data
-# !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/registered_test.zarr/"
-# Download the model checkpoint
+# Download the example registered timelapse data (5-10 minutes)
+# !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/registered_test_demo_crop.zarr/"
+# Download the model checkpoint (3 minutes)
 # !wget -m -np -nH --cut-dirs=5 "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/DynaCLR-DENV/VS_n_Ph/epoch=94-step=2375.ckpt"
 
 # %% [markdown]
 """
-# Run Model Inference
+## Run Model Inference
 
 The following code will run inference on a single field of view (FOV) of the example dataset.
 This can also be achieved by using the VisCy CLI.
@@ -134,7 +133,7 @@ from viscy.transforms import (  # noqa: E402
 # TODO: Set download paths, by default the working directory is used
 root_dir = Path("")
 # TODO: modify the path to the input dataset
-input_data_path = root_dir / "registered_test_demo_cropped.zarr"
+input_data_path = root_dir / "registered_test_demo_crop.zarr"
 # TODO: modify the path to the track dataset
 tracks_path = root_dir / "track_test.zarr"
 # TODO: modify the path to the model checkpoint
@@ -249,7 +248,7 @@ trainer.predict(model=dynaclr_model, datamodule=datamodule, return_predictions=F
 
 # %% [markdown]
 """
-# Model Outputs
+## Model Outputs
 
 The model outputs are also stored in an ANNData. The embeddings can then be visualized with a dimensionality reduction method (i.e UMAP, PHATE, PCA)
 """
@@ -542,6 +541,9 @@ except ImportError:
 
 # %% [markdown]
 """
+## Contact Information
+For issues with this notebook please contact eduardo.hirata@czbiohub.org.
+
 ## Responsible Use
 
 We are committed to advancing the responsible development and use of artificial intelligence.
