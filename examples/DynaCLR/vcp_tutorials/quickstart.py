@@ -16,7 +16,7 @@
 
 # %% [markdown]
 """
-# Prerequisites
+## Prerequisites
 - Python>=3.11
 
 """
@@ -60,11 +60,10 @@ The commands below will install the required packages and download the example d
 
 Setup notes:
 
--  **Setting up Google Colab**: To run this quickstart guide using Google Colab, choose the 'T4' GPU runtime from the "Connect" dropdown menu in the upper-right corner of this notebook for faster execution.
+-  **Setting up Google Colab**: To run this quickstart guide using Google Colab, choose the 'T4' GPU runtime from the 'Connect' dropdown menu in the upper-right corner of this notebook for faster execution.
 Using a GPU significantly speeds up running model inference, but CPU compute can also be used.
 
 -  **Setting up local environment**: The commands below assume a Unix-like shell with `wget` installed. On Windows, the files can be downloaded manually from the URLs.
-On Windows, the files can be downloaded manually from the URLs.
 
 """
 ### Install VisCy
