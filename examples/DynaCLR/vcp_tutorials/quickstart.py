@@ -93,6 +93,9 @@ if "get_ipython" in globals():
 # !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/registered_test_demo_crop.zarr/"
 # Download the model checkpoint (3 minutes)
 # !wget -m -np -nH --cut-dirs=5 "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/DynaCLR-DENV/VS_n_Ph/epoch=94-step=2375.ckpt"
+# Download the annotations for the infected state
+# !wget -m -np -nH --cut-dirs=6 "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/extracted_inf_state.csv"
+
 
 # %% [markdown]
 """
