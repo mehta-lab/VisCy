@@ -54,7 +54,7 @@ with the `viscy preprocess` CLI
 
 # %% [markdown]
 """
-# Setup
+### Setup
 
 The commands below will install the required packages and download the example dataset and model checkpoint.
 
@@ -65,8 +65,8 @@ Using a GPU significantly speeds up running model inference, but CPU compute can
 
 -  **Setting up local environment**: The commands below assume a Unix-like shell with `wget` installed. On Windows, the files can be downloaded manually from the URLs.
 
-"""
 ### Install VisCy
+"""
 # %%
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
@@ -104,8 +104,6 @@ if "get_ipython" in globals():
 The following code will run inference on a single field of view (FOV) of the example dataset.
 This can also be achieved by using the VisCy CLI.
 """
-
-# %%
 # %%
 from pathlib import Path  # noqa: E402
 
