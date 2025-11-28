@@ -84,9 +84,12 @@ if "get_ipython" in globals():
 # Validate installation
 # !viscy --help
 
+# %% [markdown]
+"""
+### Download example data and model checkpoint
+Estimated download time: 15-20 minutes
+"""
 # %%
-# Estimated download time: 15-20 minutes wall clock time
-#
 # Download the example tracks data (5-8 minutes)
 # !wget -m -np -nH --cut-dirs=6 -R "index.html*" "https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/DENV/test/20240204_A549_DENV_ZIKV_timelapse/track_test.zarr/"
 # Download the example registered timelapse data (5-10 minutes)
