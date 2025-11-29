@@ -63,6 +63,8 @@ Setup notes:
 -  **Setting up Google Colab**: To run this quickstart guide using Google Colab, choose the 'T4' GPU runtime from the 'Connect' dropdown menu in the upper-right corner of this notebook for faster execution.
 Using a GPU significantly speeds up running model inference, but CPU compute can also be used.
 
+-  **Google Colab Kaggle prompt**: When running `datamodule.setup("predict")`, Colab may prompt for Kaggle credentials. This is a Colab-specific behavior triggered by certain file I/O patterns and can be safely dismissed by clicking "Cancel" - no Kaggle account is required for this tutorial.
+
 -  **Setting up local environment**: The commands below assume a Unix-like shell with `wget` installed. On Windows, the files can be downloaded manually from the URLs.
 
 ### Install VisCy
@@ -70,7 +72,7 @@ Using a GPU significantly speeds up running model inference, but CPU compute can
 # %%
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
-# !pip install "viscy[metrics,visual]==0.4.0a3"
+# !pip install "viscy[metrics,visual,phate]==0.4.0a3"
 
 # %%
 # Restart kernel if running in Google Colab
