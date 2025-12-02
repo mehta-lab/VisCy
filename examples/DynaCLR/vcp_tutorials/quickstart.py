@@ -1,6 +1,6 @@
 # %% [markdown]
 """
-# Quick Start: DynaCLR
+# Quickstart: DynaCLR
 ## Cell Dynamics Contrastive Learning of Representations
 
 **Estimated time to complete:** 25-30 minutes
