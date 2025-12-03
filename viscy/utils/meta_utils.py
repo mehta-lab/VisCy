@@ -181,7 +181,8 @@ def generate_normalization_metadata(
         # Write plate-level metadata (dataset + timepoint statistics)
         write_meta_field(
             position=plate,
-            metadata=dataset_statistics | {"timepoint_statistics": timepoint_statistics},
+            metadata=dataset_statistics
+            | {"timepoint_statistics": timepoint_statistics},
             field_name="normalization",
             subfield_name=channel_name,
         )
