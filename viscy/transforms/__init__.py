@@ -41,6 +41,8 @@ from viscy.transforms._scale_intensity import (
 )
 from viscy.transforms._transforms import (
     BatchedRandAffined,
+    BatchedRandRotate90,
+    BatchedRandRotate90d,
     BatchedScaleIntensityRangePercentiles,
     BatchedScaleIntensityRangePercentilesd,
     NormalizeSampled,
@@ -64,6 +66,8 @@ __all__ = [
     "BatchedRandAdjustContrastd",
     "BatchedRandAffined",
     "BatchedRand3DElasticd",
+    "BatchedRandRotate90",
+    "BatchedRandRotate90d",
     "BatchedRandFlip",
     "BatchedRandFlipd",
     "BatchedRandGaussianSmooth",
