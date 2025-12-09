@@ -91,6 +91,8 @@ def write_embedding_dataset(
     features: np.ndarray,
     index_df: pd.DataFrame,
     projections: Optional[np.ndarray] = None,
+    logvar: Optional[np.ndarray] = None,
+    z: Optional[np.ndarray] = None,
     umap_kwargs: Optional[Dict[str, Any]] = None,
     phate_kwargs: Optional[Dict[str, Any]] = None,
     pca_kwargs: Optional[Dict[str, Any]] = None,
@@ -105,10 +107,18 @@ def write_embedding_dataset(
         Path to the zarr store.
     features : np.ndarray
         Array of shape (n_samples, n_features) containing the embeddings.
+        For VAE models, this is mu. For contrastive models, this is features.
     index_df : pd.DataFrame
         DataFrame containing the index information for each embedding.
     projections : np.ndarray, optional
         Array of shape (n_samples, n_projections) containing projection values, by default None.
+        Only used for contrastive models.
+    logvar : np.ndarray, optional
+        Array of shape (n_samples, n_features) containing log variance values, by default None.
+        Only used for VAE models to store uncertainty information.
+    z : np.ndarray, optional
+        Array of shape (n_samples, latent_dim) containing sampled latent codes, by default None.
+        Only used for VAE models. Can be used to regenerate reconstructions later.
     umap_kwargs : Dict[str, Any], optional
         Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed)
         Common parameters include:
@@ -149,8 +159,14 @@ def write_embedding_dataset(
     n_samples = len(features)
 
     adata = ad.AnnData(X=features, obs=ultrack_indices)
+
+    # Store model-specific outputs
     if projections is not None:
         adata.obsm["X_projections"] = projections
+    if logvar is not None:
+        adata.obsm["X_logvar"] = logvar
+    if z is not None:
+        adata.obsm["X_z"] = z
 
     # Set up default kwargs for each method
     if umap_kwargs:
@@ -253,23 +269,46 @@ class EmbeddingWriter(BasePredictionWriter):
         trainer : Trainer
             Placeholder, ignored.
         pl_module : LightningModule
-            Placeholder, ignored.
+            Lightning module (ContrastiveModule or BetaVaeModule).
         predictions : Sequence[ContrastivePrediction]
             Sequence of output from the prediction steps.
         batch_indices : Sequence[int]
             Placeholder, ignored.
         """
-        features = _move_and_stack_embeddings(predictions, "features")
-        projections = _move_and_stack_embeddings(predictions, "projections")
+        from viscy.representation.engine import BetaVaeModule
+
         ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
 
-        write_embedding_dataset(
-            output_path=self.output_path,
-            features=features,
-            index_df=ultrack_indices,
-            projections=projections,
-            umap_kwargs=self.umap_kwargs,
-            phate_kwargs=self.phate_kwargs,
-            pca_kwargs=self.pca_kwargs,
-            overwrite=self.overwrite,
-        )
+        # Detect model type and extract appropriate embeddings
+        if isinstance(pl_module, BetaVaeModule):
+            # VAE model: mu is primary embedding, logvar and z are additional info
+            features = _move_and_stack_embeddings(predictions, "mu")
+            logvar = _move_and_stack_embeddings(predictions, "logvar")
+            z = _move_and_stack_embeddings(predictions, "z")
+
+            write_embedding_dataset(
+                output_path=self.output_path,
+                features=features,
+                index_df=ultrack_indices,
+                logvar=logvar,
+                z=z,
+                umap_kwargs=self.umap_kwargs,
+                phate_kwargs=self.phate_kwargs,
+                pca_kwargs=self.pca_kwargs,
+                overwrite=self.overwrite,
+            )
+        else:
+            # Contrastive model: features and projections
+            features = _move_and_stack_embeddings(predictions, "features")
+            projections = _move_and_stack_embeddings(predictions, "projections")
+
+            write_embedding_dataset(
+                output_path=self.output_path,
+                features=features,
+                index_df=ultrack_indices,
+                projections=projections,
+                umap_kwargs=self.umap_kwargs,
+                phate_kwargs=self.phate_kwargs,
+                pca_kwargs=self.pca_kwargs,
+                overwrite=self.overwrite,
+            )

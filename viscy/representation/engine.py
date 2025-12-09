@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 from typing import Literal, Sequence, TypedDict
 
 import numpy as np
@@ -22,6 +23,13 @@ _logger = logging.getLogger("lightning.pytorch")
 class ContrastivePrediction(TypedDict):
     features: Tensor
     projections: Tensor
+    index: TrackingIndex
+
+
+class VaePrediction(TypedDict):
+    mu: Tensor
+    logvar: Tensor
+    z: Tensor
     index: TrackingIndex
 
 
@@ -385,11 +393,19 @@ class BetaVaeModule(LightningModule):
         """Get current temporal weight value based on scheduling."""
         return self.temporal_weight_scheduler.get_value(self.current_epoch)
 
-    def forward(self, x: Tensor, positive_sample: Tensor | None = None) -> dict:
+    def forward(
+        self, x: Tensor, positive_sample: Tensor | None = None
+    ) -> SimpleNamespace:
         """Forward pass through Beta-VAE.
 
         NOTE: When positive_sample is provided, computes reconstruction and KL loss for both
         anchor and positive images to ensure symmetric training similar to DynaMorph.
+
+        Returns
+        -------
+        SimpleNamespace
+            Namespace containing: recon_x, z, mu, logvar, recon_loss, kl_loss,
+            recon_loss_positive, kl_loss_positive, temporal_loss, total_loss
         """
 
         original_shape = x.shape
@@ -525,18 +541,18 @@ class BetaVaeModule(LightningModule):
         else:
             total_loss = recon_loss + current_beta * kl_loss
 
-        return {
-            "recon_x": recon_x,
-            "z": z,
-            "mu": mu,
-            "logvar": logvar,
-            "recon_loss": recon_loss,
-            "kl_loss": kl_loss,
-            "recon_loss_positive": recon_loss_positive,
-            "kl_loss_positive": kl_loss_positive,
-            "temporal_loss": temporal_loss,
-            "total_loss": total_loss,
-        }
+        return SimpleNamespace(
+            recon_x=recon_x,
+            z=z,
+            mu=mu,
+            logvar=logvar,
+            recon_loss=recon_loss,
+            kl_loss=kl_loss,
+            recon_loss_positive=recon_loss_positive,
+            kl_loss_positive=kl_loss_positive,
+            temporal_loss=temporal_loss,
+            total_loss=total_loss,
+        )
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Training step with VAE loss computation."""
@@ -544,7 +560,7 @@ class BetaVaeModule(LightningModule):
         x = batch["anchor"]
         positive = batch.get("positive") if self.use_temporal_loss else None
         model_output = self(x, positive_sample=positive)
-        loss = model_output["total_loss"]
+        loss = model_output.total_loss
 
         # Log enhanced β-VAE metrics (includes beta and temporal_weight)
         self.vae_logger.log_enhanced_metrics(
@@ -555,9 +571,9 @@ class BetaVaeModule(LightningModule):
         if positive is not None:
             self.log_dict(
                 {
-                    "loss/temporal_train": model_output["temporal_loss"],
-                    "loss/recon_positive_train": model_output["recon_loss_positive"],
-                    "loss/kl_positive_train": model_output["kl_loss_positive"],
+                    "loss/temporal_train": model_output.temporal_loss,
+                    "loss/recon_positive_train": model_output.recon_loss_positive,
+                    "loss/kl_positive_train": model_output.kl_loss_positive,
                 },
                 on_step=False,
                 on_epoch=True,
@@ -567,7 +583,7 @@ class BetaVaeModule(LightningModule):
             )
 
         # Log samples
-        self._log_step_samples(batch_idx, x, model_output["recon_x"], "train")
+        self._log_step_samples(batch_idx, x, model_output.recon_x, "train")
 
         return loss
 
@@ -576,7 +592,7 @@ class BetaVaeModule(LightningModule):
         x = batch["anchor"]
         positive = batch.get("positive") if self.use_temporal_loss else None
         model_output = self(x, positive_sample=positive)
-        loss = model_output["total_loss"]
+        loss = model_output.total_loss
 
         # Log enhanced β-VAE metrics
         self.vae_logger.log_enhanced_metrics(
@@ -587,9 +603,9 @@ class BetaVaeModule(LightningModule):
         if positive is not None:
             self.log_dict(
                 {
-                    "loss/temporal_val": model_output["temporal_loss"],
-                    "loss/recon_positive_val": model_output["recon_loss_positive"],
-                    "loss/kl_positive_val": model_output["kl_loss_positive"],
+                    "loss/temporal_val": model_output.temporal_loss,
+                    "loss/recon_positive_val": model_output.recon_loss_positive,
+                    "loss/kl_positive_val": model_output.kl_loss_positive,
                 },
                 on_step=False,
                 on_epoch=True,
@@ -599,7 +615,7 @@ class BetaVaeModule(LightningModule):
             )
 
         # Log samples
-        self._log_step_samples(batch_idx, x, model_output["recon_x"], "val")
+        self._log_step_samples(batch_idx, x, model_output.recon_x, "val")
 
         return loss
 
@@ -705,13 +721,20 @@ class BetaVaeModule(LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
-    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> dict:
-        """Prediction step for VAE inference."""
+    def predict_step(
+        self, batch: TripletSample, batch_idx, dataloader_idx=0
+    ) -> VaePrediction:
+        """Prediction step for VAE inference.
+
+        Returns mu, logvar, and z (sampled latent code).
+        Reconstructions can be generated later from z using the decoder.
+        """
         x = batch["anchor"]
         model_output = self(x)
 
         return {
-            "latent": model_output["z"],
-            "reconstruction": model_output["recon_x"],
+            "mu": model_output.mu,
+            "logvar": model_output.logvar,
+            "z": model_output.z,
             "index": batch["index"],
         }

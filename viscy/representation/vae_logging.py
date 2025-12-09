@@ -36,11 +36,11 @@ class BetaVaeLogger:
         # Extract components
         x = batch["anchor"]
 
-        z = model_output["z"]
-        recon_x = model_output["recon_x"]
-        recon_loss = model_output["recon_loss"]
-        kl_loss = model_output["kl_loss"]
-        total_loss = model_output["total_loss"]
+        z = model_output.z
+        recon_x = model_output.recon_x
+        recon_loss = model_output.recon_loss
+        kl_loss = model_output.kl_loss
+        total_loss = model_output.total_loss
 
         # Get current β (scheduled value, not static)
         beta = getattr(
