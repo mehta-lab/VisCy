@@ -66,7 +66,7 @@ On Windows, the files can be downloaded manually from the URLs.
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
 # Here stackview and ipycanvas are installed for visualization
-# !pip install -U "viscy[metrics,visual]==0.3"
+# !pip install -U "viscy[metrics,visual]==0.4.0a3"
 
 # %%
 # Restart kernel if running in Google Colab

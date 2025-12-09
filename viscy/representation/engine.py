@@ -41,6 +41,7 @@ class ContrastiveModule(LightningModule):
         log_embeddings: bool = False,
         log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
+        ckpt_path: str | None = None,
     ) -> None:
         super().__init__()
         self.model = encoder
@@ -54,6 +55,11 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs = []
         self.log_embeddings = log_embeddings
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
+
+        if ckpt_path is not None:
+            self.load_state_dict(
+                torch.load(ckpt_path)["state_dict"]
+            )  # loading only weights
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections.

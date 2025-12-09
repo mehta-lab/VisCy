@@ -15,6 +15,7 @@ def compute_phate(
     knn: int = 5,
     decay: int = 40,
     update_dataset: bool = False,
+    random_state: int = 42,
     **phate_kwargs,
 ) -> tuple[object, NDArray]:
     """
@@ -33,6 +34,8 @@ def compute_phate(
         Decay parameter for the Markov operator, by default 40
     update_dataset : bool, optional
         Whether to update the PHATE coordinates in the dataset, by default False
+    random_state : int, optional
+        Random state for reproducibility, by default 42
     phate_kwargs : dict, optional
         Additional keyword arguments for PHATE, by default None
 
@@ -68,7 +71,11 @@ def compute_phate(
 
     # Compute PHATE embeddings
     phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, random_state=42, **phate_kwargs
+        n_components=n_components,
+        knn=knn,
+        decay=decay,
+        random_state=random_state,
+        **phate_kwargs,
     )
 
     phate_embedding = phate_model.fit_transform(embeddings_scaled)
