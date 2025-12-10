@@ -17,6 +17,9 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 import pandas as pd
 
 from viscy.data.triplet import TripletDataModule
+from viscy.representation.evaluation.annotation import load_annotation_anndata
+
+__all__ = ["load_annotation", "load_annotation_anndata", "dataset_of_tracks"]
 
 
 def load_annotation(da, path, name, categories: dict | None = None):

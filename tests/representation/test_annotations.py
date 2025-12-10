@@ -11,10 +11,7 @@ import xarray as xr
 from iohub import open_ome_zarr
 from pytest import TempPathFactory
 
-from viscy.representation.evaluation import (
-    load_annotation_anndata,
-)
-from viscy.representation.evaluation.annotation import convert
+from viscy.representation.evaluation.annotation import convert, load_annotation_anndata
 
 
 @pytest.fixture(scope="function")
@@ -252,7 +249,7 @@ def test_convert_xarray_annotation_to_anndata(xr_embeddings_dataset, tmp_path):
 
 
 def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_path):
-    """Test that load_annotation_anndata correctly loads annotations from an AnnData object."""
+    """Test that load_annotation_anndata correctly loads annotations into an AnnData object."""
     # Load the AnnData object
     adata = ad.read_zarr(anndata_embeddings)
 
@@ -271,16 +268,28 @@ def test_load_annotation_anndata(tracks_hcs_dataset, anndata_embeddings, tmp_pat
     A11_annotations_df.to_csv(annotations_path, index=False)
 
     # Test the function with the new CSV file
-    result = load_annotation_anndata(adata, str(annotations_path), "infection_state")
+    result_adata = load_annotation_anndata(
+        adata, str(annotations_path), "infection_state"
+    )
 
-    assert len(result) == 2  # Only 2 observations from A/1/1 have annotations
+    # Check that the function returns an AnnData object
+    assert isinstance(result_adata, ad.AnnData)
 
+    # Check that the annotation column was added
+    assert "infection_state" in result_adata.obs.columns
+
+    # Check that annotations were added for A/1/1 FOV
+    a11_mask = result_adata.obs["fov_name"] == "A/1/1"
+    assert a11_mask.sum() == 2  # Only 2 observations from A/1/1
+
+    # Check that the annotation values match
     expected_values = A11_annotations_df["infection_state"].values
-    actual_values = result.values
+    actual_values = result_adata.obs.loc[a11_mask, "infection_state"].values
     np.testing.assert_array_equal(actual_values, expected_values)
 
-    assert result.index.names == ["fov_name", "id"]
-    assert all(result.index.get_level_values("fov_name") == "A/1/1")
+    # Check that other FOVs have NaN annotations
+    other_fovs_mask = result_adata.obs["fov_name"] != "A/1/1"
+    assert result_adata.obs.loc[other_fovs_mask, "infection_state"].isna().all()
 
 
 def test_cli_convert_to_anndata(xr_embeddings_dataset, tmp_path):
