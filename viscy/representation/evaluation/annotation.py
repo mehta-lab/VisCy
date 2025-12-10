@@ -131,10 +131,7 @@ def load_annotation_anndata(
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
 
-    # Reset index to align with adata.obs
     selected.index = adata.obs.index
-
-    # Add annotations to adata.obs
     adata.obs[name] = selected
 
     return adata
