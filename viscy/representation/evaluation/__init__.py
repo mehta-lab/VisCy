@@ -14,7 +14,6 @@ TODO: consider time- and condition-dependent clustering and UMAP visualization o
 https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 """
 
-import anndata as ad
 import pandas as pd
 
 from viscy.data.triplet import TripletDataModule
@@ -60,41 +59,6 @@ def load_annotation(da, path, name, categories: dict | None = None):
     if categories:
         selected = selected.astype("category").cat.rename_categories(categories)
 
-    return selected
-
-
-def load_annotation_anndata(
-    adata: ad.AnnData, path: str, name: str, categories: dict | None = None
-):
-    """
-    Load annotations from a CSV file and map them to the AnnData object.
-
-    Parameters
-    ----------
-    adata : anndata.AnnData
-        The AnnData object to map the annotations to.
-    path : str
-        Path to the CSV file containing annotations.
-    name : str
-        The column name in the CSV file to be used as annotations.
-    categories : dict, optional
-        A dictionary to rename categories in the annotation column. Default is None.
-    """
-    annotation = pd.read_csv(path)
-    annotation["fov_name"] = annotation["fov_name"].str.strip("/")
-
-    annotation = annotation.set_index(["fov_name", "id"])
-
-    mi = pd.MultiIndex.from_arrays(
-        [adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"]
-    )
-
-    # Use reindex to handle missing annotations gracefully
-    # This will return NaN for observations that don't have annotations, then just drop'em
-    selected = annotation.reindex(mi)[name].dropna()
-
-    if categories:
-        selected = selected.astype("category").cat.rename_categories(categories)
     return selected
 
 
