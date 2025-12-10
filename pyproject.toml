@@ -68,6 +68,8 @@ optional-dependencies.visual = [
   "plotly",
   "seaborn",
   "torchview",
+  "gradio>=5.49.1",
+
 ]
 scripts.viscy = "viscy.cli:main"
 
