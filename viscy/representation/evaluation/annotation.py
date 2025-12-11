@@ -59,9 +59,11 @@ def convert(
     available_cols = get_available_index_columns(embeddings_ds)
     tracking_df = pd.DataFrame(
         {
-            col: embeddings_ds.coords[col].data
-            if col != "fov_name"
-            else embeddings_ds.coords[col].to_pandas().str.strip("/")
+            col: (
+                embeddings_ds.coords[col].data
+                if col != "fov_name"
+                else embeddings_ds.coords[col].to_pandas().str.strip("/")
+            )
             for col in available_cols
         }
     )
@@ -89,3 +91,47 @@ def convert(
     adata.write_zarr(output_path)
     if return_anndata:
         return adata
+
+
+def load_annotation_anndata(
+    adata: ad.AnnData, path: str, name: str, categories: dict | None = None
+):
+    """
+    Load annotations from a CSV file and map them to the AnnData object.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        The AnnData object to map the annotations to.
+    path : str
+        Path to the CSV file containing annotations.
+    name : str
+        The column name in the CSV file to be used as annotations.
+    categories : dict, optional
+        A dictionary to rename categories in the annotation column. Default is None.
+
+    Returns
+    -------
+    anndata.AnnData
+        The AnnData object with annotations added to adata.obs[name].
+    """
+    annotation = pd.read_csv(path)
+    annotation["fov_name"] = annotation["fov_name"].str.strip("/")
+
+    annotation = annotation.set_index(["fov_name", "id"])
+
+    mi = pd.MultiIndex.from_arrays(
+        [adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"]
+    )
+
+    # Use reindex to handle missing annotations gracefully
+    # This will return NaN for observations that don't have annotations
+    selected = annotation.reindex(mi)[name]
+
+    if categories:
+        selected = selected.astype("category").cat.rename_categories(categories)
+
+    selected.index = adata.obs.index
+    adata.obs[name] = selected
+
+    return adata
