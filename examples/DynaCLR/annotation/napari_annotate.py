@@ -320,12 +320,11 @@ def save_annotations(
                     if first_infected_t is not None
                     else None
                 )
+                # Organelle: always has a value - remodel if marked, otherwise noremodel
                 organelle_state = (
                     "remodel"
                     if (first_remodel_t is not None and t >= first_remodel_t)
                     else "noremodel"
-                    if first_remodel_t is not None
-                    else None
                 )
                 cell_death_state = "alive" if first_death_t is not None else None
 
@@ -344,10 +343,10 @@ def save_annotations(
     # Save to CSV
     if all_annotations:
         df = pd.DataFrame(all_annotations)
-        df.to_csv(
-            output_path / f"annotations_{fov_name.replace('/', '_')}.csv", index=False
-        )
-        _logger.info(f"Saved {len(all_annotations)} annotations to {output_path}")
+        output_path.mkdir(parents=True, exist_ok=True)
+        csv_path = output_path / f"annotations_{fov_name.replace('/', '_')}.csv"
+        df.to_csv(csv_path, index=False)
+        _logger.info(f"Saved {len(all_annotations)} annotations to {csv_path}")
     else:
         _logger.warning("No annotations to save")
 
