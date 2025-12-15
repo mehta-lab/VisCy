@@ -344,7 +344,9 @@ def save_annotations(
     # Save to CSV
     if all_annotations:
         df = pd.DataFrame(all_annotations)
-        df.to_csv(output_path, index=False)
+        df.to_csv(
+            output_path / f"annotations_{fov_name.replace('/', '_')}.csv", index=False
+        )
         _logger.info(f"Saved {len(all_annotations)} annotations to {output_path}")
     else:
         _logger.warning("No annotations to save")
@@ -377,7 +379,7 @@ def save_annotations(
     "-o",
     type=click.Path(path_type=Path),
     default=None,
-    help="Path to save annotations CSV (default: tracks_dataset/fov_name/annotations.csv)",
+    help="Path folder to save annotations CSV (default: tracks_dataset/fov_name). It will use the fov_name to create the file name.",
 )
 def main(images_dataset, tracks_dataset, fov_name, output_path):
     """
@@ -425,7 +427,7 @@ def main(images_dataset, tracks_dataset, fov_name, output_path):
 
     # Set default output path if not provided
     if output_path is None:
-        output_path = Path(tracks_dataset) / fov_name.strip("/") / "annotations.csv"
+        output_path = Path(tracks_dataset) / fov_name.strip("/")
 
     # State for interpolation mode
     interpolation_mode = {"enabled": False, "start_point": None}
