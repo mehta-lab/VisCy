@@ -152,7 +152,7 @@ def setup_annotation_layers(viewer: napari.Viewer) -> None:
         ndim=4,
         size=20,
         face_color="blue",
-        name="mitosis_events",
+        name="_mitosis_events",
     )
     layer.mode = "add"
 
@@ -161,7 +161,7 @@ def setup_annotation_layers(viewer: napari.Viewer) -> None:
         ndim=4,
         size=20,
         face_color="orange",
-        name="infected_events",
+        name="_infected_events",
     )
     layer.mode = "add"
 
@@ -170,7 +170,7 @@ def setup_annotation_layers(viewer: napari.Viewer) -> None:
         ndim=4,
         size=20,
         face_color="purple",
-        name="remodel_events",
+        name="_remodel_events",
     )
     layer.mode = "add"
 
@@ -179,7 +179,7 @@ def setup_annotation_layers(viewer: napari.Viewer) -> None:
         ndim=4,
         size=20,
         face_color="red",
-        name="death_events",
+        name="_death_events",
     )
     layer.mode = "add"
 
@@ -224,10 +224,10 @@ def save_annotations(
 
     # Process the four annotation layers
     layer_mapping = [
-        ("mitosis_events", "cell_division_state", "mitosis"),
-        ("infected_events", "infection_state", "infected"),
-        ("remodel_events", "organelle_state", "remodel"),
-        ("death_events", "cell_death_state", "dead"),
+        ("_mitosis_events", "cell_division_state", "mitosis"),
+        ("_infected_events", "infection_state", "infected"),
+        ("_remodel_events", "organelle_state", "remodel"),
+        ("_death_events", "cell_death_state", "dead"),
     ]
 
     for layer_name, event_type, event_state in layer_mapping:
@@ -292,10 +292,10 @@ def save_annotations(
         )
 
         # Cell death: first marked timepoint onwards = dead, before = alive
-        death_events = [
+        _death_events = [
             e for e in marked_events["cell_death_state"] if e["track_id"] == track_id
         ]
-        first_death_t = min([e["t"] for e in death_events]) if death_events else None
+        first_death_t = min([e["t"] for e in _death_events]) if _death_events else None
 
         # Create one row per timepoint with all event states
         for t in track_timepoints:
@@ -387,6 +387,7 @@ def main(images_dataset, tracks_dataset, fov_name, output_path):
     - a/d: Step backward/forward in time
     - q/e: Cycle through annotation layers (mitosis → infected → remodel → death)
     - r: Enable interpolation mode (click start point → press 'r' → click end point to auto-interpolate)
+         (For cell divisiona and organelle remodeling only)
     - s: Save annotations
 
     Annotation logic:
@@ -431,10 +432,10 @@ def main(images_dataset, tracks_dataset, fov_name, output_path):
 
     # List of annotation layers for cycling
     annotation_layers = [
-        "mitosis_events",
-        "infected_events",
-        "remodel_events",
-        "death_events",
+        "_mitosis_events",
+        "_infected_events",
+        "_remodel_events",
+        "_death_events",
     ]
     current_layer_index = {"index": 0}
 
@@ -472,10 +473,10 @@ def main(images_dataset, tracks_dataset, fov_name, output_path):
 
     # Connect the callback to each annotation layer and add custom keybindings
     for layer_name in [
-        "mitosis_events",
-        "infected_events",
-        "remodel_events",
-        "death_events",
+        "_mitosis_events",
+        "_infected_events",
+        "_remodel_events",
+        "_death_events",
     ]:
         layer = viewer.layers[layer_name]
         layer.mouse_drag_callbacks.append(interpolate_points)
@@ -533,7 +534,7 @@ def main(images_dataset, tracks_dataset, fov_name, output_path):
                 )
 
     # Set initial active layer
-    viewer.layers.selection.active = viewer.layers["mitosis_events"]
+    viewer.layers.selection.active = viewer.layers["_mitosis_events"]
 
     _logger.info("Viewer ready! Annotation layers in 'add' mode by default")
     _logger.info("  Navigation: a/d = step backward/forward in time")
