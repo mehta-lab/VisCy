@@ -10,19 +10,16 @@ from _reader import fov_to_layers
 from iohub import open_ome_zarr
 from napari.types import LayerDataTuple
 
+from viscy.data.triplet import INDEX_COLUMNS
+
 _logger = logging.getLogger("viscy")
 _logger.setLevel(logging.INFO)
 console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 _logger.addHandler(console_handler)
 
-_ULTRACK_NO_PARENT = -1
-_ULTRACK_TRACKS_HEADER = ("track_id", "t", "z", "y", "x")
 
-
-def _ultrack_inv_tracks_df_forest(
-    df: pd.DataFrame, no_parent=_ULTRACK_NO_PARENT
-) -> dict[int, int]:
+def _ultrack_inv_tracks_df_forest(df: pd.DataFrame, no_parent=-1) -> dict[int, int]:
     """
     Vendored from ultrack.tracks.graph.inv_tracks_df_forest.
     """
@@ -52,7 +49,14 @@ def _ultrack_read_csv(path: Path | str) -> LayerDataTuple:
     _logger.info(f"Read {len(df)} tracks from {path}")
     _logger.info(df.head())
 
-    tracks_cols = list(_ULTRACK_TRACKS_HEADER)
+    # For napari tracks layer, only use position columns: [track_id, t, y, x,z]
+    tracks_cols = [
+        "track_id",
+        "t",
+        "z",
+        "y",
+        "x",
+    ]
     if "z" not in df.columns:
         tracks_cols.remove("z")
 
@@ -63,7 +67,7 @@ def _ultrack_read_csv(path: Path | str) -> LayerDataTuple:
         graph = None
 
     kwargs = {
-        "features": df,
+        "features": df,  # Full dataframe with all columns is stored in features
         "name": path.name.removesuffix(".csv"),
         "graph": graph,
     }
@@ -330,7 +334,6 @@ def save_annotations(
 
             all_annotations.append(
                 {
-                    "fov_name": fov_name,
                     "track_id": track_id,
                     "t": t,
                     "cell_division_state": cell_division_state,
@@ -342,11 +345,30 @@ def save_annotations(
 
     # Save to CSV
     if all_annotations:
-        df = pd.DataFrame(all_annotations)
+        annotations_df = pd.DataFrame(all_annotations)
+
+        # Merge with original tracks dataframe to preserve all INDEX_COLUMNS
+        # Add fov_name column first
+        tracks_df["fov_name"] = fov_name
+
+        # Merge on track_id and t
+        merged_df = tracks_df.merge(annotations_df, on=["track_id", "t"], how="left")
+
+        # Reorder columns to have fov_name first, followed by INDEX_COLUMNS, then annotation columns
+        index_cols = [col for col in INDEX_COLUMNS if col in merged_df.columns]
+        annotation_cols = [
+            "cell_division_state",
+            "infection_state",
+            "organelle_state",
+            "cell_death_state",
+        ]
+        column_order = index_cols + annotation_cols
+        merged_df = merged_df[column_order]
+
         output_path.mkdir(parents=True, exist_ok=True)
         csv_path = output_path / f"annotations_{fov_name.replace('/', '_')}.csv"
-        df.to_csv(csv_path, index=False)
-        _logger.info(f"Saved {len(all_annotations)} annotations to {csv_path}")
+        merged_df.to_csv(csv_path, index=False)
+        _logger.info(f"Saved {len(merged_df)} annotations to {csv_path}")
     else:
         _logger.warning("No annotations to save")
 
