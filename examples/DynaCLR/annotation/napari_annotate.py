@@ -1,5 +1,7 @@
 # %%
 import logging
+import os
+from datetime import datetime
 from pathlib import Path
 
 import click
@@ -218,6 +220,11 @@ def save_annotations(
     # Load tracks CSV to get all track-timepoint combinations
     tracks_df = pd.read_csv(tracks_csv_path)
 
+    # Capture annotation metadata
+    annotator = os.getlogin()
+    annotation_date = datetime.now().isoformat()
+    annotation_version = "1.0"
+
     # Collect marked events from each layer
     marked_events = {
         "cell_division_state": [],  # mitosis events
@@ -340,6 +347,9 @@ def save_annotations(
                     "infection_state": infection_state,
                     "organelle_state": organelle_state,
                     "cell_death_state": cell_death_state,
+                    "annotator": annotator,
+                    "annotation_date": annotation_date,
+                    "annotation_version": annotation_version,
                 }
             )
 
@@ -354,7 +364,7 @@ def save_annotations(
         # Merge on track_id and t
         merged_df = tracks_df.merge(annotations_df, on=["track_id", "t"], how="left")
 
-        # Reorder columns to have fov_name first, followed by INDEX_COLUMNS, then annotation columns
+        # Reorder columns to have fov_name first, followed by INDEX_COLUMNS, then annotation columns, then metadata
         index_cols = [col for col in INDEX_COLUMNS if col in merged_df.columns]
         annotation_cols = [
             "cell_division_state",
@@ -362,13 +372,25 @@ def save_annotations(
             "organelle_state",
             "cell_death_state",
         ]
-        column_order = index_cols + annotation_cols
+        metadata_cols = ["annotator", "annotation_date", "annotation_version"]
+        column_order = index_cols + annotation_cols + metadata_cols
         merged_df = merged_df[column_order]
 
         output_path.mkdir(parents=True, exist_ok=True)
-        csv_path = output_path / f"annotations_{fov_name.replace('/', '_')}.csv"
-        merged_df.to_csv(csv_path, index=False)
-        _logger.info(f"Saved {len(merged_df)} annotations to {csv_path}")
+
+        # Generate timestamped filename for history
+        timestamp = datetime.now().strftime("%Y%m%dT%H%M%S")
+        base_name = f"annotations_{fov_name.replace('/', '_')}"
+        timestamped_csv = output_path / f"{base_name}_{annotator}_{timestamp}.csv"
+        canonical_csv = output_path / f"{base_name}.csv"
+
+        # Save with timestamp (for history/consensus)
+        merged_df.to_csv(timestamped_csv, index=False)
+        _logger.info(f"Saved {len(merged_df)} annotations to {timestamped_csv}")
+
+        # Update canonical version (most recent)
+        merged_df.to_csv(canonical_csv, index=False)
+        _logger.info(f"Updated canonical annotations at {canonical_csv}")
     else:
         _logger.warning("No annotations to save")
 
