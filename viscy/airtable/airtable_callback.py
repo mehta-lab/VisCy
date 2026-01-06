@@ -6,7 +6,7 @@ from typing import Any
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy.representation.airtable_registry import AirtableDatasetRegistry
+from viscy.airtable.airtable_dataset_registry import AirtableDatasetRegistry
 
 
 class AirtableLoggingCallback(Callback):
