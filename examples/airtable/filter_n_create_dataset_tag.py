@@ -3,7 +3,7 @@
 # %%
 import os
 
-from viscy.representation.airtable_fov_registry import AirtableFOVRegistry
+from viscy.airtable.airtable_fov_registry import AirtableFOVRegistry
 
 BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 registry = AirtableFOVRegistry(base_id=BASE_ID)
