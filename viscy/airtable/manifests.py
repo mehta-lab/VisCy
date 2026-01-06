@@ -28,7 +28,7 @@ class AirtableDatasetRegistry:
     >>> registry = AirtableDatasetRegistry(base_id="appXXXXXXXXXXXXXX")
     >>>
     >>> # Get dataset info
-    >>> dataset = registry.get_dataset("rpe1_fucci_embeddings", version="v2")
+    >>> dataset = registry.get_manifest("rpe1_fucci_embeddings", version="v2")
     >>> print(dataset['hpc_path'])
     >>>
     >>> # Record that a model was trained with this dataset
@@ -53,7 +53,7 @@ class AirtableDatasetRegistry:
         self.datasets_table = self.api.table(base_id, "Datasets")
         self.models_table = self.api.table(base_id, "Models")
 
-    def get_dataset(self, name: str, version: str | None = None) -> dict[str, Any]:
+    def get_manifest(self, name: str, version: str | None = None) -> dict[str, Any]:
         """
         Retrieve dataset record from Airtable.
 
@@ -66,13 +66,7 @@ class AirtableDatasetRegistry:
 
         Returns
         -------
-        dict
-            Airtable record with fields:
-            - id: Airtable record ID
-            - hpc_path: Path to dataset on HPC
-            - version: Dataset version
-            - sha256: Dataset hash
-            - created_date: Creation timestamp
+        TODO: typing for the headers in manifest
         """
         if version:
             formula = f"AND({{name}}='{name}', {{version}}='{version}')"
