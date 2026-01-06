@@ -1,0 +1,66 @@
+# Example config showing Airtable integration with Lightning training
+# Usage: viscy fit -c examples/airtable/example_config_with_airtable.yml
+
+seed_everything: true
+
+trainer:
+  accelerator: gpu
+  devices: 1
+  max_epochs: 100
+  check_val_every_n_epoch: 1
+  log_every_n_steps: 50
+
+  # Add Airtable logging callback
+  callbacks:
+    - class_path: viscy.representation.airtable_callback.AirtableLoggingCallback
+      init_args:
+        base_id: "appXXXXXXXXXXXXXX"  # Replace with your Airtable base ID
+        dataset_id: "recYYYYYYYYYYYYYY"  # Replace with your dataset record ID
+        model_name: null  # Auto-generate from model class and timestamp
+        log_metrics: false  # Set to true to store metrics in Airtable (otherwise use TensorBoard)
+
+model:
+  class_path: viscy.representation.contrastive.ContrastiveModule
+  init_args:
+    # Your model config here
+    backbone: resnet50
+    embedding_len: 256
+
+data:
+  class_path: viscy.data.triplet.TripletDataModule
+  init_args:
+    data_path: /hpc/data/your_plate.zarr
+    tracks_path: /hpc/tracks/your_tracks/
+    source_channel: [Phase]
+    z_range: [0, 5]
+    initial_yx_patch_size: [512, 512]
+    final_yx_patch_size: [224, 224]
+    split_ratio: 0.8
+    batch_size: 16
+    num_workers: 8
+
+    # FOV selection from Airtable dataset definition
+    fit_include_wells: ["B3", "B4", "C3"]
+    fit_exclude_fovs: []
+
+    # Data augmentation
+    augmentations:
+      - class_path: viscy.transforms.RandAffined
+        init_args:
+          keys: [Phase]
+          prob: 0.8
+          rotate_range: [3.14, 0.0, 0.0]
+          scale_range: [0.1, 0.1, 0.1]
+      - class_path: viscy.transforms.RandGaussianNoised
+        init_args:
+          keys: [Phase]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1
+
+# Dataset metadata (for reference, not used by training)
+dataset_metadata:
+  airtable_id: "recYYYYYYYYYYYYYY"
+  name: "RPE1_infection_v2"
+  version: "v2"
+  description: "RPE1 cells, infection experiment, wells B3-C3"
