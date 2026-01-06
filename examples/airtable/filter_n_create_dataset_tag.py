@@ -2,11 +2,11 @@
 
 # %%
 
-from viscy.airtable.datasets import AirtableDatasets
+from viscy.airtable.database import AirtableManager
 
 # BASE_ID = os.getenv("AIRTABLE_BASE_ID")
 BASE_ID = "app8vqaoWyOwa0sB5"
-registry = AirtableDatasets(base_id=BASE_ID)
+airtable_db = AirtableManager(base_id=BASE_ID)
 
 # %%
 # EXAMPLE 1: Get all dataset records as DataFrame and explore
@@ -14,7 +14,7 @@ print("=" * 70)
 print("Getting all dataset records as DataFrame")
 print("=" * 70)
 
-df_datasets = registry.list_datasets()
+df_datasets = airtable_db.list_datasets()
 print(f"\nTotal dataset records: {len(df_datasets)}")
 print("\nDataFrame columns:")
 print(df_datasets.columns.tolist())
@@ -28,7 +28,7 @@ print("Filter: Dataset, Wells B_3 and B_4")
 print("=" * 70)
 
 # Get all dataset records as DataFrame
-df = registry.list_datasets()
+df = airtable_db.list_datasets()
 
 # Filter with pandas - simple and powerful!
 filtered = df[
@@ -44,7 +44,7 @@ print(filtered.groupby("Well ID").size())
 fov_ids = filtered["FOV_ID"].tolist()
 
 try:
-    manifest_id = registry.create_manifest_from_datasets(
+    manifest_id = airtable_db.create_manifest_from_datasets(
         manifest_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
         fov_ids=fov_ids,
         version="0.0.1",  # Semantic versioning
@@ -58,7 +58,7 @@ except ValueError as e:
 
 # %%
 # Delete the manifest entry demo
-registry.delete_manifest(manifest_id)
+airtable_db.delete_manifest(manifest_id)
 print(f"Deleted manifest: {manifest_id}")
 
 # %%
@@ -67,7 +67,7 @@ print("\n" + "=" * 70)
 print("Group by dataset and show summary")
 print("=" * 70)
 
-df_all = registry.list_datasets()
+df_all = airtable_db.list_datasets()
 
 grouped = df_all.groupby("Dataset")
 
@@ -82,7 +82,7 @@ print("\n" + "=" * 70)
 print("Filter: Multiple specific wells")
 print("=" * 70)
 
-df = registry.list_datasets()
+df = airtable_db.list_datasets()
 
 # Filter for specific wells from a dataset
 filtered = df[
@@ -104,7 +104,7 @@ print("\n" + "=" * 70)
 print("Summary Statistics")
 print("=" * 70)
 
-df = registry.list_datasets()
+df = airtable_db.list_datasets()
 
 print("\nDataset records per source dataset:")
 print(df.groupby("Dataset").size())

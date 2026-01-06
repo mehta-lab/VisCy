@@ -1,7 +1,8 @@
-"""FOV-level dataset registry with Airtable."""
+"""FOV-level dataset airtable_db with Airtable."""
 
 import getpass
 import os
+from datetime import datetime
 from typing import Any
 
 import pandas as pd
@@ -48,15 +49,15 @@ MANIFESTS_INDEX = [
 ]
 
 
-class AirtableDatasets:
+class AirtableManager:
     """
-    Interface to Airtable for FOV-level dataset management.
+    Unified interface to Airtable for dataset, manifest, and model management.
 
     Use this to:
     - Register individual FOVs from HCS plates
-    - Create dataset "tags" (collections of FOVs)
-    - Query which FOVs are in each dataset
-    - Generate training configs from dataset tags
+    - Create and manage dataset manifests (collections of FOVs)
+    - Track model training on manifests
+    - Query datasets, manifests, and models
 
     Parameters
     ----------
@@ -67,18 +68,25 @@ class AirtableDatasets:
 
     Examples
     --------
-    >>> registry = AirtableDatasets(base_id="appXXXXXXXXXXXXXX")
+    >>> airtable_db = AirtableManager(base_id="appXXXXXXXXXXXXXX")
     >>>
-    >>> # Create dataset from FOV selection
-    >>> registry.create_manifest_from_datasets(
-    ...     dataset_name="RPE1_infection_v2",
+    >>> # Create manifest from FOV selection
+    >>> manifest_id = airtable_db.create_manifest_from_datasets(
+    ...     manifest_name="RPE1_infection_v2",
     ...     fov_ids=["FOV_001", "FOV_002", "FOV_004"],
-    ...     version="v2",
+    ...     version="0.0.1",
     ...     purpose="training"
     ... )
     >>>
-    >>> # Get all FOV paths for a dataset
-    >>> fov_paths = registry.get_dataset_fov_paths("RPE1_infection_v2")
+    >>> # Track model training
+    >>> airtable_db.log_model_training(
+    ...     manifest_id=manifest_id,
+    ...     mlflow_run_id="run_123",
+    ...     model_name="my_model",
+    ... )
+    >>>
+    >>> # Get all FOV paths for a manifest
+    >>> fov_paths = airtable_db.get_manifest_data_paths("RPE1_infection_v2")
     >>> print(fov_paths)
     >>> # ['/hpc/data/rpe1.zarr/B/3/0', '/hpc/data/rpe1.zarr/B/3/1', ...]
     """
@@ -173,7 +181,7 @@ class AirtableDatasets:
 
         Examples
         --------
-        >>> registry.create_manifest_from_datasets(
+        >>> airtable_db.create_manifest_from_datasets(
         ...     manifest_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
         ...     project_name="OrganelleBox",
         ...     fov_ids=["2024_11_07_A549_SEC61_DENV_B1_0", "2024_11_07_A549_SEC61_DENV_B1_1"],
@@ -211,7 +219,6 @@ class AirtableDatasets:
                     f"To create a new version, increment the version number (e.g., '0.0.2')."
                 )
 
-            # Show existing versions (helpful feedback)
             existing_versions = df_manifests[df_manifests["name"] == manifest_name]
             if len(existing_versions) > 0:
                 versions = sorted(existing_versions["version"].tolist())
@@ -288,7 +295,7 @@ class AirtableDatasets:
         Examples
         --------
         >>> # Create manifest from specific wells in a dataset
-        >>> registry.create_manifest_from_query(
+        >>> airtable_db.create_manifest_from_query(
         ...     manifest_name="RPE1_infection_training",
         ...     version="0.0.1",
         ...     source_dataset="RPE1_plate1",
@@ -339,7 +346,7 @@ class AirtableDatasets:
 
         Examples
         --------
-        >>> paths = registry.get_manifest_data_paths("RPE1_infection_v2")
+        >>> paths = airtable_db.get_manifest_data_paths("RPE1_infection_v2")
         >>> print(paths)
         >>> # ['/hpc/data/rpe1.zarr/B/3/0', '/hpc/data/rpe1.zarr/B/3/1', ...]
         """
@@ -458,7 +465,7 @@ class AirtableDatasets:
 
         Examples
         --------
-        >>> registry.list_manifests(purpose="training")
+        >>> airtable_db.list_manifests(purpose="training")
         >>> # Returns DataFrame with columns: id, name, version, purpose, ...
         """
         # Fetch all manifests (try sorting, but don't fail if field doesn't exist)
@@ -506,7 +513,7 @@ class AirtableDatasets:
         Examples
         --------
         >>> # Get all datasets
-        >>> df = registry.list_datasets()
+        >>> df = airtable_db.list_datasets()
         >>>
         >>> # Filter with pandas (simple and powerful!)
         >>> filtered = df[df['Dataset'] == 'RPE1_plate1']
@@ -540,9 +547,176 @@ class AirtableDatasets:
 
         Examples
         --------
-        >>> manifest_id = registry.create_manifest_from_datasets(...)
-        >>> registry.delete_manifest(manifest_id)
+        >>> manifest_id = airtable_db.create_manifest_from_datasets(...)
+        >>> airtable_db.delete_manifest(manifest_id)
         >>> print(f"Deleted manifest: {manifest_id}")
         """
         self.manifests_table.delete(manifest_id)
         return True
+
+    def log_model_training(
+        self,
+        manifest_id: str,
+        mlflow_run_id: str,
+        model_name: str | None = None,
+        metrics: dict[str, float] | None = None,
+        checkpoint_path: str | None = None,
+        trained_by: str | None = None,
+    ) -> str:
+        """
+        Log that a model was trained using a manifest.
+
+        Creates entry in Models table and updates Manifest table.
+
+        Parameters
+        ----------
+        manifest_id : str
+            Airtable record ID of manifest used
+        mlflow_run_id : str
+            MLflow run ID for experiment tracking
+        model_name : str | None
+            Human-readable model name
+        metrics : dict | None
+            Training metrics (e.g., {"accuracy": 0.89, "f1_score": 0.92})
+        checkpoint_path : str | None
+            Path to saved model checkpoint
+        trained_by : str | None
+            Username of person who trained the model
+
+        Returns
+        -------
+        str
+            Airtable record ID of created model entry
+
+        Examples
+        --------
+        >>> manifest_id = airtable_db.create_manifest_from_datasets(...)
+        >>> model_id = airtable_db.log_model_training(
+        ...     manifest_id=manifest_id,
+        ...     mlflow_run_id="run_abc123",
+        ...     model_name="sec61_model_v1",
+        ...     metrics={"val_loss": 0.15},
+        ...     trained_by="researcher_name"
+        ... )
+        """
+        # Create model record
+        model_record = {
+            "model_name": model_name or f"model_{datetime.now():%Y%m%d_%H%M%S}",
+            "manifest": [manifest_id],  # Link to manifest
+            "mlflow_run_id": mlflow_run_id,
+            "trained_date": datetime.now().isoformat(),
+        }
+
+        if metrics:
+            model_record.update(metrics)
+
+        if checkpoint_path:
+            model_record["checkpoint_path"] = checkpoint_path
+
+        if trained_by:
+            model_record["trained_by"] = trained_by
+
+        created = self.models_table.create(model_record)
+
+        # Update manifest record to track usage
+        manifest = self.manifests_table.get(manifest_id)
+        models_trained_str = manifest["fields"].get("models_trained", "")
+
+        # Handle models_trained as comma-separated string
+        if models_trained_str:
+            models_list = [m.strip() for m in models_trained_str.split(",")]
+            models_list.append(mlflow_run_id)
+            new_models_str = ", ".join(models_list)
+        else:
+            new_models_str = mlflow_run_id
+
+        self.manifests_table.update(
+            manifest_id,
+            {"models_trained": new_models_str, "last_used": datetime.now().isoformat()},
+        )
+
+        return created["id"]
+
+    def get_models_for_manifest(
+        self, manifest_id: str, as_dataframe: bool = True
+    ) -> pd.DataFrame | list[dict]:
+        """
+        Get all models trained on a specific manifest.
+
+        Parameters
+        ----------
+        manifest_id : str
+            Airtable record ID of manifest
+        as_dataframe : bool
+            If True, return pandas DataFrame. If False, return list of dicts.
+
+        Returns
+        -------
+        pd.DataFrame | list[dict]
+            Model records as DataFrame or list of dicts
+
+        Examples
+        --------
+        >>> models_df = airtable_db.get_models_for_manifest(manifest_id)
+        >>> print(models_df[["model_name", "mlflow_run_id", "trained_date"]])
+        """
+        # Get all models as DataFrame
+        records = self.models_table.all()
+        data = [{"id": r["id"], **r["fields"]} for r in records]
+
+        if as_dataframe:
+            df = pd.DataFrame(data)
+            if len(df) == 0:
+                return df
+
+            # Filter by manifest_id using pandas
+            # The 'manifest' field contains a list of linked record IDs
+            df_filtered = df[
+                df["manifest"].apply(
+                    lambda x: manifest_id in x if isinstance(x, list) else False
+                )
+            ]
+
+            # Sort by trained_date if column exists
+            if "trained_date" in df_filtered.columns:
+                df_filtered = df_filtered.sort_values("trained_date", ascending=False)
+
+            return df_filtered
+        else:
+            # Filter list
+            filtered = [d for d in data if manifest_id in d.get("manifest", [])]
+            return filtered
+
+    def list_models(self, as_dataframe: bool = True) -> pd.DataFrame | list[dict]:
+        """
+        List all models in the airtable_db.
+
+        Parameters
+        ----------
+        as_dataframe : bool
+            If True, return pandas DataFrame. If False, return list of dicts.
+
+        Returns
+        -------
+        pd.DataFrame | list[dict]
+            All model records
+
+        Examples
+        --------
+        >>> models_df = airtable_db.list_models()
+        >>> print(models_df.groupby("model_name").size())
+        """
+        records = self.models_table.all()
+        data = [{"id": r["id"], **r["fields"]} for r in records]
+
+        if as_dataframe:
+            df = pd.DataFrame(data)
+            # Sort by trained_date if column exists
+            if len(df) > 0 and "trained_date" in df.columns:
+                df = df.sort_values("trained_date", ascending=False)
+            return df
+        return data
+
+
+# Backward compatibility alias
+AirtableDatasets = AirtableManager

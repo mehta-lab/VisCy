@@ -6,7 +6,7 @@ from typing import Any
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy.airtable.manifests import AirtableManifests
+from viscy.airtable.datasets import AirtableManager
 
 
 class AirtableLoggingCallback(Callback):
@@ -59,7 +59,7 @@ class AirtableLoggingCallback(Callback):
         log_metrics: bool = False,
     ):
         super().__init__()
-        self.registry = AirtableManifests(base_id=base_id)
+        self.airtable_db = AirtableManager(base_id=base_id)
         self.manifest_id = manifest_id
         self.model_name = model_name
         self.log_metrics = log_metrics
@@ -103,7 +103,7 @@ class AirtableLoggingCallback(Callback):
 
         # Log to Airtable
         try:
-            model_id = self.registry.log_model_training(
+            model_id = self.airtable_db.log_model_training(
                 manifest_id=self.manifest_id,
                 mlflow_run_id=run_id or "unknown",
                 model_name=model_name,
