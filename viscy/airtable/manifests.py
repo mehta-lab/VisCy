@@ -7,14 +7,12 @@ from typing import Any
 from pyairtable import Api
 
 
-class AirtableDatasetRegistry:
+class AirtableManifests:
     """
-    Interface to Airtable for dataset registry.
+    Interface to Airtable for manifests.
 
     Airtable acts as source of truth for:
-    - Dataset paths on HPC
-    - Dataset versions and metadata
-    - Links between datasets and trained models
+    - Dataset manifests
 
     Parameters
     ----------
@@ -50,34 +48,35 @@ class AirtableDatasetRegistry:
 
         self.api = Api(api_key)
         self.base_id = base_id
-        self.datasets_table = self.api.table(base_id, "Datasets")
+        self.manifests_table = self.api.table(base_id, "Manifest")
         self.models_table = self.api.table(base_id, "Models")
 
     def get_manifest(self, name: str, version: str | None = None) -> dict[str, Any]:
         """
-        Retrieve dataset record from Airtable.
+        Retrieve manifest record from Airtable.
 
         Parameters
         ----------
         name : str
-            Dataset name
+            Manifest name
         version : str | None
-            Specific version (e.g., "v2"). If None, returns latest.
+            Specific version (e.g., "0.0.1"). If None, returns latest.
 
         Returns
         -------
-        TODO: typing for the headers in manifest
+        dict
+            Manifest record with fields from MANIFESTS_INDEX
         """
         if version:
             formula = f"AND({{name}}='{name}', {{version}}='{version}')"
         else:
             formula = f"{{name}}='{name}'"
 
-        records = self.datasets_table.all(formula=formula, sort=["-created_date"])
+        records = self.manifests_table.all(formula=formula, sort=["-created_time"])
 
         if not records:
             raise ValueError(
-                f"Dataset '{name}' (version={version}) not found in Airtable"
+                f"Manifest '{name}' (version={version}) not found in Airtable"
             )
 
         record = records[0]
@@ -85,7 +84,7 @@ class AirtableDatasetRegistry:
 
     def log_model_training(
         self,
-        dataset_id: str,
+        manifest_id: str,
         mlflow_run_id: str,
         model_name: str | None = None,
         metrics: dict[str, float] | None = None,
@@ -93,14 +92,14 @@ class AirtableDatasetRegistry:
         trained_by: str | None = None,
     ) -> str:
         """
-        Log that a model was trained using a dataset.
+        Log that a model was trained using a manifest.
 
-        Creates entry in Models table and updates Datasets table.
+        Creates entry in Models table and updates Manifests table.
 
         Parameters
         ----------
-        dataset_id : str
-            Airtable record ID of dataset used
+        manifest_id : str
+            Airtable record ID of manifest used
         mlflow_run_id : str
             MLflow run ID for experiment tracking
         model_name : str | None
@@ -120,7 +119,7 @@ class AirtableDatasetRegistry:
         # Create model record
         model_record = {
             "model_name": model_name or f"model_{datetime.now():%Y%m%d_%H%M%S}",
-            "dataset": [dataset_id],  # Link to dataset
+            "manifest": [manifest_id],  # Link to manifest
             "mlflow_run_id": mlflow_run_id,
             "trained_date": datetime.now().isoformat(),
         }
@@ -136,9 +135,9 @@ class AirtableDatasetRegistry:
 
         created = self.models_table.create(model_record)
 
-        # Update dataset record to track usage
-        dataset = self.datasets_table.get(dataset_id)
-        models_trained_str = dataset["fields"].get("models_trained", "")
+        # Update manifest record to track usage
+        manifest = self.manifests_table.get(manifest_id)
+        models_trained_str = manifest["fields"].get("models_trained", "")
 
         # Handle models_trained as comma-separated string
         if models_trained_str:
@@ -148,16 +147,16 @@ class AirtableDatasetRegistry:
         else:
             new_models_str = mlflow_run_id
 
-        self.datasets_table.update(
-            dataset_id,
+        self.manifests_table.update(
+            manifest_id,
             {"models_trained": new_models_str, "last_used": datetime.now().isoformat()},
         )
 
         return created["id"]
 
-    def list_datasets(self, formula: str | None = None) -> list[dict]:
+    def list_manifests(self, formula: str | None = None) -> list[dict]:
         """
-        List all datasets in registry.
+        List all manifests in registry.
 
         Parameters
         ----------
@@ -167,25 +166,25 @@ class AirtableDatasetRegistry:
         Returns
         -------
         list[dict]
-            List of dataset records
+            List of manifest records
         """
-        records = self.datasets_table.all(formula=formula, sort=["-created_date"])
+        records = self.manifests_table.all(formula=formula, sort=["-created_time"])
         return [{"id": r["id"], **r["fields"]} for r in records]
 
-    def get_models_for_dataset(self, dataset_id: str) -> list[dict]:
+    def get_models_for_manifest(self, manifest_id: str) -> list[dict]:
         """
-        Get all models trained on a specific dataset.
+        Get all models trained on a specific manifest.
 
         Parameters
         ----------
-        dataset_id : str
-            Airtable record ID of dataset
+        manifest_id : str
+            Airtable record ID of manifest
 
         Returns
         -------
         list[dict]
             List of model records
         """
-        formula = f"FIND('{dataset_id}', ARRAYJOIN({{dataset}}))"
+        formula = f"FIND('{manifest_id}', ARRAYJOIN({{manifest}}))"
         records = self.models_table.all(formula=formula, sort=["-trained_date"])
         return [{"id": r["id"], **r["fields"]} for r in records]

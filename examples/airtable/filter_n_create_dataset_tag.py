@@ -1,143 +1,121 @@
-"""Filter FOVs using pandas and create dataset tags."""
+"""Filter datasets using pandas and create manifest tags."""
 
 # %%
-import os
 
-from viscy.airtable.airtable_fov_registry import AirtableFOVRegistry
+from viscy.airtable.datasets import AirtableDatasets
 
-BASE_ID = os.getenv("AIRTABLE_BASE_ID")
-registry = AirtableFOVRegistry(base_id=BASE_ID)
+# BASE_ID = os.getenv("AIRTABLE_BASE_ID")
+BASE_ID = "app8vqaoWyOwa0sB5"
+registry = AirtableDatasets(base_id=BASE_ID)
 
 # %%
-# EXAMPLE 1: Get all FOVs as DataFrame and explore
+# EXAMPLE 1: Get all dataset records as DataFrame and explore
 print("=" * 70)
-print("Getting all FOVs as DataFrame")
+print("Getting all dataset records as DataFrame")
 print("=" * 70)
 
-df_fovs = registry.list_fovs()
-print(f"\nTotal FOVs: {len(df_fovs)}")
+df_datasets = registry.list_datasets()
+print(f"\nTotal dataset records: {len(df_datasets)}")
 print("\nDataFrame columns:")
-print(df_fovs.columns.tolist())
+print(df_datasets.columns.tolist())
 print("\nFirst few rows:")
-print(df_fovs.head())
+print(df_datasets.head())
 
 # %%
-# EXAMPLE 2: Filter by plate and rows B and C using pandas
+# EXAMPLE 2: Filter by dataset and specific wells using pandas
 print("\n" + "=" * 70)
-print("Filter: Plate RPE1_plate1, Rows B and C, Good quality")
+print("Filter: Dataset, Wells B_3 and B_4")
 print("=" * 70)
 
-# Get all FOVs as DataFrame
-df = registry.list_fovs()
+# Get all dataset records as DataFrame
+df = registry.list_datasets()
 
 # Filter with pandas - simple and powerful!
 filtered = df[
-    (df["plate_name"] == "RPE1_plate1")
-    & (df["quality"] == "Good")
-    & (df["row"].isin(["B", "C"]))
+    (df["Dataset"] == "2024_11_07_A549_SEC61_DENV")
+    & (df["Well ID"].isin(["B/1", "B/2"]))
 ]
 
-print(f"\nTotal FOVs after filtering: {len(filtered)}")
+print(f"\nTotal dataset records after filtering: {len(filtered)}")
 print("\nBreakdown by well:")
-print(filtered.groupby("well_id").size())
+print(filtered.groupby("Well ID").size())
 
-# Create dataset from filtered FOVs
-fov_ids = filtered["fov_id"].tolist()
+# Create manifest from filtered dataset records
+fov_ids = filtered["FOV_ID"].tolist()
 
 try:
-    dataset_id = registry.create_dataset_from_fovs(
-        dataset_name="RPE1_rows_BC_good",
+    manifest_id = registry.create_manifest_from_datasets(
+        manifest_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
         fov_ids=fov_ids,
         version="0.0.1",  # Semantic versioning
         purpose="training",
-        description="Good quality FOVs from rows B and C",
+        description="Dataset records from wells B_3 and B_4",
     )
-    print(f"\n✓ Created dataset: {dataset_id}")
-    print(f"  Contains {len(fov_ids)} FOVs")
+    print(f"\n✓ Created manifest: {manifest_id}")
+    print(f"  Contains {len(fov_ids)} dataset records")
 except ValueError as e:
     print(f"\n⚠ {e}")
 
 # %%
-# EXAMPLE 3: Group by plate and show summary
-print("\n" + "=" * 70)
-print("Group by plate and show summary")
-print("=" * 70)
-
-df_all = registry.list_fovs()
-
-# Filter for good quality only
-df_all = df_all[df_all["quality"] == "Good"]
-
-grouped = df_all.groupby("plate_name")
-
-for plate_name, group in grouped:
-    print(f"\n{plate_name}:")
-    print(f"  Total FOVs: {len(group)}")
-    print(f"  Wells: {group['well_id'].unique()}")
-    print(f"  Rows: {group['row'].unique()}")
+# Delete the manifest entry demo
+registry.delete_manifest(manifest_id)
+print(f"Deleted manifest: {manifest_id}")
 
 # %%
-# EXAMPLE 4: Complex filtering - specific rows and columns
+# EXAMPLE 3: Group by dataset and show summary
 print("\n" + "=" * 70)
-print("Complex Filter: Rows B/C AND Columns 3/4")
+print("Group by dataset and show summary")
 print("=" * 70)
 
-df = registry.list_fovs()
+df_all = registry.list_datasets()
 
-# Complex pandas filter: plate, quality, rows B or C, AND columns 3 or 4
+grouped = df_all.groupby("Dataset")
+
+for dataset_name, group in grouped:
+    print(f"\n{dataset_name}:")
+    print(f"  Total records: {len(group)}")
+    print(f"  Wells: {sorted(group['Well ID'].unique())}")
+
+# %%
+# EXAMPLE 4: Filter by multiple wells
+print("\n" + "=" * 70)
+print("Filter: Multiple specific wells")
+print("=" * 70)
+
+df = registry.list_datasets()
+
+# Filter for specific wells from a dataset
 filtered = df[
-    (df["plate_name"] == "RPE1_plate1")
-    & (df["quality"] == "Good")
-    & (df["row"].isin(["B", "C"]))
-    & (df["column"].isin(["3", "4"]))
+    (df["Dataset"] == "2024_11_07_A549_SEC61_DENV")
+    & (df["Well ID"].isin(["B/3", "B/4", "C/3", "C/4"]))
 ]
 
-print(f"\nFOVs matching criteria: {len(filtered)}")
+print(f"\nDataset records matching criteria: {len(filtered)}")
 print("\nBy well:")
-print(filtered.groupby(["row", "column"]).size())
+print(filtered.groupby("Well ID").size())
 
 print("\nFOV IDs:")
-for fov_id in filtered["fov_id"]:
+for fov_id in filtered["FOV_ID"]:
     print(f"  {fov_id}")
 
 # %%
-# EXAMPLE 5: Exclude specific FOVs
-print("\n" + "=" * 70)
-print("Exclude specific FOVs from dataset")
-print("=" * 70)
-
-df = registry.list_fovs()
-
-# Start with good quality FOVs from specific plate
-filtered = df[(df["plate_name"] == "RPE1_plate1") & (df["quality"] == "Good")]
-
-print(f"\nBefore exclusion: {len(filtered)} FOVs")
-
-# List of FOVs to exclude (e.g., known contamination)
-exclude_list = ["RPE1_plate1_B_3_2", "RPE1_plate1_C_4_1"]
-
-# Filter out excluded FOVs
-filtered = filtered[~filtered["fov_id"].isin(exclude_list)]
-
-print(f"Excluded: {len(exclude_list)} FOVs")
-print(f"After exclusion: {len(filtered)} FOVs")
-
-# %%
-# EXAMPLE 6: Summary statistics
+# EXAMPLE 5: Summary statistics
 print("\n" + "=" * 70)
 print("Summary Statistics")
 print("=" * 70)
 
-df = registry.list_fovs()
+df = registry.list_datasets()
 
-print("\nFOVs per plate:")
-print(df.groupby("plate_name").size())
+print("\nDataset records per source dataset:")
+print(df.groupby("Dataset").size())
 
-print("\nFOVs per quality:")
-print(df.groupby("quality").size())
+print("\nWells with most dataset records:")
+print(df.groupby("Well ID").size().sort_values(ascending=False).head(10))
 
-print("\nFOVs per row (across all plates):")
-print(df.groupby("row").size().sort_index())
+print("\nTotal unique wells:")
+print(f"{df['Well ID'].nunique()} wells")
 
-print("\nWells with most FOVs:")
-print(df.groupby("well_id").size().sort_values(ascending=False).head(10))
+print("\nTotal unique FOV IDs:")
+print(f"{df['FOV_ID'].nunique()} FOV IDs")
+
+# %%

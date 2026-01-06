@@ -6,7 +6,7 @@ from typing import Any
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy.airtable.airtable_dataset_registry import AirtableDatasetRegistry
+from viscy.airtable.manifests import AirtableManifests
 
 
 class AirtableLoggingCallback(Callback):
@@ -17,14 +17,14 @@ class AirtableLoggingCallback(Callback):
     - Best model checkpoint path
     - Who trained the model
     - When it was trained
-    - Link to the dataset used
+    - Link to the manifest used
 
     Parameters
     ----------
     base_id : str
         Airtable base ID
-    dataset_id : str
-        Airtable dataset record ID (from config)
+    manifest_id : str
+        Airtable manifest record ID (from config)
     model_name : str | None
         Custom model name. If None, auto-generates from model class and timestamp.
     log_metrics : bool
@@ -37,16 +37,16 @@ class AirtableLoggingCallback(Callback):
 
     >>> trainer:
     >>>   callbacks:
-    >>>     - class_path: viscy.representation.airtable_callback.AirtableLoggingCallback
+    >>>     - class_path: viscy.airtable.callbacks.AirtableLoggingCallback
     >>>       init_args:
     >>>         base_id: "appXXXXXXXXXXXXXX"
-    >>>         dataset_id: "recYYYYYYYYYYYYYY"
+    >>>         manifest_id: "recYYYYYYYYYYYYYY"
 
     Or add programmatically:
 
     >>> callback = AirtableLoggingCallback(
     >>>     base_id="appXXXXXXXXXXXXXX",
-    >>>     dataset_id="recYYYYYYYYYYYYYY"
+    >>>     manifest_id="recYYYYYYYYYYYYYY"
     >>> )
     >>> trainer = Trainer(callbacks=[callback])
     """
@@ -54,13 +54,13 @@ class AirtableLoggingCallback(Callback):
     def __init__(
         self,
         base_id: str,
-        dataset_id: str,
+        manifest_id: str,
         model_name: str | None = None,
         log_metrics: bool = False,
     ):
         super().__init__()
-        self.registry = AirtableDatasetRegistry(base_id=base_id)
-        self.dataset_id = dataset_id
+        self.registry = AirtableManifests(base_id=base_id)
+        self.manifest_id = manifest_id
         self.model_name = model_name
         self.log_metrics = log_metrics
 
@@ -104,7 +104,7 @@ class AirtableLoggingCallback(Callback):
         # Log to Airtable
         try:
             model_id = self.registry.log_model_training(
-                dataset_id=self.dataset_id,
+                manifest_id=self.manifest_id,
                 mlflow_run_id=run_id or "unknown",
                 model_name=model_name,
                 checkpoint_path=str(checkpoint_path) if checkpoint_path else None,
@@ -114,7 +114,7 @@ class AirtableLoggingCallback(Callback):
             print(f"\n✓ Model logged to Airtable (record ID: {model_id})")
             print(f"  Model name: {model_name}")
             print(f"  Checkpoint: {checkpoint_path}")
-            print(f"  Dataset ID: {self.dataset_id}")
+            print(f"  Manifest ID: {self.manifest_id}")
         except Exception as e:
             print(f"\n✗ Failed to log to Airtable: {e}")
             # Don't fail training if Airtable logging fails
