@@ -716,7 +716,3 @@ class AirtableManager:
                 df = df.sort_values("trained_date", ascending=False)
             return df
         return data
-
-
-# Backward compatibility alias
-AirtableDatasets = AirtableManager
