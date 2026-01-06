@@ -43,8 +43,8 @@ except Exception as e:
 # Test Datasets table
 print("\n3. Testing Datasets Table...")
 try:
-    datasets_table = api.table(base_id, "Datasets")
-    records = datasets_table.all()
+    models_table = api.table(base_id, "Models")
+    records = models_table.all()
     print("   ✓ Connected to Datasets table")
     print(f"   ✓ Found {len(records)} record(s)")
 
@@ -89,19 +89,16 @@ except Exception as e:
 # Test creating a dummy record
 print("\n5. Testing Write Permissions...")
 try:
-    test_record = datasets_table.create(
+    test_record = models_table.create(
         {
-            "name": "connection_test",
-            "version": "v0",
-            "hpc_path": "/tmp/test",
-            "sha256": "test_hash",
-            "created_date": "2024-12-19T00:00:00",
+            "model_name": "connection_test",
+            "model_family": "DynaCLR",
         }
     )
     print(f"   ✓ Successfully created test record (ID: {test_record['id']})")
 
     # Clean up
-    datasets_table.delete(test_record["id"])
+    models_table.delete(test_record["id"])
     print("   ✓ Successfully deleted test record")
 
 except Exception as e:
