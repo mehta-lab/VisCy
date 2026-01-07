@@ -891,7 +891,6 @@ class AirtableManager:
 
     def update_record(
         self,
-    ): ...  # inputs are the table, the record, maybe manifest, use the unique keys instead of the first column
-
-    # TODO: to update the tracks path column
-    raise NotImplementedError("Not implemented yet")
+    ): 
+        # TODO: to update the tracks path column
+        raise NotImplementedError("Not implemented yet")
