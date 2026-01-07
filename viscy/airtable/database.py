@@ -2,11 +2,74 @@
 
 import getpass
 import os
+from dataclasses import dataclass
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
 import pandas as pd
+from natsort import natsorted
 from pyairtable import Api
+
+
+@dataclass
+class ManifestDataset:
+    """
+    Dataset paths for one HCS plate/zarr store.
+
+    A manifest may contain multiple stores, each returned as a separate ManifestDataset.
+    """
+
+    data_path: str
+    tracks_path: str
+    fov_names: list[str]
+
+    def __len__(self) -> int:
+        return len(self.fov_names)
+
+    @property
+    def fov_paths(self) -> list[str]:
+        """Full paths to each FOV: {data_path}/{fov_name}."""
+        return [f"{self.data_path}/{fov}" for fov in self.fov_names]
+
+    def exists(self) -> bool:
+        """Check if data_path and tracks_path exist."""
+        return Path(self.data_path).exists() and Path(self.tracks_path).exists()
+
+    def validate(self) -> None:
+        """Raise FileNotFoundError if paths don't exist."""
+        if not Path(self.data_path).exists():
+            raise FileNotFoundError(f"Data path not found: {self.data_path}")
+        if not Path(self.tracks_path).exists():
+            raise FileNotFoundError(f"Tracks path not found: {self.tracks_path}")
+
+
+@dataclass
+class Manifest:
+    """All datasets for a manifest, potentially across multiple HCS plates."""
+
+    name: str
+    version: str
+    datasets: list[ManifestDataset]
+
+    def __iter__(self):
+        """Iterate over datasets."""
+        return iter(self.datasets)
+
+    def __len__(self):
+        """Total number of HCS plates."""
+        return len(self.datasets)
+
+    @property
+    def total_fovs(self) -> int:
+        """Total FOVs across all plates."""
+        return sum(len(ds) for ds in self.datasets)
+
+    def validate(self) -> None:
+        """Validate all dataset paths exist."""
+        for ds in self.datasets:
+            ds.validate()
+
 
 # TODO: update the usage examples in the docstrings
 # TODO: update the headers to match the Airtable columns and potentially move to separate file
@@ -716,3 +779,119 @@ class AirtableManager:
                 df = df.sort_values("trained_date", ascending=False)
             return df
         return data
+
+    def get_dataset_paths(
+        self,
+        manifest_name: str,
+        version: str,
+    ) -> Manifest:
+        """
+        Get zarr store paths and FOV names for a manifest.
+
+        Parameters
+        ----------
+        manifest_name : str
+            Name of the manifest
+        version : str
+            Semantic version of the manifest
+
+        Returns
+        -------
+        Manifest
+            Manifest object containing list of ManifestDataset (one per HCS plate)
+
+        Examples
+        --------
+        >>> manifest = airtable_db.get_dataset_paths("my_manifest", "0.0.1")
+        >>> print(f"{manifest.name} v{manifest.version}: {manifest.total_fovs} FOVs")
+
+        >>> # Use with TripletDataModule
+        >>> for ds in manifest:
+        ...     data_module = TripletDataModule(
+        ...         data_path=ds.data_path,
+        ...         tracks_path=ds.tracks_path,
+        ...         include_fov_names=ds.fov_names,
+        ...     )
+        """
+        # Get manifest record IDs
+        dataset_record_ids = self._get_manifest_dataset_ids(manifest_name, version)
+        if not dataset_record_ids:
+            return Manifest(name=manifest_name, version=version, datasets=[])
+
+        dataset_records = [
+            self.datasets_table.get(dataset_id)["fields"]
+            for dataset_id in dataset_record_ids
+        ]
+
+        stores: dict[str, list[str]] = {}
+        for fields in dataset_records:
+            data_path = fields["Data path"]
+            fov_name = f"{fields['Well ID']}/{fields['FOV']}"
+
+            if data_path not in stores:
+                stores[data_path] = []
+            stores[data_path].append(fov_name)
+
+        datasets = [
+            ManifestDataset(
+                data_path=data_path,
+                tracks_path=self._derive_tracks_path(data_path),
+                fov_names=natsorted(fov_names),
+            )
+            for data_path, fov_names in stores.items()
+        ]
+
+        return Manifest(name=manifest_name, version=version, datasets=datasets)
+
+    @staticmethod
+    def _derive_tracks_path(data_path: str) -> str:
+        """
+        Derive tracks path from data path.
+
+        Pattern:
+        - Data: {base}/2-assemble/{name}.zarr
+        - Tracks: {base}/1-preprocess/label-free/3-track/{name}_cropped.zarr
+        """
+        # Replace 2-assemble with 1-preprocess/label-free/3-track
+        tracks_path = data_path.replace(
+            "/2-assemble/", "/1-preprocess/label-free/3-track/"
+        )
+        # Replace .zarr with _cropped.zarr
+        if tracks_path.endswith(".zarr"):
+            tracks_path = tracks_path[:-5] + "_cropped.zarr"
+        return tracks_path
+
+    def _get_manifest_dataset_ids(self, manifest_name: str, version: str) -> list[str]:
+        """Get linked dataset record IDs for a manifest."""
+        df_manifests = self.list_manifests()
+
+        if len(df_manifests) == 0 or "name" not in df_manifests.columns:
+            raise ValueError(f"Manifest '{manifest_name}' not found (table is empty)")
+
+        filtered = df_manifests[df_manifests["name"] == manifest_name]
+        if len(filtered) == 0:
+            raise ValueError(f"Manifest '{manifest_name}' not found")
+
+        if "version" not in df_manifests.columns:
+            raise ValueError("Version field not found in Manifest table")
+
+        filtered = filtered[filtered["version"] == version]
+        if len(filtered) == 0:
+            raise ValueError(
+                f"Manifest '{manifest_name}' version '{version}' not found"
+            )
+
+        manifest_row = filtered.iloc[0]
+        dataset_record_ids = manifest_row.get("datasets", [])
+
+        if not dataset_record_ids or len(dataset_record_ids) == 0:
+            return []
+
+        return dataset_record_ids
+
+    def update_record(
+        self,
+    ): ...  # inputs are the table, the record, maybe manifest, use the unique keys instead of the first column
+
+    # TODO: to update the tracks path column
+    raise NotImplementedError("Not implemented yet")
