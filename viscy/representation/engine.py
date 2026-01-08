@@ -168,9 +168,22 @@ class ContrastiveModule(LightningModule):
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         grid = render_images(imgs, cmaps=["gray"] * 3)
-        self.logger.experiment.add_image(
-            key, grid, self.current_epoch, dataformats="HWC"
-        )
+
+        # Handle different logger types
+        if hasattr(self.logger, "experiment"):
+            # Check if TensorBoard logger
+            if hasattr(self.logger.experiment, "add_image"):
+                self.logger.experiment.add_image(
+                    key, grid, self.current_epoch, dataformats="HWC"
+                )
+            # Check if WandB logger
+            # FIXME this is just temporary fix to get the samples logged to WandB
+            elif hasattr(self.logger.experiment, "log"):
+                import wandb
+
+                self.logger.experiment.log(
+                    {key: wandb.Image(grid), "epoch": self.current_epoch}
+                )
 
     def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
         """Common method for logging step samples"""

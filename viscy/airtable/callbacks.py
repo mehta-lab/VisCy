@@ -6,7 +6,7 @@ from typing import Any
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy.airtable.datasets import AirtableManager
+from viscy.airtable.database import AirtableManager
 
 
 class AirtableLoggingCallback(Callback):
@@ -118,3 +118,75 @@ class AirtableLoggingCallback(Callback):
         except Exception as e:
             print(f"\n✗ Failed to log to Airtable: {e}")
             # Don't fail training if Airtable logging fails
+
+
+class ManifestWandbCallback(Callback):
+    """
+    Log manifest metadata to Weights & Biases automatically.
+
+    This callback extracts manifest information from ManifestTripletDataModule
+    and logs it to W&B config for searchability and lineage tracking.
+
+    Examples
+    --------
+    Add to config YAML:
+
+    >>> trainer:
+    >>>   logger:
+    >>>     class_path: lightning.pytorch.loggers.WandbLogger
+    >>>     init_args:
+    >>>       project: viscy-experiments
+    >>>       log_model: false
+    >>>   callbacks:
+    >>>     - class_path: viscy.airtable.callbacks.ManifestWandbCallback
+
+    Or add programmatically:
+
+    >>> from lightning.pytorch.loggers import WandbLogger
+    >>> logger = WandbLogger(project="viscy-experiments")
+    >>> callback = ManifestWandbCallback()
+    >>> trainer = Trainer(logger=logger, callbacks=[callback])
+    """
+
+    def on_train_start(self, trainer: Trainer, pl_module: Any) -> None:
+        """Log manifest metadata to W&B config at training start."""
+        # Import here to avoid requiring wandb as a dependency
+        try:
+            from lightning.pytorch.loggers import WandbLogger
+        except ImportError:
+            return  # Skip if wandb not installed
+
+        # Check if using WandbLogger
+        if not isinstance(trainer.logger, WandbLogger):
+            return
+
+        # Check if using ManifestTripletDataModule
+        from viscy.airtable.factory import ManifestTripletDataModule
+
+        dm = trainer.datamodule
+
+        # Log manifest metadata if using ManifestTripletDataModule
+        if isinstance(dm, ManifestTripletDataModule):
+            manifest_config = {
+                "manifest/name": dm.manifest_name,
+                "manifest/version": dm.manifest_version,
+                "manifest/base_id": dm.base_id,
+                "manifest/data_path": str(dm.data_path),
+                "manifest/tracks_path": str(dm.tracks_path),
+            }
+            trainer.logger.experiment.config.update(manifest_config)
+
+            print("\n✓ Manifest metadata logged to W&B:")
+            print(f"  Manifest: {dm.manifest_name} v{dm.manifest_version}")
+            print(f"  Data path: {dm.data_path}")
+            print(f"  Tracks path: {dm.tracks_path}")
+
+        # Also log data module hyperparameters explicitly
+        if dm is not None and hasattr(dm, "hparams"):
+            data_config = {f"data/{k}": v for k, v in dm.hparams.items()}
+            trainer.logger.experiment.config.update(data_config, allow_val_change=True)
+
+        # Log model hyperparameters explicitly
+        if hasattr(pl_module, "hparams"):
+            model_config = {f"model/{k}": v for k, v in pl_module.hparams.items()}
+            trainer.logger.experiment.config.update(model_config, allow_val_change=True)

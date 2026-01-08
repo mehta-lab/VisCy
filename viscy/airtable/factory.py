@@ -435,6 +435,13 @@ class ManifestTripletDataModule(TripletDataModule):
 
         dataset = manifest.datasets[0]
 
+        # Store manifest metadata as instance attributes for callbacks/logging
+        self.base_id = base_id
+        self.manifest_name = manifest_name
+        self.manifest_version = manifest_version
+        self.data_path = dataset.data_path
+        self.tracks_path = dataset.tracks_path
+
         # Handle FOV filtering
         if fit_include_wells is not None:
             # User override: use explicit wells

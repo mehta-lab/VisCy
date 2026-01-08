@@ -1,5 +1,6 @@
 """Airtable integration for dataset management and tracking."""
 
+from viscy.airtable.callbacks import ManifestWandbCallback
 from viscy.airtable.database import AirtableManager, Manifest, ManifestDataset
 from viscy.airtable.factory import (
     ManifestTripletDataModule,
@@ -11,5 +12,6 @@ __all__ = [
     "Manifest",
     "ManifestDataset",
     "ManifestTripletDataModule",
+    "ManifestWandbCallback",
     "create_triplet_datamodule_from_manifest",
 ]
