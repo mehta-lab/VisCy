@@ -11,6 +11,8 @@ import pandas as pd
 from natsort import natsorted
 from pyairtable import Api
 
+from viscy.airtable.schemas import DatasetRecord
+
 
 @dataclass
 class ManifestDataset:
@@ -169,45 +171,77 @@ class AirtableManager:
         self.manifests_table = self.api.table(base_id, "Manifest")
         self.models_table = self.api.table(base_id, "Models")
 
-    def register_dataset(
-        self,
-        fov_id: str,
-        dataset_name: str,
-        well_id: str,
-        fov_name: str,
-        data_path: str,
-    ) -> str:
+    def register_dataset(self, dataset: DatasetRecord) -> str:
         """
         Register a single dataset record (FOV) in Airtable.
 
         Parameters
         ----------
-        fov_id : str
-            Human-readable identifier (e.g., "RPE1_plate1_B_3_0")
-        dataset_name : str
-            Name of the dataset/plate this FOV belongs to
-        well_id : str
-            Well identifier as row_column (e.g., "B_3")
-        fov_name : str
-            FOV index within well (e.g., "0", "1", "2")
-        data_path : str
-            Full path to FOV (e.g., "/hpc/data/plate.zarr/B/3/0")
+        dataset : DatasetRecord
+            Dataset record with FOV metadata
 
         Returns
         -------
         str
             Airtable record ID
-        """
-        record = {
-            "FOV_ID": fov_id,
-            "Dataset": dataset_name,
-            "Well ID": well_id,
-            "FOV": fov_name,
-            "Data path": data_path,
-        }
 
-        created = self.datasets_table.create(record)
+        Examples
+        --------
+        >>> from viscy.airtable.schemas import DatasetRecord
+        >>> dataset = DatasetRecord(
+        ...     fov_id="plate_B_3_0",
+        ...     dataset_name="plate",
+        ...     well_id="B_3",
+        ...     fov_name="0",
+        ...     data_path="/hpc/data/plate.zarr/B/3/0"
+        ... )
+        >>> record_id = airtable_db.register_dataset(dataset)
+        """
+        record_dict = dataset.to_airtable_dict()
+        created = self.datasets_table.create(record_dict)
         return created["id"]
+
+    def register_datasets(self, datasets: list[DatasetRecord]) -> list[str]:
+        """
+        Register multiple dataset records (FOVs) in Airtable.
+
+        Parameters
+        ----------
+        datasets : list[DatasetRecord]
+            List of dataset records to register
+
+        Returns
+        -------
+        list[str]
+            List of Airtable record IDs
+
+        Examples
+        --------
+        >>> from viscy.airtable.schemas import DatasetRecord
+        >>> datasets = [
+        ...     DatasetRecord(
+        ...         fov_id="plate_B_3_0",
+        ...         dataset_name="plate",
+        ...         well_id="B_3",
+        ...         fov_name="0",
+        ...         data_path="/hpc/data/plate.zarr/B/3/0"
+        ...     ),
+        ...     DatasetRecord(
+        ...         fov_id="plate_B_3_1",
+        ...         dataset_name="plate",
+        ...         well_id="B_3",
+        ...         fov_name="1",
+        ...         data_path="/hpc/data/plate.zarr/B/3/1"
+        ...     ),
+        ... ]
+        >>> record_ids = airtable_db.register_datasets(datasets)
+        """
+        record_ids = []
+        for dataset in datasets:
+            record_dict = dataset.to_airtable_dict()
+            created = self.datasets_table.create(record_dict)
+            record_ids.append(created["id"])
+        return record_ids
 
     def create_manifest_from_datasets(
         self,
@@ -556,9 +590,14 @@ class AirtableManager:
                 data = [d for d in data if d.get("purpose") == purpose]
             return data
 
-    def list_datasets(self, as_dataframe: bool = True) -> pd.DataFrame | list[dict]:
+    def list_datasets(
+        self,
+        as_dataframe: bool = True,
+        as_pydantic: bool = False,
+        skip_invalid: bool = True,
+    ) -> pd.DataFrame | list[dict] | list[DatasetRecord]:
         """
-        Get all dataset records (FOVs) as a DataFrame (or list of dicts).
+        Get all dataset records (FOVs) as a DataFrame, list of dicts, or Pydantic models.
 
         Use pandas for filtering - much simpler and more powerful than
         building Airtable formulas.
@@ -566,16 +605,21 @@ class AirtableManager:
         Parameters
         ----------
         as_dataframe : bool
-            If True, return pandas DataFrame. If False, return list of dicts.
+            If True, return pandas DataFrame. Ignored if as_pydantic is True.
+        as_pydantic : bool
+            If True, return list of DatasetRecord objects. Takes precedence over as_dataframe.
+        skip_invalid : bool
+            If True and as_pydantic=True, skip records that fail validation instead of raising error.
+            Default is True to handle legacy/incomplete records gracefully.
 
         Returns
         -------
-        pd.DataFrame | list[dict]
+        pd.DataFrame | list[dict] | list[DatasetRecord]
             All dataset records
 
         Examples
         --------
-        >>> # Get all datasets
+        >>> # Get all datasets as DataFrame
         >>> df = airtable_db.list_datasets()
         >>>
         >>> # Filter with pandas (simple and powerful!)
@@ -583,11 +627,30 @@ class AirtableManager:
         >>> filtered = df[df['Well ID'].isin(['B_3', 'B_4'])]
         >>> filtered = df[~df['FOV_ID'].isin(['RPE1_plate1_B_3_2'])]
         >>>
+        >>> # Get as Pydantic models for type safety
+        >>> datasets = airtable_db.list_datasets(as_pydantic=True)
+        >>> for dataset in datasets:
+        ...     print(dataset.fov_id, dataset.data_path)
+        >>>
         >>> # Group and analyze
         >>> df.groupby('Dataset').size()
         >>> df.groupby('Well ID').size()
         """
         records = self.datasets_table.all()
+
+        if as_pydantic:
+            parsed_records = []
+            for r in records:
+                try:
+                    parsed_records.append(DatasetRecord.from_airtable_record(r))
+                except Exception:
+                    if skip_invalid:
+                        # Skip invalid records silently
+                        continue
+                    else:
+                        raise
+            return parsed_records
+
         data = [{"id": r["id"], **r["fields"]} for r in records]
 
         if as_dataframe:
@@ -620,7 +683,7 @@ class AirtableManager:
     def log_model_training(
         self,
         manifest_id: str,
-        mlflow_run_id: str,
+        wandb_run_id: str,
         model_name: str | None = None,
         metrics: dict[str, float] | None = None,
         checkpoint_path: str | None = None,
@@ -635,12 +698,12 @@ class AirtableManager:
         ----------
         manifest_id : str
             Airtable record ID of manifest used
-        mlflow_run_id : str
-            MLflow run ID for experiment tracking
+        wandb_run_id : str
+            W&B run ID for experiment tracking
         model_name : str | None
             Human-readable model name
         metrics : dict | None
-            Training metrics (e.g., {"accuracy": 0.89, "f1_score": 0.92})
+            Training metrics (e.g., {"val_loss": 0.15, "dice": 0.92})
         checkpoint_path : str | None
             Path to saved model checkpoint
         trained_by : str | None
@@ -656,17 +719,17 @@ class AirtableManager:
         >>> manifest_id = airtable_db.create_manifest_from_datasets(...)
         >>> model_id = airtable_db.log_model_training(
         ...     manifest_id=manifest_id,
-        ...     mlflow_run_id="run_abc123",
-        ...     model_name="sec61_model_v1",
+        ...     wandb_run_id="20260107-152420",
+        ...     model_name="contrastive-a549:v1",
         ...     metrics={"val_loss": 0.15},
-        ...     trained_by="researcher_name"
+        ...     trained_by="eduardo.hirata"
         ... )
         """
         # Create model record
         model_record = {
             "model_name": model_name or f"model_{datetime.now():%Y%m%d_%H%M%S}",
             "manifest": [manifest_id],  # Link to manifest
-            "mlflow_run_id": mlflow_run_id,
+            "wandb_run_id": wandb_run_id,
             "trained_date": datetime.now().isoformat(),
         }
 
@@ -688,10 +751,10 @@ class AirtableManager:
         # Handle models_trained as comma-separated string
         if models_trained_str:
             models_list = [m.strip() for m in models_trained_str.split(",")]
-            models_list.append(mlflow_run_id)
+            models_list.append(wandb_run_id)
             new_models_str = ", ".join(models_list)
         else:
-            new_models_str = mlflow_run_id
+            new_models_str = wandb_run_id
 
         self.manifests_table.update(
             manifest_id,
@@ -891,6 +954,6 @@ class AirtableManager:
 
     def update_record(
         self,
-    ): 
+    ):
         # TODO: to update the tracks path column
         raise NotImplementedError("Not implemented yet")
