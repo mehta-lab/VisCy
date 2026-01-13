@@ -17,14 +17,14 @@ class AirtableLoggingCallback(Callback):
     - Best model checkpoint path
     - Who trained the model
     - When it was trained
-    - Link to the manifest used
+    - Link to the collection used
 
     Parameters
     ----------
     base_id : str
         Airtable base ID
-    manifest_id : str
-        Airtable manifest record ID (from config)
+    collection_id : str
+        Airtable collection record ID (from config)
     model_name : str | None
         Custom model name. If None, auto-generates from model class and timestamp.
     log_metrics : bool
@@ -40,13 +40,13 @@ class AirtableLoggingCallback(Callback):
     >>>     - class_path: viscy.airtable.callbacks.AirtableLoggingCallback
     >>>       init_args:
     >>>         base_id: "appXXXXXXXXXXXXXX"
-    >>>         manifest_id: "recYYYYYYYYYYYYYY"
+    >>>         collection_id: "recYYYYYYYYYYYYYY"
 
     Or add programmatically:
 
     >>> callback = AirtableLoggingCallback(
     >>>     base_id="appXXXXXXXXXXXXXX",
-    >>>     manifest_id="recYYYYYYYYYYYYYY"
+    >>>     collection_id="recYYYYYYYYYYYYYY"
     >>> )
     >>> trainer = Trainer(callbacks=[callback])
     """
@@ -54,13 +54,13 @@ class AirtableLoggingCallback(Callback):
     def __init__(
         self,
         base_id: str,
-        manifest_id: str,
+        collection_id: str,
         model_name: str | None = None,
         log_metrics: bool = False,
     ):
         super().__init__()
         self.airtable_db = AirtableManager(base_id=base_id)
-        self.manifest_id = manifest_id
+        self.collection_id = collection_id
         self.model_name = model_name
         self.log_metrics = log_metrics
 
@@ -104,7 +104,7 @@ class AirtableLoggingCallback(Callback):
         # Log to Airtable
         try:
             model_id = self.airtable_db.log_model_training(
-                manifest_id=self.manifest_id,
+                collection_id=self.collection_id,
                 mlflow_run_id=run_id or "unknown",
                 model_name=model_name,
                 checkpoint_path=str(checkpoint_path) if checkpoint_path else None,
@@ -114,17 +114,17 @@ class AirtableLoggingCallback(Callback):
             print(f"\n✓ Model logged to Airtable (record ID: {model_id})")
             print(f"  Model name: {model_name}")
             print(f"  Checkpoint: {checkpoint_path}")
-            print(f"  Manifest ID: {self.manifest_id}")
+            print(f"  Collections ID: {self.collection_id}")
         except Exception as e:
             print(f"\n✗ Failed to log to Airtable: {e}")
             # Don't fail training if Airtable logging fails
 
 
-class ManifestWandbCallback(Callback):
+class CollectionWandbCallback(Callback):
     """
-    Log manifest metadata to Weights & Biases automatically.
+    Log collection metadata to Weights & Biases automatically.
 
-    This callback extracts manifest information from ManifestTripletDataModule
+    This callback extracts collection information from CollectionTripletDataModule
     and logs it to W&B config for searchability and lineage tracking.
 
     Examples
@@ -138,18 +138,18 @@ class ManifestWandbCallback(Callback):
     >>>       project: viscy-experiments
     >>>       log_model: false
     >>>   callbacks:
-    >>>     - class_path: viscy.airtable.callbacks.ManifestWandbCallback
+    >>>     - class_path: viscy.airtable.callbacks.CollectionWandbCallback
 
     Or add programmatically:
 
     >>> from lightning.pytorch.loggers import WandbLogger
     >>> logger = WandbLogger(project="viscy-experiments")
-    >>> callback = ManifestWandbCallback()
+    >>> callback = CollectionWandbCallback()
     >>> trainer = Trainer(logger=logger, callbacks=[callback])
     """
 
     def on_train_start(self, trainer: Trainer, pl_module: Any) -> None:
-        """Log manifest metadata to W&B config at training start."""
+        """Log collection metadata to W&B config at training start."""
         # Import here to avoid requiring wandb as a dependency
         try:
             from lightning.pytorch.loggers import WandbLogger
@@ -160,24 +160,24 @@ class ManifestWandbCallback(Callback):
         if not isinstance(trainer.logger, WandbLogger):
             return
 
-        # Check if using ManifestTripletDataModule
-        from viscy.airtable.factory import ManifestTripletDataModule
+        # Check if using CollectionTripletDataModule
+        from viscy.airtable.factory import CollectionTripletDataModule
 
         dm = trainer.datamodule
 
-        # Log manifest metadata if using ManifestTripletDataModule
-        if isinstance(dm, ManifestTripletDataModule):
-            manifest_config = {
-                "manifest/name": dm.manifest_name,
-                "manifest/version": dm.manifest_version,
-                "manifest/base_id": dm.base_id,
-                "manifest/data_path": str(dm.data_path),
-                "manifest/tracks_path": str(dm.tracks_path),
+        # Log collection metadata if using CollectionTripletDataModule
+        if isinstance(dm, CollectionTripletDataModule):
+            collection_config = {
+                "collection/name": dm.collection_name,
+                "collection/version": dm.collection_version,
+                "collection/base_id": dm.base_id,
+                "collection/data_path": str(dm.data_path),
+                "collection/tracks_path": str(dm.tracks_path),
             }
-            trainer.logger.experiment.config.update(manifest_config)
+            trainer.logger.experiment.config.update(collection_config)
 
-            print("\n✓ Manifest metadata logged to W&B:")
-            print(f"  Manifest: {dm.manifest_name} v{dm.manifest_version}")
+            print("\n✓ Collections metadata logged to W&B:")
+            print(f"  Collections: {dm.collection_name} v{dm.collection_version}")
             print(f"  Data path: {dm.data_path}")
             print(f"  Tracks path: {dm.tracks_path}")
 

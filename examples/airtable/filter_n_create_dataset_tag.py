@@ -1,4 +1,4 @@
-"""Filter datasets using pandas and create manifest tags."""
+"""Filter datasets using pandas and create collection tags."""
 
 # %%
 
@@ -40,26 +40,26 @@ print(f"\nTotal dataset records after filtering: {len(filtered)}")
 print("\nBreakdown by well:")
 print(filtered.groupby("Well ID").size())
 
-# Create manifest from filtered dataset records
+# Create collection from filtered dataset records
 fov_ids = filtered["FOV_ID"].tolist()
 
 try:
-    manifest_id = airtable_db.create_manifest_from_datasets(
-        manifest_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
+    collection_id = airtable_db.create_collection_from_datasets(
+        collection_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
         fov_ids=fov_ids,
-        version="0.0.1",  # Semantic versioning
+        version="0.0.2",  # Semantic versioning
         purpose="training",
         description="Dataset records from wells B_3 and B_4",
     )
-    print(f"\n✓ Created manifest: {manifest_id}")
+    print(f"\n✓ Created collection: {collection_id}")
     print(f"  Contains {len(fov_ids)} dataset records")
 except ValueError as e:
     print(f"\n⚠ {e}")
 
 # %%
-# Delete the manifest entry demo
-airtable_db.delete_manifest(manifest_id)
-print(f"Deleted manifest: {manifest_id}")
+# Delete the collection entry demo
+airtable_db.delete_collection(collection_id)
+print(f"Deleted collection: {collection_id}")
 
 # %%
 # EXAMPLE 3: Group by dataset and show summary

@@ -15,11 +15,11 @@ from viscy.airtable.schemas import DatasetRecord
 
 
 @dataclass
-class ManifestDataset:
+class CollectionDataset:
     """
     Dataset paths for one HCS plate/zarr store.
 
-    A manifest may contain multiple stores, each returned as a separate ManifestDataset.
+    A collection may contain multiple stores, each returned as a separate CollectionDataset.
     """
 
     data_path: str
@@ -47,12 +47,12 @@ class ManifestDataset:
 
 
 @dataclass
-class Manifest:
-    """All datasets for a manifest, potentially across multiple HCS plates."""
+class Collections:
+    """All datasets for a collection, potentially across multiple HCS plates."""
 
     name: str
     version: str
-    datasets: list[ManifestDataset]
+    datasets: list[CollectionDataset]
 
     def __iter__(self):
         """Iterate over datasets."""
@@ -116,13 +116,13 @@ MANIFESTS_INDEX = [
 
 class AirtableManager:
     """
-    Unified interface to Airtable for dataset, manifest, and model management.
+    Unified interface to Airtable for dataset, collection, and model management.
 
     Use this to:
     - Register individual FOVs from HCS plates
-    - Create and manage dataset manifests (collections of FOVs)
-    - Track model training on manifests
-    - Query datasets, manifests, and models
+    - Create and manage dataset collections (collections of FOVs)
+    - Track model training on collections
+    - Query datasets, collections, and models
 
     Parameters
     ----------
@@ -135,9 +135,9 @@ class AirtableManager:
     --------
     >>> airtable_db = AirtableManager(base_id="appXXXXXXXXXXXXXX")
     >>>
-    >>> # Create manifest from FOV selection
-    >>> manifest_id = airtable_db.create_manifest_from_datasets(
-    ...     manifest_name="RPE1_infection_v2",
+    >>> # Create collection from FOV selection
+    >>> collection_id = airtable_db.create_collection_from_datasets(
+    ...     collection_name="RPE1_infection_v2",
     ...     fov_ids=["FOV_001", "FOV_002", "FOV_004"],
     ...     version="0.0.1",
     ...     purpose="training"
@@ -145,13 +145,13 @@ class AirtableManager:
     >>>
     >>> # Track model training
     >>> airtable_db.log_model_training(
-    ...     manifest_id=manifest_id,
+    ...     collection_id=collection_id,
     ...     mlflow_run_id="run_123",
     ...     model_name="my_model",
     ... )
     >>>
-    >>> # Get all FOV paths for a manifest
-    >>> fov_paths = airtable_db.get_manifest_data_paths("RPE1_infection_v2")
+    >>> # Get all FOV paths for a collection
+    >>> fov_paths = airtable_db.get_collection_data_paths("RPE1_infection_v2")
     >>> print(fov_paths)
     >>> # ['/hpc/data/rpe1.zarr/B/3/0', '/hpc/data/rpe1.zarr/B/3/1', ...]
     """
@@ -168,7 +168,7 @@ class AirtableManager:
         self.api = Api(api_key)
         self.base_id = base_id
         self.datasets_table = self.api.table(base_id, "Datasets")
-        self.manifests_table = self.api.table(base_id, "Manifest")
+        self.collections_table = self.api.table(base_id, "Collections")
         self.models_table = self.api.table(base_id, "Models")
 
     def register_dataset(self, dataset: DatasetRecord) -> str:
@@ -243,9 +243,9 @@ class AirtableManager:
             record_ids.append(created["id"])
         return record_ids
 
-    def create_manifest_from_datasets(
+    def create_collection_from_datasets(
         self,
-        manifest_name: str,
+        collection_name: str,
         fov_ids: list[str],
         version: str,
         purpose: str = "training",
@@ -253,19 +253,19 @@ class AirtableManager:
         description: str | None = None,
     ) -> str:
         """
-        Create a manifest (collection) from a list of FOV IDs.
+        Create a collection (collection) from a list of FOV IDs.
 
         Parameters
         ----------
-        manifest_name : str
-            Name for this manifest
+        collection_name : str
+            Name for this collection
 
         fov_ids : list[str]
             List of FOV_ID values from Datasets table (e.g., ["plate1_B_3_0", "plate1_B_3_1"])
         version : str
             Semantic version (e.g., "0.0.1", "0.1.0", "1.0.0")
         purpose : str
-            Purpose of this manifest ("training", "validation", "test")
+            Purpose of this collection ("training", "validation", "test")
         project_name : str | None
             Project Name (e.g OrganelleBox, DynaCLR, etc.)
         description : str | None
@@ -274,12 +274,12 @@ class AirtableManager:
         Returns
         -------
         str
-            Airtable manifest record ID
+            Airtable collection record ID
 
         Examples
         --------
-        >>> airtable_db.create_manifest_from_datasets(
-        ...     manifest_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
+        >>> airtable_db.create_collection_from_datasets(
+        ...     collection_name="2024_11_07_A549_SEC61_DENV_wells_B1_B2",
         ...     project_name="OrganelleBox",
         ...     fov_ids=["2024_11_07_A549_SEC61_DENV_B1_0", "2024_11_07_A549_SEC61_DENV_B1_1"],
         ...     version="0.0.1",
@@ -296,30 +296,34 @@ class AirtableManager:
                 f"Version must be semantic version format (e.g., '0.0.1', '1.0.0'), got: '{version}'"
             )
 
-        # Check if manifest with same name + version exists (use DataFrame)
-        df_manifests = self.list_manifests()
+        # Check if collection with same name + version exists (use DataFrame)
+        df_collections = self.list_collections()
 
         # Only check for duplicates if table is not empty and has required columns
         if (
-            len(df_manifests) > 0
-            and "name" in df_manifests.columns
-            and "version" in df_manifests.columns
+            len(df_collections) > 0
+            and "name" in df_collections.columns
+            and "version" in df_collections.columns
         ):
-            existing = df_manifests[
-                (df_manifests["name"] == manifest_name)
-                & (df_manifests["version"] == version)
+            existing = df_collections[
+                (df_collections["name"] == collection_name)
+                & (df_collections["version"] == version)
             ]
 
             if len(existing) > 0:
                 raise ValueError(
-                    f"Manifest '{manifest_name}' version '{version}' already exists. "
+                    f"Collections '{collection_name}' version '{version}' already exists. "
                     f"To create a new version, increment the version number (e.g., '0.0.2')."
                 )
 
-            existing_versions = df_manifests[df_manifests["name"] == manifest_name]
+            existing_versions = df_collections[
+                df_collections["name"] == collection_name
+            ]
             if len(existing_versions) > 0:
                 versions = sorted(existing_versions["version"].tolist())
-                print(f"ℹ Manifest '{manifest_name}' existing versions: {versions}")
+                print(
+                    f"ℹ Collections '{collection_name}' existing versions: {versions}"
+                )
                 print(f"  Creating new version: '{version}'")
 
         # Get Airtable record IDs for these FOV IDs (ensure unique)
@@ -341,25 +345,25 @@ class AirtableManager:
         # Remove any duplicate record IDs (shouldn't happen, but extra safety)
         dataset_record_ids = list(dict.fromkeys(dataset_record_ids))
 
-        # Create manifest record
-        manifest_record = {
-            "name": manifest_name,
+        # Create collection record
+        collection_record = {
+            "name": collection_name,
             "datasets": dataset_record_ids,  # Linked records (unique)
             "version": version,  # Semantic version (required)
             "purpose": purpose,
             "created_by": getpass.getuser(),
         }
         if project_name:
-            manifest_record["project"] = project_name
+            collection_record["project"] = project_name
         if description:
-            manifest_record["description"] = description
+            collection_record["description"] = description
 
-        created = self.manifests_table.create(manifest_record)
+        created = self.collections_table.create(collection_record)
         return created["id"]
 
-    def create_manifest_from_query(
+    def create_collection_from_query(
         self,
-        manifest_name: str,
+        collection_name: str,
         version: str,
         source_dataset: str | None = None,
         well_ids: list[str] | None = None,
@@ -367,12 +371,12 @@ class AirtableManager:
         **kwargs,
     ) -> str:
         """
-        Create a manifest by filtering dataset records with pandas.
+        Create a collection by filtering dataset records with pandas.
 
         Parameters
         ----------
-        manifest_name : str
-            Name for this manifest
+        collection_name : str
+            Name for this collection
         version : str
             Semantic version (e.g., "0.0.1") - REQUIRED
         source_dataset : str | None
@@ -382,18 +386,18 @@ class AirtableManager:
         exclude_fov_ids : list[str] | None
             FOV_ID values to exclude
         **kwargs
-            Additional arguments for create_manifest_from_datasets
+            Additional arguments for create_collection_from_datasets
 
         Returns
         -------
         str
-            Airtable manifest record ID
+            Airtable collection record ID
 
         Examples
         --------
-        >>> # Create manifest from specific wells in a dataset
-        >>> airtable_db.create_manifest_from_query(
-        ...     manifest_name="RPE1_infection_training",
+        >>> # Create collection from specific wells in a dataset
+        >>> airtable_db.create_collection_from_query(
+        ...     collection_name="RPE1_infection_training",
         ...     version="0.0.1",
         ...     source_dataset="RPE1_plate1",
         ...     well_ids=["B_3", "B_4"],
@@ -418,21 +422,21 @@ class AirtableManager:
 
         print(f"Found {len(fov_ids)} dataset records matching criteria")
 
-        # Create manifest
-        return self.create_manifest_from_datasets(
-            manifest_name=manifest_name, version=version, fov_ids=fov_ids, **kwargs
+        # Create collection
+        return self.create_collection_from_datasets(
+            collection_name=collection_name, version=version, fov_ids=fov_ids, **kwargs
         )
 
-    def get_manifest_data_paths(
-        self, manifest_name: str, version: str | None = None
+    def get_collection_data_paths(
+        self, collection_name: str, version: str | None = None
     ) -> list[str]:
         """
-        Get list of data paths for a manifest.
+        Get list of data paths for a collection.
 
         Parameters
         ----------
-        manifest_name : str
-            Manifest name
+        collection_name : str
+            Collections name
         version : str | None
             Specific version (if None, returns latest)
 
@@ -443,41 +447,43 @@ class AirtableManager:
 
         Examples
         --------
-        >>> paths = airtable_db.get_manifest_data_paths("RPE1_infection_v2")
+        >>> paths = airtable_db.get_collection_data_paths("RPE1_infection_v2")
         >>> print(paths)
         >>> # ['/hpc/data/rpe1.zarr/B/3/0', '/hpc/data/rpe1.zarr/B/3/1', ...]
         """
-        # Get all manifests as DataFrame
-        df_manifests = self.list_manifests()
+        # Get all collections as DataFrame
+        df_collections = self.list_collections()
 
-        if len(df_manifests) == 0 or "name" not in df_manifests.columns:
-            raise ValueError(f"Manifest '{manifest_name}' not found (table is empty)")
+        if len(df_collections) == 0 or "name" not in df_collections.columns:
+            raise ValueError(
+                f"Collections '{collection_name}' not found (table is empty)"
+            )
 
         # Filter by name
-        filtered = df_manifests[df_manifests["name"] == manifest_name]
+        filtered = df_collections[df_collections["name"] == collection_name]
 
         if len(filtered) == 0:
-            raise ValueError(f"Manifest '{manifest_name}' not found")
+            raise ValueError(f"Collections '{collection_name}' not found")
 
         # Filter by version if specified, otherwise get latest
         if version:
-            if "version" not in df_manifests.columns:
-                raise ValueError("Version field not found in Manifest table")
+            if "version" not in df_collections.columns:
+                raise ValueError("Version field not found in Collections table")
             filtered = filtered[filtered["version"] == version]
             if len(filtered) == 0:
                 raise ValueError(
-                    f"Manifest '{manifest_name}' version '{version}' not found"
+                    f"Collections '{collection_name}' version '{version}' not found"
                 )
         else:
             # Get latest version (sort by created_time if column exists)
             if "created_time" in filtered.columns:
                 filtered = filtered.sort_values("created_time", ascending=False)
 
-        # Get the first (or only) matching manifest
-        manifest_row = filtered.iloc[0]
+        # Get the first (or only) matching collection
+        collection_row = filtered.iloc[0]
 
         # Get linked dataset record IDs
-        dataset_record_ids = manifest_row.get("datasets", [])
+        dataset_record_ids = collection_row.get("datasets", [])
         if not dataset_record_ids or len(dataset_record_ids) == 0:
             return []
 
@@ -489,64 +495,68 @@ class AirtableManager:
 
         return data_paths
 
-    def get_manifest(
-        self, manifest_name: str, version: str | None = None
+    def get_collection(
+        self, collection_name: str, version: str | None = None
     ) -> dict[str, Any]:
         """
-        Get full manifest information including data paths.
+        Get full collection information including data paths.
 
         Parameters
         ----------
-        manifest_name : str
-            Manifest name
+        collection_name : str
+            Collections name
         version : str | None
             Specific version
 
         Returns
         -------
         dict
-            Manifest info with data paths and metadata
+            Collections info with data paths and metadata
         """
-        # Get all manifests as DataFrame
-        df_manifests = self.list_manifests()
+        # Get all collections as DataFrame
+        df_collections = self.list_collections()
 
-        if len(df_manifests) == 0 or "name" not in df_manifests.columns:
-            raise ValueError(f"Manifest '{manifest_name}' not found (table is empty)")
+        if len(df_collections) == 0 or "name" not in df_collections.columns:
+            raise ValueError(
+                f"Collections '{collection_name}' not found (table is empty)"
+            )
 
         # Filter by name
-        filtered = df_manifests[df_manifests["name"] == manifest_name]
+        filtered = df_collections[df_collections["name"] == collection_name]
 
         if len(filtered) == 0:
-            raise ValueError(f"Manifest '{manifest_name}' not found")
+            raise ValueError(f"Collections '{collection_name}' not found")
 
         # Filter by version if specified, otherwise get latest
         if version:
-            if "version" not in df_manifests.columns:
-                raise ValueError("Version field not found in Manifest table")
+            if "version" not in df_collections.columns:
+                raise ValueError("Version field not found in Collections table")
             filtered = filtered[filtered["version"] == version]
             if len(filtered) == 0:
                 raise ValueError(
-                    f"Manifest '{manifest_name}' version '{version}' not found"
+                    f"Collections '{collection_name}' version '{version}' not found"
                 )
         else:
             # Get latest version (sort by created_time if column exists)
             if "created_time" in filtered.columns:
                 filtered = filtered.sort_values("created_time", ascending=False)
 
-        # Get the first (or only) matching manifest
-        manifest_row = filtered.iloc[0]
-        manifest = manifest_row.to_dict()
+        # Get the first (or only) matching collection
+        collection_row = filtered.iloc[0]
+        collection = collection_row.to_dict()
 
         # Add data paths
-        manifest["data_paths"] = self.get_manifest_data_paths(manifest_name, version)
+        collection["data_paths"] = self.get_collection_data_paths(
+            collection_name, version
+        )
 
-        return manifest
+        return collection
 
-    def list_manifests(
+    def list_collections(
         self, purpose: str | None = None, as_dataframe: bool = True
     ) -> pd.DataFrame | list[dict]:
         """
-        List all manifests.
+        List all collections.
 
         Parameters
         ----------
@@ -558,19 +568,19 @@ class AirtableManager:
         Returns
         -------
         pd.DataFrame | list[dict]
-            Manifest records as DataFrame or list of dicts
+            Collections records as DataFrame or list of dicts
 
         Examples
         --------
-        >>> airtable_db.list_manifests(purpose="training")
+        >>> airtable_db.list_collections(purpose="training")
         >>> # Returns DataFrame with columns: id, name, version, purpose, ...
         """
-        # Fetch all manifests (try sorting, but don't fail if field doesn't exist)
+        # Fetch all collections (try sorting, but don't fail if field doesn't exist)
         try:
-            records = self.manifests_table.all(sort=["-created_time"])
+            records = self.collections_table.all(sort=["-created_time"])
         except Exception:
             # If sort fails (field might not exist), fetch without sorting
-            records = self.manifests_table.all()
+            records = self.collections_table.all()
 
         data = [{"id": r["id"], **r["fields"]} for r in records]
 
@@ -657,14 +667,14 @@ class AirtableManager:
             return pd.DataFrame(data)
         return data
 
-    def delete_manifest(self, manifest_id: str) -> bool:
+    def delete_collection(self, collection_id: str) -> bool:
         """
-        Delete a manifest record from Airtable.
+        Delete a collection record from Airtable.
 
         Parameters
         ----------
-        manifest_id : str
-            Airtable record ID of the manifest to delete
+        collection_id : str
+            Airtable record ID of the collection to delete
 
         Returns
         -------
@@ -673,16 +683,16 @@ class AirtableManager:
 
         Examples
         --------
-        >>> manifest_id = airtable_db.create_manifest_from_datasets(...)
-        >>> airtable_db.delete_manifest(manifest_id)
-        >>> print(f"Deleted manifest: {manifest_id}")
+        >>> collection_id = airtable_db.create_collection_from_datasets(...)
+        >>> airtable_db.delete_collection(collection_id)
+        >>> print(f"Deleted collection: {collection_id}")
         """
-        self.manifests_table.delete(manifest_id)
+        self.collections_table.delete(collection_id)
         return True
 
     def log_model_training(
         self,
-        manifest_id: str,
+        collection_id: str,
         wandb_run_id: str,
         model_name: str | None = None,
         metrics: dict[str, float] | None = None,
@@ -690,14 +700,14 @@ class AirtableManager:
         trained_by: str | None = None,
     ) -> str:
         """
-        Log that a model was trained using a manifest.
+        Log that a model was trained using a collection.
 
-        Creates entry in Models table and updates Manifest table.
+        Creates entry in Models table and updates Collections table.
 
         Parameters
         ----------
-        manifest_id : str
-            Airtable record ID of manifest used
+        collection_id : str
+            Airtable record ID of collection used
         wandb_run_id : str
             W&B run ID for experiment tracking
         model_name : str | None
@@ -716,9 +726,9 @@ class AirtableManager:
 
         Examples
         --------
-        >>> manifest_id = airtable_db.create_manifest_from_datasets(...)
+        >>> collection_id = airtable_db.create_collection_from_datasets(...)
         >>> model_id = airtable_db.log_model_training(
-        ...     manifest_id=manifest_id,
+        ...     collection_id=collection_id,
         ...     wandb_run_id="20260107-152420",
         ...     model_name="contrastive-a549:v1",
         ...     metrics={"val_loss": 0.15},
@@ -728,7 +738,7 @@ class AirtableManager:
         # Create model record
         model_record = {
             "model_name": model_name or f"model_{datetime.now():%Y%m%d_%H%M%S}",
-            "manifest": [manifest_id],  # Link to manifest
+            "collection": [collection_id],  # Link to collection
             "wandb_run_id": wandb_run_id,
             "trained_date": datetime.now().isoformat(),
         }
@@ -744,9 +754,9 @@ class AirtableManager:
 
         created = self.models_table.create(model_record)
 
-        # Update manifest record to track usage
-        manifest = self.manifests_table.get(manifest_id)
-        models_trained_str = manifest["fields"].get("models_trained", "")
+        # Update collection record to track usage
+        collection = self.collections_table.get(collection_id)
+        models_trained_str = collection["fields"].get("models_trained", "")
 
         # Handle models_trained as comma-separated string
         if models_trained_str:
@@ -756,23 +766,23 @@ class AirtableManager:
         else:
             new_models_str = wandb_run_id
 
-        self.manifests_table.update(
-            manifest_id,
+        self.collections_table.update(
+            collection_id,
             {"models_trained": new_models_str, "last_used": datetime.now().isoformat()},
         )
 
         return created["id"]
 
-    def get_models_for_manifest(
-        self, manifest_id: str, as_dataframe: bool = True
+    def get_models_for_collection(
+        self, collection_id: str, as_dataframe: bool = True
     ) -> pd.DataFrame | list[dict]:
         """
-        Get all models trained on a specific manifest.
+        Get all models trained on a specific collection.
 
         Parameters
         ----------
-        manifest_id : str
-            Airtable record ID of manifest
+        collection_id : str
+            Airtable record ID of collection
         as_dataframe : bool
             If True, return pandas DataFrame. If False, return list of dicts.
 
@@ -783,7 +793,7 @@ class AirtableManager:
 
         Examples
         --------
-        >>> models_df = airtable_db.get_models_for_manifest(manifest_id)
+        >>> models_df = airtable_db.get_models_for_collection(collection_id)
         >>> print(models_df[["model_name", "mlflow_run_id", "trained_date"]])
         """
         # Get all models as DataFrame
@@ -795,11 +805,11 @@ class AirtableManager:
             if len(df) == 0:
                 return df
 
-            # Filter by manifest_id using pandas
-            # The 'manifest' field contains a list of linked record IDs
+            # Filter by collection_id using pandas
+            # The 'collection' field contains a list of linked record IDs
             df_filtered = df[
-                df["manifest"].apply(
-                    lambda x: manifest_id in x if isinstance(x, list) else False
+                df["collection"].apply(
+                    lambda x: collection_id in x if isinstance(x, list) else False
                 )
             ]
 
@@ -810,7 +820,7 @@ class AirtableManager:
             return df_filtered
         else:
             # Filter list
-            filtered = [d for d in data if manifest_id in d.get("manifest", [])]
+            filtered = [d for d in data if collection_id in d.get("collection", [])]
             return filtered
 
     def list_models(self, as_dataframe: bool = True) -> pd.DataFrame | list[dict]:
@@ -845,41 +855,41 @@ class AirtableManager:
 
     def get_dataset_paths(
         self,
-        manifest_name: str,
+        collection_name: str,
         version: str,
-    ) -> Manifest:
+    ) -> Collections:
         """
-        Get zarr store paths and FOV names for a manifest.
+        Get zarr store paths and FOV names for a collection.
 
         Parameters
         ----------
-        manifest_name : str
-            Name of the manifest
+        collection_name : str
+            Name of the collection
         version : str
-            Semantic version of the manifest
+            Semantic version of the collection
 
         Returns
         -------
-        Manifest
-            Manifest object containing list of ManifestDataset (one per HCS plate)
+        Collections
+            Collections object containing list of CollectionDataset (one per HCS plate)
 
         Examples
         --------
-        >>> manifest = airtable_db.get_dataset_paths("my_manifest", "0.0.1")
-        >>> print(f"{manifest.name} v{manifest.version}: {manifest.total_fovs} FOVs")
+        >>> collection = airtable_db.get_dataset_paths("my_collection", "0.0.1")
+        >>> print(f"{collection.name} v{collection.version}: {collection.total_fovs} FOVs")
 
         >>> # Use with TripletDataModule
-        >>> for ds in manifest:
+        >>> for ds in collection:
         ...     data_module = TripletDataModule(
         ...         data_path=ds.data_path,
         ...         tracks_path=ds.tracks_path,
         ...         include_fov_names=ds.fov_names,
         ...     )
         """
-        # Get manifest record IDs
-        dataset_record_ids = self._get_manifest_dataset_ids(manifest_name, version)
+        # Get collection record IDs
+        dataset_record_ids = self._get_collection_dataset_ids(collection_name, version)
         if not dataset_record_ids:
-            return Manifest(name=manifest_name, version=version, datasets=[])
+            return Collections(name=collection_name, version=version, datasets=[])
 
         dataset_records = [
             self.datasets_table.get(dataset_id)["fields"]
@@ -896,7 +906,7 @@ class AirtableManager:
             stores[data_path].append(fov_name)
 
         datasets = [
-            ManifestDataset(
+            CollectionDataset(
                 data_path=data_path,
                 tracks_path=self._derive_tracks_path(data_path),
                 fov_names=natsorted(fov_names),
@@ -904,7 +914,7 @@ class AirtableManager:
             for data_path, fov_names in stores.items()
         ]
 
-        return Manifest(name=manifest_name, version=version, datasets=datasets)
+        return Collections(name=collection_name, version=version, datasets=datasets)
 
     @staticmethod
     def _derive_tracks_path(data_path: str) -> str:
@@ -924,28 +934,32 @@ class AirtableManager:
             tracks_path = tracks_path[:-5] + "_cropped.zarr"
         return tracks_path
 
-    def _get_manifest_dataset_ids(self, manifest_name: str, version: str) -> list[str]:
-        """Get linked dataset record IDs for a manifest."""
-        df_manifests = self.list_manifests()
+    def _get_collection_dataset_ids(
+        self, collection_name: str, version: str
+    ) -> list[str]:
+        """Get linked dataset record IDs for a collection."""
+        df_collections = self.list_collections()
 
-        if len(df_manifests) == 0 or "name" not in df_manifests.columns:
-            raise ValueError(f"Manifest '{manifest_name}' not found (table is empty)")
+        if len(df_collections) == 0 or "name" not in df_collections.columns:
+            raise ValueError(
+                f"Collections '{collection_name}' not found (table is empty)"
+            )
 
-        filtered = df_manifests[df_manifests["name"] == manifest_name]
+        filtered = df_collections[df_collections["name"] == collection_name]
         if len(filtered) == 0:
-            raise ValueError(f"Manifest '{manifest_name}' not found")
+            raise ValueError(f"Collections '{collection_name}' not found")
 
-        if "version" not in df_manifests.columns:
-            raise ValueError("Version field not found in Manifest table")
+        if "version" not in df_collections.columns:
+            raise ValueError("Version field not found in Collections table")
 
         filtered = filtered[filtered["version"] == version]
         if len(filtered) == 0:
             raise ValueError(
-                f"Manifest '{manifest_name}' version '{version}' not found"
+                f"Collections '{collection_name}' version '{version}' not found"
             )
 
-        manifest_row = filtered.iloc[0]
-        dataset_record_ids = manifest_row.get("datasets", [])
+        collection_row = filtered.iloc[0]
+        dataset_record_ids = collection_row.get("datasets", [])
 
         if not dataset_record_ids or len(dataset_record_ids) == 0:
             return []

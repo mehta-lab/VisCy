@@ -1,4 +1,4 @@
-"""Factory functions for creating data modules from Airtable manifests."""
+"""Factory functions for creating data modules from Airtable collections."""
 
 import os
 from typing import Literal, Sequence
@@ -6,7 +6,7 @@ from typing import Literal, Sequence
 from lightning.pytorch import LightningDataModule
 from monai.transforms import MapTransform
 
-from viscy.airtable.database import AirtableManager, Manifest, ManifestDataset
+from viscy.airtable.database import AirtableManager, CollectionDataset, Collections
 from viscy.data.combined import BatchedConcatDataModule, CachedConcatDataModule
 from viscy.data.triplet import TripletDataModule
 
@@ -47,8 +47,8 @@ def _extract_wells_from_fov_names(fov_names: list[str]) -> list[str]:
     return sorted(list(wells))
 
 
-def create_triplet_datamodule_from_manifest(
-    manifest: Manifest | ManifestDataset,
+def create_triplet_datamodule_from_collection(
+    collection: Collections | CollectionDataset,
     source_channel: str | Sequence[str],
     z_range: tuple[int, int],
     *,
@@ -76,7 +76,7 @@ def create_triplet_datamodule_from_manifest(
     use_cached_concat: bool = False,
 ) -> LightningDataModule:
     """
-    Create TripletDataModule(s) from Airtable manifest.
+    Create TripletDataModule(s) from Airtable collection.
 
     Automatically handles single or multiple HCS plates:
     - Single plate: Returns TripletDataModule
@@ -84,8 +84,8 @@ def create_triplet_datamodule_from_manifest(
 
     Parameters
     ----------
-    manifest : Manifest | ManifestDataset
-        Manifest from AirtableManager.get_dataset_paths() or single ManifestDataset
+    collection : Collections | CollectionDataset
+        Collections from AirtableManager.get_dataset_paths() or single CollectionDataset
     source_channel : str | Sequence[str]
         Input channel name(s) - REQUIRED
     z_range : tuple[int, int]
@@ -109,10 +109,10 @@ def create_triplet_datamodule_from_manifest(
     caching : bool
         Cache dataset, default False
     fit_include_wells : list[str] | None
-        Override manifest FOVs with specific wells (e.g., ["B/3", "C/4"]).
-        Takes precedence over manifest.fov_names
+        Override collection FOVs with specific wells (e.g., ["B/3", "C/4"]).
+        Takes precedence over collection.fov_names
     fit_exclude_fovs : list[str] | None
-        Exclude specific FOV paths from manifest
+        Exclude specific FOV paths from collection
     predict_cells : bool
         Predict on specific cells only, default False
     include_fov_names : list[str] | None
@@ -135,7 +135,7 @@ def create_triplet_datamodule_from_manifest(
         Tensorstore cache pool size in bytes, default 0
     use_cached_concat : bool
         Use CachedConcatDataModule instead of BatchedConcatDataModule
-        for multi-plate manifests, default False
+        for multi-plate collections, default False
 
     Returns
     -------
@@ -147,26 +147,26 @@ def create_triplet_datamodule_from_manifest(
     Raises
     ------
     ValueError
-        - If manifest has no datasets
+        - If collection has no datasets
         - If paths don't exist (validation fails)
-        - If fit_include_wells and manifest both specify FOVs (ambiguous)
+        - If fit_include_wells and collection both specify FOVs (ambiguous)
     FileNotFoundError
         If data_path or tracks_path don't exist
     TypeError
-        If manifest is not Manifest or ManifestDataset
+        If collection is not Collections or CollectionDataset
 
     Examples
     --------
-    Basic usage with single-plate manifest:
+    Basic usage with single-plate collection:
 
     >>> from viscy.airtable.database import AirtableManager
-    >>> from viscy.airtable.factory import create_triplet_datamodule_from_manifest
+    >>> from viscy.airtable.factory import create_triplet_datamodule_from_collection
     >>>
     >>> airtable_db = AirtableManager(base_id="appXXXXXXXXXXXXXX")
-    >>> manifest = airtable_db.get_dataset_paths("my_manifest", "0.0.1")
+    >>> collection = airtable_db.get_dataset_paths("my_collection", "0.0.1")
     >>>
-    >>> dm = create_triplet_datamodule_from_manifest(
-    ...     manifest=manifest,
+    >>> dm = create_triplet_datamodule_from_collection(
+    ...     collection=collection,
     ...     source_channel=["Phase3D"],
     ...     z_range=(0, 5),
     ...     batch_size=32,
@@ -176,15 +176,15 @@ def create_triplet_datamodule_from_manifest(
     >>> # Use with PyTorch Lightning
     >>> trainer.fit(model, dm)
 
-    Multi-plate manifest with normalization:
+    Multi-plate collection with normalization:
 
     >>> from viscy.transforms import NormalizeSampled
     >>>
-    >>> manifest = airtable_db.get_dataset_paths("multi_plate_manifest", "1.0.0")
-    >>> print(f"Manifest has {len(manifest)} plates")  # e.g., 3 plates
+    >>> collection = airtable_db.get_dataset_paths("multi_plate_collection", "1.0.0")
+    >>> print(f"Collections has {len(collection)} plates")  # e.g., 3 plates
     >>>
-    >>> dm = create_triplet_datamodule_from_manifest(
-    ...     manifest=manifest,
+    >>> dm = create_triplet_datamodule_from_collection(
+    ...     collection=collection,
     ...     source_channel=["Phase3D", "RFP"],
     ...     z_range=(0, 10),
     ...     normalizations=[
@@ -200,21 +200,21 @@ def create_triplet_datamodule_from_manifest(
     ... )
     >>> # Returns BatchedConcatDataModule wrapping 3 TripletDataModules
 
-    Override manifest FOVs with specific wells:
+    Override collection FOVs with specific wells:
 
-    >>> dm = create_triplet_datamodule_from_manifest(
-    ...     manifest=manifest,
+    >>> dm = create_triplet_datamodule_from_collection(
+    ...     collection=collection,
     ...     source_channel=["Phase3D"],
     ...     z_range=(0, 5),
-    ...     fit_include_wells=["B/3", "B/4"],  # Override manifest FOVs
+    ...     fit_include_wells=["B/3", "B/4"],  # Override collection FOVs
     ...     batch_size=16,
     ... )
 
-    Using a single ManifestDataset directly:
+    Using a single CollectionDataset directly:
 
-    >>> ds = manifest.datasets[0]  # Single plate
-    >>> dm = create_triplet_datamodule_from_manifest(
-    ...     manifest=ds,  # Pass ManifestDataset directly
+    >>> ds = collection.datasets[0]  # Single plate
+    >>> dm = create_triplet_datamodule_from_collection(
+    ...     collection=ds,  # Pass CollectionDataset directly
     ...     source_channel=["Phase3D"],
     ...     z_range=(0, 5),
     ...     batch_size=16,
@@ -222,24 +222,24 @@ def create_triplet_datamodule_from_manifest(
 
     Notes
     -----
-    - FOV filtering priority: fit_include_wells > manifest.fov_names
+    - FOV filtering priority: fit_include_wells > collection.fov_names
     - If both specified, raises ValueError to avoid ambiguity
     - The factory validates paths before creating data modules
     - Multi-plate handling uses BatchedConcatDataModule for efficient batching
     - All TripletDataModule parameters can be passed through kwargs
     """
-    # STEP 1: Normalize input - handle both Manifest and ManifestDataset
-    if isinstance(manifest, ManifestDataset):
-        datasets = [manifest]
-        manifest_name = "single_dataset"
-    elif isinstance(manifest, Manifest):
-        if len(manifest.datasets) == 0:
-            raise ValueError(f"Manifest '{manifest.name}' has no datasets")
-        datasets = manifest.datasets
-        manifest_name = manifest.name
+    # STEP 1: Normalize input - handle both Collections and CollectionDataset
+    if isinstance(collection, CollectionDataset):
+        datasets = [collection]
+        collection_name = "single_dataset"
+    elif isinstance(collection, Collections):
+        if len(collection.datasets) == 0:
+            raise ValueError(f"Collections '{collection.name}' has no datasets")
+        datasets = collection.datasets
+        collection_name = collection.name
     else:
         raise TypeError(
-            f"Expected Manifest or ManifestDataset, got {type(manifest).__name__}"
+            f"Expected Collections or CollectionDataset, got {type(collection).__name__}"
         )
 
     # STEP 2: Validate all paths exist (fail early)
@@ -247,20 +247,20 @@ def create_triplet_datamodule_from_manifest(
         try:
             ds.validate()
         except FileNotFoundError as e:
-            raise FileNotFoundError(f"Manifest '{manifest_name}' dataset {i}: {e}")
+            raise FileNotFoundError(f"Collections '{collection_name}' dataset {i}: {e}")
 
     # STEP 3: Handle FOV filtering logic
     # Check for ambiguous FOV specification
-    has_manifest_fovs = any(len(ds.fov_names) > 0 for ds in datasets)
+    has_collection_fovs = any(len(ds.fov_names) > 0 for ds in datasets)
 
-    if fit_include_wells is not None and has_manifest_fovs:
-        # Ambiguous: both manifest and user specified FOVs
+    if fit_include_wells is not None and has_collection_fovs:
+        # Ambiguous: both collection and user specified FOVs
         raise ValueError(
-            "Cannot specify both 'fit_include_wells' and use manifest FOV filtering. "
-            "The manifest already specifies FOVs to include. "
+            "Cannot specify both 'fit_include_wells' and use collection FOV filtering. "
+            "The collection already specifies FOVs to include. "
             "Either:\n"
-            "  1. Use fit_include_wells=None to respect manifest FOVs, OR\n"
-            "  2. Create a new manifest without FOV filtering if you want custom wells"
+            "  1. Use fit_include_wells=None to respect collection FOVs, OR\n"
+            "  2. Create a new collection without FOV filtering if you want custom wells"
         )
 
     # STEP 4: Ensure normalizations and augmentations are lists
@@ -276,7 +276,7 @@ def create_triplet_datamodule_from_manifest(
             # User override: use explicit wells
             include_wells = fit_include_wells
         elif len(ds.fov_names) > 0:
-            # Convert manifest FOV names to well IDs
+            # Convert collection FOV names to well IDs
             include_wells = _extract_wells_from_fov_names(ds.fov_names)
         else:
             # No filtering: use all wells
@@ -324,22 +324,22 @@ def create_triplet_datamodule_from_manifest(
             return BatchedConcatDataModule(data_modules=data_modules)
 
 
-class ManifestTripletDataModule(TripletDataModule):
+class CollectionTripletDataModule(TripletDataModule):
     """
-    TripletDataModule that fetches paths from Airtable manifests.
+    TripletDataModule that fetches paths from Airtable collections.
 
     This class is designed to work with PyTorch Lightning CLI and config files.
-    It extends TripletDataModule to accept Airtable manifest parameters instead
+    It extends TripletDataModule to accept Airtable collection parameters instead
     of explicit data_path and tracks_path.
 
     Parameters
     ----------
     base_id : str
         Airtable base ID
-    manifest_name : str
-        Name of the manifest in Airtable
-    manifest_version : str
-        Semantic version of the manifest (e.g., "0.0.1")
+    collection_name : str
+        Name of the collection in Airtable
+    collection_version : str
+        Semantic version of the collection (e.g., "0.0.1")
     source_channel : str | Sequence[str]
         Input channel name(s)
     z_range : tuple[int, int]
@@ -352,7 +352,7 @@ class ManifestTripletDataModule(TripletDataModule):
     Raises
     ------
     ValueError
-        If manifest has multiple datasets (only single-plate manifests supported)
+        If collection has multiple datasets (only single-plate collections supported)
 
     Examples
     --------
@@ -360,11 +360,11 @@ class ManifestTripletDataModule(TripletDataModule):
 
     ```yaml
     data:
-      class_path: viscy.airtable.factory.ManifestTripletDataModule
+      class_path: viscy.airtable.factory.CollectionTripletDataModule
       init_args:
         base_id: "appXXXXXXXXXXXXXX"
-        manifest_name: "my_manifest"
-        manifest_version: "0.0.1"
+        collection_name: "my_collection"
+        collection_version: "0.0.1"
         source_channel: [Phase]
         z_range: [0, 5]
         batch_size: 16
@@ -385,10 +385,10 @@ class ManifestTripletDataModule(TripletDataModule):
 
     Direct usage in Python:
     ```python
-    dm = ManifestTripletDataModule(
+    dm = CollectionTripletDataModule(
         base_id="appXXXXXXXXXXXXXX",
-        manifest_name="my_manifest",
-        manifest_version="0.0.1",
+        collection_name="my_collection",
+        collection_version="0.0.1",
         source_channel=["Phase"],
         z_range=(0, 5),
         batch_size=16,
@@ -398,47 +398,47 @@ class ManifestTripletDataModule(TripletDataModule):
 
     Notes
     -----
-    - Only supports single-plate manifests (use create_triplet_datamodule_from_manifest
+    - Only supports single-plate collections (use create_triplet_datamodule_from_collection
       for multi-plate support with BatchedConcatDataModule)
-    - Fetches manifest from Airtable during __init__
+    - Fetches collection from Airtable during __init__
     - All TripletDataModule parameters are available
-    - FOV filtering from manifest is automatically applied via fit_include_wells
+    - FOV filtering from collection is automatically applied via fit_include_wells
     """
 
     def __init__(
         self,
         base_id: str,
-        manifest_name: str,
-        manifest_version: str,
+        collection_name: str,
+        collection_version: str,
         source_channel: str | Sequence[str],
         z_range: tuple[int, int],
         api_key: str | None = None,
         fit_include_wells: list[str] | None = None,
         **kwargs,
     ):
-        # Fetch manifest from Airtable
+        # Fetch collection from Airtable
         airtable_db = AirtableManager(
             base_id=base_id, api_key=api_key or os.getenv("AIRTABLE_API_KEY")
         )
-        manifest = airtable_db.get_dataset_paths(
-            manifest_name=manifest_name,
-            version=manifest_version,
+        collection = airtable_db.get_dataset_paths(
+            collection_name=collection_name,
+            version=collection_version,
         )
 
         # Validate single plate
-        if len(manifest.datasets) != 1:
+        if len(collection.datasets) != 1:
             raise ValueError(
-                f"ManifestTripletDataModule only supports single-plate manifests. "
-                f"Manifest '{manifest_name}' has {len(manifest.datasets)} plates. "
-                f"Use create_triplet_datamodule_from_manifest() for multi-plate support."
+                f"CollectionTripletDataModule only supports single-plate collections. "
+                f"Collections '{collection_name}' has {len(collection.datasets)} plates. "
+                f"Use create_triplet_datamodule_from_collection() for multi-plate support."
             )
 
-        dataset = manifest.datasets[0]
+        dataset = collection.datasets[0]
 
-        # Store manifest metadata as instance attributes for callbacks/logging
+        # Store collection metadata as instance attributes for callbacks/logging
         self.base_id = base_id
-        self.manifest_name = manifest_name
-        self.manifest_version = manifest_version
+        self.collection_name = collection_name
+        self.collection_version = collection_version
         self.data_path = dataset.data_path
         self.tracks_path = dataset.tracks_path
 
@@ -447,7 +447,7 @@ class ManifestTripletDataModule(TripletDataModule):
             # User override: use explicit wells
             include_wells = fit_include_wells
         elif len(dataset.fov_names) > 0:
-            # Convert manifest FOV names to well IDs
+            # Convert collection FOV names to well IDs
             include_wells = _extract_wells_from_fov_names(dataset.fov_names)
         else:
             # No filtering: use all wells

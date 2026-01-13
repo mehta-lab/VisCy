@@ -1,5 +1,5 @@
-# Example Lightning config using ManifestTripletDataModule with W&B tracking
-# This config fetches dataset paths from Airtable manifests and logs to W&B
+# Example Lightning config using CollectionTripletDataModule with W&B tracking
+# This config fetches dataset paths from Airtable collections and logs to W&B
 # Usage: viscy fit -c examples/airtable/train_with_wandb.yml
 
 seed_everything: 42
@@ -25,8 +25,8 @@ trainer:
         monitor: loss/val
         save_top_k: 3
         save_last: true
-    - class_path: viscy.airtable.callbacks.ManifestWandbCallback
-      # No init_args needed - automatically logs manifest metadata
+    - class_path: viscy.airtable.callbacks.CollectionWandbCallback
+      # No init_args needed - automatically logs collection metadata
 
 model:
   class_path: viscy.representation.engine.ContrastiveModule
@@ -52,13 +52,13 @@ model:
 
 
 data:
-  # NEW: Use ManifestTripletDataModule for Airtable manifest integration
-  class_path: viscy.airtable.factory.ManifestTripletDataModule
+  # NEW: Use CollectionTripletDataModule for Airtable collection integration
+  class_path: viscy.airtable.factory.CollectionTripletDataModule
   init_args:
-    # Airtable manifest parameters
+    # Airtable collection parameters
     base_id: "app8vqaoWyOwa0sB5"  # Replace with your base ID
-    manifest_name: "2024_11_07_A549_SEC61_DENV_wells_B1_B2"
-    manifest_version: "0.0.1"
+    collection_name: "2024_11_07_A549_SEC61_DENV_wells_B1_B2"
+    collection_version: "0.0.1"
 
     # TripletDataModule parameters
     source_channel: [Phase3D]
@@ -71,5 +71,5 @@ data:
     split_ratio: 0.8
     time_interval: any
 
-    # Optional: Override manifest FOVs with specific wells
+    # Optional: Override collection FOVs with specific wells
     fit_include_wells: ["B/1", "B/2"]

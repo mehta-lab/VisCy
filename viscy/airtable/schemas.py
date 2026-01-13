@@ -1,6 +1,6 @@
-"""Pydantic schemas for Airtable records."""
+"""Pydantic schemas for Airtable records and model registry."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -167,4 +167,117 @@ class DatasetRecord(BaseModel):
         return (
             f"DatasetRecord(dataset_name={self.dataset_name!r}, well_id={self.well_id!r}, "
             f"fov_name={self.fov_name!r}, fov_id={self.fov_id!r})"
+        )
+
+
+class ModelRecord(BaseModel):
+    """
+    Pydantic model for a registered model artifact.
+
+    This represents a registered model in WandB with metadata about
+    training, architecture, and file locations.
+    """
+
+    # Core identification
+    model_name: str = Field(..., description="Model identifier")
+    model_type: Literal["contrastive", "segmentation", "vae", "translation"] = Field(
+        ..., description="Model category"
+    )
+    version: str = Field(..., description="Version (e.g., 'v1', 'v2')")
+
+    # File locations
+    checkpoint_path: str = Field(..., description="Absolute path to .ckpt file")
+    config_artifact_path: str | None = Field(
+        None, description="Path to downloaded config_fit.yml from artifact"
+    )
+
+    # Architecture (for quick reference)
+    architecture: str | None = Field(
+        None, description="Model architecture (e.g., '2.5D')"
+    )
+    backbone: str | None = Field(None, description="Backbone (e.g., 'convnext_tiny')")
+
+    # Training lineage
+    collection_name: str | None = Field(None, description="Training data collection")
+    wandb_run_id: str | None = Field(None, description="Training run ID")
+    wandb_artifact_url: str | None = Field(None, description="WandB artifact URL")
+
+    # Metadata
+    description: str | None = Field(None, description="Model description")
+    trained_date: str | None = Field(None, description="Training date")
+
+    model_config = {
+        "populate_by_name": True,
+        "str_strip_whitespace": True,
+    }
+
+    @field_validator("checkpoint_path")
+    @classmethod
+    def validate_checkpoint_path(cls, v: str) -> str:
+        """Validate checkpoint path."""
+        if not v.startswith("/"):
+            raise ValueError("Checkpoint path must be absolute")
+        if not v.endswith(".ckpt"):
+            raise ValueError("Checkpoint must be .ckpt file")
+        return v
+
+    @field_validator("version")
+    @classmethod
+    def validate_version(cls, v: str) -> str:
+        """Validate version format."""
+        if not v or not v.strip():
+            raise ValueError("Version cannot be empty")
+        return v.strip()
+
+    def to_wandb_metadata(self) -> dict[str, Any]:
+        """
+        Convert to WandB artifact metadata dictionary.
+
+        Returns
+        -------
+        dict
+            Dictionary suitable for wandb.Artifact(metadata=...)
+        """
+        return self.model_dump(
+            exclude_none=True,
+            exclude={"config_artifact_path"},  # Don't include temp paths
+        )
+
+    @classmethod
+    def from_wandb_artifact(cls, artifact: Any) -> "ModelRecord":
+        """
+        Create ModelRecord from WandB artifact.
+
+        Parameters
+        ----------
+        artifact : wandb.Artifact
+            WandB artifact object
+
+        Returns
+        -------
+        ModelRecord
+            Parsed model record
+        """
+        metadata = artifact.metadata.copy()
+
+        # Add artifact-level fields
+        metadata["model_name"] = artifact.name
+        if hasattr(artifact, "version"):
+            metadata["version"] = artifact.version
+        if hasattr(artifact, "description") and artifact.description:
+            metadata["description"] = artifact.description
+        if hasattr(artifact, "url"):
+            metadata["wandb_artifact_url"] = artifact.url
+
+        return cls(**metadata)
+
+    def __str__(self) -> str:
+        """Human-readable string representation."""
+        return f"Model({self.model_name}:{self.version} @ {self.checkpoint_path})"
+
+    def __repr__(self) -> str:
+        """Detailed string representation."""
+        return (
+            f"ModelRecord(model_name={self.model_name!r}, model_type={self.model_type!r}, "
+            f"version={self.version!r})"
         )
