@@ -51,7 +51,7 @@ CATEGORIES = None
 
 # Image settings
 CHANNELS = ["Phase3D"]
-Z_RANGE = (28, 29)  # Z slice range
+Z_RANGE = (14, 15)  # Z slice range
 YX_PATCH_SIZE = (128, 128)
 
 # Server settings
@@ -163,6 +163,7 @@ def create_phate_figure(
     selected_statuses: list[str],
     selected_tracks: Optional[list[str]] = None,
     show_trajectories: bool = False,
+    highlight_timepoint: Optional[int] = None,
 ) -> go.Figure:
     """
     Create interactive PHATE scatter plot colored by infection status.
@@ -177,6 +178,8 @@ def create_phate_figure(
         Track keys to highlight.
     show_trajectories : bool, optional
         If True, draw lines connecting points in temporal order for selected tracks.
+    highlight_timepoint : int, optional
+        Specific timepoint to highlight for selected tracks.
 
     Returns
     -------
@@ -333,6 +336,45 @@ def create_phate_figure(
                     arrowcolor=color,
                     opacity=0.6,
                 )
+
+    # Highlight specific timepoint for selected tracks
+    if highlight_timepoint is not None and selected_tracks:
+        highlight_points = []
+        for track_key in selected_tracks:
+            track_df = df[df["track_key"] == track_key]
+            timepoint_data = track_df[track_df["t"] == highlight_timepoint]
+
+            if len(timepoint_data) > 0:
+                highlight_points.append(timepoint_data)
+
+        if highlight_points:
+            highlight_df = pd.concat(highlight_points, ignore_index=True)
+
+            # Add highlighted points as a separate trace with larger markers
+            fig.add_trace(
+                go.Scattergl(
+                    x=highlight_df["PHATE1"],
+                    y=highlight_df["PHATE2"],
+                    mode="markers",
+                    name=f"t={highlight_timepoint}",
+                    marker=dict(
+                        size=15,
+                        color="yellow",
+                        symbol="star",
+                        line=dict(width=2, color="black"),
+                    ),
+                    customdata=highlight_df[
+                        ["track_key", "t", "fov_name", "track_id"]
+                    ].values,
+                    hovertemplate=(
+                        "<b>⭐ HIGHLIGHTED ⭐</b><br>"
+                        "<b>Track:</b> %{customdata[0]}<br>"
+                        "<b>Time:</b> %{customdata[1]}<br>"
+                        "<b>FOV:</b> %{customdata[2]}<br>"
+                        "<extra></extra>"
+                    ),
+                )
+            )
 
     # Update layout
     fig.update_layout(
@@ -833,6 +875,35 @@ app.layout = html.Div(
                     ],
                     style={"marginBottom": "10px"},
                 ),
+                html.Div(
+                    [
+                        html.Label(
+                            "Highlight timepoint (for selected tracks):",
+                            style={"fontWeight": "bold", "marginRight": "10px"},
+                        ),
+                        dcc.Input(
+                            id="highlight-timepoint",
+                            type="number",
+                            placeholder="Enter timepoint (e.g., 0, 1, 2...)",
+                            min=0,
+                            step=1,
+                            style={"width": "200px"},
+                        ),
+                        html.Span(
+                            " ⭐ Highlights as yellow star on plot",
+                            style={
+                                "marginLeft": "10px",
+                                "color": "#666",
+                                "fontSize": "14px",
+                            },
+                        ),
+                    ],
+                    style={
+                        "marginBottom": "10px",
+                        "display": "flex",
+                        "alignItems": "center",
+                    },
+                ),
             ],
             style={
                 "padding": "20px",
@@ -878,12 +949,17 @@ app.layout = html.Div(
         Input("infection-filter", "value"),
         Input("track-selector", "value"),
         Input("show-trajectories", "value"),
+        Input("highlight-timepoint", "value"),
     ],
 )
-def update_phate_plot(selected_statuses, selected_tracks, show_trajectories):
+def update_phate_plot(
+    selected_statuses, selected_tracks, show_trajectories, highlight_timepoint
+):
     """Update PHATE scatter plot based on filters and selections."""
     show_traj = "show" in show_trajectories if show_trajectories else False
-    return create_phate_figure(plot_df, selected_statuses, selected_tracks, show_traj)
+    return create_phate_figure(
+        plot_df, selected_statuses, selected_tracks, show_traj, highlight_timepoint
+    )
 
 
 # Callback 2: Add track on click
