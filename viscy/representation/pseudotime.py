@@ -92,6 +92,383 @@ def filter_tracks_by_fov_and_length(
     return result
 
 
+def load_annotations_from_csv(
+    csv_path: str | Path,
+    validate_against_adata: ad.AnnData | None = None,
+    min_timepoints: int | None = None,
+    consensus_only: bool = True,
+) -> list[dict]:
+    """
+    Load annotated samples from CSV file.
+
+    Parameters
+    ----------
+    csv_path : str or Path
+        Path to CSV file with annotation specifications
+    validate_against_adata : ad.AnnData, optional
+        If provided, validate that tracks exist in this AnnData object
+    min_timepoints : int, optional
+        If provided with validate_against_adata, check that tracks have
+        at least this many timepoints
+    consensus_only : bool, default True
+        If True and 'use_for_consensus' column exists in CSV, only return
+        samples where use_for_consensus is True. If False or column doesn't
+        exist, return all samples.
+
+    Returns
+    -------
+    list[AnnotatedSample]
+        List of AnnotatedSample dictionaries ready for use with CytoDtw
+
+    Raises
+    ------
+    ValueError
+        If CSV is malformed or required columns are missing
+    FileNotFoundError
+        If CSV file doesn't exist
+
+    Notes
+    -----
+    Expected CSV format:
+    Required columns:
+    - fov_name: FOV identifier (str)
+    - track_id: Single track ID or comma-separated list (int or str)
+    - event_timepoint: Timepoint where the event occurs (int)
+    - n_timepoints_before: Number of timepoints before event (int)
+    - n_timepoints_after: Number of timepoints after event (int)
+    - annotation_before: Label for timepoints before event (str)
+    - annotation_after: Label for timepoints after event (str)
+    - weight: Weight for this sample in consensus (float)
+
+    Optional columns:
+    - channel: Channel used for annotations (str, e.g., "sensor", "phase")
+    - use_for_consensus: Whether to use this sample for consensus (bool)
+
+    Examples
+    --------
+    >>> # Load without validation
+    >>> samples = load_annotations_from_csv("annotations.csv")
+    >>>
+    >>> # Load with validation
+    >>> from anndata import read_zarr
+    >>> adata = read_zarr("features.zarr")
+    >>> samples = load_annotations_from_csv(
+    ...     "annotations.csv",
+    ...     validate_against_adata=adata,
+    ...     min_timepoints=10
+    ... )
+    """
+    from pathlib import Path
+
+    import pandas as pd
+
+    csv_path = Path(csv_path)
+    if not csv_path.exists():
+        raise FileNotFoundError(f"Annotation CSV not found: {csv_path}")
+
+    # Load CSV
+    df = pd.read_csv(csv_path)
+
+    # Validate required columns
+    required_cols = [
+        "fov_name",
+        "track_id",
+        "event_timepoint",
+        "n_timepoints_before",
+        "n_timepoints_after",
+        "annotation_before",
+        "annotation_after",
+        "weight",
+    ]
+    missing_cols = set(required_cols) - set(df.columns)
+    if missing_cols:
+        raise ValueError(
+            f"Missing required columns in CSV: {missing_cols}. "
+            f"Required columns: {required_cols}"
+        )
+
+    # Parse each row into AnnotatedSample
+    annotated_samples = []
+    for _, row in df.iterrows():
+        # Parse track_id (handle both single int and comma-separated list)
+        track_id_raw = row["track_id"]
+        if isinstance(track_id_raw, str) and "," in track_id_raw:
+            # Comma-separated list
+            track_id = [int(tid.strip()) for tid in track_id_raw.split(",")]
+        else:
+            # Single int
+            track_id = int(track_id_raw)
+
+        # Calculate timepoint range
+        event_t = int(row["event_timepoint"])
+        n_before = int(row["n_timepoints_before"])
+        n_after = int(row["n_timepoints_after"])
+        timepoint_range = (event_t - n_before, event_t + n_after)
+
+        # Create annotations list
+        annotations = [str(row["annotation_before"])] * n_before + [
+            str(row["annotation_after"])
+        ] * n_after
+
+        # Build AnnotatedSample dict
+        sample = {
+            "fov_name": str(row["fov_name"]),
+            "track_id": track_id,
+            "timepoints": timepoint_range,
+            "annotations": annotations,
+            "weight": float(row["weight"]),
+        }
+
+        # Add optional metadata if columns exist
+        if "channel" in df.columns:
+            sample["channel"] = str(row["channel"])
+
+        # Check use_for_consensus flag if it exists
+        if "use_for_consensus" in df.columns:
+            use_for_consensus = row["use_for_consensus"]
+            # Handle various boolean representations
+            if isinstance(use_for_consensus, str):
+                use_for_consensus = use_for_consensus.lower() in ("true", "1", "yes")
+            else:
+                use_for_consensus = bool(use_for_consensus)
+
+            sample["use_for_consensus"] = use_for_consensus
+
+            # Skip if consensus_only is True and this sample is not marked for consensus
+            if consensus_only and not use_for_consensus:
+                continue
+
+        annotated_samples.append(sample)
+
+    # Validate if requested
+    if validate_against_adata is not None:
+        # Import here to avoid circular dependency
+        cytodtw_temp = CytoDtw(validate_against_adata)
+
+        # Get filtered lineages
+        if min_timepoints is not None:
+            filtered_lineages = cytodtw_temp.get_lineages(min_timepoints)
+        else:
+            # Use all available tracks
+            filtered_lineages = [
+                (fov, [tid])
+                for fov, tid in zip(
+                    validate_against_adata.obs["fov_name"],
+                    validate_against_adata.obs["track_id"],
+                )
+            ]
+
+        # Validate samples
+        valid_samples, invalid_info = cytodtw_temp.validate_annotated_samples(
+            annotated_samples, filtered_lineages, raise_on_invalid=False
+        )
+
+        if invalid_info:
+            _logger.warning(
+                f"Loaded {len(valid_samples)}/{len(annotated_samples)} valid annotations. "
+                f"{len(invalid_info)} samples failed validation."
+            )
+            return valid_samples
+        else:
+            _logger.info(
+                f"Loaded {len(annotated_samples)} annotations, all validated successfully"
+            )
+
+    return annotated_samples
+
+
+def prepare_annotated_samples(
+    annotations: str | Path | list[dict],
+    adata: ad.AnnData | None = None,
+    min_timepoints: int | None = None,
+    consensus_only: bool = True,
+) -> list[dict]:
+    """
+    Prepare annotated samples from CSV or dict format.
+
+    Convenience function that handles both CSV files and direct dict input.
+    Provides backward compatibility for existing code using dict-based annotations.
+
+    Parameters
+    ----------
+    annotations : str, Path, or list[dict]
+        Either path to CSV file or list of AnnotatedSample dicts
+    adata : ad.AnnData, optional
+        For validation if loading from CSV
+    min_timepoints : int, optional
+        For validation if loading from CSV
+    consensus_only : bool, default True
+        If True and CSV has 'use_for_consensus' column, only return samples
+        marked for consensus use
+
+    Returns
+    -------
+    list[AnnotatedSample]
+        Processed annotated samples
+
+    Examples
+    --------
+    >>> # Load from CSV
+    >>> samples = prepare_annotated_samples("annotations.csv", adata=adata)
+    >>>
+    >>> # Use existing dict format
+    >>> samples_dict = [{"fov_name": "...", ...}]
+    >>> samples = prepare_annotated_samples(samples_dict)
+    """
+    from pathlib import Path
+
+    if isinstance(annotations, (str, Path)):
+        # Load from CSV
+        return load_annotations_from_csv(
+            csv_path=annotations,
+            validate_against_adata=adata,
+            min_timepoints=min_timepoints,
+            consensus_only=consensus_only,
+        )
+    else:
+        # Already in dict format - return as-is
+        return annotations
+
+
+def validate_cross_channel_observations(
+    adata_dict: dict[str, ad.AnnData],
+    check_columns: list[str] = ["fov_name", "track_id", "t"],
+) -> dict:
+    """
+    Validate that multiple AnnData objects have matching observations.
+
+    Checks consistency of observation indices across multiple channels,
+    which is critical when merging PCA features from different channels.
+
+    Parameters
+    ----------
+    adata_dict : dict[str, ad.AnnData]
+        Dictionary mapping channel name -> AnnData object
+    check_columns : list[str], default ["fov_name", "track_id", "t"]
+        Columns to check for consistency across channels
+
+    Returns
+    -------
+    dict
+        Validation report with keys:
+        - 'consistent': bool - Whether all observations match
+        - 'n_observations': dict[str, int] - Observation counts per channel
+        - 'common_observations': int - Number of observations present in all channels
+        - 'channel_pairs': dict - Pairwise consistency results
+        - 'missing_per_channel': dict - Observations missing in each channel
+        - 'recommendations': str - Suggested merge strategy
+
+    Examples
+    --------
+    >>> ad_dict = {
+    ...     'sensor': sensor_adata,
+    ...     'phase': phase_adata,
+    ...     'organelle': organelle_adata
+    ... }
+    >>> report = validate_cross_channel_observations(ad_dict)
+    >>> if not report['consistent']:
+    ...     print(f"Warning: {report['recommendations']}")
+    """
+    import logging
+
+    logging.getLogger("viscy")
+
+    if len(adata_dict) < 2:
+        return {
+            "consistent": True,
+            "n_observations": {k: len(v.obs) for k, v in adata_dict.items()},
+            "common_observations": len(list(adata_dict.values())[0].obs)
+            if adata_dict
+            else 0,
+            "channel_pairs": {},
+            "missing_per_channel": {},
+            "recommendations": "Only one channel provided - no cross-channel validation needed",
+        }
+
+    # Extract observation tuples from each channel
+    channel_obs_sets = {}
+    n_observations = {}
+
+    for channel_name, adata in adata_dict.items():
+        # Create tuple of observation identifiers
+        obs_tuples = [
+            tuple(row[col] for col in check_columns)
+            for _, row in adata.obs[check_columns].iterrows()
+        ]
+        channel_obs_sets[channel_name] = set(obs_tuples)
+        n_observations[channel_name] = len(obs_tuples)
+
+    # Find common observations (intersection of all channels)
+    common_obs = set.intersection(*channel_obs_sets.values())
+
+    # Compute pairwise consistency
+    channel_names = list(adata_dict.keys())
+    channel_pairs = {}
+
+    for i, ch1 in enumerate(channel_names):
+        for ch2 in channel_names[i + 1 :]:
+            intersection = channel_obs_sets[ch1] & channel_obs_sets[ch2]
+            union = channel_obs_sets[ch1] | channel_obs_sets[ch2]
+            jaccard = len(intersection) / len(union) if union else 0
+
+            channel_pairs[f"{ch1}_vs_{ch2}"] = {
+                "intersection": len(intersection),
+                "union": len(union),
+                "jaccard_similarity": jaccard,
+                "ch1_only": len(channel_obs_sets[ch1] - channel_obs_sets[ch2]),
+                "ch2_only": len(channel_obs_sets[ch2] - channel_obs_sets[ch1]),
+            }
+
+    # Find missing observations per channel
+    missing_per_channel = {}
+    all_obs = set.union(*channel_obs_sets.values())
+
+    for channel_name, obs_set in channel_obs_sets.items():
+        missing = all_obs - obs_set
+        missing_per_channel[channel_name] = len(missing)
+
+    # Determine consistency
+    consistent = len(common_obs) == max(n_observations.values())
+
+    # Generate recommendations
+    if consistent:
+        recommendations = "All channels have identical observations. Any merge strategy (inner/left/outer) will work."
+    else:
+        max_obs_channel = max(n_observations, key=n_observations.get)
+        min_obs_channel = min(n_observations, key=n_observations.get)
+
+        coverage = len(common_obs) / max(n_observations.values())
+
+        if coverage > 0.95:
+            recommendations = (
+                f"Nearly consistent ({coverage:.1%} overlap). "
+                f"Use 'inner' merge or validate why {max_obs_channel} has extra observations."
+            )
+        elif coverage > 0.8:
+            recommendations = (
+                f"Moderate overlap ({coverage:.1%}). "
+                f"Use 'left' merge on alignment channel to preserve DTW mapping, "
+                f"or 'inner' merge if you only want fully-aligned cells."
+            )
+        else:
+            recommendations = (
+                f"Low overlap ({coverage:.1%}). "
+                f"Check if channels were processed with different tracking parameters. "
+                f"Use 'inner' merge to keep only common observations, "
+                f"or investigate why {max_obs_channel} has {n_observations[max_obs_channel]} "
+                f"observations vs {min_obs_channel} with {n_observations[min_obs_channel]}."
+            )
+
+    return {
+        "consistent": consistent,
+        "n_observations": n_observations,
+        "common_observations": len(common_obs),
+        "channel_pairs": channel_pairs,
+        "missing_per_channel": missing_per_channel,
+        "recommendations": recommendations,
+    }
+
+
 # Annotated Example TypeDict
 class AnnotatedSample(TypedDict):
     fov_name: str
@@ -279,6 +656,236 @@ class CytoDtw:
                 filtered_lineages.append((fov_id, track_ids))
         self.lineages = filtered_lineages
         return self.lineages
+
+    def check_track_exists(
+        self,
+        fov_name: str,
+        track_id: int,
+        timepoints: tuple[int, int] | None = None,
+        min_timepoints: int | None = None,
+    ) -> dict:
+        """
+        Check if a track exists and has sufficient timepoints.
+
+        Parameters
+        ----------
+        fov_name : str
+            FOV identifier
+        track_id : int
+            Track ID to check
+        timepoints : tuple[int, int], optional
+            Required timepoint range (start, end). If provided, checks that
+            track has data in this range
+        min_timepoints : int, optional
+            Minimum number of timepoints required. If not provided and
+            timepoints is given, uses range length
+
+        Returns
+        -------
+        dict
+            Validation result with keys:
+            - 'exists': bool - Whether track exists
+            - 'n_timepoints': int - Number of timepoints found
+            - 'sufficient': bool - Whether sufficient timepoints exist
+            - 'min_t': int - Earliest timepoint (if exists)
+            - 'max_t': int - Latest timepoint (if exists)
+            - 'missing_range': tuple | None - If timepoints specified and track exists,
+              shows which parts of range are missing
+        """
+        # Query for track data
+        track_data = self.adata.obs[
+            (self.adata.obs["fov_name"] == fov_name)
+            & (self.adata.obs["track_id"] == track_id)
+        ]
+
+        # Check if track exists
+        if track_data.empty:
+            return {
+                "exists": False,
+                "n_timepoints": 0,
+                "sufficient": False,
+                "min_t": None,
+                "max_t": None,
+                "missing_range": None,
+            }
+
+        # Track exists - count timepoints
+        n_timepoints = len(track_data)
+        min_t = int(track_data["t"].min())
+        max_t = int(track_data["t"].max())
+
+        # Determine if sufficient timepoints
+        sufficient = True
+        missing_range = None
+
+        if min_timepoints is not None:
+            sufficient = n_timepoints >= min_timepoints
+        elif timepoints is not None:
+            # If timepoints range specified, use that as minimum
+            required_length = timepoints[1] - timepoints[0]
+            if min_timepoints is None:
+                min_timepoints = required_length
+            sufficient = n_timepoints >= min_timepoints
+
+        # Check timepoint range coverage if specified
+        if timepoints is not None and track_data.shape[0] > 0:
+            start_t, end_t = timepoints
+            track_timepoints = set(track_data["t"].values)
+            required_timepoints = set(range(start_t, end_t))
+            missing = required_timepoints - track_timepoints
+
+            if missing:
+                missing_list = sorted(missing)
+                missing_range = (min(missing_list), max(missing_list))
+                sufficient = False
+
+        return {
+            "exists": True,
+            "n_timepoints": n_timepoints,
+            "sufficient": sufficient,
+            "min_t": min_t,
+            "max_t": max_t,
+            "missing_range": missing_range,
+        }
+
+    def validate_annotated_samples(
+        self,
+        annotated_samples: list[AnnotatedSample],
+        filtered_lineages: pd.DataFrame | list[tuple[str, list[int]]],
+        raise_on_invalid: bool = False,
+    ) -> tuple[list[AnnotatedSample], list[dict]]:
+        """
+        Validate that annotated samples exist in filtered lineages.
+
+        Parameters
+        ----------
+        annotated_samples : list[AnnotatedSample]
+            List of annotated samples to validate
+        filtered_lineages : pd.DataFrame or list[tuple[str, list[int]]]
+            Filtered lineages from get_lineages(). If DataFrame, must have
+            'fov_name' and 'track_id' columns
+        raise_on_invalid : bool, default False
+            If True, raise ValueError on invalid samples. Otherwise, log warnings
+
+        Returns
+        -------
+        valid_samples : list[AnnotatedSample]
+            Valid annotated samples that exist in filtered lineages
+        invalid_info : list[dict]
+            Information about invalid samples with keys:
+            - 'sample': The invalid sample dict
+            - 'reason': Why it's invalid
+            - 'fov_name': FOV name
+            - 'track_id': Track IDs that don't exist
+
+        Raises
+        ------
+        ValueError
+            If raise_on_invalid=True and invalid samples are found
+        """
+        import logging
+
+        logger = logging.getLogger("viscy")
+
+        # Convert filtered_lineages to set of (fov_name, track_id) tuples for fast lookup
+        lineage_set = set()
+
+        if isinstance(filtered_lineages, pd.DataFrame):
+            # DataFrame case: track_id column may contain lists
+            for _, row in filtered_lineages.iterrows():
+                fov_name = row["fov_name"]
+                track_id = row["track_id"]
+
+                # Handle both list and single track_id
+                if isinstance(track_id, list):
+                    for tid in track_id:
+                        lineage_set.add((fov_name, tid))
+                else:
+                    lineage_set.add((fov_name, track_id))
+        else:
+            # List of tuples case: (fov_name, list[track_ids])
+            for fov_name, track_ids in filtered_lineages:
+                # track_ids could be a list or a single int
+                if isinstance(track_ids, list):
+                    for track_id in track_ids:
+                        lineage_set.add((fov_name, track_id))
+                else:
+                    lineage_set.add((fov_name, track_ids))
+
+        valid_samples = []
+        invalid_info = []
+
+        for sample in annotated_samples:
+            fov_name = sample["fov_name"]
+            track_ids = (
+                sample["track_id"]
+                if isinstance(sample["track_id"], list)
+                else [sample["track_id"]]
+            )
+            timepoints = sample.get("timepoints")
+
+            # Check if all track_ids exist in filtered lineages
+            missing_tracks = []
+            for track_id in track_ids:
+                if (fov_name, track_id) not in lineage_set:
+                    missing_tracks.append(track_id)
+
+            if missing_tracks:
+                invalid_info.append(
+                    {
+                        "sample": sample,
+                        "reason": f"Tracks {missing_tracks} not found in filtered lineages",
+                        "fov_name": fov_name,
+                        "track_id": missing_tracks,
+                    }
+                )
+                logger.warning(
+                    f"Sample with FOV {fov_name}, tracks {missing_tracks} "
+                    f"not found in filtered lineages"
+                )
+                continue
+
+            # Check timepoints if specified
+            if timepoints is not None:
+                # Validate each track has sufficient timepoints
+                insufficient_tracks = []
+                for track_id in track_ids:
+                    validation = self.check_track_exists(
+                        fov_name=fov_name,
+                        track_id=track_id,
+                        timepoints=timepoints,
+                    )
+                    if not validation["sufficient"]:
+                        insufficient_tracks.append(
+                            (track_id, validation["missing_range"])
+                        )
+
+                if insufficient_tracks:
+                    invalid_info.append(
+                        {
+                            "sample": sample,
+                            "reason": f"Insufficient timepoints: {insufficient_tracks}",
+                            "fov_name": fov_name,
+                            "track_id": [t[0] for t in insufficient_tracks],
+                        }
+                    )
+                    logger.warning(
+                        f"Sample with FOV {fov_name} has insufficient timepoints "
+                        f"in range {timepoints}: {insufficient_tracks}"
+                    )
+                    continue
+
+            # Sample is valid
+            valid_samples.append(sample)
+
+        # Raise error if requested and invalid samples found
+        if raise_on_invalid and invalid_info:
+            error_msg = f"Found {len(invalid_info)} invalid annotated samples:\n"
+            for info in invalid_info:
+                error_msg += f"  - {info['fov_name']}, tracks {info['track_id']}: {info['reason']}\n"
+            raise ValueError(error_msg)
+
+        return valid_samples, invalid_info
 
     def get_reference_pattern(
         self,
@@ -1095,6 +1702,1055 @@ class CytoDtw:
         )
 
         return df
+
+    def compute_delta_t_per_cell(
+        self,
+        df: pd.DataFrame,
+        feature_columns: list[str],
+        alignment_name: str = "cell_division",
+        thresholds: dict[str, float] | float = 2.0,
+        baseline_window: tuple[int, int] = (-10, -2),
+        method: str = "uninfected_divergence",
+        min_consecutive: int = 3,
+        uninfected_df: pd.DataFrame | None = None,
+    ) -> pd.DataFrame:
+        """
+        Compute delta-T for each cell and feature based on threshold crossing.
+
+        Delta-T measures the time offset between a reference event (e.g., infection)
+        and detectable organelle remodeling. Operates in pseudotime (aligned coordinates).
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Alignment DataFrame with features and consensus_mapping column
+        feature_columns : list[str]
+            Features to analyze (e.g., ['organelle_volume', 'edge_density'])
+        alignment_name : str, default "cell_division"
+            Alignment type identifier
+        thresholds : dict or float, default 2.0
+            Detection thresholds per feature or single threshold for all.
+            - For 'uninfected_divergence': z-score threshold (e.g., 2.0 = 2 STD)
+            - For 'absolute_change': fold-change threshold (e.g., 0.5 = 50%)
+        baseline_window : tuple[int, int], default (-10, -2)
+            Relative pseudotime points for baseline (pre-event window)
+        method : str, default "uninfected_divergence"
+            Detection method:
+            - 'uninfected_divergence': Compare to uninfected distribution (data-driven)
+            - 'absolute_change': Detect when |fold_change| exceeds threshold
+        min_consecutive : int, default 3
+            Minimum consecutive timepoints above threshold to confirm remodeling
+        uninfected_df : pd.DataFrame, optional
+            DataFrame with uninfected cells (required for 'uninfected_divergence')
+
+        Returns
+        -------
+        pd.DataFrame
+            Per-cell delta-T values with columns:
+            - lineage_id, track_id, fov_name
+            - {feature}_delta_t: Delta-T in pseudotime units (NaN if not detected)
+            - {feature}_direction: 'increase' or 'decrease'
+            - {feature}_magnitude: Z-score or fold-change at detection
+            - {feature}_baseline: Baseline value (for absolute_change method)
+            - {feature}_remodeling_value: Feature value at delta-T
+
+        Notes
+        -----
+        - Uses dtw_{alignment}_consensus_mapping to work in pseudotime
+        - Only analyzes aligned cells (dtw_{alignment}_aligned == True)
+        - Reference event (t=0) is center of consensus pattern
+        - Returns NaN for cells where remodeling threshold not crossed
+        """
+        import numpy as np
+        import pandas as pd
+
+        mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+        aligned_col = f"dtw_{alignment_name}_aligned"
+
+        # Validate inputs
+        required_cols = ["lineage_id", "track_id", "fov_name", mapping_col, aligned_col]
+        missing = set(required_cols) - set(df.columns)
+        if missing:
+            raise ValueError(f"Missing required columns: {missing}")
+
+        for feat in feature_columns:
+            if feat not in df.columns:
+                raise ValueError(f"Feature '{feat}' not found in DataFrame")
+
+        # Normalize thresholds to dict
+        if isinstance(thresholds, (int, float)):
+            thresholds = {feat: thresholds for feat in feature_columns}
+
+        # Filter to aligned infected cells
+        infected_df = df[df[aligned_col]].copy()
+
+        if len(infected_df) == 0:
+            _logger.warning("No aligned cells found")
+            return pd.DataFrame()
+
+        # Get consensus length to find reference timepoint (t=0 = center of consensus)
+        if self.consensus_data is None:
+            raise ValueError(
+                "Consensus data not found. Run create_consensus_reference_pattern first."
+            )
+
+        consensus_length = len(self.consensus_data["pattern"])
+        t_reference = consensus_length // 2  # Center of consensus = infection event
+
+        results = []
+
+        if method == "uninfected_divergence":
+            # Require uninfected data
+            if uninfected_df is None:
+                raise ValueError(
+                    "uninfected_df required for 'uninfected_divergence' method"
+                )
+
+            # Compute uninfected baseline distribution per pseudotime point
+            uninfected_stats = {}
+            for feat in feature_columns:
+                # Group by consensus_mapping (pseudotime) and compute mean/std
+                stats_df = (
+                    uninfected_df.groupby(mapping_col)[feat]
+                    .agg(["mean", "std", "count"])
+                    .reset_index()
+                )
+                stats_df.columns = [
+                    "pseudotime",
+                    f"{feat}_mean",
+                    f"{feat}_std",
+                    f"{feat}_count",
+                ]
+                uninfected_stats[feat] = stats_df
+
+            # Analyze each infected cell
+            for lineage_id, lineage_data in infected_df.groupby("lineage_id"):
+                if lineage_id == -1:  # Skip consensus row
+                    continue
+
+                # Get cell metadata
+                cell_meta = lineage_data.iloc[0]
+                track_id = cell_meta["track_id"]
+                fov_name = cell_meta["fov_name"]
+
+                result = {
+                    "lineage_id": lineage_id,
+                    "track_id": track_id,
+                    "fov_name": fov_name,
+                }
+
+                # Sort by pseudotime
+                lineage_data = lineage_data.sort_values(mapping_col)
+
+                for feat in feature_columns:
+                    # Compute z-scores relative to uninfected at each pseudotime
+                    z_scores = []
+                    pseudotimes = []
+
+                    for _, row in lineage_data.iterrows():
+                        pt = row[mapping_col]
+                        if pd.isna(pt):
+                            continue
+
+                        pt_int = int(pt)
+                        feature_val = row[feat]
+
+                        if pd.isna(feature_val):
+                            z_scores.append(np.nan)
+                            pseudotimes.append(pt_int)
+                            continue
+
+                        # Get uninfected stats for this pseudotime
+                        stats = uninfected_stats[feat]
+                        pt_stats = stats[stats["pseudotime"] == pt_int]
+
+                        if len(pt_stats) == 0 or pt_stats.iloc[0][f"{feat}_std"] == 0:
+                            z_scores.append(np.nan)
+                        else:
+                            mean_uninf = pt_stats.iloc[0][f"{feat}_mean"]
+                            std_uninf = pt_stats.iloc[0][f"{feat}_std"]
+                            z_score = (feature_val - mean_uninf) / std_uninf
+                            z_scores.append(z_score)
+
+                        pseudotimes.append(pt_int)
+
+                    # Find first consecutive crossing
+                    delta_t, direction, magnitude, remodel_val = (
+                        self._find_consecutive_crossing(
+                            np.array(pseudotimes),
+                            np.array(z_scores),
+                            t_reference,
+                            thresholds[feat],
+                            min_consecutive,
+                            lineage_data[feat].values,
+                            use_abs=True,  # Detect any divergence
+                        )
+                    )
+
+                    result[f"{feat}_delta_t"] = delta_t
+                    result[f"{feat}_direction"] = direction
+                    result[f"{feat}_magnitude"] = magnitude
+                    result[f"{feat}_baseline"] = np.nan  # Not used in this method
+                    result[f"{feat}_remodeling_value"] = remodel_val
+
+                results.append(result)
+
+        elif method == "absolute_change":
+            # Compute baseline from pre-event window for each cell
+            for lineage_id, lineage_data in infected_df.groupby("lineage_id"):
+                if lineage_id == -1:
+                    continue
+
+                cell_meta = lineage_data.iloc[0]
+                track_id = cell_meta["track_id"]
+                fov_name = cell_meta["fov_name"]
+
+                result = {
+                    "lineage_id": lineage_id,
+                    "track_id": track_id,
+                    "fov_name": fov_name,
+                }
+
+                lineage_data = lineage_data.sort_values(mapping_col)
+
+                for feat in feature_columns:
+                    # Extract baseline window relative to t_reference
+                    baseline_start = t_reference + baseline_window[0]
+                    baseline_end = t_reference + baseline_window[1]
+
+                    baseline_data = lineage_data[
+                        (lineage_data[mapping_col] >= baseline_start)
+                        & (lineage_data[mapping_col] < baseline_end)
+                    ][feat]
+
+                    if len(baseline_data) == 0:
+                        result[f"{feat}_delta_t"] = np.nan
+                        result[f"{feat}_direction"] = np.nan
+                        result[f"{feat}_magnitude"] = np.nan
+                        result[f"{feat}_baseline"] = np.nan
+                        result[f"{feat}_remodeling_value"] = np.nan
+                        continue
+
+                    baseline = baseline_data.mean()
+
+                    # Compute absolute fold change
+                    pseudotimes = []
+                    fold_changes = []
+                    feature_vals = []
+
+                    for _, row in lineage_data.iterrows():
+                        pt = row[mapping_col]
+                        if pd.isna(pt):
+                            continue
+
+                        pt_int = int(pt)
+                        feature_val = row[feat]
+
+                        if pd.isna(feature_val) or baseline == 0:
+                            fold_changes.append(np.nan)
+                        else:
+                            fold_change = abs((feature_val - baseline) / baseline)
+                            fold_changes.append(fold_change)
+
+                        pseudotimes.append(pt_int)
+                        feature_vals.append(feature_val)
+
+                    # Find first consecutive crossing
+                    delta_t, direction, magnitude, remodel_val = (
+                        self._find_consecutive_crossing(
+                            np.array(pseudotimes),
+                            np.array(fold_changes),
+                            t_reference,
+                            thresholds[feat],
+                            min_consecutive,
+                            np.array(feature_vals),
+                            use_abs=False,  # Already absolute
+                            baseline=baseline,
+                        )
+                    )
+
+                    result[f"{feat}_delta_t"] = delta_t
+                    result[f"{feat}_direction"] = direction
+                    result[f"{feat}_magnitude"] = magnitude
+                    result[f"{feat}_baseline"] = baseline
+                    result[f"{feat}_remodeling_value"] = remodel_val
+
+                results.append(result)
+
+        else:
+            raise ValueError(
+                f"Unknown method: {method}. Use 'uninfected_divergence' or 'absolute_change'"
+            )
+
+        if not results:
+            _logger.warning("No delta-T results computed")
+            return pd.DataFrame()
+
+        return pd.DataFrame(results)
+
+    def _find_consecutive_crossing(
+        self,
+        pseudotimes: np.ndarray,
+        values: np.ndarray,
+        t_reference: int,
+        threshold: float,
+        min_consecutive: int,
+        feature_values: np.ndarray,
+        use_abs: bool = True,
+        baseline: float | None = None,
+    ) -> tuple[float, str, float, float]:
+        """
+        Find first consecutive threshold crossing.
+
+        Parameters
+        ----------
+        pseudotimes : np.ndarray
+            Pseudotime coordinates
+        values : np.ndarray
+            Values to check (z-scores or fold-changes)
+        t_reference : int
+            Reference timepoint (t=0)
+        threshold : float
+            Detection threshold
+        min_consecutive : int
+            Minimum consecutive crossings required
+        feature_values : np.ndarray
+            Original feature values
+        use_abs : bool
+            Whether to use absolute value for threshold
+        baseline : float, optional
+            Baseline for determining direction
+
+        Returns
+        -------
+        delta_t : float
+            Delta-T value (NaN if not detected)
+        direction : str
+            'increase' or 'decrease' (NaN if not detected)
+        magnitude : float
+            Magnitude at detection (NaN if not detected)
+        remodel_val : float
+            Feature value at detection (NaN if not detected)
+        """
+        import numpy as np
+
+        # Remove NaN values
+        valid = ~np.isnan(values)
+        if not valid.any():
+            return np.nan, np.nan, np.nan, np.nan
+
+        pseudotimes = pseudotimes[valid]
+        values = values[valid]
+        feature_values = feature_values[valid]
+
+        # Find threshold crossings
+        if use_abs:
+            crosses = np.abs(values) >= threshold
+        else:
+            crosses = values >= threshold
+
+        if not crosses.any():
+            return np.nan, np.nan, np.nan, np.nan
+
+        # Find consecutive runs
+        consecutive_count = 0
+        detection_idx = None
+
+        for i, crossed in enumerate(crosses):
+            if crossed:
+                consecutive_count += 1
+                if consecutive_count >= min_consecutive:
+                    # Found it! Use the first point of the run
+                    detection_idx = i - (min_consecutive - 1)
+                    break
+            else:
+                consecutive_count = 0
+
+        if detection_idx is None:
+            return np.nan, np.nan, np.nan, np.nan
+
+        # Compute delta_t
+        detected_pseudotime = pseudotimes[detection_idx]
+        delta_t = detected_pseudotime - t_reference
+
+        # Determine direction
+        detected_value = values[detection_idx]
+        feature_val = feature_values[detection_idx]
+
+        if use_abs:
+            # Z-score method: direction from sign
+            direction = "increase" if detected_value > 0 else "decrease"
+        else:
+            # Fold-change method: direction from comparison to baseline
+            if baseline is not None:
+                direction = "increase" if feature_val > baseline else "decrease"
+            else:
+                direction = "increase"
+
+        magnitude = abs(detected_value)
+
+        return delta_t, direction, magnitude, feature_val
+
+    def compute_delta_t_population(
+        self,
+        df: pd.DataFrame,
+        feature_columns: list[str],
+        alignment_name: str = "cell_division",
+        aggregation_method: str = "median",
+        thresholds: dict[str, float] | float = 2.0,
+        baseline_window: tuple[int, int] = (-10, -2),
+        method: str = "uninfected_divergence",
+        uninfected_df: pd.DataFrame | None = None,
+    ) -> dict:
+        """
+        Compute population-level delta-T using aggregated trajectories.
+
+        Aggregates feature trajectories across all infected cells and detects
+        when the population-level trajectory crosses the remodeling threshold.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Alignment DataFrame with features
+        feature_columns : list[str]
+            Features to analyze
+        alignment_name : str, default "cell_division"
+            Alignment type identifier
+        aggregation_method : str, default "median"
+            How to aggregate across cells: 'mean' or 'median'
+        thresholds : dict or float, default 2.0
+            Detection thresholds (z-score or fold-change depending on method)
+        baseline_window : tuple[int, int], default (-10, -2)
+            Relative pseudotime points for baseline computation
+        method : str, default "uninfected_divergence"
+            Detection method: 'uninfected_divergence' or 'absolute_change'
+        uninfected_df : pd.DataFrame, optional
+            Uninfected cells for comparison (required for 'uninfected_divergence')
+
+        Returns
+        -------
+        dict
+            Population-level results with keys:
+            - 'delta_t': dict[feature -> delta_t value]
+            - 'direction': dict[feature -> 'increase'/'decrease']
+            - 'magnitude': dict[feature -> magnitude at detection]
+            - 'aggregated_trajectories': dict[feature -> (pseudotimes, values)]
+            - 'baseline_values': dict[feature -> baseline]
+            - 'detection_details': dict with threshold crossing info
+        """
+        import numpy as np
+
+        mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+        aligned_col = f"dtw_{alignment_name}_aligned"
+
+        # Normalize thresholds
+        if isinstance(thresholds, (int, float)):
+            thresholds = {feat: thresholds for feat in feature_columns}
+
+        # Filter to aligned infected cells
+        infected_df = df[df[aligned_col]].copy()
+
+        if len(infected_df) == 0:
+            _logger.warning("No aligned cells found for population analysis")
+            return {
+                "delta_t": {feat: np.nan for feat in feature_columns},
+                "direction": {feat: np.nan for feat in feature_columns},
+                "magnitude": {feat: np.nan for feat in feature_columns},
+                "aggregated_trajectories": {},
+                "baseline_values": {},
+                "detection_details": {},
+            }
+
+        # Get consensus length for reference timepoint
+        if self.consensus_data is None:
+            raise ValueError("Consensus data not found")
+
+        consensus_length = len(self.consensus_data["pattern"])
+        t_reference = consensus_length // 2
+
+        # Aggregate features across cells by pseudotime
+        agg_func = "median" if aggregation_method == "median" else "mean"
+
+        aggregated_data = (
+            infected_df.groupby(mapping_col)[feature_columns]
+            .agg(agg_func)
+            .reset_index()
+        )
+        aggregated_data.columns = ["pseudotime"] + feature_columns
+
+        result = {
+            "delta_t": {},
+            "direction": {},
+            "magnitude": {},
+            "aggregated_trajectories": {},
+            "baseline_values": {},
+            "detection_details": {},
+        }
+
+        if method == "uninfected_divergence":
+            if uninfected_df is None:
+                raise ValueError(
+                    "uninfected_df required for 'uninfected_divergence' method"
+                )
+
+            # Compute uninfected baseline per pseudotime
+            uninfected_agg = (
+                uninfected_df.groupby(mapping_col)[feature_columns]
+                .agg(["mean", "std"])
+                .reset_index()
+            )
+
+            for feat in feature_columns:
+                # Merge infected aggregated with uninfected stats
+                feat_mean_col = (feat, "mean")
+                feat_std_col = (feat, "std")
+
+                merged = aggregated_data[["pseudotime", feat]].merge(
+                    uninfected_agg[["pseudotime", feat_mean_col, feat_std_col]],
+                    left_on="pseudotime",
+                    right_on=("pseudotime", ""),
+                    how="left",
+                    suffixes=("", "_uninf"),
+                )
+
+                # Compute z-scores
+                z_scores = (merged[feat] - merged[feat_mean_col]) / merged[feat_std_col]
+                pseudotimes = merged["pseudotime"].values
+                feature_vals = merged[feat].values
+
+                # Store trajectory
+                result["aggregated_trajectories"][feat] = (pseudotimes, feature_vals)
+
+                # Find crossing
+                delta_t, direction, magnitude, remodel_val = (
+                    self._find_consecutive_crossing(
+                        pseudotimes,
+                        z_scores.values,
+                        t_reference,
+                        thresholds[feat],
+                        min_consecutive=3,
+                        feature_values=feature_vals,
+                        use_abs=True,
+                    )
+                )
+
+                result["delta_t"][feat] = delta_t
+                result["direction"][feat] = direction
+                result["magnitude"][feat] = magnitude
+                result["baseline_values"][feat] = (
+                    np.nan
+                )  # Not applicable for z-score method
+                result["detection_details"][feat] = {
+                    "remodeling_value": remodel_val,
+                    "method": "uninfected_divergence",
+                    "z_score": magnitude,
+                }
+
+        elif method == "absolute_change":
+            for feat in feature_columns:
+                # Extract baseline window
+                baseline_start = t_reference + baseline_window[0]
+                baseline_end = t_reference + baseline_window[1]
+
+                baseline_data = aggregated_data[
+                    (aggregated_data["pseudotime"] >= baseline_start)
+                    & (aggregated_data["pseudotime"] < baseline_end)
+                ][feat]
+
+                if len(baseline_data) == 0:
+                    result["delta_t"][feat] = np.nan
+                    result["direction"][feat] = np.nan
+                    result["magnitude"][feat] = np.nan
+                    result["baseline_values"][feat] = np.nan
+                    result["detection_details"][feat] = {}
+                    continue
+
+                baseline = baseline_data.mean()
+
+                # Compute absolute fold change
+                pseudotimes = aggregated_data["pseudotime"].values
+                feature_vals = aggregated_data[feat].values
+                fold_changes = np.abs((feature_vals - baseline) / baseline)
+
+                # Store trajectory
+                result["aggregated_trajectories"][feat] = (pseudotimes, feature_vals)
+
+                # Find crossing
+                delta_t, direction, magnitude, remodel_val = (
+                    self._find_consecutive_crossing(
+                        pseudotimes,
+                        fold_changes,
+                        t_reference,
+                        thresholds[feat],
+                        min_consecutive=3,
+                        feature_values=feature_vals,
+                        use_abs=False,
+                        baseline=baseline,
+                    )
+                )
+
+                result["delta_t"][feat] = delta_t
+                result["direction"][feat] = direction
+                result["magnitude"][feat] = magnitude
+                result["baseline_values"][feat] = baseline
+                result["detection_details"][feat] = {
+                    "remodeling_value": remodel_val,
+                    "method": "absolute_change",
+                    "fold_change": magnitude,
+                }
+
+        else:
+            raise ValueError(f"Unknown method: {method}")
+
+        return result
+
+    def plot_delta_t_distribution(
+        self,
+        delta_t_df: pd.DataFrame,
+        feature_columns: list[str],
+        population_delta_t: dict | None = None,
+        bins: int = 20,
+        figsize: tuple = (12, 8),
+    ):
+        """
+        Plot distribution of delta-T values across cells.
+
+        Creates histograms and box plots showing the distribution of delta-T
+        values for each feature, with optional population-level reference lines.
+
+        Parameters
+        ----------
+        delta_t_df : pd.DataFrame
+            DataFrame from compute_delta_t_per_cell() with columns:
+            {feature}_delta_t, {feature}_direction, {feature}_magnitude
+        feature_columns : list[str]
+            Features to plot (e.g., ['organelle_volume', 'edge_density'])
+        population_delta_t : dict, optional
+            Dictionary from compute_delta_t_population() with key 'delta_t'
+            containing {feature: delta_t_value}. If provided, population
+            delta-T will be shown as vertical lines.
+        bins : int, default 20
+            Number of histogram bins
+        figsize : tuple, default (12, 8)
+            Figure size (width, height)
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Figure with subplots for each feature showing:
+            - Top: Histogram of per-cell delta-T values
+            - Bottom: Box plot with median, quartiles, and outliers
+        """
+        import matplotlib.pyplot as plt
+        from matplotlib.gridspec import GridSpec
+
+        n_features = len(feature_columns)
+        fig = plt.figure(figsize=figsize)
+        gs = GridSpec(2, n_features, figure=fig, height_ratios=[3, 1], hspace=0.3)
+
+        for i, feature in enumerate(feature_columns):
+            delta_t_col = f"{feature}_delta_t"
+
+            if delta_t_col not in delta_t_df.columns:
+                continue
+
+            # Get valid delta-T values (drop NaN)
+            values = delta_t_df[delta_t_col].dropna()
+
+            if len(values) == 0:
+                continue
+
+            # Histogram (top)
+            ax_hist = fig.add_subplot(gs[0, i])
+            ax_hist.hist(
+                values, bins=bins, color="#1f77b4", alpha=0.7, edgecolor="black"
+            )
+
+            # Add population delta-T line if provided
+            if population_delta_t is not None and "delta_t" in population_delta_t:
+                pop_dt = population_delta_t["delta_t"].get(feature, None)
+                if pop_dt is not None and not np.isnan(pop_dt):
+                    ax_hist.axvline(
+                        pop_dt,
+                        color="#ff7f0e",
+                        linestyle="--",
+                        linewidth=2,
+                        label=f"Population: {pop_dt:.1f}",
+                    )
+                    ax_hist.legend()
+
+            # Add statistics text
+            median_val = values.median()
+            mean_val = values.mean()
+            std_val = values.std()
+            ax_hist.text(
+                0.98,
+                0.98,
+                f"n={len(values)}\nMedian: {median_val:.1f}\nMean: {mean_val:.1f}±{std_val:.1f}",
+                transform=ax_hist.transAxes,
+                verticalalignment="top",
+                horizontalalignment="right",
+                bbox=dict(boxstyle="round", facecolor="white", alpha=0.8),
+            )
+
+            ax_hist.set_xlabel("Delta-T (pseudotime units)", fontsize=10)
+            ax_hist.set_ylabel("Count", fontsize=10)
+            ax_hist.set_title(
+                feature.replace("_", " ").title(), fontsize=12, fontweight="bold"
+            )
+            ax_hist.grid(axis="y", alpha=0.3)
+
+            # Box plot (bottom)
+            ax_box = fig.add_subplot(gs[1, i])
+            ax_box.boxplot(
+                [values],
+                vert=False,
+                widths=0.6,
+                patch_artist=True,
+                boxprops=dict(facecolor="#1f77b4", alpha=0.7),
+                medianprops=dict(color="red", linewidth=2),
+                whiskerprops=dict(linewidth=1.5),
+                capprops=dict(linewidth=1.5),
+                flierprops=dict(
+                    marker="o", markerfacecolor="#1f77b4", markersize=5, alpha=0.5
+                ),
+            )
+
+            # Add population line to box plot
+            if population_delta_t is not None and "delta_t" in population_delta_t:
+                pop_dt = population_delta_t["delta_t"].get(feature, None)
+                if pop_dt is not None and not np.isnan(pop_dt):
+                    ax_box.axvline(pop_dt, color="#ff7f0e", linestyle="--", linewidth=2)
+
+            ax_box.set_xlabel("Delta-T (pseudotime units)", fontsize=10)
+            ax_box.set_yticks([])
+            ax_box.grid(axis="x", alpha=0.3)
+
+        fig.suptitle(
+            "Delta-T Distribution Across Cells", fontsize=14, fontweight="bold", y=0.98
+        )
+        plt.tight_layout()
+
+        return fig
+
+    def plot_remodeling_heatmap(
+        self,
+        delta_t_df: pd.DataFrame,
+        feature_columns: list[str],
+        sort_by: str = "mean_delta_t",
+        figsize: tuple = (10, 12),
+        cmap: str = "RdBu_r",
+    ):
+        """
+        Plot heatmap showing delta-T for each cell and feature.
+
+        Creates a heatmap where rows are individual cells and columns are
+        features, with color indicating the delta-T value. Helps visualize
+        heterogeneity in remodeling timing across cells and features.
+
+        Parameters
+        ----------
+        delta_t_df : pd.DataFrame
+            DataFrame from compute_delta_t_per_cell() with columns:
+            {feature}_delta_t, lineage_id, track_id
+        feature_columns : list[str]
+            Features to include as columns in the heatmap
+        sort_by : str, default 'mean_delta_t'
+            How to sort rows (cells):
+            - 'mean_delta_t': Sort by mean delta-T across all features
+            - Feature name (e.g., 'organelle_volume'): Sort by that feature's delta-T
+        figsize : tuple, default (10, 12)
+            Figure size (width, height)
+        cmap : str, default 'RdBu_r'
+            Colormap name. Diverging colormaps work well:
+            - 'RdBu_r': Blue=early, Red=late
+            - 'coolwarm': Cool=early, Warm=late
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Heatmap figure with:
+            - Rows: Individual cells (sorted by delta-T)
+            - Columns: Features
+            - Color: Delta-T value (NaN shown in gray)
+            - Colorbar: Delta-T scale in pseudotime units
+        """
+        import matplotlib.pyplot as plt
+
+        # Extract delta-T values for heatmap
+        delta_t_cols = [f"{feat}_delta_t" for feat in feature_columns]
+        available_cols = [col for col in delta_t_cols if col in delta_t_df.columns]
+
+        if len(available_cols) == 0:
+            raise ValueError("No delta-T columns found in DataFrame")
+
+        # Create matrix for heatmap
+        heatmap_data = delta_t_df[available_cols].copy()
+        heatmap_data.columns = [
+            col.replace("_delta_t", "") for col in heatmap_data.columns
+        ]
+
+        # Sort rows
+        if sort_by == "mean_delta_t":
+            # Sort by mean delta-T across all features
+            row_means = heatmap_data.mean(axis=1)
+            sort_idx = row_means.argsort()
+        else:
+            # Sort by specific feature
+            sort_col = sort_by.replace("_delta_t", "")
+            if sort_col not in heatmap_data.columns:
+                raise ValueError(
+                    f"Sort column '{sort_by}' not found in feature columns"
+                )
+            sort_idx = heatmap_data[sort_col].argsort()
+
+        heatmap_data = heatmap_data.iloc[sort_idx]
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot heatmap
+        vmin = heatmap_data.min().min()
+        vmax = heatmap_data.max().max()
+
+        # Use center=None for sequential colormap (early to late)
+        # If you want symmetric around 0, set center=0
+        im = ax.imshow(
+            heatmap_data.values,
+            aspect="auto",
+            cmap=cmap,
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+        )
+
+        # Add colorbar
+        plt.colorbar(im, ax=ax, label="Delta-T (pseudotime units)")
+
+        # Set ticks and labels
+        ax.set_xticks(range(len(heatmap_data.columns)))
+        ax.set_xticklabels(
+            [col.replace("_", " ").title() for col in heatmap_data.columns],
+            rotation=45,
+            ha="right",
+        )
+
+        # Y-axis: Show cell count
+        n_cells = len(heatmap_data)
+        if n_cells <= 50:
+            # Show all cell labels
+            ax.set_yticks(range(n_cells))
+            if "lineage_id" in delta_t_df.columns:
+                cell_labels = delta_t_df.iloc[sort_idx]["lineage_id"].astype(str)
+                ax.set_yticklabels(cell_labels, fontsize=8)
+            else:
+                ax.set_yticklabels(range(n_cells), fontsize=8)
+        else:
+            # Show subset of ticks
+            tick_positions = np.linspace(0, n_cells - 1, min(20, n_cells), dtype=int)
+            ax.set_yticks(tick_positions)
+            ax.set_yticklabels(tick_positions, fontsize=8)
+
+        ax.set_ylabel("Cell (sorted by delta-T)", fontsize=12)
+        ax.set_xlabel("Feature", fontsize=12)
+        ax.set_title(
+            "Delta-T Heatmap: Remodeling Timing Across Cells",
+            fontsize=14,
+            fontweight="bold",
+        )
+
+        # Add grid for readability
+        ax.set_xticks(np.arange(len(heatmap_data.columns)) - 0.5, minor=True)
+        ax.set_yticks(np.arange(n_cells) - 0.5, minor=True)
+        ax.grid(which="minor", color="gray", linestyle="-", linewidth=0.5, alpha=0.2)
+
+        plt.tight_layout()
+
+        return fig
+
+    def plot_feature_trajectories_with_delta_t(
+        self,
+        df: pd.DataFrame,
+        delta_t_df: pd.DataFrame,
+        feature: str,
+        alignment_name: str = "cell_division",
+        max_cells: int = 20,
+        show_threshold: bool = True,
+        figsize: tuple = (12, 6),
+    ):
+        """
+        Plot individual cell trajectories with delta-T markers.
+
+        Shows feature trajectories for individual cells along with markers
+        indicating when each cell's delta-T was detected. Useful for
+        visualizing the relationship between trajectory shape and remodeling timing.
+
+        Parameters
+        ----------
+        df : pd.DataFrame
+            Master DataFrame with aligned features and warped coordinates
+            (from compute_alignment.py)
+        delta_t_df : pd.DataFrame
+            DataFrame from compute_delta_t_per_cell() with delta-T values
+        feature : str
+            Feature to plot (e.g., 'organelle_volume')
+        alignment_name : str, default 'cell_division'
+            Alignment type identifier for accessing consensus_mapping column
+        max_cells : int, default 20
+            Maximum number of individual cells to plot (randomly sampled)
+        show_threshold : bool, default True
+            Whether to show horizontal threshold line (if baseline available)
+        figsize : tuple, default (12, 6)
+            Figure size (width, height)
+
+        Returns
+        -------
+        matplotlib.figure.Figure
+            Figure showing:
+            - Individual cell trajectories (thin lines, semi-transparent)
+            - Population mean trajectory (thick line)
+            - Vertical markers at each cell's delta-T (if detected)
+            - Vertical line at t=0 (reference event)
+            - Optional horizontal threshold line
+        """
+        import matplotlib.pyplot as plt
+
+        # Get aligned cells
+        aligned_col = f"dtw_{alignment_name}_aligned"
+        mapping_col = f"dtw_{alignment_name}_consensus_mapping"
+
+        if aligned_col not in df.columns or mapping_col not in df.columns:
+            raise ValueError(
+                f"Alignment columns not found for alignment '{alignment_name}'"
+            )
+
+        aligned_df = df[df[aligned_col]].copy()
+
+        if len(aligned_df) == 0:
+            raise ValueError("No aligned cells found")
+
+        # Check feature exists
+        if feature not in aligned_df.columns:
+            raise ValueError(f"Feature '{feature}' not found in DataFrame")
+
+        # Get unique lineages
+        lineages = aligned_df["lineage_id"].unique()
+
+        # Sample cells if needed
+        if len(lineages) > max_cells:
+            sampled_lineages = np.random.choice(lineages, size=max_cells, replace=False)
+        else:
+            sampled_lineages = lineages
+
+        # Create figure
+        fig, ax = plt.subplots(figsize=figsize)
+
+        # Plot individual trajectories
+        for lineage_id in sampled_lineages:
+            cell_data = aligned_df[aligned_df["lineage_id"] == lineage_id].copy()
+            cell_data = cell_data.sort_values(by=mapping_col)
+
+            pseudotimes = cell_data[mapping_col].values
+            feature_vals = cell_data[feature].values
+
+            # Plot trajectory
+            ax.plot(pseudotimes, feature_vals, alpha=0.3, linewidth=1, color="gray")
+
+            # Add delta-T marker if available
+            delta_t_col = f"{feature}_delta_t"
+            if delta_t_col in delta_t_df.columns:
+                cell_delta_t_row = delta_t_df[delta_t_df["lineage_id"] == lineage_id]
+                if len(cell_delta_t_row) > 0:
+                    delta_t_val = cell_delta_t_row[delta_t_col].values[0]
+                    if not np.isnan(delta_t_val):
+                        # Delta-T is relative to t=0, so absolute position is delta_t_val
+                        # Find center of consensus (t=0)
+                        t_reference = int(pseudotimes.max() // 2)  # Approximate center
+                        delta_t_absolute = t_reference + delta_t_val
+
+                        # Find feature value at delta-T
+                        idx = np.argmin(np.abs(pseudotimes - delta_t_absolute))
+                        y_val = feature_vals[idx]
+
+                        # Plot marker
+                        ax.scatter(
+                            delta_t_absolute,
+                            y_val,
+                            marker="o",
+                            s=50,
+                            color="#ff7f0e",
+                            edgecolors="black",
+                            linewidths=0.5,
+                            alpha=0.7,
+                            zorder=5,
+                        )
+
+        # Compute and plot population mean
+        agg_data = (
+            aligned_df.groupby(mapping_col)[feature].agg(["mean", "std"]).reset_index()
+        )
+        agg_data = agg_data.sort_values(by=mapping_col)
+
+        ax.plot(
+            agg_data[mapping_col],
+            agg_data["mean"],
+            color="#1f77b4",
+            linewidth=3,
+            label="Population Mean",
+            zorder=10,
+        )
+
+        # Add confidence band
+        ax.fill_between(
+            agg_data[mapping_col],
+            agg_data["mean"] - agg_data["std"],
+            agg_data["mean"] + agg_data["std"],
+            color="#1f77b4",
+            alpha=0.2,
+            zorder=1,
+        )
+
+        # Add reference line at t=0 (infection event)
+        t_reference = int(agg_data[mapping_col].max() // 2)  # Approximate center
+        ax.axvline(
+            t_reference,
+            color="black",
+            linestyle="--",
+            linewidth=2,
+            label="Reference Event (t=0)",
+            alpha=0.7,
+        )
+
+        # Add threshold line if requested
+        if show_threshold:
+            # Try to get baseline from delta_t_df
+            baseline_col = f"{feature}_baseline"
+            if baseline_col in delta_t_df.columns:
+                baseline_val = delta_t_df[baseline_col].mean()
+                if not np.isnan(baseline_val):
+                    ax.axhline(
+                        baseline_val,
+                        color="red",
+                        linestyle=":",
+                        linewidth=1.5,
+                        label=f"Baseline ({baseline_val:.2f})",
+                        alpha=0.6,
+                    )
+
+        # Styling
+        ax.set_xlabel("Pseudotime (consensus-aligned)", fontsize=12)
+        ax.set_ylabel(feature.replace("_", " ").title(), fontsize=12)
+        ax.set_title(
+            f"Feature Trajectories with Delta-T Markers\n{feature.replace('_', ' ').title()}",
+            fontsize=14,
+            fontweight="bold",
+        )
+        ax.legend(loc="best", fontsize=10)
+        ax.grid(alpha=0.3)
+
+        plt.tight_layout()
+
+        return fig
 
     def plot_global_trends(
         self,

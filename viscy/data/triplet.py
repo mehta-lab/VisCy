@@ -64,6 +64,87 @@ def _transform_channel_wise(
     return _gather_channels(transformed_channels)
 
 
+def load_images_from_triplet_dataset(
+    dataset: "TripletDataset",
+    fov_name: str,
+    track_ids: list[int] | int,
+) -> dict[int, dict]:
+    """
+    Load images from TripletDataset for given FOV and track IDs.
+
+    Extracts images for specific tracks from a TripletDataset by finding
+    matching valid anchors and retrieving their image data.
+
+    Parameters
+    ----------
+    dataset : TripletDataset
+        TripletDataset instance containing the image data
+    fov_name : str
+        FOV identifier to match (e.g., "B/2/000000")
+    track_ids : list[int] or int
+        Track ID(s) to load images for. Single int will be converted to list.
+
+    Returns
+    -------
+    dict[int, dict]
+        Dictionary mapping timepoint -> image data dict with keys:
+        - 'anchor': Tensor of image data (C, Z, Y, X)
+        - 'index': Dict with metadata (track_id, t, fov_name, etc.)
+        Sorted by timepoint in ascending order.
+
+    Notes
+    -----
+    - Returns empty dict if no matching images found
+    - Logs warning if no matches found
+    - Images are sorted by timepoint for temporal consistency
+
+    Examples
+    --------
+    >>> dataset = TripletDataset(...)
+    >>> images = load_images_from_triplet_dataset(
+    ...     dataset, "B/2/000000", [85, 86]
+    ... )
+    >>> for t, img_data in images.items():
+    ...     print(f"Timepoint {t}: {img_data['anchor'].shape}")
+    """
+    import logging
+
+    logger = logging.getLogger("viscy")
+
+    # Normalize track_ids to list
+    if isinstance(track_ids, int):
+        track_ids = [track_ids]
+
+    # Find matching indices in dataset.valid_anchors
+    matching_indices = []
+    for dataset_idx in range(len(dataset.valid_anchors)):
+        anchor_row = dataset.valid_anchors.iloc[dataset_idx]
+        if anchor_row["fov_name"] == fov_name and anchor_row["track_id"] in track_ids:
+            matching_indices.append(dataset_idx)
+
+    if not matching_indices:
+        logger.warning(
+            f"No matching indices found for FOV {fov_name}, tracks {track_ids}"
+        )
+        return {}
+
+    # Get images and create time mapping using batch loading
+    batch_data = dataset.__getitems__(matching_indices)
+    images = []
+    for i in range(len(matching_indices)):
+        img_data = {
+            "anchor": batch_data["anchor"][i],
+            "index": batch_data["index"][i],
+        }
+        images.append(img_data)
+
+    # Sort by timepoint
+    images.sort(key=lambda x: x["index"]["t"])
+
+    # Return time-indexed dict
+    return {img["index"]["t"]: img for img in images}
+
+
 class TripletDataset(Dataset):
     def __init__(
         self,
