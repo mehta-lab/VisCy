@@ -162,6 +162,7 @@ def create_phate_figure(
     df: pd.DataFrame,
     selected_statuses: list[str],
     selected_tracks: Optional[list[str]] = None,
+    show_trajectories: bool = False,
 ) -> go.Figure:
     """
     Create interactive PHATE scatter plot colored by infection status.
@@ -174,6 +175,8 @@ def create_phate_figure(
         Infection statuses to display.
     selected_tracks : list[str], optional
         Track keys to highlight.
+    show_trajectories : bool, optional
+        If True, draw lines connecting points in temporal order for selected tracks.
 
     Returns
     -------
@@ -275,6 +278,61 @@ def create_phate_figure(
                     ),
                 )
             )
+
+    # Add trajectory lines for selected tracks
+    if show_trajectories and selected_tracks:
+        for track_key in selected_tracks:
+            track_df = df[df["track_key"] == track_key].sort_values("t")
+
+            if len(track_df) < 2:
+                continue
+
+            infection_status = track_df["infection_status"].iloc[0]
+            color = INFECTION_COLORS.get(infection_status, "#95a5a6")
+
+            # Add line trace connecting points in temporal order
+            fig.add_trace(
+                go.Scattergl(
+                    x=track_df["PHATE1"],
+                    y=track_df["PHATE2"],
+                    mode="lines",
+                    line=dict(
+                        color=color,
+                        width=2,
+                        dash="solid",
+                    ),
+                    showlegend=False,
+                    hoverinfo="skip",
+                )
+            )
+
+            # Add arrow markers at intermediate points to show direction
+            # Use every 3rd point to avoid cluttering
+            for i in range(0, len(track_df) - 1, 3):
+                row_current = track_df.iloc[i]
+                row_next = track_df.iloc[i + 1]
+
+                # Calculate arrow direction
+                row_next["PHATE1"] - row_current["PHATE1"]
+                row_next["PHATE2"] - row_current["PHATE2"]
+
+                # Add arrow annotation
+                fig.add_annotation(
+                    x=row_next["PHATE1"],
+                    y=row_next["PHATE2"],
+                    ax=row_current["PHATE1"],
+                    ay=row_current["PHATE2"],
+                    xref="x",
+                    yref="y",
+                    axref="x",
+                    ayref="y",
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=2,
+                    arrowcolor=color,
+                    opacity=0.6,
+                )
 
     # Update layout
     fig.update_layout(
@@ -759,6 +817,22 @@ app.layout = html.Div(
                     ],
                     style={"marginBottom": "15px"},
                 ),
+                html.Div(
+                    [
+                        dcc.Checklist(
+                            id="show-trajectories",
+                            options=[
+                                {
+                                    "label": " Show track trajectories (lines connecting points in temporal order)",
+                                    "value": "show",
+                                }
+                            ],
+                            value=[],
+                            inline=True,
+                        ),
+                    ],
+                    style={"marginBottom": "10px"},
+                ),
             ],
             style={
                 "padding": "20px",
@@ -800,11 +874,16 @@ app.layout = html.Div(
 # Callback 1: Update PHATE plot based on infection filter and selected tracks
 @app.callback(
     Output("phate-scatter", "figure"),
-    [Input("infection-filter", "value"), Input("track-selector", "value")],
+    [
+        Input("infection-filter", "value"),
+        Input("track-selector", "value"),
+        Input("show-trajectories", "value"),
+    ],
 )
-def update_phate_plot(selected_statuses, selected_tracks):
+def update_phate_plot(selected_statuses, selected_tracks, show_trajectories):
     """Update PHATE scatter plot based on filters and selections."""
-    return create_phate_figure(plot_df, selected_statuses, selected_tracks)
+    show_traj = "show" in show_trajectories if show_trajectories else False
+    return create_phate_figure(plot_df, selected_statuses, selected_tracks, show_traj)
 
 
 # Callback 2: Add track on click
