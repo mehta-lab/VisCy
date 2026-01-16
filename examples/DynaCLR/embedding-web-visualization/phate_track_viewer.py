@@ -14,6 +14,7 @@ from typing import Optional
 import anndata as ad
 import numpy as np
 import pandas as pd
+import plotly.express as px
 import plotly.graph_objects as go
 from anndata import read_zarr
 from dash import Dash, Input, Output, State, dcc, html
@@ -32,27 +33,35 @@ logger = logging.getLogger(__name__)
 
 # Data paths
 ADATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/6-phenotype/predictions/dynaclrv3/timeaware/dynaclrv3_phaseOnly_tau1_temp0p2_ckpt37.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/1-predictions/organellebox-v3/organelle_160patch_104ckpt_ver3max.zarr"
 )
-ANNOTATION_CSV = Path(
-    "/hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/6-phenotype/0-annotations/track_infection_annotation_0_4_000001.csv"
-)
+ANNOTATION_CSV_PATH = None
 DATA_PATH = Path(
-    "/hpc/projects/organelle_phenotyping/2024_08_14_ZIKV_pal17_48h/2024_08_14_ZIKV_pal17_48h.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/0-train-test/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr"
 )
 
-# Annotation settings
+# Annotation settings (optional - set to None if no annotations)
+ANNOTATION_CSV = None  # Set to None to skip annotation loading
 ANNOTATION_COLUMN = "infection_status"
 # Optional: Map annotation values to standardized categories
 # Example for numeric labels: CATEGORIES = {0: "uninfected", 1: "infected", 2: "unknown"}
 # Example for string labels: CATEGORIES = {"healthy": "uninfected", "sick": "infected"}
 # Set to None if no remapping needed
-CATEGORIES = None
+CATEGORIES = {0: "uninfected", 1: "infected", 2: "unknown"}
+
+# Color mode: "annotation", "time", or "track_id"
+# This will be selectable in the UI, but you can set a default here
+DEFAULT_COLOR_MODE = "annotation"  # or "time" or "track_id"
+
+# FOV filtering (optional - set to None to include all FOVs)
+# Can be a list of exact FOV names: ["A/1/0", "A/2/0"]
+# Or a list of patterns to match: ["A_1", "A_2"] will match any FOV containing these strings
+FOV_FILTER = ["A/1", "A/2"]  # Set to None to include all FOVs
 
 # Image settings
-CHANNELS = ["Phase3D"]
-Z_RANGE = (14, 15)  # Z slice range
-YX_PATCH_SIZE = (128, 128)
+CHANNELS = ["GFP EX488 EM525-45"]
+Z_RANGE = (0, 1)  # Z slice range
+YX_PATCH_SIZE = (160, 160)
 
 # Server settings
 PORT = 8050
@@ -72,52 +81,90 @@ INFECTION_COLORS = {
 
 def load_and_prepare_data(
     adata_path: Path,
-    annotation_csv: Path,
-    annotation_column: str,
+    annotation_csv: Path | None = None,
+    annotation_column: str | None = None,
     categories: dict | None = None,
-) -> tuple[ad.AnnData, pd.DataFrame, list]:
+    fov_filter: list[str] | None = None,
+) -> tuple[ad.AnnData, pd.DataFrame, list, bool]:
     """
-    Load AnnData with PHATE embeddings and infection annotations.
+    Load AnnData with PHATE embeddings and optional annotations.
 
     Parameters
     ----------
     adata_path : Path
         Path to AnnData zarr store with PHATE embeddings.
-    annotation_csv : Path
-        Path to CSV file with infection annotations.
-    annotation_column : str
+    annotation_csv : Path, optional
+        Path to CSV file with annotations. If None, no annotations are loaded.
+    annotation_column : str, optional
         Column name in CSV for annotation values.
     categories : dict, optional
         Dictionary to remap annotation categories (e.g., {0: "uninfected", 1: "infected"}).
+    fov_filter : list[str], optional
+        List of FOV names or patterns to filter. If provided, only FOVs containing
+        any of these strings will be included.
 
     Returns
     -------
     adata : ad.AnnData
-        Filtered AnnData object with annotations.
+        AnnData object with optional annotations.
     plot_df : pd.DataFrame
         DataFrame with PHATE coordinates and metadata for plotting.
     track_options : list
         List of unique track identifiers for dropdown.
+    has_annotations : bool
+        Whether annotations were loaded.
     """
     logger.info(f"Loading AnnData from {adata_path}")
     adata = read_zarr(adata_path)
     logger.info(f"Loaded {adata.shape[0]} observations with {adata.shape[1]} features")
 
-    # Load annotations
-    logger.info(f"Loading annotations from {annotation_csv}")
-    adata = load_annotation_anndata(
-        adata, str(annotation_csv), annotation_column, categories=categories
-    )
+    # Filter by FOV if specified
+    if fov_filter is not None and len(fov_filter) > 0:
+        logger.info(f"Filtering FOVs by patterns: {fov_filter}")
 
-    # Filter out unknown infection status and NaN values
-    initial_count = adata.shape[0]
-    valid_mask = (adata.obs[annotation_column] != "unknown") & (
-        adata.obs[annotation_column].notna()
-    )
-    adata = adata[valid_mask]
-    logger.info(
-        f"Filtered {initial_count - adata.shape[0]} invalid observations (unknown/NaN), {adata.shape[0]} remaining"
-    )
+        # Show sample of available FOV names for debugging
+        unique_fovs = adata.obs["fov_name"].unique()
+        logger.info(f"Available FOVs (showing first 10): {list(unique_fovs[:10])}")
+        logger.info(f"Total unique FOVs: {len(unique_fovs)}")
+
+        initial_count = adata.shape[0]
+
+        # Convert fov_name to string for pattern matching
+        fov_names = adata.obs["fov_name"].astype(str)
+
+        # Create mask: keep FOVs where ANY pattern is IN the FOV name
+        # e.g., "A_1" matches "A_1_0000000", "A_1_0000001", etc.
+        mask = pd.Series([False] * len(fov_names), index=fov_names.index)
+        for pattern in fov_filter:
+            mask |= fov_names.str.contains(pattern, regex=False)
+
+        adata = adata[mask]
+        logger.info(
+            f"Filtered to {adata.shape[0]} observations from {len(adata.obs['fov_name'].unique())} FOVs "
+            f"(removed {initial_count - adata.shape[0]} observations)"
+        )
+
+    has_annotations = False
+
+    # Load annotations if provided
+    if annotation_csv is not None and annotation_csv.exists() and annotation_column:
+        logger.info(f"Loading annotations from {annotation_csv}")
+        adata = load_annotation_anndata(
+            adata, str(annotation_csv), annotation_column, categories=categories
+        )
+        has_annotations = True
+
+        # Filter out unknown infection status and NaN values
+        initial_count = adata.shape[0]
+        valid_mask = (adata.obs[annotation_column] != "unknown") & (
+            adata.obs[annotation_column].notna()
+        )
+        adata = adata[valid_mask]
+        logger.info(
+            f"Filtered {initial_count - adata.shape[0]} invalid observations (unknown/NaN), {adata.shape[0]} remaining"
+        )
+    else:
+        logger.info("No annotations provided, skipping annotation loading")
 
     # Check for PHATE embeddings
     if "X_phate" not in adata.obsm:
@@ -128,20 +175,22 @@ def load_and_prepare_data(
     logger.info(f"PHATE embedding shape: {phate_coords.shape}")
 
     # Create plotting DataFrame
-    plot_df = pd.DataFrame(
-        {
-            "PHATE1": phate_coords[:, 0],
-            "PHATE2": phate_coords[:, 1],
-            "track_id": adata.obs["track_id"].values,
-            "fov_name": adata.obs["fov_name"].values,
-            "t": adata.obs["t"].values,
-            "y": adata.obs["y"].values,
-            "x": adata.obs["x"].values,
-            "infection_status": adata.obs[annotation_column].values,
-            "id": adata.obs["id"].values,
-        },
-        index=adata.obs.index,
-    )
+    plot_df_dict = {
+        "PHATE1": phate_coords[:, 0],
+        "PHATE2": phate_coords[:, 1],
+        "track_id": adata.obs["track_id"].values,
+        "fov_name": adata.obs["fov_name"].values,
+        "t": adata.obs["t"].values,
+        "y": adata.obs["y"].values,
+        "x": adata.obs["x"].values,
+        "id": adata.obs["id"].values,
+    }
+
+    # Add annotation column if available
+    if has_annotations and annotation_column in adata.obs:
+        plot_df_dict["annotation"] = adata.obs[annotation_column].values
+
+    plot_df = pd.DataFrame(plot_df_dict, index=adata.obs.index)
 
     # Create track options for dropdown (format: "fov_name/track_id")
     plot_df["track_key"] = (
@@ -150,7 +199,7 @@ def load_and_prepare_data(
     track_options = sorted(plot_df["track_key"].unique())
     logger.info(f"Found {len(track_options)} unique tracks")
 
-    return adata, plot_df, track_options
+    return adata, plot_df, track_options, has_annotations
 
 
 # =============================================================================
@@ -160,20 +209,23 @@ def load_and_prepare_data(
 
 def create_phate_figure(
     df: pd.DataFrame,
-    selected_statuses: list[str],
+    color_by: str = "annotation",
+    selected_values: Optional[list] = None,
     selected_tracks: Optional[list[str]] = None,
     show_trajectories: bool = False,
     highlight_timepoint: Optional[int] = None,
 ) -> go.Figure:
     """
-    Create interactive PHATE scatter plot colored by infection status.
+    Create interactive PHATE scatter plot with flexible coloring.
 
     Parameters
     ----------
     df : pd.DataFrame
         DataFrame with PHATE coordinates and metadata.
-    selected_statuses : list[str]
-        Infection statuses to display.
+    color_by : str
+        Coloring mode: "annotation", "time", or "track_id".
+    selected_values : list, optional
+        Values to display (for categorical coloring).
     selected_tracks : list[str], optional
         Track keys to highlight.
     show_trajectories : bool, optional
@@ -186,37 +238,93 @@ def create_phate_figure(
     fig : go.Figure
         Plotly figure object.
     """
-    # Filter by selected infection statuses
-    filtered_df = df[df["infection_status"].isin(selected_statuses)]
-
     fig = go.Figure()
 
-    # Add traces for each infection status
-    for status in selected_statuses:
-        status_df = filtered_df[filtered_df["infection_status"] == status]
+    if color_by == "annotation" and "annotation" in df.columns:
+        # Color by annotation (categorical)
+        if selected_values is None:
+            selected_values = df["annotation"].unique().tolist()
 
-        if len(status_df) == 0:
-            continue
+        filtered_df = df[df["annotation"].isin(selected_values)]
 
-        # Check if any of these points are in selected tracks
-        if selected_tracks:
-            highlighted = status_df[status_df["track_key"].isin(selected_tracks)]
-            background = status_df[~status_df["track_key"].isin(selected_tracks)]
+        for status in selected_values:
+            status_df = filtered_df[filtered_df["annotation"] == status]
 
-            # Add background points (smaller, more transparent)
-            if len(background) > 0:
+            if len(status_df) == 0:
+                continue
+
+            # Check if any of these points are in selected tracks
+            if selected_tracks:
+                highlighted = status_df[status_df["track_key"].isin(selected_tracks)]
+                background = status_df[~status_df["track_key"].isin(selected_tracks)]
+
+                # Add background points (smaller, more transparent)
+                if len(background) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=background["PHATE1"],
+                            y=background["PHATE2"],
+                            mode="markers",
+                            name=f"{status} (background)",
+                            marker=dict(
+                                color=INFECTION_COLORS.get(status, "#95a5a6"),
+                                size=4,
+                                opacity=0.3,
+                            ),
+                            customdata=background[
+                                ["track_key", "t", "fov_name", "track_id"]
+                            ].values,
+                            hovertemplate=(
+                                "<b>Track:</b> %{customdata[0]}<br>"
+                                "<b>Time:</b> %{customdata[1]}<br>"
+                                "<b>FOV:</b> %{customdata[2]}<br>"
+                                "<b>Status:</b> " + status + "<br>"
+                                "<extra></extra>"
+                            ),
+                            showlegend=False,
+                        )
+                    )
+
+                # Add highlighted points (larger, more opaque)
+                if len(highlighted) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=highlighted["PHATE1"],
+                            y=highlighted["PHATE2"],
+                            mode="markers",
+                            name=f"{status} (selected)",
+                            marker=dict(
+                                color=INFECTION_COLORS.get(status, "#95a5a6"),
+                                size=8,
+                                opacity=0.9,
+                                line=dict(width=1, color="white"),
+                            ),
+                            customdata=highlighted[
+                                ["track_key", "t", "fov_name", "track_id"]
+                            ].values,
+                            hovertemplate=(
+                                "<b>Track:</b> %{customdata[0]}<br>"
+                                "<b>Time:</b> %{customdata[1]}<br>"
+                                "<b>FOV:</b> %{customdata[2]}<br>"
+                                "<b>Status:</b> " + status + "<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+            else:
+                # No tracks selected, show all points normally
                 fig.add_trace(
                     go.Scattergl(
-                        x=background["PHATE1"],
-                        y=background["PHATE2"],
+                        x=status_df["PHATE1"],
+                        y=status_df["PHATE2"],
                         mode="markers",
-                        name=f"{status} (background)",
+                        name=status.replace("_", " ").title(),
                         marker=dict(
                             color=INFECTION_COLORS.get(status, "#95a5a6"),
-                            size=4,
-                            opacity=0.3,
+                            size=5,
+                            opacity=0.6,
                         ),
-                        customdata=background[
+                        customdata=status_df[
                             ["track_key", "t", "fov_name", "track_id"]
                         ].values,
                         hovertemplate=(
@@ -226,22 +334,61 @@ def create_phate_figure(
                             "<b>Status:</b> " + status + "<br>"
                             "<extra></extra>"
                         ),
+                    )
+                )
+
+    elif color_by == "time":
+        # Color by timepoint (continuous colorscale)
+        filtered_df = df.copy()
+
+        # Separate selected tracks and background
+        if selected_tracks:
+            highlighted = filtered_df[filtered_df["track_key"].isin(selected_tracks)]
+            background = filtered_df[~filtered_df["track_key"].isin(selected_tracks)]
+
+            # Add background
+            if len(background) > 0:
+                fig.add_trace(
+                    go.Scattergl(
+                        x=background["PHATE1"],
+                        y=background["PHATE2"],
+                        mode="markers",
+                        name="background",
+                        marker=dict(
+                            color=background["t"],
+                            colorscale="Viridis",
+                            size=4,
+                            opacity=0.3,
+                            showscale=False,
+                        ),
+                        customdata=background[
+                            ["track_key", "t", "fov_name", "track_id"]
+                        ].values,
+                        hovertemplate=(
+                            "<b>Track:</b> %{customdata[0]}<br>"
+                            "<b>Time:</b> %{customdata[1]}<br>"
+                            "<b>FOV:</b> %{customdata[2]}<br>"
+                            "<extra></extra>"
+                        ),
                         showlegend=False,
                     )
                 )
 
-            # Add highlighted points (larger, more opaque)
+            # Add highlighted
             if len(highlighted) > 0:
                 fig.add_trace(
                     go.Scattergl(
                         x=highlighted["PHATE1"],
                         y=highlighted["PHATE2"],
                         mode="markers",
-                        name=f"{status} (selected)",
+                        name="time (selected tracks)",
                         marker=dict(
-                            color=INFECTION_COLORS.get(status, "#95a5a6"),
+                            color=highlighted["t"],
+                            colorscale="Viridis",
                             size=8,
                             opacity=0.9,
+                            showscale=True,
+                            colorbar=dict(title="Time"),
                             line=dict(width=1, color="white"),
                         ),
                         customdata=highlighted[
@@ -251,32 +398,102 @@ def create_phate_figure(
                             "<b>Track:</b> %{customdata[0]}<br>"
                             "<b>Time:</b> %{customdata[1]}<br>"
                             "<b>FOV:</b> %{customdata[2]}<br>"
-                            "<b>Status:</b> " + status + "<br>"
                             "<extra></extra>"
                         ),
                     )
                 )
         else:
-            # No tracks selected, show all points normally
+            # No tracks selected
             fig.add_trace(
                 go.Scattergl(
-                    x=status_df["PHATE1"],
-                    y=status_df["PHATE2"],
+                    x=filtered_df["PHATE1"],
+                    y=filtered_df["PHATE2"],
                     mode="markers",
-                    name=status.replace("_", " ").title(),
+                    name="time",
                     marker=dict(
-                        color=INFECTION_COLORS.get(status, "#95a5a6"),
+                        color=filtered_df["t"],
+                        colorscale="Viridis",
                         size=5,
                         opacity=0.6,
+                        showscale=True,
+                        colorbar=dict(title="Time"),
                     ),
-                    customdata=status_df[
+                    customdata=filtered_df[
                         ["track_key", "t", "fov_name", "track_id"]
                     ].values,
                     hovertemplate=(
                         "<b>Track:</b> %{customdata[0]}<br>"
                         "<b>Time:</b> %{customdata[1]}<br>"
                         "<b>FOV:</b> %{customdata[2]}<br>"
-                        "<b>Status:</b> " + status + "<br>"
+                        "<extra></extra>"
+                    ),
+                )
+            )
+
+    elif color_by == "track_id":
+        # Color by track_id
+        filtered_df = df.copy()
+
+        if selected_tracks:
+            # Only show selected tracks
+            filtered_df = filtered_df[filtered_df["track_key"].isin(selected_tracks)]
+
+            # Generate colors for selected tracks
+            colors = px.colors.qualitative.Plotly + px.colors.qualitative.Set2
+            track_colors = {
+                track: colors[i % len(colors)]
+                for i, track in enumerate(selected_tracks)
+            }
+
+            for track_key in selected_tracks:
+                track_df = filtered_df[filtered_df["track_key"] == track_key]
+
+                if len(track_df) == 0:
+                    continue
+
+                fig.add_trace(
+                    go.Scattergl(
+                        x=track_df["PHATE1"],
+                        y=track_df["PHATE2"],
+                        mode="markers",
+                        name=track_key,
+                        marker=dict(
+                            color=track_colors[track_key],
+                            size=8,
+                            opacity=0.7,
+                            line=dict(width=1, color="white"),
+                        ),
+                        customdata=track_df[
+                            ["track_key", "t", "fov_name", "track_id"]
+                        ].values,
+                        hovertemplate=(
+                            "<b>Track:</b> %{customdata[0]}<br>"
+                            "<b>Time:</b> %{customdata[1]}<br>"
+                            "<b>FOV:</b> %{customdata[2]}<br>"
+                            "<extra></extra>"
+                        ),
+                    )
+                )
+        else:
+            # Show all points in gray if no tracks selected
+            fig.add_trace(
+                go.Scattergl(
+                    x=filtered_df["PHATE1"],
+                    y=filtered_df["PHATE2"],
+                    mode="markers",
+                    name="all tracks",
+                    marker=dict(
+                        color="#95a5a6",
+                        size=5,
+                        opacity=0.4,
+                    ),
+                    customdata=filtered_df[
+                        ["track_key", "t", "fov_name", "track_id"]
+                    ].values,
+                    hovertemplate=(
+                        "<b>Track:</b> %{customdata[0]}<br>"
+                        "<b>Time:</b> %{customdata[1]}<br>"
+                        "<b>FOV:</b> %{customdata[2]}<br>"
                         "<extra></extra>"
                     ),
                 )
@@ -290,8 +507,12 @@ def create_phate_figure(
             if len(track_df) < 2:
                 continue
 
-            infection_status = track_df["infection_status"].iloc[0]
-            color = INFECTION_COLORS.get(infection_status, "#95a5a6")
+            # Get color based on mode
+            if color_by == "annotation" and "annotation" in track_df.columns:
+                annotation_value = track_df["annotation"].iloc[0]
+                color = INFECTION_COLORS.get(annotation_value, "#95a5a6")
+            else:
+                color = "#666666"  # Default gray for other modes
 
             # Add line trace connecting points in temporal order
             fig.add_trace(
@@ -611,20 +832,24 @@ def create_track_timeline(
         if len(track_data) == 0:
             continue
 
-        # Get infection status
-        infection_status = track_data["infection_status"].iloc[0]
+        # Get annotation status if available
+        if "annotation" in track_data.columns:
+            annotation_value = track_data["annotation"].iloc[0]
+            header_text = f"Track: {track_key} | Status: {annotation_value}"
+            header_color = INFECTION_COLORS.get(annotation_value, "#95a5a6")
+        else:
+            header_text = f"Track: {track_key}"
+            header_color = "#95a5a6"
 
         # Create header
         header = html.Div(
             [
                 html.H4(
-                    f"Track: {track_key} | Status: {infection_status}",
+                    header_text,
                     style={
                         "margin": "10px 0",
                         "padding": "10px",
-                        "backgroundColor": INFECTION_COLORS.get(
-                            infection_status, "#95a5a6"
-                        ),
+                        "backgroundColor": header_color,
                         "color": "white",
                         "borderRadius": "5px",
                     },
@@ -796,18 +1021,25 @@ def create_track_timeline(
 
 # Load data
 logger.info("Loading data...")
-adata, plot_df, track_options = load_and_prepare_data(
-    ADATA_PATH, ANNOTATION_CSV, ANNOTATION_COLUMN, CATEGORIES
+adata, plot_df, track_options, has_annotations = load_and_prepare_data(
+    ADATA_PATH,
+    ANNOTATION_CSV_PATH if ANNOTATION_CSV is not None else None,
+    ANNOTATION_COLUMN,
+    CATEGORIES,
+    FOV_FILTER,
 )
 
 # Initialize image cache
 logger.info("Initializing image cache...")
 image_cache = ImageCache(DATA_PATH, CHANNELS, Z_RANGE, YX_PATCH_SIZE)
 
-# Get unique infection statuses (filter out NaN if any remain)
-infection_statuses = sorted(
-    [s for s in plot_df["infection_status"].unique() if pd.notna(s)]
-)
+# Get unique annotation values if available
+if has_annotations and "annotation" in plot_df.columns:
+    annotation_values = sorted(
+        [s for s in plot_df["annotation"].unique() if pd.notna(s)]
+    )
+else:
+    annotation_values = []
 
 # Create Dash app
 app = Dash(__name__)
@@ -823,24 +1055,57 @@ app.layout = html.Div(
             [
                 html.Div(
                     [
+                        html.Label("Color points by:", style={"fontWeight": "bold"}),
+                        dcc.Dropdown(
+                            id="color-mode",
+                            options=[
+                                opt
+                                for opt in [
+                                    (
+                                        {"label": "Annotation", "value": "annotation"}
+                                        if has_annotations
+                                        else None
+                                    ),
+                                    {"label": "Time", "value": "time"},
+                                    {"label": "Track ID", "value": "track_id"},
+                                ]
+                                if opt is not None
+                            ],
+                            value=DEFAULT_COLOR_MODE if has_annotations else "time",
+                            clearable=False,
+                            style={"width": "200px", "marginLeft": "10px"},
+                        ),
+                    ],
+                    style={
+                        "marginBottom": "15px",
+                        "display": "flex",
+                        "alignItems": "center",
+                    },
+                ),
+                html.Div(
+                    [
                         html.Label(
-                            "Filter by Infection Status:", style={"fontWeight": "bold"}
+                            "Filter by annotation:", style={"fontWeight": "bold"}
                         ),
                         dcc.Checklist(
-                            id="infection-filter",
+                            id="annotation-filter",
                             options=[
                                 {
                                     "label": status.replace("_", " ").title(),
                                     "value": status,
                                 }
-                                for status in infection_statuses
+                                for status in annotation_values
                             ],
-                            value=infection_statuses,
+                            value=annotation_values,
                             inline=True,
                             style={"marginLeft": "10px"},
                         ),
                     ],
-                    style={"marginBottom": "15px"},
+                    style={
+                        "marginBottom": "15px",
+                        "display": "none" if not has_annotations else "block",
+                    },
+                    id="annotation-filter-container",
                 ),
                 html.Div(
                     [
@@ -942,24 +1207,45 @@ app.layout = html.Div(
 )
 
 
-# Callback 1: Update PHATE plot based on infection filter and selected tracks
+# Callback 1: Update PHATE plot based on color mode and filters
 @app.callback(
     Output("phate-scatter", "figure"),
     [
-        Input("infection-filter", "value"),
+        Input("color-mode", "value"),
+        Input("annotation-filter", "value"),
         Input("track-selector", "value"),
         Input("show-trajectories", "value"),
         Input("highlight-timepoint", "value"),
     ],
 )
 def update_phate_plot(
-    selected_statuses, selected_tracks, show_trajectories, highlight_timepoint
+    color_mode,
+    selected_annotations,
+    selected_tracks,
+    show_trajectories,
+    highlight_timepoint,
 ):
     """Update PHATE scatter plot based on filters and selections."""
     show_traj = "show" in show_trajectories if show_trajectories else False
     return create_phate_figure(
-        plot_df, selected_statuses, selected_tracks, show_traj, highlight_timepoint
+        plot_df,
+        color_mode,
+        selected_annotations,
+        selected_tracks,
+        show_traj,
+        highlight_timepoint,
     )
+
+
+# Callback 1.5: Show/hide annotation filter based on color mode
+@app.callback(
+    Output("annotation-filter-container", "style"), Input("color-mode", "value")
+)
+def toggle_annotation_filter(color_mode):
+    """Show annotation filter only when coloring by annotation."""
+    if color_mode == "annotation" and has_annotations:
+        return {"marginBottom": "15px", "display": "block"}
+    return {"marginBottom": "15px", "display": "none"}
 
 
 # Callback 2: Add track on click
