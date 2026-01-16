@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 
 # Data paths
 ADATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/1-predictions/organellebox-v3/organelle_160patch_104ckpt_ver3max.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/1-predictions/organellebox_mip_v3/timeaware/organelle_160patch_104ckpt_ver3max.zarr"
 )
 ANNOTATION_CSV_PATH = None
 DATA_PATH = Path(
