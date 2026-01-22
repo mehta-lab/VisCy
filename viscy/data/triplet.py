@@ -42,11 +42,7 @@ def _scatter_channels(
         for name, c in zip(channel_names, range(patch.shape[1]))
     }
     if norm_meta is not None:
-        # Check and handle if norm_meta is a list of all Nones (happens when normalizations=[])
-        if isinstance(norm_meta, (list, tuple)) and all(x is None for x in norm_meta):
-            pass
-        else:
-            channels["norm_meta"] = collate_meta_tensor(norm_meta)
+        channels["norm_meta"] = collate_meta_tensor(norm_meta)
     return channels
 
 

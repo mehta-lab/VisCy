@@ -13,7 +13,7 @@ from viscy.data.typing import TrackingIndex, TripletSample
 from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 from viscy.representation.vae_logging import BetaVaeLogger
-from viscy.utils.log_images import detach_sample, log_image_samples
+from viscy.utils.log_images import detach_sample, render_images
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -167,8 +167,9 @@ class ContrastiveModule(LightningModule):
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        log_image_samples(
-            self.logger, key, imgs, self.current_epoch, cmaps=["gray"] * 3
+        grid = render_images(imgs, cmaps=["gray"] * 3)
+        self.logger.experiment.add_image(
+            key, grid, self.current_epoch, dataformats="HWC"
         )
 
     def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
@@ -535,8 +536,9 @@ class BetaVaeModule(LightningModule):
             for orig, recon in zip(originals[:4], reconstructions[:4]):
                 combined.append([orig, recon])
 
-            log_image_samples(
-                self.logger, key, combined, self.current_epoch, cmaps=["gray", "gray"]
+            grid = render_images(combined, cmaps=["gray", "gray"])
+            self.logger.experiment.add_image(
+                key, grid, self.current_epoch, dataformats="HWC"
             )
 
     def on_train_epoch_end(self) -> None:
