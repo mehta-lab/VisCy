@@ -52,6 +52,10 @@ class DatasetConfig(NamedTuple):
         Dictionary to remap annotation categories.
     dataset_id : str, optional
         Unique identifier for this dataset (default: "").
+    channels : tuple[str, ...] or None, optional
+        Channel names for this dataset. If None, uses global channels from MultiDatasetConfig.
+    z_range : tuple[int, int] or None, optional
+        Z slice range for this dataset. If None, uses global z_range from MultiDatasetConfig.
     """
 
     adata_path: Path
@@ -61,6 +65,8 @@ class DatasetConfig(NamedTuple):
     annotation_column: str | None = None
     categories: dict | None = None
     dataset_id: str = ""
+    channels: tuple[str, ...] | None = None
+    z_range: tuple[int, int] | None = None
 
 
 class MultiDatasetConfig(NamedTuple):
@@ -71,14 +77,11 @@ class MultiDatasetConfig(NamedTuple):
     ----------
     datasets : list[DatasetConfig]
         List of dataset configurations to load and merge.
-    phate_n_components : int, optional
-        Number of PHATE components (default: 2).
-    phate_knn : int, optional
-        Number of nearest neighbors for PHATE (default: 5).
-    phate_decay : int, optional
-        Decay parameter for PHATE (default: 40).
-    phate_scale_embeddings : bool, optional
-        Whether to scale PHATE embeddings (default: False).
+    phate_kwargs : dict or None, optional
+        PHATE parameters for computing embeddings. If None, uses existing embeddings
+        from AnnData (single dataset only). For multi-dataset, always computes joint PHATE.
+        Example: {"n_components": 2, "knn": 5, "decay": 40, "scale_embeddings": False}
+        Set to empty dict {} to force recomputation with default parameters.
     channels : tuple[str, ...], optional
         Channel names to load from images (default: ("Phase3D",)).
     z_range : tuple[int, int], optional
@@ -94,10 +97,7 @@ class MultiDatasetConfig(NamedTuple):
     """
 
     datasets: list[DatasetConfig]
-    phate_n_components: int = 2
-    phate_knn: int = 5
-    phate_decay: int = 40
-    phate_scale_embeddings: bool = False
+    phate_kwargs: dict | None = None
     channels: tuple[str, ...] = ("Phase3D",)
     z_range: tuple[int, int] = (0, 1)
     yx_patch_size: tuple[int, int] = (160, 160)
@@ -110,41 +110,64 @@ class MultiDatasetConfig(NamedTuple):
 # CONFIGURATION - Edit these paths and settings before running
 # =============================================================================
 
-# Data paths
-ADATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/predictions/organellebox_mip_v3/classical/phase_160patch_108ckpt_classical.zarr"
+# Single dataset configuration using new NamedTuple classes
+CONFIG = MultiDatasetConfig(
+    datasets=[
+        # DatasetConfig(
+        #     adata_path=Path(
+        #         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/2-predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr"
+        #     ),
+        #     data_path=Path(
+        #         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/1-train-test/2024_11_07_A549_SEC61_DENV.zarr"
+        #     ),
+        #     fov_filter=["B/1", "B/3"],
+        #     annotation_csv=None,
+        #     annotation_column="infection_status",
+        #     categories={0: "uninfected", 1: "infected", 2: "unknown"},
+        #     dataset_id=None,  # Will auto-detect from zarr filename
+        #     channels=("Phase3D",),
+        #     z_range=(0, 1),
+        # ),
+        # DatasetConfig(
+        #     adata_path=Path(
+        #         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr"
+        #     ),
+        #     data_path=Path(
+        #         "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr"
+        #     ),
+        #     fov_filter=["C/2"],
+        #     annotation_csv=None,
+        #     annotation_column="infection_status",
+        #     categories={0: "uninfected", 1: "infected", 2: "unknown"},
+        #     dataset_id=None,  # Will auto-detect from zarr filename
+        #     channels=("Phase3D",),
+        #     z_range=(0, 1),
+        # ),
+        DatasetConfig(
+            adata_path=Path(
+                "/hpc/projects/intracellular_dashboard/organelle_box/2025_09_24_Organelle_box_NCLN/6.1-phenotyping/anndata/phase_3hpi_160patch_104ckpt_ver3max.zarr"
+            ),
+            data_path=Path(
+                "/hpc/projects/intracellular_dashboard/organelle_box/2025_09_24_Organelle_box_NCLN/5-concatenate/3hpi.zarr"
+            ),
+            fov_filter=["G3BP1/uninfected"],
+            annotation_csv=None,
+            annotation_column="infection_status",
+            categories={0: "uninfected", 1: "infected", 2: "unknown"},
+            dataset_id=None,  # Will auto-detect from zarr filename
+            channels=("Phase3D",),
+            z_range=(0, 1),
+        ),
+    ],
+    # PHATE parameters: None = use existing (single dataset only), or dict with params
+    phate_kwargs={"n_components": 2, "knn": 5, "decay": 40, "scale_embeddings": False},
+    # Image settings
+    yx_patch_size=(160, 160),
+    # Server settings
+    port=8050,
+    debug=False,
+    default_color_mode="time",
 )
-ANNOTATION_CSV_PATH = None
-DATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/train-test/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr"
-)
-
-# Annotation settings (optional - set to None if no annotations)
-ANNOTATION_CSV = None  # Set to None to skip annotation loading
-ANNOTATION_COLUMN = "infection_status"
-# Optional: Map annotation values to standardized categories
-# Example for numeric labels: CATEGORIES = {0: "uninfected", 1: "infected", 2: "unknown"}
-# Example for string labels: CATEGORIES = {"healthy": "uninfected", "sick": "infected"}
-# Set to None if no remapping needed
-CATEGORIES = {0: "uninfected", 1: "infected", 2: "unknown"}
-
-# Color mode: "annotation", "time", or "track_id"
-# This will be selectable in the UI, but you can set a default here
-DEFAULT_COLOR_MODE = "annotation"  # or "time" or "track_id"
-
-# FOV filtering (optional - set to None to include all FOVs)
-# Can be a list of exact FOV names: ["A/1/0", "A/2/0"]
-# Or a list of patterns to match: ["A_1", "A_2"] will match any FOV containing these strings
-FOV_FILTER = ["A/1", "A/2"]  # Set to None to include all FOVs
-
-# Image settings
-CHANNELS = ["Phase3D"]
-Z_RANGE = (0, 1)  # Z slice range
-YX_PATCH_SIZE = (160, 160)
-
-# Server settings
-PORT = 8050
-DEBUG = False
 
 # Colorblind-friendly palette
 INFECTION_COLORS = {
@@ -153,62 +176,6 @@ INFECTION_COLORS = {
     "unknown": "#95a5a6",  # Gray
 }
 
-# =============================================================================
-# MULTI-DATASET CONFIGURATION (OPTIONAL)
-# =============================================================================
-# Uncomment and configure this section to enable multi-dataset mode with joint PHATE.
-# When CONFIG is defined, it will override the single-dataset settings above.
-
-# Example: Load two datasets with joint PHATE embedding
-# DATASET_CONFIGS = [
-#     DatasetConfig(
-#         adata_path=Path(
-#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
-#             "dataset1/predictions/features.zarr"
-#         ),
-#         data_path=Path(
-#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
-#             "dataset1/images.zarr"
-#         ),
-#         fov_filter=["A/1", "A/2"],  # Only load FOVs matching these patterns
-#         annotation_csv=Path("/path/to/annotations1.csv"),
-#         annotation_column="infection_status",
-#         categories={0: "uninfected", 1: "infected", 2: "unknown"},
-#         dataset_id="control",  # Unique identifier for this dataset
-#     ),
-#     DatasetConfig(
-#         adata_path=Path(
-#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
-#             "dataset2/predictions/features.zarr"
-#         ),
-#         data_path=Path(
-#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
-#             "dataset2/images.zarr"
-#         ),
-#         fov_filter=["B/1", "B/2"],
-#         annotation_csv=Path("/path/to/annotations2.csv"),
-#         annotation_column="infection_status",
-#         categories={0: "uninfected", 1: "infected"},
-#         dataset_id="treatment",
-#     ),
-# ]
-#
-# CONFIG = MultiDatasetConfig(
-#     datasets=DATASET_CONFIGS,
-#     # PHATE parameters (computed jointly on all datasets)
-#     phate_n_components=2,
-#     phate_knn=5,
-#     phate_decay=40,
-#     phate_scale_embeddings=False,
-#     # Image settings
-#     channels=("Phase3D",),  # Use tuple, not list
-#     z_range=(0, 1),
-#     yx_patch_size=(160, 160),
-#     # Server settings
-#     port=8050,
-#     debug=False,
-#     default_color_mode="dataset",  # Start with dataset coloring
-# )
 
 # =============================================================================
 # DATA LOADING
@@ -429,13 +396,17 @@ def compute_joint_phate(
     )
 
     # Compute PHATE on the joint dataset
-    adata_joint = compute_phate(
+    # compute_phate returns (phate_model, phate_embedding)
+    _, phate_embedding = compute_phate(
         adata_joint,
         n_components=n_components,
         knn=knn,
         decay=decay,
         scale_embeddings=scale_embeddings,
     )
+
+    # Store the embedding in obsm
+    adata_joint.obsm["X_phate"] = phate_embedding
 
     logger.info(
         f"✓ PHATE embedding computed: shape {adata_joint.obsm['X_phate'].shape}"
@@ -473,7 +444,13 @@ def load_multiple_datasets(
 
     # Load each dataset
     for i, dataset_cfg in enumerate(config.datasets):
-        logger.info(f"\n--- Loading dataset {i}: {dataset_cfg.dataset_id} ---")
+        # Auto-detect dataset_id from data_path if not provided
+        dataset_id = dataset_cfg.dataset_id
+        if dataset_id is None or dataset_id == "":
+            dataset_id = dataset_cfg.data_path.name.replace(".zarr", "")
+            logger.info(f"Auto-detected dataset_id: {dataset_id}")
+
+        logger.info(f"\n--- Loading dataset {i}: {dataset_id} ---")
 
         adata, _, _, has_annot = load_and_prepare_data(
             adata_path=dataset_cfg.adata_path,
@@ -481,16 +458,14 @@ def load_multiple_datasets(
             annotation_column=dataset_cfg.annotation_column,
             categories=dataset_cfg.categories,
             fov_filter=dataset_cfg.fov_filter,
+            dataset_id=dataset_id,
         )
 
-        # Add dataset_id to obs
-        adata.obs["dataset_id"] = dataset_cfg.dataset_id
-        logger.info(
-            f"  Added dataset_id='{dataset_cfg.dataset_id}' to {adata.shape[0]} observations"
-        )
+        # dataset_id is already added by load_and_prepare_data
+        logger.info(f"  Dataset '{dataset_id}': {adata.shape[0]} observations")
 
         # Make observation indices unique by prefixing with dataset_id
-        adata.obs.index = [f"{dataset_cfg.dataset_id}_{idx}" for idx in adata.obs.index]
+        adata.obs.index = [f"{dataset_id}_{idx}" for idx in adata.obs.index]
 
         adatas.append(adata)
         has_any_annotations = has_any_annotations or has_annot
@@ -505,19 +480,35 @@ def load_multiple_datasets(
         f"✓ Concatenated {len(adatas)} datasets: {adata_joint.shape[0]} total observations"
     )
 
-    # Remove old PHATE embeddings if present (we'll compute new joint embedding)
-    if "X_phate" in adata_joint.obsm:
-        del adata_joint.obsm["X_phate"]
-        logger.info("  Removed old PHATE embeddings")
+    # Handle PHATE embeddings based on phate_kwargs
+    if len(adatas) == 1 and config.phate_kwargs is None:
+        # Single dataset with no phate_kwargs: use existing embeddings
+        if "X_phate" in adata_joint.obsm:
+            logger.info("✓ Using existing PHATE embeddings from AnnData")
+        else:
+            raise ValueError(
+                "No PHATE embeddings found in AnnData. Set phate_kwargs to compute embeddings."
+            )
+    else:
+        # Multi-dataset OR phate_kwargs specified: compute PHATE
+        if len(adatas) > 1:
+            logger.info("Computing joint PHATE embedding across all datasets...")
+        else:
+            logger.info("phate_kwargs specified, recomputing PHATE embeddings...")
 
-    # Compute joint PHATE embedding
-    adata_joint = compute_joint_phate(
-        adata_joint,
-        n_components=config.phate_n_components,
-        knn=config.phate_knn,
-        decay=config.phate_decay,
-        scale_embeddings=config.phate_scale_embeddings,
-    )
+        # Remove old embeddings if present
+        if "X_phate" in adata_joint.obsm:
+            del adata_joint.obsm["X_phate"]
+
+        # Get PHATE parameters (use defaults if phate_kwargs is empty dict)
+        phate_params = config.phate_kwargs or {}
+        adata_joint = compute_joint_phate(
+            adata_joint,
+            n_components=phate_params.get("n_components", 2),
+            knn=phate_params.get("knn", 5),
+            decay=phate_params.get("decay", 40),
+            scale_embeddings=phate_params.get("scale_embeddings", False),
+        )
 
     # Extract PHATE coordinates
     phate_coords = adata_joint.obsm["X_phate"]
@@ -563,55 +554,6 @@ def load_multiple_datasets(
     logger.info(f"✓ Found {len(track_options)} unique tracks across all datasets")
 
     return adata_joint, plot_df, track_options, has_any_annotations
-
-
-def create_single_dataset_config(
-    adata_path: Path,
-    data_path: Path,
-    annotation_csv: Path | None = None,
-    annotation_column: str | None = None,
-    categories: dict | None = None,
-    fov_filter: list[str] | None = None,
-    **kwargs,
-) -> MultiDatasetConfig:
-    """
-    Create MultiDatasetConfig from single dataset parameters for backward compatibility.
-
-    Parameters
-    ----------
-    adata_path : Path
-        Path to AnnData zarr store.
-    data_path : Path
-        Path to image zarr store.
-    annotation_csv : Path, optional
-        Path to CSV file with annotations.
-    annotation_column : str, optional
-        Column name in annotation CSV.
-    categories : dict, optional
-        Dictionary to remap annotation categories.
-    fov_filter : list[str], optional
-        FOV names or patterns to filter.
-    **kwargs
-        Additional parameters for MultiDatasetConfig (e.g., phate_knn, channels, port).
-
-    Returns
-    -------
-    MultiDatasetConfig
-        Configuration object with single dataset.
-    """
-    # Extract dataset name from adata_path
-    dataset_name = adata_path.name.replace(".zarr", "")
-
-    dataset = DatasetConfig(
-        adata_path=adata_path,
-        data_path=data_path,
-        fov_filter=fov_filter,
-        annotation_csv=annotation_csv,
-        annotation_column=annotation_column,
-        categories=categories,
-        dataset_id=dataset_name,
-    )
-    return MultiDatasetConfig(datasets=[dataset], **kwargs)
 
 
 # =============================================================================
@@ -1363,8 +1305,8 @@ class MultiDatasetImageCache:
     def __init__(
         self,
         dataset_configs: list[DatasetConfig],
-        channels: list[str],
-        z_range: tuple[int, int],
+        global_channels: list[str],
+        global_z_range: tuple[int, int],
         yx_patch_size: tuple[int, int],
     ):
         """
@@ -1374,22 +1316,54 @@ class MultiDatasetImageCache:
         ----------
         dataset_configs : list[DatasetConfig]
             List of dataset configurations.
-        channels : list[str]
-            Channel names to load.
-        z_range : tuple[int, int]
-            Z slice range (start, end).
+        global_channels : list[str]
+            Default channel names (used if dataset doesn't specify its own).
+        global_z_range : tuple[int, int]
+            Default Z slice range (used if dataset doesn't specify its own).
         yx_patch_size : tuple[int, int]
             Patch size in (Y, X) dimensions.
         """
-        self.caches = {
-            config.dataset_id: ImageCache(
+        self.caches = {}
+        self.dataset_channels = {}  # Track channels per dataset
+
+        for config in dataset_configs:
+            # Auto-detect dataset_id from data_path if not provided
+            dataset_id = config.dataset_id
+            if dataset_id is None or dataset_id == "":
+                dataset_id = config.data_path.name.replace(".zarr", "")
+
+            # Use dataset-specific channels/z_range if provided, else use global
+            channels = (
+                list(config.channels)
+                if config.channels is not None
+                else global_channels
+            )
+            z_range = config.z_range if config.z_range is not None else global_z_range
+
+            self.caches[dataset_id] = ImageCache(
                 config.data_path, channels, z_range, yx_patch_size, config.fov_filter
             )
-            for config in dataset_configs
-        }
+            self.dataset_channels[dataset_id] = channels
+
         logger.info(
             f"Initialized MultiDatasetImageCache for {len(self.caches)} datasets"
         )
+
+    def get_channels(self, dataset_id: str) -> list[str]:
+        """
+        Get available channels for a specific dataset.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Dataset identifier.
+
+        Returns
+        -------
+        list[str]
+            List of channel names for this dataset.
+        """
+        return self.dataset_channels.get(dataset_id, [])
 
     def load_image(
         self,
@@ -1427,7 +1401,10 @@ class MultiDatasetImageCache:
             Base64-encoded image string, or None if loading fails.
         """
         if dataset_id not in self.caches:
-            logger.error(f"Dataset ID '{dataset_id}' not found in caches")
+            logger.error(
+                f"Dataset ID '{dataset_id}' not found in caches. "
+                f"Available datasets: {list(self.caches.keys())}"
+            )
             return None
 
         return self.caches[dataset_id].load_image(fov_name, track_id, t, channel, y, x)
@@ -1443,7 +1420,7 @@ def create_track_timeline(
     adata: ad.AnnData,
     plot_df: pd.DataFrame,
     image_cache: ImageCache | MultiDatasetImageCache,
-    channels: list[str],
+    default_channels: list[str],
 ) -> list:
     """
     Create timeline displays for selected tracks.
@@ -1458,8 +1435,8 @@ def create_track_timeline(
         DataFrame with track metadata.
     image_cache : ImageCache or MultiDatasetImageCache
         Image cache instance.
-    channels : list[str]
-        Channel names to display.
+    default_channels : list[str]
+        Default channel names (used for single dataset or if dataset doesn't specify).
 
     Returns
     -------
@@ -1479,6 +1456,12 @@ def create_track_timeline(
         prefix, track_id_str = track_key.rsplit("/", 1)
         track_id = int(track_id_str)
         dataset_id, fov_name = prefix.split("/", 1)
+
+        # Get channels for this specific dataset
+        if is_multi_dataset:
+            channels = image_cache.get_channels(dataset_id)
+        else:
+            channels = default_channels
 
         # Get all observations for this track
         track_data = plot_df[plot_df["track_key"] == track_key].sort_values("t")
@@ -1529,11 +1512,18 @@ def create_track_timeline(
 
         # Create image rows for each channel
         channel_rows = []
+        first_image_logged = False
         for channel in channels:
             images = []
             for idx, row in track_data.iterrows():
                 # Load image using appropriate cache method
                 if is_multi_dataset:
+                    if not first_image_logged:
+                        logger.info(
+                            f"Loading image: dataset_id={dataset_id}, fov={fov_name}, "
+                            f"track={track_id}, t={int(row['t'])}, channel={channel}"
+                        )
+                        first_image_logged = True
                     img_base64 = image_cache.load_image(
                         dataset_id=dataset_id,
                         fov_name=fov_name,
@@ -1685,35 +1675,22 @@ def create_track_timeline(
 # DASH APPLICATION
 # =============================================================================
 
-# Load data - Auto-detect single vs multi-dataset mode
+# Load data using CONFIG
 logger.info("Loading data...")
 
-# Check if multi-dataset CONFIG is defined
-if "CONFIG" in globals() and isinstance(globals().get("CONFIG"), MultiDatasetConfig):
-    # Multi-dataset mode
-    logger.info("=== MULTI-DATASET MODE ===")
-    CONFIG = globals()["CONFIG"]
-    adata, plot_df, track_options, has_annotations = load_multiple_datasets(CONFIG)
-
-    # Initialize multi-dataset image cache
-    logger.info("Initializing multi-dataset image cache...")
-    image_cache = MultiDatasetImageCache(
-        CONFIG.datasets, CONFIG.channels, CONFIG.z_range, CONFIG.yx_patch_size
-    )
-else:
-    # Single dataset mode (backward compatible)
+if len(CONFIG.datasets) == 1:
     logger.info("=== SINGLE-DATASET MODE ===")
-    adata, plot_df, track_options, has_annotations = load_and_prepare_data(
-        ADATA_PATH,
-        ANNOTATION_CSV_PATH if ANNOTATION_CSV is not None else None,
-        ANNOTATION_COLUMN,
-        CATEGORIES,
-        FOV_FILTER,
-    )
+else:
+    logger.info(f"=== MULTI-DATASET MODE ({len(CONFIG.datasets)} datasets) ===")
 
-    # Initialize single-dataset image cache
-    logger.info("Initializing image cache...")
-    image_cache = ImageCache(DATA_PATH, CHANNELS, Z_RANGE, YX_PATCH_SIZE, FOV_FILTER)
+# Load datasets (works for both single and multi-dataset)
+adata, plot_df, track_options, has_annotations = load_multiple_datasets(CONFIG)
+
+# Initialize image cache (multi-dataset cache works for single dataset too)
+logger.info("Initializing image cache...")
+image_cache = MultiDatasetImageCache(
+    CONFIG.datasets, list(CONFIG.channels), CONFIG.z_range, CONFIG.yx_patch_size
+)
 
 # Get unique annotation values if available
 if has_annotations and "annotation" in plot_df.columns:
@@ -1754,7 +1731,9 @@ app.layout = html.Div(
                                 ]
                                 if opt is not None
                             ],
-                            value=DEFAULT_COLOR_MODE if has_annotations else "time",
+                            value=(
+                                CONFIG.default_color_mode if has_annotations else "time"
+                            ),
                             clearable=False,
                             style={"width": "200px", "marginLeft": "10px"},
                         ),
@@ -1971,7 +1950,9 @@ def update_timelines(selected_tracks):
             },
         )
 
-    return create_track_timeline(selected_tracks, adata, plot_df, image_cache, CHANNELS)
+    return create_track_timeline(
+        selected_tracks, adata, plot_df, image_cache, list(CONFIG.channels)
+    )
 
 
 # =============================================================================
@@ -1979,6 +1960,8 @@ def update_timelines(selected_tracks):
 # =============================================================================
 
 if __name__ == "__main__":
-    logger.info(f"Starting PHATE Track Viewer on http://localhost:{PORT}")
-    logger.info(f"Loaded {len(track_options)} tracks from {ADATA_PATH}")
-    app.run(debug=DEBUG, port=PORT, host="0.0.0.0")
+    logger.info(f"Starting PHATE Track Viewer on http://localhost:{CONFIG.port}")
+    logger.info(
+        f"Loaded {len(track_options)} tracks across {len(CONFIG.datasets)} dataset(s)"
+    )
+    app.run(debug=CONFIG.debug, port=CONFIG.port, host="0.0.0.0")
