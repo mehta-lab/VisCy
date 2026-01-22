@@ -1,0 +1,39 @@
+{
+  "datasets": [
+    {
+      "adata_path": "/path/to/adata.zarr",
+      "data_path": "/path/to/data.zarr",
+      "channels": [
+        "Phase3D"
+      ],
+      "z_range": [
+        0,
+        1
+      ],
+      "fov_filter": [
+        "A/1",
+        "A/2"
+      ],
+      "annotation_csv": "/path/to/annotations.csv",
+      "annotation_column": "infection_status",
+      "categories": {
+        "0": "uninfected",
+        "1": "infected"
+      },
+      "dataset_id": "experiment_1"
+    }
+  ],
+  "phate_kwargs": {
+    "n_components": 2,
+    "knn": 5,
+    "decay": 40,
+    "scale_embeddings": false
+  },
+  "yx_patch_size": [
+    160,
+    160
+  ],
+  "port": 8050,
+  "debug": false,
+  "default_color_mode": "annotation"
+}
