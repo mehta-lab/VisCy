@@ -9,7 +9,7 @@ import base64
 import logging
 from io import BytesIO
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 
 import anndata as ad
 import numpy as np
@@ -28,16 +28,95 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # =============================================================================
+# CONFIGURATION CLASSES
+# =============================================================================
+
+
+class DatasetConfig(NamedTuple):
+    """
+    Configuration for a single dataset source.
+
+    Parameters
+    ----------
+    adata_path : Path
+        Path to AnnData zarr store with features.
+    data_path : Path
+        Path to image zarr store.
+    fov_filter : list[str] or None, optional
+        FOV names or patterns to filter. If None, include all FOVs.
+    annotation_csv : Path or None, optional
+        Path to CSV file with annotations.
+    annotation_column : str or None, optional
+        Column name in annotation CSV.
+    categories : dict or None, optional
+        Dictionary to remap annotation categories.
+    dataset_id : str, optional
+        Unique identifier for this dataset (default: "").
+    """
+
+    adata_path: Path
+    data_path: Path
+    fov_filter: list[str] | None = None
+    annotation_csv: Path | None = None
+    annotation_column: str | None = None
+    categories: dict | None = None
+    dataset_id: str = ""
+
+
+class MultiDatasetConfig(NamedTuple):
+    """
+    Configuration for multi-dataset PHATE viewer.
+
+    Parameters
+    ----------
+    datasets : list[DatasetConfig]
+        List of dataset configurations to load and merge.
+    phate_n_components : int, optional
+        Number of PHATE components (default: 2).
+    phate_knn : int, optional
+        Number of nearest neighbors for PHATE (default: 5).
+    phate_decay : int, optional
+        Decay parameter for PHATE (default: 40).
+    phate_scale_embeddings : bool, optional
+        Whether to scale PHATE embeddings (default: False).
+    channels : tuple[str, ...], optional
+        Channel names to load from images (default: ("Phase3D",)).
+    z_range : tuple[int, int], optional
+        Z slice range (start, end) (default: (0, 1)).
+    yx_patch_size : tuple[int, int], optional
+        Patch size in (Y, X) dimensions (default: (160, 160)).
+    port : int, optional
+        Server port (default: 8050).
+    debug : bool, optional
+        Enable debug mode (default: False).
+    default_color_mode : str, optional
+        Default coloring mode: "annotation", "time", "track_id", or "dataset" (default: "annotation").
+    """
+
+    datasets: list[DatasetConfig]
+    phate_n_components: int = 2
+    phate_knn: int = 5
+    phate_decay: int = 40
+    phate_scale_embeddings: bool = False
+    channels: tuple[str, ...] = ("Phase3D",)
+    z_range: tuple[int, int] = (0, 1)
+    yx_patch_size: tuple[int, int] = (160, 160)
+    port: int = 8050
+    debug: bool = False
+    default_color_mode: str = "annotation"
+
+
+# =============================================================================
 # CONFIGURATION - Edit these paths and settings before running
 # =============================================================================
 
 # Data paths
 ADATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/1-predictions/organellebox_mip_v3/timeaware/organelle_160patch_104ckpt_ver3max.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/predictions/organellebox_mip_v3/classical/phase_160patch_108ckpt_classical.zarr"
 )
 ANNOTATION_CSV_PATH = None
 DATA_PATH = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/0-train-test/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr"
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_08_26_A549_SEC61_TOMM20_ZIKV/4-phenotyping/train-test/2025_08_26_A549_SEC61_TOMM20_ZIKV.zarr"
 )
 
 # Annotation settings (optional - set to None if no annotations)
@@ -59,7 +138,7 @@ DEFAULT_COLOR_MODE = "annotation"  # or "time" or "track_id"
 FOV_FILTER = ["A/1", "A/2"]  # Set to None to include all FOVs
 
 # Image settings
-CHANNELS = ["GFP EX488 EM525-45"]
+CHANNELS = ["Phase3D"]
 Z_RANGE = (0, 1)  # Z slice range
 YX_PATCH_SIZE = (160, 160)
 
@@ -75,6 +154,63 @@ INFECTION_COLORS = {
 }
 
 # =============================================================================
+# MULTI-DATASET CONFIGURATION (OPTIONAL)
+# =============================================================================
+# Uncomment and configure this section to enable multi-dataset mode with joint PHATE.
+# When CONFIG is defined, it will override the single-dataset settings above.
+
+# Example: Load two datasets with joint PHATE embedding
+# DATASET_CONFIGS = [
+#     DatasetConfig(
+#         adata_path=Path(
+#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+#             "dataset1/predictions/features.zarr"
+#         ),
+#         data_path=Path(
+#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+#             "dataset1/images.zarr"
+#         ),
+#         fov_filter=["A/1", "A/2"],  # Only load FOVs matching these patterns
+#         annotation_csv=Path("/path/to/annotations1.csv"),
+#         annotation_column="infection_status",
+#         categories={0: "uninfected", 1: "infected", 2: "unknown"},
+#         dataset_id="control",  # Unique identifier for this dataset
+#     ),
+#     DatasetConfig(
+#         adata_path=Path(
+#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+#             "dataset2/predictions/features.zarr"
+#         ),
+#         data_path=Path(
+#             "/hpc/projects/intracellular_dashboard/organelle_dynamics/"
+#             "dataset2/images.zarr"
+#         ),
+#         fov_filter=["B/1", "B/2"],
+#         annotation_csv=Path("/path/to/annotations2.csv"),
+#         annotation_column="infection_status",
+#         categories={0: "uninfected", 1: "infected"},
+#         dataset_id="treatment",
+#     ),
+# ]
+#
+# CONFIG = MultiDatasetConfig(
+#     datasets=DATASET_CONFIGS,
+#     # PHATE parameters (computed jointly on all datasets)
+#     phate_n_components=2,
+#     phate_knn=5,
+#     phate_decay=40,
+#     phate_scale_embeddings=False,
+#     # Image settings
+#     channels=("Phase3D",),  # Use tuple, not list
+#     z_range=(0, 1),
+#     yx_patch_size=(160, 160),
+#     # Server settings
+#     port=8050,
+#     debug=False,
+#     default_color_mode="dataset",  # Start with dataset coloring
+# )
+
+# =============================================================================
 # DATA LOADING
 # =============================================================================
 
@@ -85,6 +221,7 @@ def load_and_prepare_data(
     annotation_column: str | None = None,
     categories: dict | None = None,
     fov_filter: list[str] | None = None,
+    dataset_id: str | None = None,
 ) -> tuple[ad.AnnData, pd.DataFrame, list, bool]:
     """
     Load AnnData with PHATE embeddings and optional annotations.
@@ -102,18 +239,26 @@ def load_and_prepare_data(
     fov_filter : list[str], optional
         List of FOV names or patterns to filter. If provided, only FOVs containing
         any of these strings will be included.
+    dataset_id : str, optional
+        Unique identifier for this dataset. If None, uses the zarr filename from adata_path.
 
     Returns
     -------
     adata : ad.AnnData
-        AnnData object with optional annotations.
+        AnnData object with optional annotations and dataset_id in obs.
     plot_df : pd.DataFrame
-        DataFrame with PHATE coordinates and metadata for plotting.
+        DataFrame with PHATE coordinates and metadata for plotting, including dataset_id.
     track_options : list
-        List of unique track identifiers for dropdown.
+        List of unique track identifiers for dropdown (format: "dataset_id/fov_name/track_id").
     has_annotations : bool
         Whether annotations were loaded.
     """
+    # Extract dataset_id from adata_path if not provided
+    if dataset_id is None:
+        # Get the zarr filename without extension
+        dataset_id = adata_path.name.replace(".zarr", "")
+        logger.info(f"Using dataset_id: {dataset_id}")
+
     logger.info(f"Loading AnnData from {adata_path}")
     adata = read_zarr(adata_path)
     logger.info(f"Loaded {adata.shape[0]} observations with {adata.shape[1]} features")
@@ -174,6 +319,9 @@ def load_and_prepare_data(
     phate_coords = adata.obsm["X_phate"]
     logger.info(f"PHATE embedding shape: {phate_coords.shape}")
 
+    # Add dataset_id to adata.obs
+    adata.obs["dataset_id"] = dataset_id
+
     # Create plotting DataFrame
     plot_df_dict = {
         "PHATE1": phate_coords[:, 0],
@@ -184,6 +332,7 @@ def load_and_prepare_data(
         "y": adata.obs["y"].values,
         "x": adata.obs["x"].values,
         "id": adata.obs["id"].values,
+        "dataset_id": adata.obs["dataset_id"].values,
     }
 
     # Add annotation column if available
@@ -192,14 +341,277 @@ def load_and_prepare_data(
 
     plot_df = pd.DataFrame(plot_df_dict, index=adata.obs.index)
 
-    # Create track options for dropdown (format: "fov_name/track_id")
+    # Create track options for dropdown (format: "dataset_id/fov_name/track_id")
     plot_df["track_key"] = (
-        plot_df["fov_name"].astype(str) + "/" + plot_df["track_id"].astype(str)
+        plot_df["dataset_id"].astype(str)
+        + "/"
+        + plot_df["fov_name"].astype(str)
+        + "/"
+        + plot_df["track_id"].astype(str)
     )
     track_options = sorted(plot_df["track_key"].unique())
     logger.info(f"Found {len(track_options)} unique tracks")
 
+    # Log FOV name format for debugging
+    unique_fovs = plot_df["fov_name"].unique()
+    logger.info(f"FOV name format (first 5): {list(unique_fovs[:5])}")
+
     return adata, plot_df, track_options, has_annotations
+
+
+def validate_feature_compatibility(adatas: list[ad.AnnData]) -> None:
+    """
+    Validate all datasets have compatible feature dimensions.
+
+    Parameters
+    ----------
+    adatas : list[ad.AnnData]
+        List of AnnData objects to validate.
+
+    Raises
+    ------
+    ValueError
+        If datasets have incompatible feature dimensions.
+    """
+    if len(adatas) < 2:
+        return
+
+    ref_n_features = adatas[0].X.shape[1]
+    ref_idx = 0
+
+    for idx, adata in enumerate(adatas[1:], start=1):
+        n_features = adata.X.shape[1]
+        if n_features != ref_n_features:
+            raise ValueError(
+                f"Feature dimension mismatch: dataset {ref_idx} has {ref_n_features} features, "
+                f"but dataset {idx} has {n_features} features. "
+                f"All datasets must have the same number of features for joint PHATE embedding."
+            )
+
+    logger.info(
+        f"✓ Feature validation passed: all {len(adatas)} datasets have {ref_n_features} features"
+    )
+
+
+def compute_joint_phate(
+    adata_joint: ad.AnnData,
+    n_components: int = 2,
+    knn: int = 5,
+    decay: int = 40,
+    scale_embeddings: bool = False,
+) -> ad.AnnData:
+    """
+    Compute PHATE embedding on joint dataset.
+
+    Parameters
+    ----------
+    adata_joint : ad.AnnData
+        Combined AnnData object with feature matrix in .X
+    n_components : int, optional
+        Number of PHATE components (default: 2).
+    knn : int, optional
+        Number of nearest neighbors (default: 5).
+    decay : int, optional
+        Decay parameter for PHATE (default: 40).
+    scale_embeddings : bool, optional
+        Whether to scale embeddings (default: False).
+
+    Returns
+    -------
+    ad.AnnData
+        AnnData with PHATE embedding in .obsm['X_phate'].
+    """
+    from viscy.representation.evaluation.dimensionality_reduction import compute_phate
+
+    logger.info("Computing joint PHATE embedding...")
+    logger.info(
+        f"  Parameters: n_components={n_components}, knn={knn}, decay={decay}, scale={scale_embeddings}"
+    )
+
+    # Compute PHATE on the joint dataset
+    adata_joint = compute_phate(
+        adata_joint,
+        n_components=n_components,
+        knn=knn,
+        decay=decay,
+        scale_embeddings=scale_embeddings,
+    )
+
+    logger.info(
+        f"✓ PHATE embedding computed: shape {adata_joint.obsm['X_phate'].shape}"
+    )
+
+    return adata_joint
+
+
+def load_multiple_datasets(
+    config: MultiDatasetConfig,
+) -> tuple[ad.AnnData, pd.DataFrame, list, bool]:
+    """
+    Load and concatenate multiple AnnData objects with joint PHATE embedding.
+
+    Parameters
+    ----------
+    config : MultiDatasetConfig
+        Configuration object specifying datasets and PHATE parameters.
+
+    Returns
+    -------
+    adata_joint : ad.AnnData
+        Combined AnnData with X_phate in obsm.
+    plot_df : pd.DataFrame
+        DataFrame with PHATE coordinates and metadata including dataset_id.
+    track_options : list
+        Unique track identifiers (format: "dataset_id/fov_name/track_id").
+    has_annotations : bool
+        Whether any dataset has annotations.
+    """
+    logger.info(f"Loading {len(config.datasets)} datasets for joint PHATE embedding...")
+
+    adatas = []
+    has_any_annotations = False
+
+    # Load each dataset
+    for i, dataset_cfg in enumerate(config.datasets):
+        logger.info(f"\n--- Loading dataset {i}: {dataset_cfg.dataset_id} ---")
+
+        adata, _, _, has_annot = load_and_prepare_data(
+            adata_path=dataset_cfg.adata_path,
+            annotation_csv=dataset_cfg.annotation_csv,
+            annotation_column=dataset_cfg.annotation_column,
+            categories=dataset_cfg.categories,
+            fov_filter=dataset_cfg.fov_filter,
+        )
+
+        # Add dataset_id to obs
+        adata.obs["dataset_id"] = dataset_cfg.dataset_id
+        logger.info(
+            f"  Added dataset_id='{dataset_cfg.dataset_id}' to {adata.shape[0]} observations"
+        )
+
+        # Make observation indices unique by prefixing with dataset_id
+        adata.obs.index = [f"{dataset_cfg.dataset_id}_{idx}" for idx in adata.obs.index]
+
+        adatas.append(adata)
+        has_any_annotations = has_any_annotations or has_annot
+
+    # Validate feature compatibility
+    validate_feature_compatibility(adatas)
+
+    # Concatenate datasets
+    logger.info("\nConcatenating datasets...")
+    adata_joint = ad.concat(adatas, axis=0, join="outer", merge="unique")
+    logger.info(
+        f"✓ Concatenated {len(adatas)} datasets: {adata_joint.shape[0]} total observations"
+    )
+
+    # Remove old PHATE embeddings if present (we'll compute new joint embedding)
+    if "X_phate" in adata_joint.obsm:
+        del adata_joint.obsm["X_phate"]
+        logger.info("  Removed old PHATE embeddings")
+
+    # Compute joint PHATE embedding
+    adata_joint = compute_joint_phate(
+        adata_joint,
+        n_components=config.phate_n_components,
+        knn=config.phate_knn,
+        decay=config.phate_decay,
+        scale_embeddings=config.phate_scale_embeddings,
+    )
+
+    # Extract PHATE coordinates
+    phate_coords = adata_joint.obsm["X_phate"]
+
+    # Create plotting DataFrame with dataset_id
+    plot_df_dict = {
+        "PHATE1": phate_coords[:, 0],
+        "PHATE2": phate_coords[:, 1],
+        "track_id": adata_joint.obs["track_id"].values,
+        "fov_name": adata_joint.obs["fov_name"].values,
+        "t": adata_joint.obs["t"].values,
+        "y": adata_joint.obs["y"].values,
+        "x": adata_joint.obs["x"].values,
+        "id": adata_joint.obs["id"].values,
+        "dataset_id": adata_joint.obs["dataset_id"].values,
+    }
+
+    # Add annotation column if available
+    annotation_column = None
+    for dataset_cfg in config.datasets:
+        if dataset_cfg.annotation_column:
+            annotation_column = dataset_cfg.annotation_column
+            break
+
+    if (
+        has_any_annotations
+        and annotation_column
+        and annotation_column in adata_joint.obs
+    ):
+        plot_df_dict["annotation"] = adata_joint.obs[annotation_column].values
+
+    plot_df = pd.DataFrame(plot_df_dict, index=adata_joint.obs.index)
+
+    # Create track options with dataset_id prefix (format: "dataset_id/fov_name/track_id")
+    plot_df["track_key"] = (
+        plot_df["dataset_id"].astype(str)
+        + "/"
+        + plot_df["fov_name"].astype(str)
+        + "/"
+        + plot_df["track_id"].astype(str)
+    )
+    track_options = sorted(plot_df["track_key"].unique())
+    logger.info(f"✓ Found {len(track_options)} unique tracks across all datasets")
+
+    return adata_joint, plot_df, track_options, has_any_annotations
+
+
+def create_single_dataset_config(
+    adata_path: Path,
+    data_path: Path,
+    annotation_csv: Path | None = None,
+    annotation_column: str | None = None,
+    categories: dict | None = None,
+    fov_filter: list[str] | None = None,
+    **kwargs,
+) -> MultiDatasetConfig:
+    """
+    Create MultiDatasetConfig from single dataset parameters for backward compatibility.
+
+    Parameters
+    ----------
+    adata_path : Path
+        Path to AnnData zarr store.
+    data_path : Path
+        Path to image zarr store.
+    annotation_csv : Path, optional
+        Path to CSV file with annotations.
+    annotation_column : str, optional
+        Column name in annotation CSV.
+    categories : dict, optional
+        Dictionary to remap annotation categories.
+    fov_filter : list[str], optional
+        FOV names or patterns to filter.
+    **kwargs
+        Additional parameters for MultiDatasetConfig (e.g., phate_knn, channels, port).
+
+    Returns
+    -------
+    MultiDatasetConfig
+        Configuration object with single dataset.
+    """
+    # Extract dataset name from adata_path
+    dataset_name = adata_path.name.replace(".zarr", "")
+
+    dataset = DatasetConfig(
+        adata_path=adata_path,
+        data_path=data_path,
+        fov_filter=fov_filter,
+        annotation_csv=annotation_csv,
+        annotation_column=annotation_column,
+        categories=categories,
+        dataset_id=dataset_name,
+    )
+    return MultiDatasetConfig(datasets=[dataset], **kwargs)
 
 
 # =============================================================================
@@ -223,7 +635,7 @@ def create_phate_figure(
     df : pd.DataFrame
         DataFrame with PHATE coordinates and metadata.
     color_by : str
-        Coloring mode: "annotation", "time", or "track_id".
+        Coloring mode: "annotation", "time", "track_id", or "dataset".
     selected_values : list, optional
         Values to display (for categorical coloring).
     selected_tracks : list[str], optional
@@ -239,6 +651,9 @@ def create_phate_figure(
         Plotly figure object.
     """
     fig = go.Figure()
+
+    # Colorblind-friendly palette for datasets (blue/orange per user guidelines)
+    DATASET_COLORS = ["#3498db", "#e67e22", "#2ecc71", "#9b59b6", "#f1c40f", "#e74c3c"]
 
     if color_by == "annotation" and "annotation" in df.columns:
         # Color by annotation (categorical)
@@ -272,9 +687,10 @@ def create_phate_figure(
                                 opacity=0.3,
                             ),
                             customdata=background[
-                                ["track_key", "t", "fov_name", "track_id"]
+                                ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                             ].values,
                             hovertemplate=(
+                                "<b>Dataset:</b> %{customdata[4]}<br>"
                                 "<b>Track:</b> %{customdata[0]}<br>"
                                 "<b>Time:</b> %{customdata[1]}<br>"
                                 "<b>FOV:</b> %{customdata[2]}<br>"
@@ -300,9 +716,10 @@ def create_phate_figure(
                                 line=dict(width=1, color="white"),
                             ),
                             customdata=highlighted[
-                                ["track_key", "t", "fov_name", "track_id"]
+                                ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                             ].values,
                             hovertemplate=(
+                                "<b>Dataset:</b> %{customdata[4]}<br>"
                                 "<b>Track:</b> %{customdata[0]}<br>"
                                 "<b>Time:</b> %{customdata[1]}<br>"
                                 "<b>FOV:</b> %{customdata[2]}<br>"
@@ -325,9 +742,10 @@ def create_phate_figure(
                             opacity=0.6,
                         ),
                         customdata=status_df[
-                            ["track_key", "t", "fov_name", "track_id"]
+                            ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                         ].values,
                         hovertemplate=(
+                            "<b>Dataset:</b> %{customdata[4]}<br>"
                             "<b>Track:</b> %{customdata[0]}<br>"
                             "<b>Time:</b> %{customdata[1]}<br>"
                             "<b>FOV:</b> %{customdata[2]}<br>"
@@ -362,9 +780,10 @@ def create_phate_figure(
                             showscale=False,
                         ),
                         customdata=background[
-                            ["track_key", "t", "fov_name", "track_id"]
+                            ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                         ].values,
                         hovertemplate=(
+                            "<b>Dataset:</b> %{customdata[4]}<br>"
                             "<b>Track:</b> %{customdata[0]}<br>"
                             "<b>Time:</b> %{customdata[1]}<br>"
                             "<b>FOV:</b> %{customdata[2]}<br>"
@@ -392,9 +811,10 @@ def create_phate_figure(
                             line=dict(width=1, color="white"),
                         ),
                         customdata=highlighted[
-                            ["track_key", "t", "fov_name", "track_id"]
+                            ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                         ].values,
                         hovertemplate=(
+                            "<b>Dataset:</b> %{customdata[4]}<br>"
                             "<b>Track:</b> %{customdata[0]}<br>"
                             "<b>Time:</b> %{customdata[1]}<br>"
                             "<b>FOV:</b> %{customdata[2]}<br>"
@@ -419,9 +839,10 @@ def create_phate_figure(
                         colorbar=dict(title="Time"),
                     ),
                     customdata=filtered_df[
-                        ["track_key", "t", "fov_name", "track_id"]
+                        ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                     ].values,
                     hovertemplate=(
+                        "<b>Dataset:</b> %{customdata[4]}<br>"
                         "<b>Track:</b> %{customdata[0]}<br>"
                         "<b>Time:</b> %{customdata[1]}<br>"
                         "<b>FOV:</b> %{customdata[2]}<br>"
@@ -464,9 +885,10 @@ def create_phate_figure(
                             line=dict(width=1, color="white"),
                         ),
                         customdata=track_df[
-                            ["track_key", "t", "fov_name", "track_id"]
+                            ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                         ].values,
                         hovertemplate=(
+                            "<b>Dataset:</b> %{customdata[4]}<br>"
                             "<b>Track:</b> %{customdata[0]}<br>"
                             "<b>Time:</b> %{customdata[1]}<br>"
                             "<b>FOV:</b> %{customdata[2]}<br>"
@@ -488,9 +910,10 @@ def create_phate_figure(
                         opacity=0.4,
                     ),
                     customdata=filtered_df[
-                        ["track_key", "t", "fov_name", "track_id"]
+                        ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                     ].values,
                     hovertemplate=(
+                        "<b>Dataset:</b> %{customdata[4]}<br>"
                         "<b>Track:</b> %{customdata[0]}<br>"
                         "<b>Time:</b> %{customdata[1]}<br>"
                         "<b>FOV:</b> %{customdata[2]}<br>"
@@ -498,6 +921,108 @@ def create_phate_figure(
                     ),
                 )
             )
+
+    elif color_by == "dataset" and "dataset_id" in df.columns:
+        # Color by dataset
+        filtered_df = df.copy()
+        unique_datasets = sorted(filtered_df["dataset_id"].unique())
+
+        # Create color mapping
+        dataset_color_map = {
+            dataset: DATASET_COLORS[i % len(DATASET_COLORS)]
+            for i, dataset in enumerate(unique_datasets)
+        }
+
+        if selected_tracks:
+            # Separate selected tracks and background
+            highlighted = filtered_df[filtered_df["track_key"].isin(selected_tracks)]
+            background = filtered_df[~filtered_df["track_key"].isin(selected_tracks)]
+
+            # Add background points
+            for dataset_id in unique_datasets:
+                dataset_bg = background[background["dataset_id"] == dataset_id]
+                if len(dataset_bg) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=dataset_bg["PHATE1"],
+                            y=dataset_bg["PHATE2"],
+                            mode="markers",
+                            name=f"{dataset_id} (background)",
+                            marker=dict(
+                                color=dataset_color_map[dataset_id],
+                                size=4,
+                                opacity=0.3,
+                            ),
+                            customdata=dataset_bg[
+                                ["track_key", "t", "fov_name", "track_id", "dataset_id"]
+                            ].values,
+                            hovertemplate=(
+                                "<b>Dataset:</b> %{customdata[4]}<br>"
+                                "<b>Track:</b> %{customdata[0]}<br>"
+                                "<b>Time:</b> %{customdata[1]}<br>"
+                                "<b>FOV:</b> %{customdata[2]}<br>"
+                                "<extra></extra>"
+                            ),
+                            showlegend=False,
+                        )
+                    )
+
+            # Add highlighted points
+            for dataset_id in unique_datasets:
+                dataset_hl = highlighted[highlighted["dataset_id"] == dataset_id]
+                if len(dataset_hl) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=dataset_hl["PHATE1"],
+                            y=dataset_hl["PHATE2"],
+                            mode="markers",
+                            name=f"{dataset_id} (selected)",
+                            marker=dict(
+                                color=dataset_color_map[dataset_id],
+                                size=8,
+                                opacity=0.9,
+                                line=dict(width=1, color="white"),
+                            ),
+                            customdata=dataset_hl[
+                                ["track_key", "t", "fov_name", "track_id", "dataset_id"]
+                            ].values,
+                            hovertemplate=(
+                                "<b>Dataset:</b> %{customdata[4]}<br>"
+                                "<b>Track:</b> %{customdata[0]}<br>"
+                                "<b>Time:</b> %{customdata[1]}<br>"
+                                "<b>FOV:</b> %{customdata[2]}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
+        else:
+            # No tracks selected, show all points by dataset
+            for dataset_id in unique_datasets:
+                dataset_df = filtered_df[filtered_df["dataset_id"] == dataset_id]
+                if len(dataset_df) > 0:
+                    fig.add_trace(
+                        go.Scattergl(
+                            x=dataset_df["PHATE1"],
+                            y=dataset_df["PHATE2"],
+                            mode="markers",
+                            name=dataset_id,
+                            marker=dict(
+                                color=dataset_color_map[dataset_id],
+                                size=5,
+                                opacity=0.6,
+                            ),
+                            customdata=dataset_df[
+                                ["track_key", "t", "fov_name", "track_id", "dataset_id"]
+                            ].values,
+                            hovertemplate=(
+                                "<b>Dataset:</b> %{customdata[4]}<br>"
+                                "<b>Track:</b> %{customdata[0]}<br>"
+                                "<b>Time:</b> %{customdata[1]}<br>"
+                                "<b>FOV:</b> %{customdata[2]}<br>"
+                                "<extra></extra>"
+                            ),
+                        )
+                    )
 
     # Add trajectory lines for selected tracks
     if show_trajectories and selected_tracks:
@@ -585,10 +1110,11 @@ def create_phate_figure(
                         line=dict(width=2, color="black"),
                     ),
                     customdata=highlight_df[
-                        ["track_key", "t", "fov_name", "track_id"]
+                        ["track_key", "t", "fov_name", "track_id", "dataset_id"]
                     ].values,
                     hovertemplate=(
                         "<b>⭐ HIGHLIGHTED ⭐</b><br>"
+                        "<b>Dataset:</b> %{customdata[4]}<br>"
                         "<b>Track:</b> %{customdata[0]}<br>"
                         "<b>Time:</b> %{customdata[1]}<br>"
                         "<b>FOV:</b> %{customdata[2]}<br>"
@@ -631,6 +1157,7 @@ class ImageCache:
         channels: list[str],
         z_range: tuple[int, int],
         yx_patch_size: tuple[int, int],
+        fov_filter: list[str] | None = None,
     ):
         """
         Initialize image cache.
@@ -645,11 +1172,15 @@ class ImageCache:
             Z slice range (start, end).
         yx_patch_size : tuple[int, int]
             Patch size in (Y, X) dimensions.
+        fov_filter : list[str], optional
+            FOV filter patterns used during data loading (e.g., ["A/1", "A/2"]).
+            Used to reconstruct full FOV paths when needed.
         """
         self.data_path = data_path
         self.channels = channels
         self.z_range = z_range
         self.yx_patch_size = yx_patch_size
+        self.fov_filter = fov_filter
         self.cache = {}  # (fov_name, track_id, t, channel) -> base64 string
 
         logger.info(f"Initializing ImageCache with data from {data_path}")
@@ -743,7 +1274,50 @@ class ImageCache:
 
         try:
             # Get position from data store
-            position = self.data_store[fov_name]
+            # First try direct access
+            try:
+                position = self.data_store[fov_name]
+            except KeyError:
+                # FOV name format mismatch - try to reconstruct full path
+                # The fov_name might be just the numeric part (e.g., "001000")
+                # but the zarr store expects full path (e.g., "A/1/001000")
+
+                # Try to find matching position by checking if fov_name is a suffix
+                matching_positions = [
+                    pos_name
+                    for pos_name, _ in self.data_store.positions()
+                    if pos_name.endswith(fov_name)
+                ]
+
+                # If we have FOV filters, narrow down by those patterns
+                if self.fov_filter and len(matching_positions) > 1:
+                    filtered_matches = [
+                        pos
+                        for pos in matching_positions
+                        if any(pattern in pos for pattern in self.fov_filter)
+                    ]
+                    if filtered_matches:
+                        matching_positions = filtered_matches
+
+                if len(matching_positions) == 1:
+                    # Found exactly one match
+                    position = self.data_store[matching_positions[0]]
+                elif len(matching_positions) > 1:
+                    # Multiple matches - use the first one
+                    # This shouldn't happen if fov_filter is properly specified
+                    logger.warning(
+                        f"Multiple positions match FOV '{fov_name}' (filter: {self.fov_filter}): "
+                        f"{matching_positions[:5]}. Using first match."
+                    )
+                    position = self.data_store[matching_positions[0]]
+                else:
+                    # No matches found
+                    available_positions = list(self.data_store.positions())
+                    logger.error(
+                        f"FOV '{fov_name}' not found in data store. "
+                        f"Available positions (first 10): {available_positions[:10]}"
+                    )
+                    return None
 
             # Get channel index
             channel_idx = position.get_channel_index(channel)
@@ -783,6 +1357,82 @@ class ImageCache:
             return None
 
 
+class MultiDatasetImageCache:
+    """Cache for loading images from multiple dataset sources."""
+
+    def __init__(
+        self,
+        dataset_configs: list[DatasetConfig],
+        channels: list[str],
+        z_range: tuple[int, int],
+        yx_patch_size: tuple[int, int],
+    ):
+        """
+        Initialize multi-dataset image cache.
+
+        Parameters
+        ----------
+        dataset_configs : list[DatasetConfig]
+            List of dataset configurations.
+        channels : list[str]
+            Channel names to load.
+        z_range : tuple[int, int]
+            Z slice range (start, end).
+        yx_patch_size : tuple[int, int]
+            Patch size in (Y, X) dimensions.
+        """
+        self.caches = {
+            config.dataset_id: ImageCache(
+                config.data_path, channels, z_range, yx_patch_size, config.fov_filter
+            )
+            for config in dataset_configs
+        }
+        logger.info(
+            f"Initialized MultiDatasetImageCache for {len(self.caches)} datasets"
+        )
+
+    def load_image(
+        self,
+        dataset_id: str,
+        fov_name: str,
+        track_id: int,
+        t: int,
+        channel: str,
+        y: float,
+        x: float,
+    ) -> Optional[str]:
+        """
+        Load image from appropriate dataset source.
+
+        Parameters
+        ----------
+        dataset_id : str
+            Dataset identifier.
+        fov_name : str
+            Field of view name.
+        track_id : int
+            Track identifier.
+        t : int
+            Timepoint.
+        channel : str
+            Channel name.
+        y : float
+            Y coordinate (centroid).
+        x : float
+            X coordinate (centroid).
+
+        Returns
+        -------
+        str or None
+            Base64-encoded image string, or None if loading fails.
+        """
+        if dataset_id not in self.caches:
+            logger.error(f"Dataset ID '{dataset_id}' not found in caches")
+            return None
+
+        return self.caches[dataset_id].load_image(fov_name, track_id, t, channel, y, x)
+
+
 # =============================================================================
 # TRACK TIMELINE DISPLAY
 # =============================================================================
@@ -792,7 +1442,7 @@ def create_track_timeline(
     selected_tracks: list[str],
     adata: ad.AnnData,
     plot_df: pd.DataFrame,
-    image_cache: ImageCache,
+    image_cache: ImageCache | MultiDatasetImageCache,
     channels: list[str],
 ) -> list:
     """
@@ -801,12 +1451,12 @@ def create_track_timeline(
     Parameters
     ----------
     selected_tracks : list[str]
-        List of track keys (format: "fov_name/track_id").
+        List of track keys (format: "dataset_id/fov_name/track_id").
     adata : ad.AnnData
         AnnData object with full data.
     plot_df : pd.DataFrame
         DataFrame with track metadata.
-    image_cache : ImageCache
+    image_cache : ImageCache or MultiDatasetImageCache
         Image cache instance.
     channels : list[str]
         Channel names to display.
@@ -820,11 +1470,15 @@ def create_track_timeline(
         return []
 
     timelines = []
+    is_multi_dataset = isinstance(image_cache, MultiDatasetImageCache)
 
     for track_key in selected_tracks[:10]:  # Limit to 10 tracks
-        # Parse track key
-        fov_name, track_id_str = track_key.rsplit("/", 1)
+        # Parse track key (format: "dataset_id/fov_name/track_id")
+        # Note: fov_name can contain slashes (e.g., "A/1/002001")
+        # Split off track_id from the right, then dataset_id from the left
+        prefix, track_id_str = track_key.rsplit("/", 1)
         track_id = int(track_id_str)
+        dataset_id, fov_name = prefix.split("/", 1)
 
         # Get all observations for this track
         track_data = plot_df[plot_df["track_key"] == track_key].sort_values("t")
@@ -835,10 +1489,10 @@ def create_track_timeline(
         # Get annotation status if available
         if "annotation" in track_data.columns:
             annotation_value = track_data["annotation"].iloc[0]
-            header_text = f"Track: {track_key} | Status: {annotation_value}"
+            header_text = f"Dataset: {dataset_id} | Track: {fov_name}/{track_id} | Status: {annotation_value}"
             header_color = INFECTION_COLORS.get(annotation_value, "#95a5a6")
         else:
-            header_text = f"Track: {track_key}"
+            header_text = f"Dataset: {dataset_id} | Track: {fov_name}/{track_id}"
             header_color = "#95a5a6"
 
         # Create header
@@ -878,14 +1532,26 @@ def create_track_timeline(
         for channel in channels:
             images = []
             for idx, row in track_data.iterrows():
-                img_base64 = image_cache.load_image(
-                    fov_name=fov_name,
-                    track_id=track_id,
-                    t=int(row["t"]),
-                    channel=channel,
-                    y=row.get("y", 0),
-                    x=row.get("x", 0),
-                )
+                # Load image using appropriate cache method
+                if is_multi_dataset:
+                    img_base64 = image_cache.load_image(
+                        dataset_id=dataset_id,
+                        fov_name=fov_name,
+                        track_id=track_id,
+                        t=int(row["t"]),
+                        channel=channel,
+                        y=row.get("y", 0),
+                        x=row.get("x", 0),
+                    )
+                else:
+                    img_base64 = image_cache.load_image(
+                        fov_name=fov_name,
+                        track_id=track_id,
+                        t=int(row["t"]),
+                        channel=channel,
+                        y=row.get("y", 0),
+                        x=row.get("x", 0),
+                    )
 
                 if img_base64:
                     images.append(
@@ -1019,19 +1685,35 @@ def create_track_timeline(
 # DASH APPLICATION
 # =============================================================================
 
-# Load data
+# Load data - Auto-detect single vs multi-dataset mode
 logger.info("Loading data...")
-adata, plot_df, track_options, has_annotations = load_and_prepare_data(
-    ADATA_PATH,
-    ANNOTATION_CSV_PATH if ANNOTATION_CSV is not None else None,
-    ANNOTATION_COLUMN,
-    CATEGORIES,
-    FOV_FILTER,
-)
 
-# Initialize image cache
-logger.info("Initializing image cache...")
-image_cache = ImageCache(DATA_PATH, CHANNELS, Z_RANGE, YX_PATCH_SIZE)
+# Check if multi-dataset CONFIG is defined
+if "CONFIG" in globals() and isinstance(globals().get("CONFIG"), MultiDatasetConfig):
+    # Multi-dataset mode
+    logger.info("=== MULTI-DATASET MODE ===")
+    CONFIG = globals()["CONFIG"]
+    adata, plot_df, track_options, has_annotations = load_multiple_datasets(CONFIG)
+
+    # Initialize multi-dataset image cache
+    logger.info("Initializing multi-dataset image cache...")
+    image_cache = MultiDatasetImageCache(
+        CONFIG.datasets, CONFIG.channels, CONFIG.z_range, CONFIG.yx_patch_size
+    )
+else:
+    # Single dataset mode (backward compatible)
+    logger.info("=== SINGLE-DATASET MODE ===")
+    adata, plot_df, track_options, has_annotations = load_and_prepare_data(
+        ADATA_PATH,
+        ANNOTATION_CSV_PATH if ANNOTATION_CSV is not None else None,
+        ANNOTATION_COLUMN,
+        CATEGORIES,
+        FOV_FILTER,
+    )
+
+    # Initialize single-dataset image cache
+    logger.info("Initializing image cache...")
+    image_cache = ImageCache(DATA_PATH, CHANNELS, Z_RANGE, YX_PATCH_SIZE, FOV_FILTER)
 
 # Get unique annotation values if available
 if has_annotations and "annotation" in plot_df.columns:
@@ -1068,6 +1750,7 @@ app.layout = html.Div(
                                     ),
                                     {"label": "Time", "value": "time"},
                                     {"label": "Track ID", "value": "track_id"},
+                                    {"label": "Dataset", "value": "dataset"},
                                 ]
                                 if opt is not None
                             ],
