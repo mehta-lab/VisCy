@@ -32,5 +32,8 @@ jobs:
           # Install cpu wheels only to speed up the build
           pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
           pip install ".[dev]"
-      - name: Test with pytest
-        run: pytest -v
+      - name: Test with pytest (fast tests only)
+        run: pytest -v -m "not slow"
+      - name: Test with pytest (slow tests)
+        run: pytest -v -m "slow"
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'

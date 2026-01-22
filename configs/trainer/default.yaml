@@ -1,0 +1,24 @@
+# Default trainer configuration
+_target_: viscy.trainer.VisCyTrainer
+
+accelerator: auto
+devices: auto
+num_nodes: 1
+
+precision: 32-true
+use_distributed_sampler: true
+sync_batchnorm: true
+
+max_epochs: 100
+fast_dev_run: false
+
+check_val_every_n_epoch: 1
+val_check_interval: null
+
+log_every_n_steps: 10
+
+enable_checkpointing: true
+inference_mode: true
+default_root_dir: null
+plugins: null
+strategy: auto

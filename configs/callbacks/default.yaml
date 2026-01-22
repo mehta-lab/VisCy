@@ -1,0 +1,14 @@
+# Default callbacks
+model_checkpoint:
+  _target_: lightning.pytorch.callbacks.ModelCheckpoint
+  dirpath: null
+  filename: "epoch={epoch}-step={step}"
+  monitor: "loss/val"
+  mode: "min"
+  save_top_k: 3
+  save_last: true
+  verbose: false
+
+lr_monitor:
+  _target_: lightning.pytorch.callbacks.LearningRateMonitor
+  logging_interval: "step"

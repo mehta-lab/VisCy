@@ -1,0 +1,35 @@
+# Contrastive learning model configuration (DynaCLR)
+_target_: viscy.representation.engine.ContrastiveModule
+
+# Encoder configuration (ContrastiveEncoder with ConvNeXt backbone)
+encoder:
+  _target_: viscy.representation.contrastive.ContrastiveEncoder
+  backbone: convnext_tiny
+  in_channels: 1
+  in_stack_depth: 15  # Must match z_range in data config (e.g., [10, 25] = 15 slices)
+  stem_kernel_size: [5, 4, 4]
+  stem_stride: [5, 4, 4]
+  embedding_dim: 768  # Default for convnext_tiny
+  projection_dim: 128
+  drop_path_rate: 0.0
+
+# Loss function (NT-Xent for DynaCLR)
+loss_function:
+  _target_: pytorch_metric_learning.losses.NTXentLoss
+  temperature: 0.5
+
+# Training hyperparameters
+lr: 0.0001
+schedule: Constant
+
+# Logging configuration
+log_batches_per_epoch: 2
+log_samples_per_batch: 1
+log_embeddings: false
+log_negative_metrics_every_n_epochs: 1
+
+# Example input shape for torchscript [B, C, Z, Y, X]
+example_input_array_shape: [1, 1, 15, 224, 224]
+
+# Checkpoint path (optional)
+ckpt_path: null

@@ -1,0 +1,22 @@
+# VSUNet model configuration
+_target_: viscy.translation.engine.VSUNet
+
+# Architecture type: "2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"
+architecture: "UNeXt2"
+
+model_config:
+  in_channels: 1
+  out_channels: 2
+  residual: true
+  dropout: 0.1
+
+loss_function:
+  _target_: viscy.translation.engine.MixedLoss
+  l1_alpha: 0.5
+  l2_alpha: 0.0
+  ms_dssim_alpha: 0.5
+
+lr: 0.001
+schedule: Constant
+log_batches_per_epoch: 8
+log_samples_per_batch: 1
