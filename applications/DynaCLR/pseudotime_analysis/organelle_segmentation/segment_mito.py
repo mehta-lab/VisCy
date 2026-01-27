@@ -354,28 +354,28 @@ if all_features:
     plt.show()
 
     # Print summary statistics
-    print(f"\n=== Mitochondrial Dynamics Summary ===")
+    print("\n=== Mitochondrial Dynamics Summary ===")
     print(f"Position: {well_id}/{pos_id}")
     print(f"\nTimepoint range: {selected_timepoints[0]} -> {selected_timepoints[-1]}")
-    print(f"\nFragmentation (Object Count):")
+    print("\nFragmentation (Object Count):")
     print(f"  Start: {timepoint_summary['label_count'].iloc[0]:.0f} objects")
     print(f"  End: {timepoint_summary['label_count'].iloc[-1]:.0f} objects")
     print(
-        f"  Change: {timepoint_summary['label_count'].iloc[-1] - timepoint_summary['label_count'].iloc[0]:+.0f} ({(timepoint_summary['label_count'].iloc[-1]/timepoint_summary['label_count'].iloc[0] - 1)*100:+.1f}%)"
+        f"  Change: {timepoint_summary['label_count'].iloc[-1] - timepoint_summary['label_count'].iloc[0]:+.0f} ({(timepoint_summary['label_count'].iloc[-1] / timepoint_summary['label_count'].iloc[0] - 1) * 100:+.1f}%)"
     )
 
-    print(f"\nElongation (Aspect Ratio):")
+    print("\nElongation (Aspect Ratio):")
     print(f"  Start: {timepoint_summary['aspect_ratio_mean'].iloc[0]:.2f}")
     print(f"  End: {timepoint_summary['aspect_ratio_mean'].iloc[-1]:.2f}")
     print(
-        f"  Change: {timepoint_summary['aspect_ratio_mean'].iloc[-1] - timepoint_summary['aspect_ratio_mean'].iloc[0]:+.2f} ({(timepoint_summary['aspect_ratio_mean'].iloc[-1]/timepoint_summary['aspect_ratio_mean'].iloc[0] - 1)*100:+.1f}%)"
+        f"  Change: {timepoint_summary['aspect_ratio_mean'].iloc[-1] - timepoint_summary['aspect_ratio_mean'].iloc[0]:+.2f} ({(timepoint_summary['aspect_ratio_mean'].iloc[-1] / timepoint_summary['aspect_ratio_mean'].iloc[0] - 1) * 100:+.1f}%)"
     )
 
-    print(f"\nMean Object Size (Area):")
+    print("\nMean Object Size (Area):")
     print(f"  Start: {timepoint_summary['area_mean'].iloc[0]:.2f} µm²")
     print(f"  End: {timepoint_summary['area_mean'].iloc[-1]:.2f} µm²")
     print(
-        f"  Change: {timepoint_summary['area_mean'].iloc[-1] - timepoint_summary['area_mean'].iloc[0]:+.2f} µm² ({(timepoint_summary['area_mean'].iloc[-1]/timepoint_summary['area_mean'].iloc[0] - 1)*100:+.1f}%)"
+        f"  Change: {timepoint_summary['area_mean'].iloc[-1] - timepoint_summary['area_mean'].iloc[0]:+.2f} µm² ({(timepoint_summary['area_mean'].iloc[-1] / timepoint_summary['area_mean'].iloc[0] - 1) * 100:+.1f}%)"
     )
 
 # %%

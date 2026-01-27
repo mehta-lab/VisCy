@@ -1,10 +1,7 @@
 # %%
 import logging
-from pathlib import Path
 
 import matplotlib.pyplot as plt
-import numpy as np
-import pandas as pd
 from anndata import read_zarr
 
 from viscy.representation.pseudotime import (
@@ -87,7 +84,7 @@ axes[0, 0].axvline(
     color="#ff7f0e",
     linestyle="--",
     linewidth=2,
-    label=f'Mean: {track_stats["total_timepoints"].mean():.1f}',
+    label=f"Mean: {track_stats['total_timepoints'].mean():.1f}",
 )
 axes[0, 0].set_xlabel("Total Timepoints per Lineage")
 axes[0, 0].set_ylabel("Count")
@@ -107,7 +104,7 @@ axes[0, 1].axvline(
     color="#ff7f0e",
     linestyle="--",
     linewidth=2,
-    label=f'Mean: {track_stats["n_tracks"].mean():.2f}',
+    label=f"Mean: {track_stats['n_tracks'].mean():.2f}",
 )
 axes[0, 1].set_xlabel("Number of Tracks per Lineage")
 axes[0, 1].set_ylabel("Count")
@@ -127,7 +124,7 @@ axes[1, 0].axvline(
     color="#ff7f0e",
     linestyle="--",
     linewidth=2,
-    label=f'Mean: {track_stats["mean_timepoints_per_track"].mean():.1f}',
+    label=f"Mean: {track_stats['mean_timepoints_per_track'].mean():.1f}",
 )
 axes[1, 0].set_xlabel("Mean Timepoints per Track")
 axes[1, 0].set_ylabel("Count")

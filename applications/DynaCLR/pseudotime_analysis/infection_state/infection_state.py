@@ -10,7 +10,7 @@ from iohub import open_ome_zarr
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from viscy.data.triplet import INDEX_COLUMNS, TripletDataset
+from viscy.data.triplet import TripletDataset
 from viscy.representation.pseudotime import (
     CytoDtw,
     align_embedding_patterns,
@@ -34,9 +34,9 @@ logger.addHandler(console_handler)
 
 """
 TODO
-- We need to find a way to save the annotations, features and track information into one file. 
-- We need to standardize the naming convention. i.e The annotations fov_name is missing a / at the beginning. 
-- It would be nice to also select which will be the reference lineages and add that as a column. 
+- We need to find a way to save the annotations, features and track information into one file.
+- We need to standardize the naming convention. i.e The annotations fov_name is missing a / at the beginning.
+- It would be nice to also select which will be the reference lineages and add that as a column.
 - Figure out what is the best format to save the consensus lineage
 - Does the consensus track generalize?
 - There is a lot of fragmentation. Which tracking was used for the annotations? There is a script that unifies this but no record of which one was it. We can append these as extra columns
@@ -340,9 +340,9 @@ for i, (pattern, info) in enumerate(zip(patterns, pattern_info)):
                 break  # Only mark the first infection timepoint
 
         ax.set_xlabel("Time")
-        ax.set_ylabel(f"PC{pc_idx+1}")
+        ax.set_ylabel(f"PC{pc_idx + 1}")
         ax.set_title(
-            f'Pattern {i+1}: FOV {info["fov_name"]}, Tracks {info["track_id"]}\nPC{pc_idx+1} over time'
+            f"Pattern {i + 1}: FOV {info['fov_name']}, Tracks {info['track_id']}\nPC{pc_idx + 1} over time"
         )
         ax.grid(True, alpha=0.3)
 
@@ -423,7 +423,7 @@ for pc_idx in range(3):
             time_axis,
             pc_ref[:, pc_idx],
             "o-",
-            label=f"Ref {i+1}",
+            label=f"Ref {i + 1}",
             alpha=0.7,
             linewidth=2,
             markersize=4,
@@ -464,8 +464,8 @@ for pc_idx in range(3):
         )
 
     ax.set_xlabel("Aligned Time")
-    ax.set_ylabel(f"PC{pc_idx+1}")
-    ax.set_title(f"PC{pc_idx+1}: All DTW-Aligned References + Consensus")
+    ax.set_ylabel(f"PC{pc_idx + 1}")
+    ax.set_title(f"PC{pc_idx + 1}: All DTW-Aligned References + Consensus")
     ax.grid(True, alpha=0.3)
     ax.legend()
 
@@ -501,7 +501,7 @@ alignment_results[name] = matches
 logger.info(f"Found {len(matches)} matches for {name}")
 # %%
 # Save matches
-print(f'Saving matches to {output_root / f"{name}_matching_lineages_cosine.csv"}')
+print(f"Saving matches to {output_root / f'{name}_matching_lineages_cosine.csv'}")
 matches["consensus_path"] = str(output_root / f"{name}.pkl")
 cytodtw.save_consensus(output_root / f"{name}.pkl")
 matches.to_csv(output_root / f"{name}_matching_lineages_cosine.csv", index=False)
@@ -623,7 +623,7 @@ if dataset is not None:
 
     # Filter alignment_df to only aligned rows for loading just the aligned region
     alignment_col = f"dtw_{ALIGN_TYPE}_aligned"
-    aligned_only_df = alignment_df[alignment_df[alignment_col] == True].copy()
+    aligned_only_df = alignment_df[alignment_df[alignment_col]].copy()
 
     # Use filtered alignment_df since get_aligned_image_sequences expects 'track_id' column
     aligned_sequences = get_aligned_image_sequences(
@@ -691,7 +691,7 @@ for idx, seq in aligned_sequences.items():
 # %%
 # Enhanced DataFrame was already created above with PCA plotting - skip duplicate
 logger.info(
-    f"{ALIGN_TYPE.capitalize()} aligned timepoints: {alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].sum()}/{len(alignment_df)} ({100*alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].mean():.1f}%)"
+    f"{ALIGN_TYPE.capitalize()} aligned timepoints: {alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].sum()}/{len(alignment_df)} ({100 * alignment_df[f'dtw_{ALIGN_TYPE}_aligned'].mean():.1f}%)"
 )
 logger.info(f"Columns: {list(alignment_df.columns)}")
 
@@ -923,7 +923,7 @@ for channel, adata in ad_features.items():
 
     # Add PC columns with channel prefix
     for i in range(n_pca_components):
-        pcs_df[f"{channel}_PC{i+1}"] = adata.obsm["X_pca"][:, i]
+        pcs_df[f"{channel}_PC{i + 1}"] = adata.obsm["X_pca"][:, i]
 
     # Merge with combined features
     combined_features_df = combined_features_df.merge(
@@ -1121,7 +1121,7 @@ top_n_cells = 10
 alignment_col = f"dtw_{ALIGN_TYPE}_aligned"
 
 # Get aligned cells only
-aligned_cells = align_n_comp_feat_df[align_n_comp_feat_df[alignment_col] == True].copy()
+aligned_cells = align_n_comp_feat_df[align_n_comp_feat_df[alignment_col]].copy()
 
 # Select top N lineages by distance
 if "distance" in aligned_cells.columns and "lineage_id" in aligned_cells.columns:
@@ -1159,7 +1159,7 @@ infection_timepoint = None
 aligned_region_bounds = None
 
 if alignment_col in top_cells_df.columns:
-    aligned_mask = top_cells_df[alignment_col] == True
+    aligned_mask = top_cells_df[alignment_col]
     if aligned_mask.any():
         aligned_subset = top_cells_df[aligned_mask]
 
@@ -2176,15 +2176,14 @@ plot_binned_period_comparison(
 # %%
 # Plot PC/PHATE for all the cells grayed out and the top N aligned cells highlighted with fancyarrows
 # Shows unaligned + aligned + unaligned timepoints like in the time-series plots
-from matplotlib.patches import FancyArrowPatch
 import matplotlib.cm as cm
+from matplotlib.patches import FancyArrowPatch
 
 fig, ax = plt.subplots(figsize=(12, 10))
 if (
     "organelle_PC1" in combined_features_df.columns
     and "organelle_PC2" in combined_features_df.columns
 ):
-
     # Highlight top N aligned cells - include ALL timepoints (unaligned + aligned + unaligned)
     top_aligned_cells = align_n_comp_feat_df[
         align_n_comp_feat_df["lineage_id"].isin(top_lineages[:3])
@@ -2225,8 +2224,8 @@ if (
 
         # Split into aligned and unaligned portions
         if alignment_col in lineage_data.columns:
-            aligned_data = lineage_data[lineage_data[alignment_col] == True]
-            unaligned_data = lineage_data[lineage_data[alignment_col] == False]
+            aligned_data = lineage_data[lineage_data[alignment_col]]
+            unaligned_data = lineage_data[not lineage_data[alignment_col]]
         else:
             aligned_data = lineage_data
             unaligned_data = pd.DataFrame()
@@ -2275,9 +2274,7 @@ if (
             # Check if this arrow is within aligned region
             is_aligned_arrow = False
             if alignment_col in row_start.index and alignment_col in row_end.index:
-                is_aligned_arrow = (
-                    row_start[alignment_col] == True and row_end[alignment_col] == True
-                )
+                is_aligned_arrow = row_start[alignment_col] and row_end[alignment_col]
 
             # Create arrow with different styles for aligned vs unaligned
             arrow = FancyArrowPatch(

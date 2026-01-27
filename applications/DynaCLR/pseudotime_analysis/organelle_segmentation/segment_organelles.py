@@ -134,7 +134,7 @@ def segment_zyx(
     binary_mask = vesselness > threshold
 
     _logger.debug(
-        f"    Selected {binary_mask.sum()} / {binary_mask.size} pixels ({100*binary_mask.sum()/binary_mask.size:.2f}%)"
+        f"    Selected {binary_mask.sum()} / {binary_mask.size} pixels ({100 * binary_mask.sum() / binary_mask.size:.2f}%)"
     )
 
     # Apply morphological operations
