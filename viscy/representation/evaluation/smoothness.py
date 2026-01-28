@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 from numpy.typing import NDArray
 from scipy.signal import find_peaks
+from scipy.spatial.distance import cdist
 from scipy.stats import gaussian_kde
 from sklearn.preprocessing import StandardScaler
 
@@ -112,6 +113,8 @@ def find_distribution_peak(
 def compute_embeddings_smoothness(
     features_ad: ad.AnnData,
     distance_metric: Literal["cosine", "euclidean"] = "cosine",
+    time_offsets: list[int] = [1],
+    use_optimized: bool = True,
     verbose: bool = False,
 ) -> tuple[dict, dict, list[list[float]]]:
     """
@@ -119,12 +122,23 @@ def compute_embeddings_smoothness(
 
     Parameters
     --------
-    features_ad: adAnnData
-    distance_metric: Distance metric to use, by default "cosine"
+    features_ad : ad.AnnData
+        AnnData object containing features with .obs having 'fov_name', 'track_id', and 't' columns
+    distance_metric : Literal["cosine", "euclidean"], optional
+        Distance metric to use, by default "cosine"
+    time_offsets : list[int], optional
+        Temporal offsets to compute (e.g., [1] for t→t+1, [1,2,3] for t→t+1,t+2,t+3)
+        Distances from all offsets are aggregated together, by default [1]
+    use_optimized : bool, optional
+        Use memory-optimized computation that avoids full pairwise distance matrix.
+        Recommended for large datasets (>50K samples). By default True
+    verbose : bool, optional
+        Print progress messages, by default False
 
-    Returns:
+    Returns
     -------
-    stats: dict: Dictionary containing metrics including:
+    stats : dict
+        Dictionary containing metrics including:
         - adjacent_frame_mean: Mean of adjacent frame dissimilarity
         - adjacent_frame_std: Standard deviation of adjacent frame dissimilarity
         - adjacent_frame_median: Median of adjacent frame dissimilarity
@@ -133,43 +147,140 @@ def compute_embeddings_smoothness(
         - random_frame_std: Standard deviation of random sampling dissimilarity
         - random_frame_median: Median of random sampling dissimilarity
         - random_frame_peak: Peak of random sampling distribution
-        - smoothness_score: Score of smoothness
-        - dynamic_range: Difference between random and adjacent peaks
-    distributions: dict: Dictionary containing distributions including:
+        - smoothness_score: Score of smoothness (lower is better)
+        - dynamic_range: Difference between random and adjacent peaks (higher is better)
+    distributions : dict
+        Dictionary containing distributions including:
         - adjacent_frame_distribution: Full distribution of adjacent frame dissimilarities
         - random_frame_distribution: Full distribution of random sampling dissimilarities
-    piecewise_distance_per_track: list[list[float]]
+    piecewise_distance_per_track : list[list[float]]
         Piece-wise distance per track
+
+    Notes
+    -----
+    Memory optimization: When use_optimized=True, this function avoids creating the full
+    pairwise distance matrix (N×N), which can require 100+ GB for large datasets (>100K samples).
+    Instead, it computes only temporal neighbor distances within tracks and samples random pairs
+    on-demand, reducing memory usage to ~1GB. For datasets with <50K samples, both approaches
+    work, but optimized is still recommended for consistency.
     """
     features = features_ad.X
     scaled_features = StandardScaler().fit_transform(features)
-
-    # Compute the distance matrix
-    cross_dist = pairwise_distance_matrix(scaled_features, metric=distance_metric)
-    rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
-
-    # Compute piece-wise distance and rank difference
     features_df = features_ad.obs.reset_index(drop=True)
-    piecewise_distance_per_track, _ = compute_piece_wise_distance(
-        features_df, cross_dist, rank_fractions
-    )
 
-    all_piecewise_distances = np.concatenate(piecewise_distance_per_track)
+    if use_optimized:
+        # Memory-optimized computation: avoid full pairwise distance matrix
+        if verbose:
+            print(
+                f"Computing temporal neighbor distances (offsets: {time_offsets}) per track..."
+            )
 
-    # Random sampling values in the distance matrix with same size as adjacent frame measurements
-    n_samples = len(all_piecewise_distances)
-    # Avoid sampling the diagonal elements
-    np.random.seed(42)
-    i_indices = np.random.randint(0, len(cross_dist), size=n_samples)
-    j_indices = np.random.randint(0, len(cross_dist), size=n_samples)
+        # Compute temporal neighbor distances per track (memory efficient)
+        adjacent_distances = []
+        piecewise_distance_per_track = []
 
-    diagonal_mask = i_indices == j_indices
-    while diagonal_mask.any():
-        j_indices[diagonal_mask] = np.random.randint(
-            0, len(cross_dist), size=diagonal_mask.sum()
+        for _, subdata in features_df.groupby(["fov_name", "track_id"]):
+            if len(subdata) > 1:
+                indices = subdata.index.values
+                track_features = scaled_features[indices]
+                track_distances = []
+
+                # Compute distances for each time offset
+                for offset in time_offsets:
+                    for i in range(len(track_features) - offset):
+                        dist = cdist(
+                            track_features[i : i + 1],
+                            track_features[i + offset : i + offset + 1],
+                            metric=distance_metric,
+                        )[0, 0]
+                        adjacent_distances.append(dist)
+                        if offset == 1:  # Only collect per-track for offset=1
+                            track_distances.append(dist)
+
+                if track_distances:
+                    piecewise_distance_per_track.append(track_distances)
+
+        adjacent_distances = np.array(adjacent_distances)
+        n_adjacent = len(adjacent_distances)
+
+        if verbose:
+            print(f"Computed {n_adjacent:,} adjacent frame distances")
+
+        if n_adjacent == 0:
+            raise ValueError(
+                "No adjacent frame distances found. Dataset may not have tracks with multiple timepoints."
+            )
+
+        # Sample random pairs (same number as adjacent distances) in batches
+        if verbose:
+            print("Sampling random pairs for baseline...")
+
+        n_samples = len(scaled_features)
+        n_random_samples = n_adjacent
+        batch_size = 10000
+        random_distances = []
+
+        np.random.seed(42)
+        for batch_start in range(0, n_random_samples, batch_size):
+            batch_end = min(batch_start + batch_size, n_random_samples)
+            batch_n = batch_end - batch_start
+
+            i_indices = np.random.randint(0, n_samples, size=batch_n)
+            j_indices = np.random.randint(0, n_samples, size=batch_n)
+
+            # Avoid diagonal
+            diagonal_mask = i_indices == j_indices
+            while diagonal_mask.any():
+                j_indices[diagonal_mask] = np.random.randint(
+                    0, n_samples, size=diagonal_mask.sum()
+                )
+                diagonal_mask = i_indices == j_indices
+
+            # Compute distances for this batch
+            for i, j in zip(i_indices, j_indices):
+                dist = cdist(
+                    scaled_features[i : i + 1],
+                    scaled_features[j : j + 1],
+                    metric=distance_metric,
+                )[0, 0]
+                random_distances.append(dist)
+
+        random_distances = np.array(random_distances)
+
+        if verbose:
+            print(f"Computed {len(random_distances):,} random pair distances")
+
+        all_piecewise_distances = adjacent_distances
+        sampled_values = random_distances
+
+    else:
+        # Original computation using full pairwise distance matrix
+        if verbose:
+            print("Computing full pairwise distance matrix...")
+
+        cross_dist = pairwise_distance_matrix(scaled_features, metric=distance_metric)
+        rank_fractions = rank_nearest_neighbors(cross_dist, normalize=True)
+
+        # Compute piece-wise distance and rank difference
+        piecewise_distance_per_track, _ = compute_piece_wise_distance(
+            features_df, cross_dist, rank_fractions
         )
+
+        all_piecewise_distances = np.concatenate(piecewise_distance_per_track)
+
+        # Random sampling values in the distance matrix with same size as adjacent frame measurements
+        n_samples = len(all_piecewise_distances)
+        np.random.seed(42)
+        i_indices = np.random.randint(0, len(cross_dist), size=n_samples)
+        j_indices = np.random.randint(0, len(cross_dist), size=n_samples)
+
         diagonal_mask = i_indices == j_indices
-    sampled_values = cross_dist[i_indices, j_indices]
+        while diagonal_mask.any():
+            j_indices[diagonal_mask] = np.random.randint(
+                0, len(cross_dist), size=diagonal_mask.sum()
+            )
+            diagonal_mask = i_indices == j_indices
+        sampled_values = cross_dist[i_indices, j_indices]
 
     # Compute the peaks of both distributions using KDE
     adjacent_peak = find_distribution_peak(all_piecewise_distances, method="kde_robust")
@@ -182,14 +293,10 @@ def compute_embeddings_smoothness(
         "adjacent_frame_std": float(np.std(all_piecewise_distances)),
         "adjacent_frame_median": float(np.median(all_piecewise_distances)),
         "adjacent_frame_peak": float(adjacent_peak),
-        # "adjacent_frame_p99": p99_piece_wise_distance,
-        # "adjacent_frame_p1": p1_percentile_piece_wise_distance,
-        # "adjacent_frame_distribution": all_piecewise_distances,
         "random_frame_mean": float(np.mean(sampled_values)),
         "random_frame_std": float(np.std(sampled_values)),
         "random_frame_median": float(np.median(sampled_values)),
         "random_frame_peak": float(random_peak),
-        # "random_frame_distribution": sampled_values,
         "smoothness_score": float(smoothness_score),
         "dynamic_range": float(dynamic_range),
     }
