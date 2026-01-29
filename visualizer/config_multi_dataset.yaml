@@ -3,53 +3,39 @@
 
 datasets:
   # Dataset 1: A549 SEC61 DENV
-  - adata_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/2-predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr
-    data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/1-train-test/2024_11_07_A549_SEC61_DENV.zarr
-    channels:
-      - Phase3D
-    z_range: [0, 1]
-    fov_filter:
-      - B/1
-      - B/3
-    annotation_column: infection_status
-    categories:
-      0: uninfected
-      1: infected
-      2: unknown
+  # - adata_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/2-predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_organelle_160patch_104ckpt.zarr
+  #   data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_DENV/4-phenotyping/1-train-test/2024_11_07_A549_SEC61_DENV.zarr
+  #   channels:
+  #     # - Phase3D
+  #     - "raw GFP EX488 EM525-45"
+  #   z_range: [0, 1]
+  #   fov_filter:
+  #     - C/2
+  #   annotation_column: infection_status
+  #   categories:
+  #     0: uninfected
+  #     1: infected
+  #     2: unknown
 
   # Dataset 2: A549 SEC61 TOMM20 G3BP1 ZIKV
-  - adata_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_phase_160patch_104ckpt.zarr
+  - adata_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3/timeaware_organelle_160patch_104ckpt.zarr
     data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/train-test/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
     channels:
-      - Phase3D
+      # - Phase3D
+      - "raw GFP EX488 EM525-45"
     z_range: [0, 1]
     fov_filter:
       - C/2
-    annotation_column: infection_status
-    categories:
-      0: uninfected
-      1: infected
-      2: unknown
+    annotation_csv: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+    annotation_column: infection_state
 
-  # Dataset 3: Organelle Box NCLN
-  - adata_path: /hpc/projects/intracellular_dashboard/organelle_box/2025_09_24_Organelle_box_NCLN/6.1-phenotyping/anndata/phase_3hpi_160patch_104ckpt_ver3max.zarr
-    data_path: /hpc/projects/intracellular_dashboard/organelle_box/2025_09_24_Organelle_box_NCLN/5-concatenate/3hpi.zarr
-    channels:
-      - Phase3D
-    z_range: [0, 1]
-    fov_filter:
-      - G3BP1/uninfected
-    annotation_column: infection_status
-    categories:
-      0: uninfected
-      1: infected
-      2: unknown
 
 # PHATE parameters for joint embedding
 phate_kwargs:
   n_components: 2
-  knn: 5
+  knn: 15
   decay: 40
+  t: 3
   scale_embeddings: false
 
 # Image settings

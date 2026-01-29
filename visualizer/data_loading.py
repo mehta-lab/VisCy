@@ -195,6 +195,7 @@ def compute_joint_phate(
     knn: int = 5,
     decay: int = 40,
     scale_embeddings: bool = False,
+    **phate_kwargs,
 ) -> ad.AnnData:
     """
     Compute PHATE embedding on joint dataset.
@@ -211,6 +212,8 @@ def compute_joint_phate(
         Decay parameter for PHATE (default: 40).
     scale_embeddings : bool, optional
         Whether to scale embeddings (default: False).
+    **phate_kwargs
+        Additional keyword arguments passed to compute_phate (e.g., random_state).
 
     Returns
     -------
@@ -221,6 +224,8 @@ def compute_joint_phate(
     logger.info(
         f"  Parameters: n_components={n_components}, knn={knn}, decay={decay}, scale={scale_embeddings}"
     )
+    if phate_kwargs:
+        logger.info(f"  Additional PHATE kwargs: {phate_kwargs}")
 
     _, phate_embedding = compute_phate(
         adata_joint,
@@ -228,6 +233,7 @@ def compute_joint_phate(
         knn=knn,
         decay=decay,
         scale_embeddings=scale_embeddings,
+        **phate_kwargs,
     )
 
     adata_joint.obsm["X_phate"] = phate_embedding
@@ -314,13 +320,18 @@ def load_multiple_datasets(
         if "X_phate" in adata_joint.obsm:
             del adata_joint.obsm["X_phate"]
 
-        phate_params = config.phate_kwargs or {}
+        phate_params = dict(config.phate_kwargs) if config.phate_kwargs else {}
+        n_components = phate_params.pop("n_components", 2)
+        knn = phate_params.pop("knn", 5)
+        decay = phate_params.pop("decay", 40)
+        scale_embeddings = phate_params.pop("scale_embeddings", False)
         adata_joint = compute_joint_phate(
             adata_joint,
-            n_components=phate_params.get("n_components", 2),
-            knn=phate_params.get("knn", 5),
-            decay=phate_params.get("decay", 40),
-            scale_embeddings=phate_params.get("scale_embeddings", False),
+            n_components=n_components,
+            knn=knn,
+            decay=decay,
+            scale_embeddings=scale_embeddings,
+            **phate_params,
         )
 
     phate_coords = adata_joint.obsm["X_phate"]
