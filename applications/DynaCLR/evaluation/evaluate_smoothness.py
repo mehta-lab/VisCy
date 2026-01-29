@@ -35,7 +35,7 @@ from .utils import (
 matplotlib.use("Agg")
 
 
-@click.command()
+@click.command("evaluate-smoothness")
 @click.option(
     "--config",
     type=click.Path(exists=True, path_type=Path),

@@ -62,16 +62,17 @@ optional-dependencies.phate = [
 optional-dependencies.visual = [
   "cmap",
   "dash",
+  "gradio>=5.49.1",
+
   "graphviz",
   "ipykernel",
   "nbformat",
   "plotly",
   "seaborn",
   "torchview",
-  "gradio>=5.49.1",
-
 ]
 scripts.viscy = "viscy.cli:main"
+scripts."viscy-dynaclr" = "viscy.cli_dynaclr:main"
 
 [tool.setuptools]
 packages = [ "viscy" ]

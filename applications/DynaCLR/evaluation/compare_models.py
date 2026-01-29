@@ -17,7 +17,7 @@ import pandas as pd
 from .utils import format_comparison_summary, format_results_table, load_config
 
 
-@click.command()
+@click.command("compare-models")
 @click.option(
     "--config",
     type=click.Path(exists=True, path_type=Path),

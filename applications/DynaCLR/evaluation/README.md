@@ -21,6 +21,15 @@ The evaluation suite is part of the viscy package. All dependencies are already 
 - `pandas` - Data manipulation
 - `pyyaml` - Config file parsing
 
+## CLI Usage
+
+The evaluation suite is accessible through the `viscy-dynaclr` command-line interface. This provides a unified entry point for all DynaCLR evaluation tools.
+
+**View available commands:**
+```bash
+viscy-dynaclr --help
+```
+
 ## Available Tools
 
 ### 1. Temporal Smoothness Evaluation
@@ -28,6 +37,11 @@ The evaluation suite is part of the viscy package. All dependencies are already 
 Evaluate how well embeddings capture temporal continuity by comparing distances between adjacent frames vs random frame pairs.
 
 **Command:**
+```bash
+viscy-dynaclr evaluate-smoothness --config configs/example_smoothness.yaml
+```
+
+**Alternative (direct module invocation):**
 ```bash
 python -m applications.DynaCLR.evaluation.evaluate_smoothness \
     --config configs/example_smoothness.yaml
@@ -67,6 +81,11 @@ Compare previously saved results from multiple evaluation runs.
 
 **Command:**
 ```bash
+viscy-dynaclr compare-models --config configs/compare_config.yaml
+```
+
+**Alternative (direct module invocation):**
+```bash
 python -m applications.DynaCLR.evaluation.compare_models \
     --config configs/compare_config.yaml
 ```
@@ -104,9 +123,7 @@ evaluation:
 
 Run:
 ```bash
-cd /home/eduardo.hirata/repos/viscy
-python -m applications.DynaCLR.evaluation.evaluate_smoothness \
-    --config my_model.yaml
+viscy-dynaclr evaluate-smoothness --config my_model.yaml
 ```
 
 ### Example 2: Compare Multiple Models
@@ -130,8 +147,7 @@ evaluation:
 
 Run:
 ```bash
-python -m applications.DynaCLR.evaluation.evaluate_smoothness \
-    --config compare_models.yaml
+viscy-dynaclr evaluate-smoothness --config compare_models.yaml
 ```
 
 The output will be a markdown table like:
