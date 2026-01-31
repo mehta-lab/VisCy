@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 import anndata as ad
+import numpy as np
 import pandas as pd
 import yaml
 
@@ -248,3 +249,71 @@ def format_comparison_summary(
 
     best_value = metric_values[best_label]
     return f"**Best {metric}**: {best_label} ({comparison}: {best_value:.4f})"
+
+
+def csv_to_anndata(csv_path: Path) -> ad.AnnData:
+    """Convert CSV tracking data to minimal AnnData for CytoDtw.
+
+    Parameters
+    ----------
+    csv_path : Path
+        Path to CSV file with tracking columns
+
+    Returns
+    -------
+    ad.AnnData
+        AnnData object with tracking metadata in obs
+    """
+    df = pd.read_csv(csv_path)
+    required_cols = ["fov_name", "track_id", "t", "parent_track_id"]
+    missing = [c for c in required_cols if c not in df.columns]
+    if missing:
+        raise ValueError(f"CSV missing required columns: {missing}")
+
+    n_samples = len(df)
+    adata = ad.AnnData(
+        X=np.zeros((n_samples, 1)),
+        obs=df,
+    )
+    return adata
+
+
+def load_tracking_data(path: Path) -> ad.AnnData:
+    """Auto-detect and load zarr or CSV tracking data.
+
+    Parameters
+    ----------
+    path : Path
+        Path to tracking data (zarr directory or CSV file)
+
+    Returns
+    -------
+    ad.AnnData
+        Loaded AnnData object
+    """
+    path = Path(path)
+    if path.suffix == ".csv":
+        return csv_to_anndata(path)
+    elif path.suffix == ".zarr" or path.is_dir():
+        return ad.read_zarr(path)
+    else:
+        raise ValueError(f"Unsupported file type: {path.suffix}. Use .csv or .zarr")
+
+
+def validate_tracking_stats_config(config: dict) -> None:
+    """Validate tracking stats config structure.
+
+    Parameters
+    ----------
+    config : dict
+        Configuration dictionary
+
+    Raises
+    ------
+    ValueError
+        If config is missing required fields
+    """
+    if "input" not in config:
+        raise ValueError("Config must contain 'input' section")
+    if "path" not in config["input"]:
+        raise ValueError("Input config missing required 'path' field")

@@ -75,7 +75,53 @@ evaluation:
 - **Dynamic Range**: Separation between random and adjacent peaks (higher is better)
 - Adjacent/Random frame statistics: mean, std, median, peak
 
-### 2. Model Comparison Tool
+### 2. Tracking Statistics
+
+Compute tracking statistics (lineages, mean length, etc.) from zarr or CSV files at FOV, well, and global levels.
+
+**Command:**
+```bash
+viscy-dynaclr tracking-stats /path/to/data.csv
+```
+
+**Options:**
+```bash
+viscy-dynaclr tracking-stats INPUT_PATH [OPTIONS]
+
+Arguments:
+  INPUT_PATH  Path to tracking data (.zarr or .csv)
+
+Options:
+  --min-timepoints INT   Minimum timepoints for lineage inclusion (default: 0)
+  --levels [fov|well|global|all]  Statistics levels (can repeat, default: all)
+  -o, --output PATH      Output file path for markdown results
+```
+
+**Examples:**
+```bash
+# All statistics (default)
+viscy-dynaclr tracking-stats /path/to/annotations.csv
+
+# Only well-level stats with minimum 10 timepoints
+viscy-dynaclr tracking-stats /path/to/data.zarr --min-timepoints 10 --levels well
+
+# Save to file
+viscy-dynaclr tracking-stats /path/to/data.csv -o results/stats.md
+```
+
+**CSV Input Requirements:**
+- `fov_name`: Field of view identifier (e.g., 'A/1/000000')
+- `track_id`: Track identifier
+- `t`: Time point index
+- `parent_track_id`: Parent track ID for lineage reconstruction (-1 for root)
+
+**Output:**
+Markdown tables for easy copy-paste to wikis:
+- FOV-Level: lineages, mean length, std per FOV
+- Well-Level: aggregated by well_id (first two path components of fov_name)
+- Global: total wells, FOVs, lineages, overall mean/std
+
+### 3. Model Comparison Tool
 
 Compare previously saved results from multiple evaluation runs.
 

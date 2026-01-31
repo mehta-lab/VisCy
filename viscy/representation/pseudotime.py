@@ -629,6 +629,79 @@ class CytoDtw:
 
         return pd.DataFrame(fov_stats)
 
+    def get_well_statistics(
+        self,
+        lineages: list[tuple[str, list[int]]] = None,
+        min_timepoints: int = 0,
+    ) -> pd.DataFrame:
+        """Get statistics aggregated by well.
+
+        Parameters
+        ----------
+        lineages : list[tuple[str, list[int]]], optional
+            List of (fov_name, track_ids) to analyze. If None, uses all lineages.
+        min_timepoints : int
+            Minimum timepoints required for lineage identification if lineages is None
+
+        Returns
+        -------
+        pd.DataFrame
+            DataFrame with per-well statistics:
+            - well_id: Well identifier (e.g., 'A/1')
+            - n_fovs: Number of FOVs in well
+            - n_lineages: Total lineages in well
+            - mean_lineage_length: Mean timepoints per lineage
+            - std_lineage_length: Std of timepoints per lineage
+        """
+        if lineages is None:
+            lineages = self.get_lineages(min_timepoints)
+
+        # Compute per-lineage stats first
+        lineage_stats = []
+        for fov_name, track_ids in lineages:
+            lineage_rows = self.adata.obs[
+                (self.adata.obs["fov_name"] == fov_name)
+                & (self.adata.obs["track_id"].isin(track_ids))
+            ]
+            total_timepoints = len(lineage_rows)
+            well_id = extract_well_id(fov_name)
+            lineage_stats.append(
+                {
+                    "well_id": well_id,
+                    "fov_name": fov_name,
+                    "total_timepoints": total_timepoints,
+                }
+            )
+
+        df = pd.DataFrame(lineage_stats)
+
+        if df.empty:
+            return pd.DataFrame(
+                columns=[
+                    "well_id",
+                    "n_fovs",
+                    "n_lineages",
+                    "mean_lineage_length",
+                    "std_lineage_length",
+                ]
+            )
+
+        # Aggregate by well
+        well_stats = []
+        for well_id in df["well_id"].unique():
+            well_df = df[df["well_id"] == well_id]
+            well_stats.append(
+                {
+                    "well_id": well_id,
+                    "n_fovs": well_df["fov_name"].nunique(),
+                    "n_lineages": len(well_df),
+                    "mean_lineage_length": well_df["total_timepoints"].mean(),
+                    "std_lineage_length": well_df["total_timepoints"].std(),
+                }
+            )
+
+        return pd.DataFrame(well_stats)
+
     def _identify_lineages(
         self, min_timepoints: int = 15
     ) -> list[tuple[str, list[int]]]:
@@ -4505,6 +4578,23 @@ def identify_lineages(
                 all_lineages.append((fov_id, lineage_tracks[0]))
 
     return all_lineages
+
+
+def extract_well_id(fov_name: str) -> str:
+    """Extract well_id from fov_name.
+
+    Parameters
+    ----------
+    fov_name : str
+        FOV name in format like 'A/1/000000'
+
+    Returns
+    -------
+    str
+        Well ID (e.g., 'A/1')
+    """
+    parts = fov_name.split("/")
+    return "/".join(parts[:2]) if len(parts) >= 2 else fov_name
 
 
 def find_pattern_matches(
