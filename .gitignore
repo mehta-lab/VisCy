@@ -1,14 +1,18 @@
-.idea
+# IDE/Editor
+.idea/
+.vscode/
 .DS_Store
+
+# Python bytecode
 __pycache__/
+*.py[cod]
+*$py.class
 .ipynb_checkpoints/
-.vscode
 
-# written by setuptools_scm
-*/_version.py
-
-# slurm output files
-slurm-*
+# Virtual environments
+.venv/
+venv/
+ENV/
 
 # Distribution / packaging
 .Python
@@ -31,19 +35,28 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# Linter/formatter caches
+.ruff_cache/
+.mypy_cache/
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
+.nox/
 .coverage
 .coverage.*
 .cache
 coverage.xml
 *.cover
+*.py,cover
 .hypothesis/
 .pytest_cache/
 
-# SLURM
+# SLURM output files
+slurm-*
 slurm*.out
 
-#lightning_logs directory
+# Lightning logs
 lightning_logs/
+
+# NOTE: uv.lock is NOT ignored - it should be tracked for reproducibility
