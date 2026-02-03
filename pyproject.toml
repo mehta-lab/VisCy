@@ -39,7 +39,7 @@ urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
-dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
+dev = [ "prek>=0.3", "ruff>=0.14", { include-group = "jupyter" }, { include-group = "test" } ]
 test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
 jupyter = [
   "ipykernel>=7.1",
