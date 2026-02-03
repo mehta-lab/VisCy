@@ -33,6 +33,10 @@ and is organized as a [uv workspace](https://docs.astral.sh/uv/concepts/workspac
 
 #### Install uv
 
+> [!NOTE]
+> If you are an HPC system, we suggest making a symlink elsewhere first for the `uv` cache as your home directory will quickly get filled up.
+> `mkdir -p /hpc/mydata/firstname.lastname/.cache/uv && ln -s /hpc/mydata/firstname.lastname/.cache/uv ~/.cache/uv`
+
 See [uv installation docs](https://docs.astral.sh/uv/getting-started/installation/).
 
 #### Clone the repository
