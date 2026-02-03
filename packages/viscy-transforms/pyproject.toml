@@ -37,6 +37,13 @@ dependencies = [
   "torch>=2.10",
 ]
 
+optional-dependencies.notebook = [
+  "cmap",
+  "ipykernel",
+  "matplotlib",
+  "pooch",
+  "scikit-image",
+]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 # Documentation = "https://mehta-lab.github.io/VisCy/" # TODO: add documentation site at the end of monorepo migration
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"

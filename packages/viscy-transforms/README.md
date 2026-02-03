@@ -38,6 +38,16 @@ from viscy_transforms import NormalizeSampled, RandAffineTransformSampled
 - Kornia-accelerated augmentations (affine, noise, blur)
 - Specialized transforms for virtual staining workflows
 
+## Examples
+
+To run the example notebook, install with the `notebook` extra:
+
+```bash
+pip install viscy-transforms[notebook]
+```
+
+See the [batched transforms benchmark notebook](docs/examples/batched_transforms.ipynb) for a comparison of batched GPU transforms vs standard MONAI transforms.
+
 ## Dependencies
 
 - `torch>=2.4.1`
