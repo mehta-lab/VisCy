@@ -2,9 +2,7 @@ import pytest
 import torch
 
 from viscy_transforms._decollate import Decollate
-from viscy_transforms._transforms import (
-    BatchedScaleIntensityRangePercentiles,
-)
+from viscy_transforms._percentile_scale import BatchedScaleIntensityRangePercentiles
 
 
 @pytest.mark.parametrize("channel_wise", [True, False])

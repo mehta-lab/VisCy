@@ -1,8 +1,8 @@
-"""Redefine transforms from MONAI for jsonargparse.
+"""MONAI transform wrappers with explicit signatures for jsonargparse.
 
-This module provides wrapper classes around MONAI transforms with explicit
-constructor signatures. These wrappers enable automatic configuration via
-jsonargparse while preserving all functionality of the parent classes.
+MONAI transforms use **kwargs in constructors, which prevents jsonargparse
+from introspecting parameters for config-driven pipelines (e.g., LightningCLI).
+These wrappers re-declare constructors with explicit type hints.
 
 All transforms in this module are dictionary-based ("d" suffix) and operate
 on specified keys within a data dictionary.
