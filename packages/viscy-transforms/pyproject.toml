@@ -38,11 +38,10 @@ dependencies = [
 ]
 
 optional-dependencies.notebook = [
-  "cmap",
-  "ipykernel",
-  "matplotlib",
-  "pooch",
-  "scikit-image",
+  "cmap>=0.7",
+  "jupyterlab>=4.5.3",
+  "pooch>=1.9",
+  "scikit-image>=0.26",
 ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 # Documentation = "https://mehta-lab.github.io/VisCy/" # TODO: add documentation site at the end of monorepo migration
@@ -50,8 +49,12 @@ urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
-dev = [ "ruff>=0.14", { include-group = "test" } ]
+dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
 test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+jupyter = [
+  "ipykernel>=7.1",
+  "jupyterlab>=4.5.3",
+]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

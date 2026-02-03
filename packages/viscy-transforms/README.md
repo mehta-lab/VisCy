@@ -57,7 +57,7 @@ See the [batched transforms benchmark notebook](docs/examples/batched_transforms
 
 ## Documentation
 
-Full documentation available at [mehta-lab.github.io/VisCy](https://mehta-lab.github.io/VisCy/).
+In the works!
 
 ## License
 
