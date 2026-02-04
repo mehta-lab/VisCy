@@ -25,7 +25,7 @@ uv sync --package viscy-transforms
 ## Usage
 
 ```python
-from viscy_transforms import NormalizeSampled, RandAffineTransformSampled
+from viscy_transforms import NormalizeSampled, BatchedRandAffined
 
 # Transforms follow MONAI dictionary transform pattern
 # See documentation for full API reference
