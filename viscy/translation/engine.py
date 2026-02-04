@@ -554,7 +554,6 @@ class AugmentedPredictionVSUNet(LightningModule):
             Output tensor of shape (B, out_channel, Z, Y, X).
         """
 
-
         if x.ndim != 5:
             raise ValueError(
                 f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}"
@@ -563,10 +562,6 @@ class AugmentedPredictionVSUNet(LightningModule):
         batch_size, _, depth, height, width = x.shape
         in_stack_depth = self.model.out_stack_depth
 
-        if not hasattr(self, "_predict_pad"):
-            raise RuntimeError(
-                "Missing _predict_pad; make sure to call `on_predict_start()` before inference."
-            )
         if in_stack_depth > depth:
             raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
 
@@ -586,11 +581,6 @@ class AugmentedPredictionVSUNet(LightningModule):
             pred = pred[:, :, : end - start]  # Trim if Z was padded
             out_tensor[:, :, start:end] += pred
             weights[:, :, start:end] += 1.0
-
-        if (weights == 0).any():
-            raise RuntimeError(
-                "Some Z slices were not covered during sliding window inference."
-            )
 
         blended = out_tensor / weights
         return blended
