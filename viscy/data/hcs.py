@@ -235,12 +235,13 @@ class SlidingWindowDataset(Dataset):
             sample_images["weight"] = sample_images[self.channels["target"][0]]
         if norm_meta is not None:
             sample_images["norm_meta"] = norm_meta
+        sample_images["index"] = sample_index
         if self.transform:
             sample_images = self.transform(sample_images)
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
-            "index": sample_index,
+            "index": sample_images["index"],
             "source": self._stack_channels(sample_images, "source"),
         }
         if self.target_ch_idx is not None:

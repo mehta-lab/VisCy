@@ -59,7 +59,7 @@ class NormalizeSampled(MapTransform):
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
             if self.level == "timepoint_statistics":
-                time_idx = sample["index"].time
+                time_idx = sample["index"][1]
                 level_meta = level_meta[str(time_idx)]
             subtrahend_val = level_meta[self.subtrahend]
             subtrahend_val = self._match_image(subtrahend_val, sample[key])
