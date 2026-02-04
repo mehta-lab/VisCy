@@ -87,12 +87,21 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
         return None
     for channel, channel_values in norm_meta.items():
         for level, level_values in channel_values.items():
-            for stat, value in level_values.items():
-                if isinstance(value, Tensor):
-                    value = value.clone().float()
-                else:
-                    value = torch.tensor(value, dtype=torch.float32)
-                norm_meta[channel][level][stat] = value
+            if level == "timepoint_statistics":
+                for tp_idx, tp_values in level_values.items():
+                    for stat, value in tp_values.items():
+                        if isinstance(value, Tensor):
+                            value = value.clone().float()
+                        else:
+                            value = torch.tensor(value, dtype=torch.float32)
+                        norm_meta[channel][level][tp_idx][stat] = value
+            else:
+                for stat, value in level_values.items():
+                    if isinstance(value, Tensor):
+                        value = value.clone().float()
+                    else:
+                        value = torch.tensor(value, dtype=torch.float32)
+                    norm_meta[channel][level][stat] = value
     return norm_meta
 
 
