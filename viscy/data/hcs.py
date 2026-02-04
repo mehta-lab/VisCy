@@ -241,7 +241,7 @@ class SlidingWindowDataset(Dataset):
         if "weight" in sample_images:
             del sample_images["weight"]
         sample = {
-            "index": sample_images["index"],
+            "index": sample_index,
             "source": self._stack_channels(sample_images, "source"),
         }
         if self.target_ch_idx is not None:
