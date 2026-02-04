@@ -1671,7 +1671,7 @@ with tqdm(total=total_positions, desc="Processing FOVs") as pbar:
         position.create_image("0", output_array)
 
         # Update the progress bar
-        pbar.set_description(f"Processing FOVs")
+        pbar.set_description("Processing FOVs")
         pbar.update(1)
 
 # Close the OME-Zarr files
@@ -1838,14 +1838,11 @@ Script to visualize the encoder feature maps of a trained model.
 Using PCA to visualize feature maps is inspired by
 https://doi.org/10.48550/arXiv.2304.07193 (Oquab et al., 2023).
 """
-from typing import NamedTuple
+from typing import NamedTuple  # noqa: E402
 
-from matplotlib.patches import Rectangle
-from monai.networks.layers import GaussianFilter
-from skimage.exposure import rescale_intensity
-from skimage.transform import downscale_local_mean
-from sklearn.decomposition import PCA
-from sklearn.manifold import TSNE
+from monai.networks.layers import GaussianFilter  # noqa: E402
+from skimage.exposure import rescale_intensity  # noqa: E402
+from sklearn.decomposition import PCA  # noqa: E402
 
 
 def feature_map_pca(feature_map: np.array, n_components: int = 8) -> PCA:
@@ -1901,9 +1898,9 @@ norm_meta = test_dataset.zattrs["normalization"]["Phase3D"]["dataset_statistics"
 Y, X = test_dataset[f"0/0/{fov}"].data.shape[-2:]
 test_dataset.channel_names
 phase_idx = test_dataset.channel_names.index("Phase3D")
-assert (
-    crop // 2 < Y and crop // 2 < Y
-), "Crop size larger than the image. Check the image shape"
+assert crop // 2 < Y and crop // 2 < Y, (
+    "Crop size larger than the image. Check the image shape"
+)
 
 phase_img = test_dataset[f"0/0/{fov}/0"][
     :,
@@ -2027,11 +2024,11 @@ ax[-1].set_title("Fluorescence")
 
 for level, feat in enumerate(encoder_features_np):
     ax[level + 1].imshow(pcs_to_rgb(feat, n_components=n_components))
-    ax[level + 1].set_title(f"Encoder stage {level+1} {feat.shape[1:]}")
+    ax[level + 1].set_title(f"Encoder stage {level + 1} {feat.shape[1:]}")
 
 for level, feat in enumerate(decoder_features_np):
     ax[5 + level].imshow(pcs_to_rgb(feat, n_components=n_components))
-    ax[5 + level].set_title(f"Decoder stage {level+1} {feat.shape[1:]}")
+    ax[5 + level].set_title(f"Decoder stage {level + 1} {feat.shape[1:]}")
 
 pred_comp = composite_nuc_mem(prediction[0, :, 0], BOP_BLUE, BOP_ORANGE)
 ax[-2].imshow(clip_p(pred_comp))

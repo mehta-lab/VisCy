@@ -88,12 +88,12 @@ On Windows, the files can be downloaded manually from the URLs.
 # %%
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
-# !pip install "viscy[metrics,visual]==0.3"
+# !pip install "viscy[metrics,visual]==0.4.0a3"
 
 # %%
 # restart kernel if running in Google Colab
 if "get_ipython" in globals():
-    session = get_ipython()
+    session = get_ipython()  # noqa: F821
     if "google.colab" in str(session):
         print("Shutting down colab session.")
         session.kernel.do_shutdown(restart=True)
@@ -117,16 +117,16 @@ This can also be achieved by using the VisCy CLI.
 """
 
 # %%
-from pathlib import Path
+from pathlib import Path  # noqa: E402
 
-from iohub import open_ome_zarr
-from torchview import draw_graph
+from iohub import open_ome_zarr  # noqa: E402
+from torchview import draw_graph  # noqa: E402
 
-from viscy.data.hcs import HCSDataModule
-from viscy.trainer import VisCyTrainer
-from viscy.transforms import NormalizeSampled
-from viscy.translation.engine import FcmaeUNet
-from viscy.translation.predict_writer import HCSPredictionWriter
+from viscy.data.hcs import HCSDataModule  # noqa: E402
+from viscy.trainer import VisCyTrainer  # noqa: E402
+from viscy.transforms import NormalizeSampled  # noqa: E402
+from viscy.translation.engine import FcmaeUNet  # noqa: E402
+from viscy.translation.predict_writer import HCSPredictionWriter  # noqa: E402
 
 # %%
 # NOTE: Nothing needs to be changed in this code block for the example to work.
@@ -187,7 +187,6 @@ data_module = HCSDataModule(
 # Load the VSCyto2D model from the downloaded checkpoint
 # VSCyto2D is fine-tuned from a FCMAE-pretrained UNeXt2 model.
 # See this module for options to configure the model:
-from viscy.unet.networks.fcmae import FullyConvolutionalMAE
 
 # ?FullyConvolutionalMAE
 
@@ -274,10 +273,10 @@ with open_ome_zarr(input_data_path / fov) as fluor_store:
 
 # %%
 # Plot
-import matplotlib.pyplot as plt
-import numpy as np
-from cmap import Colormap
-from skimage.exposure import rescale_intensity
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+from cmap import Colormap  # noqa: E402
+from skimage.exposure import rescale_intensity  # noqa: E402
 
 
 def render_rgb(image: np.ndarray, colormap: Colormap):

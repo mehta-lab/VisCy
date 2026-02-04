@@ -27,7 +27,7 @@ Python>=3.11
 # Introduction
 
 See the [model card](https://virtualcellmodels.cziscience.com/paper/cytoland2025)
-for more details about the Cytoland models. 
+for more details about the Cytoland models.
 
 VSCyto3D is a 3D UNeXt2 model that has been trained on A549, HEK293T, and hiPSC cells using the Cytoland approach.
 This model enables users to jointly stain cell nuclei and plasma membranes from 3D label-free images
@@ -58,14 +58,14 @@ On Windows, the files can be downloaded manually from the URLs.
 # Install VisCy with the optional dependencies for this example
 # See the [repository](https://github.com/mehta-lab/VisCy) for more details
 # Here stackview and ipycanvas are installed for visualization
-# !pip install -U "viscy[metrics,visual]==0.3" stackview ipycanvas==0.11
+# !pip install -U "viscy[metrics,visual]==0.4.0a3" stackview ipycanvas==0.11
 
 # %%
 # Restart kernel if running in Google Colab
 # This is required to use the packages installed above
 # The 'kernel crashed' message is expected here
 if "get_ipython" in globals():
-    session = get_ipython()
+    session = get_ipython()  # noqa: F821
     if "google.colab" in str(session):
         print("Shutting down colab session.")
         session.kernel.do_shutdown(restart=True)
@@ -154,12 +154,11 @@ and using a standalone viewer such as [napari](https://napari.org/).
 """
 
 # %%
-from pathlib import Path
 
-import numpy as np
-import stackview
-from iohub import open_ome_zarr
-from skimage.exposure import rescale_intensity
+import numpy as np  # noqa: E402
+import stackview  # noqa: E402
+from iohub import open_ome_zarr  # noqa: E402
+from skimage.exposure import rescale_intensity  # noqa: E402
 
 try:
     from google.colab import output

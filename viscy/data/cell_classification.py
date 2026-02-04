@@ -11,6 +11,7 @@ from torch.utils.data import DataLoader, Dataset
 
 from viscy.data.hcs import _read_norm_meta
 from viscy.data.triplet import INDEX_COLUMNS
+from viscy.data.typing import AnnotationColumns
 
 
 class ClassificationDataset(Dataset):
@@ -23,6 +24,7 @@ class ClassificationDataset(Dataset):
         transform: Callable | None,
         initial_yx_patch_size: tuple[int, int],
         return_indices: bool = False,
+        label_column: AnnotationColumns = "infection_state",
     ):
         self.plate = plate
         self.z_range = z_range
@@ -42,6 +44,7 @@ class ClassificationDataset(Dataset):
             annotation["y"].between(*y_range, inclusive="neither")
             & annotation["x"].between(*x_range, inclusive="neither")
         ]
+        self.label_column = label_column
 
     def __len__(self):
         return len(self.annotation)
@@ -66,7 +69,7 @@ class ClassificationDataset(Dataset):
         img = (image - norm_meta["mean"]) / norm_meta["std"]
         if self.transform is not None:
             img = self.transform(img)
-        label = torch.tensor(row["infection_state"]).float()[None]
+        label = torch.tensor(row[self.label_column]).float()[None]
         if self.return_indices:
             return img, label, row[INDEX_COLUMNS].to_dict()
         else:
@@ -81,12 +84,13 @@ class ClassificationDataModule(LightningDataModule):
         val_fovs: list[str] | None,
         channel_name: str,
         z_range: tuple[int, int],
-        train_exlude_timepoints: list[int],
+        train_exclude_timepoints: list[int],
         train_transforms: list[Callable] | None,
         val_transforms: list[Callable] | None,
         initial_yx_patch_size: tuple[int, int],
         batch_size: int,
         num_workers: int,
+        label_column: str = "infection_state",
     ):
         super().__init__()
         self.image_path = image_path
@@ -94,12 +98,13 @@ class ClassificationDataModule(LightningDataModule):
         self.val_fovs = val_fovs
         self.channel_name = channel_name
         self.z_range = z_range
-        self.train_exlude_timepoints = train_exlude_timepoints
+        self.train_exclude_timepoints = train_exclude_timepoints
         self.train_transform = Compose(train_transforms)
         self.val_transform = Compose(val_transforms)
         self.initial_yx_patch_size = initial_yx_patch_size
         self.batch_size = batch_size
         self.num_workers = num_workers
+        self.label_column = label_column
 
     def _subset(
         self,
@@ -121,12 +126,21 @@ class ClassificationDataModule(LightningDataModule):
             transform=transform,
             initial_yx_patch_size=self.initial_yx_patch_size,
             return_indices=return_indices,
+            label_column=self.label_column,
         )
 
     def setup(self, stage=None):
         plate = open_ome_zarr(self.image_path)
-        all_fovs = ["/" + name for (name, _) in plate.positions()]
         annotation = pd.read_csv(self.annotation_path)
+        all_fovs = [name for (name, _) in plate.positions()]
+        if annotation["fov_name"].iloc[0].startswith("/"):
+            all_fovs = ["/" + name for name in all_fovs]
+        if all_fovs[0].startswith("/"):
+            if not self.val_fovs[0].startswith("/"):
+                self.val_fovs = ["/" + name for name in self.val_fovs]
+        else:
+            if self.val_fovs[0].startswith("/"):
+                self.val_fovs = [name[1:] for name in self.val_fovs]
         for column in ("t", "y", "x"):
             annotation[column] = annotation[column].astype(int)
         if stage in (None, "fit", "validate"):
@@ -136,7 +150,7 @@ class ClassificationDataModule(LightningDataModule):
                 annotation,
                 train_fovs,
                 transform=self.train_transform,
-                exclude_timepoints=self.train_exlude_timepoints,
+                exclude_timepoints=self.train_exclude_timepoints,
             )
             self.val_dataset = self._subset(
                 plate,

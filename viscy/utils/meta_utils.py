@@ -4,9 +4,10 @@ import sys
 import iohub.ngff as ngff
 import numpy as np
 import pandas as pd
+import tensorstore
+from tqdm import tqdm
 
-import viscy.utils.mp_utils as mp_utils
-from viscy.utils.cli_utils import show_progress_bar
+from viscy.utils.mp_utils import get_val_stats
 
 
 def write_meta_field(position: ngff.Position, metadata, field_name, subfield_name):
@@ -30,7 +31,15 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
     """
     if field_name in position.zattrs:
         if subfield_name in position.zattrs[field_name]:
-            position.zattrs[field_name][subfield_name].update(metadata)
+            # Need to create a new dict and reassign to trigger zarr write
+            updated_subfield = {
+                **position.zattrs[field_name][subfield_name],
+                **metadata,
+            }
+            position.zattrs[field_name] = {
+                **position.zattrs[field_name],
+                subfield_name: updated_subfield,
+            }
         else:
             D1 = position.zattrs[field_name]
             field_metadata = {
@@ -45,24 +54,70 @@ def write_meta_field(position: ngff.Position, metadata, field_name, subfield_nam
         position.zattrs[field_name] = field_metadata
 
 
+def _grid_sample(
+    position: ngff.Position, grid_spacing: int, channel_index: int, num_workers: int
+):
+    return (
+        position["0"]
+        .tensorstore(
+            context=tensorstore.Context(
+                {"data_copy_concurrency": {"limit": num_workers}}
+            )
+        )[:, channel_index, :, ::grid_spacing, ::grid_spacing]
+        .read()
+        .result()
+    )
+
+
+def _grid_sample_timepoint(
+    position: ngff.Position,
+    grid_spacing: int,
+    channel_index: int,
+    timepoint_index: int,
+    num_workers: int,
+):
+    """
+    Sample a specific timepoint from a position using grid sampling.
+
+    :param Position position: NGFF position node object
+    :param int grid_spacing: distance between points in sampling grid
+    :param int channel_index: index of channel to sample
+    :param int timepoint_index: index of timepoint to sample
+    :param int num_workers: number of cpu workers for multiprocessing
+    :return: sampled values for the specified timepoint
+    """
+    return (
+        position["0"]
+        .tensorstore(
+            context=tensorstore.Context(
+                {"data_copy_concurrency": {"limit": num_workers}}
+            )
+        )[timepoint_index, channel_index, :, ::grid_spacing, ::grid_spacing]
+        .read()
+        .result()
+    )
+
+
 def generate_normalization_metadata(
-    zarr_dir,
-    num_workers=4,
-    channel_ids=-1,
-    grid_spacing=32,
+    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32
 ):
     """
     Generate pixel intensity metadata to be later used in on-the-fly normalization
     during training and inference. Sampling is used for efficient estimation of median
-    and interquartile range for intensity values on both a dataset and field-of-view
-    level.
+    and interquartile range for intensity values on both a dataset, field-of-view,
+    and timepoint level.
 
     Normalization values are recorded in the image-level metadata in the corresponding
     position of each zarr_dir store. Format of metadata is as follows:
     {
         channel_idx : {
             dataset_statistics: dataset level normalization values (positive float),
-            fov_statistics: field-of-view level normalization values (positive float)
+            fov_statistics: field-of-view level normalization values (positive float),
+            timepoint_statistics: {
+                "0": timepoint 0 normalization values (positive float),
+                "1": timepoint 1 normalization values (positive float),
+                ...
+            }
         },
         .
         .
@@ -83,60 +138,66 @@ def generate_normalization_metadata(
     elif isinstance(channel_ids, int):
         channel_ids = [channel_ids]
 
+    # Get number of timepoints from first position
+    _, first_position = position_map[0]
+    num_timepoints = first_position["0"].shape[0]
+    print(f"Detected {num_timepoints} timepoints in dataset")
+
     # get arguments for multiprocessed grid sampling
     mp_grid_sampler_args = []
     for _, position in position_map:
         mp_grid_sampler_args.append([position, grid_spacing])
 
     # sample values and use them to get normalization statistics
-    for i, channel in enumerate(channel_ids):
-        show_progress_bar(
-            dataloader=channel_ids,
-            current=i,
-            process="sampling channel values",
-        )
+    for i, channel_index in enumerate(channel_ids):
+        print(f"Sampling channel index {channel_index} ({i + 1}/{len(channel_ids)})")
 
-        channel_name = plate.channel_names[channel]
-        this_channels_args = tuple([args + [channel] for args in mp_grid_sampler_args])
+        channel_name = plate.channel_names[channel_index]
+        dataset_sample_values = []
+        position_and_statistics = []
 
-        # NOTE: Doing sequential mp with pool execution creates synchronization
-        #      points between each step. This could be detrimental to performance
-        positions, fov_sample_values = mp_utils.mp_sample_im_pixels(
-            this_channels_args, num_workers
-        )
-        dataset_sample_values = np.concatenate(
-            [arr.flatten() for arr in fov_sample_values]
-        )
-        fov_level_statistics = mp_utils.mp_get_val_stats(fov_sample_values, num_workers)
-        dataset_level_statistics = mp_utils.get_val_stats(dataset_sample_values)
+        for _, pos in tqdm(position_map, desc="Positions"):
+            samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
+            dataset_sample_values.append(samples)
+            fov_level_statistics = {"fov_statistics": get_val_stats(samples)}
+            position_and_statistics.append((pos, fov_level_statistics))
 
         dataset_statistics = {
-            "dataset_statistics": dataset_level_statistics,
+            "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
         }
 
+        # Compute per-timepoint statistics across all FOVs
+        print(f"Computing per-timepoint statistics for channel {channel_name}")
+        timepoint_statistics = {}
+        for t in tqdm(range(num_timepoints), desc="Timepoints"):
+            timepoint_samples = []
+            for _, pos in position_map:
+                t_samples = _grid_sample_timepoint(
+                    pos, grid_spacing, channel_index, t, num_workers
+                )
+                timepoint_samples.append(t_samples)
+            timepoint_statistics[str(t)] = get_val_stats(np.stack(timepoint_samples))
+
+        # Write plate-level metadata (dataset + timepoint statistics)
         write_meta_field(
             position=plate,
-            metadata=dataset_statistics,
+            metadata=dataset_statistics
+            | {"timepoint_statistics": timepoint_statistics},
             field_name="normalization",
             subfield_name=channel_name,
         )
 
-        for j, pos in enumerate(positions):
-            show_progress_bar(
-                dataloader=position_map,
-                current=j,
-                process=f"calculating channel statistics {channel}/{list(channel_ids)}",
-            )
-            position_statistics = dataset_statistics | {
-                "fov_statistics": fov_level_statistics[j],
-            }
-
+        # Write position-level metadata (dataset + FOV + timepoint statistics)
+        for pos, position_statistics in position_and_statistics:
             write_meta_field(
                 position=pos,
-                metadata=position_statistics,
+                metadata=dataset_statistics
+                | position_statistics
+                | {"timepoint_statistics": timepoint_statistics},
                 field_name="normalization",
                 subfield_name=channel_name,
             )
+
     plate.close()
 
 

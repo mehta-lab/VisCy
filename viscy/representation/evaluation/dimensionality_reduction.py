@@ -10,10 +10,12 @@ from xarray import Dataset
 
 def compute_phate(
     embedding_dataset,
+    scale_embeddings: bool = False,
     n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
     update_dataset: bool = False,
+    random_state: int = 42,
     **phate_kwargs,
 ) -> tuple[object, NDArray]:
     """
@@ -32,6 +34,8 @@ def compute_phate(
         Decay parameter for the Markov operator, by default 40
     update_dataset : bool, optional
         Whether to update the PHATE coordinates in the dataset, by default False
+    random_state : int, optional
+        Random state for reproducibility, by default 42
     phate_kwargs : dict, optional
         Additional keyword arguments for PHATE, by default None
 
@@ -59,11 +63,22 @@ def compute_phate(
         else embedding_dataset
     )
 
+    if scale_embeddings:
+        scaler = StandardScaler()
+        embeddings_scaled = scaler.fit_transform(embeddings)
+    else:
+        embeddings_scaled = embeddings
+
     # Compute PHATE embeddings
     phate_model = phate.PHATE(
-        n_components=n_components, knn=knn, decay=decay, **phate_kwargs
+        n_components=n_components,
+        knn=knn,
+        decay=decay,
+        random_state=random_state,
+        **phate_kwargs,
     )
-    phate_embedding = phate_model.fit_transform(embeddings)
+
+    phate_embedding = phate_model.fit_transform(embeddings_scaled)
 
     # Update dataset if requested
     if update_dataset and isinstance(embedding_dataset, Dataset):
@@ -122,7 +137,7 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
 
     # Add PCA components for features
     for i in range(pc_features.shape[1]):
-        pca_dict[f"PCA{i + 1}"] = pc_features[:, i]
+        pca_dict[f"PC{i + 1}"] = pc_features[:, i]
 
     # Create DataFrame with all components
     pca_df = pd.DataFrame(pca_dict)
@@ -131,12 +146,17 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
 
 
 def _fit_transform_umap(
-    embeddings: NDArray, n_components: int = 2, normalize: bool = True
+    embeddings: NDArray,
+    n_components: int = 2,
+    n_neighbors: int = 15,
+    normalize: bool = True,
 ) -> tuple[umap.UMAP, NDArray]:
     """Fit UMAP model and transform embeddings."""
     if normalize:
         embeddings = StandardScaler().fit_transform(embeddings)
-    umap_model = umap.UMAP(n_components=n_components, random_state=42)
+    umap_model = umap.UMAP(
+        n_components=n_components, n_neighbors=n_neighbors, random_state=42
+    )
     umap_embedding = umap_model.fit_transform(embeddings)
     return umap_model, umap_embedding
 

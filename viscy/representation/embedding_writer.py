@@ -2,6 +2,7 @@ import logging
 from pathlib import Path
 from typing import Any, Dict, Literal, Optional, Sequence
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 import torch
@@ -18,8 +19,44 @@ from viscy.representation.evaluation.dimensionality_reduction import (
     compute_phate,
 )
 
-__all__ = ["read_embedding_dataset", "EmbeddingWriter", "write_embedding_dataset"]
+__all__ = [
+    "read_embedding_dataset",
+    "EmbeddingWriter",
+    "write_embedding_dataset",
+    "get_available_index_columns",
+]
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def get_available_index_columns(
+    dataset: Dataset, dataset_path: str | None = None
+) -> list[str]:
+    """
+    Get available index columns from a dataset with logging for missing columns.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The xarray dataset to check for index columns.
+    dataset_path : str, optional
+        Path to the dataset for logging purposes. If None, uses generic message.
+
+    Returns
+    -------
+    list[str]
+        List of available index columns from INDEX_COLUMNS.
+    """
+    available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
+    missing_cols = set(INDEX_COLUMNS) - set(available_cols)
+
+    if missing_cols:
+        path_msg = f" at {dataset_path}" if dataset_path else ""
+        _logger.warning(
+            f"Dataset{path_msg} is missing index columns: {sorted(missing_cols)}. "
+            "This appears to be a legacy dataset format."
+        )
+
+    return available_cols
 
 
 def read_embedding_dataset(path: Path) -> Dataset:
@@ -38,17 +75,7 @@ def read_embedding_dataset(path: Path) -> Dataset:
         Xarray dataset with features and projections.
     """
     dataset = open_zarr(path)
-    # Check which index columns are present in the dataset
-    available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
-
-    # Warn if any INDEX_COLUMNS are missing
-    missing_cols = set(INDEX_COLUMNS) - set(available_cols)
-    if missing_cols:
-        _logger.warning(
-            f"Dataset at {path} is missing index columns: {sorted(missing_cols)}. "
-            "This appears to be a legacy dataset format."
-        )
-
+    available_cols = get_available_index_columns(dataset, str(path))
     return dataset.set_index(sample=available_cols)
 
 
@@ -70,7 +97,7 @@ def write_embedding_dataset(
     overwrite: bool = False,
 ) -> None:
     """
-    Write embeddings to a zarr store in an Xarray-compatible format.
+    Write embeddings to an AnnData Zarr Store.
 
     Parameters
     ----------
@@ -118,7 +145,12 @@ def write_embedding_dataset(
 
     # Create a copy of the index DataFrame to avoid modifying the original
     ultrack_indices = index_df.copy()
+    ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
     n_samples = len(features)
+
+    adata = ad.AnnData(X=features, obs=ultrack_indices)
+    if projections is not None:
+        adata.obsm["X_projections"] = projections
 
     # Set up default kwargs for each method
     if umap_kwargs:
@@ -130,8 +162,7 @@ def write_embedding_dataset(
 
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
         _, UMAP = _fit_transform_umap(features, **umap_kwargs)
-        for i in range(UMAP.shape[1]):
-            ultrack_indices[f"UMAP{i + 1}"] = UMAP[:, i]
+        adata.obsm["X_umap"] = UMAP
 
     if phate_kwargs:
         # Update with user-provided kwargs
@@ -147,8 +178,7 @@ def write_embedding_dataset(
         try:
             _logger.debug("Computing PHATE")
             _, PHATE = compute_phate(features, **phate_kwargs)
-            for i in range(PHATE.shape[1]):
-                ultrack_indices[f"PHATE{i + 1}"] = PHATE[:, i]
+            adata.obsm["X_phate"] = PHATE
         except Exception as e:
             _logger.warning(f"PHATE computation failed: {str(e)}")
 
@@ -158,27 +188,12 @@ def write_embedding_dataset(
         try:
             _logger.debug("Computing PCA")
             PCA_features, _ = compute_pca(features, **pca_kwargs)
-            for i in range(PCA_features.shape[1]):
-                ultrack_indices[f"PCA{i + 1}"] = PCA_features[:, i]
+            adata.obsm["X_pca"] = PCA_features
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
 
-    # Create multi-index and dataset
-    index = pd.MultiIndex.from_frame(ultrack_indices)
-
-    # Create dataset dictionary with features
-    dataset_dict = {"features": (("sample", "features"), features)}
-
-    # Add projections if provided
-    if projections is not None:
-        dataset_dict["projections"] = (("sample", "projections"), projections)
-
-    # Create the dataset
-    dataset = Dataset(dataset_dict, coords={"sample": index}).reset_index("sample")
-
     _logger.debug(f"Writing dataset to {output_path}")
-    with dataset.to_zarr(output_path, mode="w") as zarr_store:
-        zarr_store.close()
+    adata.write_zarr(output_path)
 
 
 class EmbeddingWriter(BasePredictionWriter):
@@ -208,7 +223,6 @@ class EmbeddingWriter(BasePredictionWriter):
             "knn": 5,
             "decay": 40,
             "n_jobs": -1,
-            "random_state": 42,
         },
         pca_kwargs: dict | None = {"n_components": 8},
         overwrite: bool = False,

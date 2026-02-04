@@ -50,7 +50,7 @@ class ImageNetModule(LightningModule):
             self.model = timm.create_model(model_name, pretrained=True)
             self.model.eval()
         except ImportError:
-            raise ImportError("Please install the timm library: " "pip install timm")
+            raise ImportError("Please install the timm library: pip install timm")
 
     def _reduce_5d_input(self, x: torch.Tensor) -> torch.Tensor:
         """Reduce 5D input (B, C, D, H, W) to 4D (B, C, H, W) using specified methods.
@@ -303,7 +303,7 @@ def main(config, model):
             phate_kwargs = cfg["embedding"]["phate_kwargs"]
 
         if "umap_kwargs" in cfg["embedding"]:
-            umap_kwargs = cfg["embedding"]["umap_kwargs"]
+            cfg["embedding"]["umap_kwargs"]
 
         if "pca_kwargs" in cfg["embedding"]:
             pca_kwargs = cfg["embedding"]["pca_kwargs"]

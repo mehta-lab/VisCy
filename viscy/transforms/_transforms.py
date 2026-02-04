@@ -6,11 +6,8 @@ from kornia.augmentation import RandomAffine3D
 from monai.transforms import (
     MapTransform,
     MultiSampleTrait,
-    RandGaussianNoise,
-    RandGaussianNoised,
     RandomizableTransform,
     ScaleIntensityRangePercentiles,
-    Transform,
 )
 from numpy.typing import DTypeLike
 from torch import Tensor
@@ -165,42 +162,6 @@ class StackChannelsd(MapTransform):
         return results
 
 
-class BatchedZoom(Transform):
-    "Batched zoom transform using ``torch.nn.functional.interpolate``."
-
-    def __init__(
-        self,
-        scale_factor: float | tuple[float, float, float],
-        mode: Literal[
-            "nearest",
-            "nearest-exact",
-            "linear",
-            "bilinear",
-            "bicubic",
-            "trilinear",
-            "area",
-        ],
-        align_corners: bool | None = None,
-        recompute_scale_factor: bool | None = None,
-        antialias: bool = False,
-    ) -> None:
-        self.scale_factor = scale_factor
-        self.mode = mode
-        self.align_corners = align_corners
-        self.recompute_scale_factor = recompute_scale_factor
-        self.antialias = antialias
-
-    def __call__(self, sample: Tensor) -> Tensor:
-        return torch.nn.functional.interpolate(
-            sample,
-            scale_factor=self.scale_factor,
-            mode=self.mode,
-            align_corners=self.align_corners,
-            recompute_scale_factor=self.recompute_scale_factor,
-            antialias=self.antialias,
-        )
-
-
 class BatchedScaleIntensityRangePercentiles(ScaleIntensityRangePercentiles):
     def _normalize(self, img: Tensor) -> Tensor:
         q_low = self.lower / 100.0
@@ -332,36 +293,3 @@ class BatchedRandAffined(MapTransform):
                 d[key] = self.random_affine(data)
             assert d[key].device == data.device
         return d
-
-
-class RandGaussianNoiseTensor(RandGaussianNoise):
-    def randomize(self, img: Tensor, mean: float | None = None) -> None:
-        self._do_transform = self.R.rand() < self.prob
-        if not self._do_transform:
-            return None
-        std = self.R.uniform(0, self.std) if self.sample_std else self.std
-        self.noise = torch.normal(
-            self.mean if mean is None else mean,
-            std,
-            size=img.shape,
-            device=img.device,
-            dtype=img.dtype,
-        )
-
-
-class RandGaussianNoiseTensord(RandGaussianNoised):
-    def __init__(
-        self,
-        keys: str | Iterable[str],
-        prob: float = 0.1,
-        mean: float = 0.0,
-        std: float = 0.1,
-        dtype: DTypeLike = np.float32,
-        allow_missing_keys: bool = False,
-        sample_std: bool = True,
-    ) -> None:
-        MapTransform.__init__(self, keys, allow_missing_keys)
-        RandomizableTransform.__init__(self, prob)
-        self.rand_gaussian_noise = RandGaussianNoiseTensor(
-            mean=mean, std=std, prob=1.0, dtype=dtype, sample_std=sample_std
-        )

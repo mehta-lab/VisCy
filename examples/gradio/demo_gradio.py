@@ -1,10 +1,11 @@
 import gradio as gr
+import numpy as np
 import torch
-from viscy.light.engine import VSUNet
 from huggingface_hub import hf_hub_download
 from numpy.typing import ArrayLike
-import numpy as np
 from skimage import exposure
+
+from viscy.light.engine import VSUNet
 
 
 class VSGradio:
@@ -99,7 +100,7 @@ if __name__ == "__main__":
                     <b>Output:</b> two virtually stained channels: one for the <b>nucleus</b> and one for the <b>cell membrane</b>.
                 </p>
                 <p>
-                    Check out our preprint: 
+                    Check out our preprint:
                     <a href='https://www.biorxiv.org/content/10.1101/2024.05.31.596901' target='_blank'><i>Liu et al.,Robust virtual staining of landmark organelles</i></a>
                 </p>
             </div>

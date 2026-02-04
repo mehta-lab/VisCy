@@ -69,7 +69,7 @@ class TestConvBlock3D(unittest.TestCase):
             input_, output = input_.detach().numpy(), output.detach().numpy()
             exp_out = output
             return input_, output, exp_out
-        except:
+        except Exception:
             input_.detach().numpy()
             return input_, np.ones((1, 1)), np.zeros((1, 1))
 
@@ -102,7 +102,7 @@ class TestConvBlock3D(unittest.TestCase):
                 inputs.append(input_)
                 outputs.append(output)
                 exp_out_shapes.append(exp_out_shape)
-            except:
+            except Exception:
                 inputs.append(input_)
                 outputs.append(False)
                 exp_out_shapes.append(exp_out_shape if pass_ else False)
@@ -136,7 +136,7 @@ class TestConvBlock3D(unittest.TestCase):
             resid_block = ConvBlock3D(in_filters, out_filters, *resid_kwargs)
 
             return block.parameters(), resid_block.parameters()
-        except:
+        except Exception:
             return None, None
 
     def _all_test_configurations(self, test, verbose=True):
@@ -176,7 +176,7 @@ class TestConvBlock3D(unittest.TestCase):
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
                     )
-                except:
+                except Exception:
                     failed_tests[i].append(args)
             elif test == "failing":
                 # test failing shapes
@@ -194,19 +194,19 @@ class TestConvBlock3D(unittest.TestCase):
                     np.testing.assert_array_equal(
                         out_shapes, exp_out_shapes, fail_message
                     )
-                except:
+                except Exception:
                     failed_tests[i].append(args)
             elif test == "residual":
                 # test residual
                 resid_index = 2
-                if args[resid_index] == False:
+                if not args[resid_index]:
                     params, resid_params = self._get_residual_params(args, resid_index)
                     try:
                         fail_message = f"\t Residual params tests failed on config {i + 1} \n args: {args}"
                         np.testing.assert_equal(
                             len(list(params)), len(list(resid_params)), fail_message
                         )
-                    except:
+                    except Exception:
                         failed_tests[i].append(args)
 
             io_utils.show_progress_bar(configs_list, i, process="testing", interval=10)
@@ -215,7 +215,7 @@ class TestConvBlock3D(unittest.TestCase):
                 f"Testing complete! {len(configs_list) - len(failed_tests)}/{len(configs_list)} passed."
             )
             if len(failed_tests) > 0:
-                print(f"Failed messages:")
+                print("Failed messages:")
                 for key in failed_tests:
                     print(f"Config {key}: {failed_tests[key]}")
 

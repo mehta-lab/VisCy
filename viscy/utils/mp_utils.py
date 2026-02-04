@@ -2,7 +2,6 @@ from concurrent.futures import ProcessPoolExecutor
 
 import iohub.ngff as ngff
 import numpy as np
-import scipy.stats
 
 import viscy.utils.image_utils as image_utils
 import viscy.utils.masks as mask_utils
@@ -260,63 +259,21 @@ def get_val_stats(sample_values):
                                         indices
     :return dict meta_row: Dict with intensity data for image
     """
-
+    percentiles = [1, 5, 25, 50, 75, 95, 99]
+    percentile_values = {
+        k: float(v)
+        for k, v in zip(percentiles, np.nanpercentile(sample_values, percentiles))
+    }
     meta_row = {
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),
-        "median": float(np.nanmedian(sample_values)),
-        "iqr": float(scipy.stats.iqr(sample_values)),
+        "median": percentile_values[50],
+        "iqr": percentile_values[75] - percentile_values[25],
+        "p5": percentile_values[5],
+        "p95": percentile_values[95],
+        "p95_p5": percentile_values[95] - percentile_values[5],
+        "p1": percentile_values[1],
+        "p99": percentile_values[99],
+        "p99_p1": percentile_values[99] - percentile_values[1],
     }
     return meta_row
-
-
-def mp_sample_im_pixels(fn_args, workers):
-    """Read and computes statistics of images with multiprocessing
-
-    :param list of tuple fn_args: list with tuples of function arguments
-    :param int workers: max number of workers
-    :return: list of paths and corresponding returned df from get_im_stats
-    """
-
-    with ProcessPoolExecutor(workers) as ex:
-        # can't use map directly as it works only with single arg functions
-        res = ex.map(sample_im_pixels, *zip(*fn_args))
-    return list(map(list, zip(*list(res))))
-
-
-def sample_im_pixels(
-    position: ngff.Position,
-    grid_spacing,
-    channel,
-):
-    # TODO move out of mp utils into normalization utils
-    """
-    Read and computes statistics of images for each point in a grid.
-    Grid spacing determines distance in pixels between grid points
-    for rows and cols.
-    By default, samples from every time position and every z-depth, and
-    assumes that the data in the zarr store is stored in [T,C,Z,Y,X] format,
-    for time, channel, z, y, x.
-
-    :param Position zarr_dir: NGFF position node object
-    :param int grid_spacing: spacing of sampling grid in x and y
-    :param int channel: channel to sample from
-
-    :return list meta_rows: Dicts with intensity data for each grid point
-    """
-    image_zarr = position.data
-
-    all_sample_values = []
-    all_time_indices = list(range(image_zarr.shape[0]))
-    all_z_indices = list(range(image_zarr.shape[2]))
-
-    for time_index in all_time_indices:
-        for z_index in all_z_indices:
-            image_slice = image_zarr[time_index, channel, z_index, :, :]
-            _, _, sample_values = image_utils.grid_sample_pixel_values(
-                image_slice, grid_spacing
-            )
-            all_sample_values.append(sample_values)
-    sample_values = np.stack(all_sample_values, 0).flatten()
-
-    return position, sample_values

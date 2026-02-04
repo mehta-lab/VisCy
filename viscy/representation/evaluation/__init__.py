@@ -17,6 +17,9 @@ https://github.com/mehta-lab/dynacontrast/blob/master/analysis/gmm.py
 import pandas as pd
 
 from viscy.data.triplet import TripletDataModule
+from viscy.representation.evaluation.annotation import load_annotation_anndata
+
+__all__ = ["load_annotation", "load_annotation_anndata", "dataset_of_tracks"]
 
 
 def load_annotation(da, path, name, categories: dict | None = None):
@@ -42,19 +45,18 @@ def load_annotation(da, path, name, categories: dict | None = None):
     # Read the annotation CSV file
     annotation = pd.read_csv(path)
 
-    # Add a leading slash to 'fov name' column and set it as 'fov_name'
-    annotation["fov_name"] = "/" + annotation["fov_name"]
-
     # Set the index of the annotation DataFrame to ['fov_name', 'id']
+    annotation["fov_name"] = annotation["fov_name"].str.strip("/")
     annotation = annotation.set_index(["fov_name", "id"])
 
     # Create a MultiIndex from the dataset array's 'fov_name' and 'id' values
     mi = pd.MultiIndex.from_arrays(
-        [da["fov_name"].values, da["id"].values], names=["fov_name", "id"]
+        [da["fov_name"].to_pandas().str.strip("/"), da["id"].values],
+        names=["fov_name", "id"],
     )
 
-    # Select the annotations corresponding to the MultiIndex
-    selected = annotation.loc[mi][name]
+    # This will return NaN for observations that don't have annotations, then just drop'em
+    selected = annotation.reindex(mi)[name].dropna()
 
     # If categories are provided, rename the categories in the selected annotations
     if categories:

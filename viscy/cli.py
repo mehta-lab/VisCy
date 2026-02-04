@@ -22,6 +22,7 @@ class VisCyCLI(LightningCLI):
         subcommands["preprocess"] = subcommand_base_args
         subcommands["export"] = subcommand_base_args
         subcommands["precompute"] = subcommand_base_args
+        subcommands["convert_to_anndata"] = subcommand_base_args
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
@@ -35,6 +36,13 @@ class VisCyCLI(LightningCLI):
                 )
             }
         )
+
+    def _parse_ckpt_path(self) -> None:
+        try:
+            return super()._parse_ckpt_path()
+        except SystemExit:
+            # FIXME: https://github.com/Lightning-AI/pytorch-lightning/issues/21255
+            return None
 
 
 def _setup_environment() -> None:
@@ -51,8 +59,17 @@ def main() -> None:
     Set default random seed to 42.
     """
     _setup_environment()
-    require_model = {"preprocess", "precompute"}.isdisjoint(sys.argv)
-    require_data = {"preprocess", "precompute", "export"}.isdisjoint(sys.argv)
+    require_model = {
+        "preprocess",
+        "precompute",
+        "convert_to_anndata",
+    }.isdisjoint(sys.argv)
+    require_data = {
+        "preprocess",
+        "precompute",
+        "export",
+        "convert_to_anndata",
+    }.isdisjoint(sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,
         datamodule_class=LightningDataModule if require_data else None,

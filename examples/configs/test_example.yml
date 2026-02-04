@@ -66,5 +66,6 @@ data:
       - 256
     caching: false
     ground_truth_masks: null
+  array_key: "0"
 ckpt_path: null
 verbose: true

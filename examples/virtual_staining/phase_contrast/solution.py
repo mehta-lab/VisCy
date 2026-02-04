@@ -14,18 +14,19 @@
 # %% tags=[]
 # Imports
 from pathlib import Path
-from iohub import open_ome_zarr
-from viscy.data.hcs import HCSDataModule
-
-# Viscy classes for the trainer and model
-from viscy.translation.engine import VSUNet
-from viscy.trainer import VisCyTrainer
-from viscy.transforms import NormalizeSampled
-from lightning.pytorch import seed_everything
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from iohub import open_ome_zarr
+from lightning.pytorch import seed_everything
+
+from viscy.data.hcs import HCSDataModule
+from viscy.trainer import VisCyTrainer
+from viscy.transforms import NormalizeSampled
+
+# Viscy classes for the trainer and model
+from viscy.translation.engine import VSUNet
 
 # seed random number generators for reproducibility.
 seed_everything(42, workers=True)
