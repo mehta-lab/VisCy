@@ -1,9 +1,11 @@
+import numpy as np
 import pytest
+import torch
 from iohub import open_ome_zarr
 
 from viscy.data.hcs import HCSDataModule
 from viscy.trainer import VisCyTrainer
-from viscy.translation.engine import VSUNet
+from viscy.translation.engine import AugmentedPredictionVSUNet, VSUNet
 from viscy.translation.predict_writer import HCSPredictionWriter, _pad_shape
 
 
@@ -67,3 +69,67 @@ def test_predict_writer(preprocessed_hcs_dataset, tmp_path, array_key):
         for _, pos in result.positions():
             assert pos[array_key][:].any()
             assert pos[array_key].shape == expected_shape
+
+
+def test_blend_in_consistency():
+    """Verify _blend_in produces identical results for torch and numpy inputs."""
+    from viscy.translation.engine import _blend_in
+
+    depth = 5
+    shape_4d = (2, depth, 8, 8)  # C, Z, Y, X (numpy from HCSPredictionWriter)
+
+    np.random.seed(42)
+    old_np = np.random.rand(*shape_4d).astype(np.float32)
+    new_np = np.random.rand(*shape_4d).astype(np.float32)
+    old_torch = torch.from_numpy(old_np).unsqueeze(0)  # Add batch dim
+    new_torch = torch.from_numpy(new_np).unsqueeze(0)
+
+    z_slice = slice(2, 2 + depth)
+
+    result_np = _blend_in(old_np, new_np, z_slice)
+    result_torch = _blend_in(old_torch, new_torch, z_slice)
+
+    np.testing.assert_allclose(
+        result_np, result_torch.squeeze(0).numpy(), rtol=1e-5, atol=1e-5
+    )
+
+
+def test_predict_sliding_windows_output_shape(preprocessed_hcs_dataset):
+    """Verify predict_sliding_windows produces correct output shape."""
+    z_window_size = 5
+    data_path = preprocessed_hcs_dataset
+    channel_split = 2
+
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+        first_pos = next(dataset.positions())[1]
+        source_data = first_pos["0"][0:1, :channel_split]
+        source_tensor = torch.from_numpy(source_data).float()
+
+    model = VSUNet(
+        architecture="fcmae",
+        model_config=dict(
+            in_channels=channel_split,
+            out_channels=len(channel_names) - channel_split,
+            encoder_blocks=[2, 2, 2, 2],
+            dims=[4, 8, 16, 32],
+            decoder_conv_blocks=2,
+            stem_kernel_size=[z_window_size, 4, 4],
+            in_stack_depth=z_window_size,
+            pretraining=False,
+        ),
+    )
+
+    vs = AugmentedPredictionVSUNet(model=model.model)
+
+    with torch.inference_mode():
+        output = vs.predict_sliding_windows(
+            source_tensor,
+            out_channel=len(channel_names) - channel_split,
+            step=1,
+        )
+
+    expected_shape = (1, len(channel_names) - channel_split, *source_tensor.shape[2:])
+    assert output.shape == expected_shape, (
+        f"Expected {expected_shape}, got {output.shape}"
+    )

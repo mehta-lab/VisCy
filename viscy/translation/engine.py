@@ -46,6 +46,56 @@ _UNET_ARCHITECTURE = {
 _logger = logging.getLogger("lightning.pytorch")
 
 
+def _blend_in(
+    old_stack: Union[torch.Tensor, np.ndarray],
+    new_stack: Union[torch.Tensor, np.ndarray],
+    z_slice: slice,
+) -> Union[torch.Tensor, np.ndarray]:
+    """
+    Blend a new stack of images into an old stack over a specified range of slices.
+
+    This function blends the `new_stack` of images into the `old_stack` over the range
+    specified by `z_slice`. The blending is done using a weighted average where the
+    weights are determined by the position within the range of slices. If the start
+    of `z_slice` is 0, the function returns the `new_stack` unchanged.
+
+    Parameters
+    ----------
+    old_stack : torch.Tensor or np.ndarray
+        The original stack of images with shape (C, Z, Y, X) or (B, C, Z, Y, X).
+    new_stack : torch.Tensor or np.ndarray
+        The new stack of images to blend into the original stack.
+    z_slice : slice
+        A slice object indicating the range of slices over which to perform the blending.
+        The start and stop attributes of the slice determine the range.
+
+    Returns
+    -------
+    torch.Tensor or np.ndarray
+        The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
+    """
+    if z_slice.start == 0:
+        return new_stack
+    depth = z_slice.stop - z_slice.start
+    samples = min(z_slice.start + 1, depth)
+    factors = []
+    for i in reversed(list(range(depth))):
+        factors.append(min(i + 1, samples))
+    _logger.debug(f"Blending with factors {factors}.")
+
+    is_torch = isinstance(old_stack, torch.Tensor)
+    if is_torch:
+        factors = torch.tensor(factors, dtype=old_stack.dtype, device=old_stack.device)
+        # Reshape for broadcasting: (B, C, Z, Y, X) -> factors shape (1, 1, Z, 1, 1)
+        factors = factors.view(1, 1, -1, 1, 1)
+    else:
+        factors = np.array(factors)
+        # Reshape for 4D (C, Z, Y, X) numpy arrays from HCSPredictionWriter
+        factors = factors[np.newaxis, :, np.newaxis, np.newaxis]
+
+    return old_stack * (factors - 1) / factors + new_stack / factors
+
+
 class MixedLoss(nn.Module):
     """Mixed reconstruction loss.
     Adapted from Zhao et al, https://arxiv.org/pdf/1511.08861.pdf
@@ -537,7 +587,7 @@ class AugmentedPredictionVSUNet(LightningModule):
     ) -> torch.Tensor:
         """
         Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
-        along the Z dimension with overlap and average blending.
+        along the Z dimension with overlap and linear feathering blending.
 
         Parameters
         ----------
@@ -565,23 +615,20 @@ class AugmentedPredictionVSUNet(LightningModule):
             raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
 
         out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
-        weights = x.new_zeros((1, 1, depth, 1, 1))
 
-        for start in range(0, depth, step):
-            end = min(start + in_stack_depth, depth)
+        # Iterate only over valid starting positions where full window fits
+        # This matches SlidingWindowDataset behavior: depth - in_stack_depth + 1 windows
+        for start in range(0, depth - in_stack_depth + 1, step):
+            end = start + in_stack_depth
             slab = x[:, :, start:end]
 
-            if end - start < in_stack_depth:
-                pad_z = in_stack_depth - (end - start)
-                slab = F.pad(slab, (0, 0, 0, 0, 0, pad_z))
-
             pred = self._predict_with_tta(slab)
-            pred = pred[:, :, : end - start]  # Trim if Z was padded
 
-            out_tensor[:, :, start:end] += pred
-            weights[:, :, start:end] += 1.0
+            z_slice = slice(start, end)
+            old_stack = out_tensor[:, :, z_slice]
+            out_tensor[:, :, z_slice] = _blend_in(old_stack, pred, z_slice)
 
-        return out_tensor / weights
+        return out_tensor
 
     def setup(self, stage: str) -> None:
         if stage != "predict":
