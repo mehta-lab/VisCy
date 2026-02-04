@@ -1,0 +1,70 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "viscy-transforms"
+description = "Image transforms for virtual staining microscopy"
+readme = "README.md"
+keywords = [
+  "deep learning",
+  "image transforms",
+  "microscopy",
+  "pytorch",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "kornia>=0.8.2",
+  "monai>=1.5.2",
+  "numpy>=2.4.1",
+  "torch>=2.10",
+]
+
+optional-dependencies.notebook = [
+  "cmap>=0.7",
+  "jupyterlab>=4.5.3",
+  "matplotlib>=3.10.8",
+  "pooch>=1.9",
+  "scikit-image>=0.26",
+]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+# Documentation = "https://mehta-lab.github.io/VisCy/" # TODO: add documentation site at the end of monorepo migration
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+[dependency-groups]
+dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
+test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+jupyter = [
+  "ipykernel>=7.1",
+  "jupyterlab>=4.5.3",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/viscy_transforms" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-transforms-"
+fallback-version = "0.0.0"

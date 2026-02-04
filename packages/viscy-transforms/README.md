@@ -1,0 +1,64 @@
+# viscy-transforms
+
+Image transforms for virtual staining microscopy.
+
+Part of the [VisCy](https://github.com/mehta-lab/VisCy) project.
+
+## Installation
+
+### From PyPI (when published)
+
+```bash
+pip install viscy-transforms
+```
+
+### For development (from monorepo root)
+
+```bash
+# Using uv (recommended)
+uv pip install -e packages/viscy-transforms
+
+# Or via workspace sync
+uv sync --package viscy-transforms
+```
+
+## Usage
+
+```python
+from viscy_transforms import NormalizeSampled, BatchedRandAffined
+
+# Transforms follow MONAI dictionary transform pattern
+# See documentation for full API reference
+```
+
+## Features
+
+- PyTorch-based image transforms optimized for microscopy data
+- MONAI Dictionary transform compatibility for DataLoader pipelines
+- Kornia-accelerated augmentations (affine, noise, blur)
+- Specialized transforms for virtual staining workflows
+
+## Examples
+
+To run the example notebook, install with the `notebook` extra:
+
+```bash
+pip install viscy-transforms[notebook]
+```
+
+See the [batched transforms benchmark notebook](docs/examples/batched_transforms.ipynb) for a comparison of batched GPU transforms vs standard MONAI transforms.
+
+## Dependencies
+
+- `torch>=2.4.1`
+- `kornia`
+- `monai>=1.4`
+- `numpy`
+
+## Documentation
+
+In the works!
+
+## License
+
+BSD-3-Clause - see [LICENSE](../../LICENSE) in repository root.
