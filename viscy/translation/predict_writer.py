@@ -51,7 +51,7 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
     weights are determined by the position within the range of slices. If the start
     of `z_slice` is 0, the function returns the `new_stack` unchanged.
 
-    Parameters:
+    Parameters
     ----------
     old_stack : NDArray
         The original stack of images to be blended.
@@ -61,12 +61,11 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
         A slice object indicating the range of slices over which to perform the blending.
         The start and stop attributes of the slice determine the range.
 
-    Returns:
+    Returns
     -------
     NDArray
         The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
     """
-
     if z_slice.start == 0:
         return new_stack
     depth = z_slice.stop - z_slice.start
@@ -76,7 +75,7 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
     for i in reversed(list(range(depth))):
         factors.append(min(i + 1, samples))
     _logger.debug(f"Blending with factors {factors}.")
-    factors = np.array(factors)[np.newaxis :, np.newaxis, np.newaxis]
+    factors = np.array(factors)[np.newaxis, :, np.newaxis, np.newaxis]
     return old_stack * (factors - 1) / factors + new_stack / factors
 
 

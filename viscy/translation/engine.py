@@ -553,7 +553,6 @@ class AugmentedPredictionVSUNet(LightningModule):
         torch.Tensor
             Output tensor of shape (B, out_channel, Z, Y, X).
         """
-
         if x.ndim != 5:
             raise ValueError(
                 f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}"
@@ -577,13 +576,12 @@ class AugmentedPredictionVSUNet(LightningModule):
                 slab = F.pad(slab, (0, 0, 0, 0, 0, pad_z))
 
             pred = self._predict_with_tta(slab)
-
             pred = pred[:, :, : end - start]  # Trim if Z was padded
+
             out_tensor[:, :, start:end] += pred
             weights[:, :, start:end] += 1.0
 
-        blended = out_tensor / weights
-        return blended
+        return out_tensor / weights
 
     def setup(self, stage: str) -> None:
         if stage != "predict":
