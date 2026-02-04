@@ -1,0 +1,10 @@
+# Extras configuration for debugging and development
+
+# Ignore Python warnings
+ignore_warnings: False
+
+# Prompt for tags if not specified (prevents untagged experiments)
+enforce_tags: True
+
+# Print config tree at startup using Rich
+print_config: True

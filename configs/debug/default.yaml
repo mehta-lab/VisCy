@@ -1,0 +1,23 @@
+# @package _global_
+
+# Debug configuration for quick testing
+# Enable with: viscy-train debug=default
+
+defaults:
+  - override /trainer: default
+
+# Fast training settings for debugging
+trainer:
+  max_epochs: 1
+  accelerator: cpu
+  devices: 1
+  fast_dev_run: True
+
+# Minimal data settings
+data:
+  num_workers: 0
+  batch_size: 4
+
+# Print config for debugging
+extras:
+  print_config: True

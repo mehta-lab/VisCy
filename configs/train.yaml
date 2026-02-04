@@ -1,0 +1,39 @@
+# @package _global_
+
+# Main training configuration following lightning-hydra-template pattern
+
+defaults:
+  - _self_
+  - data: ???               # Must be specified (hcs, triplet, etc.)
+  - model: ???              # Must be specified (vsunet, contrastive, etc.)
+  - callbacks: default
+  - logger: tensorboard
+  - trainer: default
+  - augmentation: ???       # Must be specified
+  - normalization: ???      # Must be specified
+  - paths: default
+  - extras: default
+  - hydra: default
+  - experiment: null        # Override with experiment=<name>
+  - debug: null             # Enable with debug=default
+  - local: null             # Machine-specific settings (gitignored)
+
+# Task name determines output directory structure
+task_name: "train"
+
+# Tags for experiment tracking and filtering
+tags: ["dev"]
+
+# Random seed for reproducibility
+seed: 42
+
+# Control execution flow
+train: True   # Run trainer.fit()
+test: True    # Run trainer.test()
+predict: False  # Run trainer.predict()
+
+# Checkpoint path for resuming training
+ckpt_path: null
+
+# Metric to optimize for hyperparameter sweeps (e.g., Optuna)
+optimized_metric: "val/loss"

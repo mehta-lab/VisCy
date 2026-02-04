@@ -1,0 +1,51 @@
+# TripletDataModule configuration for contrastive learning (DynaCLR)
+_target_: viscy.data.triplet.TripletDataModule
+
+# Paths (must be specified via CLI)
+data_path: ???
+tracks_path: ???
+
+# Channel configuration
+source_channel: ???  # Must be specified, e.g., ["Phase3D"]
+
+# Z-slice configuration
+z_range: ???  # Must be specified, e.g., [10, 25] for 15 slices
+
+# Patch sizes
+initial_yx_patch_size: [512, 512]
+final_yx_patch_size: [224, 224]
+
+# Training configuration
+split_ratio: 0.8
+batch_size: 16
+num_workers: 1  # More than 1 not recommended per code warning
+
+# Transforms (will be composed from config groups)
+normalizations: []
+augmentations: []
+augment_validation: true
+
+# Caching
+caching: false
+cache_pool_bytes: 0
+
+# Fit configuration
+fit_include_wells: null
+fit_exclude_fovs: null
+
+# Prediction configuration
+predict_cells: false
+include_fov_names: null
+include_track_ids: null
+
+# Triplet sampling
+time_interval: any  # Sample negative from any time point
+return_negative: false  # NT-Xent doesn't use explicit negatives
+
+# DataLoader configuration
+persistent_workers: false
+prefetch_factor: null
+pin_memory: false
+
+# Z window size (inferred from z_range if not specified)
+z_window_size: null

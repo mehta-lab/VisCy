@@ -21,6 +21,7 @@ dynamic = [ "version" ]
 
 dependencies = [
   "anndata>=0.12.2",
+  "hydra-core>=1.3",
   "iohub[tensorstore]>=0.3a2",
   "jsonargparse[signatures]>=4.20.1",
   "kornia",
@@ -29,6 +30,7 @@ dependencies = [
   "monai>=1.4",
   "numpy",
   "pytorch-metric-learning>2",
+  "rich>=13",
   "scikit-image",
   "tensorboard>=2.13",
   "timm>=0.9.5",
@@ -62,16 +64,17 @@ optional-dependencies.phate = [
 optional-dependencies.visual = [
   "cmap",
   "dash",
+  "gradio>=5.49.1",
+
   "graphviz",
   "ipykernel",
   "nbformat",
   "plotly",
   "seaborn",
   "torchview",
-  "gradio>=5.49.1",
-
 ]
-scripts.viscy = "viscy.cli:main"
+scripts.viscy-legacy = "viscy.cli:main"
+scripts.viscy-train = "viscy.train:main"
 
 [tool.setuptools]
 packages = [ "viscy" ]
@@ -88,3 +91,12 @@ lint.per-file-ignores."examples/**/*.ipynb" = [ "E402" ]
 lint.per-file-ignores."examples/**/*.py" = [ "E402", "F821" ]
 lint.per-file-ignores."tests/**/*.py" = [ "E402" ]
 lint.isort.known-first-party = [ "viscy" ]
+
+[tool.pytest.ini_options]
+minversion = "6.0"
+testpaths = [ "tests" ]
+markers = [
+  "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
+# Run fast tests by default, use -m slow to run slow tests
+addopts = "-v --strict-markers"

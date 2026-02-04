@@ -1,0 +1,8 @@
+# Project paths configuration
+# Uses environment variables and Hydra runtime values
+
+root_dir: ${oc.env:PROJECT_ROOT,${hydra:runtime.cwd}}
+data_dir: ${paths.root_dir}/data/
+log_dir: ${paths.root_dir}/logs/
+output_dir: ${hydra:runtime.output_dir}
+work_dir: ${hydra:runtime.cwd}
