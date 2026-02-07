@@ -92,6 +92,7 @@ class ContrastiveModule(LightningModule):
     def _log_metrics(
         self, loss, anchor, positive, stage: Literal["train", "val"], negative=None
     ):
+        batch_size = anchor.size(0)
         self.log(
             f"loss/{stage}",
             loss.to(self.device),
@@ -100,6 +101,7 @@ class ContrastiveModule(LightningModule):
             prog_bar=True,
             logger=True,
             sync_dist=True,
+            batch_size=batch_size,
         )
         cosine_sim_pos = F.cosine_similarity(anchor, positive, dim=1).mean()
         euclidean_dist_pos = F.pairwise_distance(anchor, positive).mean()
@@ -164,6 +166,7 @@ class ContrastiveModule(LightningModule):
             on_epoch=True,
             logger=True,
             sync_dist=True,
+            batch_size=batch_size,
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
