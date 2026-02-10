@@ -1,0 +1,42 @@
+# Example configuration file for temporal smoothness evaluation
+# This config evaluates and compares multiple representation learning models
+
+models:
+  # List of models to evaluate
+  # Each model requires a path to the zarr file and a label for display
+  - path: /hpc/projects/organelle_phenotyping/models/bag_of_channels/h2b_caax_tomm_sec61_g3bp1_sensor_phase/linear_classifier/infection/model_2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/train/phase3d_ckpt32.zarr
+    label: DynaCLRv3
+
+  # Add more models to compare
+  # - path: /path/to/imagenet_model.zarr
+  #   label: ImageNet-ConvNext
+  # - path: /path/to/sam2_model.zarr
+  #   label: SAM2
+
+evaluation:
+  # Distance metric to use for computing embeddings similarity
+  # Options: "cosine" (recommended) or "euclidean"
+  distance_metric: cosine
+
+  # Temporal offsets to compute (e.g., [1] for t→t+1, [1,2,3] for t→t+1,t+2,t+3)
+  # All offsets are aggregated for the analysis
+  time_offsets: [1]
+
+  # Output directory for results (plots and CSV files)
+  output_dir: ./results/smoothness
+
+  # Output format for summary table
+  # Options: "markdown" (default), "csv", "json"
+  output_format: markdown
+
+  # Whether to save individual distribution plots for each model
+  save_plots: true
+
+  # Whether to save full distributions (can be large for many samples)
+  save_distributions: false
+
+  # Whether to use memory-optimized computation (recommended for >50K samples)
+  use_optimized: true
+
+  # Print verbose progress messages
+  verbose: true

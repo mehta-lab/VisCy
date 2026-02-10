@@ -136,7 +136,7 @@ def compute_dtw_matrix(s1, s2):
         best_path: The optimal warping path
     """
     # Compute pairwise distances between all timepoints
-    distance_matrix = cdist(s1, s2)
+    distance_matrix = cdist(s1, s2, metric="cosine")
 
     n, m = distance_matrix.shape
 
