@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import anndata as ad
 import numpy as np
 import pandas as pd
 from iohub import open_ome_zarr
@@ -192,3 +193,53 @@ def tracks_with_gaps_dataset(tmp_path_factory: TempPathFactory) -> Path:
         tracks_df.to_csv(dataset_path / fov_name / "tracks.csv", index=False)
 
     return dataset_path
+
+
+@fixture(scope="function")
+def annotated_adata() -> ad.AnnData:
+    """Provides an in-memory AnnData with 60 samples, 16 features, and annotations."""
+    rng = np.random.default_rng(42)
+    n_samples = 60
+    n_features = 16
+
+    X = rng.standard_normal((n_samples, n_features)).astype(np.float32)
+
+    fov_names = [f"A/{(i % 4) + 1}/0" for i in range(n_samples)]
+    labels = (["alive"] * 20) + (["dead"] * 20) + (["apoptotic"] * 20)
+
+    obs = pd.DataFrame(
+        {
+            "fov_name": fov_names,
+            "id": np.arange(n_samples),
+            "t": rng.integers(0, 10, size=n_samples),
+            "track_id": rng.integers(0, 5, size=n_samples),
+            "parent_track_id": np.full(n_samples, -1),
+            "parent_id": np.full(n_samples, -1),
+            "x": rng.integers(0, 256, size=n_samples),
+            "y": rng.integers(0, 256, size=n_samples),
+            "cell_death_state": labels,
+        }
+    )
+
+    return ad.AnnData(X=X, obs=obs)
+
+
+@fixture(scope="function")
+def annotated_adata_zarr(tmp_path_factory: TempPathFactory, annotated_adata) -> dict:
+    """Writes annotated_adata to zarr and a matching annotations CSV.
+
+    Returns a dict with 'embeddings' and 'annotations' paths.
+    """
+    base_dir = tmp_path_factory.mktemp("annotated_data")
+
+    zarr_path = base_dir / "embeddings.zarr"
+    adata_disk = annotated_adata.copy()
+    cols_for_csv = ["fov_name", "id", "cell_death_state"]
+    annotations_df = adata_disk.obs[cols_for_csv].copy()
+    adata_disk.obs = adata_disk.obs.drop(columns=["cell_death_state"])
+    adata_disk.write_zarr(zarr_path)
+
+    csv_path = base_dir / "annotations.csv"
+    annotations_df.to_csv(csv_path, index=False)
+
+    return {"embeddings": zarr_path, "annotations": csv_path}
