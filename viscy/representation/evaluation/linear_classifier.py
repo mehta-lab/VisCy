@@ -447,12 +447,14 @@ def save_pipeline_to_wandb(
         entity=wandb_entity,
         job_type=f"linear-classifier-{task}-{input_channel}",
         name=model_name,
+        group=model_name,
         config=config,
         tags=tags or [],
     )
 
-    wandb.log(metrics)
-    print("\n✓ Logged metrics to wandb:")
+    for key, value in metrics.items():
+        run.summary[key] = value
+    print("\n✓ Logged metrics to wandb summary:")
     for metric_name, metric_value in metrics.items():
         print(f"  {metric_name}: {metric_value:.3f}")
 
@@ -482,11 +484,15 @@ def save_pipeline_to_wandb(
             artifact.add_file(str(pca_filename))
             print("✓ PCA saved to artifact")
 
-        run.log_artifact(artifact)
+        logged_artifact = run.log_artifact(artifact)
+        logged_artifact.wait()
+        artifact_version = logged_artifact.version
+        run.summary["artifact_version"] = artifact_version
+        run.name = f"{model_name}-{artifact_version}"
 
     run.finish()
 
-    print(f"✓ Model logged to wandb: {model_name}")
+    print(f"✓ Model logged to wandb: {model_name}:{artifact_version}")
     print("=" * 60)
 
     return model_name
