@@ -22,7 +22,9 @@ embeddings_dir = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics"
 annotations_dir = Path("/hpc/projects/organelle_phenotyping/datasets/annotations")
 model = "DynaCLR-2D-Bag*Channels-timeaware"
 version = "v3"
-output_dir = Path("configs/generated")
+output_dir = Path(
+    "/hpc/projects/organelle_phenotyping/models/linear_classifiers/configs"
+)
 wandb_project = "DynaCLR-2D-linearclassifiers"
 
 # %%
@@ -100,3 +102,5 @@ for entry in generated:
     with open(out_path, "w") as f:
         yaml.dump(entry["config"], f, default_flow_style=False, sort_keys=False)
     print(f"Wrote {out_path}")
+
+# %%

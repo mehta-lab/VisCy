@@ -31,7 +31,7 @@ class LazyCommand(click.Command):
     def get_params(self, ctx):
         """Get parameters from the real command."""
         real_cmd = self._load_real_command()
-        return real_cmd.params
+        return real_cmd.get_params(ctx)
 
 
 # Command registry
@@ -51,7 +51,10 @@ COMMANDS = [
 ]
 
 
-@click.group()
+CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
+
+
+@click.group(context_settings=CONTEXT_SETTINGS)
 def dynaclr():
     """DynaCLR evaluation and analysis tools."""
     pass

@@ -57,8 +57,9 @@ def format_metrics_markdown(metrics: dict) -> str:
     return "\n".join(lines)
 
 
-@click.command()
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
 @click.option(
+    "-c",
     "--config",
     type=click.Path(exists=True, path_type=Path),
     required=True,
