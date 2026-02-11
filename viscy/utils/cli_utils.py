@@ -1,9 +1,11 @@
 import collections
 import os
 import re
+from pathlib import Path
 
 import numpy as np
 import torch
+import yaml
 from PIL import Image
 
 
@@ -78,6 +80,122 @@ def show_progress_bar(dataloader, current, process="training", interval=1):
         print(output_string, end="\r")
     else:
         print(output_string)
+
+
+def format_markdown_table(
+    data: dict | list[dict], title: str = None, headers: list[str] = None
+) -> str:
+    """Format data as a markdown table.
+
+    Parameters
+    ----------
+    data : dict | list[dict]
+        Data to format. If dict, will create two columns (key, value).
+        If list of dicts, each dict becomes a row with columns from headers or dict keys.
+    title : str, optional
+        Optional title to add above the table.
+    headers : list[str], optional
+        Column headers. If None and data is dict, uses ["Metric", "Value"].
+        If None and data is list[dict], uses keys from first dict.
+
+    Returns
+    -------
+    str
+        Markdown-formatted table.
+
+    Examples
+    --------
+    >>> metrics = {"accuracy": 0.95, "precision": 0.92}
+    >>> print(format_markdown_table(metrics, title="Results"))
+    ## Results
+
+    | Metric | Value |
+    |--------|-------|
+    | Accuracy | 0.95 |
+    | Precision | 0.92 |
+
+    >>> data = [{"name": "train", "loss": 0.1}, {"name": "val", "loss": 0.2}]
+    >>> print(format_markdown_table(data, headers=["Split", "Loss"]))
+    | Split | Loss |
+    |-------|------|
+    | train | 0.1 |
+    | val | 0.2 |
+    """
+    lines = []
+
+    if title:
+        lines.append(f"## {title}")
+        lines.append("")
+
+    # Handle dict input (key-value pairs)
+    if isinstance(data, dict):
+        if headers is None:
+            headers = ["Metric", "Value"]
+
+        # Create header
+        lines.append(f"| {' | '.join(headers)} |")
+        lines.append(f"|{'|'.join(['---' + '-' * len(h) for h in headers])}|")
+
+        # Add rows
+        for key, value in data.items():
+            formatted_key = str(key).replace("_", " ").title()
+            if isinstance(value, float):
+                formatted_value = f"{value:.3f}"
+            else:
+                formatted_value = str(value)
+            lines.append(f"| {formatted_key} | {formatted_value} |")
+
+    # Handle list of dicts input (tabular data)
+    elif isinstance(data, list) and len(data) > 0 and isinstance(data[0], dict):
+        if headers is None:
+            headers = list(data[0].keys())
+
+        # Create header
+        header_titles = [str(h).replace("_", " ").title() for h in headers]
+        lines.append(f"| {' | '.join(header_titles)} |")
+        lines.append(f"|{'|'.join(['---' + '-' * len(h) for h in header_titles])}|")
+
+        # Add rows
+        for row in data:
+            values = []
+            for key in headers:
+                value = row.get(key, "")
+                if isinstance(value, float):
+                    values.append(f"{value:.3f}")
+                else:
+                    values.append(str(value))
+            lines.append(f"| {' | '.join(values)} |")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def load_config(config_path: str | Path) -> dict:
+    """Load YAML configuration file.
+
+    Parameters
+    ----------
+    config_path : str | Path
+        Path to YAML configuration file.
+
+    Returns
+    -------
+    dict
+        Configuration dictionary.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the config file does not exist.
+    yaml.YAMLError
+        If the YAML file is malformed.
+    """
+    config_path = Path(config_path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+
+    with open(config_path, "r") as f:
+        return yaml.safe_load(f)
 
 
 def save_figure(data, save_folder, name, title=None, vmax=0, ext=".png"):
