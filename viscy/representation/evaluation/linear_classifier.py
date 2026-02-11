@@ -108,6 +108,9 @@ def load_and_combine_datasets(datasets: list[dict], task: str) -> ad.AnnData:
     ----------
     datasets : list[dict]
         List of dataset dicts with 'embeddings' and 'annotations' paths.
+        Each dict may optionally include 'include_wells', a list of well
+        prefixes (e.g. ["A/1", "B/2"]) to filter annotations by fov_name.
+        If None or absent, all wells are used.
     task : str
         Name of the classification task (column name in annotations).
 
@@ -126,10 +129,13 @@ def load_and_combine_datasets(datasets: list[dict], task: str) -> ad.AnnData:
     for i, dataset in enumerate(datasets):
         embeddings_path = Path(dataset["embeddings"])
         annotations_path = Path(dataset["annotations"])
+        include_wells = dataset.get("include_wells")
 
         print(f"\nLoading dataset {i + 1}/{len(datasets)}: {embeddings_path.name}")
         print(f"  Embeddings: {embeddings_path}")
         print(f"  Annotations: {annotations_path}")
+        if include_wells:
+            print(f"  Wells filter: {include_wells}")
 
         adata = ad.read_zarr(embeddings_path)
 
@@ -141,6 +147,15 @@ def load_and_combine_datasets(datasets: list[dict], task: str) -> ad.AnnData:
             print(f"⚠ Skipping dataset - task '{task}' not found in annotations:")
             print(f"  Error: {e}")
             continue
+
+        if include_wells:
+            well_mask = adata_annotated.obs["fov_name"].str.startswith(
+                tuple(w + "/" for w in include_wells)
+            )
+            adata_annotated = adata_annotated[well_mask]
+            print(
+                f"  Filtered to {len(adata_annotated)} samples in wells {include_wells}"
+            )
 
         if task not in adata_annotated.obs.columns:
             print(f"⚠ Skipping dataset - task '{task}' not in columns:")

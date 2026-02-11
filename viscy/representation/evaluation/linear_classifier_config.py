@@ -28,6 +28,8 @@ class LinearClassifierTrainConfig(BaseModel):
         Name of the embedding model used.
     train_datasets : list[dict]
         List of training datasets with 'embeddings' and 'annotations' paths.
+        Each dict may optionally include 'include_wells', a list of well
+        prefixes (e.g. ["A/1", "B/2"]) to filter by fov_name.
     use_scaling : bool
         Whether to apply StandardScaler normalization.
     use_pca : bool
