@@ -38,13 +38,13 @@ class LazyCommand(click.Command):
 COMMANDS = [
     {
         "name": "train-linear-classifier",
-        "import_path": "applications.DynaCLR.evaluation.train_linear_classifier.main",
+        "import_path": "applications.DynaCLR.evaluation.linear_classifiers.train_linear_classifier.main",
         "help": "Train a linear classifier on cell embeddings",
         "short_help": "Train linear classifier",
     },
     {
         "name": "apply-linear-classifier",
-        "import_path": "applications.DynaCLR.evaluation.apply_linear_classifier.main",
+        "import_path": "applications.DynaCLR.evaluation.linear_classifiers.apply_linear_classifier.main",
         "help": "Apply a trained linear classifier to new embeddings",
         "short_help": "Apply linear classifier",
     },
