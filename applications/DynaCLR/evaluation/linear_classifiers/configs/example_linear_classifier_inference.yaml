@@ -1,8 +1,8 @@
 # Example configuration for applying a trained linear classifier
 #
 # Usage:
-#   python -m applications.DynaCLR.evaluation.apply_linear_classifier \
-#       --config applications/DynaCLR/evaluation/configs/example_linear_classifier_inference.yaml
+#   viscy-dynaclr apply-linear-classifier \
+#       -c applications/DynaCLR/evaluation/linear_classifiers/configs/example_linear_classifier_inference.yaml
 
 # W&B project name where the model artifact is stored
 wandb_project: DynaCLR-2D-linearclassifiers

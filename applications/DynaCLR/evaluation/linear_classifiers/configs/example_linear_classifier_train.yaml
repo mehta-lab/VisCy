@@ -1,8 +1,8 @@
 # Example configuration for training a linear classifier
 #
 # Usage:
-#   python -m applications.DynaCLR.evaluation.train_linear_classifier \
-#       --config applications/DynaCLR/evaluation/configs/example_linear_classifier_train.yaml
+#   viscy-dynaclr train-linear-classifier \
+#       -c applications/DynaCLR/evaluation/linear_classifiers/configs/example_linear_classifier_train.yaml
 
 # Classification task name
 # Valid options: infection_state, organelle_state, cell_division_state, cell_death_state
@@ -17,11 +17,13 @@ embedding_model: DynaCLR-2D-BagOfChannels-timeaware-v3
 
 # Training datasets - list of exact file paths (no glob patterns)
 # Each dataset must have both embeddings (zarr) and annotations (csv)
+# Optionally specify include_wells to filter by well prefix (e.g. A/1, B/2)
 train_datasets:
   - embeddings: /path/to/dataset1/embeddings_phase.zarr
     annotations: /path/to/dataset1/annotations.csv
   - embeddings: /path/to/dataset2/embeddings_phase.zarr
     annotations: /path/to/dataset2/annotations.csv
+    include_wells: ["A/1", "C/2"]  # optional: only use these wells
 
 # Preprocessing
 use_scaling: true  # Apply StandardScaler normalization

@@ -88,7 +88,15 @@ dataset_name,fov_name,id,t,track_id,parent_id,parent_track_id,x,y,cell_death_sta
 2024_11_07_A549_SEC61_DENV,/Position_002,1,0,1,-1,-1,300.0,400.0,,infected
 ```
 
-### 2.3 Annotation Rules
+### 2.3 Well Filtering
+
+The `fov_name` column follows the format `{row}/{col}/{position}` (e.g. `B/1/002001`), where `{row}/{col}` identifies the well.
+
+Each dataset entry in the training config can optionally specify `include_wells` — a list of well prefixes (e.g. `["A/1", "B/2"]`). When specified, only annotations whose `fov_name` starts with one of the given prefixes are used. If omitted or null, all wells are included.
+
+This is useful when different wells contain different organelle markers and the classification task (e.g. `organelle_state`) should only use specific wells.
+
+### 2.4 Annotation Rules
 
 **Current behavior:**
 - Cells without annotations can be left as `NaN` or empty (will be filtered out)
@@ -109,7 +117,7 @@ viscy-dynaclr train-linear-classifier -c config.yaml
 Configuration file must specify:
 - `task`: One of the valid tasks
 - `input_channel`: One of the valid channels
-- `train_datasets`: List of embeddings + annotations paths
+- `train_datasets`: List of embeddings + annotations paths (with optional `include_wells`)
 - `wandb_project`: W&B project name for artifact storage
 
 ### 3.2 Inference
@@ -180,5 +188,5 @@ Trained models are stored in Weights & Biases with:
 
 ---
 
-**Version:** 1.0
-**Last Updated:** 2026-01-27
+**Version:** 1.1
+**Last Updated:** 2026-02-11
