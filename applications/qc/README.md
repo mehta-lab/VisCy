@@ -12,7 +12,7 @@ viscy qc -c applications/qc/qc_config.yml
 
 ### FocusSliceMetric
 
-Detects the in-focus z-slice per timepoint using midband spatial frequency power (GPU-batched FFT via waveorder).
+Detects the in-focus z-slice per timepoint using midband spatial frequency power (Z-vectorized FFT via waveorder).
 
 **Parameters:**
 
@@ -24,7 +24,6 @@ Detects the in-focus z-slice per timepoint using midband spatial frequency power
 | `channel_names` | List of channel names, or `-1` for all channels in the dataset |
 | `midband_fractions` | Inner/outer fractions of cutoff frequency (default `[0.125, 0.25]`) |
 | `device` | Torch device (`cpu` or `cuda`) |
-| `batch_size` | Max timepoints per GPU batch (auto-calculated from GPU memory when omitted) |
 
 ## Configuration
 

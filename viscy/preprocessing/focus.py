@@ -3,48 +3,9 @@ from typing import Literal
 import numpy as np
 import tensorstore
 import torch
-from waveorder.focus import compute_focus_slice_batch
+from waveorder.focus import focus_from_transverse_band
 
 from viscy.preprocessing.qc_metrics import QCMetric
-
-
-def _estimate_batch_size(
-    shape: tuple[int, ...],
-    device: str | torch.device,
-    memory_fraction: float = 0.5,
-) -> int | None:
-    """Estimate max timepoints per batch from available GPU memory.
-
-    Parameters
-    ----------
-    shape : tuple[int, ...]
-        Array shape as (T, Z, Y, X).
-    device : str or torch.device
-        Target device. Returns None for CPU (no limit needed).
-    memory_fraction : float
-        Fraction of free GPU memory to use (default 0.5).
-
-    Returns
-    -------
-    int or None
-        Estimated batch size, or None if CPU.
-    """
-    device = torch.device(device)
-    if device.type != "cuda":
-        return None
-
-    free_mem, _ = torch.cuda.mem_get_info(device)
-    usable = free_mem * memory_fraction
-
-    T, Z, Y, X = shape
-    # Per-slice peak memory during FFT:
-    #   input float32 (4B) + complex64 FFT output (8B) + abs float32 (4B)
-    #   + torch FFT workspace (~8B)
-    # ~24 bytes per element, with batch_size timepoints = batch_size * Z slices
-    bytes_per_slice = Y * X * 24
-    bytes_per_timepoint = Z * bytes_per_slice
-    batch = max(1, int(usable // bytes_per_timepoint))
-    return min(batch, T)
 
 
 class FocusSliceMetric(QCMetric):
@@ -64,9 +25,6 @@ class FocusSliceMetric(QCMetric):
         Inner and outer fractions of cutoff frequency.
     device : str
         Torch device for FFT computation.
-    batch_size : int or None
-        Max timepoints to process at once. If None, automatically
-        estimated from available GPU memory (or unlimited on CPU).
     """
 
     field_name = "focus_slice"
@@ -79,7 +37,6 @@ class FocusSliceMetric(QCMetric):
         channel_names: list[str] | Literal[-1] = -1,
         midband_fractions: tuple[float, float] = (0.125, 0.25),
         device: str = "cpu",
-        batch_size: int | None = None,
     ):
         self.NA_det = NA_det
         self.lambda_ill = lambda_ill
@@ -87,7 +44,6 @@ class FocusSliceMetric(QCMetric):
         self.channel_names = channel_names
         self.midband_fractions = midband_fractions
         self.device = device
-        self.batch_size = batch_size
 
     def channels(self) -> list[str] | Literal[-1]:
         return self.channel_names
@@ -104,22 +60,18 @@ class FocusSliceMetric(QCMetric):
             .result()
         )
 
-        batch_size = self.batch_size
-        if batch_size is None:
-            batch_size = _estimate_batch_size(tzyx.shape, self.device)
+        T = tzyx.shape[0]
+        focus_indices = np.empty(T, dtype=int)
 
-        focus_indices = compute_focus_slice_batch(
-            tzyx,
-            NA_det=self.NA_det,
-            lambda_ill=self.lambda_ill,
-            pixel_size=self.pixel_size,
-            midband_fractions=self.midband_fractions,
-            device=self.device,
-            batch_size=batch_size,
-        )
-
-        if isinstance(focus_indices, int):
-            focus_indices = np.array([focus_indices])
+        for t in range(T):
+            zyx = torch.from_numpy(np.asarray(tzyx[t])).to(self.device)
+            focus_indices[t] = focus_from_transverse_band(
+                zyx,
+                NA_det=self.NA_det,
+                lambda_ill=self.lambda_ill,
+                pixel_size=self.pixel_size,
+                midband_fractions=self.midband_fractions,
+            )
 
         per_timepoint = {str(t): int(idx) for t, idx in enumerate(focus_indices)}
         fov_stats = {
