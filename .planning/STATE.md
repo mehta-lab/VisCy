@@ -2,40 +2,40 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-12)
+See: .planning/PROJECT.md (updated 2025-01-27)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 10 - Public API & CI Integration -- PHASE COMPLETE -- v1.1 MILESTONE COMPLETE
+**Current focus:** Phase 5 - CI/CD (COMPLETE)
 
 ## Current Position
 
-Phase: 10 of 10 (Public API & CI Integration) -- PHASE COMPLETE
-Plan: 1 of 1 in current phase
-Status: v1.1 Milestone Complete
-Last activity: 2026-02-13 -- Completed 10-01 Public API, state dict tests, CI integration
+Phase: 5 of 5 (CI/CD) - COMPLETE
+Plan: 1 of 1 complete
+Status: Phase complete
+Last activity: 2026-01-29 - Completed 05-01-PLAN.md (CI workflows)
 
-Progress: [==================] 100% (v1.0 complete, v1.1 complete: all 10 phases done)
+Progress: [==========] 100% (All phases complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 16 (v1.0: 7, v1.1: 9)
-- Average duration: ~15 min
-- Total execution time: ~4.1 hours
+- Total plans completed: 7
+- Average duration: 4.2 min
+- Total execution time: 29 min
 
 **By Phase:**
 
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
-| 1. Foundation | 2 | ~60m | ~30m |
-| 2. Package | 1 | ~30m | ~30m |
-| 3. Migration | 3 | ~90m | ~30m |
-| 5. CI/CD | 1 | ~30m | ~30m |
-| 6. Package Scaffold | 3 | ~10m | ~3m |
-| 7. Core UNet Models | 2 | ~6m | ~3m |
-| 8. Representation Models | 2 | ~8m | ~4m |
-| 9. Legacy UNet Models | 1 | ~4m | ~4m |
-| 10. Public API & CI | 1 | ~4m | ~4m |
+| 1. Workspace Foundation | 2/2 | 5 min | 2.5 min |
+| 2. Package Structure | 1/1 | 4 min | 4 min |
+| 3. Code Migration | 3/3 | 18 min | 6 min |
+| 4. Documentation | 0/0 | - | - |
+| 5. CI/CD | 1/1 | 2 min | 2 min |
+
+**Recent Trend:**
+- Last 5 plans: 4 min, 4 min, 8 min, 6 min, 2 min
+- Trend: CI/CD was fast due to clear research findings
 
 ## Accumulated Context
 
@@ -44,53 +44,40 @@ Progress: [==================] 100% (v1.0 complete, v1.1 complete: all 10 phases
 Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
-- Pure nn.Module in viscy-models: No Lightning/Hydra coupling
-- Function-based grouping: unet/, vae/, contrastive/ with shared components/
-- viscy-models independent of viscy-transforms (torch/timm/monai/numpy only)
-- 14+ shared components in unext2.py need extraction to components/
-- Mutable defaults must be fixed to tuples during migration
-- State dict key compatibility is non-negotiable for checkpoint loading
-- Followed viscy-transforms pyproject.toml pattern exactly for consistency
-- No optional-dependencies for viscy-models (no notebook extras needed)
-- Dev dependency group includes only test (no jupyter for models package)
-- Preserved register_modules/add_module pattern verbatim for state dict key compatibility
-- Fixed only docstring formatting for ruff D-series compliance, no logic changes to legacy code
-- Intra-components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
-- _get_convnext_stage private but importable; excluded from __all__
-- Preserved exact list mutation pattern (decoder_channels = num_channels alias) in UNeXt2 for compatibility
-- Marked deconv decoder test as xfail due to pre-existing channel mismatch bug in original code
-- Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
-- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical components.heads location
-- Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
-- Used encoder.num_features instead of encoder.head.fc.in_features for timm backbone-agnostic projection dim (fixes ResNet50 bug)
-- Added pretrained parameter (default False) to contrastive encoders for pure nn.Module semantics
-- VaeEncoder pretrained default changed to False for pure nn.Module semantics
-- VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
-- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not components
-- SimpleNamespace return type preserved for VAE backward compatibility
-- Convert user-provided num_filters tuple to list internally for list concatenation compatibility
-- up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters
-- Used --cov=src/ for cross-platform CI coverage (avoids hyphen-to-underscore conversion on Windows)
-- State dict tests use structural assertions (count + prefixes + sentinels) not frozen key lists
-
-### Pending Todos
-
-- Fix deconv decoder channel mismatch in UNeXt2UpStage (pre-existing bug, xfailed test documents it)
+- Clean break on imports: `from viscy_transforms import X` (no backward compatibility)
+- Clean slate approach: Wipe repo, keep only LICENSE, CITATION.cff, .gitignore
+- hatchling over setuptools: Modern build system with plugin support
+- Root package is `viscy` umbrella with `package=true` (installable)
+- `viscy` re-exports from subpackages, has dynamic versioning from git tags
+- Use prek instead of pre-commit for faster hook execution
+- ty type checker removed (too many false positives with MONAI)
+- Removed dependency-groups from package (root has `dev` not `test`, avoids cycle)
+- uv-dynamic-versioning verified working with pattern-prefix for monorepo
+- Extract only transform-relevant types (not dataset-specific types like SegmentationSample)
+- Fixed _redef.py nested class bug (RandFlipd was nested inside CenterSpatialCropd)
+- ruff per-file-ignores updated for monorepo pattern (**/tests/**)
+- **NEW (05-01):** Matrix with fail-fast: true for quick feedback on failures
+- **NEW (05-01):** alls-green pattern for single status check in branch protection
+- **NEW (05-01):** Conditional cancel-in-progress: only for PRs, not main
 
 ### Blockers/Concerns
 
-None currently.
+- **RESOLVED (Phase 2):** hatch-vcs tag pattern verified working via uv-dynamic-versioning pattern-prefix
+- **RESOLVED:** ty type checker removed due to false positives with MONAI
 
-## v1.0 Completion Summary
+## Phase 5 Completion Summary
 
-All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
+CI/CD workflows are complete:
+- `.github/workflows/test.yml` - 9-job matrix (3 OS x 3 Python) with alls-green
+- `.github/workflows/lint.yml` - prek hooks + ruff format check
+- Concurrency control with conditional cancel-in-progress
 
 ## Session Continuity
 
-Last session: 2026-02-13
-Stopped at: Completed 10-01-PLAN.md (Public API & CI -- Phase 10 complete -- v1.1 MILESTONE COMPLETE)
+Last session: 2026-01-29
+Stopped at: Completed 05-01-PLAN.md (CI workflows) - Phase 5 complete
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (10-01 summary added, Phase 10 complete, v1.1 milestone complete)*
+*Last updated: 2026-01-29*

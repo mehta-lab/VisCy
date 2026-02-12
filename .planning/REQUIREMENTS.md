@@ -1,9 +1,11 @@
-# Requirements: VisCy Modularization
+# Requirements: VisCy Modularization (Milestone 1)
 
 **Defined:** 2025-01-27
 **Core Value:** Independent, reusable subpackages with clean import paths
 
-## v1.0 Requirements (Complete)
+## v1 Requirements
+
+Requirements for Phases 0+1: Workspace scaffolding + viscy-transforms extraction.
 
 ### Workspace Foundation
 
@@ -29,99 +31,59 @@
 - [x] **MIG-04**: All migrated tests passing with `uv run --package viscy-transforms pytest`
 - [x] **MIG-05**: Original `viscy/transforms/` directory removed
 
+### Documentation
+
+- [ ] **DOC-01**: Zensical configuration (`zensical.toml`) at repository root
+- [ ] **DOC-02**: Documentation site structure with navigation (index, API reference)
+- [ ] **DOC-03**: API reference for viscy-transforms auto-generated from docstrings
+- [ ] **DOC-04**: GitHub Pages deployment working at project URL
+
 ### CI/CD
 
-- [x] **CI-01**: GitHub Actions workflow for testing viscy-transforms package
-- [x] **CI-03**: Matrix testing across Python 3.11, 3.12, 3.13
-- [x] **CI-04**: Linting via prek (uvx prek) in CI workflows
+- [ ] **CI-01**: GitHub Actions workflow for testing viscy-transforms package
+- [ ] **CI-02**: GitHub Actions workflow for building and deploying docs
+- [ ] **CI-03**: Matrix testing across Python 3.11, 3.12, 3.13
+- [ ] **CI-04**: Linting via prek (uvx prek) in CI workflows
 
-## v1.1 Requirements
-
-Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
-
-### Models -- Package Infrastructure
-
-- [x] **MPKG-01**: Package directory `packages/viscy-models/` with src layout (`src/viscy_models/`)
-- [x] **MPKG-02**: pyproject.toml with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
-- [x] **MPKG-03**: `uv sync --package viscy-models` succeeds in workspace
-- [x] **MPKG-04**: `components/` module with stems.py, heads.py, blocks.py extracted from shared code
-
-### Models -- UNet Architectures
-
-- [x] **UNET-01**: UNeXt2 migrated to `unet/unext2.py` with shared component imports updated
-- [x] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
-- [x] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
-- [x] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
-- [x] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
-- [x] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
-- [x] **UNET-07**: FCMAE tests migrated from existing test suite
-- [x] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
-
-### Models -- Variational Autoencoders
-
-- [x] **VAE-01**: BetaVae25D migrated to `vae/beta_vae_25d.py`
-- [x] **VAE-02**: BetaVaeMonai migrated to `vae/beta_vae_monai.py`
-- [x] **VAE-03**: Forward-pass tests for both VAE models (NEW -- currently missing)
-
-### Models -- Contrastive Learning
-
-- [x] **CONT-01**: ContrastiveEncoder migrated to `contrastive/encoder.py`
-- [x] **CONT-02**: ResNet3dEncoder migrated to `contrastive/resnet3d.py`
-- [x] **CONT-03**: Forward-pass tests for contrastive models (NEW -- currently missing)
-
-### Models -- Public API & CI
-
-- [x] **API-01**: `from viscy_models import UNeXt2` works for all 8 model classes
-- [x] **API-02**: `uv run --package viscy-models pytest` passes all tests
-- [x] **API-03**: CI test matrix updated to include viscy-models
-- [x] **API-04**: Root pyproject.toml updated with viscy-models workspace dependency
-
-### Models -- Compatibility
-
-- [x] **COMPAT-01**: State dict keys preserved identically for all migrated models
-- [x] **COMPAT-02**: Mutable default arguments fixed to tuples in model constructors
-
-## Future Requirements
+## v2 Requirements
 
 Deferred to future milestones. Tracked but not in current roadmap.
 
-### Hydra Integration (future viscy-hydra package)
+### Future Package Extractions
 
-- **HYDRA-01**: BaseModelMeta metaclass or `__init_subclass__` registry for model discovery
-- **HYDRA-02**: BaseModel(LightningModule) base class with auto Hydra instantiation
-- **HYDRA-03**: Hydra ConfigStore integration (optional dependency)
-- **HYDRA-04**: `get_model("unext2")` factory function for name-based lookup
+- **PKG-10**: Extract viscy-data package (dataloaders, Lightning DataModules)
+- **PKG-11**: Extract viscy-models package (unet, representation, translation)
+- **PKG-12**: Extract viscy-airtable package
+- **PKG-13**: viscy meta-package with CLI and optional re-exports
 
-### Applications (future milestone)
+### Enhanced CI/CD
 
-- **APP-01**: applications/DynaCLR with ContrastiveModule LightningModule
-- **APP-02**: applications/Cytoland with VSUNet/FcmaeUNet LightningModules
+- **CI-10**: Path filtering to only test changed packages
+- **CI-11**: Release automation with semantic versioning
+- **CI-12**: Coverage aggregation across packages
 
-### Documentation (deferred from v1.0)
+### Documentation Enhancements
 
-- **DOC-01**: Zensical configuration (`zensical.toml`) at repository root
-- **DOC-02**: Documentation site structure with navigation
-- **DOC-03**: API reference auto-generated from docstrings
-- **DOC-04**: GitHub Pages deployment
+- **DOC-10**: Migration guide for downstream users
+- **DOC-11**: Per-package documentation sections
+- **DOC-12**: Contribution guide for monorepo workflow
 
 ## Out of Scope
 
-Explicitly excluded. Documented to prevent scope creep.
+Explicitly excluded from this milestone. Documented to prevent scope creep.
 
 | Feature | Reason |
 |---------|--------|
-| Hydra/BaseModel registry in viscy-models | Deferred to separate viscy-hydra package |
-| LightningModule wrappers | Training logic stays in applications/ |
-| Backward-compatible imports | Clean break approach |
-| viscy-data extraction | Separate milestone |
-| Documentation (Zensical) | Deferred from v1.0 |
-| ONNX/TorchScript export | VAE models return SimpleNamespace, incompatible |
+| Backward-compatible imports | Clean break decided; no `from viscy.transforms` re-exports |
+| applications/ directory | Clean slate approach; restore from git history in future milestone |
+| examples/ directory | Clean slate approach; restore from git history in future milestone |
+| Release automation | Manual releases acceptable for v1; automate later |
+| Path-based CI filtering | Added complexity; test all on every push for now |
+| hatch-cada for workspace deps | No inter-package deps yet; viscy-transforms is standalone |
 
 ## Traceability
 
 Which phases cover which requirements. Updated during roadmap creation.
-
-### v1.0 Traceability
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -140,44 +102,20 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MIG-03 | Phase 3 | Complete |
 | MIG-04 | Phase 3 | Complete |
 | MIG-05 | Phase 3 | Complete |
-| CI-01 | Phase 5 | Complete |
-| CI-03 | Phase 5 | Complete |
-| CI-04 | Phase 5 | Complete |
-
-### v1.1 Traceability
-
-| Requirement | Phase | Status |
-|-------------|-------|--------|
-| MPKG-01 | Phase 6 | Complete |
-| MPKG-02 | Phase 6 | Complete |
-| MPKG-03 | Phase 6 | Complete |
-| MPKG-04 | Phase 6 | Complete |
-| UNET-05 | Phase 6 | Complete |
-| COMPAT-02 | Phases 7-9 | Complete |
-| UNET-01 | Phase 7 | Complete |
-| UNET-02 | Phase 7 | Complete |
-| UNET-06 | Phase 7 | Complete |
-| UNET-07 | Phase 7 | Complete |
-| CONT-01 | Phase 8 | Complete |
-| CONT-02 | Phase 8 | Complete |
-| CONT-03 | Phase 8 | Complete |
-| VAE-01 | Phase 8 | Complete |
-| VAE-02 | Phase 8 | Complete |
-| VAE-03 | Phase 8 | Complete |
-| UNET-03 | Phase 9 | Complete |
-| UNET-04 | Phase 9 | Complete |
-| UNET-08 | Phase 9 | Complete |
-| API-01 | Phase 10 | Complete |
-| API-02 | Phase 10 | Complete |
-| API-03 | Phase 10 | Complete |
-| API-04 | Phase 10 | Complete |
-| COMPAT-01 | Phase 10 | Complete |
+| DOC-01 | Phase 4 | Pending |
+| DOC-02 | Phase 4 | Pending |
+| DOC-03 | Phase 4 | Pending |
+| DOC-04 | Phase 4 | Pending |
+| CI-01 | Phase 5 | Pending |
+| CI-02 | Phase 5 | Pending |
+| CI-03 | Phase 5 | Pending |
+| CI-04 | Phase 5 | Pending |
 
 **Coverage:**
-- v1.0 requirements: 18 total, 18 mapped (complete)
-- v1.1 requirements: 24 total, 24 mapped
-- Unmapped: 0
+- v1 requirements: 23 total
+- Mapped to phases: 23
+- Unmapped: 0 ✓
 
 ---
 *Requirements defined: 2025-01-27*
-*Last updated: 2026-02-12 after v1.1 roadmap creation*
+*Last updated: 2026-01-28 after Phase 3 completion*
