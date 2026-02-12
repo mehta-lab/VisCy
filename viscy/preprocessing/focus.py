@@ -3,6 +3,7 @@ from typing import Literal
 import numpy as np
 import tensorstore
 import torch
+from waveorder.focus import compute_focus_slice_batch
 
 from viscy.preprocessing.qc_metrics import QCMetric
 
@@ -92,8 +93,6 @@ class FocusSliceMetric(QCMetric):
         return self.channel_names
 
     def __call__(self, position, channel_name, channel_index, num_workers=4):
-        from waveorder.focus import compute_focus_slice_batch
-
         tzyx = (
             position["0"]
             .tensorstore(

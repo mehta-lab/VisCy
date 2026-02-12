@@ -2,14 +2,6 @@
 
 Composable quality control metrics for HCS OME-Zarr datasets. Results are written to `.zattrs` at both plate and position levels.
 
-## Installation
-
-```bash
-pip install -e ".[qc]"
-```
-
-This installs `waveorder` as an optional dependency for focus detection.
-
 ## Usage
 
 ```bash

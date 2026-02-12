@@ -34,6 +34,7 @@ dependencies = [
   "timm>=0.9.5",
   "torch>=2.4.1",
   "wandb",
+  "waveorder",
   # temporary pin for xarray#10851
   "xarray<=2025.9",
 ]
@@ -62,7 +63,6 @@ optional-dependencies.metrics = [
 optional-dependencies.phate = [
   "phate",
 ]
-optional-dependencies.qc = [ "waveorder" ]
 optional-dependencies.visual = [
   "cmap",
   "dash",
