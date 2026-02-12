@@ -10,7 +10,7 @@ from viscy.preprocessing.qc_metrics import QCMetric
 def _estimate_batch_size(
     shape: tuple[int, ...],
     device: str | torch.device,
-    memory_fraction: float = 0.7,
+    memory_fraction: float = 0.5,
 ) -> int | None:
     """Estimate max timepoints per batch from available GPU memory.
 
@@ -21,7 +21,7 @@ def _estimate_batch_size(
     device : str or torch.device
         Target device. Returns None for CPU (no limit needed).
     memory_fraction : float
-        Fraction of free GPU memory to use (default 0.7).
+        Fraction of free GPU memory to use (default 0.5).
 
     Returns
     -------
@@ -36,9 +36,12 @@ def _estimate_batch_size(
     usable = free_mem * memory_fraction
 
     T, Z, Y, X = shape
-    # Per-timepoint memory: Z slices on device as float32 + FFT output (complex64)
-    # float32 = 4 bytes, complex64 = 8 bytes -> ~12 bytes per element per slice
-    bytes_per_timepoint = Z * Y * X * 12
+    # Per-slice peak memory during FFT:
+    #   input float32 (4B) + complex64 FFT output (8B) + abs float32 (4B)
+    #   + torch FFT workspace (~8B)
+    # ~24 bytes per element, with batch_size timepoints = batch_size * Z slices
+    bytes_per_slice = Y * X * 24
+    bytes_per_timepoint = Z * bytes_per_slice
     batch = max(1, int(usable // bytes_per_timepoint))
     return min(batch, T)
 

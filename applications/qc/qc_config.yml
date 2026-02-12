@@ -1,4 +1,4 @@
-data_path: /home/eduardo.hirata/mydata/data/dummy_data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_drifting_ztest.zarr
+data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
 num_workers: 8
 metrics:
   - class_path: viscy.preprocessing.focus.FocusSliceMetric
@@ -8,5 +8,5 @@ metrics:
       pixel_size: 0.1494
       channel_names:
         - Phase3D
-        - "raw GFP EX488 EM525-45"
-      device: cuda
+        # - "raw GFP EX488 EM525-45"
+      device: cpu
