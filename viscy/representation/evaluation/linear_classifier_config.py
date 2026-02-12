@@ -142,8 +142,13 @@ class LinearClassifierInferenceConfig(BaseModel):
         W&B entity (username or team).
     embeddings_path : str
         Path to embeddings zarr file for inference.
-    output_path : str
-        Path to save output zarr file with predictions.
+    output_path : Optional[str]
+        Path to save output zarr file with predictions. When ``None``
+        (the default), predictions are written back to ``embeddings_path``.
+    include_wells : Optional[list[str]]
+        Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
+        Cells in other wells will have ``NaN`` for prediction columns.
+        When ``None`` (the default), all cells are predicted.
     overwrite : bool
         Whether to overwrite output if it exists.
     """
@@ -153,12 +158,11 @@ class LinearClassifierInferenceConfig(BaseModel):
     version: str = Field(default="latest", min_length=1)
     wandb_entity: Optional[str] = Field(default=None)
     embeddings_path: str = Field(..., min_length=1)
-    output_path: str = Field(..., min_length=1)
+    output_path: Optional[str] = Field(default=None)
+    include_wells: Optional[list[str]] = Field(default=None)
     overwrite: bool = Field(default=False)
 
-    @field_validator(
-        "wandb_project", "model_name", "version", "embeddings_path", "output_path"
-    )
+    @field_validator("wandb_project", "model_name", "version", "embeddings_path")
     @classmethod
     def validate_non_empty(cls, v: str) -> str:
         """Ensure string fields are non-empty."""
@@ -170,14 +174,15 @@ class LinearClassifierInferenceConfig(BaseModel):
     def validate_paths(self):
         """Validate input exists and output doesn't exist unless overwrite=True."""
         embeddings_path = Path(self.embeddings_path)
-        output_path = Path(self.output_path)
 
         if not embeddings_path.exists():
             raise ValueError(f"Embeddings file not found: {self.embeddings_path}")
 
-        if output_path.exists() and not self.overwrite:
-            raise ValueError(
-                f"Output file already exists: {self.output_path}. "
-                f"Set overwrite=true to overwrite."
-            )
+        if self.output_path is not None:
+            output_path = Path(self.output_path)
+            if output_path.exists() and not self.overwrite:
+                raise ValueError(
+                    f"Output file already exists: {self.output_path}. "
+                    f"Set overwrite=true to overwrite."
+                )
         return self
