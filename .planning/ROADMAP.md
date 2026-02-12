@@ -1,113 +1,156 @@
-# Roadmap: VisCy Modularization (Milestone 1)
+# Roadmap: VisCy Modularization
 
-## Overview
+## Milestones
 
-Transform VisCy from a monolithic package into a uv workspace monorepo by extracting viscy-transforms as the first independent subpackage. This milestone establishes the workspace foundation, migrates code and tests, sets up Zensical documentation with GitHub Pages, and configures CI/CD for the new monorepo structure. The repo starts with a clean slate, preserving only LICENSE, CITATION.cff, and .gitignore.
+- Shipped **v1.0 Transforms & Monorepo Skeleton** - Phases 1-5 (shipped 2026-01-29)
+- Current **v1.1 Models** - Phases 6-10 (in progress)
 
 ## Phases
 
-**Phase Numbering:**
-- Integer phases (1, 2, 3): Planned milestone work
-- Decimal phases (2.1, 2.2): Urgent insertions (marked with INSERTED)
-
-Decimal phases appear between their surrounding integers in numeric order.
-
-- [x] **Phase 1: Workspace Foundation** - Clean slate setup and uv workspace scaffolding
-- [x] **Phase 2: Package Structure** - viscy-transforms package scaffolding with hatchling
-- [x] **Phase 3: Code Migration** - Migrate transforms code and tests to new structure
-- [ ] **Phase 4: Documentation** - Zensical documentation with GitHub Pages deployment
-- [x] **Phase 5: CI/CD** - GitHub Actions for testing, linting, and docs deployment
-
-## Phase Details
+<details>
+<summary>v1.0 Transforms & Monorepo Skeleton (Phases 1-5) - SHIPPED 2026-01-29</summary>
 
 ### Phase 1: Workspace Foundation
 **Goal**: Establish a clean uv workspace with shared tooling configuration
-**Depends on**: Nothing (first phase)
-**Requirements**: WORK-00, WORK-01, WORK-02, WORK-03, WORK-04, WORK-05
-**Success Criteria** (what must be TRUE):
-  1. Repository contains only LICENSE, CITATION.cff, .gitignore, and new workspace structure
-  2. `uv sync` runs successfully at workspace root
-  3. `uvx prek` passes with ruff and mypy hooks configured
-  4. Python 3.11+ constraint enforced in root pyproject.toml
-  5. Empty `packages/` directory exists and is a workspace member
 **Plans**: 2 plans
 
 Plans:
-- [x] 01-01-PLAN.md — Clean slate + workspace pyproject.toml with uv configuration
-- [x] 01-02-PLAN.md — Pre-commit hooks with ruff and ty
+- [x] 01-01-PLAN.md -- Clean slate + workspace pyproject.toml with uv configuration
+- [x] 01-02-PLAN.md -- Pre-commit hooks with ruff and ty
 
 ### Phase 2: Package Structure
 **Goal**: Create viscy-transforms package skeleton with modern build system
-**Depends on**: Phase 1
-**Requirements**: PKG-01, PKG-02, PKG-03, PKG-04
-**Success Criteria** (what must be TRUE):
-  1. `packages/viscy-transforms/src/viscy_transforms/__init__.py` exists with proper structure
-  2. Package pyproject.toml uses hatchling with uv-dynamic-versioning
-  3. `uv pip install -e packages/viscy-transforms` succeeds
-  4. Package README.md documents installation and basic usage
 **Plans**: 1 plan
 
 Plans:
-- [x] 02-01-PLAN.md — Package skeleton with hatchling, uv-dynamic-versioning, and README
+- [x] 02-01-PLAN.md -- Package skeleton with hatchling, uv-dynamic-versioning, and README
 
 ### Phase 3: Code Migration
 **Goal**: Migrate all transforms code and tests with passing test suite
-**Depends on**: Phase 2
-**Requirements**: MIG-01, MIG-02, MIG-03, MIG-04, MIG-05
-**Success Criteria** (what must be TRUE):
-  1. All 16 transform modules exist in `packages/viscy-transforms/src/viscy_transforms/`
-  2. `from viscy_transforms import X` works for all public exports
-  3. `uv run --package viscy-transforms pytest` passes all tests
-  4. No `viscy/transforms/` directory exists in repository
-  5. Import paths in tests updated to `viscy_transforms`
 **Plans**: 3 plans
 
 Plans:
-- [x] 03-01-PLAN.md — Extract types from viscy.data.typing to _typing.py
-- [x] 03-02-PLAN.md — Migrate 16 transform modules with updated imports
-- [x] 03-03-PLAN.md — Migrate tests and verify full test suite passes
+- [x] 03-01-PLAN.md -- Extract types from viscy.data.typing to _typing.py
+- [x] 03-02-PLAN.md -- Migrate 16 transform modules with updated imports
+- [x] 03-03-PLAN.md -- Migrate tests and verify full test suite passes
 
-### Phase 4: Documentation
+### Phase 4: Documentation (Deferred)
 **Goal**: Zensical documentation deployed to GitHub Pages
-**Depends on**: Phase 3
-**Requirements**: DOC-01, DOC-02, DOC-03, DOC-04
-**Success Criteria** (what must be TRUE):
-  1. `zensical.toml` or `mkdocs.yml` configured at repository root
-  2. Documentation builds locally with `uvx zensical build` (or mkdocs fallback)
-  3. API reference auto-generated from viscy-transforms docstrings
-  4. Documentation accessible at GitHub Pages URL after push
-**Plans**: TBD
-
-Plans:
-- [ ] 04-01: TBD
 
 ### Phase 5: CI/CD
 **Goal**: Automated testing and linting via GitHub Actions
-**Depends on**: Phase 3 (docs deployment deferred)
-**Requirements**: CI-01, CI-03, CI-04 (CI-02 deferred)
-**Success Criteria** (what must be TRUE):
-  1. Push to main triggers test workflow for viscy-transforms
-  2. Tests run against Python 3.11, 3.12, 3.13 on Ubuntu, macOS, Windows
-  3. `uvx prek` linting passes in CI
-  4. alls-green check job aggregates matrix results for branch protection
 **Plans**: 1 plan
 
 Plans:
-- [x] 05-01-PLAN.md — Test matrix (9 jobs) + lint workflow with prek
+- [x] 05-01-PLAN.md -- Test matrix (9 jobs) + lint workflow with prek
+
+</details>
+
+### v1.1 Models (Phases 6-10)
+
+**Milestone Goal:** Extract all 8 network architectures into `viscy-models` as pure nn.Modules with shared components, comprehensive tests, and clean public API.
+
+- [ ] **Phase 6: Package Scaffold & Shared Components** - viscy-models package structure with extracted shared layers
+- [ ] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
+- [ ] **Phase 8: Representation Models** - Contrastive encoders and VAE architectures
+- [ ] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
+- [ ] **Phase 10: Public API & CI Integration** - Clean imports, full test suite, CI matrix, checkpoint compatibility
+
+## Phase Details
+
+### Phase 6: Package Scaffold & Shared Components
+**Goal**: Users can install viscy-models and shared architectural components are available for model implementations
+**Depends on**: Phase 5 (v1.0 CI infrastructure)
+**Requirements**: MPKG-01, MPKG-02, MPKG-03, MPKG-04, UNET-05, COMPAT-02
+**Success Criteria** (what must be TRUE):
+  1. `packages/viscy-models/src/viscy_models/` directory exists with src layout and `__init__.py`
+  2. `uv sync --package viscy-models` succeeds in the workspace without errors
+  3. `viscy_models._components` subpackage contains stems.py, heads.py, and blocks.py with extracted shared code
+  4. ConvBlock2D/3D layers exist in `viscy_models.unet._layers` and are importable
+  5. All model constructors use immutable defaults (tuples instead of mutable lists/dicts)
+**Plans**: TBD
+
+Plans:
+- [ ] 06-01: TBD
+- [ ] 06-02: TBD
+
+### Phase 7: Core UNet Models
+**Goal**: UNeXt2 and FCMAE are importable from viscy-models with forward-pass tests proving correctness
+**Depends on**: Phase 6
+**Requirements**: UNET-01, UNET-02, UNET-06, UNET-07
+**Success Criteria** (what must be TRUE):
+  1. `from viscy_models.unet import UNeXt2` works and the model produces correct output shapes for representative inputs
+  2. `from viscy_models.unet import FullyConvolutionalMAE` works and the model produces correct output shapes
+  3. UNeXt2 forward-pass test covers multiple configurations (2D/3D, varying channel counts)
+  4. Existing FCMAE tests pass after migration to the new package location
+**Plans**: TBD
+
+Plans:
+- [ ] 07-01: TBD
+- [ ] 07-02: TBD
+
+### Phase 8: Representation Models
+**Goal**: All contrastive and VAE models are importable from viscy-models with forward-pass tests
+**Depends on**: Phase 6
+**Requirements**: CONT-01, CONT-02, CONT-03, VAE-01, VAE-02, VAE-03
+**Success Criteria** (what must be TRUE):
+  1. `from viscy_models.contrastive import ContrastiveEncoder, ResNet3dEncoder` works and both produce embedding outputs
+  2. `from viscy_models.vae import BetaVae25D, BetaVaeMonai` works and both produce reconstruction + latent outputs
+  3. Forward-pass tests exist for ContrastiveEncoder and ResNet3dEncoder with representative input shapes
+  4. Forward-pass tests exist for BetaVae25D and BetaVaeMonai verifying output structure (reconstruction, mu, logvar)
+**Plans**: TBD
+
+Plans:
+- [ ] 08-01: TBD
+- [ ] 08-02: TBD
+
+### Phase 9: Legacy UNet Models
+**Goal**: Unet2d and Unet25d are importable from viscy-models with migrated test coverage
+**Depends on**: Phase 6
+**Requirements**: UNET-03, UNET-04, UNET-08
+**Success Criteria** (what must be TRUE):
+  1. `from viscy_models.unet import Unet2d, Unet25d` works and both produce correct output shapes
+  2. Existing unittest-style tests are migrated to pytest and pass in the new package
+  3. File naming follows snake_case convention (unet2d.py, unet25d.py)
+**Plans**: TBD
+
+Plans:
+- [ ] 09-01: TBD
+
+### Phase 10: Public API & CI Integration
+**Goal**: Users can `from viscy_models import ModelName` for all 8 models, with CI verifying the full package
+**Depends on**: Phases 7, 8, 9
+**Requirements**: API-01, API-02, API-03, API-04, COMPAT-01
+**Success Criteria** (what must be TRUE):
+  1. `from viscy_models import UNeXt2, FullyConvolutionalMAE, ContrastiveEncoder, ResNet3dEncoder, BetaVae25D, BetaVaeMonai, Unet2d, Unet25d` all work from the top-level package
+  2. `uv run --package viscy-models pytest` passes the complete test suite
+  3. CI test matrix includes viscy-models alongside viscy-transforms
+  4. State dict keys for all migrated models match their original monolithic counterparts exactly
+  5. Root pyproject.toml lists viscy-models as a workspace dependency
+**Plans**: TBD
+
+Plans:
+- [ ] 10-01: TBD
+- [ ] 10-02: TBD
 
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 -> 2 -> 3 -> 4 -> 5
+Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on all)
 
-| Phase | Plans Complete | Status | Completed |
-|-------|----------------|--------|-----------|
-| 1. Workspace Foundation | 2/2 | ✓ Complete | 2026-01-28 |
-| 2. Package Structure | 1/1 | ✓ Complete | 2026-01-28 |
-| 3. Code Migration | 3/3 | ✓ Complete | 2026-01-28 |
-| 4. Documentation | 0/TBD | Deferred | - |
-| 5. CI/CD | 1/1 | ✓ Complete | 2026-01-29 |
+| Phase | Milestone | Plans Complete | Status | Completed |
+|-------|-----------|----------------|--------|-----------|
+| 1. Workspace Foundation | v1.0 | 2/2 | Complete | 2026-01-28 |
+| 2. Package Structure | v1.0 | 1/1 | Complete | 2026-01-28 |
+| 3. Code Migration | v1.0 | 3/3 | Complete | 2026-01-28 |
+| 4. Documentation | v1.0 | 0/TBD | Deferred | - |
+| 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
+| 6. Package Scaffold & Shared Components | v1.1 | 0/TBD | Not started | - |
+| 7. Core UNet Models | v1.1 | 0/TBD | Not started | - |
+| 8. Representation Models | v1.1 | 0/TBD | Not started | - |
+| 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
+| 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
 
 ---
 *Roadmap created: 2025-01-27*
-*Last updated: 2026-01-29*
+*v1.1 phases added: 2026-02-12*

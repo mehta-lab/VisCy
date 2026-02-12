@@ -39,44 +39,44 @@
 
 Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
-### Models — Package Infrastructure
+### Models -- Package Infrastructure
 
 - [ ] **MPKG-01**: Package directory `packages/viscy-models/` with src layout (`src/viscy_models/`)
 - [ ] **MPKG-02**: pyproject.toml with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
 - [ ] **MPKG-03**: `uv sync --package viscy-models` succeeds in workspace
 - [ ] **MPKG-04**: `_components/` module with stems.py, heads.py, blocks.py extracted from shared code
 
-### Models — UNet Architectures
+### Models -- UNet Architectures
 
 - [ ] **UNET-01**: UNeXt2 migrated to `unet/unext2.py` with shared component imports updated
 - [ ] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
 - [ ] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
 - [ ] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
 - [ ] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
-- [ ] **UNET-06**: Forward-pass tests for UNeXt2 (NEW — currently missing)
+- [ ] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
 - [ ] **UNET-07**: FCMAE tests migrated from existing test suite
 - [ ] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
 
-### Models — Variational Autoencoders
+### Models -- Variational Autoencoders
 
 - [ ] **VAE-01**: BetaVae25D migrated to `vae/beta_vae_25d.py`
 - [ ] **VAE-02**: BetaVaeMonai migrated to `vae/beta_vae_monai.py`
-- [ ] **VAE-03**: Forward-pass tests for both VAE models (NEW — currently missing)
+- [ ] **VAE-03**: Forward-pass tests for both VAE models (NEW -- currently missing)
 
-### Models — Contrastive Learning
+### Models -- Contrastive Learning
 
 - [ ] **CONT-01**: ContrastiveEncoder migrated to `contrastive/encoder.py`
 - [ ] **CONT-02**: ResNet3dEncoder migrated to `contrastive/resnet3d.py`
-- [ ] **CONT-03**: Forward-pass tests for contrastive models (NEW — currently missing)
+- [ ] **CONT-03**: Forward-pass tests for contrastive models (NEW -- currently missing)
 
-### Models — Public API & CI
+### Models -- Public API & CI
 
 - [ ] **API-01**: `from viscy_models import UNeXt2` works for all 8 model classes
 - [ ] **API-02**: `uv run --package viscy-models pytest` passes all tests
 - [ ] **API-03**: CI test matrix updated to include viscy-models
 - [ ] **API-04**: Root pyproject.toml updated with viscy-models workspace dependency
 
-### Models — Compatibility
+### Models -- Compatibility
 
 - [ ] **COMPAT-01**: State dict keys preserved identically for all migrated models
 - [ ] **COMPAT-02**: Mutable default arguments fixed to tuples in model constructors
@@ -121,38 +121,63 @@ Explicitly excluded. Documented to prevent scope creep.
 
 Which phases cover which requirements. Updated during roadmap creation.
 
+### v1.0 Traceability
+
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MPKG-01 | TBD | Pending |
-| MPKG-02 | TBD | Pending |
-| MPKG-03 | TBD | Pending |
-| MPKG-04 | TBD | Pending |
-| UNET-01 | TBD | Pending |
-| UNET-02 | TBD | Pending |
-| UNET-03 | TBD | Pending |
-| UNET-04 | TBD | Pending |
-| UNET-05 | TBD | Pending |
-| UNET-06 | TBD | Pending |
-| UNET-07 | TBD | Pending |
-| UNET-08 | TBD | Pending |
-| VAE-01 | TBD | Pending |
-| VAE-02 | TBD | Pending |
-| VAE-03 | TBD | Pending |
-| CONT-01 | TBD | Pending |
-| CONT-02 | TBD | Pending |
-| CONT-03 | TBD | Pending |
-| API-01 | TBD | Pending |
-| API-02 | TBD | Pending |
-| API-03 | TBD | Pending |
-| API-04 | TBD | Pending |
-| COMPAT-01 | TBD | Pending |
-| COMPAT-02 | TBD | Pending |
+| WORK-00 | Phase 1 | Complete |
+| WORK-01 | Phase 1 | Complete |
+| WORK-02 | Phase 1 | Complete |
+| WORK-03 | Phase 1 | Complete |
+| WORK-04 | Phase 1 | Complete |
+| WORK-05 | Phase 1 | Complete |
+| PKG-01 | Phase 2 | Complete |
+| PKG-02 | Phase 2 | Complete |
+| PKG-03 | Phase 2 | Complete |
+| PKG-04 | Phase 2 | Complete |
+| MIG-01 | Phase 3 | Complete |
+| MIG-02 | Phase 3 | Complete |
+| MIG-03 | Phase 3 | Complete |
+| MIG-04 | Phase 3 | Complete |
+| MIG-05 | Phase 3 | Complete |
+| CI-01 | Phase 5 | Complete |
+| CI-03 | Phase 5 | Complete |
+| CI-04 | Phase 5 | Complete |
+
+### v1.1 Traceability
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| MPKG-01 | Phase 6 | Pending |
+| MPKG-02 | Phase 6 | Pending |
+| MPKG-03 | Phase 6 | Pending |
+| MPKG-04 | Phase 6 | Pending |
+| UNET-05 | Phase 6 | Pending |
+| COMPAT-02 | Phase 6 | Pending |
+| UNET-01 | Phase 7 | Pending |
+| UNET-02 | Phase 7 | Pending |
+| UNET-06 | Phase 7 | Pending |
+| UNET-07 | Phase 7 | Pending |
+| CONT-01 | Phase 8 | Pending |
+| CONT-02 | Phase 8 | Pending |
+| CONT-03 | Phase 8 | Pending |
+| VAE-01 | Phase 8 | Pending |
+| VAE-02 | Phase 8 | Pending |
+| VAE-03 | Phase 8 | Pending |
+| UNET-03 | Phase 9 | Pending |
+| UNET-04 | Phase 9 | Pending |
+| UNET-08 | Phase 9 | Pending |
+| API-01 | Phase 10 | Pending |
+| API-02 | Phase 10 | Pending |
+| API-03 | Phase 10 | Pending |
+| API-04 | Phase 10 | Pending |
+| COMPAT-01 | Phase 10 | Pending |
 
 **Coverage:**
-- v1.1 requirements: 24 total
-- Mapped to phases: 0 (pending roadmap creation)
-- Unmapped: 24
+- v1.0 requirements: 18 total, 18 mapped (complete)
+- v1.1 requirements: 24 total, 24 mapped
+- Unmapped: 0
 
 ---
 *Requirements defined: 2025-01-27*
-*Last updated: 2026-02-12 after v1.1 requirements added*
+*Last updated: 2026-02-12 after v1.1 roadmap creation*
