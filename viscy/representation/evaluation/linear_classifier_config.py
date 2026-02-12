@@ -57,6 +57,10 @@ class LinearClassifierTrainConfig(BaseModel):
     # Task metadata
     task: VALID_TASKS = Field(...)
     input_channel: VALID_CHANNELS = Field(...)
+    marker: Optional[str] = Field(
+        default=None,
+        description="Marker name for marker-specific tasks (e.g. g3bp1, sec61b, tomm20).",
+    )
     embedding_model: str = Field(..., min_length=1)
 
     # Training datasets

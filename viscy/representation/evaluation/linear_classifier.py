@@ -435,17 +435,21 @@ def save_pipeline_to_wandb(
 
     task = config["task"]
     input_channel = config["input_channel"]
+    marker = config.get("marker")
     use_pca = config.get("preprocessing", {}).get("use_pca", False)
     n_pca = config.get("preprocessing", {}).get("n_pca_components")
 
     model_name = f"linear-classifier-{task}-{input_channel}"
+    if marker:
+        model_name += f"-{marker}"
     if use_pca:
         model_name += f"-pca{n_pca}"
 
     run = wandb.init(
         project=wandb_project,
         entity=wandb_entity,
-        job_type=f"linear-classifier-{task}-{input_channel}",
+        job_type=f"linear-classifier-{task}-{input_channel}"
+        + (f"-{marker}" if marker else ""),
         name=model_name,
         group=model_name,
         config=config,
