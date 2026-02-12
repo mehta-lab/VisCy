@@ -34,7 +34,7 @@ dependencies = [
   "timm>=0.9.5",
   "torch>=2.4.1",
   "wandb",
-  "waveorder",
+  "waveorder @ git+https://github.com/mehta-lab/waveorder.git@batch_focus_slice",
   # temporary pin for xarray#10851
   "xarray<=2025.9",
 ]
