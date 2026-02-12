@@ -23,6 +23,7 @@ class VisCyCLI(LightningCLI):
         subcommands["export"] = subcommand_base_args
         subcommands["precompute"] = subcommand_base_args
         subcommands["convert_to_anndata"] = subcommand_base_args
+        subcommands["qc"] = subcommand_base_args
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
@@ -63,12 +64,14 @@ def main() -> None:
         "preprocess",
         "precompute",
         "convert_to_anndata",
+        "qc",
     }.isdisjoint(sys.argv)
     require_data = {
         "preprocess",
         "precompute",
         "export",
         "convert_to_anndata",
+        "qc",
     }.isdisjoint(sys.argv)
     _ = VisCyCLI(
         model_class=LightningModule,

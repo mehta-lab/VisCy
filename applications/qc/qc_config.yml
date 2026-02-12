@@ -1,0 +1,18 @@
+trainer:
+  qc:
+    data_path: /path/to/dataset.zarr
+    num_workers: 4
+    metrics:
+      - class_path: viscy.preprocessing.focus.FocusSliceMetric
+        init_args:
+          device: cuda
+          batch_size: 5
+          channel_params:
+            Phase:
+              NA_det: 0.55
+              lambda_ill: 0.532
+              pixel_size: 0.325
+            GFP:
+              NA_det: 1.2
+              lambda_ill: 0.488
+              pixel_size: 0.103

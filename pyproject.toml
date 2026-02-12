@@ -62,6 +62,7 @@ optional-dependencies.metrics = [
 optional-dependencies.phate = [
   "phate",
 ]
+optional-dependencies.qc = [ "waveorder" ]
 optional-dependencies.visual = [
   "cmap",
   "dash",
