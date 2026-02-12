@@ -1,4 +1,5 @@
 from abc import ABC, abstractmethod
+from typing import Literal
 
 import iohub.ngff as ngff
 import numpy as np
@@ -19,8 +20,11 @@ class QCMetric(ABC):
     field_name: str
 
     @abstractmethod
-    def channels(self) -> list[str]:
-        """Channel names this metric operates on."""
+    def channels(self) -> list[str] | Literal[-1]:
+        """Channel names this metric operates on.
+
+        Return -1 to operate on all channels in the dataset.
+        """
         ...
 
     @abstractmethod
@@ -51,9 +55,10 @@ def generate_qc_metadata(
 ) -> None:
     """Run composable QC metrics across an HCS dataset.
 
-    Each metric specifies its own channels. The orchestrator iterates
-    positions, dispatches to each metric for its channels, aggregates
-    dataset-level statistics, and writes to .zattrs.
+    Each metric specifies its own channels (or -1 for all).
+    The orchestrator iterates positions, dispatches to each metric
+    for its channels, aggregates dataset-level statistics, and
+    writes to .zattrs.
 
     Parameters
     ----------
@@ -68,7 +73,11 @@ def generate_qc_metadata(
     position_map = list(plate.positions())
 
     for metric in metrics:
-        for channel_name in metric.channels():
+        channel_list = metric.channels()
+        if channel_list == -1:
+            channel_list = list(plate.channel_names)
+
+        for channel_name in channel_list:
             channel_index = plate.channel_names.index(channel_name)
             print(f"Computing {metric.field_name} for channel '{channel_name}'")
 

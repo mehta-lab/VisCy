@@ -4,18 +4,25 @@ from iohub import open_ome_zarr
 from viscy.preprocessing.focus import FocusSliceMetric
 from viscy.preprocessing.qc_metrics import generate_qc_metadata
 
-OPTICAL_PARAMS = {
-    "Phase": {
-        "NA_det": 0.55,
-        "lambda_ill": 0.532,
-        "pixel_size": 0.325,
-    },
-}
-
 
 @pytest.fixture
 def focus_metric():
-    return FocusSliceMetric(channel_params=OPTICAL_PARAMS)
+    return FocusSliceMetric(
+        NA_det=0.55,
+        lambda_ill=0.532,
+        pixel_size=0.325,
+        channel_names=["Phase"],
+    )
+
+
+@pytest.fixture
+def focus_metric_all_channels():
+    return FocusSliceMetric(
+        NA_det=0.55,
+        lambda_ill=0.532,
+        pixel_size=0.325,
+        channel_names=-1,
+    )
 
 
 def test_focus_slice_metric_call(temporal_hcs_dataset, focus_metric):
@@ -43,7 +50,6 @@ def test_generate_qc_metadata_focus(temporal_hcs_dataset, focus_metric):
     )
 
     with open_ome_zarr(temporal_hcs_dataset, mode="r") as plate:
-        # Plate-level
         assert "focus_slice" in plate.zattrs
         assert "Phase" in plate.zattrs["focus_slice"]
         ds_stats = plate.zattrs["focus_slice"]["Phase"]["dataset_statistics"]
@@ -52,7 +58,6 @@ def test_generate_qc_metadata_focus(temporal_hcs_dataset, focus_metric):
         assert "z_focus_min" in ds_stats
         assert "z_focus_max" in ds_stats
 
-        # Position-level
         for _, pos in plate.positions():
             assert "focus_slice" in pos.zattrs
             pos_meta = pos.zattrs["focus_slice"]["Phase"]
@@ -89,3 +94,19 @@ def test_generate_qc_metadata_per_timepoint_count(temporal_hcs_dataset, focus_me
             assert len(per_tp) == 5
             for t in range(5):
                 assert str(t) in per_tp
+
+
+def test_generate_qc_metadata_all_channels(
+    temporal_hcs_dataset, focus_metric_all_channels
+):
+    generate_qc_metadata(
+        zarr_dir=temporal_hcs_dataset,
+        metrics=[focus_metric_all_channels],
+        num_workers=1,
+    )
+
+    with open_ome_zarr(temporal_hcs_dataset, mode="r") as plate:
+        for ch in plate.channel_names:
+            assert ch in plate.zattrs["focus_slice"]
+            for _, pos in plate.positions():
+                assert ch in pos.zattrs["focus_slice"]

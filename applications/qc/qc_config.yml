@@ -1,18 +1,12 @@
-trainer:
-  qc:
-    data_path: /path/to/dataset.zarr
-    num_workers: 4
-    metrics:
-      - class_path: viscy.preprocessing.focus.FocusSliceMetric
-        init_args:
-          device: cuda
-          batch_size: 5
-          channel_params:
-            Phase:
-              NA_det: 0.55
-              lambda_ill: 0.532
-              pixel_size: 0.325
-            GFP:
-              NA_det: 1.2
-              lambda_ill: 0.488
-              pixel_size: 0.103
+data_path: /home/eduardo.hirata/mydata/data/dummy_data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_drifting_ztest.zarr
+num_workers: 8
+metrics:
+  - class_path: viscy.preprocessing.focus.FocusSliceMetric
+    init_args:
+      NA_det: 1.35
+      lambda_ill: 0.450
+      pixel_size: 0.1494
+      channel_names:
+        - Phase3D
+        - "raw GFP EX488 EM525-45"
+      device: cuda
