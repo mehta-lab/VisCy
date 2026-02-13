@@ -48,13 +48,13 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
 ### Models -- UNet Architectures
 
-- [ ] **UNET-01**: UNeXt2 migrated to `unet/unext2.py` with shared component imports updated
-- [ ] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
+- [x] **UNET-01**: UNeXt2 migrated to `unet/unext2.py` with shared component imports updated
+- [x] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
 - [ ] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
 - [ ] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
 - [x] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
-- [ ] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
-- [ ] **UNET-07**: FCMAE tests migrated from existing test suite
+- [x] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
+- [x] **UNET-07**: FCMAE tests migrated from existing test suite
 - [ ] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
 
 ### Models -- Variational Autoencoders
@@ -154,10 +154,10 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MPKG-04 | Phase 6 | Complete |
 | UNET-05 | Phase 6 | Complete |
 | COMPAT-02 | Phases 7-9 | Pending (deferred — model constructors not in Phase 6) |
-| UNET-01 | Phase 7 | Pending |
-| UNET-02 | Phase 7 | Pending |
-| UNET-06 | Phase 7 | Pending |
-| UNET-07 | Phase 7 | Pending |
+| UNET-01 | Phase 7 | Complete |
+| UNET-02 | Phase 7 | Complete |
+| UNET-06 | Phase 7 | Complete |
+| UNET-07 | Phase 7 | Complete |
 | CONT-01 | Phase 8 | Pending |
 | CONT-02 | Phase 8 | Pending |
 | CONT-03 | Phase 8 | Pending |

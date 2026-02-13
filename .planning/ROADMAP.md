@@ -51,7 +51,7 @@ Plans:
 **Milestone Goal:** Extract all 8 network architectures into `viscy-models` as pure nn.Modules with shared components, comprehensive tests, and clean public API.
 
 - [x] **Phase 6: Package Scaffold & Shared Components** - viscy-models package structure with extracted shared layers
-- [ ] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
+- [x] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
 - [ ] **Phase 8: Representation Models** - Contrastive encoders and VAE architectures
 - [ ] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
 - [ ] **Phase 10: Public API & CI Integration** - Clean imports, full test suite, CI matrix, checkpoint compatibility
@@ -87,8 +87,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- Migrate UNeXt2 model with new forward-pass tests (6 tests)
-- [ ] 07-02-PLAN.md -- Migrate FCMAE model with 11 existing tests and finalize unet exports
+- [x] 07-01-PLAN.md -- Migrate UNeXt2 model with new forward-pass tests (6 tests)
+- [x] 07-02-PLAN.md -- Migrate FCMAE model with 11 existing tests and finalize unet exports
 
 ### Phase 8: Representation Models
 **Goal**: All contrastive and VAE models are importable from viscy-models with forward-pass tests
@@ -147,7 +147,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
 | 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
-| 7. Core UNet Models | v1.1 | 0/2 | Planned | - |
+| 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 8. Representation Models | v1.1 | 0/TBD | Not started | - |
 | 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
 | 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
