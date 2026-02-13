@@ -105,11 +105,11 @@ Plans:
   3. Optional dependency groups (`[triplet]`, `[livecell]`, `[mmap]`, `[all]`) are declared in pyproject.toml and installable
   4. `_utils.py` contains shared helpers (`_ensure_channel_list`, `_read_norm_meta`, `_collate_samples`) extracted from hcs.py, importable as `from viscy_data._utils import X`
   5. `py.typed` marker exists for type checking support
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- Package skeleton with pyproject.toml, type definitions, and workspace integration
+- [ ] 06-02-PLAN.md -- Extract shared utilities from hcs.py and triplet.py into _utils.py
 
 ### Phase 7: Code Migration
 **Goal**: All 13 data modules are migrated and importable with clean paths
