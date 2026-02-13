@@ -5,14 +5,16 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v1.1 — Extract viscy-data
+**Current focus:** Phase 6 -- Package Scaffolding and Foundation
 
 ## Current Position
 
-Phase: Not started (defining requirements)
-Plan: —
-Status: Defining requirements
-Last activity: 2026-02-13 — Milestone v1.1 started
+Phase: 6 of 9 (Package Scaffolding and Foundation)
+Plan: 0 of TBD in current phase
+Status: Ready to plan
+Last activity: 2026-02-13 -- Roadmap created for milestone v1.1
+
+Progress: [=======...] 70% (v1.0 complete, v1.1 starting)
 
 ## Performance Metrics
 
@@ -21,34 +23,36 @@ Last activity: 2026-02-13 — Milestone v1.1 started
 - Average duration: 4.2 min
 - Total execution time: 29 min
 
+**By Phase:**
+
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1 | 2 | ~8 min | ~4 min |
+| 2 | 1 | ~4 min | ~4 min |
+| 3 | 3 | ~13 min | ~4.3 min |
+| 5 | 1 | ~4 min | ~4 min |
+
 ## Accumulated Context
 
 ### Decisions
 
 Decisions are logged in PROJECT.md Key Decisions table.
-Key decisions from v1.0 carrying forward:
+Key decisions carrying forward:
 
 - Clean break on imports: `from viscy_data import X` (no backward compatibility)
-- hatchling over setuptools: Modern build system with plugin support
-- Root package is `viscy` umbrella with `package=true` (installable)
-- `viscy` re-exports from subpackages, has dynamic versioning from git tags
-- Use prek instead of pre-commit for faster hook execution
-- ty type checker removed (too many false positives with MONAI)
-- ruff per-file-ignores updated for monorepo pattern (**/tests/**)
-- alls-green pattern for CI branch protection
-
-New decisions for v1.1:
-- **No viscy-transforms dependency**: Remove BatchedCenterSpatialCropd from triplet.py, assert batch shape instead
-- **Optional dependency groups**: tensorstore, tensordict, pycocotools as extras
+- hatchling + uv-dynamic-versioning for build system
+- No viscy-transforms dependency: assert batch shape instead of BatchedCenterSpatialCropd
+- Optional dependency groups: tensorstore, tensordict, pycocotools as extras
+- Extract shared utilities from hcs.py into _utils.py before migration
 
 ### Blockers/Concerns
 
-(None yet)
+None yet.
 
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Starting milestone v1.1 — defining requirements
+Stopped at: Roadmap created for v1.1 -- ready to plan Phase 6
 Resume file: None
 
 ---
