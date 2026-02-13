@@ -68,11 +68,12 @@ Plans:
   3. `viscy_models._components` subpackage contains stems.py, heads.py, and blocks.py with extracted shared code
   4. ConvBlock2D/3D layers exist in `viscy_models.unet._layers` and are importable
   5. All model constructors use immutable defaults (tuples instead of mutable lists/dicts)
-**Plans**: TBD
+**Plans**: 3 plans
 
 Plans:
-- [ ] 06-01: TBD
-- [ ] 06-02: TBD
+- [ ] 06-01-PLAN.md -- Package scaffold, pyproject.toml, workspace registration
+- [ ] 06-02-PLAN.md -- Extract shared _components (stems, heads, blocks) with tests
+- [ ] 06-03-PLAN.md -- Migrate ConvBlock2D/3D to unet/_layers with tests
 
 ### Phase 7: Core UNet Models
 **Goal**: UNeXt2 and FCMAE are importable from viscy-models with forward-pass tests proving correctness
@@ -145,7 +146,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 3. Code Migration | v1.0 | 3/3 | Complete | 2026-01-28 |
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
-| 6. Package Scaffold & Shared Components | v1.1 | 0/TBD | Not started | - |
+| 6. Package Scaffold & Shared Components | v1.1 | 0/3 | Planning complete | - |
 | 7. Core UNet Models | v1.1 | 0/TBD | Not started | - |
 | 8. Representation Models | v1.1 | 0/TBD | Not started | - |
 | 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
