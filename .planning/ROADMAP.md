@@ -99,11 +99,11 @@ Plans:
   2. `from viscy_models.vae import BetaVae25D, BetaVaeMonai` works and both produce reconstruction + latent outputs
   3. Forward-pass tests exist for ContrastiveEncoder and ResNet3dEncoder with representative input shapes
   4. Forward-pass tests exist for BetaVae25D and BetaVaeMonai verifying output structure (reconstruction, mu, logvar)
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
+- [ ] 08-01-PLAN.md -- Migrate ContrastiveEncoder and ResNet3dEncoder with forward-pass tests (5 tests)
+- [ ] 08-02-PLAN.md -- Migrate BetaVae25D and BetaVaeMonai with forward-pass tests (4 tests)
 
 ### Phase 9: Legacy UNet Models
 **Goal**: Unet2d and Unet25d are importable from viscy-models with migrated test coverage
@@ -148,7 +148,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
 | 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
 | 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
-| 8. Representation Models | v1.1 | 0/TBD | Not started | - |
+| 8. Representation Models | v1.1 | 0/2 | Planned | - |
 | 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
 | 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
 
