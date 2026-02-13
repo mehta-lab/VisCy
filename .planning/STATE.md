@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 
 ## Current Position
 
-Phase: 7 of 10 (Core UNet Models)
-Plan: 1 of 2 in current phase
-Status: Plan 07-01 Complete
-Last activity: 2026-02-13 -- Completed 07-01 UNeXt2 migration
+Phase: 7 of 10 (Core UNet Models) -- PHASE COMPLETE
+Plan: 2 of 2 in current phase
+Status: Phase 7 Complete
+Last activity: 2026-02-13 -- Completed 07-02 FCMAE migration
 
-Progress: [============------] 63% (v1.0 complete, v1.1 phase 7: 1/2 plans)
+Progress: [=============-----] 68% (v1.0 complete, v1.1 phase 7: 2/2 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 11 (v1.0: 7, v1.1: 4)
-- Average duration: ~20 min
-- Total execution time: ~3.65 hours
+- Total plans completed: 12 (v1.0: 7, v1.1: 5)
+- Average duration: ~19 min
+- Total execution time: ~3.7 hours
 
 **By Phase:**
 
@@ -32,7 +32,7 @@ Progress: [============------] 63% (v1.0 complete, v1.1 phase 7: 1/2 plans)
 | 3. Migration | 3 | ~90m | ~30m |
 | 5. CI/CD | 1 | ~30m | ~30m |
 | 6. Package Scaffold | 3 | ~10m | ~3m |
-| 7. Core UNet Models | 1 | ~3m | ~3m |
+| 7. Core UNet Models | 2 | ~6m | ~3m |
 
 ## Accumulated Context
 
@@ -57,6 +57,8 @@ Recent decisions affecting current work:
 - Preserved exact list mutation pattern (decoder_channels = num_channels alias) in UNeXt2 for compatibility
 - Marked deconv decoder test as xfail due to pre-existing channel mismatch bug in original code
 - Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
+- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical _components.heads location
+- Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
 
 ### Pending Todos
 
@@ -73,9 +75,9 @@ All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 07-01-PLAN.md (UNeXt2 migration)
+Stopped at: Completed 07-02-PLAN.md (FCMAE migration -- Phase 7 complete)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (07-01 summary added)*
+*Last updated: 2026-02-13 (07-02 summary added, Phase 7 complete)*
