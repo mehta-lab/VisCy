@@ -50,12 +50,12 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
 - [x] **UNET-01**: UNeXt2 migrated to `unet/unext2.py` with shared component imports updated
 - [x] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
-- [ ] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
-- [ ] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
+- [x] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
+- [x] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
 - [x] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
 - [x] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
 - [x] **UNET-07**: FCMAE tests migrated from existing test suite
-- [ ] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
+- [x] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
 
 ### Models -- Variational Autoencoders
 
@@ -164,9 +164,9 @@ Which phases cover which requirements. Updated during roadmap creation.
 | VAE-01 | Phase 8 | Complete |
 | VAE-02 | Phase 8 | Complete |
 | VAE-03 | Phase 8 | Complete |
-| UNET-03 | Phase 9 | Pending |
-| UNET-04 | Phase 9 | Pending |
-| UNET-08 | Phase 9 | Pending |
+| UNET-03 | Phase 9 | Complete |
+| UNET-04 | Phase 9 | Complete |
+| UNET-08 | Phase 9 | Complete |
 | API-01 | Phase 10 | Pending |
 | API-02 | Phase 10 | Pending |
 | API-03 | Phase 10 | Pending |

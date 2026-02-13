@@ -53,7 +53,7 @@ Plans:
 - [x] **Phase 6: Package Scaffold & Shared Components** - viscy-models package structure with extracted shared layers
 - [x] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
 - [x] **Phase 8: Representation Models** - Contrastive encoders and VAE architectures
-- [ ] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
+- [x] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
 - [ ] **Phase 10: Public API & CI Integration** - Clean imports, full test suite, CI matrix, checkpoint compatibility
 
 ## Phase Details
@@ -116,7 +116,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 09-01-PLAN.md -- Migrate Unet2d and Unet25d with pytest test coverage
+- [x] 09-01-PLAN.md -- Migrate Unet2d and Unet25d with pytest test coverage
 
 ### Phase 10: Public API & CI Integration
 **Goal**: Users can `from viscy_models import ModelName` for all 8 models, with CI verifying the full package
@@ -149,7 +149,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
 | 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 8. Representation Models | v1.1 | 2/2 | Complete | 2026-02-13 |
-| 9. Legacy UNet Models | v1.1 | 0/1 | Planned | - |
+| 9. Legacy UNet Models | v1.1 | 1/1 | Complete | 2026-02-13 |
 | 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
 
 ---
