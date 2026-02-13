@@ -10,17 +10,17 @@ See: .planning/PROJECT.md (updated 2026-02-12)
 ## Current Position
 
 Phase: 6 of 10 (Package Scaffold & Shared Components)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-12 -- Roadmap created for milestone v1.1
+Plan: 1 of 3 in current phase
+Status: Executing
+Last activity: 2026-02-13 -- Completed 06-01 package scaffold
 
-Progress: [=======-----------] 40% (v1.0 complete, v1.1 starting)
+Progress: [========----------] 43% (v1.0 complete, v1.1 plan 1/3 of phase 6)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 7 (v1.0)
-- Average duration: ~30 min
+- Total plans completed: 8 (v1.0: 7, v1.1: 1)
+- Average duration: ~26 min
 - Total execution time: ~3.5 hours
 
 **By Phase:**
@@ -31,6 +31,7 @@ Progress: [=======-----------] 40% (v1.0 complete, v1.1 starting)
 | 2. Package | 1 | ~30m | ~30m |
 | 3. Migration | 3 | ~90m | ~30m |
 | 5. CI/CD | 1 | ~30m | ~30m |
+| 6. Package Scaffold | 1 | ~2m | ~2m |
 
 ## Accumulated Context
 
@@ -45,6 +46,9 @@ Recent decisions affecting current work:
 - 14+ shared components in unext2.py need extraction to _components/
 - Mutable defaults must be fixed to tuples during migration
 - State dict key compatibility is non-negotiable for checkpoint loading
+- Followed viscy-transforms pyproject.toml pattern exactly for consistency
+- No optional-dependencies for viscy-models (no notebook extras needed)
+- Dev dependency group includes only test (no jupyter for models package)
 
 ### Pending Todos
 
@@ -60,10 +64,10 @@ All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 
 ## Session Continuity
 
-Last session: 2026-02-12
-Stopped at: Roadmap created for v1.1 milestone
+Last session: 2026-02-13
+Stopped at: Completed 06-01-PLAN.md (package scaffold)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-12*
+*Last updated: 2026-02-13*
