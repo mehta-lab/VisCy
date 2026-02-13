@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 6 of 9 (Package Scaffolding and Foundation)
-Plan: 0 of TBD in current phase
-Status: Ready to plan
-Last activity: 2026-02-13 -- Roadmap created for milestone v1.1
+Plan: 1 of 2 in current phase
+Status: Executing
+Last activity: 2026-02-13 -- Completed 06-01 (Package Scaffolding)
 
-Progress: [=======...] 70% (v1.0 complete, v1.1 starting)
+Progress: [=======...] 75% (v1.0 complete, v1.1 phase 6 plan 1 done)
 
 ## Performance Metrics
 
 **Velocity (from v1.0):**
-- Total plans completed: 7
-- Average duration: 4.2 min
-- Total execution time: 29 min
+- Total plans completed: 8
+- Average duration: 4.1 min
+- Total execution time: 33 min
 
 **By Phase:**
 
@@ -31,6 +31,7 @@ Progress: [=======...] 70% (v1.0 complete, v1.1 starting)
 | 2 | 1 | ~4 min | ~4 min |
 | 3 | 3 | ~13 min | ~4.3 min |
 | 5 | 1 | ~4 min | ~4 min |
+| 6 | 1 | ~4 min | ~4 min |
 
 ## Accumulated Context
 
@@ -44,6 +45,8 @@ Key decisions carrying forward:
 - No viscy-transforms dependency: assert batch shape instead of BatchedCenterSpatialCropd
 - Optional dependency groups: tensorstore, tensordict, pycocotools as extras
 - Extract shared utilities from hcs.py into _utils.py before migration
+- Updated typing_extensions.NotRequired to typing.NotRequired (Python >=3.11 stdlib)
+- Type definitions in _typing.py (private), re-exported from __init__.py (public API pattern)
 
 ### Blockers/Concerns
 
@@ -52,9 +55,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Roadmap created for v1.1 -- ready to plan Phase 6
+Stopped at: Completed 06-01-PLAN.md (Package Scaffolding)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13*
+*Last updated: 2026-02-13 (06-01 complete)*
