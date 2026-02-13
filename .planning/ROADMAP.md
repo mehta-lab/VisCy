@@ -84,11 +84,11 @@ Plans:
   2. `from viscy_models.unet import FullyConvolutionalMAE` works and the model produces correct output shapes
   3. UNeXt2 forward-pass test covers multiple configurations (2D/3D, varying channel counts)
   4. Existing FCMAE tests pass after migration to the new package location
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
+- [ ] 07-01-PLAN.md -- Migrate UNeXt2 model with new forward-pass tests (6 tests)
+- [ ] 07-02-PLAN.md -- Migrate FCMAE model with 11 existing tests and finalize unet exports
 
 ### Phase 8: Representation Models
 **Goal**: All contrastive and VAE models are importable from viscy-models with forward-pass tests
@@ -147,7 +147,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
 | 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
-| 7. Core UNet Models | v1.1 | 0/TBD | Not started | - |
+| 7. Core UNet Models | v1.1 | 0/2 | Planned | - |
 | 8. Representation Models | v1.1 | 0/TBD | Not started | - |
 | 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
 | 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
