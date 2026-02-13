@@ -12,13 +12,14 @@ concurrency:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    name: Test (${{ matrix.package }}, Python ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
         python-version: ["3.11", "3.12", "3.13"]
+        package: [viscy-transforms, viscy-models]
 
     steps:
       - name: Checkout repository
@@ -33,11 +34,11 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen --all-extras --dev
-        working-directory: packages/viscy-transforms
+        working-directory: packages/${{ matrix.package }}
 
       - name: Run tests with coverage
-        run: uv run --frozen pytest --cov=viscy_transforms --cov-report=term-missing
-        working-directory: packages/viscy-transforms
+        run: uv run --frozen pytest --cov=src/ --cov-report=term-missing
+        working-directory: packages/${{ matrix.package }}
 
   check:
     name: All tests pass
