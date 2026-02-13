@@ -41,10 +41,10 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
 ### Models -- Package Infrastructure
 
-- [ ] **MPKG-01**: Package directory `packages/viscy-models/` with src layout (`src/viscy_models/`)
-- [ ] **MPKG-02**: pyproject.toml with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
-- [ ] **MPKG-03**: `uv sync --package viscy-models` succeeds in workspace
-- [ ] **MPKG-04**: `_components/` module with stems.py, heads.py, blocks.py extracted from shared code
+- [x] **MPKG-01**: Package directory `packages/viscy-models/` with src layout (`src/viscy_models/`)
+- [x] **MPKG-02**: pyproject.toml with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
+- [x] **MPKG-03**: `uv sync --package viscy-models` succeeds in workspace
+- [x] **MPKG-04**: `_components/` module with stems.py, heads.py, blocks.py extracted from shared code
 
 ### Models -- UNet Architectures
 
@@ -52,7 +52,7 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 - [ ] **UNET-02**: FullyConvolutionalMAE migrated to `unet/fcmae.py`
 - [ ] **UNET-03**: Unet2d migrated to `unet/unet2d.py` (renamed from PascalCase)
 - [ ] **UNET-04**: Unet25d migrated to `unet/unet25d.py` (renamed from PascalCase)
-- [ ] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
+- [x] **UNET-05**: ConvBlock2D/3D migrated to `unet/_layers/` (renamed from PascalCase)
 - [ ] **UNET-06**: Forward-pass tests for UNeXt2 (NEW -- currently missing)
 - [ ] **UNET-07**: FCMAE tests migrated from existing test suite
 - [ ] **UNET-08**: Unet2d/Unet25d tests migrated and converted from unittest to pytest
@@ -148,12 +148,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MPKG-01 | Phase 6 | Pending |
-| MPKG-02 | Phase 6 | Pending |
-| MPKG-03 | Phase 6 | Pending |
-| MPKG-04 | Phase 6 | Pending |
-| UNET-05 | Phase 6 | Pending |
-| COMPAT-02 | Phase 6 | Pending |
+| MPKG-01 | Phase 6 | Complete |
+| MPKG-02 | Phase 6 | Complete |
+| MPKG-03 | Phase 6 | Complete |
+| MPKG-04 | Phase 6 | Complete |
+| UNET-05 | Phase 6 | Complete |
+| COMPAT-02 | Phases 7-9 | Pending (deferred — model constructors not in Phase 6) |
 | UNET-01 | Phase 7 | Pending |
 | UNET-02 | Phase 7 | Pending |
 | UNET-06 | Phase 7 | Pending |

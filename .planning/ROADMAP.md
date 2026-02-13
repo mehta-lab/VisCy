@@ -50,7 +50,7 @@ Plans:
 
 **Milestone Goal:** Extract all 8 network architectures into `viscy-models` as pure nn.Modules with shared components, comprehensive tests, and clean public API.
 
-- [ ] **Phase 6: Package Scaffold & Shared Components** - viscy-models package structure with extracted shared layers
+- [x] **Phase 6: Package Scaffold & Shared Components** - viscy-models package structure with extracted shared layers
 - [ ] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
 - [ ] **Phase 8: Representation Models** - Contrastive encoders and VAE architectures
 - [ ] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
@@ -71,9 +71,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Package scaffold, pyproject.toml, workspace registration
-- [ ] 06-02-PLAN.md -- Extract shared _components (stems, heads, blocks) with tests
-- [ ] 06-03-PLAN.md -- Migrate ConvBlock2D/3D to unet/_layers with tests
+- [x] 06-01-PLAN.md -- Package scaffold, pyproject.toml, workspace registration
+- [x] 06-02-PLAN.md -- Extract shared _components (stems, heads, blocks) with tests
+- [x] 06-03-PLAN.md -- Migrate ConvBlock2D/3D to unet/_layers with tests
 
 ### Phase 7: Core UNet Models
 **Goal**: UNeXt2 and FCMAE are importable from viscy-models with forward-pass tests proving correctness
@@ -146,7 +146,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 3. Code Migration | v1.0 | 3/3 | Complete | 2026-01-28 |
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
-| 6. Package Scaffold & Shared Components | v1.1 | 0/3 | Planning complete | - |
+| 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
 | 7. Core UNet Models | v1.1 | 0/TBD | Not started | - |
 | 8. Representation Models | v1.1 | 0/TBD | Not started | - |
 | 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
