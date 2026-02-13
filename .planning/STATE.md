@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 7 - Core UNet Models
+**Current focus:** Phase 8 - Representation Models
 
 ## Current Position
 
-Phase: 7 of 10 (Core UNet Models) -- PHASE COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase 7 Complete
-Last activity: 2026-02-13 -- Completed 07-02 FCMAE migration
+Phase: 8 of 10 (Representation Models)
+Plan: 1 of 2 in current phase
+Status: Executing Phase 8
+Last activity: 2026-02-13 -- Completed 08-01 contrastive model migration
 
-Progress: [=============-----] 68% (v1.0 complete, v1.1 phase 7: 2/2 plans)
+Progress: [==============----] 72% (v1.0 complete, v1.1 phase 8: 1/2 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12 (v1.0: 7, v1.1: 5)
-- Average duration: ~19 min
-- Total execution time: ~3.7 hours
+- Total plans completed: 13 (v1.0: 7, v1.1: 6)
+- Average duration: ~18 min
+- Total execution time: ~3.8 hours
 
 **By Phase:**
 
@@ -33,6 +33,7 @@ Progress: [=============-----] 68% (v1.0 complete, v1.1 phase 7: 2/2 plans)
 | 5. CI/CD | 1 | ~30m | ~30m |
 | 6. Package Scaffold | 3 | ~10m | ~3m |
 | 7. Core UNet Models | 2 | ~6m | ~3m |
+| 8. Representation Models | 1 | ~4m | ~4m |
 
 ## Accumulated Context
 
@@ -59,6 +60,8 @@ Recent decisions affecting current work:
 - Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
 - Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical _components.heads location
 - Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
+- Used encoder.num_features instead of encoder.head.fc.in_features for timm backbone-agnostic projection dim (fixes ResNet50 bug)
+- Added pretrained parameter (default False) to contrastive encoders for pure nn.Module semantics
 
 ### Pending Todos
 
@@ -75,9 +78,9 @@ All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 07-02-PLAN.md (FCMAE migration -- Phase 7 complete)
+Stopped at: Completed 08-01-PLAN.md (contrastive model migration)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (07-02 summary added, Phase 7 complete)*
+*Last updated: 2026-02-13 (08-01 summary added, Phase 8 in progress)*
