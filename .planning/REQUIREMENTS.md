@@ -117,29 +117,29 @@ Deferred to later milestones.
 | CI-03 | Phase 5 | Complete |
 | CI-04 | Phase 5 | Complete |
 
-### v1.1 (Pending)
+### v1.1 (Active)
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| DATA-PKG-01 | TBD | Pending |
-| DATA-PKG-02 | TBD | Pending |
-| DATA-PKG-03 | TBD | Pending |
-| DATA-PKG-04 | TBD | Pending |
-| DATA-MIG-01 | TBD | Pending |
-| DATA-MIG-02 | TBD | Pending |
-| DATA-MIG-03 | TBD | Pending |
-| DATA-MIG-04 | TBD | Pending |
-| DATA-TST-01 | TBD | Pending |
-| DATA-TST-02 | TBD | Pending |
-| DATA-CI-01 | TBD | Pending |
-| DATA-CI-02 | TBD | Pending |
+| DATA-PKG-01 | Phase 6 | Pending |
+| DATA-PKG-02 | Phase 6 | Pending |
+| DATA-PKG-03 | Phase 7 | Pending |
+| DATA-PKG-04 | Phase 6 | Pending |
+| DATA-MIG-01 | Phase 7 | Pending |
+| DATA-MIG-02 | Phase 7 | Pending |
+| DATA-MIG-03 | Phase 7 | Pending |
+| DATA-MIG-04 | Phase 7 | Pending |
+| DATA-TST-01 | Phase 8 | Pending |
+| DATA-TST-02 | Phase 8 | Pending |
+| DATA-CI-01 | Phase 9 | Pending |
+| DATA-CI-02 | Phase 9 | Pending |
 
 **Coverage:**
 - v1.0 requirements: 18 total, 18 complete
 - v1.1 requirements: 12 total
-- Mapped to phases: 0
-- Unmapped: 12
+- Mapped to phases: 12
+- Unmapped: 0
 
 ---
 *Requirements defined: 2025-01-27*
-*Last updated: 2026-02-13 after milestone v1.1 requirements*
+*Last updated: 2026-02-13 after v1.1 roadmap creation*
