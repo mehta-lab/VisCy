@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dynamic = [ "version" ]
-dependencies = [ "viscy-transforms" ]
+dependencies = [ "viscy-models", "viscy-transforms" ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
@@ -49,6 +49,7 @@ package = true
 members = [ "packages/*" ]
 
 [tool.uv.sources]
+viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
 
 [tool.ruff]
