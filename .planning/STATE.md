@@ -9,12 +9,12 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 
 ## Current Position
 
-Phase: 6 of 9 (Package Scaffolding and Foundation)
-Plan: 1 of 2 in current phase
-Status: Executing
-Last activity: 2026-02-13 -- Completed 06-01 (Package Scaffolding)
+Phase: 6 of 9 (Package Scaffolding and Foundation) -- COMPLETE
+Plan: 2 of 2 in current phase (all plans complete)
+Status: Phase Complete
+Last activity: 2026-02-13 -- Completed 06-02 (Utility Module Extraction)
 
-Progress: [=======...] 75% (v1.0 complete, v1.1 phase 6 plan 1 done)
+Progress: [========..] 80% (v1.0 complete, v1.1 phase 6 complete)
 
 ## Performance Metrics
 
@@ -31,7 +31,7 @@ Progress: [=======...] 75% (v1.0 complete, v1.1 phase 6 plan 1 done)
 | 2 | 1 | ~4 min | ~4 min |
 | 3 | 3 | ~13 min | ~4.3 min |
 | 5 | 1 | ~4 min | ~4 min |
-| 6 | 1 | ~4 min | ~4 min |
+| 6 | 2 | ~7 min | ~3.5 min |
 
 ## Accumulated Context
 
@@ -47,6 +47,8 @@ Key decisions carrying forward:
 - Extract shared utilities from hcs.py into _utils.py before migration
 - Updated typing_extensions.NotRequired to typing.NotRequired (Python >=3.11 stdlib)
 - Type definitions in _typing.py (private), re-exported from __init__.py (public API pattern)
+- Internal utility functions accessed via `from viscy_data._utils import X` (not re-exported from __init__.py)
+- Utility functions use `viscy_data._typing` for type imports (not `viscy.data.typing`)
 
 ### Blockers/Concerns
 
@@ -55,9 +57,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 06-01-PLAN.md (Package Scaffolding)
+Stopped at: Completed 06-02-PLAN.md (Utility Module Extraction) -- Phase 6 complete
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (06-01 complete)*
+*Last updated: 2026-02-13 (06-02 complete, Phase 6 complete)*
