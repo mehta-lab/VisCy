@@ -71,15 +71,15 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
 ### Models -- Public API & CI
 
-- [ ] **API-01**: `from viscy_models import UNeXt2` works for all 8 model classes
-- [ ] **API-02**: `uv run --package viscy-models pytest` passes all tests
-- [ ] **API-03**: CI test matrix updated to include viscy-models
-- [ ] **API-04**: Root pyproject.toml updated with viscy-models workspace dependency
+- [x] **API-01**: `from viscy_models import UNeXt2` works for all 8 model classes
+- [x] **API-02**: `uv run --package viscy-models pytest` passes all tests
+- [x] **API-03**: CI test matrix updated to include viscy-models
+- [x] **API-04**: Root pyproject.toml updated with viscy-models workspace dependency
 
 ### Models -- Compatibility
 
-- [ ] **COMPAT-01**: State dict keys preserved identically for all migrated models
-- [ ] **COMPAT-02**: Mutable default arguments fixed to tuples in model constructors
+- [x] **COMPAT-01**: State dict keys preserved identically for all migrated models
+- [x] **COMPAT-02**: Mutable default arguments fixed to tuples in model constructors
 
 ## Future Requirements
 
@@ -153,7 +153,7 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MPKG-03 | Phase 6 | Complete |
 | MPKG-04 | Phase 6 | Complete |
 | UNET-05 | Phase 6 | Complete |
-| COMPAT-02 | Phases 7-9 | Pending (deferred — model constructors not in Phase 6) |
+| COMPAT-02 | Phases 7-9 | Complete |
 | UNET-01 | Phase 7 | Complete |
 | UNET-02 | Phase 7 | Complete |
 | UNET-06 | Phase 7 | Complete |
@@ -167,11 +167,11 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UNET-03 | Phase 9 | Complete |
 | UNET-04 | Phase 9 | Complete |
 | UNET-08 | Phase 9 | Complete |
-| API-01 | Phase 10 | Pending |
-| API-02 | Phase 10 | Pending |
-| API-03 | Phase 10 | Pending |
-| API-04 | Phase 10 | Pending |
-| COMPAT-01 | Phase 10 | Pending |
+| API-01 | Phase 10 | Complete |
+| API-02 | Phase 10 | Complete |
+| API-03 | Phase 10 | Complete |
+| API-04 | Phase 10 | Complete |
+| COMPAT-01 | Phase 10 | Complete |
 
 **Coverage:**
 - v1.0 requirements: 18 total, 18 mapped (complete)

@@ -54,7 +54,7 @@ Plans:
 - [x] **Phase 7: Core UNet Models** - UNeXt2 and FCMAE migration with shared component validation
 - [x] **Phase 8: Representation Models** - Contrastive encoders and VAE architectures
 - [x] **Phase 9: Legacy UNet Models** - Unet2d and Unet25d migration
-- [ ] **Phase 10: Public API & CI Integration** - Clean imports, full test suite, CI matrix, checkpoint compatibility
+- [x] **Phase 10: Public API & CI Integration** - Clean imports, full test suite, CI matrix, checkpoint compatibility
 
 ## Phase Details
 
@@ -131,7 +131,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 10-01-PLAN.md -- Public API re-exports, state dict compatibility tests, CI matrix update
+- [x] 10-01-PLAN.md -- Public API re-exports, state dict compatibility tests, CI matrix update
 
 ## Progress
 
@@ -149,7 +149,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 8. Representation Models | v1.1 | 2/2 | Complete | 2026-02-13 |
 | 9. Legacy UNet Models | v1.1 | 1/1 | Complete | 2026-02-13 |
-| 10. Public API & CI Integration | v1.1 | 0/1 | Not started | - |
+| 10. Public API & CI Integration | v1.1 | 1/1 | Complete | 2026-02-13 |
 
 ---
 *Roadmap created: 2025-01-27*
