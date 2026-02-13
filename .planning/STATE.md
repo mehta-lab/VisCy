@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 9 - Legacy UNet Models -- PHASE COMPLETE
+**Current focus:** Phase 10 - Public API & CI Integration -- PHASE COMPLETE -- v1.1 MILESTONE COMPLETE
 
 ## Current Position
 
-Phase: 9 of 10 (Legacy UNet Models) -- PHASE COMPLETE
+Phase: 10 of 10 (Public API & CI Integration) -- PHASE COMPLETE
 Plan: 1 of 1 in current phase
-Status: Phase 9 Complete
-Last activity: 2026-02-13 -- Completed 09-01 Unet2d/Unet25d migration
+Status: v1.1 Milestone Complete
+Last activity: 2026-02-13 -- Completed 10-01 Public API, state dict tests, CI integration
 
-Progress: [================--] 82% (v1.0 complete, v1.1 phase 9: 1/1 plans)
+Progress: [==================] 100% (v1.0 complete, v1.1 complete: all 10 phases done)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 15 (v1.0: 7, v1.1: 8)
-- Average duration: ~16 min
-- Total execution time: ~4.0 hours
+- Total plans completed: 16 (v1.0: 7, v1.1: 9)
+- Average duration: ~15 min
+- Total execution time: ~4.1 hours
 
 **By Phase:**
 
@@ -35,6 +35,7 @@ Progress: [================--] 82% (v1.0 complete, v1.1 phase 9: 1/1 plans)
 | 7. Core UNet Models | 2 | ~6m | ~3m |
 | 8. Representation Models | 2 | ~8m | ~4m |
 | 9. Legacy UNet Models | 1 | ~4m | ~4m |
+| 10. Public API & CI | 1 | ~4m | ~4m |
 
 ## Accumulated Context
 
@@ -69,6 +70,8 @@ Recent decisions affecting current work:
 - SimpleNamespace return type preserved for VAE backward compatibility
 - Convert user-provided num_filters tuple to list internally for list concatenation compatibility
 - up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters
+- Used --cov=src/ for cross-platform CI coverage (avoids hyphen-to-underscore conversion on Windows)
+- State dict tests use structural assertions (count + prefixes + sentinels) not frozen key lists
 
 ### Pending Todos
 
@@ -85,9 +88,9 @@ All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 09-01-PLAN.md (Unet2d/Unet25d migration -- Phase 9 complete)
+Stopped at: Completed 10-01-PLAN.md (Public API & CI -- Phase 10 complete -- v1.1 MILESTONE COMPLETE)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (09-01 summary added, Phase 9 complete)*
+*Last updated: 2026-02-13 (10-01 summary added, Phase 10 complete, v1.1 milestone complete)*
