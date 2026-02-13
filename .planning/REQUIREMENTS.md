@@ -1,11 +1,9 @@
-# Requirements: VisCy Modularization (Milestone 1)
+# Requirements: VisCy Modularization
 
 **Defined:** 2025-01-27
 **Core Value:** Independent, reusable subpackages with clean import paths
 
-## v1 Requirements
-
-Requirements for Phases 0+1: Workspace scaffolding + viscy-transforms extraction.
+## v1.0 Requirements (Complete)
 
 ### Workspace Foundation
 
@@ -13,17 +11,17 @@ Requirements for Phases 0+1: Workspace scaffolding + viscy-transforms extraction
 - [x] **WORK-01**: Virtual workspace root with `[tool.uv.workspace]` and `members = ["packages/*"]`
 - [x] **WORK-02**: Shared lockfile (`uv.lock`) at repository root
 - [x] **WORK-03**: Python version floor (>=3.11) enforced in root pyproject.toml
-- [x] **WORK-04**: Pre-commit hooks configured (ruff, ty) for local development
+- [x] **WORK-04**: Pre-commit hooks configured (ruff, prek) for local development
 - [x] **WORK-05**: Shared pytest configuration in root pyproject.toml
 
-### Package Structure
+### Package Structure (viscy-transforms)
 
 - [x] **PKG-01**: src layout for viscy-transforms (`packages/viscy-transforms/src/viscy_transforms/`)
 - [x] **PKG-02**: Package pyproject.toml with hatchling build backend
 - [x] **PKG-03**: uv-dynamic-versioning configured for git-based versioning
 - [x] **PKG-04**: Package README.md with installation and usage instructions
 
-### Code Migration
+### Code Migration (viscy-transforms)
 
 - [x] **MIG-01**: All transform modules migrated from `viscy/transforms/` to package
 - [x] **MIG-02**: All transform tests migrated from `tests/transforms/` to `packages/viscy-transforms/tests/`
@@ -31,59 +29,72 @@ Requirements for Phases 0+1: Workspace scaffolding + viscy-transforms extraction
 - [x] **MIG-04**: All migrated tests passing with `uv run --package viscy-transforms pytest`
 - [x] **MIG-05**: Original `viscy/transforms/` directory removed
 
-### Documentation
+### CI/CD
 
-- [ ] **DOC-01**: Zensical configuration (`zensical.toml`) at repository root
-- [ ] **DOC-02**: Documentation site structure with navigation (index, API reference)
-- [ ] **DOC-03**: API reference for viscy-transforms auto-generated from docstrings
-- [ ] **DOC-04**: GitHub Pages deployment working at project URL
+- [x] **CI-01**: GitHub Actions workflow for testing viscy-transforms package
+- [x] **CI-03**: Matrix testing across Python 3.11, 3.12, 3.13 on 3 OSes
+- [x] **CI-04**: Linting via prek (uvx prek) in CI workflows
+
+## v1.1 Requirements
+
+Requirements for extracting viscy-data as the second independent subpackage.
+
+### Package Structure
+
+- [ ] **DATA-PKG-01**: viscy-data package at `packages/viscy-data/src/viscy_data/` with hatchling + uv-dynamic-versioning
+- [ ] **DATA-PKG-02**: Optional dependency groups `[triplet]`, `[livecell]`, `[mmap]`, `[all]` in pyproject.toml
+- [ ] **DATA-PKG-03**: No dependency on viscy-transforms; remove BatchedCenterSpatialCropd from triplet.py, assert batch shape instead
+- [ ] **DATA-PKG-04**: Shared utilities (`_ensure_channel_list`, `_read_norm_meta`, `_collate_samples`, channel scatter/gather helpers) extracted from hcs.py and triplet.py into `_utils.py`
+
+### Code Migration
+
+- [ ] **DATA-MIG-01**: All 13 data modules migrated to `packages/viscy-data/src/viscy_data/` with updated import paths
+- [ ] **DATA-MIG-02**: Flat top-level exports in `__init__.py` for all DataModules, Datasets, and types
+- [ ] **DATA-MIG-03**: Lazy imports for optional dependencies (tensorstore, tensordict, pycocotools, pandas, tifffile, torchvision) with clear install-instruction error messages
+- [ ] **DATA-MIG-04**: Internal imports use absolute `viscy_data.` prefix, not relative imports
+
+### Testing
+
+- [ ] **DATA-TST-01**: All existing data tests (`test_hcs.py`, `test_triplet.py`, `test_select.py`) passing under new import paths
+- [ ] **DATA-TST-02**: Smoke tests verifying `import viscy_data` works without optional extras and produces correct error messages when optional modules are used
 
 ### CI/CD
 
-- [ ] **CI-01**: GitHub Actions workflow for testing viscy-transforms package
-- [ ] **CI-02**: GitHub Actions workflow for building and deploying docs
-- [ ] **CI-03**: Matrix testing across Python 3.11, 3.12, 3.13
-- [ ] **CI-04**: Linting via prek (uvx prek) in CI workflows
+- [ ] **DATA-CI-01**: GitHub Actions test workflow extended with viscy-data jobs
+- [ ] **DATA-CI-02**: Tiered CI matrix: base deps (3 OS x 3 Python) + full extras (narrower matrix)
 
-## v2 Requirements
+## Future Requirements
 
-Deferred to future milestones. Tracked but not in current roadmap.
+Deferred to later milestones.
+
+### Documentation
+- **DOC-01**: Zensical documentation with GitHub Pages (deferred from v1.0)
+- **DOC-02**: API reference auto-generated from docstrings
 
 ### Future Package Extractions
+- **PKG-10**: Extract viscy-models package (unet, representation, translation)
+- **PKG-11**: Extract viscy-airtable package
+- **PKG-12**: viscy meta-package with CLI and optional re-exports
 
-- **PKG-10**: Extract viscy-data package (dataloaders, Lightning DataModules)
-- **PKG-11**: Extract viscy-models package (unet, representation, translation)
-- **PKG-12**: Extract viscy-airtable package
-- **PKG-13**: viscy meta-package with CLI and optional re-exports
-
-### Enhanced CI/CD
-
-- **CI-10**: Path filtering to only test changed packages
-- **CI-11**: Release automation with semantic versioning
-- **CI-12**: Coverage aggregation across packages
-
-### Documentation Enhancements
-
-- **DOC-10**: Migration guide for downstream users
-- **DOC-11**: Per-package documentation sections
-- **DOC-12**: Contribution guide for monorepo workflow
+### Refactoring
+- **REF-01**: GPU transform protocol/mixin (GPUTransformMixin) for interface standardization
+- **REF-02**: Split combined.py into combined.py + concat.py
+- **REF-03**: Abstract cache interface across Manager.dict, tensorstore, MemoryMappedTensor
 
 ## Out of Scope
 
-Explicitly excluded from this milestone. Documented to prevent scope creep.
-
 | Feature | Reason |
 |---------|--------|
-| Backward-compatible imports | Clean break decided; no `from viscy.transforms` re-exports |
-| applications/ directory | Clean slate approach; restore from git history in future milestone |
-| examples/ directory | Clean slate approach; restore from git history in future milestone |
-| Release automation | Manual releases acceptable for v1; automate later |
-| Path-based CI filtering | Added complexity; test all on every push for now |
-| hatch-cada for workspace deps | No inter-package deps yet; viscy-transforms is standalone |
+| Backward-compatible `viscy.data` imports | Clean break established in v1.0 |
+| Unified batch structure across pipelines | Different pipelines have fundamentally different batch semantics |
+| Auto-detect pipeline type from config | Defeats modularity |
+| Split into multiple data packages | Over-fragmentation for 13 modules |
+| Re-export MONAI transforms | Creates import surface confusion |
+| Hydra integration | Per design doc, deferred |
 
 ## Traceability
 
-Which phases cover which requirements. Updated during roadmap creation.
+### v1.0 (Complete)
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -102,20 +113,33 @@ Which phases cover which requirements. Updated during roadmap creation.
 | MIG-03 | Phase 3 | Complete |
 | MIG-04 | Phase 3 | Complete |
 | MIG-05 | Phase 3 | Complete |
-| DOC-01 | Phase 4 | Pending |
-| DOC-02 | Phase 4 | Pending |
-| DOC-03 | Phase 4 | Pending |
-| DOC-04 | Phase 4 | Pending |
-| CI-01 | Phase 5 | Pending |
-| CI-02 | Phase 5 | Pending |
-| CI-03 | Phase 5 | Pending |
-| CI-04 | Phase 5 | Pending |
+| CI-01 | Phase 5 | Complete |
+| CI-03 | Phase 5 | Complete |
+| CI-04 | Phase 5 | Complete |
+
+### v1.1 (Pending)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| DATA-PKG-01 | TBD | Pending |
+| DATA-PKG-02 | TBD | Pending |
+| DATA-PKG-03 | TBD | Pending |
+| DATA-PKG-04 | TBD | Pending |
+| DATA-MIG-01 | TBD | Pending |
+| DATA-MIG-02 | TBD | Pending |
+| DATA-MIG-03 | TBD | Pending |
+| DATA-MIG-04 | TBD | Pending |
+| DATA-TST-01 | TBD | Pending |
+| DATA-TST-02 | TBD | Pending |
+| DATA-CI-01 | TBD | Pending |
+| DATA-CI-02 | TBD | Pending |
 
 **Coverage:**
-- v1 requirements: 23 total
-- Mapped to phases: 23
-- Unmapped: 0 ✓
+- v1.0 requirements: 18 total, 18 complete
+- v1.1 requirements: 12 total
+- Mapped to phases: 0
+- Unmapped: 12
 
 ---
 *Requirements defined: 2025-01-27*
-*Last updated: 2026-01-28 after Phase 3 completion*
+*Last updated: 2026-02-13 after milestone v1.1 requirements*
