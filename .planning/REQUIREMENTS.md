@@ -59,15 +59,15 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 
 ### Models -- Variational Autoencoders
 
-- [ ] **VAE-01**: BetaVae25D migrated to `vae/beta_vae_25d.py`
-- [ ] **VAE-02**: BetaVaeMonai migrated to `vae/beta_vae_monai.py`
-- [ ] **VAE-03**: Forward-pass tests for both VAE models (NEW -- currently missing)
+- [x] **VAE-01**: BetaVae25D migrated to `vae/beta_vae_25d.py`
+- [x] **VAE-02**: BetaVaeMonai migrated to `vae/beta_vae_monai.py`
+- [x] **VAE-03**: Forward-pass tests for both VAE models (NEW -- currently missing)
 
 ### Models -- Contrastive Learning
 
-- [ ] **CONT-01**: ContrastiveEncoder migrated to `contrastive/encoder.py`
-- [ ] **CONT-02**: ResNet3dEncoder migrated to `contrastive/resnet3d.py`
-- [ ] **CONT-03**: Forward-pass tests for contrastive models (NEW -- currently missing)
+- [x] **CONT-01**: ContrastiveEncoder migrated to `contrastive/encoder.py`
+- [x] **CONT-02**: ResNet3dEncoder migrated to `contrastive/resnet3d.py`
+- [x] **CONT-03**: Forward-pass tests for contrastive models (NEW -- currently missing)
 
 ### Models -- Public API & CI
 
@@ -158,12 +158,12 @@ Which phases cover which requirements. Updated during roadmap creation.
 | UNET-02 | Phase 7 | Complete |
 | UNET-06 | Phase 7 | Complete |
 | UNET-07 | Phase 7 | Complete |
-| CONT-01 | Phase 8 | Pending |
-| CONT-02 | Phase 8 | Pending |
-| CONT-03 | Phase 8 | Pending |
-| VAE-01 | Phase 8 | Pending |
-| VAE-02 | Phase 8 | Pending |
-| VAE-03 | Phase 8 | Pending |
+| CONT-01 | Phase 8 | Complete |
+| CONT-02 | Phase 8 | Complete |
+| CONT-03 | Phase 8 | Complete |
+| VAE-01 | Phase 8 | Complete |
+| VAE-02 | Phase 8 | Complete |
+| VAE-03 | Phase 8 | Complete |
 | UNET-03 | Phase 9 | Pending |
 | UNET-04 | Phase 9 | Pending |
 | UNET-08 | Phase 9 | Pending |
