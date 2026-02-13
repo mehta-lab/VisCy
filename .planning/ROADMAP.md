@@ -113,10 +113,10 @@ Plans:
   1. `from viscy_models.unet import Unet2d, Unet25d` works and both produce correct output shapes
   2. Existing unittest-style tests are migrated to pytest and pass in the new package
   3. File naming follows snake_case convention (unet2d.py, unet25d.py)
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 09-01: TBD
+- [ ] 09-01-PLAN.md -- Migrate Unet2d and Unet25d with pytest test coverage
 
 ### Phase 10: Public API & CI Integration
 **Goal**: Users can `from viscy_models import ModelName` for all 8 models, with CI verifying the full package
@@ -149,7 +149,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 6. Package Scaffold & Shared Components | v1.1 | 3/3 | Complete | 2026-02-12 |
 | 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 8. Representation Models | v1.1 | 2/2 | Complete | 2026-02-13 |
-| 9. Legacy UNet Models | v1.1 | 0/TBD | Not started | - |
+| 9. Legacy UNet Models | v1.1 | 0/1 | Planned | - |
 | 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
 
 ---
