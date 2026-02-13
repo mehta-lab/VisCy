@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 8 - Representation Models -- PHASE COMPLETE
+**Current focus:** Phase 9 - Legacy UNet Models -- PHASE COMPLETE
 
 ## Current Position
 
-Phase: 8 of 10 (Representation Models) -- PHASE COMPLETE
-Plan: 2 of 2 in current phase
-Status: Phase 8 Complete
-Last activity: 2026-02-13 -- Completed 08-02 VAE migration
+Phase: 9 of 10 (Legacy UNet Models) -- PHASE COMPLETE
+Plan: 1 of 1 in current phase
+Status: Phase 9 Complete
+Last activity: 2026-02-13 -- Completed 09-01 Unet2d/Unet25d migration
 
-Progress: [===============---] 76% (v1.0 complete, v1.1 phase 8: 2/2 plans)
+Progress: [================--] 82% (v1.0 complete, v1.1 phase 9: 1/1 plans)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14 (v1.0: 7, v1.1: 7)
-- Average duration: ~17 min
-- Total execution time: ~3.9 hours
+- Total plans completed: 15 (v1.0: 7, v1.1: 8)
+- Average duration: ~16 min
+- Total execution time: ~4.0 hours
 
 **By Phase:**
 
@@ -34,6 +34,7 @@ Progress: [===============---] 76% (v1.0 complete, v1.1 phase 8: 2/2 plans)
 | 6. Package Scaffold | 3 | ~10m | ~3m |
 | 7. Core UNet Models | 2 | ~6m | ~3m |
 | 8. Representation Models | 2 | ~8m | ~4m |
+| 9. Legacy UNet Models | 1 | ~4m | ~4m |
 
 ## Accumulated Context
 
@@ -66,6 +67,8 @@ Recent decisions affecting current work:
 - VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
 - Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not _components
 - SimpleNamespace return type preserved for VAE backward compatibility
+- Convert user-provided num_filters tuple to list internally for list concatenation compatibility
+- up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters
 
 ### Pending Todos
 
@@ -82,9 +85,9 @@ All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 ## Session Continuity
 
 Last session: 2026-02-13
-Stopped at: Completed 08-02-PLAN.md (VAE migration -- Phase 8 complete)
+Stopped at: Completed 09-01-PLAN.md (Unet2d/Unet25d migration -- Phase 9 complete)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13 (08-02 summary added, Phase 8 complete)*
+*Last updated: 2026-02-13 (09-01 summary added, Phase 9 complete)*
