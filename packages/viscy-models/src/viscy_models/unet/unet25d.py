@@ -90,7 +90,7 @@ class Unet25d(nn.Module):
                 "Length of num_filters must be equal to num_"
                 "blocks + 1 (number of convolutional blocks per path)."
             )
-            self.num_filters = num_filters
+            self.num_filters = list(num_filters)
         else:
             self.num_filters = [pow(2, i) * 16 for i in range(num_blocks + 1)]
         downsampling_filters = [in_channels] + self.num_filters
