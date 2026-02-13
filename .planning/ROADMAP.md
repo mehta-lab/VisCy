@@ -128,11 +128,10 @@ Plans:
   3. CI test matrix includes viscy-models alongside viscy-transforms
   4. State dict keys for all migrated models match their original monolithic counterparts exactly
   5. Root pyproject.toml lists viscy-models as a workspace dependency
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 10-01: TBD
-- [ ] 10-02: TBD
+- [ ] 10-01-PLAN.md -- Public API re-exports, state dict compatibility tests, CI matrix update
 
 ## Progress
 
@@ -150,7 +149,7 @@ Phases 6 -> 7 -> 8 -> 9 -> 10 (Phases 7, 8, 9 can execute after 6; 10 depends on
 | 7. Core UNet Models | v1.1 | 2/2 | Complete | 2026-02-12 |
 | 8. Representation Models | v1.1 | 2/2 | Complete | 2026-02-13 |
 | 9. Legacy UNet Models | v1.1 | 1/1 | Complete | 2026-02-13 |
-| 10. Public API & CI Integration | v1.1 | 0/TBD | Not started | - |
+| 10. Public API & CI Integration | v1.1 | 0/1 | Not started | - |
 
 ---
 *Roadmap created: 2025-01-27*
