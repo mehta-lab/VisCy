@@ -83,16 +83,14 @@ class UNeXt2UpStage(nn.Module):
         super().__init__()
         spatial_dims = 2
         if mode == "deconv":
-            self.upsample = (
-                get_conv_layer(
-                    spatial_dims=spatial_dims,
-                    in_channels=in_channels,
-                    out_channels=out_channels,
-                    stride=scale_factor,
-                    kernel_size=scale_factor,
-                    norm=norm_name,
-                    is_transposed=True,
-                ),
+            self.upsample = get_conv_layer(
+                spatial_dims=spatial_dims,
+                in_channels=in_channels,
+                out_channels=out_channels,
+                stride=scale_factor,
+                kernel_size=scale_factor,
+                norm=norm_name,
+                is_transposed=True,
             )
             self.conv = nn.Sequential(
                 ResidualUnit(
