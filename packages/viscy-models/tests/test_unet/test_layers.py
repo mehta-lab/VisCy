@@ -2,7 +2,7 @@
 
 import torch
 
-from viscy_models.unet._layers import ConvBlock2D, ConvBlock3D
+from viscy_models._components import ConvBlock2D, ConvBlock3D
 
 
 class TestConvBlock2D:
