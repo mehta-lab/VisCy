@@ -51,6 +51,8 @@ Recent decisions affecting current work:
 - Dev dependency group includes only test (no jupyter for models package)
 - Preserved register_modules/add_module pattern verbatim for state dict key compatibility
 - Fixed only docstring formatting for ruff D-series compliance, no logic changes to legacy code
+- Intra-_components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
+- _get_convnext_stage private but importable; excluded from __all__
 
 ### Pending Todos
 
@@ -72,4 +74,4 @@ Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-13*
+*Last updated: 2026-02-13 (06-02 summary added)*
