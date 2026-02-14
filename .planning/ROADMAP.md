@@ -90,7 +90,7 @@ Plans:
 
 - [x] **Phase 6: Package Scaffolding and Foundation** - Package structure, dependency declarations, and shared utility extraction
 - [x] **Phase 7: Code Migration** - Migrate all 13 data modules with updated imports and lazy loading
-- [ ] **Phase 8: Test Migration and Validation** - Migrate tests and verify package works correctly
+- [x] **Phase 8: Test Migration and Validation** - Migrate tests and verify package works correctly
 - [ ] **Phase 9: CI Integration** - Extend CI workflows with viscy-data jobs and tiered matrix
 
 ## Phase Details
@@ -140,8 +140,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 08-01-PLAN.md -- Migrate conftest.py and 3 test files (test_hcs, test_triplet, test_select) with updated imports
-- [ ] 08-02-PLAN.md -- Smoke tests for import, __all__ completeness, and optional dep error messages
+- [x] 08-01-PLAN.md -- Migrate conftest.py and 3 test files (test_hcs, test_triplet, test_select) with updated imports
+- [x] 08-02-PLAN.md -- Smoke tests for import, __all__ completeness, and optional dep error messages
 
 ### Phase 9: CI Integration
 **Goal**: CI automatically tests viscy-data on every push with tiered dependency coverage
@@ -171,7 +171,7 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 9
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
 | 6. Package Scaffolding and Foundation | v1.1 | 2/2 | Complete | 2026-02-13 |
 | 7. Code Migration | v1.1 | 4/4 | Complete | 2026-02-14 |
-| 8. Test Migration and Validation | v1.1 | 0/TBD | Not started | - |
+| 8. Test Migration and Validation | v1.1 | 2/2 | Complete | 2026-02-14 |
 | 9. CI Integration | v1.1 | 0/TBD | Not started | - |
 
 ---
