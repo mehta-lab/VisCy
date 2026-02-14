@@ -24,12 +24,16 @@ except ImportError:
 import torch
 from iohub.ngff import ImageArray, Position, open_ome_zarr
 from monai.data.thread_buffer import ThreadDataLoader
-from monai.transforms import CenterSpatialCropd, Compose, MapTransform
+from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
 from viscy_data._typing import INDEX_COLUMNS, NormMeta
-from viscy_data._utils import _read_norm_meta, _transform_channel_wise
+from viscy_data._utils import (
+    BatchedCenterSpatialCropd,
+    _read_norm_meta,
+    _transform_channel_wise,
+)
 from viscy_data.hcs import HCSDataModule
 from viscy_data.select import _filter_fovs, _filter_wells
 
@@ -544,9 +548,9 @@ class TripletDataModule(HCSDataModule):
             collate_fn=lambda x: x,
         )
 
-    def _final_crop(self) -> CenterSpatialCropd:
+    def _final_crop(self) -> BatchedCenterSpatialCropd:
         """Set up final cropping: center crop to the target size."""
-        return CenterSpatialCropd(
+        return BatchedCenterSpatialCropd(
             keys=self.source_channel,
             roi_size=(
                 self.z_window_size,
