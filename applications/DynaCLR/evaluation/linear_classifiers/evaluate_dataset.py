@@ -662,3 +662,214 @@ def evaluate_predictions(
         df.to_csv(config.output_dir / "test_metrics_comparison.csv", index=False)
 
     return all_eval
+
+
+# ---------------------------------------------------------------------------
+# Block 4: Report generation
+# ---------------------------------------------------------------------------
+
+
+def generate_report(
+    config: DatasetEvalConfig,
+    train_results: dict[str, dict[tuple[str, str], dict[str, Any]]],
+    eval_results: dict[str, dict[tuple[str, str], dict[str, Any]]],
+) -> Path:
+    """Generate a PDF comparison report.
+
+    Parameters
+    ----------
+    config : DatasetEvalConfig
+        Evaluation configuration.
+    train_results : dict
+        Output from ``train_classifiers()``.
+    eval_results : dict
+        Output from ``evaluate_predictions()``.
+
+    Returns
+    -------
+    Path
+        Path to the generated PDF.
+    """
+    from applications.DynaCLR.evaluation.linear_classifiers.report import (
+        generate_comparison_report,
+    )
+
+    return generate_comparison_report(config, train_results, eval_results)
+
+
+# ---------------------------------------------------------------------------
+# Orchestrator
+# ---------------------------------------------------------------------------
+
+
+def run_evaluation(
+    config: DatasetEvalConfig,
+    skip_train: bool = False,
+    skip_infer: bool = False,
+) -> Path:
+    """Run the evaluation pipeline.
+
+    Parameters
+    ----------
+    config : DatasetEvalConfig
+        Evaluation configuration.
+    skip_train : bool
+        Skip training. Loads pipelines from disk for inference.
+    skip_infer : bool
+        Skip inference. Loads prediction zarrs from disk for evaluation.
+        Implies ``skip_train=True``.
+
+    Returns
+    -------
+    Path
+        Path to the generated PDF report.
+    """
+    trained = None
+    if not skip_train and not skip_infer:
+        trained = train_classifiers(config)
+
+    predictions = None
+    if not skip_infer:
+        predictions = infer_classifiers(config, trained=trained)
+
+    eval_results = evaluate_predictions(config, predictions=predictions)
+    report_path = generate_report(config, trained or {}, eval_results)
+    return report_path
+
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+EMBEDDINGS_BASE = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics")
+ANNOTATIONS_BASE = Path("/hpc/projects/organelle_phenotyping/datasets/annotations")
+OUTPUT_BASE = Path(
+    "/hpc/projects/organelle_phenotyping/models/bag_of_channels/"
+    "h2b_caax_tomm_sec61_g3bp1_sensor_phase/evaluation/predictions"
+)
+
+TEST_DATASET = "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
+
+# Training datasets per model (excluding test dataset)
+TRAIN_DATASETS_2D = [
+    "2024_11_07_A549_SEC61_DENV",
+    "2025_01_24_A549_G3BP1_DENV",
+    "2025_01_28_A549_G3BP1_ZIKV_DENV",
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV",
+    "2025_08_26_A549_SEC61_TOMM20_ZIKV",
+]
+
+TRAIN_DATASETS_3D = [
+    "2024_11_07_A549_SEC61_DENV",
+    "2025_01_28_A549_G3BP1_ZIKV_DENV",
+    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV",
+    "2025_08_26_A549_SEC61_TOMM20_ZIKV",
+]
+
+
+def _find_predictions_dir(dataset_name: str, model_name: str, version: str) -> Path:
+    """Locate the predictions version directory for a dataset."""
+    from glob import glob
+
+    from natsort import natsorted
+
+    dataset_dir = EMBEDDINGS_BASE / dataset_name
+    pattern = str(dataset_dir / "*phenotyping*" / "*prediction*" / model_name / version)
+    matches = natsorted(glob(pattern))
+    if not matches:
+        raise FileNotFoundError(
+            f"No predictions found for {dataset_name}/{model_name}/{version}"
+        )
+    return Path(matches[0])
+
+
+def _build_train_datasets(
+    dataset_names: list[str], model_name: str, version: str
+) -> list[TrainDataset]:
+    """Build TrainDataset list from dataset names."""
+    from applications.DynaCLR.evaluation.linear_classifiers.utils import (
+        find_annotation_csv,
+    )
+
+    datasets = []
+    for name in dataset_names:
+        try:
+            emb_dir = _find_predictions_dir(name, model_name, version)
+            csv_path = find_annotation_csv(ANNOTATIONS_BASE, name)
+            if csv_path is None:
+                print(f"  Skipping {name}: no annotation CSV found")
+                continue
+            datasets.append(TrainDataset(embeddings_dir=emb_dir, annotations=csv_path))
+        except FileNotFoundError as e:
+            print(f"  Skipping {name}: {e}")
+            continue
+    return datasets
+
+
+def build_default_config() -> DatasetEvalConfig:
+    """Build the default evaluation config for the 2D vs 3D comparison."""
+    from applications.DynaCLR.evaluation.linear_classifiers.utils import (
+        find_annotation_csv,
+    )
+
+    test_csv = find_annotation_csv(ANNOTATIONS_BASE, TEST_DATASET)
+    if test_csv is None:
+        raise FileNotFoundError(f"No annotation CSV for test dataset: {TEST_DATASET}")
+
+    model_2d = ModelSpec(
+        name="DynaCLR-2D-BagOfChannels-timeaware",
+        train_datasets=_build_train_datasets(
+            TRAIN_DATASETS_2D, "DynaCLR-2D-BagOfChannels-timeaware", "v3"
+        ),
+        test_embeddings_dir=_find_predictions_dir(
+            TEST_DATASET, "DynaCLR-2D-BagOfChannels-timeaware", "v3"
+        ),
+        version="v3",
+        wandb_project="DynaCLR-2D-linearclassifiers",
+    )
+
+    model_3d = ModelSpec(
+        name="DynaCLR-3D-BagOfChannels-timeaware",
+        train_datasets=_build_train_datasets(
+            TRAIN_DATASETS_3D, "DynaCLR-3D-BagOfChannels-timeaware", "v1"
+        ),
+        test_embeddings_dir=_find_predictions_dir(
+            TEST_DATASET, "DynaCLR-3D-BagOfChannels-timeaware", "v1"
+        ),
+        version="v1",
+        wandb_project="DynaCLR-3D-linearclassifiers",
+    )
+
+    return DatasetEvalConfig(
+        dataset_name=TEST_DATASET,
+        test_annotations_csv=test_csv,
+        models={"2D": model_2d, "3D": model_3d},
+        output_dir=OUTPUT_BASE / TEST_DATASET,
+    )
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Run eval pipeline")
+    parser.add_argument(
+        "--skip-train",
+        action="store_true",
+        help="Skip training, load pipelines from disk",
+    )
+    parser.add_argument(
+        "--skip-infer",
+        action="store_true",
+        help="Skip inference, load predictions from disk (implies --skip-train)",
+    )
+    args = parser.parse_args()
+
+    config = build_default_config()
+    print(f"Output: {config.output_dir}")
+    for label, spec in config.models.items():
+        print(f"  {label}: {len(spec.train_datasets)} training datasets")
+
+    report = run_evaluation(
+        config, skip_train=args.skip_train, skip_infer=args.skip_infer
+    )
+    print(f"\nDone! Report: {report}")
