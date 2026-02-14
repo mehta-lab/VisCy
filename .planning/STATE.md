@@ -9,19 +9,19 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 
 ## Current Position
 
-Phase: 7 of 9 (Code Migration)
-Plan: 3 of 4 in current phase (07-01, 07-02, 07-03 complete)
-Status: In Progress
-Last activity: 2026-02-14 -- Completed 07-02 (Specialized Module Migration)
+Phase: 7 of 9 (Code Migration) -- COMPLETE
+Plan: 4 of 4 in current phase (07-01, 07-02, 07-03, 07-04 complete)
+Status: Phase Complete
+Last activity: 2026-02-14 -- Completed 07-04 (Public API Exports and Package Integration)
 
-Progress: [=========.] 91% (v1.0 complete, phase 7 plan 3 of 4)
+Progress: [==========] 100% (v1.0 complete, phase 7 fully done)
 
 ## Performance Metrics
 
 **Velocity (from v1.0):**
-- Total plans completed: 11
-- Average duration: 4.8 min
-- Total execution time: 53 min
+- Total plans completed: 12
+- Average duration: 4.6 min
+- Total execution time: 55 min
 
 **By Phase:**
 
@@ -32,7 +32,7 @@ Progress: [=========.] 91% (v1.0 complete, phase 7 plan 3 of 4)
 | 3 | 3 | ~13 min | ~4.3 min |
 | 5 | 1 | ~4 min | ~4 min |
 | 6 | 2 | ~7 min | ~3.5 min |
-| 7 | 3 | ~20 min | ~6.7 min |
+| 7 | 4 | ~22 min | ~5.5 min |
 
 ## Accumulated Context
 
@@ -56,6 +56,8 @@ Key decisions carrying forward:
 - combined.py preserved as-is (no split per REF-02 deferral)
 - DATA-PKG-03 satisfied: CenterSpatialCropd from MONAI replaces BatchedCenterSpatialCropd in triplet.py
 - String-literal type annotations for optional dep types (e.g., "pd.DataFrame") to avoid import-time failures
+- Eager top-level imports in __init__.py: each module handles its own optional dep guards, so package import always succeeds
+- Flat public API: all 45 names (DataModules, Datasets, types, utilities, enums) re-exported from package root
 
 ### Blockers/Concerns
 
@@ -64,9 +66,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-02-PLAN.md (Specialized Module Migration)
+Stopped at: Completed 07-04-PLAN.md (Public API Exports and Package Integration) -- Phase 7 COMPLETE
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-14 (07-02 complete, Phase 7 plans 1-3 done)*
+*Last updated: 2026-02-14 (07-04 complete, Phase 7 fully done -- all 4 plans executed)*
