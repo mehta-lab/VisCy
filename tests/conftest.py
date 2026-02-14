@@ -195,6 +195,129 @@ def tracks_with_gaps_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
+def _make_synthetic_embeddings(
+    tmp_path: Path,
+    name: str,
+    n_samples: int,
+    n_features: int,
+    channels: list[str],
+    rng: np.random.Generator,
+) -> Path:
+    """Create a fake embeddings directory with per-channel zarr files."""
+    version_dir = tmp_path / name
+    version_dir.mkdir(parents=True, exist_ok=True)
+
+    for channel in channels:
+        X = rng.standard_normal((n_samples, n_features)).astype(np.float32)
+        obs = pd.DataFrame(
+            {
+                "fov_name": [f"A/{(i % 3) + 1}/0" for i in range(n_samples)],
+                "id": np.arange(n_samples),
+                "t": np.zeros(n_samples, dtype=int),
+                "track_id": np.arange(n_samples),
+            }
+        )
+        adata = ad.AnnData(X=X, obs=obs)
+        adata.write_zarr(version_dir / f"timeaware_{channel}_160patch_99ckpt.zarr")
+
+    return version_dir
+
+
+def _make_annotation_csv(
+    tmp_path: Path,
+    name: str,
+    n_samples: int,
+    tasks: dict[str, list[str]],
+    rng: np.random.Generator,
+) -> Path:
+    """Create a fake annotation CSV with specified task columns."""
+    csv_path = tmp_path / f"{name}_annotations.csv"
+    data = {
+        "fov_name": [f"A/{(i % 3) + 1}/0" for i in range(n_samples)],
+        "id": np.arange(n_samples),
+    }
+    for task, labels in tasks.items():
+        data[task] = rng.choice(labels, size=n_samples)
+
+    pd.DataFrame(data).to_csv(csv_path, index=False)
+    return csv_path
+
+
+@fixture(scope="function")
+def synthetic_train_data(tmp_path_factory: TempPathFactory):
+    """Two synthetic training datasets for eval pipeline tests.
+
+    Each: 40 samples x 16 features, channels=[phase, organelle].
+    Tasks: infection_state, cell_division_state.
+    """
+    from applications.DynaCLR.evaluation.linear_classifiers.evaluate_dataset import (
+        TrainDataset,
+    )
+
+    base = tmp_path_factory.mktemp("train_data")
+    rng = np.random.default_rng(42)
+    channels = ["phase", "organelle"]
+    tasks = {
+        "infection_state": ["infected", "uninfected"],
+        "cell_division_state": ["interphase", "mitosis"],
+    }
+
+    datasets = []
+    for i in range(2):
+        emb_dir = _make_synthetic_embeddings(
+            base, f"train_ds_{i}/predictions/v1", 40, 16, channels, rng
+        )
+        csv_path = _make_annotation_csv(base, f"train_ds_{i}", 40, tasks, rng)
+        datasets.append(TrainDataset(embeddings_dir=emb_dir, annotations=csv_path))
+
+    return datasets
+
+
+@fixture(scope="function")
+def synthetic_test_data(tmp_path_factory: TempPathFactory):
+    """Held-out test dataset: 60 samples x 16 features, 2 channels + CSV."""
+    base = tmp_path_factory.mktemp("test_data")
+    rng = np.random.default_rng(99)
+    channels = ["phase", "organelle"]
+    tasks = {
+        "infection_state": ["infected", "uninfected"],
+        "cell_division_state": ["interphase", "mitosis"],
+    }
+
+    emb_dir = _make_synthetic_embeddings(
+        base, "test_ds/predictions/v1", 60, 16, channels, rng
+    )
+    csv_path = _make_annotation_csv(base, "test_ds", 60, tasks, rng)
+    return emb_dir, csv_path
+
+
+@fixture(scope="function")
+def eval_config(synthetic_train_data, synthetic_test_data, tmp_path_factory):
+    """Full DatasetEvalConfig with 1 model, 2 channels, 2 tasks."""
+    from applications.DynaCLR.evaluation.linear_classifiers.evaluate_dataset import (
+        DatasetEvalConfig,
+        ModelSpec,
+    )
+
+    test_emb_dir, test_csv = synthetic_test_data
+    return DatasetEvalConfig(
+        dataset_name="test_dataset",
+        test_annotations_csv=test_csv,
+        models={
+            "test_model": ModelSpec(
+                name="TestModel",
+                train_datasets=synthetic_train_data,
+                test_embeddings_dir=test_emb_dir,
+                version="v1",
+                wandb_project="test-project",
+            ),
+        },
+        output_dir=tmp_path_factory.mktemp("eval_output"),
+        channels=["phase", "organelle"],
+        tasks=["infection_state", "cell_division_state"],
+    )
+
+
 @fixture(scope="function")
 def annotated_adata() -> ad.AnnData:
     """Provides an in-memory AnnData with 60 samples, 16 features, and annotations."""
