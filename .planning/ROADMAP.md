@@ -121,12 +121,13 @@ Plans:
   3. `TripletDataModule` does not import or depend on viscy-transforms; batch shape is asserted directly instead of using `BatchedCenterSpatialCropd`
   4. All internal imports use absolute `viscy_data.` prefix (no relative imports)
   5. Importing a module that requires an uninstalled optional extra produces a clear error message naming the missing package and the install command
-**Plans**: TBD
+**Plans**: 4 plans
 
 Plans:
-- [ ] 07-01: TBD
-- [ ] 07-02: TBD
-- [ ] 07-03: TBD
+- [ ] 07-01-PLAN.md -- Migrate core modules (select, distributed, segmentation, hcs, gpu_aug)
+- [ ] 07-02-PLAN.md -- Migrate triplet family (triplet with BatchedCenterSpatialCropd removal, cell_classification, cell_division_triplet)
+- [ ] 07-03-PLAN.md -- Migrate optional dep modules + composition (mmap_cache, ctmc_v1, livecell, combined)
+- [ ] 07-04-PLAN.md -- Complete __init__.py exports and full package verification
 
 ### Phase 8: Test Migration and Validation
 **Goal**: All existing data tests pass under the new package structure
