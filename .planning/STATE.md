@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 7 -- Code Migration
+**Current focus:** Phase 8 -- Test Migration and Validation
 
 ## Current Position
 
-Phase: 7 of 9 (Code Migration) -- COMPLETE
-Plan: 4 of 4 in current phase (07-01, 07-02, 07-03, 07-04 complete)
+Phase: 8 of 9 (Test Migration and Validation)
+Plan: 2 of 2 in current phase (08-01, 08-02 complete)
 Status: Phase Complete
-Last activity: 2026-02-14 -- Completed 07-04 (Public API Exports and Package Integration)
+Last activity: 2026-02-14 -- Completed 08-02 (Smoke Tests for Import and Public API)
 
-Progress: [==========] 100% (v1.0 complete, phase 7 fully done)
+Progress: [==========] 100% (phase 8 fully done)
 
 ## Performance Metrics
 
 **Velocity (from v1.0):**
-- Total plans completed: 12
+- Total plans completed: 14
 - Average duration: 4.6 min
-- Total execution time: 55 min
+- Total execution time: 65 min
 
 **By Phase:**
 
@@ -33,6 +33,7 @@ Progress: [==========] 100% (v1.0 complete, phase 7 fully done)
 | 5 | 1 | ~4 min | ~4 min |
 | 6 | 2 | ~7 min | ~3.5 min |
 | 7 | 4 | ~22 min | ~5.5 min |
+| 8 | 2 | ~10 min | ~5 min |
 
 ## Accumulated Context
 
@@ -58,6 +59,8 @@ Key decisions carrying forward:
 - String-literal type annotations for optional dep types (e.g., "pd.DataFrame") to avoid import-time failures
 - Eager top-level imports in __init__.py: each module handles its own optional dep guards, so package import always succeeds
 - Flat public API: all 45 names (DataModules, Datasets, types, utilities, enums) re-exported from package root
+- Source inspection pattern for testing optional dep error messages: inspect.getsource() works regardless of dep installation state
+- Parametrized __all__ tests: each of 45 exports as separate test case for clear reporting
 
 ### Blockers/Concerns
 
@@ -66,9 +69,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-04-PLAN.md (Public API Exports and Package Integration) -- Phase 7 COMPLETE
+Stopped at: Completed 08-02-PLAN.md (Smoke Tests for Import and Public API) -- Phase 8 COMPLETE
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-14 (07-04 complete, Phase 7 fully done -- all 4 plans executed)*
+*Last updated: 2026-02-14 (08-02 complete, Phase 8 fully done -- all 2 plans executed)*
