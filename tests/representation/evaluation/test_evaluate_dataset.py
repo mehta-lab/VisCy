@@ -9,6 +9,7 @@ from applications.DynaCLR.evaluation.linear_classifiers.evaluate_dataset import 
     DatasetEvalConfig,
     ModelSpec,
     TrainDataset,
+    infer_classifiers,
     train_classifiers,
 )
 from pydantic import ValidationError
@@ -271,3 +272,65 @@ class TestTrainClassifiers:
             assert "train_dataset_names" in wandb_config
             assert wandb_config["embedding_model"] == "TestModel-v1"
             assert wandb_config["test_dataset"] == "test_dataset"
+
+
+# ---------------------------------------------------------------------------
+# Infer classifiers
+# ---------------------------------------------------------------------------
+
+
+class TestInferClassifiers:
+    def test_predictions_on_all_cells(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+
+        for model_label, model_preds in predictions.items():
+            for (task, channel), adata in model_preds.items():
+                pred_col = f"predicted_{task}"
+                assert pred_col in adata.obs.columns
+                assert adata.obs[pred_col].notna().all(), (
+                    f"NaN predictions for {model_label}/{task}/{channel}"
+                )
+
+    def test_prediction_columns_exist(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+
+        for model_preds in predictions.values():
+            for (task, _), adata in model_preds.items():
+                assert f"predicted_{task}" in adata.obs.columns
+                assert f"predicted_{task}_proba" in adata.obsm
+                assert f"predicted_{task}_classes" in adata.uns
+
+    def test_predictions_zarr_saved(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        infer_classifiers(eval_config, trained=trained)
+
+        for task in eval_config.tasks:
+            for channel in eval_config.channels:
+                pred_path = (
+                    eval_config.output_dir
+                    / "test_model"
+                    / f"{task}_{channel}_predictions.zarr"
+                )
+                assert pred_path.exists(), f"Missing {pred_path.name}"
+
+    def test_loads_pipeline_from_disk(self, eval_config):
+        with _mock_wandb():
+            train_classifiers(eval_config)
+
+        predictions = infer_classifiers(eval_config, trained=None)
+        model_preds = predictions["test_model"]
+        assert len(model_preds) == 4  # 2 tasks x 2 channels
+
+    def test_provenance_in_uns(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+
+        for model_preds in predictions.values():
+            for (task, _), adata in model_preds.items():
+                assert f"classifier_{task}_artifact" in adata.uns
