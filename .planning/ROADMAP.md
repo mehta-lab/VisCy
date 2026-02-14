@@ -88,7 +88,7 @@ Plans:
 - Integer phases (6, 7, 8, 9): Planned milestone work
 - Decimal phases (6.1, 7.1): Urgent insertions (marked with INSERTED)
 
-- [ ] **Phase 6: Package Scaffolding and Foundation** - Package structure, dependency declarations, and shared utility extraction
+- [x] **Phase 6: Package Scaffolding and Foundation** - Package structure, dependency declarations, and shared utility extraction
 - [ ] **Phase 7: Code Migration** - Migrate all 13 data modules with updated imports and lazy loading
 - [ ] **Phase 8: Test Migration and Validation** - Migrate tests and verify package works correctly
 - [ ] **Phase 9: CI Integration** - Extend CI workflows with viscy-data jobs and tiered matrix
@@ -108,8 +108,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 06-01-PLAN.md -- Package skeleton with pyproject.toml, type definitions, and workspace integration
-- [ ] 06-02-PLAN.md -- Extract shared utilities from hcs.py and triplet.py into _utils.py
+- [x] 06-01-PLAN.md -- Package skeleton with pyproject.toml, type definitions, and workspace integration
+- [x] 06-02-PLAN.md -- Extract shared utilities from hcs.py and triplet.py into _utils.py
 
 ### Phase 7: Code Migration
 **Goal**: All 13 data modules are migrated and importable with clean paths
@@ -168,7 +168,7 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 9
 | 3. Code Migration | v1.0 | 3/3 | Complete | 2026-01-28 |
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
-| 6. Package Scaffolding and Foundation | v1.1 | 0/TBD | Not started | - |
+| 6. Package Scaffolding and Foundation | v1.1 | 2/2 | Complete | 2026-02-13 |
 | 7. Code Migration | v1.1 | 0/TBD | Not started | - |
 | 8. Test Migration and Validation | v1.1 | 0/TBD | Not started | - |
 | 9. CI Integration | v1.1 | 0/TBD | Not started | - |
