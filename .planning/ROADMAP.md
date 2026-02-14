@@ -152,10 +152,10 @@ Plans:
   2. Base dependency tests run across 3 Python versions (3.11, 3.12, 3.13) and 3 operating systems (Ubuntu, macOS, Windows)
   3. Full extras tests run on a narrower matrix (1 Python version, 1 OS) to verify optional dependency integration
   4. alls-green aggregation job includes viscy-data results alongside viscy-transforms results
-**Plans**: TBD
+**Plans**: 1 plan
 
 Plans:
-- [ ] 09-01: TBD
+- [ ] 09-01-PLAN.md -- Add viscy-data test jobs (3x3 base + 1x1 extras) and update alls-green aggregation
 
 ## Progress
 
