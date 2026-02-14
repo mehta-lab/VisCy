@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-13)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 8 -- Test Migration and Validation
+**Current focus:** Phase 9 -- CI Integration (COMPLETE)
 
 ## Current Position
 
-Phase: 8 of 9 (Test Migration and Validation)
-Plan: 2 of 2 in current phase (08-01, 08-02 complete)
-Status: Phase Complete
-Last activity: 2026-02-14 -- Completed 08-02 (Smoke Tests for Import and Public API)
+Phase: 9 of 9 (CI Integration)
+Plan: 1 of 1 in current phase (09-01 complete)
+Status: Phase Complete -- v1.0 Milestone Complete
+Last activity: 2026-02-14 -- Completed 09-01 (CI Integration for viscy-data)
 
-Progress: [==========] 100% (phase 8 fully done)
+Progress: [==========] 100% (all phases complete)
 
 ## Performance Metrics
 
 **Velocity (from v1.0):**
-- Total plans completed: 14
-- Average duration: 4.6 min
-- Total execution time: 65 min
+- Total plans completed: 15
+- Average duration: 4.4 min
+- Total execution time: 66 min
 
 **By Phase:**
 
@@ -34,6 +34,7 @@ Progress: [==========] 100% (phase 8 fully done)
 | 6 | 2 | ~7 min | ~3.5 min |
 | 7 | 4 | ~22 min | ~5.5 min |
 | 8 | 2 | ~21 min | ~10.5 min |
+| 9 | 1 | ~1 min | ~1 min |
 
 ## Accumulated Context
 
@@ -62,6 +63,8 @@ Key decisions carrying forward:
 - Source inspection pattern for testing optional dep error messages: inspect.getsource() works regardless of dep installation state
 - Parametrized __all__ tests: each of 45 exports as separate test case for clear reporting
 - tensorstore added to test dependency group (needed for triplet tests to pass)
+- Mirrored existing viscy-transforms test job pattern for viscy-data (3x3 matrix with --all-extras)
+- test-data-extras uses -m "not slow" marker convention for future differentiation
 
 ### Blockers/Concerns
 
@@ -70,9 +73,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Re-executed 08-01-PLAN.md (Data Test Migration) with BatchedCenterSpatialCropd fix -- Phase 8 COMPLETE
+Stopped at: Completed 09-01-PLAN.md (CI Integration) -- v1.0 Milestone COMPLETE
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-14 (08-01 re-executed with bug fix, Phase 8 fully done)*
+*Last updated: 2026-02-14 (09-01 complete, all phases done, v1.0 milestone complete)*
