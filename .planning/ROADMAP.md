@@ -89,7 +89,7 @@ Plans:
 - Decimal phases (6.1, 7.1): Urgent insertions (marked with INSERTED)
 
 - [x] **Phase 6: Package Scaffolding and Foundation** - Package structure, dependency declarations, and shared utility extraction
-- [ ] **Phase 7: Code Migration** - Migrate all 13 data modules with updated imports and lazy loading
+- [x] **Phase 7: Code Migration** - Migrate all 13 data modules with updated imports and lazy loading
 - [ ] **Phase 8: Test Migration and Validation** - Migrate tests and verify package works correctly
 - [ ] **Phase 9: CI Integration** - Extend CI workflows with viscy-data jobs and tiered matrix
 
@@ -124,10 +124,10 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 07-01-PLAN.md -- Migrate core modules (select, distributed, segmentation, hcs, gpu_aug)
-- [ ] 07-02-PLAN.md -- Migrate triplet family (triplet with BatchedCenterSpatialCropd removal, cell_classification, cell_division_triplet)
-- [ ] 07-03-PLAN.md -- Migrate optional dep modules + composition (mmap_cache, ctmc_v1, livecell, combined)
-- [ ] 07-04-PLAN.md -- Complete __init__.py exports and full package verification
+- [x] 07-01-PLAN.md -- Migrate core modules (select, distributed, segmentation, hcs, gpu_aug)
+- [x] 07-02-PLAN.md -- Migrate triplet family (triplet with BatchedCenterSpatialCropd removal, cell_classification, cell_division_triplet)
+- [x] 07-03-PLAN.md -- Migrate optional dep modules + composition (mmap_cache, ctmc_v1, livecell, combined)
+- [x] 07-04-PLAN.md -- Complete __init__.py exports and full package verification
 
 ### Phase 8: Test Migration and Validation
 **Goal**: All existing data tests pass under the new package structure
@@ -170,7 +170,7 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 9
 | 4. Documentation | v1.0 | 0/TBD | Deferred | - |
 | 5. CI/CD | v1.0 | 1/1 | Complete | 2026-01-29 |
 | 6. Package Scaffolding and Foundation | v1.1 | 2/2 | Complete | 2026-02-13 |
-| 7. Code Migration | v1.1 | 0/TBD | Not started | - |
+| 7. Code Migration | v1.1 | 4/4 | Complete | 2026-02-14 |
 | 8. Test Migration and Validation | v1.1 | 0/TBD | Not started | - |
 | 9. CI Integration | v1.1 | 0/TBD | Not started | - |
 
