@@ -33,7 +33,7 @@ Progress: [==========] 100% (phase 8 fully done)
 | 5 | 1 | ~4 min | ~4 min |
 | 6 | 2 | ~7 min | ~3.5 min |
 | 7 | 4 | ~22 min | ~5.5 min |
-| 8 | 2 | ~10 min | ~5 min |
+| 8 | 2 | ~21 min | ~10.5 min |
 
 ## Accumulated Context
 
@@ -55,12 +55,13 @@ Key decisions carrying forward:
 - Removed unused imports (re, collate_meta_tensor) from hcs.py after utility extraction
 - Lazy import pattern for optional deps: try/except at module level with None sentinel, guard in __init__ with pip extras hint
 - combined.py preserved as-is (no split per REF-02 deferral)
-- DATA-PKG-03 satisfied: CenterSpatialCropd from MONAI replaces BatchedCenterSpatialCropd in triplet.py
+- DATA-PKG-03 revised: BatchedCenterSpatialCropd added to _utils.py (CenterSpatialCropd cannot handle batch dim in triplet on_after_batch_transfer)
 - String-literal type annotations for optional dep types (e.g., "pd.DataFrame") to avoid import-time failures
 - Eager top-level imports in __init__.py: each module handles its own optional dep guards, so package import always succeeds
 - Flat public API: all 45 names (DataModules, Datasets, types, utilities, enums) re-exported from package root
 - Source inspection pattern for testing optional dep error messages: inspect.getsource() works regardless of dep installation state
 - Parametrized __all__ tests: each of 45 exports as separate test case for clear reporting
+- tensorstore added to test dependency group (needed for triplet tests to pass)
 
 ### Blockers/Concerns
 
@@ -69,9 +70,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 08-02-PLAN.md (Smoke Tests for Import and Public API) -- Phase 8 COMPLETE
+Stopped at: Re-executed 08-01-PLAN.md (Data Test Migration) with BatchedCenterSpatialCropd fix -- Phase 8 COMPLETE
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-14 (08-02 complete, Phase 8 fully done -- all 2 plans executed)*
+*Last updated: 2026-02-14 (08-01 re-executed with bug fix, Phase 8 fully done)*
