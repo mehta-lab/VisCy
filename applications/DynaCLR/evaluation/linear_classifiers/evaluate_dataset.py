@@ -8,12 +8,16 @@ report. Each block can be run independently or chained via ``run_evaluation()``.
 from pathlib import Path
 from typing import Any, Optional
 
+import anndata as ad
 import joblib
 import pandas as pd
 from pydantic import BaseModel, Field, field_validator, model_validator
+from sklearn.metrics import classification_report
 
 from viscy.representation.evaluation.linear_classifier import (
+    LinearClassifierPipeline,
     load_and_combine_datasets,
+    predict_with_classifier,
     save_pipeline_to_wandb,
     train_linear_classifier,
 )
@@ -411,3 +415,250 @@ def _print_training_summary(
                 else:
                     row += " - | - |"
             print(row)
+
+
+# ---------------------------------------------------------------------------
+# Block 2: Inference
+# ---------------------------------------------------------------------------
+
+
+def infer_classifiers(
+    config: DatasetEvalConfig,
+    trained: dict[str, dict[tuple[str, str], dict[str, Any]]] | None = None,
+) -> dict[str, dict[tuple[str, str], ad.AnnData]]:
+    """Apply trained classifiers to held-out test embeddings.
+
+    Parameters
+    ----------
+    config : DatasetEvalConfig
+        Evaluation configuration.
+    trained : dict or None
+        Output from ``train_classifiers()``. If ``None``, loads pipelines
+        from disk.
+
+    Returns
+    -------
+    dict[str, dict[tuple[str, str], ad.AnnData]]
+        ``model_label -> (task, channel) -> adata`` with predictions.
+    """
+    tasks = _resolve_tasks(config)
+    print("\n## Running inference on test dataset")
+
+    all_predictions: dict[str, dict[tuple[str, str], ad.AnnData]] = {}
+
+    for model_label, model_spec in config.models.items():
+        print(f"\n### Model: {model_label} ({model_spec.name})")
+        model_predictions: dict[tuple[str, str], ad.AnnData] = {}
+        model_output_dir = config.output_dir / model_label
+        model_output_dir.mkdir(parents=True, exist_ok=True)
+
+        test_channel_zarrs = _find_channel_zarrs(
+            model_spec.test_embeddings_dir, config.channels
+        )
+
+        for task in tasks:
+            for channel in config.channels:
+                combo_key = (task, channel)
+
+                if channel not in test_channel_zarrs:
+                    print(f"  {task} / {channel}: no test zarr, skipping.")
+                    continue
+
+                # Get pipeline: from in-memory results or disk
+                pipeline = None
+                artifact_metadata = None
+
+                if trained and model_label in trained:
+                    result = trained[model_label].get(combo_key)
+                    if result:
+                        pipeline = result["pipeline"]
+                        artifact_name = result.get("artifact_name")
+                        if artifact_name:
+                            artifact_metadata = {
+                                "artifact_name": artifact_name,
+                                "artifact_id": artifact_name,
+                                "artifact_version": "local",
+                            }
+
+                if pipeline is None:
+                    pipeline_path = (
+                        model_output_dir / f"{task}_{channel}_pipeline.joblib"
+                    )
+                    if not pipeline_path.exists():
+                        print(f"  {task} / {channel}: no trained pipeline, skipping.")
+                        continue
+                    pipeline = joblib.load(pipeline_path)
+                    if not isinstance(pipeline, LinearClassifierPipeline):
+                        print(f"  {task} / {channel}: invalid pipeline file, skipping.")
+                        continue
+
+                try:
+                    print(f"  {task} / {channel}: loading test embeddings...")
+                    adata = ad.read_zarr(test_channel_zarrs[channel])
+
+                    adata = predict_with_classifier(
+                        adata,
+                        pipeline,
+                        task,
+                        artifact_metadata=artifact_metadata,
+                    )
+
+                    # Save predictions zarr
+                    pred_path = model_output_dir / f"{task}_{channel}_predictions.zarr"
+                    adata.write_zarr(pred_path)
+                    print(f"  {task} / {channel}: saved {pred_path.name}")
+
+                    model_predictions[combo_key] = adata
+
+                except Exception as e:
+                    print(f"  {task} / {channel}: FAILED - {e}")
+                    continue
+
+        all_predictions[model_label] = model_predictions
+
+    return all_predictions
+
+
+# ---------------------------------------------------------------------------
+# Block 3: Evaluate predictions
+# ---------------------------------------------------------------------------
+
+
+def evaluate_predictions(
+    config: DatasetEvalConfig,
+    predictions: dict[str, dict[tuple[str, str], ad.AnnData]] | None = None,
+) -> dict[str, dict[tuple[str, str], dict[str, Any]]]:
+    """Evaluate predictions against held-out test annotations.
+
+    Parameters
+    ----------
+    config : DatasetEvalConfig
+        Evaluation configuration.
+    predictions : dict or None
+        Output from ``infer_classifiers()``. If ``None``, loads prediction
+        zarrs from disk.
+
+    Returns
+    -------
+    dict[str, dict[tuple[str, str], dict]]
+        ``model_label -> (task, channel) -> eval_dict`` with keys:
+        ``"metrics"``, ``"annotated_adata"``.
+    """
+    from viscy.representation.evaluation import load_annotation_anndata
+
+    tasks = _resolve_tasks(config)
+    print("\n## Evaluating predictions on test set")
+
+    all_eval: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
+
+    for model_label in config.models:
+        print(f"\n### Model: {model_label}")
+        model_eval: dict[tuple[str, str], dict[str, Any]] = {}
+        model_output_dir = config.output_dir / model_label
+
+        for task in tasks:
+            for channel in config.channels:
+                combo_key = (task, channel)
+
+                # Get prediction adata: from in-memory or disk
+                adata = None
+                if predictions and model_label in predictions:
+                    adata = predictions[model_label].get(combo_key)
+
+                if adata is None:
+                    pred_path = model_output_dir / f"{task}_{channel}_predictions.zarr"
+                    if not pred_path.exists():
+                        print(f"  {task} / {channel}: no predictions found, skipping.")
+                        continue
+                    adata = ad.read_zarr(pred_path)
+
+                try:
+                    annotated = load_annotation_anndata(
+                        adata, str(config.test_annotations_csv), task
+                    )
+
+                    # Filter to cells with non-NaN ground truth
+                    mask = annotated.obs[task].notna() & (
+                        annotated.obs[task] != "unknown"
+                    )
+                    eval_subset = annotated[mask]
+
+                    if len(eval_subset) == 0:
+                        print(
+                            f"  {task} / {channel}: "
+                            "no annotated cells after filtering, skipping."
+                        )
+                        continue
+
+                    pred_col = f"predicted_{task}"
+                    y_true = eval_subset.obs[task].values
+                    y_pred = eval_subset.obs[pred_col].values
+
+                    report = classification_report(
+                        y_true, y_pred, digits=3, output_dict=True
+                    )
+
+                    test_metrics = {
+                        "test_accuracy": report["accuracy"],
+                        "test_weighted_precision": report["weighted avg"]["precision"],
+                        "test_weighted_recall": report["weighted avg"]["recall"],
+                        "test_weighted_f1": report["weighted avg"]["f1-score"],
+                        "test_n_samples": len(eval_subset),
+                    }
+
+                    for class_name in sorted(set(y_true) | set(y_pred)):
+                        if class_name in report:
+                            test_metrics[f"test_{class_name}_precision"] = report[
+                                class_name
+                            ]["precision"]
+                            test_metrics[f"test_{class_name}_recall"] = report[
+                                class_name
+                            ]["recall"]
+                            test_metrics[f"test_{class_name}_f1"] = report[class_name][
+                                "f1-score"
+                            ]
+
+                    # Save annotated adata
+                    annotated_path = (
+                        model_output_dir / f"{task}_{channel}_annotated.zarr"
+                    )
+                    annotated.write_zarr(annotated_path)
+
+                    model_eval[combo_key] = {
+                        "metrics": test_metrics,
+                        "annotated_adata": annotated,
+                    }
+
+                    acc = test_metrics["test_accuracy"]
+                    f1 = test_metrics["test_weighted_f1"]
+                    n = test_metrics["test_n_samples"]
+                    print(f"  {task} / {channel}: acc={acc:.3f}  F1={f1:.3f}  (n={n})")
+
+                except Exception as e:
+                    print(f"  {task} / {channel}: FAILED - {e}")
+                    continue
+
+        all_eval[model_label] = model_eval
+
+        # Save per-model test metrics CSV
+        rows = []
+        for (task, channel), result in model_eval.items():
+            row = {"task": task, "channel": channel}
+            row.update(result["metrics"])
+            rows.append(row)
+        if rows:
+            df = pd.DataFrame(rows)
+            df.to_csv(model_output_dir / "test_metrics_summary.csv", index=False)
+
+    # Save combined test metrics comparison
+    rows = []
+    for model_label, model_eval in all_eval.items():
+        for (task, channel), result in model_eval.items():
+            row = {"model": model_label, "task": task, "channel": channel}
+            row.update(result["metrics"])
+            rows.append(row)
+    if rows:
+        df = pd.DataFrame(rows)
+        df.to_csv(config.output_dir / "test_metrics_comparison.csv", index=False)
+
+    return all_eval

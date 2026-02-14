@@ -9,6 +9,7 @@ from applications.DynaCLR.evaluation.linear_classifiers.evaluate_dataset import 
     DatasetEvalConfig,
     ModelSpec,
     TrainDataset,
+    evaluate_predictions,
     infer_classifiers,
     train_classifiers,
 )
@@ -334,3 +335,64 @@ class TestInferClassifiers:
         for model_preds in predictions.values():
             for (task, _), adata in model_preds.items():
                 assert f"classifier_{task}_artifact" in adata.uns
+
+
+# ---------------------------------------------------------------------------
+# Evaluate predictions
+# ---------------------------------------------------------------------------
+
+
+class TestEvaluatePredictions:
+    def test_test_metrics_computed(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+        eval_results = evaluate_predictions(eval_config, predictions=predictions)
+
+        for model_eval in eval_results.values():
+            for (task, channel), result in model_eval.items():
+                metrics = result["metrics"]
+                assert "test_accuracy" in metrics
+                assert "test_weighted_f1" in metrics
+                assert "test_n_samples" in metrics
+                assert metrics["test_n_samples"] > 0
+
+    def test_annotated_zarr_saved(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+        evaluate_predictions(eval_config, predictions=predictions)
+
+        for task in eval_config.tasks:
+            for channel in eval_config.channels:
+                annotated_path = (
+                    eval_config.output_dir
+                    / "test_model"
+                    / f"{task}_{channel}_annotated.zarr"
+                )
+                assert annotated_path.exists(), f"Missing {annotated_path.name}"
+
+    def test_annotated_has_both_columns(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+        eval_results = evaluate_predictions(eval_config, predictions=predictions)
+
+        for model_eval in eval_results.values():
+            for (task, _), result in model_eval.items():
+                adata = result["annotated_adata"]
+                assert task in adata.obs.columns
+                assert f"predicted_{task}" in adata.obs.columns
+
+    def test_metrics_comparison_csv(self, eval_config):
+        with _mock_wandb():
+            trained = train_classifiers(eval_config)
+        predictions = infer_classifiers(eval_config, trained=trained)
+        evaluate_predictions(eval_config, predictions=predictions)
+
+        csv_path = eval_config.output_dir / "test_metrics_comparison.csv"
+        assert csv_path.exists()
+        df = pd.read_csv(csv_path)
+        assert "model" in df.columns
+        assert "test_accuracy" in df.columns
+        assert len(df) == 4  # 2 tasks x 2 channels
