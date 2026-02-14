@@ -137,11 +137,11 @@ Plans:
   1. `uv run --package viscy-data pytest` passes all tests (test_hcs.py, test_triplet.py, test_select.py)
   2. A smoke test verifies `import viscy_data` works in an environment with only base dependencies (no optional extras)
   3. Smoke tests verify that accessing optional-dependency modules without the extra installed raises an error with the correct install instruction
-**Plans**: TBD
+**Plans**: 2 plans
 
 Plans:
-- [ ] 08-01: TBD
-- [ ] 08-02: TBD
+- [ ] 08-01-PLAN.md -- Migrate conftest.py and 3 test files (test_hcs, test_triplet, test_select) with updated imports
+- [ ] 08-02-PLAN.md -- Smoke tests for import, __all__ completeness, and optional dep error messages
 
 ### Phase 9: CI Integration
 **Goal**: CI automatically tests viscy-data on every push with tiered dependency coverage
