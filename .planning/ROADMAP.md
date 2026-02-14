@@ -91,7 +91,7 @@ Plans:
 - [x] **Phase 6: Package Scaffolding and Foundation** - Package structure, dependency declarations, and shared utility extraction
 - [x] **Phase 7: Code Migration** - Migrate all 13 data modules with updated imports and lazy loading
 - [x] **Phase 8: Test Migration and Validation** - Migrate tests and verify package works correctly
-- [ ] **Phase 9: CI Integration** - Extend CI workflows with viscy-data jobs and tiered matrix
+- [x] **Phase 9: CI Integration** - Extend CI workflows with viscy-data jobs and tiered matrix
 
 ## Phase Details
 
@@ -155,7 +155,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 09-01-PLAN.md -- Add viscy-data test jobs (3x3 base + 1x1 extras) and update alls-green aggregation
+- [x] 09-01-PLAN.md -- Add viscy-data test jobs (3x3 base + 1x1 extras) and update alls-green aggregation
 
 ## Progress
 
@@ -172,7 +172,7 @@ Phases execute in numeric order: 6 -> 7 -> 8 -> 9
 | 6. Package Scaffolding and Foundation | v1.1 | 2/2 | Complete | 2026-02-13 |
 | 7. Code Migration | v1.1 | 4/4 | Complete | 2026-02-14 |
 | 8. Test Migration and Validation | v1.1 | 2/2 | Complete | 2026-02-14 |
-| 9. CI Integration | v1.1 | 0/TBD | Not started | - |
+| 9. CI Integration | v1.1 | 1/1 | Complete | 2026-02-14 |
 
 ---
 *Roadmap created: 2025-01-27*
