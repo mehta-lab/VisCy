@@ -10,18 +10,18 @@ See: .planning/PROJECT.md (updated 2026-02-13)
 ## Current Position
 
 Phase: 7 of 9 (Code Migration)
-Plan: 1 of 4 in current phase (07-01 complete)
+Plan: 3 of 4 in current phase (07-01, 07-03 complete)
 Status: In Progress
-Last activity: 2026-02-14 -- Completed 07-01 (Core Data Module Migration)
+Last activity: 2026-02-14 -- Completed 07-03 (Optional Dependency Module Migration)
 
-Progress: [========..] 82% (v1.0 complete, phase 7 plan 1 of 4)
+Progress: [=========.] 88% (v1.0 complete, phase 7 plan 3 of 4)
 
 ## Performance Metrics
 
 **Velocity (from v1.0):**
-- Total plans completed: 9
+- Total plans completed: 10
 - Average duration: 4.7 min
-- Total execution time: 42 min
+- Total execution time: 47 min
 
 **By Phase:**
 
@@ -32,7 +32,7 @@ Progress: [========..] 82% (v1.0 complete, phase 7 plan 1 of 4)
 | 3 | 3 | ~13 min | ~4.3 min |
 | 5 | 1 | ~4 min | ~4 min |
 | 6 | 2 | ~7 min | ~3.5 min |
-| 7 | 1 | ~9 min | ~9 min |
+| 7 | 2 | ~14 min | ~7 min |
 
 ## Accumulated Context
 
@@ -52,6 +52,8 @@ Key decisions carrying forward:
 - Utility functions use `viscy_data._typing` for type imports (not `viscy.data.typing`)
 - gpu_aug.py imports utilities from viscy_data._utils (not from hcs.py) for clean decoupling
 - Removed unused imports (re, collate_meta_tensor) from hcs.py after utility extraction
+- Lazy import pattern for optional deps: try/except at module level with None sentinel, guard in __init__ with pip extras hint
+- combined.py preserved as-is (no split per REF-02 deferral)
 
 ### Blockers/Concerns
 
@@ -60,9 +62,9 @@ None yet.
 ## Session Continuity
 
 Last session: 2026-02-14
-Stopped at: Completed 07-01-PLAN.md (Core Data Module Migration)
+Stopped at: Completed 07-03-PLAN.md (Optional Dependency Module Migration)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Last updated: 2026-02-14 (07-01 complete, Phase 7 in progress)*
+*Last updated: 2026-02-14 (07-03 complete, Phase 7 in progress)*
