@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dynamic = [ "version" ]
-dependencies = [ "viscy-data", "viscy-models", "viscy-transforms" ]
+dependencies = [ "viscy-data", "viscy-models", "viscy-transforms", "viscy-utils" ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
@@ -46,18 +46,20 @@ packages = [ "src/viscy" ]
 package = true
 
 [tool.uv.workspace]
-members = [ "packages/*" ]
+members = [ "packages/*", "applications/*" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
 viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
+viscy-utils = { workspace = true }
+dynacrl = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"
 line-length = 120
 indent-width = 4
-src = [ "packages/*/src" ]
+src = [ "packages/*/src", "applications/*/src" ]
 
 format.indent-style = "space"
 format.quote-style = "double"
@@ -72,7 +74,7 @@ lint.pydocstyle.convention = "numpy"
 
 [tool.pytest]
 minversion = "9.0"
-testpaths = [ "packages/*/tests", "tests" ]
+testpaths = [ "packages/*/tests", "applications/*/tests", "tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib" ]
 
 [tool.uv-dynamic-versioning]
