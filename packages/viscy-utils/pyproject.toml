@@ -1,0 +1,69 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "viscy-utils"
+description = "Shared ML infrastructure for virtual staining microscopy"
+readme = "README.md"
+keywords = [
+  "deep learning",
+  "microscopy",
+  "pytorch",
+  "training utilities",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "iohub>=0.3a2",
+  "lightning>=2.3",
+  "matplotlib>=3.10",
+  "numpy>=2.4.1",
+  "scikit-image",
+  "tensorstore",
+  "torch>=2.10",
+  "xarray",
+]
+
+optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
+optional-dependencies.anndata = [ "anndata" ]
+optional-dependencies.eval = [
+  "phate",
+  "scikit-learn",
+  "umap-learn",
+]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [ "pytest>=9.0.2", "pytest-cov>=7" ]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/viscy_utils" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-utils-"
+fallback-version = "0.0.0"
