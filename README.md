@@ -16,8 +16,9 @@ VisCy is organized as a [uv workspace](https://docs.astral.sh/uv/concepts/worksp
 | Package | Description | Install |
 |---------|-------------|---------|
 | [viscy-transforms](./packages/viscy-transforms/) | GPU-accelerated image transforms for microscopy | `pip install viscy-transforms` |
+| [viscy-models](./packages/viscy-models/) | Neural network architectures (UNet, contrastive, VAE) | `pip install viscy-models` |
 
-More packages coming soon: `viscy-data`, `viscy-models`, `viscy-airtable`.
+More packages coming soon: `viscy-data`, `viscy-airtable`.
 
 ## Installation
 
@@ -25,6 +26,7 @@ Install individual packages:
 
 ```sh
 pip install viscy-transforms
+pip install viscy-models
 ```
 
 Or install from source with all development dependencies:
