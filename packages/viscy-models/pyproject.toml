@@ -4,7 +4,7 @@ requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
 name = "viscy-models"
-description = "Neural network architectures for virtual staining microscopy"
+description = "Neural network architectures primarily for AI x Imaging"
 readme = "README.md"
 keywords = [
   "deep learning",
@@ -12,6 +12,7 @@ keywords = [
   "neural networks",
   "pytorch",
   "virtual staining",
+  "representation learning",
 ]
 license = "BSD-3-Clause"
 authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
