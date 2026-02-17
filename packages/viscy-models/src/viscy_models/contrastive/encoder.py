@@ -6,7 +6,7 @@ import timm
 import torch.nn as nn
 from torch import Tensor
 
-from viscy_models._components.stems import StemDepthtoChannels
+from viscy_models.components.stems import StemDepthtoChannels
 
 __all__ = ["projection_mlp", "ContrastiveEncoder"]
 

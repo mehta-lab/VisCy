@@ -10,8 +10,8 @@ from monai.networks.blocks import ResidualUnit, UpSample
 from monai.networks.blocks.dynunet_block import get_conv_layer
 from torch import Tensor, nn
 
-from viscy_models._components.heads import PixelToVoxelHead
-from viscy_models._components.stems import StemDepthtoChannels
+from viscy_models.components.heads import PixelToVoxelHead
+from viscy_models.components.stems import StemDepthtoChannels
 
 
 class VaeUpStage(nn.Module):

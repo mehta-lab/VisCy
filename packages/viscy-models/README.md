@@ -78,7 +78,7 @@ from viscy_models import BetaVae25D, BetaVaeMonai
 ## Features
 
 - Pure `nn.Module` architectures — no Lightning or Hydra dependencies
-- Shared components in `_components/` (stems, heads, decoder blocks, ConvBlocks)
+- Shared components in `components/` (stems, heads, decoder blocks, ConvBlocks)
 - State dict key compatibility with original VisCy checkpoints
 - Immutable defaults for all model constructors
 

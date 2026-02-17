@@ -5,9 +5,9 @@ from typing import Literal
 import timm
 from torch import Tensor, nn
 
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead
-from viscy_models._components.stems import UNeXt2Stem
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead
+from viscy_models.components.stems import UNeXt2Stem
 
 
 class UNeXt2(nn.Module):

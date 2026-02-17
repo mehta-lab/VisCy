@@ -1,6 +1,6 @@
 import torch
 
-from viscy_models._components.heads import PixelToVoxelShuffleHead
+from viscy_models.components.heads import PixelToVoxelShuffleHead
 from viscy_models.unet.fcmae import (
     FullyConvolutionalMAE,
     MaskedAdaptiveProjection,

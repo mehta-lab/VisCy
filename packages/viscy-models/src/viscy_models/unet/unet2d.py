@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from viscy_models._components.conv_block_2d import ConvBlock2D
+from viscy_models.components.conv_block_2d import ConvBlock2D
 
 __all__ = ["Unet2d"]
 

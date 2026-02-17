@@ -4,7 +4,7 @@ from monai.networks.blocks import Convolution, UpSample
 from monai.networks.utils import normal_init
 from torch import Tensor, nn
 
-from viscy_models._components.blocks import icnr_init
+from viscy_models.componentsblocks import icnr_init
 
 __all__ = ["PixelToVoxelHead", "UnsqueezeHead", "PixelToVoxelShuffleHead"]
 
