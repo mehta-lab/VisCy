@@ -5,7 +5,7 @@
 - Shipped **v1.0 Transforms & Monorepo Skeleton** — Phases 1-5 (shipped 2026-01-29)
 - Shipped **v1.1 Extract viscy-data** — Phases 6-9 (shipped 2026-02-14)
 - Shipped **v1.2 Extract viscy-models** — Phases 10-14 (shipped 2026-02-13)
-- Next **v2.0 Applications & Airtable** — Phases TBD
+- Shipped **v2.0 DynaCLR Application** — Phases 15-17 (shipped 2026-02-17)
 
 ## Phases
 
@@ -139,11 +139,55 @@ Plans:
 
 </details>
 
-### v2.0 Applications & Airtable (Phases TBD)
+<details>
+<summary>v2.0 DynaCLR Application (Phases 15-17) — SHIPPED 2026-02-17</summary>
 
-**Milestone Goal:** Extract application-level LightningModules and the Airtable abstraction into independent packages, composing viscy-data and viscy-models.
+### Phase 15: Shared Infrastructure (viscy-utils)
+**Goal**: Extract shared ML training infrastructure into viscy-utils package
+**Plans**: Manual (no GSD plans)
 
-*(Phases to be defined during milestone planning)*
+Delivered:
+- [x] viscy-utils package with trainer, callbacks, evaluation, cli_utils
+- [x] EmbeddingWriter callback, linear classifier evaluation, visualization
+- [x] cli_utils.py with format_markdown_table() and load_config()
+- [x] pyyaml added to viscy-utils dependencies
+
+### Phase 16: DynaCLR Application Core
+**Goal**: Create applications/dynacrl with engine, CLI, and LightningModules
+**Depends on**: Phase 15
+**Plans**: Manual
+
+Delivered:
+- [x] ContrastiveModule engine (LightningModule)
+- [x] MultiModalContrastiveModule for cross-modal distillation
+- [x] ClassificationModule for downstream classification
+- [x] vae_logging utilities
+- [x] dynaclr CLI with LazyCommand pattern
+- [x] pyproject.toml with workspace integration
+
+### Phase 17: Examples & Evaluation Migration
+**Goal**: Migrate examples and evaluation scripts into self-contained application
+**Depends on**: Phase 16
+**Plans**: Manual
+
+Delivered:
+- [x] evaluation/linear_classifiers/ — train, apply, dataset discovery, config generation
+- [x] examples/configs/ — fit.yml, predict.yml, SLURM scripts with updated class_paths
+- [x] examples/DynaCLR-DENV-VS-Ph/ — infection analysis demo with updated imports
+- [x] examples/embedding-web-visualization/ — interactive visualizer with updated imports
+- [x] examples/DynaCLR-classical-sampling/ — pseudo-track generation
+- [x] examples/vcp_tutorials/ — quickstart notebook and script with updated imports
+- [x] CLI commands: train-linear-classifier, apply-linear-classifier
+- [x] wandb, anndata, natsort added to dynacrl [eval] optional dependencies
+
+</details>
+
+### v2.0+ Remaining Applications (Phases TBD)
+
+**Candidates (not yet planned):**
+- applications/Cytoland — VSUNet/FcmaeUNet LightningModules
+- viscy-airtable — abstract from current Airtable integration
+- Hydra infrastructure (viscy-hydra or integrated)
 
 ## Progress
 
@@ -163,9 +207,13 @@ Plans:
 | 12. Representation Models | v1.2 | 2/2 | Complete | 2026-02-13 |
 | 13. Legacy UNet Models | v1.2 | 1/1 | Complete | 2026-02-13 |
 | 14. Public API & CI | v1.2 | 1/1 | Complete | 2026-02-13 |
+| 15. Shared Infrastructure | v2.0 | manual | Complete | 2026-02-17 |
+| 16. DynaCLR App Core | v2.0 | manual | Complete | 2026-02-17 |
+| 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
 
-**Total plans executed:** 25 (v1.0: 7, v1.1: 9, v1.2: 9)
+**Total plans executed:** 25 (v1.0: 7, v1.1: 9, v1.2: 9) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
+*Updated for v2.0 DynaCLR: 2026-02-17*

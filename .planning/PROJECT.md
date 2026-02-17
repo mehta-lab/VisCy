@@ -2,18 +2,21 @@
 
 ## What This Is
 
-Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. Three subpackages have been extracted: `viscy-transforms` (v1.0), `viscy-data` (v1.1), and `viscy-models` (v1.2).
+Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. Four shared packages have been extracted: `viscy-transforms` (v1.0), `viscy-data` (v1.1), `viscy-models` (v1.2), and `viscy-utils` (v2.0). The first application, `applications/dynacrl`, composes these packages into a self-contained DynaCLR application.
 
 ## Core Value
 
-**Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, or `pip install viscy-models` and use clean imports without pulling in the entire VisCy ecosystem.
+**Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, `pip install viscy-models`, or `pip install viscy-utils` and use clean imports without pulling in the entire VisCy ecosystem. Applications compose these packages into domain-specific tools (e.g., `pip install dynacrl`).
 
-## Current Milestone: v2.0 Applications & Airtable
+## Current Milestone: v2.0 Applications & Shared Infrastructure (In Progress)
 
-**Goal:** Extract application-level LightningModules (DynaCLR, Cytoland) and the Airtable abstraction into independent packages, composing the extracted model and data subpackages.
+**Goal:** Extract shared ML infrastructure (`viscy-utils`) and application-level LightningModules into independent packages, composing the extracted model and data subpackages.
 
-**Target features:**
-- `applications/DynaCLR` with ContrastiveModule LightningModule
+**Shipped (v2.0):**
+- `viscy-utils` package — shared training infrastructure (trainer, callbacks, evaluation, cli_utils)
+- `applications/dynacrl` — DynaCLR application with ContrastiveModule, CLI, evaluation, examples
+
+**Remaining (v2.0+):**
 - `applications/Cytoland` with VSUNet/FcmaeUNet LightningModules
 - `viscy-airtable` package abstracted from current Airtable integration
 - Hydra configuration infrastructure (viscy-hydra or integrated)
@@ -46,7 +49,12 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 ### Active
 
-(Pending v2.0 milestone definition)
+- `viscy-utils` package extracted with shared ML infrastructure — v2.0
+- `applications/dynacrl` with ContrastiveModule, MultiModalContrastiveModule, ClassificationModule — v2.0
+- `dynaclr` CLI with `train-linear-classifier` and `apply-linear-classifier` commands — v2.0
+- Evaluation scripts for linear classifiers on cell embeddings — v2.0
+- Examples, tutorials, and training configs migrated to `applications/dynacrl/examples/` — v2.0
+- `cli_utils.py` with `format_markdown_table()` and `load_config()` — v2.0
 
 ### Out of Scope
 
@@ -59,11 +67,13 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 **Design doc:** https://github.com/mehta-lab/VisCy/issues/353
 
-**Current state (after v1.2):**
-- uv workspace monorepo with 3 extracted packages:
+**Current state (after v2.0 DynaCLR):**
+- uv workspace monorepo with 4 shared packages + 1 application:
   - `packages/viscy-transforms/` — 16 transform modules, 44 exports
   - `packages/viscy-data/` — 15 data modules, 45 exports, 4015 LOC source + 671 LOC tests
   - `packages/viscy-models/` — 8 architectures in unet/, vae/, contrastive/ with shared _components/
+  - `packages/viscy-utils/` — shared ML infrastructure (trainer, callbacks, evaluation, cli_utils)
+  - `applications/dynacrl/` — DynaCLR application (engine, CLI, evaluation, examples)
 - CI: test.yml (viscy-transforms 3x3, viscy-data 3x3 + extras 1x1, viscy-models 3x3) + lint.yml
 - Python >=3.11, hatchling + uv-dynamic-versioning
 - Original code on `main` branch for reference
@@ -77,9 +87,10 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 - **Package naming**: hyphen for package name, underscore for import
 - **Python version**: >=3.11
 - **Build system**: hatchling with uv-dynamic-versioning
-- **Layout**: src layout (`packages/*/src/*/`)
+- **Layout**: src layout (`packages/*/src/*/`, `applications/*/src/*/`)
 - **Tooling**: uv only
 - **No cross-package dependencies between data, transforms, and models**
+- **Applications compose packages**: applications depend on shared packages, not the reverse
 
 ## Key Decisions
 
@@ -100,6 +111,9 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 | Pure nn.Module in viscy-models | No Lightning/Hydra coupling; maximum reusability | Good |
 | Function-based grouping (unet/, vae/, contrastive/) | Clean organization for 8+ models with shared components | Good |
 | State dict key compatibility | Non-negotiable for checkpoint loading | Good |
+| Applications compose packages | dynacrl depends on viscy-data, viscy-models, viscy-transforms, viscy-utils | Good |
+| LazyCommand CLI pattern | Defer heavy imports until invocation; graceful fallback on missing extras | Good |
+| Evaluation outside package src/ | Evaluation scripts are standalone; CLI wires them via sys.path | Good |
 
 ---
-*Last updated: 2026-02-16 after harmonizing modular-data and modular-models branches*
+*Last updated: 2026-02-17 after v2.0 DynaCLR application migration*

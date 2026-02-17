@@ -105,13 +105,54 @@
 - [x] **COMPAT-01**: State dict keys preserved identically for all migrated models
 - [x] **COMPAT-02**: Mutable default arguments fixed to tuples in model constructors
 
+## v2.0 Requirements (Complete)
+
+### Shared Infrastructure (viscy-utils)
+
+- [x] **UTIL-PKG-01**: viscy-utils package at `packages/viscy-utils/src/viscy_utils/` with hatchling + uv-dynamic-versioning
+- [x] **UTIL-PKG-02**: Shared training infrastructure (trainer, callbacks, evaluation modules)
+- [x] **UTIL-PKG-03**: cli_utils.py with format_markdown_table() and load_config()
+- [x] **UTIL-PKG-04**: pyyaml added as dependency for config loading
+- [x] **UTIL-PKG-05**: Optional dependency groups `[anndata]`, `[eval]`, `[all]`
+
+### DynaCLR Application — Core
+
+- [x] **APP-01-PKG**: applications/dynacrl package at `applications/dynacrl/src/dynacrl/`
+- [x] **APP-01-ENG**: ContrastiveModule LightningModule in engine.py
+- [x] **APP-01-MM**: MultiModalContrastiveModule for cross-modal distillation
+- [x] **APP-01-CLS**: ClassificationModule for downstream classification
+- [x] **APP-01-CLI**: dynaclr CLI entry point with LazyCommand pattern
+
+### DynaCLR Application — Evaluation
+
+- [x] **APP-01-EVAL-01**: Linear classifier training CLI (train_linear_classifier.py)
+- [x] **APP-01-EVAL-02**: Linear classifier inference CLI (apply_linear_classifier.py)
+- [x] **APP-01-EVAL-03**: Dataset discovery for predictions/annotations (dataset_discovery.py)
+- [x] **APP-01-EVAL-04**: SLURM prediction script generation (generate_prediction_scripts.py)
+- [x] **APP-01-EVAL-05**: Training config generation (generate_train_config.py)
+- [x] **APP-01-EVAL-06**: CLI commands registered: train-linear-classifier, apply-linear-classifier
+
+### DynaCLR Application — Examples
+
+- [x] **APP-01-EX-01**: Training configs (fit.yml, predict.yml) with updated class_path imports
+- [x] **APP-01-EX-02**: ONNX export config (dynaclr_microglia_onnx.yml) with updated imports
+- [x] **APP-01-EX-03**: SLURM scripts (fit_slurm.sh, predict_slurm.sh)
+- [x] **APP-01-EX-04**: Infection analysis demo (DynaCLR-DENV-VS-Ph/) with updated Python imports
+- [x] **APP-01-EX-05**: Interactive embedding visualizer with updated imports
+- [x] **APP-01-EX-06**: Classical sampling pseudo-track generation
+- [x] **APP-01-EX-07**: VCP quickstart tutorial (notebook + script) with updated imports
+
+### DynaCLR Application — Dependencies
+
+- [x] **APP-01-DEP-01**: wandb, anndata, natsort in dynacrl [eval] optional dependencies
+- [x] **APP-01-DEP-02**: Workspace-level uv configuration updated
+
 ## Future Requirements
 
 Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 
-### Applications (v2.0)
+### Applications (v2.0+)
 
-- **APP-01**: applications/DynaCLR with ContrastiveModule LightningModule
 - **APP-02**: applications/Cytoland with VSUNet/FcmaeUNet LightningModules
 - **APP-03**: viscy-airtable package abstracted from current Airtable integration
 
@@ -178,12 +219,24 @@ Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 | UNET-03, UNET-04, UNET-08 | Phase 13 | Complete |
 | API-01 through API-04, COMPAT-01, COMPAT-02 | Phase 14 | Complete |
 
+### v2.0 (22/22 complete)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| UTIL-PKG-01 through UTIL-PKG-05 | Phase 15 | Complete |
+| APP-01-PKG, APP-01-ENG, APP-01-MM, APP-01-CLS, APP-01-CLI | Phase 16 | Complete |
+| APP-01-EVAL-01 through APP-01-EVAL-06 | Phase 17 | Complete |
+| APP-01-EX-01 through APP-01-EX-07 | Phase 17 | Complete |
+| APP-01-DEP-01, APP-01-DEP-02 | Phase 17 | Complete |
+
 **Coverage:**
 - v1.0: 18 requirements, 18 complete
 - v1.1: 12 requirements, 12 complete
 - v1.2: 24 requirements, 24 complete
-- **Total: 54 requirements shipped**
+- v2.0: 22 requirements, 22 complete
+- **Total: 76 requirements shipped**
 
 ---
 *Requirements defined: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
+*Updated for v2.0 DynaCLR: 2026-02-17*
