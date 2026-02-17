@@ -44,7 +44,7 @@ Requirements for milestone v1.1 (Models). Each maps to roadmap phases.
 - [x] **MPKG-01**: Package directory `packages/viscy-models/` with src layout (`src/viscy_models/`)
 - [x] **MPKG-02**: pyproject.toml with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
 - [x] **MPKG-03**: `uv sync --package viscy-models` succeeds in workspace
-- [x] **MPKG-04**: `_components/` module with stems.py, heads.py, blocks.py extracted from shared code
+- [x] **MPKG-04**: `components/` module with stems.py, heads.py, blocks.py extracted from shared code
 
 ### Models -- UNet Architectures
 

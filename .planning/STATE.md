@@ -45,9 +45,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 Recent decisions affecting current work:
 
 - Pure nn.Module in viscy-models: No Lightning/Hydra coupling
-- Function-based grouping: unet/, vae/, contrastive/ with shared _components/
+- Function-based grouping: unet/, vae/, contrastive/ with shared components/
 - viscy-models independent of viscy-transforms (torch/timm/monai/numpy only)
-- 14+ shared components in unext2.py need extraction to _components/
+- 14+ shared components in unext2.py need extraction to components/
 - Mutable defaults must be fixed to tuples during migration
 - State dict key compatibility is non-negotiable for checkpoint loading
 - Followed viscy-transforms pyproject.toml pattern exactly for consistency
@@ -55,18 +55,18 @@ Recent decisions affecting current work:
 - Dev dependency group includes only test (no jupyter for models package)
 - Preserved register_modules/add_module pattern verbatim for state dict key compatibility
 - Fixed only docstring formatting for ruff D-series compliance, no logic changes to legacy code
-- Intra-_components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
+- Intra-components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
 - _get_convnext_stage private but importable; excluded from __all__
 - Preserved exact list mutation pattern (decoder_channels = num_channels alias) in UNeXt2 for compatibility
 - Marked deconv decoder test as xfail due to pre-existing channel mismatch bug in original code
 - Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
-- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical _components.heads location
+- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical components.heads location
 - Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
 - Used encoder.num_features instead of encoder.head.fc.in_features for timm backbone-agnostic projection dim (fixes ResNet50 bug)
 - Added pretrained parameter (default False) to contrastive encoders for pure nn.Module semantics
 - VaeEncoder pretrained default changed to False for pure nn.Module semantics
 - VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
-- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not _components
+- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not components
 - SimpleNamespace return type preserved for VAE backward compatibility
 - Convert user-provided num_filters tuple to list internally for list concatenation compatibility
 - up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters

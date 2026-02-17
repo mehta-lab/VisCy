@@ -6,7 +6,7 @@
 
 ## Summary
 
-Phase 9 migrates the two legacy UNet architectures (Unet2d and Unet25d) from the v0.3.3 monolithic codebase into viscy-models. These are simpler architectures than UNeXt2/FCMAE -- they do NOT use timm backbones or shared `_components/` modules. Instead they compose ConvBlock2D and ConvBlock3D (already migrated to `unet/_layers/` in Phase 6) with standard PyTorch pooling and upsampling layers. The migration is primarily a copy-and-update-imports exercise, with careful attention to the `register_modules`/`add_module` pattern that governs state dict keys.
+Phase 9 migrates the two legacy UNet architectures (Unet2d and Unet25d) from the v0.3.3 monolithic codebase into viscy-models. These are simpler architectures than UNeXt2/FCMAE -- they do NOT use timm backbones or shared `components/` modules. Instead they compose ConvBlock2D and ConvBlock3D (already migrated to `unet/_layers/` in Phase 6) with standard PyTorch pooling and upsampling layers. The migration is primarily a copy-and-update-imports exercise, with careful attention to the `register_modules`/`add_module` pattern that governs state dict keys.
 
 The original tests are written in unittest style with a combinatorial explosion approach -- each test class runs all 144 parameter configurations via Cartesian product. They also depend on `viscy.utils.cli_utils.show_progress_bar`, a utility not available in viscy-models. The tests have a known shape mismatch: the `squeeze(2)`/`unsqueeze(2)` was added to Unet2D's forward method in commit `0e2b575` after the tests were written, and the test expected shapes were never updated. The test conversion must fix this mismatch, remove the cli_utils dependency, and convert from unittest to idiomatic pytest using `@pytest.mark.parametrize` for configuration coverage.
 
@@ -135,7 +135,7 @@ __all__ = ["UNeXt2", "FullyConvolutionalMAE", "Unet2d", "Unet25d"]
 | Module registration | nn.ModuleList | `register_modules` + `add_module` | Must match legacy state dict key format |
 | Test progress bars | tqdm or custom | Remove entirely | Tests should use pytest output, not custom progress bars |
 
-**Key insight:** Unlike UNeXt2/FCMAE/ContrastiveEncoder/VAE, the legacy UNets do NOT use `_components/` at all. They are self-contained models that only depend on their respective ConvBlock layers. This makes the migration simpler.
+**Key insight:** Unlike UNeXt2/FCMAE/ContrastiveEncoder/VAE, the legacy UNets do NOT use `components/` at all. They are self-contained models that only depend on their respective ConvBlock layers. This makes the migration simpler.
 
 ## Common Pitfalls
 

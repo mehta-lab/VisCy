@@ -2,7 +2,7 @@
 
 ## What This Is
 
-Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. The second milestone extracts `viscy-models` as an independent package containing all 8 network architectures as pure nn.Modules, organized by function (unet/, vae/, contrastive/) with shared components factored into a `_components/` module.
+Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. The second milestone extracts `viscy-models` as an independent package containing all 8 network architectures as pure nn.Modules, organized by function (unet/, vae/, contrastive/) with shared components factored into a `components/` module.
 
 ## Core Value
 
@@ -14,7 +14,7 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 **Target features:**
 - `viscy-models` package with 8 architectures organized by function (unet/, vae/, contrastive/)
-- Shared components extracted to `_components/` (stems, heads, decoder blocks)
+- Shared components extracted to `components/` (stems, heads, decoder blocks)
 - Full test coverage: migrate existing + write new for UNeXt2, ContrastiveEncoder, BetaVAE
 - Independent of viscy-transforms and lightning (torch/timm/monai deps only)
 - State dict key compatibility preserved for checkpoint loading
@@ -34,7 +34,7 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 - [ ] `viscy-models` package with src layout and function-based organization
 - [ ] All 8 architectures migrated: UNeXt2, FCMAE, ContrastiveEncoder, ResNet3dEncoder, BetaVae25D, BetaVaeMonai, Unet2d, Unet25d
-- [ ] Shared components extracted to `_components/` (stems, heads, blocks)
+- [ ] Shared components extracted to `components/` (stems, heads, blocks)
 - [ ] Full test coverage: existing tests migrated + new tests for untested models
 - [ ] Import path: `from viscy_models import UNeXt2` (clean break)
 - [ ] State dict key compatibility preserved

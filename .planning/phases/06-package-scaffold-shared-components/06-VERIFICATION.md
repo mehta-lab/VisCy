@@ -8,10 +8,10 @@ must_haves:
     - "uv sync --package viscy-models succeeds without errors"
     - "python -c 'import viscy_models' runs without import errors"
     - "viscy-models appears in workspace and is importable"
-    - "from viscy_models._components.stems import UNeXt2Stem, StemDepthtoChannels works"
-    - "from viscy_models._components.heads import PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead works"
-    - "from viscy_models._components.blocks import UNeXt2UpStage, UNeXt2Decoder, icnr_init, _get_convnext_stage works"
-    - "_components/ has ZERO imports from unet/, vae/, or contrastive/"
+    - "from viscy_models.components.stems import UNeXt2Stem, StemDepthtoChannels works"
+    - "from viscy_models.components.heads import PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead works"
+    - "from viscy_models.components.blocks import UNeXt2UpStage, UNeXt2Decoder, icnr_init, _get_convnext_stage works"
+    - "components/ has ZERO imports from unet/, vae/, or contrastive/"
     - "All stem, head, and block classes produce correct output shapes"
     - "All component tests pass"
     - "from viscy_models.unet._layers import ConvBlock2D, ConvBlock3D works"
@@ -27,13 +27,13 @@ must_haves:
       status: verified
     - path: "packages/viscy-models/src/viscy_models/py.typed"
       status: verified
-    - path: "packages/viscy-models/src/viscy_models/_components/__init__.py"
+    - path: "packages/viscy-models/src/viscy_models/components/__init__.py"
       status: verified
-    - path: "packages/viscy-models/src/viscy_models/_components/stems.py"
+    - path: "packages/viscy-models/src/viscy_models/components/stems.py"
       status: verified
-    - path: "packages/viscy-models/src/viscy_models/_components/heads.py"
+    - path: "packages/viscy-models/src/viscy_models/components/heads.py"
       status: verified
-    - path: "packages/viscy-models/src/viscy_models/_components/blocks.py"
+    - path: "packages/viscy-models/src/viscy_models/components/blocks.py"
       status: verified
     - path: "packages/viscy-models/src/viscy_models/unet/__init__.py"
       status: verified
@@ -53,13 +53,13 @@ must_haves:
     - from: "pyproject.toml"
       to: "packages/viscy-models"
       status: wired
-    - from: "_components/blocks.py"
+    - from: "components/blocks.py"
       to: "timm.models.convnext.ConvNeXtStage"
       status: wired
-    - from: "_components/heads.py"
+    - from: "components/heads.py"
       to: "monai.networks.blocks.UpSample"
       status: wired
-    - from: "_components/"
+    - from: "components/"
       to: "model subpackages (unet/, vae/, contrastive/)"
       status: verified_zero_imports
 ---
@@ -83,10 +83,10 @@ must_haves:
 | 1 | uv sync --package viscy-models succeeds without errors | ✓ VERIFIED | Command exits with code 0, resolves 160 packages |
 | 2 | python -c 'import viscy_models' runs without import errors | ✓ VERIFIED | Import succeeds, __version__ = 0.0.0.post207.dev0+9f2044f |
 | 3 | viscy-models appears in workspace and is importable | ✓ VERIFIED | Package registered, appears in pkg_resources.working_set |
-| 4 | from viscy_models._components.stems import UNeXt2Stem, StemDepthtoChannels works | ✓ VERIFIED | Import succeeds, prints "stems OK" |
-| 5 | from viscy_models._components.heads import PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead works | ✓ VERIFIED | Import succeeds, prints "heads OK" |
-| 6 | from viscy_models._components.blocks import UNeXt2UpStage, UNeXt2Decoder, icnr_init works | ✓ VERIFIED | Import succeeds, prints "blocks OK" |
-| 7 | _components/ has ZERO imports from unet/, vae/, or contrastive/ | ✓ VERIFIED | grep returns no matches for forbidden imports |
+| 4 | from viscy_models.components.stems import UNeXt2Stem, StemDepthtoChannels works | ✓ VERIFIED | Import succeeds, prints "stems OK" |
+| 5 | from viscy_models.components.heads import PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead works | ✓ VERIFIED | Import succeeds, prints "heads OK" |
+| 6 | from viscy_models.components.blocks import UNeXt2UpStage, UNeXt2Decoder, icnr_init works | ✓ VERIFIED | Import succeeds, prints "blocks OK" |
+| 7 | components/ has ZERO imports from unet/, vae/, or contrastive/ | ✓ VERIFIED | grep returns no matches for forbidden imports |
 | 8 | All stem, head, and block classes produce correct output shapes | ✓ VERIFIED | 10 component tests pass (test_stems.py: 3, test_heads.py: 3, test_blocks.py: 4) |
 | 9 | All component tests pass | ✓ VERIFIED | pytest packages/viscy-models/tests/test_components/ passes 10/10 tests |
 | 10 | from viscy_models.unet._layers import ConvBlock2D, ConvBlock3D works | ✓ VERIFIED | Import succeeds, prints "layers OK" |
@@ -107,10 +107,10 @@ must_haves:
 | packages/viscy-models/pyproject.toml | Package build config with dependencies | ✓ VERIFIED | 59 lines, hatchling + uv-dynamic-versioning, torch/timm/monai/numpy deps |
 | packages/viscy-models/src/viscy_models/__init__.py | Package entry point with __version__ | ✓ VERIFIED | 186 bytes, imports version from importlib.metadata |
 | packages/viscy-models/src/viscy_models/py.typed | PEP 561 type marker | ✓ VERIFIED | Empty file present |
-| packages/viscy-models/src/viscy_models/_components/__init__.py | Re-exports all shared components | ✓ VERIFIED | 20 lines, exports 8 components from stems/heads/blocks |
-| packages/viscy-models/src/viscy_models/_components/stems.py | UNeXt2Stem, StemDepthtoChannels | ✓ VERIFIED | 80 lines, 7 classes/functions, imports from torch |
-| packages/viscy-models/src/viscy_models/_components/heads.py | PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead | ✓ VERIFIED | 96 lines, 9 classes/functions, imports from monai |
-| packages/viscy-models/src/viscy_models/_components/blocks.py | UNeXt2UpStage, UNeXt2Decoder, icnr_init, _get_convnext_stage | ✓ VERIFIED | 169 lines, 10 classes/functions, imports from timm |
+| packages/viscy-models/src/viscy_models/components/__init__.py | Re-exports all shared components | ✓ VERIFIED | 20 lines, exports 8 components from stems/heads/blocks |
+| packages/viscy-models/src/viscy_models/components/stems.py | UNeXt2Stem, StemDepthtoChannels | ✓ VERIFIED | 80 lines, 7 classes/functions, imports from torch |
+| packages/viscy-models/src/viscy_models/components/heads.py | PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead | ✓ VERIFIED | 96 lines, 9 classes/functions, imports from monai |
+| packages/viscy-models/src/viscy_models/components/blocks.py | UNeXt2UpStage, UNeXt2Decoder, icnr_init, _get_convnext_stage | ✓ VERIFIED | 169 lines, 10 classes/functions, imports from timm |
 | packages/viscy-models/src/viscy_models/unet/__init__.py | UNet subpackage marker | ✓ VERIFIED | Present with docstring |
 | packages/viscy-models/src/viscy_models/unet/_layers/__init__.py | Layers subpackage with ConvBlock exports | ✓ VERIFIED | 6 lines, exports ConvBlock2D and ConvBlock3D |
 | packages/viscy-models/src/viscy_models/unet/_layers/conv_block_2d.py | ConvBlock2D nn.Module | ✓ VERIFIED | 355 lines, register_modules/add_module pattern |
@@ -130,11 +130,11 @@ must_haves:
 |------|----|----|--------|---------|
 | pyproject.toml | packages/viscy-models/pyproject.toml | uv workspace member auto-discovery | ✓ WIRED | members = ["packages/*"] matches packages/viscy-models |
 | pyproject.toml | packages/viscy-models | workspace source | ✓ WIRED | viscy-models = { workspace = true } present in [tool.uv.sources] |
-| _components/blocks.py | timm.models.convnext.ConvNeXtStage | import in _get_convnext_stage | ✓ WIRED | Pattern "timm.models.convnext.ConvNeXtStage" found in blocks.py line 61 |
-| _components/heads.py | monai.networks.blocks.UpSample | import for PixelToVoxelHead | ✓ WIRED | "from monai.networks.blocks import Convolution, UpSample" found |
-| _components/ | model subpackages (unet/, vae/, contrastive/) | MUST NOT import | ✓ VERIFIED_ZERO_IMPORTS | grep confirms zero imports from model subpackages |
-| _components/blocks.py | numpy | np.linspace for filter step calculations | ✓ WIRED | "import numpy as np" present, used in code |
-| _components/heads.py | _components/blocks.py | intra-component import of icnr_init | ✓ WIRED | "from viscy_models._components.blocks import icnr_init" found |
+| components/blocks.py | timm.models.convnext.ConvNeXtStage | import in _get_convnext_stage | ✓ WIRED | Pattern "timm.models.convnext.ConvNeXtStage" found in blocks.py line 61 |
+| components/heads.py | monai.networks.blocks.UpSample | import for PixelToVoxelHead | ✓ WIRED | "from monai.networks.blocks import Convolution, UpSample" found |
+| components/ | model subpackages (unet/, vae/, contrastive/) | MUST NOT import | ✓ VERIFIED_ZERO_IMPORTS | grep confirms zero imports from model subpackages |
+| components/blocks.py | numpy | np.linspace for filter step calculations | ✓ WIRED | "import numpy as np" present, used in code |
+| components/heads.py | components/blocks.py | intra-component import of icnr_init | ✓ WIRED | "from viscy_models.components.blocks import icnr_init" found |
 
 ### Requirements Coverage
 
@@ -143,7 +143,7 @@ must_haves:
 | MPKG-01 | ✓ SATISFIED | packages/viscy-models/src/viscy_models/ directory exists with src layout and __init__.py |
 | MPKG-02 | ✓ SATISFIED | pyproject.toml has hatchling, uv-dynamic-versioning, torch/timm/monai/numpy deps |
 | MPKG-03 | ✓ SATISFIED | uv sync --package viscy-models succeeds without errors |
-| MPKG-04 | ✓ SATISFIED | viscy_models._components subpackage contains stems.py, heads.py, and blocks.py with extracted shared code |
+| MPKG-04 | ✓ SATISFIED | viscy_models.components subpackage contains stems.py, heads.py, and blocks.py with extracted shared code |
 | UNET-05 | ✓ SATISFIED | ConvBlock2D/3D layers exist in viscy_models.unet._layers and are importable with state-dict-compatible naming |
 | COMPAT-02 | N/A | Mutable defaults in model constructors - deferred to Phases 7-9 (no model constructors in Phase 6 scope) |
 
@@ -170,7 +170,7 @@ None. All must-haves verified. Phase goal achieved.
 ### Plan 06-01: Package Scaffold
 
 **Artifacts verified:**
-- Package directory structure created with all 5 subpackages (_components, unet, unet/_layers, contrastive, vae)
+- Package directory structure created with all 5 subpackages (components, unet, unet/_layers, contrastive, vae)
 - pyproject.toml configured with hatchling, uv-dynamic-versioning, torch/timm/monai/numpy dependencies
 - py.typed marker present for PEP 561 type checking
 - Root pyproject.toml updated with viscy-models in dependencies and workspace sources
@@ -191,10 +191,10 @@ None. All must-haves verified. Phase goal achieved.
 - stems.py: 80 lines, exports UNeXt2Stem and StemDepthtoChannels
 - heads.py: 96 lines, exports PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead
 - blocks.py: 169 lines, exports icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder
-- _components/__init__.py: Re-exports all 8 shared components
+- components/__init__.py: Re-exports all 8 shared components
 
 **Import isolation verified:**
-- Zero imports from viscy_models.unet, viscy_models.vae, or viscy_models.contrastive in _components/
+- Zero imports from viscy_models.unet, viscy_models.vae, or viscy_models.contrastive in components/
 - Only external dependencies: torch, timm, monai, numpy
 - Intra-component import allowed: heads.py imports icnr_init from blocks.py
 
@@ -204,8 +204,8 @@ None. All must-haves verified. Phase goal achieved.
 - test_blocks.py: 4/4 tests pass (icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder)
 
 **Commits verified:**
-- 0a2a15c: feat(06-02): extract shared components into _components/ module
-- 29d76d9: test(06-02): add forward-pass tests for all _components
+- 0a2a15c: feat(06-02): extract shared components into components/ module
+- 29d76d9: test(06-02): add forward-pass tests for all components
 
 ### Plan 06-03: UNet ConvBlock Layers
 
@@ -244,8 +244,8 @@ Users can install viscy-models and shared architectural components are available
 **Requirements satisfied:** MPKG-01, MPKG-02, MPKG-03, MPKG-04, UNET-05
 
 **Next phase readiness:**
-- Phase 7 (Core UNet Models): Can import from viscy_models._components for shared stems/heads/blocks
-- Phase 8 (Representation Models): Can import from viscy_models._components for encoder/decoder components
+- Phase 7 (Core UNet Models): Can import from viscy_models.components for shared stems/heads/blocks
+- Phase 8 (Representation Models): Can import from viscy_models.components for encoder/decoder components
 - Phase 9 (Legacy UNet Models): Can import ConvBlock2D/3D from viscy_models.unet._layers
 
 ---

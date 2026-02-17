@@ -65,14 +65,14 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. `packages/viscy-models/src/viscy_models/` directory exists with src layout and `__init__.py`
   2. `uv sync --package viscy-models` succeeds in the workspace without errors
-  3. `viscy_models._components` subpackage contains stems.py, heads.py, and blocks.py with extracted shared code
+  3. `viscy_models.components` subpackage contains stems.py, heads.py, and blocks.py with extracted shared code
   4. ConvBlock2D/3D layers exist in `viscy_models.unet._layers` and are importable
   5. All model constructors use immutable defaults (tuples instead of mutable lists/dicts)
 **Plans**: 3 plans
 
 Plans:
 - [x] 06-01-PLAN.md -- Package scaffold, pyproject.toml, workspace registration
-- [x] 06-02-PLAN.md -- Extract shared _components (stems, heads, blocks) with tests
+- [x] 06-02-PLAN.md -- Extract shared components (stems, heads, blocks) with tests
 - [x] 06-03-PLAN.md -- Migrate ConvBlock2D/3D to unet/_layers with tests
 
 ### Phase 7: Core UNet Models
