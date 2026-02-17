@@ -4,12 +4,14 @@ from monai.networks.blocks import Convolution, UpSample
 from monai.networks.utils import normal_init
 from torch import Tensor, nn
 
-from viscy_models.componentsblocks import icnr_init
+from viscy_models.components.blocks import icnr_init
 
 __all__ = ["PixelToVoxelHead", "UnsqueezeHead", "PixelToVoxelShuffleHead"]
 
 
 class PixelToVoxelHead(nn.Module):
+    """Pixel-shuffle head that upsamples 2D features to 3D voxel output."""
+
     def __init__(
         self,
         in_channels: int,
@@ -46,6 +48,7 @@ class PixelToVoxelHead(nn.Module):
         self.out_stack_depth = out_stack_depth
 
     def forward(self, x: Tensor) -> Tensor:
+        """Upsample 2D feature map and reshape to 3D voxel output."""
         x = self.upsample(x)
         d = self.out_stack_depth + 2
         b, c, h, w = x.shape
@@ -63,11 +66,14 @@ class UnsqueezeHead(nn.Module):
         super().__init__()
 
     def forward(self, x: Tensor) -> Tensor:
+        """Add a singleton depth dimension to convert 2D to 3D."""
         x = x.unsqueeze(2)
         return x
 
 
 class PixelToVoxelShuffleHead(nn.Module):
+    """Pixel-shuffle head that reshapes 2D features into a 3D volume."""
+
     def __init__(
         self,
         in_channels: int,
@@ -90,6 +96,7 @@ class PixelToVoxelShuffleHead(nn.Module):
         )
 
     def forward(self, x: Tensor) -> Tensor:
+        """Upsample 2D feature map and reshape to 3D voxel output."""
         x = self.upsample(x)
         b, _, h, w = x.shape
         x = x.reshape(b, self.out_channels, self.out_stack_depth, h, w)

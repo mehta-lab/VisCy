@@ -25,6 +25,18 @@ class UNeXt2Stem(nn.Module):
         )
 
     def forward(self, x: Tensor):
+        """Apply 3D convolution and reshape depth into channels.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape ``(B, C, D, H, W)``.
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape ``(B, C*D, H, W)``.
+        """
         x = self.conv(x)
         b, c, d, h, w = x.shape
         # project Z/depth into channels
@@ -62,6 +74,30 @@ class StemDepthtoChannels(nn.Module):
         stem_stride_depth,
         in_channels_encoder,
     ):
+        """Compute the number of output channels for the 3D stem convolution.
+
+        Parameters
+        ----------
+        in_stack_depth : int
+            Depth of the input volume.
+        stem_kernel_size : tuple of int
+            Kernel size ``(D, H, W)`` for the 3D convolution.
+        stem_stride_depth : int
+            Stride along the depth axis.
+        in_channels_encoder : int
+            Number of channels expected by the downstream encoder.
+
+        Returns
+        -------
+        int
+            Number of output channels for the stem convolution.
+
+        Raises
+        ------
+        ValueError
+            If the depth-to-channel reshape cannot exactly match
+            ``in_channels_encoder``.
+        """
         stem3d_out_depth = (in_stack_depth - stem_kernel_size[0]) // stem_stride_depth + 1
         stem3d_out_channels = in_channels_encoder // stem3d_out_depth
         channel_mismatch = in_channels_encoder - stem3d_out_depth * stem3d_out_channels
@@ -73,6 +109,18 @@ class StemDepthtoChannels(nn.Module):
         return stem3d_out_channels
 
     def forward(self, x: Tensor):
+        """Apply 3D convolution and reshape depth into channels.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape ``(B, C, D, H, W)``.
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape ``(B, C*D, H, W)``.
+        """
         x = self.conv(x)
         b, c, d, h, w = x.shape
         # project Z/depth into channels

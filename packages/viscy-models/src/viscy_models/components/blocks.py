@@ -25,10 +25,16 @@ def icnr_init(
     Adapted from MONAI v1.2.0, added support for upsampling dimensions
     that are not the same as the kernel dimension.
 
-    :param conv: convolution layer
-    :param upsample_factor: upsample factor
-    :param upsample_dims: upsample dimensions, 2 or 3
-    :param init: initialization function
+    Parameters
+    ----------
+    conv : nn.Module
+        Convolution layer.
+    upsample_factor : int
+        Upsample factor.
+    upsample_dims : int
+        Upsample dimensions, 2 or 3.
+    init : Callable, optional
+        Initialization function, defaults to ``nn.init.kaiming_normal_``.
     """
     out_channels, in_channels, *dims = conv.weight.shape
     scale_factor = upsample_factor**upsample_dims
@@ -69,6 +75,32 @@ def _get_convnext_stage(
 
 
 class UNeXt2UpStage(nn.Module):
+    """Single upsampling stage for the UNeXt2 decoder.
+
+    Combines upsampled low-resolution features with a high-resolution skip
+    connection, then refines the result with convolutional blocks.
+
+    Parameters
+    ----------
+    in_channels : int
+        Number of input channels from the lower-resolution stage.
+    skip_channels : int
+        Number of channels in the skip connection.
+    out_channels : int
+        Number of output channels.
+    scale_factor : int
+        Spatial upsampling factor.
+    mode : Literal["deconv", "pixelshuffle"]
+        Upsampling mode. ``"deconv"`` uses transposed convolution;
+        ``"pixelshuffle"`` uses sub-pixel convolution.
+    conv_blocks : int
+        Number of convolutional blocks in the refinement stage.
+    norm_name : str
+        Name of the normalization layer.
+    upsample_pre_conv : Literal["default"] | Callable | None
+        Pre-convolution applied before pixel-shuffle upsampling.
+    """
+
     def __init__(
         self,
         in_channels: int,
@@ -123,9 +155,17 @@ class UNeXt2UpStage(nn.Module):
     def forward(self, inp: Tensor, skip: Tensor) -> Tensor:
         """Forward pass combining upsampled features with skip connection.
 
-        :param Tensor inp: Low resolution features
-        :param Tensor skip: High resolution skip connection features
-        :return Tensor: High resolution features
+        Parameters
+        ----------
+        inp : Tensor
+            Low-resolution features.
+        skip : Tensor
+            High-resolution skip connection features.
+
+        Returns
+        -------
+        Tensor
+            High-resolution features.
         """
         inp = self.upsample(inp)
         inp = torch.cat([inp, skip], dim=1)
@@ -133,6 +173,28 @@ class UNeXt2UpStage(nn.Module):
 
 
 class UNeXt2Decoder(nn.Module):
+    """Multi-stage UNeXt2 decoder.
+
+    Progressively upsamples and fuses encoder features through a sequence
+    of ``UNeXt2UpStage`` modules to reconstruct high-resolution output.
+
+    Parameters
+    ----------
+    num_channels : list[int]
+        Number of channels at each decoder stage, ordered from the
+        bottleneck (lowest resolution) to the output (highest resolution).
+    norm_name : str
+        Name of the normalization layer.
+    mode : Literal["deconv", "pixelshuffle"]
+        Upsampling mode passed to each ``UNeXt2UpStage``.
+    conv_blocks : int
+        Number of convolutional blocks per stage.
+    strides : list[int]
+        Upsampling stride (scale factor) for each stage.
+    upsample_pre_conv : Literal["default"] | Callable | None
+        Pre-convolution applied before pixel-shuffle upsampling.
+    """
+
     def __init__(
         self,
         num_channels: list[int],
@@ -159,6 +221,20 @@ class UNeXt2Decoder(nn.Module):
             self.decoder_stages.append(stage)
 
     def forward(self, features: Sequence[Tensor]) -> Tensor:
+        """Decode multi-scale encoder features into a single output tensor.
+
+        Parameters
+        ----------
+        features : Sequence[Tensor]
+            Encoder feature maps ordered from lowest to highest resolution.
+            The first element is the bottleneck; subsequent elements are
+            skip connections at progressively higher resolutions.
+
+        Returns
+        -------
+        Tensor
+            Decoded high-resolution feature map.
+        """
         feat = features[0]
         # padding
         features.append(None)
