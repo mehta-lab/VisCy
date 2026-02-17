@@ -13,6 +13,9 @@ This directory contains:
 | `generate_train_config.py` | Generates training YAML configs for all valid task x channel combinations |
 | `train_linear_classifier.py` | CLI for training a classifier from a config |
 | `apply_linear_classifier.py` | CLI for applying a trained classifier to new embeddings |
+| `evaluate_dataset.py` | Cross-dataset evaluation pipeline: train, infer, evaluate, and generate PDF report comparing models (e.g. 2D vs 3D) |
+| `cross_validation.py` | Leave-one-dataset-out cross-validation to identify which training datasets help or hurt classifier performance |
+| `report.py` | PDF report generation for the evaluation pipeline |
 
 ## Prerequisites
 
@@ -161,6 +164,50 @@ linear-classifier-{task}-{channel}[-pca{n}]
 ```
 
 Examples: `linear-classifier-cell_death_state-phase`, `linear-classifier-infection_state-sensor-pca32`
+
+## Evaluation Pipeline (`evaluate_dataset.py`)
+
+Compares embedding models (e.g. 2D vs 3D) by training linear classifiers on pooled cross-dataset embeddings and evaluating on a held-out test dataset. Runs as a script, not a CLI.
+
+```bash
+# Full pipeline
+python evaluate_dataset.py
+
+# Skip training (reuse saved pipelines)
+python evaluate_dataset.py --skip-train
+
+# Skip training + inference (reuse saved predictions, only evaluate + report)
+python evaluate_dataset.py --skip-infer
+```
+
+### Task and channel selection
+
+`task_channels` controls which tasks to evaluate and which channels to use for each. When `None` (default), tasks are auto-detected from the test annotations CSV and all channels (phase, sensor, organelle) are used for each.
+
+```python
+# Default: auto-detect tasks, all channels
+config = DatasetEvalConfig(..., task_channels=None)
+
+# Explicit: specific channels per task
+config = DatasetEvalConfig(
+    ...,
+    task_channels={
+        "cell_division_state": ["phase"],
+        "infection_state": ["sensor", "phase"],
+        "organelle_state": ["organelle"],
+    },
+)
+```
+
+## Cross-Validation (`cross_validation.py`)
+
+Leave-one-dataset-out cross-validation to identify which training datasets help or hurt classifier performance. For each (model, task, channel), trains a baseline on all datasets, then re-trains with each dataset excluded. Reports delta AUROC, minority class F1, and annotation counts per run.
+
+```bash
+python cross_validation.py
+```
+
+Key metrics: AUROC (primary ranking), minority class F1/recall (rare event detection), per-class annotation counts (data provenance).
 
 ## Further Reference
 

@@ -313,8 +313,10 @@ def eval_config(synthetic_train_data, synthetic_test_data, tmp_path_factory):
             ),
         },
         output_dir=tmp_path_factory.mktemp("eval_output"),
-        channels=["phase", "organelle"],
-        tasks=["infection_state", "cell_division_state"],
+        task_channels={
+            "infection_state": ["phase", "organelle"],
+            "cell_division_state": ["phase", "organelle"],
+        },
     )
 
 

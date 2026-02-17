@@ -102,10 +102,12 @@ class DatasetEvalConfig(BaseModel):
         Models to compare, keyed by label (e.g. ``"2D"``, ``"3D"``).
     output_dir : Path
         Root output directory for results.
-    channels : list[str]
-        Channels to evaluate.
-    tasks : list[str] or None
-        Tasks to evaluate. ``None`` to auto-detect from test annotations.
+    task_channels : dict[str, list[str]] or None
+        Which tasks to evaluate and which channels to use for each.
+        E.g. ``{"infection_state": ["phase", "sensor"],
+        "cell_division_state": ["phase"]}``.
+        ``None`` to auto-detect tasks from the test annotations CSV
+        and use all channels (phase, sensor, organelle) for each.
     split_train_data : float
         Train/val split ratio within the training pool.
     use_scaling : bool
@@ -124,16 +126,19 @@ class DatasetEvalConfig(BaseModel):
     test_annotations_csv: Path
     models: dict[str, ModelSpec] = Field(..., min_length=1)
     output_dir: Path
-    channels: list[str] = Field(
-        default_factory=lambda: ["phase", "sensor", "organelle"]
-    )
-    tasks: Optional[list[str]] = None
+    task_channels: Optional[dict[str, list[str]]] = None
     split_train_data: float = Field(default=0.8, gt=0.0, le=1.0)
     use_scaling: bool = True
+    n_pca_components: Optional[int] = None
     max_iter: int = Field(default=1000, gt=0)
     class_weight: Optional[str] = "balanced"
     solver: str = "liblinear"
     random_seed: int = 42
+    wandb_logging: bool = True
+
+    @property
+    def use_pca(self) -> bool:
+        return self.n_pca_components is not None
 
     @model_validator(mode="after")
     def validate_config(self):
@@ -141,10 +146,16 @@ class DatasetEvalConfig(BaseModel):
             raise ValueError(
                 f"Test annotations CSV not found: {self.test_annotations_csv}"
             )
-        if self.tasks is not None:
-            for task in self.tasks:
+        if self.task_channels is not None:
+            for task in self.task_channels:
                 if task not in TASKS:
                     raise ValueError(f"Invalid task '{task}'. Must be one of {TASKS}")
+                for ch in self.task_channels[task]:
+                    if ch not in CHANNELS:
+                        raise ValueError(
+                            f"Invalid channel '{ch}' for task '{task}'. "
+                            f"Must be one of {CHANNELS}"
+                        )
         return self
 
 
@@ -173,11 +184,17 @@ def _get_available_tasks(csv_path: Path) -> list[str]:
     return [t for t in TASKS if t in columns]
 
 
-def _resolve_tasks(config: DatasetEvalConfig) -> list[str]:
-    """Resolve tasks to evaluate, auto-detecting from test CSV if needed."""
-    if config.tasks is not None:
-        return config.tasks
-    return _get_available_tasks(config.test_annotations_csv)
+def _resolve_task_channels(config: DatasetEvalConfig) -> dict[str, list[str]]:
+    """Resolve the task -> channels mapping.
+
+    If ``task_channels`` is set, use it directly.
+    Otherwise auto-detect tasks from the test CSV and use all channels.
+    """
+    if config.task_channels is not None:
+        return config.task_channels
+    tasks = _get_available_tasks(config.test_annotations_csv)
+    all_channels = list(CHANNELS)
+    return {task: all_channels for task in tasks}
 
 
 # ---------------------------------------------------------------------------
@@ -202,13 +219,12 @@ def train_classifiers(
         Each ``result_dict`` has keys: ``"pipeline"``, ``"metrics"``,
         ``"artifact_name"``.
     """
-    tasks = _resolve_tasks(config)
-    if not tasks:
+    tc = _resolve_task_channels(config)
+    if not tc:
         raise ValueError("No valid tasks found in test annotations CSV.")
 
     print("## Training classifiers")
-    print(f"  Tasks: {tasks}")
-    print(f"  Channels: {config.channels}")
+    print(f"  Task-channels: {tc}")
     print(f"  Models: {list(config.models.keys())}")
 
     all_results: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
@@ -219,8 +235,8 @@ def train_classifiers(
         model_output_dir = config.output_dir / model_label
         model_output_dir.mkdir(parents=True, exist_ok=True)
 
-        for task in tasks:
-            for channel in config.channels:
+        for task, channels in tc.items():
+            for channel in channels:
                 combo_key = (task, channel)
                 print(f"\n  {task} / {channel}:")
 
@@ -272,7 +288,8 @@ def train_classifiers(
                         adata=combined_adata,
                         task=task,
                         use_scaling=config.use_scaling,
-                        use_pca=False,
+                        use_pca=config.use_pca,
+                        n_pca_components=config.n_pca_components,
                         classifier_params=classifier_params,
                         split_train_data=config.split_train_data,
                         random_seed=config.random_seed,
@@ -317,13 +334,16 @@ def train_classifiers(
                         "cross-dataset",
                     ]
 
-                    artifact_name = save_pipeline_to_wandb(
-                        pipeline=pipeline,
-                        metrics=metrics,
-                        config=wandb_config,
-                        wandb_project=model_spec.wandb_project,
-                        tags=wandb_tags,
-                    )
+                    if config.wandb_logging:
+                        artifact_name = save_pipeline_to_wandb(
+                            pipeline=pipeline,
+                            metrics=metrics,
+                            config=wandb_config,
+                            wandb_project=model_spec.wandb_project,
+                            tags=wandb_tags,
+                        )
+                    else:
+                        artifact_name = f"{model_spec.name}_{task}_{channel}_local"
 
                     model_results[combo_key] = {
                         "pipeline": pipeline,
@@ -350,7 +370,7 @@ def train_classifiers(
     _save_comparison_csv(all_results, config.output_dir / "metrics_comparison.csv")
 
     # Print markdown summary
-    _print_training_summary(all_results, tasks, config.channels)
+    _print_training_summary(all_results, tc)
 
     return all_results
 
@@ -390,8 +410,7 @@ def _save_comparison_csv(
 
 def _print_training_summary(
     all_results: dict[str, dict[tuple[str, str], dict[str, Any]]],
-    tasks: list[str],
-    channels: list[str],
+    task_channels: dict[str, list[str]],
 ) -> None:
     """Print markdown summary table of training results."""
     print("\n## Training Summary\n")
@@ -403,7 +422,7 @@ def _print_training_summary(
     print(header)
     print(sep)
 
-    for task in tasks:
+    for task, channels in task_channels.items():
         for channel in channels:
             row = f"| {task} | {channel} |"
             for model_label, model_results in all_results.items():
@@ -441,7 +460,7 @@ def infer_classifiers(
     dict[str, dict[tuple[str, str], ad.AnnData]]
         ``model_label -> (task, channel) -> adata`` with predictions.
     """
-    tasks = _resolve_tasks(config)
+    tc = _resolve_task_channels(config)
     print("\n## Running inference on test dataset")
 
     all_predictions: dict[str, dict[tuple[str, str], ad.AnnData]] = {}
@@ -452,12 +471,12 @@ def infer_classifiers(
         model_output_dir = config.output_dir / model_label
         model_output_dir.mkdir(parents=True, exist_ok=True)
 
-        test_channel_zarrs = _find_channel_zarrs(
-            model_spec.test_embeddings_dir, config.channels
-        )
+        for task, channels in tc.items():
+            test_channel_zarrs = _find_channel_zarrs(
+                model_spec.test_embeddings_dir, channels
+            )
 
-        for task in tasks:
-            for channel in config.channels:
+            for channel in channels:
                 combo_key = (task, channel)
 
                 if channel not in test_channel_zarrs:
@@ -546,7 +565,7 @@ def evaluate_predictions(
     """
     from viscy.representation.evaluation import load_annotation_anndata
 
-    tasks = _resolve_tasks(config)
+    tc = _resolve_task_channels(config)
     print("\n## Evaluating predictions on test set")
 
     all_eval: dict[str, dict[tuple[str, str], dict[str, Any]]] = {}
@@ -556,8 +575,8 @@ def evaluate_predictions(
         model_eval: dict[tuple[str, str], dict[str, Any]] = {}
         model_output_dir = config.output_dir / model_label
 
-        for task in tasks:
-            for channel in config.channels:
+        for task, channels in tc.items():
+            for channel in channels:
                 combo_key = (task, channel)
 
                 # Get prediction adata: from in-memory or disk

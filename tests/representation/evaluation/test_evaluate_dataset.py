@@ -134,7 +134,7 @@ class TestDatasetEvalConfig:
                     )
                 },
                 output_dir=tmp_path / "out",
-                tasks=["not_a_valid_task"],
+                task_channels={"not_a_valid_task": ["phase"]},
             )
 
     def test_auto_detect_tasks(
@@ -154,9 +154,9 @@ class TestDatasetEvalConfig:
                 )
             },
             output_dir=tmp_path / "out",
-            tasks=None,
+            task_channels=None,
         )
-        assert config.tasks is None
+        assert config.task_channels is None
 
 
 # ---------------------------------------------------------------------------
@@ -194,8 +194,8 @@ class TestTrainClassifiers:
             train_classifiers(eval_config)
 
         model_dir = eval_config.output_dir / "test_model"
-        for task in eval_config.tasks:
-            for channel in eval_config.channels:
+        for task, channels in eval_config.task_channels.items():
+            for channel in channels:
                 pipeline_path = model_dir / f"{task}_{channel}_pipeline.joblib"
                 assert pipeline_path.exists(), f"Missing {pipeline_path.name}"
                 pipeline = joblib.load(pipeline_path)
@@ -223,7 +223,10 @@ class TestTrainClassifiers:
         assert "model" in df.columns
 
     def test_skips_missing_channel(self, eval_config):
-        eval_config.channels = ["phase", "organelle", "sensor"]
+        eval_config.task_channels = {
+            "infection_state": ["phase", "organelle", "sensor"],
+            "cell_division_state": ["phase", "organelle", "sensor"],
+        }
         with _mock_wandb():
             results = train_classifiers(eval_config)
 
@@ -234,11 +237,11 @@ class TestTrainClassifiers:
         assert "organelle" in trained_channels
 
     def test_skips_missing_task(self, eval_config):
-        eval_config.tasks = [
-            "infection_state",
-            "cell_division_state",
-            "cell_death_state",
-        ]
+        eval_config.task_channels = {
+            "infection_state": ["phase", "organelle"],
+            "cell_division_state": ["phase", "organelle"],
+            "cell_death_state": ["phase", "organelle"],
+        }
         with _mock_wandb():
             results = train_classifiers(eval_config)
 
@@ -310,8 +313,8 @@ class TestInferClassifiers:
             trained = train_classifiers(eval_config)
         infer_classifiers(eval_config, trained=trained)
 
-        for task in eval_config.tasks:
-            for channel in eval_config.channels:
+        for task, channels in eval_config.task_channels.items():
+            for channel in channels:
                 pred_path = (
                     eval_config.output_dir
                     / "test_model"
@@ -363,8 +366,8 @@ class TestEvaluatePredictions:
         predictions = infer_classifiers(eval_config, trained=trained)
         evaluate_predictions(eval_config, predictions=predictions)
 
-        for task in eval_config.tasks:
-            for channel in eval_config.channels:
+        for task, channels in eval_config.task_channels.items():
+            for channel in channels:
                 annotated_path = (
                     eval_config.output_dir
                     / "test_model"
