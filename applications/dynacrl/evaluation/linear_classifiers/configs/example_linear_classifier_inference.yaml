@@ -1,0 +1,28 @@
+# Example configuration for applying a trained linear classifier
+#
+# Usage:
+#   dynaclr apply-linear-classifier \
+#       -c evaluation/linear_classifiers/configs/example_linear_classifier_inference.yaml
+
+# W&B project name where the model artifact is stored
+wandb_project: DynaCLR-2D-linearclassifiers
+
+# Name of the model artifact in W&B
+# (e.g., linear-classifier-cell_death_state-phase)
+model_name: linear-classifier-cell_death_state-phase
+
+# Version of the model artifact
+# Use 'latest' for the most recent version, or specific version like 'v0', 'v1'
+version: latest
+
+# W&B entity (username or team, null for default)
+wandb_entity: null
+
+# Path to embeddings zarr file for inference
+embeddings_path: /path/to/embeddings.zarr
+
+# Path to save output zarr file with predictions
+output_path: /path/to/output_with_predictions.zarr
+
+# Whether to overwrite output if it already exists
+overwrite: false

@@ -1,0 +1,179 @@
+"""Configuration models for linear classifier training and inference."""
+
+from pathlib import Path
+from typing import Literal, Optional
+
+from pydantic import BaseModel, Field, field_validator, model_validator
+
+# Valid classification tasks
+VALID_TASKS = Literal[
+    "infection_state", "organelle_state", "cell_division_state", "cell_death_state"
+]
+
+# Valid input channels
+VALID_CHANNELS = Literal["phase", "sensor", "organelle"]
+
+
+class LinearClassifierTrainConfig(BaseModel):
+    """Configuration for linear classifier training.
+
+    Parameters
+    ----------
+    task : str
+        Classification task name (one of: infection_state, organelle_state,
+        cell_division_state, cell_death_state).
+    input_channel : str
+        Input channel name (one of: phase, sensor, organelle).
+    embedding_model : str
+        Name of the embedding model used.
+    train_datasets : list[dict]
+        List of training datasets with 'embeddings' and 'annotations' paths.
+        Each dict may optionally include 'include_wells', a list of well
+        prefixes (e.g. ["A/1", "B/2"]) to filter by fov_name.
+    use_scaling : bool
+        Whether to apply StandardScaler normalization.
+    use_pca : bool
+        Whether to apply PCA dimensionality reduction.
+    n_pca_components : Optional[int]
+        Number of PCA components (required if use_pca=True).
+    max_iter : int
+        Maximum number of iterations for solver.
+    class_weight : Optional[str]
+        Weighting strategy for classes ('balanced' or None).
+    solver : str
+        Algorithm to use for optimization.
+    split_train_data : float
+        Fraction of data to use for training (rest for validation).
+    random_seed : int
+        Random seed for reproducibility.
+    wandb_project : str
+        W&B project name.
+    wandb_entity : Optional[str]
+        W&B entity (username or team).
+    wandb_tags : list[str]
+        Tags to add to the run.
+    """
+
+    # Task metadata
+    task: VALID_TASKS = Field(...)
+    input_channel: VALID_CHANNELS = Field(...)
+    embedding_model: str = Field(..., min_length=1)
+
+    # Training datasets
+    train_datasets: list[dict] = Field(..., min_length=1)
+
+    # Preprocessing
+    use_scaling: bool = Field(default=True)
+    use_pca: bool = Field(default=False)
+    n_pca_components: Optional[int] = Field(default=None)
+
+    # Classifier parameters
+    max_iter: int = Field(default=1000, gt=0)
+    class_weight: Optional[Literal["balanced"]] = Field(default="balanced")
+    solver: str = Field(default="liblinear")
+
+    # Training parameters
+    split_train_data: float = Field(default=0.8, gt=0.0, lt=1.0)
+    random_seed: int = Field(default=42)
+
+    # W&B configuration
+    wandb_project: str = Field(..., min_length=1)
+    wandb_entity: Optional[str] = Field(default=None)
+    wandb_tags: list[str] = Field(default_factory=list)
+
+    @field_validator("embedding_model", "wandb_project")
+    @classmethod
+    def validate_non_empty_strings(cls, v: str) -> str:
+        """Ensure string fields are non-empty."""
+        if not v or not v.strip():
+            raise ValueError("Field cannot be empty")
+        return v
+
+    @model_validator(mode="after")
+    def validate_config(self):
+        """Validate PCA settings and dataset paths."""
+        # PCA validation
+        if self.use_pca and self.n_pca_components is None:
+            raise ValueError("n_pca_components must be specified when use_pca=True")
+        if self.use_pca and self.n_pca_components is not None:
+            if self.n_pca_components <= 0:
+                raise ValueError("n_pca_components must be positive")
+
+        # Dataset validation
+        for i, dataset in enumerate(self.train_datasets):
+            if not isinstance(dataset, dict):
+                raise ValueError(f"Dataset {i} must be a dict")
+            if "embeddings" not in dataset or "annotations" not in dataset:
+                raise ValueError(
+                    f"Dataset {i} must have 'embeddings' and 'annotations' keys"
+                )
+
+            embeddings_path = Path(dataset["embeddings"])
+            annotations_path = Path(dataset["annotations"])
+
+            if not embeddings_path.exists():
+                raise ValueError(
+                    f"Dataset {i}: Embeddings file not found: {dataset['embeddings']}"
+                )
+            if not annotations_path.exists():
+                raise ValueError(
+                    f"Dataset {i}: Annotations file not found: {dataset['annotations']}"
+                )
+
+        return self
+
+
+class LinearClassifierInferenceConfig(BaseModel):
+    """Configuration for linear classifier inference.
+
+    Parameters
+    ----------
+    wandb_project : str
+        W&B project name where model artifact is stored.
+    model_name : str
+        Name of the model artifact in W&B.
+    version : str
+        Version of the model artifact (e.g., 'latest', 'v0').
+    wandb_entity : Optional[str]
+        W&B entity (username or team).
+    embeddings_path : str
+        Path to embeddings zarr file for inference.
+    output_path : str
+        Path to save output zarr file with predictions.
+    overwrite : bool
+        Whether to overwrite output if it exists.
+    """
+
+    wandb_project: str = Field(..., min_length=1)
+    model_name: str = Field(..., min_length=1)
+    version: str = Field(default="latest", min_length=1)
+    wandb_entity: Optional[str] = Field(default=None)
+    embeddings_path: str = Field(..., min_length=1)
+    output_path: str = Field(..., min_length=1)
+    overwrite: bool = Field(default=False)
+
+    @field_validator(
+        "wandb_project", "model_name", "version", "embeddings_path", "output_path"
+    )
+    @classmethod
+    def validate_non_empty(cls, v: str) -> str:
+        """Ensure string fields are non-empty."""
+        if not v or not v.strip():
+            raise ValueError("Field cannot be empty")
+        return v
+
+    @model_validator(mode="after")
+    def validate_paths(self):
+        """Validate input exists and output doesn't exist unless overwrite=True."""
+        embeddings_path = Path(self.embeddings_path)
+        output_path = Path(self.output_path)
+
+        if not embeddings_path.exists():
+            raise ValueError(f"Embeddings file not found: {self.embeddings_path}")
+
+        if output_path.exists() and not self.overwrite:
+            raise ValueError(
+                f"Output file already exists: {self.output_path}. "
+                f"Set overwrite=true to overwrite."
+            )
+        return self

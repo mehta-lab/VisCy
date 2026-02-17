@@ -12,7 +12,36 @@ concurrency:
 
 jobs:
   test:
-    name: Test (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    name: Test (${{ matrix.package }}, Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+        package: [viscy-transforms, viscy-models]
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python ${{ matrix.python-version }}
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: ${{ matrix.os }}-${{ matrix.python-version }}
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/${{ matrix.package }}
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=src/ --cov-report=term-missing
+        working-directory: packages/${{ matrix.package }}
+
+  test-data:
+    name: Test Data (Python ${{ matrix.python-version }}, ${{ matrix.os }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -33,16 +62,39 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --frozen --all-extras --dev
-        working-directory: packages/viscy-transforms
+        working-directory: packages/viscy-data
 
       - name: Run tests with coverage
-        run: uv run --frozen pytest --cov=viscy_transforms --cov-report=term-missing
-        working-directory: packages/viscy-transforms
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
+        working-directory: packages/viscy-data
+
+  test-data-extras:
+    name: Test Data Extras (Python 3.13, ubuntu-latest)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Set up uv with Python 3.13
+        uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+          cache-suffix: ubuntu-latest-3.13
+
+      - name: Install dependencies
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/viscy-data
+
+      - name: Run tests with coverage
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing -m "not slow"
+        working-directory: packages/viscy-data
 
   check:
     name: All tests pass
     if: always()
-    needs: [test]
+    needs: [test, test-data, test-data-extras]
     runs-on: ubuntu-latest
     steps:
       - name: Verify all test jobs succeeded
