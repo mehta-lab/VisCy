@@ -41,9 +41,12 @@ dependencies = [
 ]
 
 optional-dependencies.eval = [
+  "anndata",
+  "natsort",
   "phate",
   "scikit-learn",
   "umap-learn",
+  "wandb",
 ]
 scripts.dynaclr = "dynacrl.cli:main"
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
