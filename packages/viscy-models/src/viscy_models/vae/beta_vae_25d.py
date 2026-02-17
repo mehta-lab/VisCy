@@ -132,8 +132,7 @@ class VaeEncoder(nn.Module):
             out_channels_encoder = num_channels[-1]
         else:
             raise ValueError(
-                f"Backbone {backbone} not supported. "
-                "Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'"
+                f"Backbone {backbone} not supported. Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'"
             )
 
         # Stem for 3d multichannel and to convert 3D to 2D
@@ -158,9 +157,7 @@ class VaeEncoder(nn.Module):
         final_spatial_size_h = stem_spatial_size_h // backbone_reduction
         final_spatial_size_w = stem_spatial_size_w // backbone_reduction
 
-        flattened_size = (
-            out_channels_encoder * final_spatial_size_h * final_spatial_size_w
-        )
+        flattened_size = out_channels_encoder * final_spatial_size_h * final_spatial_size_w
 
         self.fc = nn.Linear(flattened_size, latent_dim)
         self.fc_mu = nn.Linear(latent_dim, latent_dim)
@@ -225,12 +222,8 @@ class VaeDecoder(nn.Module):
         self.spatial_size = encoder_spatial_size
         self.spatial_channels = latent_dim // (self.spatial_size * self.spatial_size)
 
-        self.latent_reshape = nn.Linear(
-            latent_dim, self.spatial_channels * self.spatial_size * self.spatial_size
-        )
-        self.latent_proj = nn.Conv2d(
-            self.spatial_channels, decoder_channels[0], kernel_size=1
-        )
+        self.latent_reshape = nn.Linear(latent_dim, self.spatial_channels * self.spatial_size * self.spatial_size)
+        self.latent_proj = nn.Conv2d(self.spatial_channels, decoder_channels[0], kernel_size=1)
 
         # Build the decoder stages
         self.decoder_stages = nn.ModuleList()
@@ -263,14 +256,10 @@ class VaeDecoder(nn.Module):
         # Reshape 1D latent back to spatial format so we can reconstruct
         # the 2.5D image
         z_spatial = self.latent_reshape(z)  # [batch, spatial_channels * H * W]
-        z_spatial = z_spatial.view(
-            batch_size, self.spatial_channels, self.spatial_size, self.spatial_size
-        )
+        z_spatial = z_spatial.view(batch_size, self.spatial_channels, self.spatial_size, self.spatial_size)
 
         # Project spatial latent to first decoder channels using 1x1 conv
-        x = self.latent_proj(
-            z_spatial
-        )  # [batch, decoder_channels[0], spatial_H, spatial_W]
+        x = self.latent_proj(z_spatial)  # [batch, decoder_channels[0], spatial_H, spatial_W]
 
         for stage in self.decoder_stages:
             x = stage(x)
@@ -319,9 +308,7 @@ class BetaVae25D(nn.Module):
         decoder_channels = [base_channels]
         for i in range(decoder_stages - 1):
             decoder_channels.append(base_channels // (2 ** (i + 1)))
-        decoder_channels.append(
-            (out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio
-        )
+        decoder_channels.append((out_stack_depth + 2) * in_channels * 2**2 * head_expansion_ratio)
 
         strides = [2] * decoder_stages + [1]
 

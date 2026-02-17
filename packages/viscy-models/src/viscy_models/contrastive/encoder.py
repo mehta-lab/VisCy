@@ -99,9 +99,7 @@ class ContrastiveEncoder(nn.Module):
         # contained within the encoder.
         # Use encoder.num_features for uniform API across all timm backbones
         # (fixes bug where encoder.head.fc.in_features fails for resnet50).
-        projection = projection_mlp(
-            encoder.num_features, embedding_dim, projection_dim
-        )
+        projection = projection_mlp(encoder.num_features, embedding_dim, projection_dim)
         if "convnext" in backbone:
             encoder.head.fc = nn.Identity()
         elif "resnet" in backbone:

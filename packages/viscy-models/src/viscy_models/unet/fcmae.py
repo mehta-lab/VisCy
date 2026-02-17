@@ -1,15 +1,14 @@
-"""
-Fully Convolutional Masked Autoencoder as described in ConvNeXt V2
-based on the official JAX example in
+"""Fully Convolutional Masked Autoencoder as described in ConvNeXt V2.
+
+Based on the official JAX example in
 https://github.com/facebookresearch/ConvNeXt-V2/blob/main/TRAINING.md#implementing-fcmae-with-masked-convolution-in-jax
-and timm's dense implementation of the encoder in ``timm.models.convnext``
+and timm's dense implementation of the encoder in ``timm.models.convnext``.
 """
 
 import math
 from typing import Sequence
 
 import torch
-from monai.networks.blocks import UpSample
 from timm.models.convnext import (
     Downsample,
     DropPath,
@@ -38,14 +37,24 @@ def _init_weights(module: nn.Module) -> None:
         nn.init.zeros_(module.bias)
 
 
-def generate_mask(
-    target: Size, stride: int, mask_ratio: float, device: str
-) -> BoolTensor:
-    """
-    :param Size target: target shape
-    :param int stride: total stride
-    :param float mask_ratio: ratio of the pixels to mask
-    :return BoolTensor: boolean mask (B1HW)
+def generate_mask(target: Size, stride: int, mask_ratio: float, device: str) -> BoolTensor:
+    """Generate a random binary mask at low resolution.
+
+    Parameters
+    ----------
+    target : Size
+        Target shape.
+    stride : int
+        Total stride.
+    mask_ratio : float
+        Ratio of the pixels to mask.
+    device : str
+        Device to create the mask on.
+
+    Returns
+    -------
+    BoolTensor
+        Boolean mask (B1HW).
     """
     m_height = target[-2] // stride
     m_width = target[-1] // stride
@@ -56,28 +65,43 @@ def generate_mask(
 
 
 def upsample_mask(mask: BoolTensor, target: Size) -> BoolTensor:
-    """
-    :param BoolTensor mask: low-resolution boolean mask (B1HW)
-    :param Size target: target size (BCHW)
-    :return BoolTensor: upsampled boolean mask (B1HW)
+    """Upsample a low-resolution mask to match the target shape.
+
+    Parameters
+    ----------
+    mask : BoolTensor
+        Low-resolution boolean mask (B1HW).
+    target : Size
+        Target size (BCHW).
+
+    Returns
+    -------
+    BoolTensor
+        Upsampled boolean mask (B1HW).
     """
     if target[-2:] != mask.shape[-2:]:
         if not all(i % j == 0 for i, j in zip(target, mask.shape)):
-            raise ValueError(
-                f"feature map shape {target} must be divisible by "
-                f"mask shape {mask.shape}."
-            )
-        mask = mask.repeat_interleave(
-            target[-2] // mask.shape[-2], dim=-2
-        ).repeat_interleave(target[-1] // mask.shape[-1], dim=-1)
+            raise ValueError(f"feature map shape {target} must be divisible by mask shape {mask.shape}.")
+        mask = mask.repeat_interleave(target[-2] // mask.shape[-2], dim=-2).repeat_interleave(
+            target[-1] // mask.shape[-1], dim=-1
+        )
     return mask
 
 
 def masked_patchify(features: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-    """
-    :param Tensor features: input image features (BCHW)
-    :param BoolTensor unmasked: boolean foreground mask (B1HW)
-    :return Tensor: masked channel-last features (BLC, L = H * W * mask_ratio)
+    """Patchify features, keeping only unmasked positions.
+
+    Parameters
+    ----------
+    features : Tensor
+        Input image features (BCHW).
+    unmasked : BoolTensor | None, optional
+        Boolean foreground mask (B1HW).
+
+    Returns
+    -------
+    Tensor
+        Masked channel-last features (BLC, L = H * W * mask_ratio).
     """
     if unmasked is None:
         return features.flatten(2).permute(0, 2, 1)
@@ -89,14 +113,22 @@ def masked_patchify(features: Tensor, unmasked: BoolTensor | None = None) -> Ten
     return features
 
 
-def masked_unpatchify(
-    features: Tensor, out_shape: Size, unmasked: BoolTensor | None = None
-) -> Tensor:
-    """
-    :param Tensor features: dense channel-last features (BLC)
-    :param Size out_shape: output shape (BCHW)
-    :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
-    :return Tensor: masked features (BCHW)
+def masked_unpatchify(features: Tensor, out_shape: Size, unmasked: BoolTensor | None = None) -> Tensor:
+    """Unpatchify channel-last features back to spatial layout.
+
+    Parameters
+    ----------
+    features : Tensor
+        Dense channel-last features (BLC).
+    out_shape : Size
+        Output shape (BCHW).
+    unmasked : BoolTensor | None, optional
+        Boolean foreground mask, defaults to None.
+
+    Returns
+    -------
+    Tensor
+        Masked features (BCHW).
     """
     if unmasked is None:
         return features.permute(0, 2, 1).reshape(out_shape)
@@ -112,12 +144,20 @@ def masked_unpatchify(
 class MaskedConvNeXtV2Block(nn.Module):
     """Masked ConvNeXt V2 Block.
 
-    :param int in_channels: input channels
-    :param int | None out_channels: output channels, defaults to None
-    :param int kernel_size: depth-wise convolution kernel size, defaults to 7
-    :param int stride: downsample stride, defaults to 1
-    :param int mlp_ratio: MLP expansion ratio, defaults to 4
-    :param float drop_path: drop path rate, defaults to 0.0
+    Parameters
+    ----------
+    in_channels : int
+        Input channels.
+    out_channels : int | None, optional
+        Output channels, defaults to None.
+    kernel_size : int, optional
+        Depth-wise convolution kernel size, defaults to 7.
+    stride : int, optional
+        Downsample stride, defaults to 1.
+    mlp_ratio : int, optional
+        MLP expansion ratio, defaults to 4.
+    drop_path : float, optional
+        Drop path rate, defaults to 0.0.
     """
 
     def __init__(
@@ -152,10 +192,19 @@ class MaskedConvNeXtV2Block(nn.Module):
             self.shortcut = nn.Identity()
 
     def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-        """
-        :param Tensor x: input tensor (BCHW)
-        :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
-        :return Tensor: output tensor (BCHW)
+        """Forward pass through the masked block.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor (BCHW).
+        unmasked : BoolTensor | None, optional
+            Boolean foreground mask, defaults to None.
+
+        Returns
+        -------
+        Tensor
+            Output tensor (BCHW).
         """
         shortcut = self.shortcut(x)
         if unmasked is not None:
@@ -175,13 +224,20 @@ class MaskedConvNeXtV2Block(nn.Module):
 class MaskedConvNeXtV2Stage(nn.Module):
     """Masked ConvNeXt V2 Stage.
 
-    :param int in_channels: input channels
-    :param int out_channels: output channels
-    :param int kernel_size: depth-wise convolution kernel size, defaults to 7
-    :param int stride: downsampling factor of this stage, defaults to 2
-    :param int num_blocks: number of residual blocks, defaults to 2
-    :param Sequence[float] | None drop_path_rates: drop path rates of each block,
-        defaults to None
+    Parameters
+    ----------
+    in_channels : int
+        Input channels.
+    out_channels : int
+        Output channels.
+    kernel_size : int, optional
+        Depth-wise convolution kernel size, defaults to 7.
+    stride : int, optional
+        Downsampling factor of this stage, defaults to 2.
+    num_blocks : int, optional
+        Number of residual blocks, defaults to 2.
+    drop_path_rates : Sequence[float] | None, optional
+        Drop path rates of each block, defaults to None.
     """
 
     def __init__(
@@ -230,10 +286,19 @@ class MaskedConvNeXtV2Stage(nn.Module):
             in_channels = out_channels
 
     def forward(self, x: Tensor, unmasked: BoolTensor | None = None) -> Tensor:
-        """
-        :param Tensor x: input tensor (BCHW)
-        :param BoolTensor | None unmasked: boolean foreground mask, defaults to None
-        :return Tensor: output tensor (BCHW)
+        """Forward pass through the stage.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor (BCHW).
+        unmasked : BoolTensor | None, optional
+            Boolean foreground mask, defaults to None.
+
+        Returns
+        -------
+        Tensor
+            Output tensor (BCHW).
         """
         x = self.downsample(x)
         if unmasked is not None:
@@ -244,14 +309,20 @@ class MaskedConvNeXtV2Stage(nn.Module):
 
 
 class MaskedAdaptiveProjection(nn.Module):
-    """
-    Masked patchifying layer for projecting 2D or 3D input into 2D feature maps.
+    """Masked patchifying layer for projecting 2D or 3D input into 2D feature maps.
 
-    :param int in_channels: input channels
-    :param int out_channels: output channels
-    :param Sequence[int, int] | int kernel_size_2d: kernel width and height
-    :param int kernel_depth: kernel depth for 3D input
-    :param int in_stack_depth: input stack depth for 3D input
+    Parameters
+    ----------
+    in_channels : int
+        Input channels.
+    out_channels : int
+        Output channels.
+    kernel_size_2d : tuple[int, int] | int, optional
+        Kernel width and height, defaults to 4.
+    kernel_depth : int, optional
+        Kernel depth for 3D input, defaults to 5.
+    in_stack_depth : int, optional
+        Input stack depth for 3D input, defaults to 5.
     """
 
     def __init__(
@@ -282,10 +353,19 @@ class MaskedAdaptiveProjection(nn.Module):
         self.norm = nn.LayerNorm(out_channels)
 
     def forward(self, x: Tensor, unmasked: BoolTensor = None) -> Tensor:
-        """
-        :param Tensor x: input tensor (BCDHW)
-        :param BoolTensor unmasked: boolean foreground mask (B1HW), defaults to None
-        :return Tensor: output tensor (BCHW)
+        """Forward pass through the adaptive projection.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor (BCDHW).
+        unmasked : BoolTensor, optional
+            Boolean foreground mask (B1HW), defaults to None.
+
+        Returns
+        -------
+        Tensor
+            Output tensor (BCHW).
         """
         # no need to mask before convolutions since patches do not spill over
         if x.shape[2] > 1:
@@ -306,6 +386,8 @@ class MaskedAdaptiveProjection(nn.Module):
 
 
 class MaskedMultiscaleEncoder(nn.Module):
+    """Multiscale encoder with optional sparse masking for MAE pretraining."""
+
     def __init__(
         self,
         in_channels: int,
@@ -340,20 +422,24 @@ class MaskedMultiscaleEncoder(nn.Module):
         self.total_stride = stem_kernel_size[1] * 2 ** (len(self.stages) - 1)
         self.apply(_init_weights)
 
-    def forward(
-        self, x: Tensor, mask_ratio: float = 0.0
-    ) -> tuple[list[Tensor], BoolTensor | None]:
-        """
-        :param Tensor x: input tensor (BCDHW)
-        :param float mask_ratio: ratio of the feature maps to mask,
-            defaults to 0.0 (no masking)
-        :return list[Tensor]: output tensors (list of BCHW)
-        :return BoolTensor | None: boolean foreground mask, None if no masking
+    def forward(self, x: Tensor, mask_ratio: float = 0.0) -> tuple[list[Tensor], BoolTensor | None]:
+        """Forward pass through the multiscale encoder.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor (BCDHW).
+        mask_ratio : float, optional
+            Ratio of the feature maps to mask, defaults to 0.0 (no masking).
+
+        Returns
+        -------
+        tuple[list[Tensor], BoolTensor | None]
+            Output tensors (list of BCHW) and boolean foreground mask
+            (None if no masking).
         """
         if mask_ratio > 0.0:
-            mask = generate_mask(
-                x.shape, self.total_stride, mask_ratio, device=x.device
-            )
+            mask = generate_mask(x.shape, self.total_stride, mask_ratio, device=x.device)
             b, c, d, h, w = x.shape
             unmasked = ~mask
             mask = upsample_mask(mask, (b, 1, h, w))
@@ -368,6 +454,8 @@ class MaskedMultiscaleEncoder(nn.Module):
 
 
 class FullyConvolutionalMAE(nn.Module):
+    """Fully Convolutional Masked Autoencoder (FCMAE) for self-supervised pretraining."""
+
     def __init__(
         self,
         in_channels: int,
@@ -395,13 +483,9 @@ class FullyConvolutionalMAE(nn.Module):
         decoder_channels = list(dims)
         decoder_channels.reverse()
         if head_conv:
-            decoder_channels[-1] = (
-                (in_stack_depth + 2) * in_channels * 2**2 * head_conv_expansion_ratio
-            )
+            decoder_channels[-1] = (in_stack_depth + 2) * in_channels * 2**2 * head_conv_expansion_ratio
         else:
-            decoder_channels[-1] = (
-                out_channels * in_stack_depth * stem_kernel_size[-1] ** 2
-            )
+            decoder_channels[-1] = out_channels * in_stack_depth * stem_kernel_size[-1] ** 2
         self.decoder = UNeXt2Decoder(
             decoder_channels,
             norm_name="instance",
@@ -432,6 +516,20 @@ class FullyConvolutionalMAE(nn.Module):
         self.pretraining = pretraining
 
     def forward(self, x: Tensor, mask_ratio: float = 0.0) -> Tensor:
+        """Forward pass through the FCMAE.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor (BCDHW).
+        mask_ratio : float, optional
+            Ratio of the feature maps to mask, defaults to 0.0.
+
+        Returns
+        -------
+        Tensor
+            Reconstructed output tensor.
+        """
         x, mask = self.encoder(x, mask_ratio=mask_ratio)
         x.reverse()
         x = self.decoder(x)

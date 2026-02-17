@@ -75,17 +75,13 @@ def test_masked_convnextv2_stage():
 
 
 def test_adaptive_projection():
-    proj = MaskedAdaptiveProjection(
-        3, 12, kernel_size_2d=4, kernel_depth=5, in_stack_depth=5
-    )
+    proj = MaskedAdaptiveProjection(3, 12, kernel_size_2d=4, kernel_depth=5, in_stack_depth=5)
     assert proj(torch.rand(2, 3, 5, 8, 8)).shape == (2, 12, 2, 2)
     assert proj(torch.rand(2, 3, 1, 12, 16)).shape == (2, 12, 3, 4)
     mask = generate_mask((1, 3, 5, 8, 8), stride=4, mask_ratio=0.6, device="cpu")
     masked_out = proj(torch.rand(1, 3, 5, 16, 16), mask)
     assert masked_out.shape == (1, 12, 4, 4)
-    proj = MaskedAdaptiveProjection(
-        3, 12, kernel_size_2d=(2, 4), kernel_depth=5, in_stack_depth=15
-    )
+    proj = MaskedAdaptiveProjection(3, 12, kernel_size_2d=(2, 4), kernel_depth=5, in_stack_depth=15)
     assert proj(torch.rand(2, 3, 15, 6, 8)).shape == (2, 12, 3, 2)
 
 
@@ -125,9 +121,7 @@ def test_fcmae():
 
 def test_fcmae_head_conv():
     x = torch.rand(2, 3, 5, 128, 128)
-    model = FullyConvolutionalMAE(
-        3, 3, head_conv=True, head_conv_expansion_ratio=4, head_conv_pool=True
-    )
+    model = FullyConvolutionalMAE(3, 3, head_conv=True, head_conv_expansion_ratio=4, head_conv_pool=True)
     y, m = model(x)
     assert y.shape == x.shape
     assert m is None

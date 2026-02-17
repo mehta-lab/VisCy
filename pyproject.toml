@@ -58,16 +58,24 @@ line-length = 120
 indent-width = 4
 src = [ "packages/*/src" ]
 
-format.indent-style = "space"
-format.quote-style = "double"
-format.skip-magic-trailing-comma = false
-format.docstring-code-format = true
-lint.select = [ "D", "E", "F", "I", "NPY", "PD", "W" ]
-lint.per-file-ignores."**/*.ipynb" = [ "D" ]
-lint.per-file-ignores."**/__init__.py" = [ "D104", "F401" ]
-lint.per-file-ignores."**/docs/**" = [ "I" ]
-lint.per-file-ignores."**/tests/**" = [ "D" ]
-lint.pydocstyle.convention = "numpy"
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+docstring-code-format = true
+docstring-code-line-length = "dynamic"
+
+[tool.ruff.lint]
+select = [ "D", "E", "F", "I", "NPY", "PD", "W" ]
+
+[tool.ruff.lint.per-file-ignores]
+"**/*.ipynb" = [ "D" ]
+"**/__init__.py" = [ "D104", "F401" ]
+"**/docs/**" = [ "I" ]
+"**/tests/**" = [ "D" ]
+
+[tool.ruff.lint.pydocstyle]
+convention = "numpy"
 
 [tool.pytest]
 minversion = "9.0"
