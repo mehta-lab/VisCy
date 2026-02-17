@@ -88,7 +88,7 @@ jobs:
         working-directory: packages/viscy-data
 
       - name: Run tests with coverage
-        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing -m "not slow"
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
         working-directory: packages/viscy-data
 
   check:

@@ -22,6 +22,7 @@ def _build_hcs(
     max_value: int | float,
     sharded: bool = False,
     multiscales: bool = False,
+    num_timepoints: int = 2,
 ):
     dataset = open_ome_zarr(
         path,
@@ -37,9 +38,9 @@ def _build_hcs(
                 rng = np.random.default_rng()
                 pos.create_image(
                     "0",
-                    (rng.random((2, len(channel_names), *zyx_shape)) * max_value).astype(dtype),
+                    (rng.random((num_timepoints, len(channel_names), *zyx_shape)) * max_value).astype(dtype),
                     chunks=(1, 1, 1, *zyx_shape[1:]),
-                    shards_ratio=(2, len(channel_names), zyx_shape[0], 1, 1) if sharded else None,
+                    shards_ratio=(num_timepoints, len(channel_names), zyx_shape[0], 1, 1) if sharded else None,
                 )
                 if multiscales:
                     pos["1"] = pos["0"][::2, :, ::2, ::2, ::2]
@@ -102,6 +103,21 @@ def tracks_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
             }
         )
         fake_tracks.to_csv(dataset_path / fov_name / "tracks.csv", index=False)
+    return dataset_path
+
+
+@fixture(scope="function")
+def temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
+    """Provides a temporal HCS OME-Zarr dataset with multiple timepoints."""
+    dataset_path = tmp_path_factory.mktemp("temporal.zarr")
+    _build_hcs(
+        dataset_path,
+        channel_names[:2],
+        (10, 50, 50),
+        np.uint16,
+        65535,
+        num_timepoints=5,
+    )
     return dataset_path
 
 

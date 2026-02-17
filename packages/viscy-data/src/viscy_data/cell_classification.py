@@ -60,9 +60,7 @@ class ClassificationDataset(Dataset):
             Column name for the label, by default "infection_state"
         """
         if pd is None:
-            raise ImportError(
-                "pandas is required for ClassificationDataset. Install with: pip install 'viscy-data[triplet]'"
-            )
+            raise ImportError("pandas is required for ClassificationDataset. Install with: pip install pandas")
         self.plate = plate
         self.z_range = z_range
         self.initial_yx_patch_size = initial_yx_patch_size
@@ -200,6 +198,8 @@ class ClassificationDataModule(LightningDataModule):
 
     def setup(self, stage=None):
         """Set up datasets for the given stage."""
+        if pd is None:
+            raise ImportError("pandas is required for ClassificationDataModule. Install with: pip install pandas")
         plate = open_ome_zarr(self.image_path)
         annotation = pd.read_csv(self.annotation_path)
         all_fovs = [name for (name, _) in plate.positions()]

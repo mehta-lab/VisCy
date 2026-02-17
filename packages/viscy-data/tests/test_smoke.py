@@ -66,7 +66,7 @@ def test_all_count():
         ("viscy_data.livecell", "pip install 'viscy-data[livecell]'"),
         (
             "viscy_data.cell_classification",
-            "pip install 'viscy-data[triplet]'",
+            "pip install pandas",
         ),
     ],
     ids=["triplet", "mmap_cache", "livecell", "cell_classification"],

@@ -431,6 +431,10 @@ class TripletDataModule(HCSDataModule):
         tuple[list[Position], list[pd.DataFrame]]
             List of positions and list of tracks tables for each position
         """
+        if pd is None:
+            raise ImportError(
+                "pandas is required for TripletDataModule. Install with: pip install 'viscy-data[triplet]'"
+            )
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
