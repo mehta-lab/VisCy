@@ -36,17 +36,24 @@ class BetaVaeLogger:
         # Extract components
         x = batch["anchor"]
 
-        z = model_output["z"]
-        recon_x = model_output["recon_x"]
-        recon_loss = model_output["recon_loss"]
-        kl_loss = model_output["kl_loss"]
-        total_loss = model_output["total_loss"]
+        z = model_output.z
+        recon_x = model_output.recon_x
+        recon_loss = model_output.recon_loss
+        kl_loss = model_output.kl_loss
+        total_loss = model_output.total_loss
 
         # Get current β (scheduled value, not static)
         beta = getattr(
             lightning_module,
             "_get_current_beta",
             lambda: getattr(lightning_module, "beta", 1.0),
+        )()
+
+        # Get current temporal_weight (scheduled value, if available)
+        temporal_weight = getattr(
+            lightning_module,
+            "_get_current_temporal_weight",
+            lambda: 0.0,
         )()
 
         # Check for explosion and NaN/Inf
@@ -58,6 +65,7 @@ class BetaVaeLogger:
             f"loss/{stage}/reconstruction": recon_loss,
             f"loss/{stage}/kl": kl_loss,
             f"beta/{stage}": beta,
+            f"temporal_weight/{stage}": temporal_weight,
         }
 
         # Add diagnostic metrics

@@ -1,4 +1,5 @@
 import logging
+from types import SimpleNamespace
 from typing import Literal, Sequence, TypedDict
 
 import numpy as np
@@ -14,6 +15,7 @@ from viscy.representation.contrastive import ContrastiveEncoder
 from viscy.representation.vae import BetaVae25D, BetaVaeMonai
 from viscy.representation.vae_logging import BetaVaeLogger
 from viscy.utils.log_images import detach_sample, render_images
+from viscy.utils.scheduler import ParameterScheduler
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -21,6 +23,13 @@ _logger = logging.getLogger("lightning.pytorch")
 class ContrastivePrediction(TypedDict):
     features: Tensor
     projections: Tensor
+    index: TrackingIndex
+
+
+class VaePrediction(TypedDict):
+    mu: Tensor
+    logvar: Tensor
+    z: Tensor
     index: TrackingIndex
 
 
@@ -288,11 +297,16 @@ class BetaVaeModule(LightningModule):
     def __init__(
         self,
         vae: nn.Module | BetaVae25D | BetaVaeMonai,
-        loss_function: nn.Module | nn.MSELoss = nn.MSELoss(reduction="sum"),
+        reconstruction_loss_fn: nn.Module | nn.MSELoss = nn.MSELoss(reduction="mean"),
         beta: float = 1.0,
         beta_schedule: Literal["linear", "cosine", "warmup"] | None = None,
         beta_min: float = 0.1,
         beta_warmup_epochs: int = 50,
+        use_temporal_loss: bool = False,
+        temporal_weight: float = 0.05,
+        temporal_weight_schedule: Literal["linear", "cosine", "warmup"] | None = None,
+        temporal_weight_min: float = 0.0,
+        temporal_weight_warmup_epochs: int = 50,
         lr: float = 1e-5,
         lr_schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
@@ -304,12 +318,25 @@ class BetaVaeModule(LightningModule):
         super().__init__()
 
         self.model = vae
-        self.loss_function = loss_function
+        self.reconstruction_loss_fn = reconstruction_loss_fn
 
-        self.beta = beta
-        self.beta_schedule = beta_schedule
-        self.beta_min = beta_min
-        self.beta_warmup_epochs = beta_warmup_epochs
+        # Create parameter schedulers
+        self.beta_scheduler = ParameterScheduler(
+            param_name="beta",
+            initial_value=beta_min,
+            target_value=beta,
+            warmup_epochs=beta_warmup_epochs,
+            schedule_type=beta_schedule or "constant",
+        )
+
+        self.use_temporal_loss = use_temporal_loss
+        self.temporal_weight_scheduler = ParameterScheduler(
+            param_name="temporal_weight",
+            initial_value=temporal_weight_min,
+            target_value=temporal_weight,
+            warmup_epochs=temporal_weight_warmup_epochs,
+            schedule_type=temporal_weight_schedule or "constant",
+        )
 
         self.lr = lr
         self.lr_schedule = lr_schedule
@@ -326,8 +353,11 @@ class BetaVaeModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
-        self._min_beta = 1e-15
-        self._logvar_minmax = (-20, 20)
+        # Clamp logvar to (-10, 10) to prevent numerical instability
+        # This corresponds to variance range of approximately [4.5e-5, 2.2e4]
+        # More conservative than (-20, 20) but still allows reasonable uncertainty modeling
+        # Common practice in Beta-VAE implementations (e.g., Higgins et al., 2017)
+        self._logvar_minmax = (-10, 10)
 
         # Handle different parameter names for latent dimensions
         latent_dim = None
@@ -357,45 +387,26 @@ class BetaVaeModule(LightningModule):
 
     def _get_current_beta(self) -> float:
         """Get current beta value based on scheduling."""
-        if self.beta_schedule is None:
-            return max(self.beta, self._min_beta)
+        return self.beta_scheduler.get_value(self.current_epoch)
 
-        epoch = self.current_epoch
+    def _get_current_temporal_weight(self) -> float:
+        """Get current temporal weight value based on scheduling."""
+        return self.temporal_weight_scheduler.get_value(self.current_epoch)
 
-        if self.beta_schedule == "linear":
-            # Linear warmup from beta_min to beta
-            if epoch < self.beta_warmup_epochs:
-                beta_val = (
-                    self.beta_min
-                    + (self.beta - self.beta_min) * epoch / self.beta_warmup_epochs
-                )
-                return max(beta_val, self._min_beta)
-            else:
-                return max(self.beta, self._min_beta)
+    def forward(
+        self, x: Tensor, positive_sample: Tensor | None = None
+    ) -> SimpleNamespace:
+        """Forward pass through Beta-VAE.
 
-        elif self.beta_schedule == "cosine":
-            # Cosine warmup from beta_min to beta
-            if epoch < self.beta_warmup_epochs:
-                import math
+        NOTE: When positive_sample is provided, computes reconstruction and KL loss for both
+        anchor and positive images to ensure symmetric training similar to DynaMorph.
 
-                progress = epoch / self.beta_warmup_epochs
-                beta_val = self.beta_min + (self.beta - self.beta_min) * 0.5 * (
-                    1 + math.cos(math.pi * (1 - progress))
-                )
-                return max(beta_val, self._min_beta)
-            else:
-                return max(self.beta, self._min_beta)
-
-        elif self.beta_schedule == "warmup":
-            # Keep beta_min for warmup epochs, then jump to beta
-            beta_val = self.beta_min if epoch < self.beta_warmup_epochs else self.beta
-            return max(beta_val, self._min_beta)
-
-        else:
-            return max(self.beta, self._min_beta)
-
-    def forward(self, x: Tensor) -> dict:
-        """Forward pass through Beta-VAE."""
+        Returns
+        -------
+        SimpleNamespace
+            Namespace containing: recon_x, z, mu, logvar, recon_loss, kl_loss,
+            recon_loss_positive, kl_loss_positive, temporal_loss, total_loss
+        """
 
         original_shape = x.shape
         is_monai_2d = (
@@ -427,20 +438,18 @@ class BetaVaeModule(LightningModule):
             if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1)
             else x.unsqueeze(2)
         )
-        recon_loss = self.loss_function(recon_x, x_original)
-        if isinstance(self.loss_function, nn.MSELoss):
+        # Standard practice for microscopy: MSE with mean reduction automatically
+        # normalizes by number of elements, making loss scale-independent
+        recon_loss = self.reconstruction_loss_fn(recon_x, x_original)
+        # Handle sum reduction for backward compatibility
+        if isinstance(self.reconstruction_loss_fn, nn.MSELoss):
             if (
-                hasattr(self.loss_function, "reduction")
-                and self.loss_function.reduction == "sum"
+                hasattr(self.reconstruction_loss_fn, "reduction")
+                and self.reconstruction_loss_fn.reduction == "sum"
             ):
-                recon_loss = recon_loss / batch_size
-            elif (
-                hasattr(self.loss_function, "reduction")
-                and self.loss_function.reduction == "mean"
-            ):
-                # Correct the over-normalization by PyTorch's mean reduction by multiplying by the number of elements per image
+                # Normalize by batch size and number of elements per image
                 num_elements_per_image = x_original[0].numel()
-                recon_loss = recon_loss * num_elements_per_image
+                recon_loss = recon_loss / (batch_size * num_elements_per_image)
 
         kl_loss = -0.5 * torch.sum(
             1
@@ -451,47 +460,162 @@ class BetaVaeModule(LightningModule):
         )
         kl_loss = torch.mean(kl_loss)
 
-        total_loss = recon_loss + current_beta * kl_loss
+        temporal_loss = torch.tensor(0.0, device=x.device)
+        recon_loss_positive = torch.tensor(0.0, device=x.device)
+        kl_loss_positive = torch.tensor(0.0, device=x.device)
 
-        return {
-            "recon_x": recon_x,
-            "z": z,
-            "mu": mu,
-            "logvar": logvar,
-            "recon_loss": recon_loss,
-            "kl_loss": kl_loss,
-            "total_loss": total_loss,
-        }
+        if positive_sample is not None:
+            positive_original_shape = positive_sample.shape
+            positive_input = positive_sample
+            if (
+                is_monai_2d
+                and len(positive_original_shape) == 5
+                and positive_original_shape[2] == 1
+            ):
+                positive_input = positive_sample.squeeze(2)
+
+            # Forward pass for positive sample
+            positive_output = self.model(positive_input)
+            recon_x_positive = positive_output.recon_x
+            mu_positive = positive_output.mean
+            logvar_positive = positive_output.logvar
+
+            if (
+                is_monai_2d
+                and len(positive_original_shape) == 5
+                and positive_original_shape[2] == 1
+            ):
+                recon_x_positive = recon_x_positive.unsqueeze(2)
+
+            # Compute reconstruction loss for positive
+            positive_original = (
+                positive_input
+                if not (
+                    is_monai_2d
+                    and len(positive_original_shape) == 5
+                    and positive_original_shape[2] == 1
+                )
+                else positive_input.unsqueeze(2)
+            )
+            # Standard practice for microscopy: MSE with mean reduction automatically
+            # normalizes by number of elements, making loss scale-independent
+            recon_loss_positive = self.reconstruction_loss_fn(
+                recon_x_positive, positive_original
+            )
+            # Handle sum reduction for backward compatibility
+            if isinstance(self.reconstruction_loss_fn, nn.MSELoss):
+                if (
+                    hasattr(self.reconstruction_loss_fn, "reduction")
+                    and self.reconstruction_loss_fn.reduction == "sum"
+                ):
+                    # Normalize by batch size and number of elements per image
+                    num_elements_per_image = positive_original[0].numel()
+                    recon_loss_positive = recon_loss_positive / (
+                        batch_size * num_elements_per_image
+                    )
+
+            # Compute KL loss for positive
+            kl_loss_positive = -0.5 * torch.sum(
+                1
+                + torch.clamp(
+                    logvar_positive, self._logvar_minmax[0], self._logvar_minmax[1]
+                )
+                - mu_positive.pow(2)
+                - logvar_positive.exp(),
+                dim=1,
+            )
+            kl_loss_positive = torch.mean(kl_loss_positive)
+
+            # Temporal matching loss between anchor and positive latents
+            temporal_loss = F.mse_loss(mu, mu_positive, reduction="mean")
+
+            current_temporal_weight = self._get_current_temporal_weight()
+
+            # Total loss includes reconstruction and KL for both anchor and positive
+            total_loss = (
+                recon_loss
+                + recon_loss_positive
+                + current_beta * (kl_loss + kl_loss_positive)
+                + current_temporal_weight * temporal_loss
+            )
+        else:
+            total_loss = recon_loss + current_beta * kl_loss
+
+        return SimpleNamespace(
+            recon_x=recon_x,
+            z=z,
+            mu=mu,
+            logvar=logvar,
+            recon_loss=recon_loss,
+            kl_loss=kl_loss,
+            recon_loss_positive=recon_loss_positive,
+            kl_loss_positive=kl_loss_positive,
+            temporal_loss=temporal_loss,
+            total_loss=total_loss,
+        )
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Training step with VAE loss computation."""
 
         x = batch["anchor"]
-        model_output = self(x)
-        loss = model_output["total_loss"]
+        positive = batch.get("positive") if self.use_temporal_loss else None
+        model_output = self(x, positive_sample=positive)
+        loss = model_output.total_loss
 
-        # Log enhanced β-VAE metrics
+        # Log enhanced β-VAE metrics (includes beta and temporal_weight)
         self.vae_logger.log_enhanced_metrics(
             lightning_module=self, model_output=model_output, batch=batch, stage="train"
         )
+
+        # Log temporal loss and positive sample losses if active
+        if positive is not None:
+            self.log_dict(
+                {
+                    "loss/temporal_train": model_output.temporal_loss,
+                    "loss/recon_positive_train": model_output.recon_loss_positive,
+                    "loss/kl_positive_train": model_output.kl_loss_positive,
+                },
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+            )
+
         # Log samples
-        self._log_step_samples(batch_idx, x, model_output["recon_x"], "train")
+        self._log_step_samples(batch_idx, x, model_output.recon_x, "train")
 
         return loss
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
         """Validation step with VAE loss computation."""
         x = batch["anchor"]
-        model_output = self(x)
-        loss = model_output["total_loss"]
+        positive = batch.get("positive") if self.use_temporal_loss else None
+        model_output = self(x, positive_sample=positive)
+        loss = model_output.total_loss
 
         # Log enhanced β-VAE metrics
         self.vae_logger.log_enhanced_metrics(
             lightning_module=self, model_output=model_output, batch=batch, stage="val"
         )
 
+        # Log temporal loss and positive sample losses if active
+        if positive is not None:
+            self.log_dict(
+                {
+                    "loss/temporal_val": model_output.temporal_loss,
+                    "loss/recon_positive_val": model_output.recon_loss_positive,
+                    "loss/kl_positive_val": model_output.kl_loss_positive,
+                },
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                logger=True,
+                sync_dist=True,
+            )
+
         # Log samples
-        self._log_step_samples(batch_idx, x, model_output["recon_x"], "val")
+        self._log_step_samples(batch_idx, x, model_output.recon_x, "val")
 
         return loss
 
@@ -525,8 +649,8 @@ class BetaVaeModule(LightningModule):
             reconstructions = []
 
             for sample in samples_list:
-                orig = sample["original"][:, :, mid_z].numpy()
-                recon = sample["reconstruction"][:, :, mid_z].numpy()
+                orig = sample["original"][:, :, mid_z].float().numpy()
+                recon = sample["reconstruction"][:, :, mid_z].float().numpy()
 
                 originals.extend([orig[i] for i in range(orig.shape[0])])
                 reconstructions.extend([recon[i] for i in range(recon.shape[0])])
@@ -597,13 +721,20 @@ class BetaVaeModule(LightningModule):
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
-    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> dict:
-        """Prediction step for VAE inference."""
+    def predict_step(
+        self, batch: TripletSample, batch_idx, dataloader_idx=0
+    ) -> VaePrediction:
+        """Prediction step for VAE inference.
+
+        Returns mu, logvar, and z (sampled latent code).
+        Reconstructions can be generated later from z using the decoder.
+        """
         x = batch["anchor"]
         model_output = self(x)
 
         return {
-            "latent": model_output["z"],
-            "reconstruction": model_output["recon_x"],
+            "mu": model_output.mu,
+            "logvar": model_output.logvar,
+            "z": model_output.z,
             "index": batch["index"],
         }
