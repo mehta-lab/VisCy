@@ -4,158 +4,102 @@
 """
 
 # %%
+from anndata import read_zarr
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import seaborn as sns
-from compute_pca_features import compute_correlation_and_save_png, compute_features
-
-# %% for sensor features
-
-features_path = Path(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/trainng_logs/SEC61/rev6_NTXent_sensorPhase_infection/2chan_160patch_94ckpt_rev6_2.zarr"
-)
-data_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/registered_test.zarr"
-)
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_02_04_A549_DENV_ZIKV_timelapse/8-train-test-split/track_test.zarr"
-)
-
-source_channel = ["Phase3D", "RFP"]
-seg_channel = ["Nuclei_prediction_labels"]
-z_range = (28, 43)
-fov_list = ["/A/3", "/B/3", "/B/4"]
-
-features_sensor = compute_features(
-    features_path,
-    data_path,
-    tracks_path,
-    source_channel,
-    seg_channel,
-    z_range,
-    fov_list,
-)
-
-features_sensor.to_csv(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv",
-    index=False,
-)
-
-# features_sensor = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_allset_sensor.csv")
-
-# take a subset without the 768 features
-feature_columns = [f"feature_{i + 1}" for i in range(768)]
-features_subset_sensor = features_sensor.drop(columns=feature_columns)
-correlation_sensor = compute_correlation_and_save_png(
-    features_subset_sensor,
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_sensor_allset.svg",
-)
-
-# %% plot PCA vs set of computed features for sensor features
-
-set_features = [
-    "Fluor Radial Intensity Gradient",
-    "Phase Interquartile Range",
-    "Perimeter area ratio",
-    "Fluor Interquartile Range",
-    "Phase Entropy",
-    "Fluor Zernike Moment Mean",
-]
-
-plt.figure(figsize=(10, 8))
-sns.heatmap(
-    correlation_sensor.loc[set_features, "PCA1":"PCA6"],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-    annot_kws={"size": 24},
-    vmin=-1,
-    vmax=1,
-)
-plt.xlabel("Computed Features", fontsize=24)
-plt.ylabel("PCA Features", fontsize=24)
-plt.xticks(fontsize=24)  # Increase x-axis tick labels
-plt.yticks(fontsize=24)  # Increase y-axis tick labels
-
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_allset_sensor_6features.svg"
-)
-
-# plot the PCA1 vs PCA2 map for sensor features
-
-plt.figure(figsize=(10, 10))
-sns.scatterplot(
-    x="PCA1",
-    y="PCA2",
-    data=features_sensor,
-)
-
-
-#   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.   .-.-.
-#  / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \ / / \ \
-# '-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'-'   '-'
-
+import pandas as pd
+from compute_pca_features import compute_correlation_and_save_png
 
 # %% for organelle features
 
-features_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/4-phenotyping/predictions/Soorya/timeAware_2chan_ntxent_192patch_91ckpt_rev7_GT.zarr"
+def convert_to_dataframe(embeddings_dataset):
+    features_df = embeddings_dataset.obs
+    embedding_features = embeddings_dataset.X
+    embedding_features_df = pd.DataFrame(embedding_features, columns=[f"feature_{i+1}" for i in range(embedding_features.shape[1])], index=features_df.index)
+    features_df = pd.concat([features_df, embedding_features_df], axis=1)
+    return features_df
+
+def match_computed_features_to_embeddings(
+    embeddings_path: Path,
+    computed_features_path: Path,
+    wells: list,
+):
+    embeddings_dataset = read_zarr(embeddings_path)
+    computed_features = pd.read_csv(computed_features_path)
+    
+    # Extract well from fov_name with better handling
+    computed_features_split = computed_features["fov_name"].str.split("/")
+    computed_features["well"] = computed_features_split.str[1].fillna("") + "/" + computed_features_split.str[2].fillna("")
+    
+    features_df = convert_to_dataframe(embeddings_dataset)
+    
+    # Extract well from fov_name with better handling
+    features_split = features_df["fov_name"].str.split("/")
+    features_df["well"] = features_split.str[0].fillna("") + "/" + features_split.str[1].fillna("")
+    
+    features_df_filtered = features_df[features_df["well"].isin(wells)].copy()
+    computed_features_df = computed_features[computed_features["well"].isin(wells)].copy()
+    
+    # Prepare columns for merge - strip '/' from fov_name in both dataframes
+    computed_features_df["fov_name_clean"] = computed_features_df["fov_name"].str.strip('/')
+    features_df_filtered["fov_name_clean"] = features_df_filtered["fov_name"].astype(str).str.strip('/')
+    
+    # Rename columns to avoid conflicts during merge
+    # Rename 't' in features_df_filtered to 'time_point' to match computed_features
+    features_df_filtered = features_df_filtered.rename(columns={"t": "time_point"})
+    
+    # Ensure merge keys have compatible types - use float for track_id
+    computed_features_df["track_id"] = pd.to_numeric(computed_features_df["track_id"], errors='coerce')
+    features_df_filtered["track_id"] = pd.to_numeric(features_df_filtered["track_id"], errors='coerce')
+    computed_features_df["time_point"] = pd.to_numeric(computed_features_df["time_point"], errors='coerce')
+    features_df_filtered["time_point"] = pd.to_numeric(features_df_filtered["time_point"], errors='coerce')
+    
+    # This performs a vectorized join operation
+    merged_df = pd.merge(
+        computed_features_df,
+        features_df_filtered,
+        on=["fov_name_clean", "track_id", "time_point"],
+        how="inner",
+        suffixes=("_computed", "_embedding")
+    )
+    
+    # Drop the temporary fov_name_clean column
+    merged_df = merged_df.drop(columns=["fov_name_computed"])
+    
+    return merged_df
+
+embeddings_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/organelle_160patch_104ckpt_ver3max.zarr"
 )
-data_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/2-assemble/2024_11_07_A549_SEC61_ZIKV_DENV.zarr"
-)
-tracks_path = Path(
-    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2024_11_07_A549_SEC61_ZIKV_DENV/1-preprocess/label-free/4-track-gt/2024_11_07_A549_SEC61_ZIKV_DENV_2_cropped.zarr"
+computed_features_path = Path(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/G3BP1/feature_list_G3BP1_2025_07_22_160patch.csv"
 )
 
-source_channel = ["Phase3D", "raw GFP EX488 EM525-45"]
-seg_channel = ["nuclei_prediction_labels_labels"]
-z_range = (16, 21)
-normalizations = None
-fov_list = ["/B/2/000000", "/B/3/000000", "/C/2/000000"]
-
-features_organelle = compute_features(
-    features_path,
-    data_path,
-    tracks_path,
-    source_channel,
-    seg_channel,
-    z_range,
-    fov_list,
+wells = ["C/2"]
+computed_features_df = match_computed_features_to_embeddings(
+embeddings_path,
+computed_features_path,
+wells,
 )
 
 # Save the features dataframe to a CSV file
-features_organelle.to_csv(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell.csv",
+computed_features_df.to_csv(
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/G3BP1/features_organelle_wellC2_160patch.csv",
     index=False,
 )
 
+
+# %% compute the correlation between PCA and computed features and plot
+
+computed_features_df = pd.read_csv("/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/G3BP1/features_organelle_wellC2_160patch.csv")
 correlation_organelle = compute_correlation_and_save_png(
-    features_organelle,
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_organelle_multiwell.svg",
+    computed_features_df,
+    "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/4-phenotyping/predictions/quantify_remodeling/G3BP1/PC_vs_CF_organelle_wellC2_160patch.svg",
 )
 
 # features_organelle = pd.read_csv("/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/features_twoChan_organelle_multiwell_refinedPCA.csv")
 
-# %% plot PCA vs set of computed features for organelle features
-
-plt.figure(figsize=(10, 8))
-sns.heatmap(
-    correlation_organelle.loc[set_features, "PCA1":"PCA6"],
-    annot=True,
-    cmap="coolwarm",
-    fmt=".2f",
-    annot_kws={"size": 24},
-    vmin=-1,
-    vmax=1,
-)
-plt.xlabel("Computed Features", fontsize=24)
-plt.ylabel("PCA Features", fontsize=24)
-plt.xticks(fontsize=24)  # Increase x-axis tick labels
-plt.yticks(fontsize=24)  # Increase y-axis tick labels
-plt.savefig(
-    "/hpc/projects/comp.micro/infected_cell_imaging/Single_cell_phenotyping/ContrastiveLearning/Figure_panels/cell_division/PC_vs_CF_2chan_pca_setfeatures_organelle_6features.svg"
-)
 
 # %%
