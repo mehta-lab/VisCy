@@ -9,6 +9,7 @@ VisCy is a **uv workspace monorepo**. Sub-packages live under `packages/`:
 ```
 pyproject.toml              # Root config (ruff, pytest, uv workspace)
 packages/
+  viscy-data/               # Data loading and Lightning DataModules
   viscy-models/             # Neural network architectures
   viscy-transforms/         # Image transforms
 src/viscy/                  # Umbrella package (re-exports)
@@ -30,7 +31,7 @@ src/viscy/                  # Umbrella package (re-exports)
 
 ```sh
 uv run pytest                          # all tests
-uv run pytest packages/viscy-models/   # single package
+uv run pytest packages/viscy-data/     # single package
 ```
 
 ## Common Commands
