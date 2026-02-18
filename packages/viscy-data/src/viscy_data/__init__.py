@@ -20,7 +20,7 @@ Version:
 
 # Type definitions (from _typing.py)
 from viscy_data._typing import (
-    INDEX_COLUMNS,
+    ULTRACK_INDEX_COLUMNS,
     LABEL_CELL_CYCLE_STATE,
     LABEL_CELL_DIVISION_STATE,
     LABEL_CELL_REMODELING_STATE,
@@ -97,7 +97,7 @@ __all__ = [
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "INDEX_COLUMNS",
+    "ULTRACK_INDEX_COLUMNS",
     "LABEL_CELL_CYCLE_STATE",
     "LABEL_CELL_DIVISION_STATE",
     "LABEL_CELL_REMODELING_STATE",

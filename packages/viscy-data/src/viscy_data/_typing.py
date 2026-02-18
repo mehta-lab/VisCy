@@ -1,7 +1,7 @@
 """Type definitions for viscy-data.
 
 Copied verbatim from ``viscy/data/typing.py`` with the following additions:
-- ``INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
+- ``ULTRACK_INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
 - ``__all__`` for explicit public API
 - Updated ``typing_extensions.NotRequired`` to ``typing.NotRequired`` (Python >=3.11)
 """
@@ -16,7 +16,7 @@ __all__ = [
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "INDEX_COLUMNS",
+    "ULTRACK_INDEX_COLUMNS",
     "LABEL_CELL_CYCLE_STATE",
     "LABEL_CELL_DIVISION_STATE",
     "LABEL_CELL_REMODELING_STATE",
@@ -154,7 +154,7 @@ LABEL_CELL_REMODELING_STATE = {
 }
 
 # Extracted from viscy/data/triplet.py for shared access
-INDEX_COLUMNS = [
+ULTRACK_INDEX_COLUMNS = [
     "fov_name",
     "track_id",
     "t",

@@ -20,7 +20,7 @@ from monai.transforms import Compose
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy_data._typing import INDEX_COLUMNS, AnnotationColumns
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, AnnotationColumns
 from viscy_data._utils import _read_norm_meta
 
 
@@ -106,7 +106,7 @@ class ClassificationDataset(Dataset):
             img = self.transform(img)
         label = torch.tensor(row[self.label_column]).float()[None]
         if self.return_indices:
-            return img, label, row[INDEX_COLUMNS].to_dict()
+            return img, label, row[ULTRACK_INDEX_COLUMNS].to_dict()
         else:
             return img, label
 
