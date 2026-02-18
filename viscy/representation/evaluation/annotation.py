@@ -6,7 +6,7 @@ import pandas as pd
 import xarray as xr
 from natsort import natsorted
 
-from viscy.representation.embedding_writer import get_available_index_columns
+from viscy.data.triplet import INDEX_COLUMNS
 
 
 def convert(
@@ -56,7 +56,8 @@ def convert(
     if isinstance(embeddings_ds, Path):
         embeddings_ds = xr.open_zarr(embeddings_ds)
 
-    available_cols = get_available_index_columns(embeddings_ds)
+    # Get available index columns from the dataset
+    available_cols = [col for col in INDEX_COLUMNS if col in embeddings_ds.coords]
     tracking_df = pd.DataFrame(
         {
             col: (

@@ -1,0 +1,57 @@
+# Example YAML configuration for PHATE Track Viewer
+# Copy this file and modify paths/parameters for your data
+
+# List of datasets to load and visualize
+datasets:
+  - adata_path: /path/to/adata.zarr
+    data_path: /path/to/data.zarr
+
+    # Required: Channel names to load from images
+    channels:
+      - Phase3D
+
+    # Required: Z slice range (start, end)
+    z_range: [0, 1]
+
+    # Optional: Filter FOVs to load (list of patterns to match)
+    fov_filter:
+      - A/1
+      - A/2
+
+    # Optional: Annotation file and settings
+    annotation_csv: /path/to/annotations.csv
+    annotation_column: infection_status
+    categories:
+      0: uninfected
+      1: infected
+
+    # Optional: Unique identifier for this dataset
+    dataset_id: experiment_1
+
+  # Add more datasets with potentially different channels/z_range
+  # - adata_path: /path/to/adata2.zarr
+  #   data_path: /path/to/data2.zarr
+  #   channels:
+  #     - Phase3D
+  #     - Nuclei
+  #   z_range: [0, 5]
+  #   dataset_id: experiment_2
+
+# PHATE computation parameters
+# Set to null to use existing embeddings (single dataset only)
+# Set to {} to recompute with default parameters
+# Or specify custom parameters:
+phate_kwargs:
+  n_components: 2
+  knn: 5
+  decay: 40
+  scale_embeddings: false
+
+yx_patch_size: [160, 160]
+
+# Server configuration
+port: 8050
+debug: false
+
+# Default coloring mode: "annotation", "time", "track_id", or "dataset"
+default_color_mode: annotation
