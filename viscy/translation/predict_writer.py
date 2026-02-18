@@ -3,14 +3,14 @@ import os
 from pathlib import Path
 from typing import Literal, Optional, Sequence
 
-import numpy as np
 import torch
 from iohub.ngff import ImageArray, Plate, Position, TransformationMeta, open_ome_zarr
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
-from numpy.typing import DTypeLike, NDArray
+from numpy.typing import DTypeLike
 
 from viscy.data.hcs import HCSDataModule, Sample
+from viscy.translation.engine import _blend_in
 
 __all__ = ["HCSPredictionWriter"]
 _logger = logging.getLogger("lightning.pytorch")
@@ -40,44 +40,6 @@ def _resize_image(image: ImageArray, t_index: int, z_slice: slice) -> None:
                 *image.shape[-2:],
             )
         )
-
-
-def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray:
-    """
-    Blend a new stack of images into an old stack over a specified range of slices.
-
-    This function blends the `new_stack` of images into the `old_stack` over the range
-    specified by `z_slice`. The blending is done using a weighted average where the
-    weights are determined by the position within the range of slices. If the start
-    of `z_slice` is 0, the function returns the `new_stack` unchanged.
-
-    Parameters:
-    ----------
-    old_stack : NDArray
-        The original stack of images to be blended.
-    new_stack : NDArray
-        The new stack of images to blend into the original stack.
-    z_slice : slice
-        A slice object indicating the range of slices over which to perform the blending.
-        The start and stop attributes of the slice determine the range.
-
-    Returns:
-    -------
-    NDArray
-        The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
-    """
-
-    if z_slice.start == 0:
-        return new_stack
-    depth = z_slice.stop - z_slice.start
-    # relevant predictions to integrate
-    samples = min(z_slice.start + 1, depth)
-    factors = []
-    for i in reversed(list(range(depth))):
-        factors.append(min(i + 1, samples))
-    _logger.debug(f"Blending with factors {factors}.")
-    factors = np.array(factors)[np.newaxis :, np.newaxis, np.newaxis]
-    return old_stack * (factors - 1) / factors + new_stack / factors
 
 
 class HCSPredictionWriter(BasePredictionWriter):

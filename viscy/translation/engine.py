@@ -46,6 +46,56 @@ _UNET_ARCHITECTURE = {
 _logger = logging.getLogger("lightning.pytorch")
 
 
+def _blend_in(
+    old_stack: Union[torch.Tensor, np.ndarray],
+    new_stack: Union[torch.Tensor, np.ndarray],
+    z_slice: slice,
+) -> Union[torch.Tensor, np.ndarray]:
+    """
+    Blend a new stack of images into an old stack over a specified range of slices.
+
+    This function blends the `new_stack` of images into the `old_stack` over the range
+    specified by `z_slice`. The blending is done using a weighted average where the
+    weights are determined by the position within the range of slices. If the start
+    of `z_slice` is 0, the function returns the `new_stack` unchanged.
+
+    Parameters
+    ----------
+    old_stack : torch.Tensor or np.ndarray
+        The original stack of images with shape (C, Z, Y, X) or (B, C, Z, Y, X).
+    new_stack : torch.Tensor or np.ndarray
+        The new stack of images to blend into the original stack.
+    z_slice : slice
+        A slice object indicating the range of slices over which to perform the blending.
+        The start and stop attributes of the slice determine the range.
+
+    Returns
+    -------
+    torch.Tensor or np.ndarray
+        The blended stack of images. If `z_slice.start` is 0, returns `new_stack` unchanged.
+    """
+    if z_slice.start == 0:
+        return new_stack
+    depth = z_slice.stop - z_slice.start
+    samples = min(z_slice.start + 1, depth)
+    factors = []
+    for i in reversed(list(range(depth))):
+        factors.append(min(i + 1, samples))
+    _logger.debug(f"Blending with factors {factors}.")
+
+    is_torch = isinstance(old_stack, torch.Tensor)
+    if is_torch:
+        factors = torch.tensor(factors, dtype=old_stack.dtype, device=old_stack.device)
+        # Reshape for broadcasting: (B, C, Z, Y, X) -> factors shape (1, 1, Z, 1, 1)
+        factors = factors.view(1, 1, -1, 1, 1)
+    else:
+        factors = np.array(factors)
+        # Reshape for 4D (C, Z, Y, X) numpy arrays from HCSPredictionWriter
+        factors = factors[np.newaxis, :, np.newaxis, np.newaxis]
+
+    return old_stack * (factors - 1) / factors + new_stack / factors
+
+
 class MixedLoss(nn.Module):
     """Mixed reconstruction loss.
     Adapted from Zhao et al, https://arxiv.org/pdf/1511.08861.pdf
@@ -487,10 +537,12 @@ class AugmentedPredictionVSUNet(LightningModule):
     forward_transforms : list[Callable[[Tensor], Tensor]]
         A collection of transforms to apply to the input image before passing it to the model.
         Each one is applied independently.
+        If None, no forward transforms are applied, fallback to the identity transform.
         For example, resizing the input to match the expected voxel size of the model.
     inverse_transforms : list[Callable[[Tensor], Tensor]]
         Inverse transforms to apply to the model output before reduction.
         They should be the inverse of each forward transform.
+        If None, no inverse transforms are applied, fallback to the identity transform.
         For example, resizing the output to match the original input shape for storage.
     reduction : Literal["mean", "median"], optional
         The reduction method to apply to the predictions, by default "mean"
@@ -515,20 +567,68 @@ class AugmentedPredictionVSUNet(LightningModule):
     def __init__(
         self,
         model: nn.Module,
-        forward_transforms: list[Callable[[Tensor], Tensor]],
-        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        forward_transforms: list[Callable[[Tensor], Tensor]] | None = None,
+        inverse_transforms: list[Callable[[Tensor], Tensor]] | None = None,
         reduction: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
         down_factor = 2**model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
         self.model = model
-        self._forward_transforms = forward_transforms
-        self._inverse_transforms = inverse_transforms
+        self._forward_transforms = forward_transforms or [lambda x: x]
+        self._inverse_transforms = inverse_transforms or [lambda x: x]
         self._reduction = reduction
 
     def forward(self, x: Tensor) -> Tensor:
         return self.model(x)
+
+    def predict_sliding_windows(
+        self, x: torch.Tensor, out_channel: int = 2, step: int = 1
+    ) -> torch.Tensor:
+        """
+        Run inference on a 5D input tensor (B, C, Z, Y, X) using sliding windows
+        along the Z dimension with overlap and linear feathering blending.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Input tensor of shape (B, C, Z, Y, X).
+        out_channel : int, optional
+            Number of output channels, by default 2.
+        step : int, optional
+            Step size for sliding window along Z, by default 1.
+
+        Returns
+        -------
+        torch.Tensor
+            Output tensor of shape (B, out_channel, Z, Y, X).
+        """
+        if x.ndim != 5:
+            raise ValueError(
+                f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}"
+            )
+
+        batch_size, _, depth, height, width = x.shape
+        in_stack_depth = self.model.out_stack_depth
+
+        if in_stack_depth > depth:
+            raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
+
+        out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
+
+        # Iterate only over valid starting positions where full window fits
+        # This matches SlidingWindowDataset behavior: depth - in_stack_depth + 1 windows
+        for start in range(0, depth - in_stack_depth + 1, step):
+            end = start + in_stack_depth
+            slab = x[:, :, start:end]
+
+            pred = self._predict_with_tta(slab)
+
+            z_slice = slice(start, end)
+            old_stack = out_tensor[:, :, z_slice]
+            out_tensor[:, :, z_slice] = _blend_in(old_stack, pred, z_slice)
+
+        return out_tensor
 
     def setup(self, stage: str) -> None:
         if stage != "predict":
@@ -544,25 +644,39 @@ class AugmentedPredictionVSUNet(LightningModule):
             prediction = prediction.median(dim=0).values
         return prediction
 
+    def _predict_with_tta(self, source: torch.Tensor) -> torch.Tensor:
+        preds = []
+        for fwd_t, inv_t in zip(
+            self._forward_transforms,
+            self._inverse_transforms,
+        ):
+            src = fwd_t(source)
+            src = self._predict_pad(src)
+            y = self.forward(src)
+            y = self._predict_pad.inverse(y)
+            preds.append(inv_t(y))
+        return preds[0] if len(preds) == 1 else self._reduce_predictions(preds)
+
     def predict_step(
         self, batch: Sample, batch_idx: int, dataloader_idx: int = 0
-    ) -> Tensor:
+    ) -> torch.Tensor:
+        """
+        Parameters
+        ----------
+        batch : dict[str, Tensor]
+            A dictionary containing a "source" tensor of shape (B, C, Z, Y, X).
+        batch_idx : int
+            Index of the batch.
+        dataloader_idx : int
+            Index of the dataloader if multiple dataloaders are used.
+
+        Returns
+        -------
+        torch.Tensor
+            Prediction tensor of shape (B, out_channels, Z, Y, X).
+        """
         source = batch["source"]
-        preds = []
-        for forward_t, inverse_t in zip(
-            self._forward_transforms, self._inverse_transforms
-        ):
-            source = forward_t(source)
-            source = self._predict_pad(source)
-            pred = self.forward(source)
-            pred = self._predict_pad.inverse(pred)
-            pred = inverse_t(pred)
-            preds.append(pred)
-        if len(preds) == 1:
-            prediction = preds[0]
-        else:
-            prediction = self._reduce_predictions(preds)
-        return prediction
+        return self._predict_with_tta(source)
 
 
 class FcmaeUNet(VSUNet):
