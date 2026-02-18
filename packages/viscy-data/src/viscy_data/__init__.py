@@ -21,10 +21,6 @@ Version:
 # Type definitions (from _typing.py)
 from viscy_data._typing import (
     ULTRACK_INDEX_COLUMNS,
-    LABEL_CELL_CYCLE_STATE,
-    LABEL_CELL_DIVISION_STATE,
-    LABEL_CELL_REMODELING_STATE,
-    LABEL_INFECTION_STATE,
     AnnotationColumns,
     ChannelMap,
     ChannelNormStats,
@@ -98,10 +94,6 @@ __all__ = [
     "DictTransform",
     "HCSStackIndex",
     "ULTRACK_INDEX_COLUMNS",
-    "LABEL_CELL_CYCLE_STATE",
-    "LABEL_CELL_DIVISION_STATE",
-    "LABEL_CELL_REMODELING_STATE",
-    "LABEL_INFECTION_STATE",
     "LevelNormStats",
     "NormMeta",
     "OneOrSeq",

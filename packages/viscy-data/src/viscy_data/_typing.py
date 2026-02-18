@@ -17,10 +17,6 @@ __all__ = [
     "DictTransform",
     "HCSStackIndex",
     "ULTRACK_INDEX_COLUMNS",
-    "LABEL_CELL_CYCLE_STATE",
-    "LABEL_CELL_DIVISION_STATE",
-    "LABEL_CELL_REMODELING_STATE",
-    "LABEL_INFECTION_STATE",
     "LevelNormStats",
     "NormMeta",
     "OneOrSeq",
@@ -125,33 +121,6 @@ AnnotationColumns = Literal[
     "cell_cycle_state",
 ]
 
-
-# NOTE: The following labels are not mutable.
-# They are used to map the labels to the integer values.
-LABEL_INFECTION_STATE = {"uninfected": 0, "infected": 1, "unknown": -1}
-
-LABEL_CELL_DIVISION_STATE = {
-    "interphase": 0,
-    "mitosis": 1,
-    "unknown": -1,
-}
-
-LABEL_CELL_CYCLE_STATE = {
-    "G1": 0,
-    "S": 1,
-    "G2": 2,
-    "prophase": 3,
-    "metaphase": 4,
-    "anaphase": 5,
-    "telophase": 6,
-    "unknown": -1,
-}
-
-LABEL_CELL_REMODELING_STATE = {
-    "no_remodel": 0,
-    "remodeling": 1,
-    "unknown": -1,
-}
 
 # Extracted from viscy/data/triplet.py for shared access
 ULTRACK_INDEX_COLUMNS = [
