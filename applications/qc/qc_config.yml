@@ -1,0 +1,12 @@
+data_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr
+num_workers: 8  # num workers to fetch data
+metrics:
+  - class_path: viscy.preprocessing.focus.FocusSliceMetric
+    init_args:
+      NA_det: 1.35
+      lambda_ill: 0.450
+      pixel_size: 0.1494
+      channel_names:
+        - Phase3D
+        # - "raw GFP EX488 EM525-45"
+      device: cuda

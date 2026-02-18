@@ -9,6 +9,7 @@ from lightning.pytorch.utilities.compile import _maybe_unwrap_optimized
 from torch.onnx import OperatorExportTypes
 
 from viscy.preprocessing.precompute import precompute_array
+from viscy.preprocessing.qc_metrics import QCMetric, generate_qc_metadata
 from viscy.representation.evaluation.annotation import convert
 from viscy.utils.meta_utils import generate_normalization_metadata
 
@@ -128,6 +129,34 @@ class VisCyTrainer(Trainer):
             image_array_key=image_array_key,
             include_wells=include_wells,
             exclude_fovs=exclude_fovs,
+        )
+
+    def qc(
+        self,
+        data_path: Path,
+        metrics: list[QCMetric],
+        num_workers: int = 1,
+        model: LightningModule | None = None,
+    ):
+        """Run composable QC metrics on an HCS OME-Zarr dataset.
+
+        Parameters
+        ----------
+        data_path : Path
+            Path to the HCS OME-Zarr dataset.
+        metrics : list[QCMetric]
+            QC metric instances (uses jsonargparse class_path/init_args).
+        num_workers : int
+            Number of workers for data loading.
+        model : LightningModule or None
+            Ignored placeholder.
+        """
+        if model is not None:
+            _logger.warning("Ignoring model configuration during QC.")
+        generate_qc_metadata(
+            zarr_dir=data_path,
+            metrics=metrics,
+            num_workers=num_workers,
         )
 
     def convert_to_anndata(

@@ -84,6 +84,8 @@ def main(config: Path):
     click.echo(f"\n✓ Configuration loaded: {config}")
     click.echo(f"  Task: {train_config.task}")
     click.echo(f"  Input channel: {train_config.input_channel}")
+    if train_config.marker:
+        click.echo(f"  Marker: {train_config.marker}")
     click.echo(f"  Model: {train_config.embedding_model}")
     click.echo(f"  Datasets: {len(train_config.train_datasets)}")
 
