@@ -47,9 +47,7 @@ def _build_hcs(
 
 
 @fixture(scope="session", params=[False, True], ids=["zarr_v2", "zarr_v3"])
-def preprocessed_hcs_dataset(
-    tmp_path_factory: TempPathFactory, request: FixtureRequest
-) -> Path:
+def preprocessed_hcs_dataset(tmp_path_factory: TempPathFactory, request: FixtureRequest) -> Path:
     """Provides a preprocessed HCS OME-Zarr dataset (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("preprocessed.zarr")
     _build_hcs(
@@ -96,9 +94,7 @@ def labels_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
 
 
 @fixture(scope="function", params=[False, True], ids=["zarr_v2", "zarr_v3"])
-def tracks_hcs_dataset(
-    tmp_path_factory: TempPathFactory, request: FixtureRequest
-) -> Path:
+def tracks_hcs_dataset(tmp_path_factory: TempPathFactory, request: FixtureRequest) -> Path:
     """Provides a HCS OME-Zarr dataset with tracking CSV results (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("tracks.zarr")
     _build_hcs(
@@ -141,9 +137,7 @@ def temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
 
 
 @fixture(scope="function", params=[False, True], ids=["zarr_v2", "zarr_v3"])
-def tracks_with_gaps_dataset(
-    tmp_path_factory: TempPathFactory, request: FixtureRequest
-) -> Path:
+def tracks_with_gaps_dataset(tmp_path_factory: TempPathFactory, request: FixtureRequest) -> Path:
     """Provides a HCS OME-Zarr dataset with tracking results with gaps in time (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("tracks_gaps.zarr")
     _build_hcs(
