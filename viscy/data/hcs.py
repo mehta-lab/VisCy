@@ -2,13 +2,13 @@ import logging
 import math
 import os
 import re
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
-import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
@@ -424,20 +424,11 @@ class HCSDataModule(LightningDataModule):
         file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
         logger.info(f"Caching dataset at {self.cache_path}.")
-        tmp_store = zarr.NestedDirectoryStore(self.cache_path)
-        with open_ome_zarr(self.data_path, mode="r") as lazy_plate:
-            _, skipped, _ = zarr.copy(
-                lazy_plate.zgroup,
-                zarr.open(tmp_store, mode="a"),
-                name="/",
-                log=logger.debug,
-                if_exists="skip_initialized",
-                compressor=None,
-            )
-        if skipped > 0:
-            logger.warning(
-                f"Skipped {skipped} items when caching. Check debug log for details."
-            )
+        if self.cache_path.exists():
+            logger.info("Cache already exists, skipping copy.")
+            return
+        shutil.copytree(self.data_path, self.cache_path)
+        logger.info("Cached dataset.")
 
     @property
     def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:
