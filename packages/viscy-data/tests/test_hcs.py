@@ -1,3 +1,5 @@
+import shutil
+
 from iohub import open_ome_zarr
 from monai.transforms import RandSpatialCropSamplesd
 from pytest import mark
@@ -51,6 +53,41 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, multi_sample_augmentatio
             z_window_size,
             *yx_patch_size,
         )
+
+
+def test_datamodule_caching(preprocessed_hcs_dataset):
+    """Test that prepare_data caches the dataset to a local directory."""
+    data_path = preprocessed_hcs_dataset
+    with open_ome_zarr(data_path) as dataset:
+        channel_names = dataset.channel_names
+    dm = HCSDataModule(
+        data_path=data_path,
+        source_channel=channel_names[:2],
+        target_channel=channel_names[2:],
+        z_window_size=5,
+        batch_size=2,
+        num_workers=0,
+        caching=True,
+    )
+    cache_path = dm.cache_path
+    if cache_path.exists():
+        shutil.rmtree(cache_path)
+    try:
+        assert not cache_path.exists()
+        dm.prepare_data()
+        assert cache_path.exists()
+        with open_ome_zarr(cache_path) as cached:
+            assert len(list(cached.positions())) == len(list(open_ome_zarr(data_path).positions()))
+        # Second call should skip (cache exists)
+        dm.prepare_data()
+        # Setup should use cached path
+        dm.setup(stage="fit")
+        for batch in dm.train_dataloader():
+            assert batch["source"].shape[1] == 2
+            break
+    finally:
+        if cache_path.exists():
+            shutil.rmtree(cache_path)
 
 
 @mark.parametrize("z_window_size", [1, 5])

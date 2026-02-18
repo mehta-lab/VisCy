@@ -46,11 +46,21 @@ def _build_hcs(
                     pos["1"] = pos["0"][::2, :, ::2, ::2, ::2]
 
 
-@fixture(scope="session")
-def preprocessed_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
-    """Provides a preprocessed HCS OME-Zarr dataset."""
+@fixture(scope="session", params=[False, True], ids=["zarr_v2", "zarr_v3"])
+def preprocessed_hcs_dataset(
+    tmp_path_factory: TempPathFactory, request: FixtureRequest
+) -> Path:
+    """Provides a preprocessed HCS OME-Zarr dataset (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("preprocessed.zarr")
-    _build_hcs(dataset_path, channel_names, (12, 256, 256), np.float32, 1.0, multiscales=True)
+    _build_hcs(
+        dataset_path,
+        channel_names,
+        (12, 256, 256),
+        np.float32,
+        1.0,
+        sharded=request.param,
+        multiscales=True,
+    )
     # U[0, 1)
     expected = {"mean": 0.5, "std": 1 / np.sqrt(12), "median": 0.5, "iqr": 0.5}
     norm_meta = {channel: {"dataset_statistics": expected} for channel in channel_names}
@@ -85,11 +95,20 @@ def labels_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
-@fixture(scope="function")
-def tracks_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
-    """Provides a HCS OME-Zarr dataset with tracking CSV results."""
+@fixture(scope="function", params=[False, True], ids=["zarr_v2", "zarr_v3"])
+def tracks_hcs_dataset(
+    tmp_path_factory: TempPathFactory, request: FixtureRequest
+) -> Path:
+    """Provides a HCS OME-Zarr dataset with tracking CSV results (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("tracks.zarr")
-    _build_hcs(dataset_path, ["nuclei_labels"], (1, 256, 256), np.uint16, 3)
+    _build_hcs(
+        dataset_path,
+        ["nuclei_labels"],
+        (1, 256, 256),
+        np.uint16,
+        3,
+        sharded=request.param,
+    )
     for fov_name, _ in open_ome_zarr(dataset_path).positions():
         fake_tracks = pd.DataFrame(
             {
@@ -121,11 +140,20 @@ def temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
-@fixture(scope="function")
-def tracks_with_gaps_dataset(tmp_path_factory: TempPathFactory) -> Path:
-    """Provides a HCS OME-Zarr dataset with tracking results with gaps in time."""
+@fixture(scope="function", params=[False, True], ids=["zarr_v2", "zarr_v3"])
+def tracks_with_gaps_dataset(
+    tmp_path_factory: TempPathFactory, request: FixtureRequest
+) -> Path:
+    """Provides a HCS OME-Zarr dataset with tracking results with gaps in time (v2 and v3)."""
     dataset_path = tmp_path_factory.mktemp("tracks_gaps.zarr")
-    _build_hcs(dataset_path, ["nuclei_labels"], (1, 256, 256), np.uint16, 3)
+    _build_hcs(
+        dataset_path,
+        ["nuclei_labels"],
+        (1, 256, 256),
+        np.uint16,
+        3,
+        sharded=request.param,
+    )
 
     # Define different track patterns for different FOVs
     track_patterns = {
