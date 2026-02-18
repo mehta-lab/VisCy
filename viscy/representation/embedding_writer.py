@@ -207,11 +207,11 @@ class EmbeddingWriter(BasePredictionWriter):
     write_interval : Literal["batch", "epoch", "batch_and_epoch"], optional
         When to write the embeddings, by default 'epoch'.
     umap_kwargs : dict, optional
-        Keyword arguments passed to UMAP, by default None (i.e. UMAP is not computed).
+        Keyword arguments passed to UMAP, by default UMAP is not computed.
     phate_kwargs : dict, optional
-        Keyword arguments passed to PHATE, by default PHATE is computed with default parameters.
+        Keyword arguments passed to PHATE, by default PHATE is not computed.
     pca_kwargs : dict, optional
-        Keyword arguments passed to PCA, by default PCA is computed with default parameters.
+        Keyword arguments passed to PCA, by default PCA is not computed.
     """
 
     def __init__(
@@ -219,12 +219,8 @@ class EmbeddingWriter(BasePredictionWriter):
         output_path: Path,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "epoch",
         umap_kwargs: dict | None = None,
-        phate_kwargs: dict | None = {
-            "knn": 5,
-            "decay": 40,
-            "n_jobs": -1,
-        },
-        pca_kwargs: dict | None = {"n_components": 8},
+        phate_kwargs: dict | None = None,
+        pca_kwargs: dict | None = None,
         overwrite: bool = False,
     ):
         super().__init__(write_interval)
