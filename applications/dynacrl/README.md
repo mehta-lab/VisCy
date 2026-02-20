@@ -5,9 +5,8 @@ Self-supervised contrastive learning for cellular dynamics from time-lapse micro
 Part of the [VisCy](https://github.com/mehta-lab/VisCy) monorepo.
 
 > **DynaCLR: Dynamic Contrastive Learning of Representations for label-free assessment of live cells**
-> Eduardo Hirata-Miyasaki, Shao-Chun Hsu, Tazim Buksh, Talley Lambert, Madhura Bhave, Syuan-Ming Guo, Manu Prakash, Shalin B. Mehta
 >
-> [arXiv:2506.18420](https://arxiv.org/abs/2506.18420)
+> [arXiv:2410.11281](https://arxiv.org/abs/2410.11281)
 
 ## Installation
 
