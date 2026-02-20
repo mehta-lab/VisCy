@@ -200,7 +200,10 @@ Delivered:
   1. `uv run --package dynacrl pytest` discovers and runs a training integration test that exercises ContrastiveModule through a complete fast_dev_run training loop (fit) without errors
   2. The training test uses a YAML config (or equivalent parametrization) that references the new modular import paths (dynacrl.engine.ContrastiveModule, viscy_models, viscy_data, viscy_transforms) and these class paths resolve correctly
   3. The fast_dev_run completes all stages (train batch, validation batch) and the trainer reports no errors
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 18-01-PLAN.md — Training integration tests (fast_dev_run + YAML config class_path resolution)
 
 ### Phase 19: Inference Reproducibility
 **Goal**: User can load a pretrained checkpoint into the modular DynaCLR application, run prediction, and get embeddings that exactly match saved reference outputs
