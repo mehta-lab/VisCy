@@ -23,9 +23,7 @@ __all__ = [
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def get_available_index_columns(
-    dataset: Dataset, dataset_path: str | None = None
-) -> list[str]:
+def get_available_index_columns(dataset: Dataset, dataset_path: str | None = None) -> list[str]:
     """Get available index columns from a dataset.
 
     Parameters
@@ -107,13 +105,10 @@ def write_embedding_dataset(
     overwrite : bool, optional
         Whether to overwrite existing zarr store, by default False.
     """
-    from viscy_utils.evaluation.dimensionality_reduction import (
-        _fit_transform_umap,
-        compute_pca,
-        compute_phate,
-    )
-
     import anndata as ad
+
+    if hasattr(ad, "settings") and hasattr(ad.settings, "allow_write_nullable_strings"):
+        ad.settings.allow_write_nullable_strings = True
 
     output_path = Path(output_path)
 
@@ -129,6 +124,10 @@ def write_embedding_dataset(
         adata.obsm["X_projections"] = projections
 
     if umap_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import (
+            _fit_transform_umap,
+        )
+
         if umap_kwargs["n_neighbors"] >= n_samples:
             _logger.warning(
                 f"Reducing n_neighbors from {umap_kwargs['n_neighbors']} "
@@ -141,11 +140,12 @@ def write_embedding_dataset(
         adata.obsm["X_umap"] = UMAP
 
     if phate_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import compute_phate
+
         _logger.debug(f"Using PHATE kwargs: {phate_kwargs}")
         if phate_kwargs["knn"] >= n_samples:
             _logger.warning(
-                f"Reducing knn from {phate_kwargs['knn']} "
-                f"to {max(2, n_samples // 2)} due to small dataset size"
+                f"Reducing knn from {phate_kwargs['knn']} to {max(2, n_samples // 2)} due to small dataset size"
             )
             phate_kwargs["knn"] = max(2, n_samples // 2)
 
@@ -157,6 +157,8 @@ def write_embedding_dataset(
             _logger.warning(f"PHATE computation failed: {str(e)}")
 
     if pca_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import compute_pca
+
         _logger.debug(f"Using PCA kwargs: {pca_kwargs}")
         try:
             _logger.debug("Computing PCA")
