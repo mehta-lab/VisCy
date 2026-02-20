@@ -1,9 +1,8 @@
 """Smoke tests for DynaCLR engine modules."""
 
 import torch
+from dynaclr.engine import ContrastiveModule
 from torch import nn
-
-from dynacrl.engine import ContrastiveModule, ContrastivePrediction
 
 
 def test_contrastive_module_init():

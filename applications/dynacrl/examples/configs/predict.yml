@@ -23,7 +23,7 @@ trainer:
           n_components: 8
   inference_mode: true
 model:
-  class_path: dynacrl.engine.ContrastiveModule
+  class_path: dynaclr.engine.ContrastiveModule
   init_args:
     encoder:
       class_path: viscy_models.contrastive.ContrastiveEncoder

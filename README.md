@@ -24,7 +24,7 @@ VisCy is organized as a [uv workspace](https://docs.astral.sh/uv/concepts/worksp
 
 | Application | Description | Install |
 |-------------|-------------|---------|
-| [DynaCLR](./applications/dynacrl/) | Self-supervised contrastive learning for cellular dynamics | `uv pip install -e "applications/dynacrl"` |
+| [DynaCLR](./applications/dynaclr/) | Self-supervised contrastive learning for cellular dynamics | `uv pip install -e "applications/dynaclr"` |
 
 ## Installation
 

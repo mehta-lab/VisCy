@@ -72,7 +72,7 @@
   - Embedding visualization app (Plotly/Dash)
   - cli_utils with format_markdown_table() and load_config()
   - pyyaml added as dependency
-- `applications/dynacrl` — DynaCLR self-contained application
+- `applications/dynaclr` — DynaCLR self-contained application
   - ContrastiveModule engine (LightningModule for time-aware contrastive learning)
   - MultiModalContrastiveModule (cross-modal distillation)
   - ClassificationModule (downstream supervised classification)
@@ -86,7 +86,7 @@
   - `examples/DynaCLR-classical-sampling/` — pseudo-track generation from 2D segmentation
   - `examples/vcp_tutorials/` — quickstart notebook and script
   - Optional [eval] extras: anndata, natsort, wandb, scikit-learn, phate, umap-learn
-- All YAML configs updated with new class_path imports (dynacrl.engine, viscy_models, viscy_data, viscy_transforms)
+- All YAML configs updated with new class_path imports (dynaclr.engine, viscy_models, viscy_data, viscy_transforms)
 - All Python scripts updated with new import paths
 
 **Last phase:** 17

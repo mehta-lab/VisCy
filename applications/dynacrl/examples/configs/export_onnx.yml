@@ -11,7 +11,7 @@ trainer:
   precision: 32-true
   callbacks: []
 model:
-  class_path: dynacrl.engine.ContrastiveModule
+  class_path: dynaclr.engine.ContrastiveModule
   init_args:
     encoder:
       class_path: viscy_models.contrastive.ContrastiveEncoder

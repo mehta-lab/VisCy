@@ -21,9 +21,9 @@ tech-stack:
 
 key-files:
   created:
-    - applications/dynacrl/tests/test_training_integration.py
+    - applications/dynaclr/tests/test_training_integration.py
   modified:
-    - applications/dynacrl/pyproject.toml
+    - applications/dynaclr/pyproject.toml
     - pyproject.toml
     - uv.lock
 
@@ -59,7 +59,7 @@ completed: 2026-02-20
 ## Accomplishments
 - ContrastiveModule completes full Lightning training loop (training_step, validation_step, on_train_epoch_end with TensorBoard image logging, on_validation_epoch_end, configure_optimizers) via fast_dev_run
 - Both loss function code paths validated: TripletMarginLoss (anchor/positive/negative) and NTXentLoss (anchor/positive only, label-based)
-- All class_path strings in fit.yml and predict.yml verified to resolve to importable Python classes (dynacrl.engine, viscy_models, viscy_data, viscy_transforms, viscy_utils)
+- All class_path strings in fit.yml and predict.yml verified to resolve to importable Python classes (dynaclr.engine, viscy_models, viscy_data, viscy_transforms, viscy_utils)
 - Full test suite (6 tests) passes without regressions
 
 ## Task Commits
@@ -71,8 +71,8 @@ Each task was committed atomically:
 **Plan metadata:** (pending final commit)
 
 ## Files Created/Modified
-- `applications/dynacrl/tests/test_training_integration.py` - Training integration tests (4 tests: fast_dev_run with TripletMarginLoss, fast_dev_run with NTXentLoss, config class_path resolution for fit.yml and predict.yml)
-- `applications/dynacrl/pyproject.toml` - Added tensorboard to test dependencies
+- `applications/dynaclr/tests/test_training_integration.py` - Training integration tests (4 tests: fast_dev_run with TripletMarginLoss, fast_dev_run with NTXentLoss, config class_path resolution for fit.yml and predict.yml)
+- `applications/dynaclr/pyproject.toml` - Added tensorboard to test dependencies
 - `pyproject.toml` - Added workspace exclude for non-package application directories
 - `uv.lock` - Updated lock file with tensorboard dependency tree
 
@@ -91,30 +91,30 @@ Each task was committed atomically:
 - **Issue:** `applications/*` glob in `[tool.uv.workspace].members` matched `benchmarking`, `contrastive_phenotyping`, `qc` directories that have no pyproject.toml, causing `uv run` to fail
 - **Fix:** Added `exclude = ["applications/benchmarking", "applications/contrastive_phenotyping", "applications/qc"]` to workspace config
 - **Files modified:** pyproject.toml
-- **Verification:** `uv run --package dynacrl pytest` succeeds
+- **Verification:** `uv run --package dynaclr pytest` succeeds
 - **Committed in:** 5c34dc47 (Task 1 commit)
 
 **2. [Rule 1 - Bug] Fixed tensor shape for render_images compatibility**
 - **Found during:** Task 1 (test_contrastive_fast_dev_run failure)
 - **Issue:** Plan-specified shape (1,1,1,10) produces 1D arrays after detach_sample mid-depth slicing, which render_images cannot process (expects 2D images)
 - **Fix:** Changed to (1,1,4,4) producing proper 4x4 images after slicing, with FLAT_DIM=16 for SimpleEncoder
-- **Files modified:** applications/dynacrl/tests/test_training_integration.py
+- **Files modified:** applications/dynaclr/tests/test_training_integration.py
 - **Verification:** All 4 tests pass
 - **Committed in:** 5c34dc47 (Task 1 commit)
 
 **3. [Rule 3 - Blocking] Added tensorboard test dependency**
 - **Found during:** Task 1 (TensorBoardLogger ModuleNotFoundError)
 - **Issue:** TensorBoardLogger requires tensorboard or tensorboardX, neither installed in test dependencies
-- **Fix:** Added `tensorboard` to `[dependency-groups].test` in applications/dynacrl/pyproject.toml
-- **Files modified:** applications/dynacrl/pyproject.toml, uv.lock
+- **Fix:** Added `tensorboard` to `[dependency-groups].test` in applications/dynaclr/pyproject.toml
+- **Files modified:** applications/dynaclr/pyproject.toml, uv.lock
 - **Verification:** TensorBoardLogger initializes without error
 - **Committed in:** 5c34dc47 (Task 1 commit)
 
 **4. [Rule 1 - Bug] Fixed config path resolution in test_config_class_paths_resolve**
 - **Found during:** Task 1 (config path assertion failure)
-- **Issue:** Plan specified `parents[2]` which resolves to `applications/` instead of `applications/dynacrl/`
-- **Fix:** Changed to `parents[1]` to correctly reach `applications/dynacrl/examples/configs/`
-- **Files modified:** applications/dynacrl/tests/test_training_integration.py
+- **Issue:** Plan specified `parents[2]` which resolves to `applications/` instead of `applications/dynaclr/`
+- **Fix:** Changed to `parents[1]` to correctly reach `applications/dynaclr/examples/configs/`
+- **Files modified:** applications/dynaclr/tests/test_training_integration.py
 - **Verification:** Both config tests pass
 - **Committed in:** 5c34dc47 (Task 1 commit)
 
@@ -132,12 +132,12 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 - Training integration validated, ready for Phase 19 (inference/prediction validation)
-- All 6 dynacrl tests pass (2 smoke tests + 4 integration tests)
+- All 6 dynaclr tests pass (2 smoke tests + 4 integration tests)
 - Checkpoint loading tests (Phase 19) will need real checkpoint paths from user
 
 ## Self-Check: PASSED
 
-- FOUND: applications/dynacrl/tests/test_training_integration.py
+- FOUND: applications/dynaclr/tests/test_training_integration.py
 - FOUND: .planning/phases/18-training-validation/18-01-SUMMARY.md
 - FOUND: commit 5c34dc47
 

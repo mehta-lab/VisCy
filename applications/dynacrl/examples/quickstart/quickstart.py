@@ -120,7 +120,7 @@ from anndata import read_zarr  # noqa: E402
 from iohub import open_ome_zarr  # noqa: E402
 from torchview import draw_graph  # noqa: E402
 
-from dynacrl.engine import ContrastiveModule  # noqa: E402
+from dynaclr.engine import ContrastiveModule  # noqa: E402
 from viscy_data.triplet import TripletDataModule  # noqa: E402
 from viscy_models.contrastive import ContrastiveEncoder  # noqa: E402
 from viscy_transforms import (  # noqa: E402

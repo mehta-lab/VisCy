@@ -2,11 +2,11 @@
 
 ## What This Is
 
-Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. Four shared packages have been extracted: `viscy-transforms` (v1.0), `viscy-data` (v1.1), `viscy-models` (v1.2), and `viscy-utils` (v2.0). The first application, `applications/dynacrl`, composes these packages into a self-contained DynaCLR application.
+Restructuring VisCy from a monolithic package into a uv workspace monorepo. This enables reusing transforms, dataloaders, and models in downstream projects without requiring the entire VisCy package as a dependency. Four shared packages have been extracted: `viscy-transforms` (v1.0), `viscy-data` (v1.1), `viscy-models` (v1.2), and `viscy-utils` (v2.0). The first application, `applications/dynaclr`, composes these packages into a self-contained DynaCLR application.
 
 ## Core Value
 
-**Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, `pip install viscy-models`, or `pip install viscy-utils` and use clean imports without pulling in the entire VisCy ecosystem. Applications compose these packages into domain-specific tools (e.g., `pip install dynacrl`).
+**Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, `pip install viscy-models`, or `pip install viscy-utils` and use clean imports without pulling in the entire VisCy ecosystem. Applications compose these packages into domain-specific tools (e.g., `pip install dynaclr`).
 
 ## Current Milestone: v2.1 DynaCLR Integration Validation
 
@@ -43,10 +43,10 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 - State dict key compatibility preserved — v1.2
 - CI includes viscy-models in test matrix — v1.2
 - `viscy-utils` package extracted with shared ML infrastructure — v2.0
-- `applications/dynacrl` with ContrastiveModule, MultiModalContrastiveModule, ClassificationModule — v2.0
+- `applications/dynaclr` with ContrastiveModule, MultiModalContrastiveModule, ClassificationModule — v2.0
 - `dynaclr` CLI with `train-linear-classifier` and `apply-linear-classifier` commands — v2.0
 - Evaluation scripts for linear classifiers on cell embeddings — v2.0
-- Examples, tutorials, and training configs migrated to `applications/dynacrl/examples/` — v2.0
+- Examples, tutorials, and training configs migrated to `applications/dynaclr/examples/` — v2.0
 - `cli_utils.py` with `format_markdown_table()` and `load_config()` — v2.0
 
 ### Active
@@ -72,7 +72,7 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
   - `packages/viscy-data/` — 15 data modules, 45 exports, 4015 LOC source + 671 LOC tests
   - `packages/viscy-models/` — 8 architectures in unet/, vae/, contrastive/ with shared _components/
   - `packages/viscy-utils/` — shared ML infrastructure (trainer, callbacks, evaluation, cli_utils)
-  - `applications/dynacrl/` — DynaCLR application (engine, CLI, evaluation, examples)
+  - `applications/dynaclr/` — DynaCLR application (engine, CLI, evaluation, examples)
 - CI: test.yml (viscy-transforms 3x3, viscy-data 3x3 + extras 1x1, viscy-models 3x3) + lint.yml
 - Python >=3.11, hatchling + uv-dynamic-versioning
 - Original code on `main` branch for reference
@@ -110,7 +110,7 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 | Pure nn.Module in viscy-models | No Lightning/Hydra coupling; maximum reusability | Good |
 | Function-based grouping (unet/, vae/, contrastive/) | Clean organization for 8+ models with shared components | Good |
 | State dict key compatibility | Non-negotiable for checkpoint loading | Good |
-| Applications compose packages | dynacrl depends on viscy-data, viscy-models, viscy-transforms, viscy-utils | Good |
+| Applications compose packages | dynaclr depends on viscy-data, viscy-models, viscy-transforms, viscy-utils | Good |
 | LazyCommand CLI pattern | Defer heavy imports until invocation; graceful fallback on missing extras | Good |
 | Evaluation outside package src/ | Evaluation scripts are standalone; CLI wires them via sys.path | Good |
 

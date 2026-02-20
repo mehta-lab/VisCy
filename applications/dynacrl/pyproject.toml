@@ -3,7 +3,7 @@ build-backend = "hatchling.build"
 requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "dynacrl"
+name = "dynaclr"
 description = "DynaCLR: Self-supervised contrastive learning for cellular dynamics"
 readme = "README.md"
 keywords = [
@@ -51,7 +51,7 @@ optional-dependencies.eval = [
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
-scripts.dynaclr = "dynacrl.cli:main"
+scripts.dynaclr = "dynaclr.cli:main"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
@@ -68,10 +68,10 @@ test = [
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/dynacrl" ]
+packages = [ "src/dynaclr" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
-pattern-prefix = "dynacrl-"
+pattern-prefix = "dynaclr-"
 fallback-version = "0.0.0"

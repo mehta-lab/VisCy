@@ -19,10 +19,10 @@ tech-stack:
 
 key-files:
   created:
-    - applications/dynacrl/tests/conftest.py
-    - applications/dynacrl/tests/test_inference_reproducibility.py
+    - applications/dynaclr/tests/conftest.py
+    - applications/dynaclr/tests/test_inference_reproducibility.py
   modified:
-    - applications/dynacrl/pyproject.toml
+    - applications/dynaclr/pyproject.toml
     - packages/viscy-utils/src/viscy_utils/callbacks/embedding_writer.py
     - uv.lock
 
@@ -58,7 +58,7 @@ completed: 2026-02-20
 - Checkpoint epoch=104 loads into modular ContrastiveModule with zero missing/unexpected keys
 - Full predict pipeline writes 39170x768 features + 39170x32 projections to AnnData zarr
 - Predicted embeddings match reference with Pearson r=0.9996 (features) and r=0.99999 (projections)
-- All 8 dynacrl tests pass (6 existing + 2 new); HPC tests auto-skip without resources
+- All 8 dynaclr tests pass (6 existing + 2 new); HPC tests auto-skip without resources
 - Fixed EmbeddingWriter to use lazy imports (no more hard umap dependency for basic prediction)
 
 ## Task Commits
@@ -70,9 +70,9 @@ Each task was committed atomically:
 
 ## Files Created/Modified
 
-- `applications/dynacrl/tests/conftest.py` - HPC path constants, skip markers, pytest fixtures
-- `applications/dynacrl/tests/test_inference_reproducibility.py` - 2 integration tests (INFER-01, INFER-02+03)
-- `applications/dynacrl/pyproject.toml` - Added anndata to test dependency group
+- `applications/dynaclr/tests/conftest.py` - HPC path constants, skip markers, pytest fixtures
+- `applications/dynaclr/tests/test_inference_reproducibility.py` - 2 integration tests (INFER-01, INFER-02+03)
+- `applications/dynaclr/pyproject.toml` - Added anndata to test dependency group
 - `packages/viscy-utils/src/viscy_utils/callbacks/embedding_writer.py` - Lazy imports + nullable string fix
 - `uv.lock` - Updated lockfile
 
@@ -106,7 +106,7 @@ Each task was committed atomically:
 - **Found during:** Task 2 (inference test)
 - **Issue:** Plan specified atol=1e-5, rtol=1e-5 but GPU non-determinism produced max abs diff of 0.018
 - **Fix:** Used atol=0.02, rtol=1e-2 with additional Pearson r>0.999 correlation check
-- **Files modified:** applications/dynacrl/tests/test_inference_reproducibility.py
+- **Files modified:** applications/dynaclr/tests/test_inference_reproducibility.py
 - **Verification:** Tests pass consistently; correlation r=0.9996 confirms functional equivalence
 
 ---

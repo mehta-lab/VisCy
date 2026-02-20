@@ -38,10 +38,10 @@ Progress: [====================] 100% (19/19 phases complete)
 Key decisions carrying forward:
 
 - Clean break on imports: `from viscy_{pkg} import X` (no backward compatibility)
-- Applications compose packages: dynacrl depends on viscy-data, viscy-models, viscy-transforms, viscy-utils
+- Applications compose packages: dynaclr depends on viscy-data, viscy-models, viscy-transforms, viscy-utils
 - State dict key compatibility non-negotiable for checkpoint loading
-- YAML config class_path references: dynacrl.engine, viscy_models, viscy_data, viscy_transforms
-- Tests inside packages: `applications/dynacrl/tests/`, runnable via `uv run --package dynacrl pytest`
+- YAML config class_path references: dynaclr.engine, viscy_models, viscy_data, viscy_transforms
+- Tests inside packages: `applications/dynaclr/tests/`, runnable via `uv run --package dynaclr pytest`
 - TensorBoardLogger with tmp_path for integration tests instead of logger=False (exercises full logging pipeline)
 - Workspace exclude needed for non-package application directories (benchmarking, contrastive_phenotyping, qc)
 - Synthetic data shape (1,1,4,4) required for render_images compatibility in tests

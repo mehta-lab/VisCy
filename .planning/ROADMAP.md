@@ -154,7 +154,7 @@ Delivered:
 - [x] pyyaml added to viscy-utils dependencies
 
 ### Phase 16: DynaCLR Application Core
-**Goal**: Create applications/dynacrl with engine, CLI, and LightningModules
+**Goal**: Create applications/dynaclr with engine, CLI, and LightningModules
 **Depends on**: Phase 15
 **Plans**: Manual
 
@@ -179,7 +179,7 @@ Delivered:
 - [x] examples/DynaCLR-classical-sampling/ — pseudo-track generation
 - [x] examples/vcp_tutorials/ — quickstart notebook and script with updated imports
 - [x] CLI commands: train-linear-classifier, apply-linear-classifier
-- [x] wandb, anndata, natsort added to dynacrl [eval] optional dependencies
+- [x] wandb, anndata, natsort added to dynaclr [eval] optional dependencies
 
 </details>
 
@@ -197,8 +197,8 @@ Delivered:
 **Depends on**: Phase 17 (v2.0 DynaCLR application exists)
 **Requirements**: TRAIN-01, TRAIN-02
 **Success Criteria** (what must be TRUE):
-  1. `uv run --package dynacrl pytest` discovers and runs a training integration test that exercises ContrastiveModule through a complete fast_dev_run training loop (fit) without errors
-  2. The training test uses a YAML config (or equivalent parametrization) that references the new modular import paths (dynacrl.engine.ContrastiveModule, viscy_models, viscy_data, viscy_transforms) and these class paths resolve correctly
+  1. `uv run --package dynaclr pytest` discovers and runs a training integration test that exercises ContrastiveModule through a complete fast_dev_run training loop (fit) without errors
+  2. The training test uses a YAML config (or equivalent parametrization) that references the new modular import paths (dynaclr.engine.ContrastiveModule, viscy_models, viscy_data, viscy_transforms) and these class paths resolve correctly
   3. The fast_dev_run completes all stages (train batch, validation batch) and the trainer reports no errors
 **Plans**: 1 plan
 
@@ -213,8 +213,8 @@ Plans:
   1. A pretrained checkpoint (from the original monolithic VisCy) loads successfully into the modular ContrastiveModule without state dict key mismatches
   2. Running the predict step with EmbeddingWriter callback writes embedding outputs to disk
   3. The predicted embeddings are numerically identical (exact match) to saved reference embeddings produced by the original monolithic code
-  4. All training and inference integration tests are permanent pytest tests (not standalone scripts) living in `applications/dynacrl/tests/`
-  5. The full test suite passes when invoked via `uv run --package dynacrl pytest`
+  4. All training and inference integration tests are permanent pytest tests (not standalone scripts) living in `applications/dynaclr/tests/`
+  5. The full test suite passes when invoked via `uv run --package dynaclr pytest`
 **Plans**: 1 plan
 
 Plans:

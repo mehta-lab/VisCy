@@ -54,7 +54,7 @@ viscy-data = { workspace = true }
 viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
 viscy-utils = { workspace = true }
-dynacrl = { workspace = true }
+dynaclr = { workspace = true }
 
 [tool.ruff]
 target-version = "py311"

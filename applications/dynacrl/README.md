@@ -27,10 +27,10 @@ Part of the [VisCy](https://github.com/mehta-lab/VisCy) monorepo.
 
 ```bash
 # From the VisCy monorepo root
-uv pip install -e "applications/dynacrl"
+uv pip install -e "applications/dynaclr"
 
 # With evaluation extras (PHATE, UMAP, etc.)
-uv pip install -e "applications/dynacrl[eval]"
+uv pip install -e "applications/dynaclr[eval]"
 ```
 
 ## Usage
@@ -39,10 +39,10 @@ Training and prediction use the shared `viscy` CLI provided by `viscy-utils`:
 
 ```bash
 # Training
-uv run --package dynacrl viscy fit -c examples/configs/fit.yml
+uv run --package dynaclr viscy fit -c examples/configs/fit.yml
 
 # Prediction (embedding extraction)
-uv run --package dynacrl viscy predict -c examples/configs/predict.yml
+uv run --package dynaclr viscy predict -c examples/configs/predict.yml
 
 # On SLURM (see examples/configs/fit_slurm.sh and predict_slurm.sh)
 sbatch examples/configs/fit_slurm.sh
@@ -52,7 +52,7 @@ The YAML config determines which model and data module to use via `class_path`:
 
 ```yaml
 model:
-  class_path: dynacrl.engine.ContrastiveModule
+  class_path: dynaclr.engine.ContrastiveModule
 data:
   class_path: viscy_data.triplet.TripletDataModule
 ```
@@ -61,10 +61,10 @@ DynaCLR also provides evaluation-specific commands:
 
 ```bash
 # Train a linear classifier on cell embeddings
-uv run --package dynacrl dynaclr train-linear-classifier --help
+uv run --package dynaclr dynaclr train-linear-classifier --help
 
 # Apply a trained classifier to new embeddings
-uv run --package dynacrl dynaclr apply-linear-classifier --help
+uv run --package dynaclr dynaclr apply-linear-classifier --help
 ```
 
 ## Examples

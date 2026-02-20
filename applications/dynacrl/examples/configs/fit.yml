@@ -35,7 +35,7 @@ trainer:
   inference_mode: true
   use_distributed_sampler: true
 model:
-  class_path: dynacrl.engine.ContrastiveModule
+  class_path: dynaclr.engine.ContrastiveModule
   init_args:
     encoder:
       class_path: viscy_models.contrastive.ContrastiveEncoder

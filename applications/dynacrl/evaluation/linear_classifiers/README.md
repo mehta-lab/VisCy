@@ -19,7 +19,7 @@ This directory contains:
 Install DynaCLR with the eval extras:
 
 ```bash
-pip install -e "applications/dynacrl[eval]"
+pip install -e "applications/dynaclr[eval]"
 ```
 
 You also need a [Weights & Biases](https://wandb.ai) account for model storage and tracking. Log in before running:

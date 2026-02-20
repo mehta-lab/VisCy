@@ -117,7 +117,7 @@
 
 ### DynaCLR Application — Core
 
-- [x] **APP-01-PKG**: applications/dynacrl package at `applications/dynacrl/src/dynacrl/`
+- [x] **APP-01-PKG**: applications/dynaclr package at `applications/dynaclr/src/dynaclr/`
 - [x] **APP-01-ENG**: ContrastiveModule LightningModule in engine.py
 - [x] **APP-01-MM**: MultiModalContrastiveModule for cross-modal distillation
 - [x] **APP-01-CLS**: ClassificationModule for downstream classification
@@ -144,7 +144,7 @@
 
 ### DynaCLR Application — Dependencies
 
-- [x] **APP-01-DEP-01**: wandb, anndata, natsort in dynacrl [eval] optional dependencies
+- [x] **APP-01-DEP-01**: wandb, anndata, natsort in dynaclr [eval] optional dependencies
 - [x] **APP-01-DEP-02**: Workspace-level uv configuration updated
 
 ## v2.1 Requirements
@@ -165,7 +165,7 @@ Requirements for DynaCLR integration validation. Each maps to roadmap phases.
 ### Test Infrastructure
 
 - [ ] **TEST-01**: Training and inference checks are permanent pytest integration tests
-- [ ] **TEST-02**: Tests are runnable via `uv run --package dynacrl pytest`
+- [ ] **TEST-02**: Tests are runnable via `uv run --package dynaclr pytest`
 
 ## Future Requirements
 

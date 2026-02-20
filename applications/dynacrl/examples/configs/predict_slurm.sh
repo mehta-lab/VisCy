@@ -19,4 +19,4 @@ config=./predict.yml
 cat $config
 
 # Run the prediction CLI (viscy is provided by viscy-utils)
-uv run --project "$WORKSPACE_DIR" --package dynacrl viscy predict -c $config
+uv run --project "$WORKSPACE_DIR" --package dynaclr viscy predict -c $config

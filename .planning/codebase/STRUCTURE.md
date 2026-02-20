@@ -42,8 +42,8 @@ VisCy/
 │       ├── tests/
 │       └── pyproject.toml
 ├── applications/
-│   └── dynacrl/           # DynaCLR application
-│       ├── src/dynacrl/
+│   └── dynaclr/           # DynaCLR application
+│       ├── src/dynaclr/
 │       │   ├── engine.py          (ContrastiveModule, BetaVaeModule LightningModules)
 │       │   ├── multi_modal.py     (MultiModalContrastiveModule)
 │       │   ├── classification.py  (ClassificationModule)
@@ -143,15 +143,15 @@ VisCy/
 
 ### Applications
 
-**applications/dynacrl/:**
+**applications/dynaclr/:**
 - Purpose: DynaCLR application -- self-supervised contrastive learning for cellular dynamics
 - Contains: Lightning modules, CLI, evaluation pipelines, example configs
 - Key files:
-  - `src/dynacrl/engine.py`: ContrastiveModule, BetaVaeModule (LightningModule subclasses)
-  - `src/dynacrl/multi_modal.py`: MultiModalContrastiveModule (cross-modal distillation)
-  - `src/dynacrl/classification.py`: ClassificationModule (downstream task)
-  - `src/dynacrl/vae_logging.py`: VAE-specific logging utilities
-  - `src/dynacrl/cli.py`: `dynaclr` CLI with LazyCommand pattern for lazy-loading
+  - `src/dynaclr/engine.py`: ContrastiveModule, BetaVaeModule (LightningModule subclasses)
+  - `src/dynaclr/multi_modal.py`: MultiModalContrastiveModule (cross-modal distillation)
+  - `src/dynaclr/classification.py`: ClassificationModule (downstream task)
+  - `src/dynaclr/vae_logging.py`: VAE-specific logging utilities
+  - `src/dynaclr/cli.py`: `dynaclr` CLI with LazyCommand pattern for lazy-loading
   - `__init__.py`: Exports BetaVaeModule, ContrastiveModule, ContrastivePrediction
 - Sub-directories:
   - `configs/`: Application-level configuration (currently empty)
@@ -183,7 +183,7 @@ VisCy/
 - `packages/viscy-data/pyproject.toml`: viscy-data package config
 - `packages/viscy-models/pyproject.toml`: viscy-models package config
 - `packages/viscy-utils/pyproject.toml`: viscy-utils package config
-- `applications/dynacrl/pyproject.toml`: dynacrl application config
+- `applications/dynaclr/pyproject.toml`: dynaclr application config
 - `src/viscy/__init__.py`: Umbrella package version only
 
 **Public APIs (package __init__.py files):**
@@ -191,7 +191,7 @@ VisCy/
 - `packages/viscy-data/src/viscy_data/__init__.py`: 51 data exports
 - `packages/viscy-models/src/viscy_models/__init__.py`: 8 model exports
 - `packages/viscy-utils/src/viscy_utils/__init__.py`: 7 utility exports
-- `applications/dynacrl/src/dynacrl/__init__.py`: 3 Lightning module exports
+- `applications/dynaclr/src/dynaclr/__init__.py`: 3 Lightning module exports
 
 **Configuration:**
 - `pyproject.toml`: Build system, dependencies, dev groups, Ruff linting config
@@ -239,13 +239,13 @@ VisCy/
 - `packages/viscy-utils/src/viscy_utils/evaluation/metrics.py`: Evaluation metrics
 
 **DynaCLR Application:**
-- `applications/dynacrl/src/dynacrl/engine.py`: ContrastiveModule, BetaVaeModule
-- `applications/dynacrl/src/dynacrl/multi_modal.py`: MultiModalContrastiveModule
-- `applications/dynacrl/src/dynacrl/cli.py`: `dynaclr` CLI entry point
-- `applications/dynacrl/evaluation/linear_classifiers/train_linear_classifier.py`: Train linear classifiers
-- `applications/dynacrl/evaluation/linear_classifiers/apply_linear_classifier.py`: Apply classifiers
-- `applications/dynacrl/examples/configs/fit.yml`: Training configuration example
-- `applications/dynacrl/examples/configs/predict.yml`: Prediction configuration example
+- `applications/dynaclr/src/dynaclr/engine.py`: ContrastiveModule, BetaVaeModule
+- `applications/dynaclr/src/dynaclr/multi_modal.py`: MultiModalContrastiveModule
+- `applications/dynaclr/src/dynaclr/cli.py`: `dynaclr` CLI entry point
+- `applications/dynaclr/evaluation/linear_classifiers/train_linear_classifier.py`: Train linear classifiers
+- `applications/dynaclr/evaluation/linear_classifiers/apply_linear_classifier.py`: Apply classifiers
+- `applications/dynaclr/examples/configs/fit.yml`: Training configuration example
+- `applications/dynaclr/examples/configs/predict.yml`: Prediction configuration example
 
 **Type Definitions:**
 - `packages/viscy-transforms/src/viscy_transforms/_typing.py`: Transform-level TypedDicts
@@ -256,7 +256,7 @@ VisCy/
 - `packages/viscy-data/tests/`: 4 test files + conftest.py
 - `packages/viscy-models/tests/`: Test directories per family (test_unet/, test_vae/, test_contrastive/, test_components/) + state_dict_compat
 - `packages/viscy-utils/tests/`: 2 test files (test_normalize.py, test_mp_utils.py)
-- `applications/dynacrl/tests/`: test_engine.py
+- `applications/dynaclr/tests/`: test_engine.py
 
 **Documentation:**
 - `README.md`: Project overview, installation, links to Cytoland and DynaCLR
@@ -268,7 +268,7 @@ VisCy/
 **Files (monorepo-wide):**
 - Private implementation files: `_<name>.py` (leading underscore)
   - Example: `_crop.py`, `_flip.py`, `_typing.py`, `_utils.py`
-- Public modules (viscy-data, viscy-utils, dynacrl): `<name>.py` (no underscore)
+- Public modules (viscy-data, viscy-utils, dynaclr): `<name>.py` (no underscore)
   - Example: `hcs.py`, `triplet.py`, `engine.py`, `normalize.py`
 - Test files: `test_<name>.py` (one per module or feature group)
   - Example: `test_flip.py`, `test_hcs.py`, `test_engine.py`
@@ -277,8 +277,8 @@ VisCy/
 **Packages/Applications:**
 - Package directories: `viscy-<name>` (hyphen-separated)
 - Python package names: `viscy_<name>` (underscore-separated, PEP 8)
-- Application directories: `<app_name>` (e.g., `dynacrl`)
-- Application Python packages: match directory name (e.g., `dynacrl`)
+- Application directories: `<app_name>` (e.g., `dynaclr`)
+- Application Python packages: match directory name (e.g., `dynaclr`)
 
 **Functions/Classes:**
 - Transform classes: `PascalCase`, optionally with `d` suffix per MONAI convention
@@ -346,7 +346,7 @@ VisCy/
 
 **New Application:**
 1. Create directory: `applications/<app_name>/`
-2. Follow dynacrl structure: `src/<app_name>/`, `tests/`, `examples/`, `pyproject.toml`
+2. Follow dynaclr structure: `src/<app_name>/`, `tests/`, `examples/`, `pyproject.toml`
 3. Lightning modules go in `src/<app_name>/` (engine.py, etc.)
 4. Evaluation pipelines go in `evaluation/`
 5. Example configs and scripts go in `examples/`

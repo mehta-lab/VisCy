@@ -22,7 +22,7 @@ resolution-markers = [
 
 [manifest]
 members = [
-    "dynacrl",
+    "dynaclr",
     "viscy",
     "viscy-data",
     "viscy-models",
@@ -905,8 +905,8 @@ wheels = [
 ]
 
 [[package]]
-name = "dynacrl"
-source = { editable = "applications/dynacrl" }
+name = "dynaclr"
+source = { editable = "applications/dynaclr" }
 dependencies = [
     { name = "click" },
     { name = "pytorch-metric-learning" },

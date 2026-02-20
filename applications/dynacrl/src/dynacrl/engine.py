@@ -265,7 +265,7 @@ class BetaVaeModule(LightningModule):
         log_enhanced_visualizations_frequency: int = 30,
     ):
         super().__init__()
-        from dynacrl.vae_logging import BetaVaeLogger
+        from dynaclr.vae_logging import BetaVaeLogger
 
         self.model = vae
         self.loss_function = loss_function

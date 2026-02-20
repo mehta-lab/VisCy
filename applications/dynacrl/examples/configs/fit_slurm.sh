@@ -31,7 +31,7 @@ scontrol show job $SLURM_JOB_ID
 cat $config
 
 # Run the training CLI (viscy is provided by viscy-utils)
-uv run --project "$WORKSPACE_DIR" --package dynacrl viscy fit -c $config
+uv run --project "$WORKSPACE_DIR" --package dynaclr viscy fit -c $config
 
 # Tips:
 # 1. Run this script with `sbatch fit_slurm.sh`
