@@ -118,7 +118,7 @@ class ClassificationDataModule(LightningDataModule):
         self,
         image_path: Path,
         annotation_path: Path,
-        val_fovs: list[str] | None,
+        val_fovs: list[str],
         channel_name: str,
         z_range: tuple[int, int],
         train_exclude_timepoints: list[int],
@@ -137,7 +137,7 @@ class ClassificationDataModule(LightningDataModule):
             Path to the OME-Zarr image store
         annotation_path : Path
             Path to the annotation CSV file
-        val_fovs : list[str] | None
+        val_fovs : list[str]
             FOV names for validation
         channel_name : str
             Input channel name
@@ -178,11 +178,11 @@ class ClassificationDataModule(LightningDataModule):
         annotation: "pd.DataFrame",
         fov_names: list[str],
         transform: Callable | None,
-        exclude_timepoints: list[int] = [],
+        exclude_timepoints: list[int] | None = None,
         return_indices: bool = False,
     ) -> ClassificationDataset:
         """Create a classification dataset subset for specific FOVs."""
-        if exclude_timepoints:
+        if exclude_timepoints is not None and len(exclude_timepoints) > 0:
             filter_timepoints = annotation["t"].isin(exclude_timepoints)
             annotation = annotation[~filter_timepoints]
         return ClassificationDataset(
@@ -242,7 +242,7 @@ class ClassificationDataModule(LightningDataModule):
         elif stage == "test":
             raise NotImplementedError("Test stage not implemented.")
         else:
-            raise (f"Unknown stage: {stage}")
+            raise ValueError(f"Unknown stage: {stage}")
 
     def train_dataloader(self):
         """Return training data loader."""
