@@ -8,18 +8,14 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 **Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, `pip install viscy-models`, or `pip install viscy-utils` and use clean imports without pulling in the entire VisCy ecosystem. Applications compose these packages into domain-specific tools (e.g., `pip install dynacrl`).
 
-## Current Milestone: v2.0 Applications & Shared Infrastructure (In Progress)
+## Current Milestone: v2.1 DynaCLR Integration Validation
 
-**Goal:** Extract shared ML infrastructure (`viscy-utils`) and application-level LightningModules into independent packages, composing the extracted model and data subpackages.
+**Goal:** Prove the modularized DynaCLR application produces identical results to the original monolithic VisCy, with permanent integration tests.
 
-**Shipped (v2.0):**
-- `viscy-utils` package — shared training infrastructure (trainer, callbacks, evaluation, cli_utils)
-- `applications/dynacrl` — DynaCLR application with ContrastiveModule, CLI, evaluation, examples
-
-**Remaining (v2.0+):**
-- `applications/Cytoland` with VSUNet/FcmaeUNet LightningModules
-- `viscy-airtable` package abstracted from current Airtable integration
-- Hydra configuration infrastructure (viscy-hydra or integrated)
+**Target features:**
+- Full training loop (fast_dev_run) with modular DynaCLR
+- Inference reproducibility: checkpoint loading produces exact match against reference outputs
+- Permanent pytest integration tests for training and inference
 
 ## Requirements
 
@@ -46,15 +42,18 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 - Import path: `from viscy_models import UNeXt2` (clean break) — v1.2
 - State dict key compatibility preserved — v1.2
 - CI includes viscy-models in test matrix — v1.2
-
-### Active
-
 - `viscy-utils` package extracted with shared ML infrastructure — v2.0
 - `applications/dynacrl` with ContrastiveModule, MultiModalContrastiveModule, ClassificationModule — v2.0
 - `dynaclr` CLI with `train-linear-classifier` and `apply-linear-classifier` commands — v2.0
 - Evaluation scripts for linear classifiers on cell embeddings — v2.0
 - Examples, tutorials, and training configs migrated to `applications/dynacrl/examples/` — v2.0
 - `cli_utils.py` with `format_markdown_table()` and `load_config()` — v2.0
+
+### Active
+
+- DynaCLR training integration test (fast_dev_run) — v2.1
+- DynaCLR inference reproducibility test (exact match against reference) — v2.1
+- Permanent pytest integration test suite for DynaCLR — v2.1
 
 ### Out of Scope
 
@@ -116,4 +115,4 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 | Evaluation outside package src/ | Evaluation scripts are standalone; CLI wires them via sys.path | Good |
 
 ---
-*Last updated: 2026-02-17 after v2.0 DynaCLR application migration*
+*Last updated: 2026-02-19 after starting milestone v2.1 DynaCLR Integration Validation*

@@ -2,18 +2,17 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-17)
+See: .planning/PROJECT.md (updated 2026-02-19)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** v2.0 DynaCLR application shipped; remaining v2.0+ candidates (Cytoland, Airtable) not yet started
+**Current focus:** v2.1 DynaCLR Integration Validation
 
 ## Current Position
 
-Phase: 17 of 17 (all shipped through v2.0 DynaCLR)
-Status: v1.0, v1.1, v1.2 milestones complete. v2.0 DynaCLR shipped.
-Last activity: 2026-02-17 — Migrated examples/ and evaluation/ into applications/dynacrl/
-
-Progress: [==================] 100% (all milestones through v2.0 DynaCLR complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-19 — Milestone v2.1 started
 
 ## Performance Metrics
 
@@ -71,18 +70,21 @@ None currently.
 
 ## Next Steps
 
-v2.0+ candidates (not yet planned):
+Milestone v2.1: Define requirements → create roadmap → execute phases.
+
+Future candidates (after v2.1):
 - **APP-02**: applications/Cytoland — VSUNet/FcmaeUNet LightningModules
 - **APP-03**: viscy-airtable — abstract from current Airtable integration
 - **HYDRA-***: Hydra infrastructure (BaseModel, ConfigStore, registry)
 
 ## Session Continuity
 
-Last session: 2026-02-17
-Stopped at: Migrated examples/ and evaluation/ into applications/dynacrl/, updated planning docs
+Last session: 2026-02-19
+Stopped at: Starting milestone v2.1 DynaCLR Integration Validation
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
 *Updated for v2.0 DynaCLR: 2026-02-17*
+*Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
