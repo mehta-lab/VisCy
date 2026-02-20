@@ -187,7 +187,7 @@ Delivered:
 
 **Milestone Goal:** Prove the modularized DynaCLR application produces identical results to the original monolithic VisCy, with permanent integration tests.
 
-- [ ] **Phase 18: Training Validation** - ContrastiveModule completes a full training loop via fast_dev_run with correct YAML config parsing
+- [x] **Phase 18: Training Validation** - ContrastiveModule completes a full training loop via fast_dev_run with correct YAML config parsing (completed 2026-02-20)
 - [ ] **Phase 19: Inference Reproducibility** - Checkpoint loading and prediction produce exact match against reference outputs, with permanent test suite
 
 ## Phase Details
@@ -248,7 +248,7 @@ Phases execute in numeric order: 18 -> 19
 | 15. Shared Infrastructure | v2.0 | manual | Complete | 2026-02-17 |
 | 16. DynaCLR App Core | v2.0 | manual | Complete | 2026-02-17 |
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
-| 18. Training Validation | v2.1 | 0/TBD | Not started | - |
+| 18. Training Validation | v2.1 | Complete    | 2026-02-20 | - |
 | 19. Inference Reproducibility | v2.1 | 0/TBD | Not started | - |
 
 **Total plans executed:** 25 (v1.0: 7, v1.1: 9, v1.2: 9) + 3 manual phases (v2.0)
