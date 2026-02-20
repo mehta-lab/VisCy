@@ -253,20 +253,20 @@ Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRAIN-01 | — | Pending |
-| TRAIN-02 | — | Pending |
-| INFER-01 | — | Pending |
-| INFER-02 | — | Pending |
-| INFER-03 | — | Pending |
-| TEST-01 | — | Pending |
-| TEST-02 | — | Pending |
+| TRAIN-01 | Phase 18 | Pending |
+| TRAIN-02 | Phase 18 | Pending |
+| INFER-01 | Phase 19 | Pending |
+| INFER-02 | Phase 19 | Pending |
+| INFER-03 | Phase 19 | Pending |
+| TEST-01 | Phase 19 | Pending |
+| TEST-02 | Phase 19 | Pending |
 
 **Coverage:**
 - v1.0: 18 requirements, 18 complete
 - v1.1: 12 requirements, 12 complete
 - v1.2: 24 requirements, 24 complete
 - v2.0: 22 requirements, 22 complete
-- v2.1: 7 requirements, 0 complete
+- v2.1: 7 requirements, 0 complete (7 mapped to phases)
 - **Total: 83 requirements (76 shipped, 7 pending)**
 
 ---

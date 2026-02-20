@@ -6,6 +6,7 @@
 - Shipped **v1.1 Extract viscy-data** — Phases 6-9 (shipped 2026-02-14)
 - Shipped **v1.2 Extract viscy-models** — Phases 10-14 (shipped 2026-02-13)
 - Shipped **v2.0 DynaCLR Application** — Phases 15-17 (shipped 2026-02-17)
+- In Progress **v2.1 DynaCLR Integration Validation** — Phases 18-19
 
 ## Phases
 
@@ -182,6 +183,37 @@ Delivered:
 
 </details>
 
+### v2.1 DynaCLR Integration Validation (In Progress)
+
+**Milestone Goal:** Prove the modularized DynaCLR application produces identical results to the original monolithic VisCy, with permanent integration tests.
+
+- [ ] **Phase 18: Training Validation** - ContrastiveModule completes a full training loop via fast_dev_run with correct YAML config parsing
+- [ ] **Phase 19: Inference Reproducibility** - Checkpoint loading and prediction produce exact match against reference outputs, with permanent test suite
+
+## Phase Details
+
+### Phase 18: Training Validation
+**Goal**: User can run a DynaCLR training loop through the modular application and confirm it completes without errors
+**Depends on**: Phase 17 (v2.0 DynaCLR application exists)
+**Requirements**: TRAIN-01, TRAIN-02
+**Success Criteria** (what must be TRUE):
+  1. `uv run --package dynacrl pytest` discovers and runs a training integration test that exercises ContrastiveModule through a complete fast_dev_run training loop (fit) without errors
+  2. The training test uses a YAML config (or equivalent parametrization) that references the new modular import paths (dynacrl.engine.ContrastiveModule, viscy_models, viscy_data, viscy_transforms) and these class paths resolve correctly
+  3. The fast_dev_run completes all stages (train batch, validation batch) and the trainer reports no errors
+**Plans**: TBD
+
+### Phase 19: Inference Reproducibility
+**Goal**: User can load a pretrained checkpoint into the modular DynaCLR application, run prediction, and get embeddings that exactly match saved reference outputs
+**Depends on**: Phase 18
+**Requirements**: INFER-01, INFER-02, INFER-03, TEST-01, TEST-02
+**Success Criteria** (what must be TRUE):
+  1. A pretrained checkpoint (from the original monolithic VisCy) loads successfully into the modular ContrastiveModule without state dict key mismatches
+  2. Running the predict step with EmbeddingWriter callback writes embedding outputs to disk
+  3. The predicted embeddings are numerically identical (exact match) to saved reference embeddings produced by the original monolithic code
+  4. All training and inference integration tests are permanent pytest tests (not standalone scripts) living in `applications/dynacrl/tests/`
+  5. The full test suite passes when invoked via `uv run --package dynacrl pytest`
+**Plans**: TBD
+
 ### v2.0+ Remaining Applications (Phases TBD)
 
 **Candidates (not yet planned):**
@@ -190,6 +222,9 @@ Delivered:
 - Hydra infrastructure (viscy-hydra or integrated)
 
 ## Progress
+
+**Execution Order:**
+Phases execute in numeric order: 18 -> 19
 
 | Phase | Milestone | Plans | Status | Completed |
 |-------|-----------|-------|--------|-----------|
@@ -210,6 +245,8 @@ Delivered:
 | 15. Shared Infrastructure | v2.0 | manual | Complete | 2026-02-17 |
 | 16. DynaCLR App Core | v2.0 | manual | Complete | 2026-02-17 |
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
+| 18. Training Validation | v2.1 | 0/TBD | Not started | - |
+| 19. Inference Reproducibility | v2.1 | 0/TBD | Not started | - |
 
 **Total plans executed:** 25 (v1.0: 7, v1.1: 9, v1.2: 9) + 3 manual phases (v2.0)
 
@@ -217,3 +254,4 @@ Delivered:
 *Roadmap created: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
 *Updated for v2.0 DynaCLR: 2026-02-17*
+*Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
