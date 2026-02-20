@@ -1,291 +1,269 @@
 # Project Research Summary
 
-**Project:** VisCy Modular Architecture (uv workspace monorepo)
-**Domain:** Scientific Python package transformation (single package → workspace with independent subpackages)
-**Researched:** 2026-01-27
+**Project:** viscy-data subpackage extraction
+**Domain:** Scientific microscopy data loading (PyTorch Lightning DataModules for HCS OME-Zarr)
+**Researched:** 2026-02-13
 **Confidence:** HIGH
 
 ## Executive Summary
 
-This research evaluated transforming VisCy from a single setuptools-based package into a modern uv workspace monorepo with independently versioned subpackages. The recommended approach uses **hatchling + hatch-vcs + hatch-cada** for build and versioning, replacing the current setuptools + setuptools-scm configuration. The first extraction targets `viscy-transforms` (GPU augmentation transforms), establishing patterns for future extractions.
+The viscy-data package extraction involves migrating 13 data loading modules from the VisCy monolith into a standalone workspace package. This is the second extraction milestone, building on the established patterns from viscy-transforms (Milestone 1). The extraction is architecturally straightforward — copy modules, update imports, declare dependencies — but has three significant complexities that distinguish it from viscy-transforms: (1) heavy I/O dependencies (iohub, zarr, tensorstore) with platform-specific constraints, (2) optional heavyweight dependencies requiring careful lazy loading, and (3) a one-way cross-package dependency on viscy-transforms for `BatchedCenterSpatialCropd`.
 
-The monorepo approach enables users to install only what they need (`pip install viscy-transforms` instead of the entire VisCy stack), reduces dependency bloat, and allows independent release cycles. Critical to success: agreeing on a single Python version floor (3.11+) across all workspace members, preventing import leakage via isolated testing, and using src layout to avoid development-time import confusion. The architecture requires careful dependency management since all packages share a single lockfile.
+The recommended approach follows the proven viscy-transforms pattern: flat module layout with underscore-prefixed private modules, top-level exports in `__init__.py`, optional dependency groups (`[triplet]`, `[livecell]`, `[mmap]`, `[all]`), and workspace dependency declaration. The critical difference is extracting shared utilities from `hcs.py` into `_utils.py` FIRST — this breaks the current dual-role pattern where hcs.py serves as both a concrete DataModule and a utility library, preventing fragile cross-module coupling.
 
-Key risks center on the shared lockfile constraint (conflicting dependencies between packages break the workspace) and the clean break in import paths (`from viscy_transforms import X` not `from viscy.transforms import X`). Applications and examples will have temporarily broken imports until updated. Mitigation requires phase-gated extraction with validation at each step, comprehensive CI testing per package, and clear migration documentation for downstream users.
+Key risks center on multiprocessing and cross-platform compatibility: the `Manager().dict()` shared cache pattern works on Linux (fork) but breaks on macOS/Windows (spawn), optional dependencies like pycocotools and tensorstore have platform-specific build requirements, and `ThreadDataLoader` with tensorstore creates test isolation challenges. These are mitigated by: (1) testing with `spawn` explicitly in CI, (2) using optional dependency groups with platform markers, (3) session-scoped test fixtures with explicit cleanup, and (4) a tiered CI matrix (base deps on 3x3, full extras on 1x1).
 
 ## Key Findings
 
 ### Recommended Stack
 
-The stack modernizes VisCy's tooling while maintaining compatibility with the scientific Python ecosystem. Core shift: **hatchling replaces setuptools** because it's extensible via plugins and integrates cleanly with uv workspaces. Dynamic versioning uses **hatch-vcs (git tag based) + hatch-cada (workspace dependency rewriting)** instead of setuptools-scm. This combination enables independent package versioning with tags like `viscy-transforms@1.0.0` while correctly handling inter-package dependencies at build time.
+The core stack is **iohub + monai + lightning + torch + numpy** as required dependencies, with **tensorstore, tensordict, pycocotools, pandas, tifffile, torchvision** available through optional extras. This represents an incremental addition to the workspace — the build system (hatchling + uv-dynamic-versioning), Python version support (3.11-3.14), and CI patterns are already established and do not need re-research.
 
 **Core technologies:**
-- **uv** (package manager, workspace orchestration) — 10-100x faster than pip, native workspace support, industry standard for 2025+
-- **hatchling + hatch-vcs + hatch-cada** (build system + versioning) — Plugin-based extensibility; hatch-cada critical for workspace deps; hatch-vcs mature git versioning
-- **Zensical** (documentation) — Official successor to Material for MkDocs (now in maintenance mode); 4-5x faster builds; Rust + Python
-- **ruff** (linting + formatting) — Replaces black + isort + flake8; 200x faster; native Jupyter support; current project already uses it
+- **iohub >=0.3a2**: OME-Zarr I/O layer (Plate, Position, ImageArray) used by 9 of 13 modules; pre-release version but stable in VisCy production use
+- **monai >=1.5.2**: Transforms (Compose, MapTransform), data utilities (ThreadDataLoader, set_track_meta, collate_meta_tensor) used by 10 of 13 modules; aligns with viscy-transforms pin
+- **lightning >=2.3**: LightningDataModule base class for all data modules; matches original VisCy pin
+- **torch >=2.10**: Tensor operations, DataLoader, Dataset; aligns with viscy-transforms for consistency
+- **tensorstore (optional)**: High-performance array I/O for contrastive learning triplet cache; C++ library with platform wheel limitations; only needed for `[triplet]` extra
+- **tensordict (optional)**: MemoryMappedTensor for mmap caching strategy; part of PyTorch RL ecosystem; only needed for `[mmap]` extra
+- **pycocotools (optional)**: COCO annotation parsing for LiveCell benchmark dataset; requires C compiler on some platforms; only needed for `[livecell]` extra
 
-**Note:** Cannot use uv's native build backend (`build-backend = "uv"`) because it doesn't support plugins yet. Hatchling required for hatch-vcs/hatch-cada functionality.
+**Version pinning philosophy:** Floor pins (`>=X.Y`) for core dependencies to avoid over-constraining user environments. No upper bounds (trust semantic versioning). No version pins for optional dependencies — let the resolver pick compatible versions.
 
 ### Expected Features
 
+All 13 modules must be extracted and importable with clean paths (`from viscy_data import HCSDataModule`). The extraction must preserve all existing functionality while establishing a cleaner architecture through utility refactoring. Optional dependency groups enable users to install only what they need for their specific pipeline (translation, FCMAE pretraining, contrastive learning, or benchmarking).
+
 **Must have (table stakes):**
-- **Workspace member discovery** — `members = ["packages/*"]` glob pattern; users expect this to work
-- **Shared lockfile** — Single `uv.lock` ensures reproducibility; standard uv workspace design
-- **Editable inter-package dependencies** — `workspace = true` in sources; changes propagate immediately during development
-- **Per-package testing** — `uv run --package viscy-transforms pytest` must work from any directory
-- **Git-based versioning** — Dynamic version from VCS tags; avoids manual version bumps (scientific Python standard)
-- **src layout** — `packages/*/src/*/` prevents import confusion; pytest/pip best practice
-- **CI changed-package filtering** — Path-based filtering; don't test unchanged packages (monorepo efficiency requirement)
+- All 13 modules extracted with clean import paths (no `viscy.data.` references)
+- Flat top-level exports for all DataModules and Datasets
+- Type exports (Sample, NormMeta, TripletSample, etc.) for downstream type annotations
+- Optional dependency groups (`[triplet]`, `[livecell]`, `[mmap]`, `[all]`)
+- Workspace dependency on viscy-transforms (for `BatchedCenterSpatialCropd` import in triplet.py)
+- Shared utilities extracted from hcs.py into `_utils.py` (breaks dual-role anti-pattern)
+- Existing tests passing under new import paths
+- py.typed marker for type checking support
 
 **Should have (competitive):**
-- **Reusable CI workflows** — DRY GitHub Actions with parameters; reduces maintenance overhead
-- **API documentation generation** — Auto-generated from docstrings (mkdocstrings/Zensical); keeps docs synchronized
-- **Package-specific documentation** — Per-package docs with cross-linking; docs stay close to code
-- **Parallel test execution** — pytest-xdist for faster runs; easy win for large test suites
-- **Independent versioning** — Each package has own version via package-specific tags; good for loosely coupled packages
+- Lazy imports for heavy optional deps with clear error messages when missing
+- Package README with pipeline mapping table (adapted from existing `viscy/data/README.md`)
+- GPU transform mixin as protocol for duck typing without forced inheritance
+- Type-safe batch structures exported as first-class types
 
 **Defer (v2+):**
-- **Release automation** — python-semantic-release or manual workflow; manual releases acceptable initially
-- **Coverage aggregation** — Combined coverage across packages; nice-to-have for later
-- **Dependabot/Renovate** — Automated dependency updates; can add after initial stabilization
-- **Dev containers** — Consistent environment via devcontainer.json; useful but not blocking
+- Promoting internal utilities like `_read_norm_meta` to public API (wait for user demand)
+- Abstract cache interface unifying Manager.dict, tensorstore, and MemoryMappedTensor patterns (complexity without immediate benefit)
+- Config-driven DataModule registry for Lightning CLI integration (wait for viscy meta-package)
 
 ### Architecture Approach
 
-The architecture uses a **virtual workspace root** (not a distributable package) that coordinates multiple independent packages under `packages/*`. Each package uses src layout (`packages/<name>/src/<import_name>/`) with its own pyproject.toml, preventing import confusion and enabling true independence. The single lockfile at workspace root ensures consistent dependency resolution, while workspace dependencies declared via `[tool.uv.sources]` with `workspace = true` enable editable development.
+The package uses a flat module layout following the viscy-transforms pattern. All modules use underscore-prefixed names (`_hcs.py`, `_utils.py`) to signal "import from package top-level, not from module." The internal dependency graph is a clean DAG with foundation modules (`_typing.py`, `_utils.py`) at the root, core modules (`hcs.py`, `gpu_aug.py`) in the middle, and specialized modules (triplet, livecell, mmap_cache) as leaves.
 
 **Major components:**
-1. **Workspace Root** — Defines membership via `[tool.uv.workspace]`, shared tooling config (ruff, mypy, pytest), not installable itself
-2. **viscy-transforms (first extraction)** — Image transformations (kornia, monai based); standalone with no workspace dependencies
-3. **viscy-data (future)** — Data loading, HCS datasets; may depend on viscy-transforms via workspace sources
-4. **viscy-models (future)** — Neural network architectures; may depend on viscy-transforms
-5. **applications/** — Publication code (not a package); broken imports acceptable during transition
 
-**Critical path:** Workspace scaffolding → First package extraction → Code migration → Test migration. Phases 5+ (dependency groups) and 6 (dynamic versioning) can run in parallel after Phase 2 completes.
+1. **Foundation layer** (`_typing.py`, `_utils.py`) — Type definitions and shared utilities; no internal dependencies; imported by all other modules
+2. **Core DataModules** (`hcs.py`, `gpu_aug.py`) — HCSDataModule for translation pipelines, GPUTransformDataModule (ABC) for FCMAE pretraining; depend only on foundation layer
+3. **Specialized DataModules** (triplet, mmap_cache, livecell, cell_classification, cell_division_triplet, ctmc_v1, segmentation) — Pipeline-specific implementations extending core DataModules; may have optional dependencies
+4. **Composition modules** (combined, concat) — Wrappers for multi-source training and dataset concatenation; depend on core modules
+5. **Utilities** (select, distributed) — SelectWell mixin for well/FOV filtering, ShardedDistributedSampler for DDP; standalone with no internal dependencies
+
+**Critical architecture decision:** Extract shared utilities (`_ensure_channel_list`, `_read_norm_meta`, `_collate_samples`) from `hcs.py` into `_utils.py` BEFORE extracting any other modules. The current code has 5 modules importing from `hcs.py` for utility functions, not for `HCSDataModule`, creating unnecessary coupling. This refactoring is the prerequisite that enables clean module boundaries.
 
 ### Critical Pitfalls
 
-1. **Single requires-python constraint** — uv enforces workspace-wide Python version intersection. If one package needs 3.12+, entire workspace becomes 3.12+. Users on 3.11 cannot install any package even if individually compatible. **Mitigation:** Agree on Python 3.11 floor upfront; document in workspace root; all packages must use `>=3.11`.
+Based on analysis of the 13-module architecture, v1.0 extraction experience, and domain expertise with PyTorch/Lightning data loading patterns:
 
-2. **Conflicting dependencies between members** — All packages share one lockfile. If viscy-transforms needs `numpy<2` and a future package needs `numpy>=2`, resolution fails and workspace cannot lock. **Mitigation:** Survey dependency constraints before adding packages; pin compatible ranges for PyTorch/NumPy early; consider path dependencies for genuinely incompatible packages.
+1. **Lazy Import Guard Ordering Breaks at Runtime** — Optional dependencies (tensorstore, tensordict, pycocotools) must use lazy imports that defer errors until actual usage, not module import time. If guards are missing or placed incorrectly, errors surface deep in training loops (potentially in DataLoader worker subprocesses), making them hard to trace. Prevention: centralized lazy import pattern in `_imports.py`, call import helpers at method entry points, test with base-deps-only CI job to catch unguarded imports.
 
-3. **Import leakage between workspace members** — Python doesn't enforce dependency boundaries. viscy-transforms can accidentally import from viscy-data even without declaring it, because both are in the same environment. Works in monorepo, fails for users. **Mitigation:** Test each package in isolation (`uv sync --package <name>`); CI must test packages independently, not just whole workspace.
+2. **Manager().dict() Shared Cache Not Picklable Across spawn Contexts** — `CachedOmeZarrDataset` uses `multiprocessing.Manager().dict()` which works with `fork` (Linux) but fails with `spawn` (macOS/Windows default). Proxy objects must pickle, and depending on creation timing relative to DataLoader fork/spawn, you get either pickle errors or silently separate caches per worker. Prevention: create Manager in `setup()` (Lightning hook after multiprocessing context is configured), test with `mp_start_method="spawn"` explicitly in CI, consider replacing with file-based cache.
 
-4. **uv-dynamic-versioning requires hatchling** — Using `build-backend = "uv"` breaks dynamic versioning; uv-dynamic-versioning is a hatchling plugin. **Mitigation:** Always use `build-backend = "hatchling.build"`; verify version in built wheel before publishing.
+3. **Base Class Extraction Creates Hidden Import Cycles** — `hcs.py` is both a concrete DataModule and the base class for TripletDataModule/CellDivisionTripletDataModule. Extracting utilities into `_utils.py` without careful dependency analysis creates circular imports. Prevention: map complete import graph BEFORE moving code, follow strict layering (_typing -> _utils -> hcs -> specialized), test import order explicitly with isolated `python -c "from viscy_data import X"` calls.
 
-5. **Entry points lost during migration** — CLI commands (`viscy = "viscy.cli:main"`) stop working after setuptools → hatchling. Different config syntax; easy to forget. **Mitigation:** Audit all `[project.scripts]` sections; test CLI after migration: `uv run viscy --help`.
+4. **Optional Extras Create a 2^N CI Matrix Explosion** — With 4 optional groups across 3 Python versions and 3 OS targets, testing all combinations creates 45+ jobs. Some combinations are invalid (pycocotools doesn't build on Windows). Prevention: tiered CI strategy (base deps 3x3, full extras 1x1, per-extra smoke tests), use pytest markers to skip when deps missing, exclude known-broken combinations in matrix.
+
+5. **pycocotools Build Failure Blocks Windows CI** — pycocotools requires C compiler; Windows has no default C compiler. When wheels are missing, pip falls back to source build which fails. Prevention: exclude livecell extra from Windows in CI matrix, mark `[livecell]` as Linux/macOS only in docs (LiveCell is HPC dataset anyway), or use `pycocotools-windows` fork.
 
 ## Implications for Roadmap
 
-Based on research, suggested phase structure:
+Based on the dependency analysis and architecture patterns, the extraction follows a layered build order. The critical path is: scaffolding → foundation modules → core modules → specialized modules → composition modules → finalize. Tests can begin after core modules are migrated.
 
-### Phase 1: Workspace Foundation
-**Rationale:** Establishes monorepo structure and prevents critical pitfalls (Python version floor, build system). Must come first because all packages depend on workspace configuration.
-
-**Delivers:**
-- Root pyproject.toml with `[tool.uv.workspace]` and `members = ["packages/*"]`
-- Shared tooling config (ruff, mypy, pytest at workspace level)
-- Python version floor decision (3.11+) documented
-- Virtual workspace root (`package = false`)
-
-**Addresses:**
-- Workspace scaffolding (table stakes from FEATURES.md)
-- Shared lockfile requirement
-- Pre-commit/prek hooks for quality gates
-
-**Avoids:**
-- Pitfall #1 (Python version conflicts) by setting floor upfront
-- Pitfall #4 (wrong build backend) by configuring hatchling immediately
-
-### Phase 2: viscy-transforms Package Extraction
-**Rationale:** First extraction establishes patterns for future packages. viscy-transforms chosen because it's standalone (no workspace dependencies), well-isolated, and delivers immediate user value.
+### Phase 1: Package Scaffolding & Foundation
+**Rationale:** Establish package structure and dependency declarations before migrating any code. Extract shared utilities first to break the hcs.py dual-role anti-pattern.
 
 **Delivers:**
-- `packages/viscy-transforms/` with src layout
-- Per-package pyproject.toml with hatchling + hatch-vcs + hatch-cada
-- Git-based versioning configured (tag pattern: `viscy-transforms@X.Y.Z`)
-- Clean import path: `from viscy_transforms import X`
+- `packages/viscy-data/pyproject.toml` with all dependencies (required and optional groups)
+- Empty `__init__.py` placeholder
+- `py.typed` marker
+- `_typing.py` with all data types (verbatim copy from `viscy/data/typing.py` + DictTransform alias)
+- `_utils.py` with extracted helpers (`_ensure_channel_list`, `_read_norm_meta`, `_collate_samples`, `_search_int_in_str`)
+- Root `pyproject.toml` updated with viscy-data workspace dependency
 
-**Uses:**
-- hatchling build backend
-- hatch-vcs for version from git tags
-- hatch-cada for workspace dependency rewriting
-- PEP 735 dependency groups for dev/test separation
+**Addresses features:**
+- Package structure (table stakes)
+- Type exports (table stakes)
+- Shared utilities extraction (table stakes, prevents coupling)
+- Optional dependency groups (table stakes)
 
-**Implements:**
-- src layout pattern from ARCHITECTURE.md
-- Independent package testing workflow
+**Avoids pitfalls:**
+- P3 (import cycles) — extracting _utils.py first prevents coupling
+- P1 (lazy imports) — pyproject.toml defines extras structure
+- P5 (pycocotools Windows) — optional deps with platform markers
 
-**Avoids:**
-- Pitfall #3 (import leakage) via isolated testing from day 1
-- Pitfall #14 (src layout confusion) via clear documentation
-
-### Phase 3: Code and Test Migration
-**Rationale:** Moves actual code after scaffolding is validated. Separating this from Phase 2 allows validation of structure before content.
-
-**Delivers:**
-- Migrated code: `viscy/transforms/*.py` → `packages/viscy-transforms/src/viscy_transforms/`
-- Updated imports within package
-- Migrated tests: `tests/transforms/` → `packages/viscy-transforms/tests/`
-- Updated test imports
-
-**Addresses:**
-- Test organization (table stakes)
-- Clean import paths requirement
-
-**Avoids:**
-- Pitfall #5 (entry points lost) by auditing and testing CLI
-- Pitfall #2 (dependency conflicts) via careful dependency specification
-
-### Phase 4: CI/CD Updates
-**Rationale:** CI must validate monorepo structure before merging. Comes after code migration so there's something to test.
+### Phase 2: Core Data Modules
+**Rationale:** Migrate the two base DataModule classes that other modules depend on. These have no optional dependencies and establish the inheritance patterns.
 
 **Delivers:**
-- GitHub Actions workflows for monorepo testing
-- Package-specific test jobs with path-based filtering
-- Build verification (version correctness)
-- Independent package testing validation
+- `hcs.py` (HCSDataModule, SlidingWindowDataset, MaskTestDataset) — remove extracted functions, update imports
+- `gpu_aug.py` (GPUTransformDataModule ABC, CachedOmeZarrDataset, CachedOmeZarrDataModule) — update imports to viscy_data._utils
+- `select.py` (SelectWell mixin) — verbatim copy, update imports
+- `distributed.py` (ShardedDistributedSampler) — verbatim copy, no internal imports
 
-**Addresses:**
-- CI changed-package filtering (table stakes)
-- Path-based filtering requirement
-- Build caching for efficiency
+**Uses stack:** iohub, monai, lightning, torch (all required deps)
 
-**Avoids:**
-- Pitfall #11 (CI cache explosion) via `uv cache prune --ci`
-- Pitfall #3 (import leakage) by testing packages in isolation
+**Implements architecture:** Foundation → Core layer in dependency DAG
 
-### Phase 5: Documentation Migration
-**Rationale:** Documentation can be migrated after core functionality works. Zensical setup is independent of code migration.
+**Avoids pitfalls:**
+- P2 (Manager().dict() spawn) — CachedOmeZarrDataModule addressed in this phase
+- P11 (MRO fragility) — copy-first, no refactoring during extraction
 
-**Delivers:**
-- Zensical configuration replacing current docs
-- Per-package documentation structure
-- API documentation from docstrings (mkdocstrings)
-- GitHub Pages deployment workflow
-
-**Uses:**
-- Zensical (successor to Material for MkDocs)
-- mkdocstrings-python for API doc generation
-
-**Addresses:**
-- API documentation generation (differentiator)
-- Package-specific documentation
-
-**Avoids:**
-- Pitfall #12 (Jekyll interference) via `.nojekyll` file in deploy workflow
-
-### Phase 6: Validation and Documentation (Launch)
-**Rationale:** Final validation before considering MVP complete. Documentation ensures future maintainers understand the patterns.
+### Phase 3: Specialized Data Modules
+**Rationale:** Migrate pipeline-specific DataModules that extend core classes. These introduce optional dependencies and lazy loading patterns.
 
 **Delivers:**
-- Developer guide for monorepo workflow
-- Migration guide for downstream users
-- Example updates (fix broken imports in examples/)
-- Version validation and test coverage verification
+- `triplet.py` (TripletDataset, TripletDataModule) — add lazy imports for tensorstore/pandas
+- `cell_classification.py` (ClassificationDataset, ClassificationDataModule) — lazy pandas import
+- `cell_division_triplet.py` (CellDivisionTripletDataset, CellDivisionTripletDataModule)
+- `mmap_cache.py` (MmappedDataset, MmappedDataModule) — lazy tensordict import
+- `livecell.py` (LiveCellDataset, LiveCellTestDataset, LiveCellDataModule) — lazy pycocotools/tifffile imports
+- `ctmc_v1.py` (CTMCv1DataModule)
+- `segmentation.py` (SegmentationDataset, SegmentationDataModule)
 
-**Addresses:**
-- Clean break import migration (VisCy-specific risk #3)
-- Documentation of migration path
+**Uses stack:** tensorstore, tensordict, pycocotools (all optional)
+
+**Implements architecture:** Specialized modules layer in DAG
+
+**Avoids pitfalls:**
+- P1 (lazy imports) — centralized pattern for all optional deps
+- P7 (ThreadDataLoader leaks) — addressed in triplet.py migration
+- P12 (MemoryMappedTensor cleanup) — addressed in mmap_cache.py
+
+### Phase 4: Composition Modules & Finalize
+**Rationale:** Migrate the high-level composition wrappers that depend on core modules, then finalize the package with complete exports and README.
+
+**Delivers:**
+- `combined.py` (CombinedDataModule, CombineMode) — update imports
+- `concat.py` (ConcatDataModule, BatchedConcatDataModule, CachedConcatDataModule, BatchedConcatDataset) — split from combined.py
+- Complete `__init__.py` with all public exports (15 classes + 8 types)
+- Package README adapted from `viscy/data/README.md`
+
+**Implements architecture:** Composition layer, public API surface
+
+**Avoids pitfalls:**
+- P8 (__init__.py eager imports) — only re-export modules with required deps
+
+### Phase 5: Test Migration & CI
+**Rationale:** Migrate existing tests after code modules are stable, establish test fixtures with proper cleanup, configure tiered CI matrix.
+
+**Delivers:**
+- `tests/conftest.py` with session-scoped OME-Zarr fixtures (migrate from main branch tests/conftest.py)
+- `test_hcs.py` (update imports, verify HCSDataModule + SlidingWindowDataset)
+- `test_triplet.py` (update imports, add ThreadDataLoader cleanup)
+- `test_select.py` (update imports, verify SelectWell mixin)
+- `test_typing.py` (new: smoke tests for type definitions)
+- CI workflow with tiered matrix: base deps (3x3), full extras (1x1), per-extra smoke tests
+
+**Verifies:** All table-stakes features work, pitfall mitigations are effective
+
+**Avoids pitfalls:**
+- P4 (CI matrix explosion) — tiered strategy keeps job count manageable
+- P9 (expensive fixtures) — session-scoped, read-only fixtures
+- P7 (ThreadDataLoader leaks) — explicit cleanup in fixtures
+- P12 (mmap cleanup) — explicit teardown for MemoryMappedTensor
+
+### Phase 6: Workspace Integration & Validation
+**Rationale:** Verify the extracted package integrates correctly with the workspace and existing configs still reference correct import paths.
+
+**Delivers:**
+- Root `pyproject.toml` verified with viscy-data in dependencies and [tool.uv.sources]
+- All YAML/JSON configs in applications/ checked for stale `viscy.data.` references
+- Integration test: `uv sync --package viscy-data` + `uv run --package viscy-data pytest`
+- Integration test: viscy meta-package can import from both viscy-transforms and viscy-data
+- Documentation: migration guide with old → new import paths
+
+**Verifies:** Clean workspace integration, no config breakage
+
+**Avoids pitfalls:**
+- P10 (config class_path breakage) — grep + update all in-repo configs
+- P6 (iohub API coupling) — integration test verifies iohub types
 
 ### Phase Ordering Rationale
 
-- **Foundation first (Phase 1):** Workspace configuration is prerequisite for all packages; Python version floor prevents rework
-- **Pattern establishment (Phase 2-3):** First extraction creates blueprint for future packages; validating structure before content prevents large-scale rework
-- **Validation early (Phase 4):** CI must validate monorepo before considering it functional; testing in isolation catches import leakage
-- **Documentation deferred (Phase 5):** Zensical setup independent of code migration; can proceed in parallel with Phase 4 if resources allow
-- **Launch preparation (Phase 6):** User-facing docs and examples updated after core functionality proven
-
-**Dependency ordering:**
-- Phase 1 blocks all others (foundation)
-- Phase 2 blocks Phase 3 (scaffolding before content)
-- Phase 3 blocks Phase 4 (must have code to test)
-- Phase 4 and Phase 5 can run in parallel after Phase 3
-- Phase 6 depends on all previous phases
-
-**Avoids pitfalls:**
-- Phase-gated extraction prevents commitment to flawed structure
-- Isolation testing at each phase catches import leakage early
-- Build verification before merge prevents version issues in production
+- **Sequential dependency chain:** Foundation → Core → Specialized → Composition follows the import DAG. Each phase depends on the previous phase being complete.
+- **Extract _utils.py FIRST:** This is the critical prerequisite. The current hcs.py dual-role creates coupling that blocks clean extraction of downstream modules.
+- **Lazy imports in Specialized phase:** Optional dependencies are leaf nodes in the dependency graph. They're isolated in Phase 3 so Phase 2 can be tested without tensorstore/tensordict/pycocotools.
+- **Tests after code:** Tests require all modules to exist. Session-scoped fixtures need the full package structure. Testing comes after Phases 1-4 are stable.
+- **CI after tests:** The tiered CI matrix needs to know which tests can run with base deps vs. which need extras. CI design happens after test structure is known.
 
 ### Research Flags
 
-**Phases needing deeper research during planning:**
-- **Phase 2:** hatch-vcs tag pattern configuration (new as of v1.0.1, Jan 2026) — verify pattern syntax for monorepo
-- **Phase 4:** GitHub Actions workspace testing patterns — sparse official guidance on monorepo path filtering
-- **Phase 5:** Zensical migration from mkdocs.yml (Alpha software, v0.0.19) — may need fallback plan to mkdocs-material
-
 **Phases with standard patterns (skip research-phase):**
-- **Phase 1:** Workspace scaffolding — well-documented in uv official docs
-- **Phase 3:** Code migration — standard Python refactoring patterns
-- **Phase 6:** Documentation — standard technical writing
+- **Phase 1-4:** Code extraction follows the proven viscy-transforms pattern. All architectural decisions are documented in existing research.
+- **Phase 5:** Test fixture patterns are well-documented in existing tests/conftest.py. CI workflow structure mirrors existing test.yml.
+- **Phase 6:** Workspace integration is standard uv workspace mechanics.
+
+**No phases need additional research.** All architectural decisions, dependency choices, and pitfall mitigations are informed by the comprehensive upfront research (STACK.md, FEATURES.md, ARCHITECTURE.md, PITFALLS.md) and the established viscy-transforms precedent.
 
 ## Confidence Assessment
 
 | Area | Confidence | Notes |
 |------|------------|-------|
-| Stack | HIGH | Verified with official uv, hatchling, hatch-vcs docs; multiple successful deployments (pydantic-ai, MCP SDK) |
-| Features | HIGH | Based on uv official workspace docs and PEP 735; table stakes well-established in community |
-| Architecture | HIGH | Patterns verified in official uv documentation; src layout is pytest/pip best practice |
-| Pitfalls | MEDIUM-HIGH | Critical pitfalls verified in official docs; moderate/minor based on GitHub issues and community reports |
+| Stack | HIGH | Core dependencies verified via lockfile and source code analysis. Optional dependencies verified via original pyproject.toml. Python version support follows workspace standard. |
+| Features | HIGH | All 13 modules analyzed with direct source code review. Import paths, class hierarchies, and dependency graph documented in existing `viscy/data/README.md`. Feature requirements are table-stakes extraction, not new development. |
+| Architecture | HIGH | Package layout follows proven viscy-transforms pattern. Internal dependency graph is well-documented (README.md). Shared utilities extraction is the only new architectural element, and it's a straightforward refactoring. |
+| Pitfalls | MEDIUM-HIGH | Pitfalls derived from: (1) codebase analysis, (2) v1.0 extraction experience, (3) domain expertise with PyTorch multiprocessing, Lightning DataModules, tensorstore, and C-extension packages. WebSearch unavailable during research, so some cross-platform build claims (tensorstore arm64, pycocotools Windows wheels) could not be verified against current package indices. |
 
 **Overall confidence:** HIGH
 
-Research is comprehensive with strong official documentation coverage. Lower confidence areas (Zensical, hatch-cada) have fallback options (mkdocs-material 9.7.0, uv-dynamic-versioning respectively) and don't block core functionality.
+The extraction is architecturally straightforward and follows established patterns. The three complexities (heavy I/O deps, optional deps, cross-package dependency) are well-understood and have documented mitigation strategies. The main uncertainties are platform-specific (tensorstore/pycocotools wheel availability), which are addressed by making those dependencies optional and testing in a tiered CI matrix.
 
 ### Gaps to Address
 
-**Gap: Zensical Alpha stability**
-- **Impact:** Documentation generation may have bugs
-- **Handling:** Keep mkdocs-material 9.7.0 as fallback; Zensical maintains compatibility with mkdocs.yml config
-- **Validation:** Test Zensical during Phase 5 before committing; easy to roll back
+**Platform-specific dependency availability:**
+- **tensorstore Python 3.13 support:** Wheels may not exist yet. Mitigated by making `[triplet]` optional and testing extras only on Python 3.11-3.12 in CI.
+- **pycocotools Windows build:** No pre-built wheels for some Python versions. Mitigated by excluding Windows from livecell tests in CI or documenting as Linux/macOS only.
+- **tensordict Python 3.13 support:** Same mitigation as tensorstore (optional, narrower CI matrix).
 
-**Gap: IDE workspace support**
-- **Impact:** VS Code/PyCharm may not understand workspace structure; import errors shown for valid code
-- **Handling:** Configure `.vscode/settings.json` with Python paths; use `uv sync` to populate `.venv`; document in developer guide
-- **Validation:** Test with both VS Code and PyCharm during Phase 1
+**iohub version stability:**
+- iohub is pinned at pre-release (0.3a2) because stable release timeline is unknown. The API is stable in VisCy production use, but future releases may have breaking changes. Mitigated by floor pin (`>=0.3a2`), no upper bound, and integration test that verifies expected types/attributes.
 
-**Gap: PyTorch + NumPy version matrix**
-- **Impact:** NumPy 2.0 migration ongoing; PyTorch has tight NumPy requirements; potential dependency conflicts
-- **Handling:** Pin NumPy range compatible with PyTorch 2.4+; test against both NumPy 1.x and 2.x in CI matrix
-- **Validation:** Run `uv tree` during Phase 2 to inspect resolved versions; monitor NumPy 2.0 ecosystem compatibility
+**Manager().dict() cross-platform:**
+- Shared cache pattern works on Linux (fork) but needs testing on macOS/Windows (spawn). Mitigated by explicit spawn testing in CI. If failures persist, fallback is to document CachedOmeZarrDataModule as Linux-only or refactor to file-based cache (tensordict MemoryMappedTensor pattern already exists in mmap_cache.py).
 
-**Gap: Docker build efficiency**
-- **Impact:** Docker builds may copy entire workspace for every package; massive cache invalidation
-- **Handling:** Defer to post-MVP; use `uv sync --frozen --package <name>` when available; structure Dockerfiles for minimal layer invalidation
-- **Validation:** Measure Docker build times in CI during Phase 4; optimize if blocking
-
-**Gap: Release automation**
-- **Impact:** Manual release process initially; potential for version tag errors
-- **Handling:** Document manual release workflow clearly; consider python-semantic-release post-MVP
-- **Validation:** Test manual release workflow during Phase 6 with test PyPI
+None of these gaps block the extraction. All have documented mitigation strategies that can be applied during Phase 2 (Manager().dict()), Phase 3 (optional deps), and Phase 5 (CI matrix).
 
 ## Sources
 
 ### Primary (HIGH confidence)
-- [uv Workspaces Documentation](https://docs.astral.sh/uv/concepts/projects/workspaces/) — Workspace configuration, member discovery, inter-package dependencies
-- [uv Project Dependencies](https://docs.astral.sh/uv/concepts/projects/dependencies/) — Dependency groups (PEP 735), workspace sources
-- [Hatchling Build Configuration](https://hatch.pypa.io/latest/config/build/) — Build backend, src layout, packages
-- [PEP 735 - Dependency Groups](https://peps.python.org/pep-0735/) — dependency-groups specification
-- [hatch-vcs PyPI](https://pypi.org/project/hatch-vcs/) — Git-based versioning for hatchling
-- [hatch-cada GitHub](https://github.com/bilelomrani1/hatch-cada) — Workspace dependency rewriting at build time
-- [Zensical Documentation](https://zensical.org/docs/get-started/) — MkDocs successor, setup and migration
-- [pytest Good Integration Practices](https://docs.pytest.org/en/stable/explanation/goodpractices.html) — src layout, test organization
+- `viscy/data/README.md` (modular-data branch) — Comprehensive module inventory, dependency graph, class hierarchy, GPU transform patterns
+- All 13 source files in `viscy/data/` on main branch — Direct import statement analysis, function-level dependency tracing
+- `packages/viscy-transforms/` — Established extraction pattern (pyproject.toml, __init__.py, _typing.py, CI structure)
+- `main:pyproject.toml` — Original dependency pins: iohub>=0.3a2, monai>=1.4, lightning>=2.3
+- `uv.lock` — Resolved versions: monai 1.5.2, torch 2.10.0, numpy 2.4.2, tifffile 2026.1.28
+- `.planning/PROJECT.md` — Project constraints (no viscy-transforms dependency, clean break imports, optional extras)
+- `.planning/ROADMAP.md` — Milestone 1 completion status, workspace patterns
 
-### Secondary (MEDIUM confidence)
-- [Python Workspaces (Monorepos) - tomasrepcik.dev](https://tomasrepcik.dev/blog/2025/2025-10-26-python-workspaces/) — Real-world workspace structure patterns
-- [uv Monorepo Best Practices Issue #10960](https://github.com/astral-sh/uv/issues/10960) — Community discussion on workspace patterns
-- [LlamaIndex Monorepo Overhaul](https://www.llamaindex.ai/blog/python-tooling-at-scale-llamaindex-s-monorepo-overhaul) — Large-scale Python monorepo migration case study
-- [Dynamic Versioning and Automated Releases](https://slhck.info/software/2025/10/01/dynamic-versioning-uv-projects.html) — uv-dynamic-versioning practical guide
-- [Tweag Python Monorepo Guide](https://www.tweag.io/blog/2023-04-04-python-monorepo-1/) — Architectural patterns for Python monorepos
-- [FOSDEM 2026 - Modern Python monorepo with uv](https://fosdem.org/2026/schedule/event/WE7NHM-modern-python-monorepo-apache-airflow/) — Apache Airflow's uv workspace migration
+### Secondary (HIGH confidence)
+- `main:tests/conftest.py` — Test fixture patterns for HCS OME-Zarr stores, tracks datasets
+- `main:tests/data/test_hcs.py`, `test_select.py`, `test_triplet.py` — Existing test coverage and patterns
+- MONAI `monai.data.__init__.py` — Flat API export pattern (100+ symbols from 20+ modules)
+- viscy-transforms `__init__.py` — Sibling package pattern (44 exports, underscore-prefixed private modules)
 
-### Tertiary (LOW confidence, needs validation)
-- [uv Issue #6935 - Workspaces and monorepo support](https://github.com/astral-sh/uv/issues/6935) — Docker build efficiency in workspaces
-- [uv Issue #2231 - CI cache management](https://github.com/astral-sh/uv/issues/2231) — Cache pruning strategies
-- [NumPy 2.0 Ecosystem Compatibility #26191](https://github.com/numpy/numpy/issues/26191) — NumPy version matrix tracking
+### Tertiary (MEDIUM confidence, needs validation)
+- tensorstore Python 3.13 wheel availability — Claimed LIMITED based on historical lag, but not verified against current PyPI
+- tensordict Python 3.13 wheel availability — Claimed LIMITED, same reason
+- pycocotools Windows wheel coverage — Claimed REQUIRES C COMPILER for missing wheels, based on common CI failure pattern
+- iohub latest stable release status — Pre-release 0.3a2 is used; stable release timeline unknown
 
 ---
-*Research completed: 2026-01-27*
+*Research completed: 2026-02-13*
 *Ready for roadmap: yes*

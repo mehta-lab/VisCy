@@ -1,358 +1,426 @@
-# Technology Stack: VisCy Monorepo
+# Technology Stack: viscy-data Package Extraction
 
-**Project:** VisCy uv workspace monorepo with independent subpackages
-**Researched:** 2026-01-27
-**Overall Confidence:** HIGH
+**Project:** viscy-data -- data loading, Lightning DataModules, and dataset classes for VisCy
+**Researched:** 2026-02-13
+**Overall Confidence:** HIGH (core deps verified via lockfile and source; optional deps verified via original pyproject.toml on main)
 
 ---
 
 ## Executive Summary
 
-This stack recommendation converts VisCy from a single-package setuptools project to a uv workspace monorepo with hatchling build backend and VCS-based dynamic versioning. The stack prioritizes:
+This document covers the **incremental stack additions** needed to extract viscy-data as the second independent subpackage in the VisCy monorepo. The build system (hatchling + uv-dynamic-versioning), workspace structure, and CI patterns are already established by viscy-transforms (Milestone 1) and are NOT re-covered here.
 
-1. **Modern tooling** (uv, hatchling) over legacy (setuptools, pip)
-2. **Workspace-native versioning** (hatch-cada + hatch-vcs) for independent package releases
-3. **Zensical documentation** as the successor to Material for MkDocs
-4. **Minimal configuration** with sensible defaults
+viscy-data introduces three new concerns beyond viscy-transforms:
 
----
+1. **Heavy I/O dependencies** -- iohub (OME-Zarr), zarr, and tifffile form the core I/O layer that nearly every module requires.
+2. **Optional heavyweight deps** -- tensorstore, tensordict, and pycocotools are only needed by specific modules (triplet, mmap_cache, livecell) and require optional dependency groups.
+3. **Inter-package dependency** -- viscy-data depends on viscy-transforms (for `BatchedCenterSpatialCropd` in triplet.py), making this the first workspace package with a cross-package dependency.
 
-## Recommended Stack
-
-### Package Management & Build System
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| uv | latest | Package manager, virtual env, workspace orchestration | Industry standard for 2025+; 10-100x faster than pip; native workspace support | HIGH |
-| hatchling | >=1.28.0 | Build backend | Recommended by uv; extensible via plugins; better than setuptools for modern projects | HIGH |
-| hatch-vcs | latest | VCS-based versioning | Derives version from git tags; eliminates manual version bumps | HIGH |
-| hatch-cada | >=1.0.1 | Workspace dependency versioning | Rewrites workspace deps with version constraints at build time; enables independent releases | HIGH |
-
-**Rationale:** The combination of hatchling + hatch-vcs + hatch-cada is specifically designed for uv workspace monorepos. This replaces setuptools-scm which the current project uses. The uv build backend (`uv_build`) does NOT support plugins yet, so hatchling is required.
-
-### Dynamic Versioning Strategy
-
-| Approach | When to Use | Configuration |
-|----------|-------------|---------------|
-| **hatch-vcs + hatch-cada** (RECOMMENDED) | Independent versioning per package | Package-specific git tags like `viscy-transforms@1.0.0` |
-| uv-dynamic-versioning | Simpler single-package or lockstep versioning | Single version derived from any tag |
-
-**Why hatch-vcs + hatch-cada over uv-dynamic-versioning:**
-- hatch-cada properly handles workspace dependencies at build time
-- hatch-vcs is mature and well-documented
-- uv-dynamic-versioning's metadata hook is newer and less battle-tested for workspaces
-
-### Documentation
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| zensical | >=0.0.19 | Static site generator | Successor to Material for MkDocs by same team; 4-5x faster incremental builds; Rust + Python | MEDIUM |
-| mkdocstrings | latest | API documentation from docstrings | Standard for Python API docs; works with Zensical | HIGH |
-| mkdocstrings-python | latest | Python handler for mkdocstrings | Required for Python docstring extraction | HIGH |
-
-**Why Zensical over MkDocs:**
-- MkDocs is unmaintained since August 2024
-- Material for MkDocs entered maintenance mode (November 2025)
-- Zensical is the official successor, maintains compatibility with mkdocs.yml
-- New projects should use zensical.toml (not mkdocs.yml)
-
-**Caution:** Zensical is still Alpha (0.0.x). For maximum stability, Material for MkDocs 9.7.0 works but is in maintenance mode.
-
-### Code Quality & Linting
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| ruff | >=0.14.14 | Linting + formatting | Replaces flake8, isort, black; 200x faster; native notebook support | HIGH |
-| mypy | >=1.19.1 | Static type checking | Industry standard for Python typing; catches bugs pre-runtime | HIGH |
-| pre-commit | >=4.5.1 | Git hooks framework | Automates quality checks on commit | HIGH |
-
-**Why ruff replaces black + isort + flake8:**
-- Single tool, single configuration
-- 200x faster (Rust-based)
-- Native Jupyter notebook support (default since 0.6)
-- The current project already uses ruff
-
-### Testing
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| pytest | >=9.0.2 | Test framework | Industry standard; rich plugin ecosystem | HIGH |
-| pytest-cov | latest | Coverage reporting | Integrates coverage.py with pytest | HIGH |
-| hypothesis | latest | Property-based testing | Already in current project; good for scientific code | HIGH |
-
-**Testing with uv:**
-```bash
-uv run pytest                           # Run all tests
-uv run --package viscy-transforms pytest  # Run tests for specific package
-uv run -p 3.12 pytest                   # Test against specific Python version
-```
-
-### Scientific Computing Core
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| torch | >=2.4.1 | Deep learning framework | Required for GPU acceleration; already in project | HIGH |
-| kornia | latest | Differentiable image processing | GPU augmentations; integrates with PyTorch Lightning | HIGH |
-| monai | >=1.4 | Medical imaging transforms | Specialized augmentations for biomedical imaging | HIGH |
-| lightning | >=2.3 | Training framework | Already in project; integrates well with kornia | HIGH |
-
-### CI/CD & Deployment
-
-| Technology | Version | Purpose | Why | Confidence |
-|------------|---------|---------|-----|------------|
-| GitHub Actions | N/A | CI/CD pipeline | Native GitHub integration; free for open source | HIGH |
-| uv in CI | latest | Fast dependency installation | 10-100x faster CI runs | HIGH |
-| gh-pages | N/A | Documentation hosting | Free; integrates with Zensical | HIGH |
+The core stack is: **iohub + monai + lightning + torch + numpy** as required dependencies, with **tensorstore, tensordict, pycocotools, pandas, tifffile, torchvision** available through optional extras `[triplet]`, `[livecell]`, `[mmap]`, `[all]`.
 
 ---
 
-## Workspace Structure
+## Recommended Stack -- New Dependencies for viscy-data
 
-### Root pyproject.toml
+### Core Required Dependencies
+
+These are imported by the majority of modules and must be required (not optional).
+
+| Technology | Version | Purpose | Why This Version | Confidence |
+|------------|---------|---------|------------------|------------|
+| iohub | >=0.3a2 | OME-Zarr I/O (Plate, Position, ImageArray) | Matches original VisCy pinning; provides `open_ome_zarr`, `ngff` module used by 9 of 13 data modules | HIGH |
+| monai | >=1.5.2 | Transforms (Compose, MapTransform), data utilities (ThreadDataLoader, set_track_meta, collate_meta_tensor) | 1.5.2 is current (Jan 2026 release); used by 10 of 13 modules; aligns with viscy-transforms pin | HIGH |
+| lightning | >=2.3 | LightningDataModule base class | Every DataModule inherits from this; matches original VisCy pin | HIGH |
+| torch | >=2.10 | Tensor operations, DataLoader, Dataset, DDP | Aligns with viscy-transforms pin (>=2.10); needed by all modules | HIGH |
+| numpy | >=2.4.1 | Array operations | Aligns with viscy-transforms pin; iohub returns numpy arrays | HIGH |
+| zarr | * | Zarr store access | Imported directly in hcs.py for decompression caching; version managed transitively via iohub | HIGH |
+| imageio | * | Image reading (imread in hcs.py) | Used in hcs.py; lightweight; version managed transitively | MEDIUM |
+| viscy-transforms | (workspace) | BatchedCenterSpatialCropd | triplet.py imports this; one-way dependency (data -> transforms), no circular risk | HIGH |
+
+**Rationale for iohub >=0.3a2:** The original VisCy on main pins `iohub[tensorstore]>=0.3a2`. This is a pre-release version (alpha), which means the API may not be fully stable. However, VisCy has been using this version in production. The `[tensorstore]` extra on iohub itself is separate from our optional `[triplet]` extra -- iohub uses tensorstore for its own OME-Zarr v0.5 sharded access. We should pin `iohub>=0.3a2` as the base dependency and let users who need tensorstore-backed I/O install `viscy-data[triplet]` which includes both.
+
+**Rationale for monai >=1.5.2 (not >=1.4):** The original VisCy pinned >=1.4, but viscy-transforms already uses >=1.5.2. Since viscy-data depends on viscy-transforms, the effective floor is 1.5.2 anyway. Be explicit to avoid confusing lower bounds.
+
+### Optional Dependencies (Extras)
+
+These are imported by specific modules only and should be lazy-loaded with clear error messages.
+
+| Extra Group | Dependencies | Used By | Why Optional |
+|-------------|-------------|---------|--------------|
+| `[triplet]` | tensorstore, pandas | triplet.py, cell_classification.py | tensorstore is a large C++ library (~100MB+); pandas adds weight; only needed for contrastive learning pipelines |
+| `[livecell]` | pycocotools, tifffile, torchvision | livecell.py | pycocotools requires C compiler on some platforms; tifffile + torchvision only needed for LiveCell benchmark |
+| `[mmap]` | tensordict | mmap_cache.py | Part of torchrl ecosystem; only needed for memory-mapped caching strategy |
+| `[all]` | (union of above) | All modules | Convenience extra for users who want everything |
+
+#### Optional Dependency Versions
+
+| Technology | Version | Purpose | Platform Notes | Confidence |
+|------------|---------|---------|----------------|------------|
+| tensorstore | * | High-performance array I/O for triplet cache pool | C++ library; pre-built wheels for Linux/macOS x86_64/arm64, Windows x86_64; Python 3.11-3.12 confirmed, 3.13 support needs verification | MEDIUM |
+| tensordict | * | MemoryMappedTensor for mmap_cache.py | Part of PyTorch RL ecosystem; depends on torch; Python 3.11-3.12 confirmed | MEDIUM |
+| pycocotools | * | COCO annotation parsing for livecell.py | Requires C compiler for source build; pre-built wheels available on most platforms | HIGH |
+| pandas | * | DataFrame operations for tracks in triplet.py and cell_classification.py | Widely available; no platform issues | HIGH |
+| tifffile | * | TIFF file reading for livecell.py | Pure Python; no platform issues; version 2026.1.28 in lockfile | HIGH |
+| torchvision | * | box_convert utility in livecell.py | Single function import; already commonly installed with torch | HIGH |
+
+### Testing Dependencies
+
+| Technology | Version | Purpose | Why | Confidence |
+|------------|---------|---------|-----|------------|
+| pytest | >=9.0.2 | Test framework | Aligns with workspace standard | HIGH |
+| pytest-cov | >=7 | Coverage reporting | Aligns with workspace standard | HIGH |
+| iohub | >=0.3a2 | Test fixture creation (OME-Zarr stores) | conftest.py uses `open_ome_zarr` to create test stores; required for all data tests | HIGH |
+| pandas | * | Test fixtures for tracks datasets | conftest.py creates CSV track files with pandas DataFrames | HIGH |
+
+---
+
+## Python Version Compatibility Matrix
+
+| Dependency | Python 3.11 | Python 3.12 | Python 3.13 | Python 3.14 | Notes |
+|------------|-------------|-------------|-------------|-------------|-------|
+| torch >=2.10 | Yes | Yes | Yes | Yes | Wheels for all; 3.14 is new |
+| monai >=1.5.2 | Yes | Yes | Yes | Yes | Pure Python wheel (py3-none-any) |
+| lightning >=2.3 | Yes | Yes | Yes | Likely | Pure Python |
+| iohub >=0.3a2 | Yes | Yes | Likely | Unknown | Pre-release; limited metadata available |
+| tensorstore | Yes | Yes | LOW confidence | Unknown | C++ binary; historically slow to add new Python versions |
+| tensordict | Yes | Yes | LOW confidence | Unknown | C extension; tied to torch version cycle |
+| pycocotools | Yes | Yes | Likely | Unknown | C extension but well-maintained |
+| pandas | Yes | Yes | Yes | Yes | Broad support |
+| tifffile | Yes | Yes | Yes | Yes | Pure Python |
+| torchvision | Yes | Yes | Yes | Likely | Follows torch support |
+
+**Key risk:** tensorstore and tensordict have historically lagged in Python version support. This is mitigated by making them optional -- users on Python 3.13+ can still use the core package without `[triplet]` or `[mmap]` extras.
+
+---
+
+## pyproject.toml Specification
 
 ```toml
 [build-system]
-requires = ["hatchling"]
 build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "viscy-workspace"
-version = "0.0.0"
-requires-python = ">=3.11"
-description = "VisCy monorepo workspace root"
+name = "viscy-data"
+description = "Data loading and Lightning DataModules for virtual staining microscopy"
 readme = "README.md"
+keywords = [
+  "data loading",
+  "deep learning",
+  "lightning",
+  "microscopy",
+  "ome-zarr",
+  "virtual staining",
+]
 license = "BSD-3-Clause"
-
-[tool.uv.workspace]
-members = ["packages/*"]
-
-[tool.ruff]
-line-length = 88
-src = ["packages/*/src"]
-extend-exclude = ["examples", "applications"]
-
-[tool.ruff.lint]
-extend-select = ["I001"]
-
-[tool.mypy]
-python_version = "3.11"
-warn_return_any = true
-warn_unused_configs = true
-```
-
-### Package pyproject.toml (viscy-transforms example)
-
-```toml
-[build-system]
-requires = ["hatchling", "hatch-vcs", "hatch-cada"]
-build-backend = "hatchling.build"
-
-[project]
-name = "viscy-transforms"
-description = "GPU augmentation transforms for VisCy"
-readme = "README.md"
-license = "BSD-3-Clause"
-authors = [{ name = "CZ Biohub SF", email = "compmicro@czbiohub.org" }]
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
 requires-python = ">=3.11"
 classifiers = [
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
-    "Programming Language :: Python :: 3.13",
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
 ]
-dynamic = ["version"]
+dynamic = [ "version" ]
 dependencies = [
-    "torch>=2.4.1",
-    "kornia",
-    "monai>=1.4",
-    "numpy",
+  "iohub>=0.3a2",
+  "imageio",
+  "lightning>=2.3",
+  "monai>=1.5.2",
+  "numpy>=2.4.1",
+  "torch>=2.10",
+  "viscy-transforms",
+  "zarr",
 ]
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=9.0.2",
-    "pytest-cov",
-    "hypothesis",
-    "ruff>=0.14.14",
-    "mypy>=1.19.1",
+triplet = [
+  "pandas",
+  "tensorstore",
+]
+livecell = [
+  "pycocotools",
+  "tifffile",
+  "torchvision",
+]
+mmap = [
+  "tensordict",
+]
+all = [
+  "viscy-data[triplet,livecell,mmap]",
+]
+
+[project.urls]
+Homepage = "https://github.com/mehta-lab/VisCy"
+Issues = "https://github.com/mehta-lab/VisCy/issues"
+Repository = "https://github.com/mehta-lab/VisCy"
+
+[dependency-groups]
+dev = [ { include-group = "jupyter" }, { include-group = "test" } ]
+test = [
+  "pandas",
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+]
+jupyter = [
+  "ipykernel>=7.1",
+  "jupyterlab>=4.5.3",
 ]
 
 [tool.hatch.version]
-source = "vcs"
-
-[tool.hatch.version.raw-options]
-tag_regex = "^viscy-transforms@(?P<version>.*)$"
-search_parent_directories = true
-git_describe_command = ["git", "describe", "--tags", "--long", "--match", "viscy-transforms@*"]
-
-[tool.hatch.metadata.hooks.cada]
-strategy = "allow-all-updates"
+source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/viscy_transforms"]
+packages = [ "src/viscy_data" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-data-"
+fallback-version = "0.0.0"
 ```
 
-### Directory Structure
+### Root pyproject.toml Additions
 
-Per the [design doc](https://github.com/mehta-lab/VisCy/issues/353):
+```toml
+# Add to root [project] dependencies
+dependencies = [ "viscy-transforms", "viscy-data" ]
 
+# Add to root [tool.uv.sources]
+[tool.uv.sources]
+viscy-transforms = { workspace = true }
+viscy-data = { workspace = true }
+
+# Add to root [tool.ruff]
+# src already covers packages/*/src via glob
 ```
-viscy/
-├── pyproject.toml              # Workspace root (also the viscy meta-package)
-├── uv.lock                     # Shared lockfile
-├── zensical.toml               # Documentation config
-├── .pre-commit-config.yaml
-├── src/
-│   └── viscy/                  # Meta-package source (CLI, re-exports)
-│       ├── __init__.py
-│       └── cli.py
-├── packages/
-│   ├── viscy-transforms/       # First extraction (this milestone)
-│   │   ├── pyproject.toml      # Package-specific config
-│   │   ├── src/
-│   │   │   └── viscy_transforms/
-│   │   │       ├── __init__.py
-│   │   │       └── ...
-│   │   └── tests/
-│   ├── viscy-data/             # Future: dataloaders, Lightning DataModules
-│   ├── viscy-models/           # Future: unet, representation, translation
-│   └── viscy-airtable/         # Future: Airtable integration
-├── applications/               # Publications (CytoLand, DynaCLR, DynaCell)
-├── tests/                      # Integration tests for meta-package
-├── docs/
-│   ├── index.md
-│   └── api/
-└── .github/
-    └── workflows/
+
+---
+
+## Lazy Import Pattern for Optional Dependencies
+
+Modules with optional dependencies must use lazy imports with actionable error messages.
+
+```python
+# triplet.py -- example pattern
+def _import_tensorstore():
+    try:
+        import tensorstore as ts
+        return ts
+    except ImportError:
+        raise ImportError(
+            "tensorstore is required for TripletDataset. "
+            "Install with: pip install 'viscy-data[triplet]'"
+        ) from None
+
+# Usage: move import from module level into function/class that needs it
+# tensorstore is currently imported at module level in triplet.py --
+# this must be changed to lazy import at point of use.
+```
+
+**Modules requiring lazy import conversion:**
+
+| Module | Current Import | Lazy Import Target |
+|--------|---------------|-------------------|
+| triplet.py | `import tensorstore as ts` (top-level) | Defer to `TripletDataset.__init__()` or cache pool init |
+| triplet.py | `import pandas as pd` (top-level) | Defer to `TripletDataModule.setup()` |
+| mmap_cache.py | `from tensordict.memmap import MemoryMappedTensor` (top-level) | Defer to `MmappedDataset.__init__()` |
+| livecell.py | `from pycocotools.coco import COCO` (top-level) | Defer to `LiveCellTestDataset.__init__()` |
+| livecell.py | `from tifffile import imread` (top-level) | Defer to `LiveCellDataset.__init__()` |
+| livecell.py | `from torchvision.ops import box_convert` (top-level) | Defer to `LiveCellTestDataset.__init__()` |
+| cell_classification.py | `import pandas as pd` (top-level) | Defer to `ClassificationDataset.__init__()` |
+
+---
+
+## Testing Infrastructure
+
+### Shared Test Fixtures
+
+The existing `tests/conftest.py` on main provides session-scoped HCS OME-Zarr fixtures that viscy-data tests will need. These must be migrated to `packages/viscy-data/tests/conftest.py`.
+
+**Fixtures to migrate from main's conftest.py:**
+
+| Fixture | Scope | Creates | Used By |
+|---------|-------|---------|---------|
+| `preprocessed_hcs_dataset` | session | 2x4x4 HCS store with norm metadata, 12x256x256, float32, multiscale | test_hcs.py, test_select.py, test_triplet.py |
+| `small_hcs_dataset` | function | 2x4x4 HCS store, 12x64x64, uint16, parametrized sharded/non-sharded | test_hcs.py |
+| `small_hcs_labels` | function | 2-channel labels store, 12x64x64, uint16 | test_hcs.py |
+| `labels_hcs_dataset` | function | 2-channel store, 2x16x16, uint16 | test_hcs.py |
+| `tracks_hcs_dataset` | function | HCS store + tracks.csv per FOV | test_triplet.py |
+| `tracks_with_gaps_dataset` | function | HCS store + tracks with temporal gaps | test_triplet.py |
+
+**Key pattern:** All fixtures use `iohub.open_ome_zarr` with `layout="hcs"` to create synthetic test stores. The `_build_hcs` helper function encapsulates the store creation logic. This helper should be part of the test conftest.
+
+### Test Dependency Requirements
+
+viscy-data tests require at minimum:
+- `iohub>=0.3a2` -- for creating and reading test OME-Zarr stores
+- `pandas` -- for creating tracks fixtures (CSV files)
+- `pytest>=9.0.2` + `pytest-cov>=7` -- test runner
+
+**pandas in test group, not just [triplet]:** Even if pandas becomes optional for runtime, the test conftest needs it to create track fixtures. It belongs in the `[dependency-groups] test` group.
+
+### Test Categories by Dependency Tier
+
+| Test Tier | Deps Required | Modules Covered | CI Strategy |
+|-----------|---------------|----------------|-------------|
+| **Core** (always run) | iohub, monai, lightning, pandas | hcs.py, select.py, distributed.py, gpu_aug.py, combined.py, typing.py, segmentation.py, cell_classification.py | Default test matrix (3 OS x 3 Python) |
+| **Triplet** (conditional) | + tensorstore | triplet.py, cell_division_triplet.py | Skip with `pytest.importorskip("tensorstore")` if not installed |
+| **Mmap** (conditional) | + tensordict | mmap_cache.py | Skip with `pytest.importorskip("tensordict")` |
+| **LiveCell** (conditional) | + pycocotools, tifffile, torchvision | livecell.py | Skip with `pytest.importorskip("pycocotools")` |
+
+**CI strategy:** Run core tests in the standard matrix. Run optional-dep tests in a separate CI job that installs `viscy-data[all]`, or use `pytest.importorskip()` to gracefully skip.
+
+### Recommended CI Workflow Addition
+
+```yaml
+# In .github/workflows/test.yml -- add viscy-data job
+  test-data:
+    name: Test viscy-data (Python ${{ matrix.python-version }}, ${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          cache-suffix: data-${{ matrix.os }}-${{ matrix.python-version }}
+      - name: Install core deps
+        run: uv sync --frozen --dev
+        working-directory: packages/viscy-data
+      - name: Run core tests
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
+        working-directory: packages/viscy-data
+
+  test-data-extras:
+    name: Test viscy-data extras (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]  # Narrower matrix for optional deps
+    steps:
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+      - name: Install all extras
+        run: uv sync --frozen --all-extras --dev
+        working-directory: packages/viscy-data
+      - name: Run all tests
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
+        working-directory: packages/viscy-data
 ```
 
 ---
 
 ## Alternatives Considered
 
-### Build Backend Comparison
+### iohub Dependency Strategy
 
 | Category | Recommended | Alternative | Why Not Alternative |
 |----------|-------------|-------------|---------------------|
-| Build backend | hatchling | setuptools | setuptools is legacy; less extensible; requires more config |
-| Build backend | hatchling | uv_build | uv_build doesn't support plugins (yet); can't use hatch-vcs/hatch-cada |
-| Build backend | hatchling | poetry-core | Poetry doesn't integrate with uv workspaces |
+| iohub extras | `iohub>=0.3a2` (base) | `iohub[tensorstore]>=0.3a2` | iohub's own tensorstore extra is for its v0.5 sharded access; viscy-data's tensorstore usage in triplet.py is separate; don't force iohub's tensorstore on all users |
+| iohub version | `>=0.3a2` (pre-release) | Wait for stable release | Stable release timeline unknown; VisCy has used 0.3a2 in production |
 
-### Versioning Comparison
-
-| Category | Recommended | Alternative | Why Not Alternative |
-|----------|-------------|-------------|---------------------|
-| Versioning | hatch-vcs + hatch-cada | uv-dynamic-versioning | uv-dynamic-versioning is newer; hatch-cada handles workspace deps better |
-| Versioning | hatch-vcs + hatch-cada | setuptools-scm | setuptools-scm doesn't work with hatchling |
-
-### Documentation Comparison
+### Optional Dependency Grouping Strategy
 
 | Category | Recommended | Alternative | Why Not Alternative |
 |----------|-------------|-------------|---------------------|
-| Docs generator | zensical | mkdocs-material | MkDocs unmaintained; Material in maintenance mode |
-| Docs generator | zensical | sphinx | Sphinx is complex; RST vs Markdown; worse DX |
+| Extras structure | Per-pipeline (`[triplet]`, `[livecell]`, `[mmap]`) | Per-library (`[tensorstore]`, `[pandas]`) | Pipeline-oriented groups are more user-friendly; users know which pipeline they're running |
+| Extras structure | Per-pipeline | Single `[full]` extra | Loses granularity; forces heavy deps on LiveCell users who don't need tensorstore |
+| pandas placement | Optional in `[triplet]`, required in test group | Always required | pandas is ~30MB; only 2 of 13 modules need it at runtime; keep install lean |
 
-### Monorepo Tools Comparison
+### viscy-transforms Dependency
 
 | Category | Recommended | Alternative | Why Not Alternative |
 |----------|-------------|-------------|---------------------|
-| Build/publish | hatch-cada | una | hatch-cada is simpler; una adds another tool layer |
-| Build/publish | hatch-cada | pants/bazel | Massive complexity overhead for a scientific package |
+| Cross-package dep | Depend on viscy-transforms | Copy BatchedCenterSpatialCropd into viscy-data | Code duplication; divergence risk; the dependency is clean (one-way) |
+| Cross-package dep | Depend on viscy-transforms | Move BatchedCenterSpatialCropd to viscy-data | It's a transform, not a data class; belongs in viscy-transforms |
+
+### DictTransform Type Sharing
+
+| Category | Recommended | Alternative | Why Not Alternative |
+|----------|-------------|-------------|---------------------|
+| Shared type | Copy `DictTransform` alias into viscy-data `_typing.py` | Import from viscy-transforms | Adds coupling for a single type alias (`Callable`); copy is one line |
+| Shared type | Copy locally | Create viscy-types micro-package | Over-engineering for a type alias |
 
 ---
 
-## Installation Commands
+## What NOT to Add
 
-### Initial Setup
+| Technology | Why Not |
+|------------|---------|
+| **dask** | Not used anywhere in viscy data modules; OME-Zarr access goes through iohub, not dask arrays |
+| **xarray** | Was pinned in original VisCy for iohub compatibility (`<=2025.9`), but not directly imported by any data module; let iohub manage transitively |
+| **anndata** | Used in other VisCy modules (preprocessing), not in data modules |
+| **kornia** | Already in viscy-transforms; viscy-data does not import kornia directly |
+| **scikit-image** | Not imported by any data module |
+| **hypothesis** | Property-based testing is less applicable to data module tests (I/O heavy, fixture-dependent); standard pytest is sufficient |
+| **pytest-xdist** | Data tests are I/O-bound and use shared session fixtures; parallel execution risks fixture conflicts with temp zarr stores |
 
-```bash
-# Install uv (if not installed)
-curl -LsSf https://astral.sh/uv/install.sh | sh
+---
 
-# Create workspace
-uv init viscy-workspace
-cd viscy-workspace
-uv add --dev ruff mypy pre-commit pytest
+## Integration Points
 
-# Create first package
-mkdir -p packages/viscy-transforms/src/viscy_transforms
-# ... add pyproject.toml and code
+### viscy-transforms -> viscy-data
 
-# Sync all packages
-uv sync --all-packages
+```
+viscy_data.triplet imports:
+    viscy_transforms.BatchedCenterSpatialCropd
 ```
 
-### Package Development
+This is the sole cross-package import. In the uv workspace, this is handled by:
+1. Adding `"viscy-transforms"` to viscy-data's `dependencies`
+2. Adding `viscy-data = { workspace = true }` to root `[tool.uv.sources]`
 
-```bash
-# Install specific package in dev mode
-uv sync --package viscy-transforms
+### viscy-data -> downstream (viscy-models, applications)
 
-# Run tests for specific package
-uv run --package viscy-transforms pytest
+viscy-data will be consumed by:
+- `viscy-models` (future) -- engines reference DataModules for GPU transforms
+- `applications/` -- training configs reference DataModule classes
 
-# Build specific package
-uv build packages/viscy-transforms
+Import path change: `from viscy.data.hcs import HCSDataModule` becomes `from viscy_data.hcs import HCSDataModule`.
 
-# Publish (after tagging)
-git tag viscy-transforms@1.0.0
-uv build packages/viscy-transforms
-uv publish dist/viscy_transforms-1.0.0*
-```
+### Root Meta-package
 
-### Documentation
+```toml
+# Root pyproject.toml
+dependencies = [
+  "viscy-transforms",
+  "viscy-data",
+]
 
-```bash
-# Install zensical
-uv add --dev zensical mkdocstrings mkdocstrings-python
-
-# Serve locally
-uv run zensical serve
-
-# Build for deployment
-uv run zensical build
-
-# Deploy to GitHub Pages
-uv run zensical gh-deploy
+# Optional: expose all extras through meta-package
+[project.optional-dependencies]
+data-triplet = ["viscy-data[triplet]"]
+data-livecell = ["viscy-data[livecell]"]
+data-mmap = ["viscy-data[mmap]"]
+data-all = ["viscy-data[all]"]
 ```
 
 ---
 
-## Pre-commit Configuration
+## Version Pinning Philosophy
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.14.14
-    hooks:
-      - id: ruff-check
-        args: [--fix]
-      - id: ruff-format
-
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.19.1
-    hooks:
-      - id: mypy
-        additional_dependencies: [torch, numpy]
-        args: [--ignore-missing-imports]
-```
-
----
-
-## Migration Notes
-
-### From Current VisCy Setup
-
-The current VisCy uses:
-- `setuptools` + `setuptools-scm` -> Replace with `hatchling` + `hatch-vcs` + `hatch-cada`
-- `write_to = "viscy/_version.py"` -> Use `importlib.metadata.version()` instead
-- Single package -> Workspace with multiple packages
-
-### Key Breaking Changes
-
-1. **Version file location**: No more `_version.py` generation; use `importlib.metadata`
-2. **Import paths**: `from viscy.transforms import X` becomes `from viscy_transforms import X`
-3. **Installation**: `pip install viscy` remains for full suite; individual packages available as `pip install viscy-transforms`, `pip install viscy-data`, etc.
+| Category | Strategy | Rationale |
+|----------|----------|-----------|
+| Core (torch, monai, numpy, lightning) | Floor pin (`>=X.Y`) | These are aligned with viscy-transforms; users may need newer versions for other packages |
+| iohub | Floor pin (`>=0.3a2`) | Pre-release but stable in practice; no upper bound to allow future stable releases |
+| Optional (tensorstore, tensordict, etc.) | No version pin | Let solver pick compatible version; these change independently and version conflicts are unlikely |
+| Test deps (pytest, pytest-cov) | Floor pin (`>=X.Y`) | Match workspace standard |
 
 ---
 
@@ -360,36 +428,34 @@ The current VisCy uses:
 
 | Gap | Impact | Mitigation |
 |-----|--------|------------|
-| Zensical is Alpha | May have bugs | Can fall back to mkdocs-material 9.7.0 |
-| hatch-cada is new (v1.0.1) | Limited community testing | Well-documented; simple plugin |
-| uv workspace IDE support | VSCode/Pylance may not understand workspace | Configure pyrightconfig.json |
-| No official uv monorepo docs | Limited guidance | Follow patterns from pydantic-ai, MCP SDK |
+| iohub is pre-release (0.3a2) | API instability risk | Pin >=0.3a2; iohub is maintained by the same lab (CZ Biohub); monitor for stable release |
+| tensorstore Python 3.13 support | May not have wheels | Make optional; CI extras tests only on 3.11-3.12 |
+| tensordict Python 3.13 support | May not have wheels | Make optional; same mitigation as tensorstore |
+| No data tests exist for livecell, mmap_cache, gpu_aug, combined | Test coverage gaps | Write new tests during extraction; existing hcs/select/triplet tests are a good foundation |
+| iohub's zarr dependency version | Potential zarr v2 vs v3 conflicts | iohub manages zarr transitively; don't pin zarr version explicitly |
+| xarray version pin | Original VisCy had `xarray<=2025.9` for iohub compat | Don't add xarray to viscy-data; it's iohub's transitive dep to manage |
 
 ---
 
 ## Sources
 
-### Official Documentation (HIGH confidence)
-- [uv Workspaces Documentation](https://docs.astral.sh/uv/concepts/projects/workspaces/)
-- [Hatchling PyPI](https://pypi.org/project/hatchling/) - v1.28.0 (Nov 2025)
-- [Zensical Documentation](https://zensical.org/docs/get-started/)
-- [Zensical PyPI](https://pypi.org/project/zensical/) - v0.0.19 (Jan 2026)
+### Codebase (HIGH confidence)
+- `viscy/data/README.md` (modular-data branch) -- Module inventory, dependency per module, class hierarchy
+- `main:viscy/data/*.py` -- Actual import statements for all 13 modules (verified via git show)
+- `main:tests/conftest.py` -- Test fixture patterns for HCS OME-Zarr stores
+- `main:tests/data/test_hcs.py`, `test_select.py`, `test_triplet.py` -- Existing data test coverage
+- `main:pyproject.toml` -- Original dependency pins: `iohub[tensorstore]>=0.3a2`, `monai>=1.4`, `lightning>=2.3`
+- `packages/viscy-transforms/pyproject.toml` -- Precedent for package structure: `monai>=1.5.2`, `torch>=2.10`, `numpy>=2.4.1`
 
-### GitHub Repositories (HIGH confidence)
-- [hatch-cada](https://github.com/bilelomrani1/hatch-cada) - v1.0.1 (Jan 2026)
-- [uv-dynamic-versioning](https://github.com/ninoseki/uv-dynamic-versioning) - v0.13.0 (Jan 2026)
-- [ruff-pre-commit](https://github.com/astral-sh/ruff-pre-commit) - v0.14.14
+### Lock File (HIGH confidence)
+- `uv.lock` -- Resolved versions: monai 1.5.2 (Jan 2026), torch 2.10.0, numpy 2.4.2, tifffile 2026.1.28, kornia 0.8.2
 
-### Community Resources (MEDIUM confidence)
-- [Python Workspaces (Monorepos)](https://tomasrepcik.dev/blog/2025/2025-10-26-python-workspaces/)
-- [uv Monorepo Best Practices Issue](https://github.com/astral-sh/uv/issues/10960)
-- [Dynamic Versioning and Automated Releases](https://slhck.info/software/2025/10/01/dynamic-versioning-uv-projects.html)
-- [Modern Python Code Quality Setup](https://simone-carolini.medium.com/modern-python-code-quality-setup-uv-ruff-and-mypy-8038c6549dcc)
-- [Scientific Python Development Guide](https://learn.scientific-python.org/development/guides/style/)
+### Existing Research (HIGH confidence)
+- `.planning/research/STACK.md` (v1) -- Workspace tooling decisions (hatchling, uv-dynamic-versioning, CI patterns)
+- `.planning/ROADMAP.md` -- Phase structure and completion status for Milestone 1
 
-### Tool Version References (HIGH confidence)
-- ruff v0.14.14 (Jan 22, 2026)
-- pytest v9.0.2 (Dec 6, 2025)
-- mypy v1.19.1 (Dec 15, 2025)
-- pre-commit v4.5.1 (Dec 16, 2025)
-- hatch-cada v1.0.1 (Jan 12, 2026)
+### Unverified (LOW confidence -- web search and fetch unavailable)
+- tensorstore Python 3.13 wheel availability
+- tensordict Python 3.13 wheel availability
+- iohub latest stable release status
+- pycocotools platform wheel coverage for arm64 Linux
