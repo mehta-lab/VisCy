@@ -9,9 +9,8 @@
 #SBATCH --mem-per-cpu=7G
 #SBATCH --time=0-01:00:00
 
-module load anaconda/latest
-# Update to use the actual prefix
-conda activate dynaclr
+# TODO: point to the path to your uv workspace
+WORKSPACE_DIR=/path/to/viscy
 
 scontrol show job $SLURM_JOB_ID
 
@@ -19,4 +18,5 @@ scontrol show job $SLURM_JOB_ID
 config=./predict.yml
 cat $config
 
-viscy predict -c $config
+# Run the prediction CLI (viscy is provided by viscy-utils)
+uv run --project "$WORKSPACE_DIR" --package dynacrl viscy predict -c $config

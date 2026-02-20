@@ -32,6 +32,7 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "iohub>=0.3a2",
+  "jsonargparse[signatures]>=4.26",
   "lightning>=2.3",
   "matplotlib>=3.10",
   "numpy>=2.4.1",
@@ -52,6 +53,7 @@ optional-dependencies.eval = [
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+scripts.viscy = "viscy_utils.cli:main"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]

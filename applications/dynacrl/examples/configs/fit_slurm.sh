@@ -20,10 +20,8 @@ function cleanup() {
 trap cleanup EXIT
 
 
-# TODO: Activate the conda environment - specfic to your installation!
-# TODO: You'll need to replace this path with path to your own conda environment
-module load anaconda/latest
-conda activate dynaclr
+# TODO: point to the path to your uv workspace
+WORKSPACE_DIR=/path/to/viscy
 
 # TODO: point to the path to the config file
 config=./fit.yml
@@ -32,8 +30,8 @@ config=./fit.yml
 scontrol show job $SLURM_JOB_ID
 cat $config
 
-# Run the training CLI
-viscy fit -c $config
+# Run the training CLI (viscy is provided by viscy-utils)
+uv run --project "$WORKSPACE_DIR" --package dynacrl viscy fit -c $config
 
 # Tips:
 # 1. Run this script with `sbatch fit_slurm.sh`
