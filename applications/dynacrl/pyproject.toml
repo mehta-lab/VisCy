@@ -48,10 +48,10 @@ optional-dependencies.eval = [
   "umap-learn",
   "wandb",
 ]
-scripts.dynaclr = "dynacrl.cli:main"
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
+scripts.dynaclr = "dynacrl.cli:main"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
@@ -59,6 +59,7 @@ test = [
   "pandas",
   "pytest>=9.0.2",
   "pytest-cov>=7",
+  "tensorboard",
   "tensorstore",
 ]
 
