@@ -1,10 +1,7 @@
 """PCA, UMAP, and PHATE dimensionality reduction."""
 
 import pandas as pd
-import umap
 from numpy.typing import NDArray
-from sklearn.decomposition import PCA
-from sklearn.preprocessing import StandardScaler
 from xarray import Dataset
 
 
@@ -45,15 +42,13 @@ def compute_phate(
     try:
         import phate
     except ImportError:
-        raise ImportError(
-            "PHATE is not available. Install with: pip install viscy-utils[eval]"
-        )
+        raise ImportError("PHATE is not available. Install with: pip install viscy-utils[eval]")
 
     embeddings = (
-        embedding_dataset["features"].values
-        if isinstance(embedding_dataset, Dataset)
-        else embedding_dataset
+        embedding_dataset["features"].to_numpy() if isinstance(embedding_dataset, Dataset) else embedding_dataset
     )
+
+    from sklearn.preprocessing import StandardScaler
 
     if scale_embeddings:
         scaler = StandardScaler()
@@ -73,7 +68,7 @@ def compute_phate(
 
     if update_dataset and isinstance(embedding_dataset, Dataset):
         for i in range(min(2, phate_embedding.shape[1])):
-            embedding_dataset[f"PHATE{i + 1}"].values = phate_embedding[:, i]
+            embedding_dataset[f"PHATE{i + 1}"].values = phate_embedding[:, i]  # noqa: PD011
 
     return phate_model, phate_embedding
 
@@ -96,10 +91,11 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
         PCA embeddings and PCA DataFrame.
     """
     embeddings = (
-        embedding_dataset["features"].values
-        if isinstance(embedding_dataset, Dataset)
-        else embedding_dataset
+        embedding_dataset["features"].to_numpy() if isinstance(embedding_dataset, Dataset) else embedding_dataset
     )
+
+    from sklearn.decomposition import PCA
+    from sklearn.preprocessing import StandardScaler
 
     if normalize_features:
         scaled_features = StandardScaler().fit_transform(embeddings)
@@ -111,10 +107,10 @@ def compute_pca(embedding_dataset, n_components=None, normalize_features=True):
 
     if isinstance(embedding_dataset, Dataset):
         pca_dict = {
-            "id": embedding_dataset["id"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
-            "t": embedding_dataset["t"].values,
-            "track_id": embedding_dataset["track_id"].values,
+            "id": embedding_dataset["id"].to_numpy(),
+            "fov_name": embedding_dataset["fov_name"].to_numpy(),
+            "t": embedding_dataset["t"].to_numpy(),
+            "track_id": embedding_dataset["track_id"].to_numpy(),
         }
     else:
         pca_dict = {}
@@ -132,20 +128,19 @@ def _fit_transform_umap(
     n_components: int = 2,
     n_neighbors: int = 15,
     normalize: bool = True,
-) -> tuple[umap.UMAP, NDArray]:
+):
     """Fit UMAP model and transform embeddings."""
+    import umap
+    from sklearn.preprocessing import StandardScaler
+
     if normalize:
         embeddings = StandardScaler().fit_transform(embeddings)
-    umap_model = umap.UMAP(
-        n_components=n_components, n_neighbors=n_neighbors, random_state=42
-    )
+    umap_model = umap.UMAP(n_components=n_components, n_neighbors=n_neighbors, random_state=42)
     umap_embedding = umap_model.fit_transform(embeddings)
     return umap_model, umap_embedding
 
 
-def compute_umap(
-    embedding_dataset: Dataset, normalize_features: bool = True
-) -> tuple[umap.UMAP, umap.UMAP, pd.DataFrame]:
+def compute_umap(embedding_dataset: Dataset, normalize_features: bool = True):
     """Compute UMAP embeddings for features and projections.
 
     Parameters
@@ -160,22 +155,20 @@ def compute_umap(
     tuple[umap.UMAP, umap.UMAP, pd.DataFrame]
         UMAP models for features and projections, and DataFrame.
     """
-    features = embedding_dataset["features"].values
-    projections = embedding_dataset["projections"].values
+    features = embedding_dataset["features"].to_numpy()
+    projections = embedding_dataset["projections"].to_numpy()
 
-    umap_features, umap_features_embedding = _fit_transform_umap(
-        features, n_components=2, normalize=normalize_features
-    )
+    umap_features, umap_features_embedding = _fit_transform_umap(features, n_components=2, normalize=normalize_features)
     umap_projection, umap_projection_embedding = _fit_transform_umap(
         projections, n_components=2, normalize=normalize_features
     )
 
     umap_df = pd.DataFrame(
         {
-            "id": embedding_dataset["id"].values,
-            "track_id": embedding_dataset["track_id"].values,
-            "t": embedding_dataset["t"].values,
-            "fov_name": embedding_dataset["fov_name"].values,
+            "id": embedding_dataset["id"].to_numpy(),
+            "track_id": embedding_dataset["track_id"].to_numpy(),
+            "t": embedding_dataset["t"].to_numpy(),
+            "fov_name": embedding_dataset["fov_name"].to_numpy(),
             "UMAP1": umap_features_embedding[:, 0],
             "UMAP2": umap_features_embedding[:, 1],
             "UMAP1_proj": umap_projection_embedding[:, 0],
