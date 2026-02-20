@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-19)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 18 — Training Validation (v2.1) COMPLETE
+**Current focus:** Phase 19 — Inference Reproducibility (v2.1) COMPLETE
 
 ## Current Position
 
-Phase: 18 of 19 (Training Validation)
+Phase: 19 of 19 (Inference Reproducibility)
 Plan: 1 of 1 in current phase (COMPLETE)
-Status: Phase 18 complete, ready for Phase 19
-Last activity: 2026-02-20 — Completed 18-01 training integration tests
+Status: All phases complete. v2.1 milestone finished.
+Last activity: 2026-02-20 — Completed 19-01 inference reproducibility tests
 
-Progress: [===================░] 95% (18/19 phases complete)
+Progress: [====================] 100% (19/19 phases complete)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 26 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 1) + v2.0 manual phases
+- Total plans completed: 27 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -29,7 +29,7 @@ Progress: [===================░] 95% (18/19 phases complete)
 | v1.1 Data | 6-9 | 9 | modular-data |
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
-| v2.1 Validation | 18-19 | 1 done | app-dynaclr |
+| v2.1 Validation | 18-19 | 2 done | app-dynaclr |
 
 ## Accumulated Context
 
@@ -45,16 +45,17 @@ Key decisions carrying forward:
 - TensorBoardLogger with tmp_path for integration tests instead of logger=False (exercises full logging pipeline)
 - Workspace exclude needed for non-package application directories (benchmarking, contrastive_phenotyping, qc)
 - Synthetic data shape (1,1,4,4) required for render_images compatibility in tests
+- GPU tolerance: atol=0.02, rtol=1e-2 with Pearson r>0.999 for cross-environment reproducibility
+- Lazy imports in EmbeddingWriter to avoid hard umap/phate/sklearn dependency for basic prediction
 
 ### Blockers/Concerns
 
-- Checkpoint + reference output paths needed from user during Phase 19 implementation
-- fast_dev_run synthetic data pattern established and working (blocker resolved)
+- All blockers resolved. v2.1 milestone complete.
 
 ## Session Continuity
 
 Last session: 2026-02-20
-Stopped at: Completed 18-01-PLAN.md (training integration tests)
+Stopped at: Completed 19-01-PLAN.md (inference reproducibility tests) - v2.1 COMPLETE
 Resume file: None
 
 ---
