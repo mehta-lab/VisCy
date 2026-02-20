@@ -147,6 +147,26 @@
 - [x] **APP-01-DEP-01**: wandb, anndata, natsort in dynacrl [eval] optional dependencies
 - [x] **APP-01-DEP-02**: Workspace-level uv configuration updated
 
+## v2.1 Requirements
+
+Requirements for DynaCLR integration validation. Each maps to roadmap phases.
+
+### Training
+
+- [ ] **TRAIN-01**: ContrastiveModule completes a training loop via `fast_dev_run` without errors
+- [ ] **TRAIN-02**: YAML training configs (fit.yml, predict.yml) parse and instantiate correctly with new import paths
+
+### Inference
+
+- [ ] **INFER-01**: ContrastiveModule loads a pretrained checkpoint in the modular structure
+- [ ] **INFER-02**: Prediction (predict step) writes embeddings via EmbeddingWriter callback
+- [ ] **INFER-03**: Predicted embeddings are an exact match against saved reference outputs
+
+### Test Infrastructure
+
+- [ ] **TEST-01**: Training and inference checks are permanent pytest integration tests
+- [ ] **TEST-02**: Tests are runnable via `uv run --package dynacrl pytest`
+
 ## Future Requirements
 
 Deferred to v2.0+ milestones. Tracked but not in current roadmap.
@@ -229,14 +249,28 @@ Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 | APP-01-EX-01 through APP-01-EX-07 | Phase 17 | Complete |
 | APP-01-DEP-01, APP-01-DEP-02 | Phase 17 | Complete |
 
+### v2.1 (0/7 complete)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| TRAIN-01 | — | Pending |
+| TRAIN-02 | — | Pending |
+| INFER-01 | — | Pending |
+| INFER-02 | — | Pending |
+| INFER-03 | — | Pending |
+| TEST-01 | — | Pending |
+| TEST-02 | — | Pending |
+
 **Coverage:**
 - v1.0: 18 requirements, 18 complete
 - v1.1: 12 requirements, 12 complete
 - v1.2: 24 requirements, 24 complete
 - v2.0: 22 requirements, 22 complete
-- **Total: 76 requirements shipped**
+- v2.1: 7 requirements, 0 complete
+- **Total: 83 requirements (76 shipped, 7 pending)**
 
 ---
 *Requirements defined: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
 *Updated for v2.0 DynaCLR: 2026-02-17*
+*Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
