@@ -215,7 +215,10 @@ Plans:
   3. The predicted embeddings are numerically identical (exact match) to saved reference embeddings produced by the original monolithic code
   4. All training and inference integration tests are permanent pytest tests (not standalone scripts) living in `applications/dynacrl/tests/`
   5. The full test suite passes when invoked via `uv run --package dynacrl pytest`
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 19-01-PLAN.md — Inference reproducibility tests (checkpoint loading, embedding prediction, exact match)
 
 ### v2.0+ Remaining Applications (Phases TBD)
 
@@ -249,7 +252,7 @@ Phases execute in numeric order: 18 -> 19
 | 16. DynaCLR App Core | v2.0 | manual | Complete | 2026-02-17 |
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
 | 18. Training Validation | v2.1 | Complete    | 2026-02-20 | - |
-| 19. Inference Reproducibility | v2.1 | 0/TBD | Not started | - |
+| 19. Inference Reproducibility | v2.1 | 0/1 | In Progress | - |
 
 **Total plans executed:** 25 (v1.0: 7, v1.1: 9, v1.2: 9) + 3 manual phases (v2.0)
 
