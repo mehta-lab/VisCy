@@ -39,10 +39,9 @@ viz_config = {
 
 ## Usage
 
-After setting up the environment, activate it and run the demo script:
+After [installing DynaCLR](../../../README.md), run the demo script:
 
 ```bash
-conda activate dynaclr
 python interactive_visualizer.py
 ```
 

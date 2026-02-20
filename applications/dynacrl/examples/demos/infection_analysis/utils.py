@@ -122,9 +122,7 @@ def plot_phate_time_trajectories(
             for fov_name, track_id in track_list:
                 # Get all timepoints up to current time for this track
                 track_data = df[
-                    (df["fov_name"] == fov_name)
-                    & (df["track_id"] == track_id)
-                    & (df["t"] <= t)
+                    (df["fov_name"] == fov_name) & (df["track_id"] == track_id) & (df["t"] <= t)
                 ].sort_values("t")
 
                 if len(track_data) > 0:
@@ -133,9 +131,7 @@ def plot_phate_time_trajectories(
 
                     if len(track_data) > 1:
                         # Use the arrow function that works with PHATE1/PHATE2 columns
-                        add_arrows(
-                            track_data, color, df_coordinates=["PHATE1", "PHATE2"]
-                        )
+                        add_arrows(track_data, color, df_coordinates=["PHATE1", "PHATE2"])
 
                     # Mark current position with a larger point
                     current_pos = track_data[track_data["t"] == t]
@@ -207,9 +203,7 @@ def plot_phate_time_trajectories(
 
         # Save figure
         plt.tight_layout()
-        plt.savefig(
-            f"{output_dir}/phate_embedding_t{t:03d}.png", dpi=300, bbox_inches="tight"
-        )
+        plt.savefig(f"{output_dir}/phate_embedding_t{t:03d}.png", dpi=300, bbox_inches="tight")
 
         # Only show the first frame in the notebook
         if t == all_times[0]:
@@ -286,18 +280,10 @@ def create_plotly_visualization(
 
     # Calculate global axis limits
     padding = 0.1
-    x_min = df[df_coordinates[0]].min() - padding * (
-        df[df_coordinates[0]].max() - df[df_coordinates[0]].min()
-    )
-    x_max = df[df_coordinates[0]].max() + padding * (
-        df[df_coordinates[0]].max() - df[df_coordinates[0]].min()
-    )
-    y_min = df[df_coordinates[1]].min() - padding * (
-        df[df_coordinates[1]].max() - df[df_coordinates[1]].min()
-    )
-    y_max = df[df_coordinates[1]].max() + padding * (
-        df[df_coordinates[1]].max() - df[df_coordinates[1]].min()
-    )
+    x_min = df[df_coordinates[0]].min() - padding * (df[df_coordinates[0]].max() - df[df_coordinates[0]].min())
+    x_max = df[df_coordinates[0]].max() + padding * (df[df_coordinates[0]].max() - df[df_coordinates[0]].min())
+    y_min = df[df_coordinates[1]].min() - padding * (df[df_coordinates[1]].max() - df[df_coordinates[1]].min())
+    y_max = df[df_coordinates[1]].max() + padding * (df[df_coordinates[1]].max() - df[df_coordinates[1]].min())
 
     # Make sure the aspect ratio is 1:1
     x_range = x_max - x_min
@@ -318,16 +304,12 @@ def create_plotly_visualization(
             track_key = f"{category}_{fov_name}_{track_id}"
             print(f"Processing track: {track_key}")
             # Get all data for this track
-            full_track_data = df[
-                (df["fov_name"] == fov_name) & (df["track_id"] == track_id)
-            ].sort_values(time_column)
+            full_track_data = df[(df["fov_name"] == fov_name) & (df["track_id"] == track_id)].sort_values(time_column)
 
             print(f"Found {len(full_track_data)} points for track {track_key}")
             if len(full_track_data) > 0:
                 track_data_cache[track_key] = full_track_data
-                print(
-                    f"Time points for {track_key}: {sorted(full_track_data[time_column].unique())}"
-                )
+                print(f"Time points for {track_key}: {sorted(full_track_data[time_column].unique())}")
             else:
                 print(f"WARNING: No data found for track {track_key}")
 
@@ -356,11 +338,7 @@ def create_plotly_visualization(
             )
         else:
             # Empty trace as placeholder
-            frame_data.append(
-                go.Scatter(
-                    x=[], y=[], mode="markers", name="Historical", showlegend=False
-                )
-            )
+            frame_data.append(go.Scatter(x=[], y=[], mode="markers", name="Historical", showlegend=False))
 
         # Current time data
         current_df = df[df[time_column] == t]
@@ -381,7 +359,10 @@ def create_plotly_visualization(
                         ),
                         name=category_labels.get(category, f"Category {category}"),
                         hovertext=[
-                            f"FOV: {row['fov_name']}, Track: {row['track_id']}, {category_labels.get(category, f'Category {category}')}"
+                            (
+                                f"FOV: {row['fov_name']}, Track: {row['track_id']}, "
+                                f"{category_labels.get(category, f'Category {category}')}"
+                            )
                             for _, row in category_points.iterrows()
                         ],
                         hoverinfo="text",
@@ -437,7 +418,8 @@ def create_plotly_visualization(
 
                             if t_idx == 0:
                                 print(
-                                    f"No current position for {track_key} at time {t}, using last known at {latest_pos[time_column].iloc[0]}"
+                                    f"No current position for {track_key} at time {t}, "
+                                    f"using last known at {latest_pos[time_column].iloc[0]}"
                                 )
 
                             # Add a semi-transparent marker at the last known position
@@ -454,7 +436,10 @@ def create_plotly_visualization(
                                     ),
                                     name=f"Last Known Position - {label}",
                                     hovertext=[
-                                        f"FOV: {row['fov_name']}, Track: {row['track_id']}, Last Seen at t={row[time_column]}, {label}"
+                                        (
+                                            f"FOV: {row['fov_name']}, Track: {row['track_id']}, "
+                                            f"Last Seen at t={row[time_column]}, {label}"
+                                        )
                                         for _, row in latest_pos.iterrows()
                                     ],
                                     hoverinfo="text",
@@ -464,9 +449,7 @@ def create_plotly_visualization(
                         else:
                             # Normal case - we have data at current timepoint
                             if t_idx == 0:
-                                print(
-                                    f"Found current position for {track_key} at time {t}"
-                                )
+                                print(f"Found current position for {track_key} at time {t}")
 
                             frame_data.append(
                                 go.Scatter(
@@ -571,9 +554,7 @@ def create_plotly_visualization(
                     ],
                 }
             ],
-            legend=dict(
-                orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1
-            ),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         ),
     )
 
@@ -633,13 +614,8 @@ def create_image_visualization(
     # Get all available timepoints from all conditions
     all_timepoints = []
     for condition_key in condition_keys:
-        if (
-            condition_key in image_cache
-            and "images_by_timepoint" in image_cache[condition_key]
-        ):
-            all_timepoints.extend(
-                list(image_cache[condition_key]["images_by_timepoint"].keys())
-            )
+        if condition_key in image_cache and "images_by_timepoint" in image_cache[condition_key]:
+            all_timepoints.extend(list(image_cache[condition_key]["images_by_timepoint"].keys()))
 
     all_timepoints = sorted(list(set(all_timepoints)))
     print(f"All timepoints: {all_timepoints}")
@@ -662,10 +638,7 @@ def create_image_visualization(
 
     # Add each condition as a row
     for row_idx, condition_key in enumerate(condition_keys, 1):
-        if (
-            condition_key in image_cache
-            and t_initial in image_cache[condition_key]["images_by_timepoint"]
-        ):
+        if condition_key in image_cache and t_initial in image_cache[condition_key]["images_by_timepoint"]:
             img = image_cache[condition_key]["images_by_timepoint"][t_initial]
 
             # Add each channel as a column
@@ -725,10 +698,7 @@ def create_image_visualization(
         frame_data = []
 
         for condition_key in condition_keys:
-            if (
-                condition_key in image_cache
-                and t in image_cache[condition_key]["images_by_timepoint"]
-            ):
+            if condition_key in image_cache and t in image_cache[condition_key]["images_by_timepoint"]:
                 img = image_cache[condition_key]["images_by_timepoint"][t]
 
                 for colormap in channel_colormaps:
@@ -829,12 +799,8 @@ def create_image_visualization(
     # Update axes to hide ticks and labels
     for row in range(1, len(condition_keys) + 1):
         for col in range(1, len(channel_colormaps) + 1):
-            fig.update_xaxes(
-                showticklabels=False, showgrid=False, zeroline=False, row=row, col=col
-            )
-            fig.update_yaxes(
-                showticklabels=False, showgrid=False, zeroline=False, row=row, col=col
-            )
+            fig.update_xaxes(showticklabels=False, showgrid=False, zeroline=False, row=row, col=col)
+            fig.update_yaxes(showticklabels=False, showgrid=False, zeroline=False, row=row, col=col)
 
     return fig
 
@@ -859,8 +825,9 @@ def create_combined_visualization(
     title_location="inside",
 ):
     """
-    Creates a combined visualization with cell images and PHATE embeddings with a shared time slider.
-    All plots are arranged side by side in one row.
+    Create a combined visualization with cell images and PHATE embeddings.
+
+    All plots are arranged side by side in one row with a shared time slider.
 
     Parameters
     ----------
@@ -895,39 +862,20 @@ def create_combined_visualization(
 
     all_timepoints_images = set()
     for condition_key in condition_keys:
-        if (
-            condition_key in image_cache
-            and "images_by_timepoint" in image_cache[condition_key]
-        ):
-            all_timepoints_images.update(
-                image_cache[condition_key]["images_by_timepoint"].keys()
-            )
+        if condition_key in image_cache and "images_by_timepoint" in image_cache[condition_key]:
+            all_timepoints_images.update(image_cache[condition_key]["images_by_timepoint"].keys())
 
     all_timepoints_imagenet = set(imagenet_df["t"].unique())
     all_timepoints_dynaclr = set(dynaclr_df["t"].unique())
 
-    all_timepoints = sorted(
-        list(
-            all_timepoints_images.intersection(
-                all_timepoints_imagenet, all_timepoints_dynaclr
-            )
-        )
-    )
+    all_timepoints = sorted(list(all_timepoints_images.intersection(all_timepoints_imagenet, all_timepoints_dynaclr)))
 
     if not all_timepoints:
         print("No common timepoints found across all datasets")
-        all_timepoints = sorted(
-            list(
-                all_timepoints_images.union(
-                    all_timepoints_imagenet, all_timepoints_dynaclr
-                )
-            )
-        )
+        all_timepoints = sorted(list(all_timepoints_images.union(all_timepoints_imagenet, all_timepoints_dynaclr)))
 
-    def create_phate_traces(
-        df: pd.DataFrame, t: int, df_coordinates: list[str] = ["PHATE1", "PHATE2"]
-    ):
-        """Creates PHATE plot traces for a specific timepoint"""
+    def create_phate_traces(df: pd.DataFrame, t: int, df_coordinates: list[str] = ["PHATE1", "PHATE2"]):
+        """Create PHATE plot traces for a specific timepoint."""
         traces = []
 
         historical_df = df[df["t"] < t]
@@ -964,7 +912,10 @@ def create_combined_visualization(
                         ),
                         name=category_labels.get(category, f"Category {category}"),
                         hovertext=[
-                            f"FOV: {row['fov_name']}, Track: {row['track_id']}, {category_labels.get(category, f'Category {category}')}"
+                            (
+                                f"FOV: {row['fov_name']}, Track: {row['track_id']}, "
+                                f"{category_labels.get(category, f'Category {category}')}"
+                            )
                             for _, row in category_points.iterrows()
                         ],
                         hoverinfo="text",
@@ -977,9 +928,7 @@ def create_combined_visualization(
         for category, track_list in highlight_tracks.items():
             for fov_name, track_id in track_list:
                 track_data = df[
-                    (df["fov_name"] == fov_name)
-                    & (df["track_id"] == track_id)
-                    & (df["t"] <= t)
+                    (df["fov_name"] == fov_name) & (df["track_id"] == track_id) & (df["t"] <= t)
                 ].sort_values("t")
 
                 if len(track_data) > 0:
@@ -1027,18 +976,10 @@ def create_combined_visualization(
 
     def get_phate_limits(df, df_coordinates=["PHATE1", "PHATE2"]):
         padding = 0.1
-        x_min = df[df_coordinates[0]].min() - padding * (
-            df[df_coordinates[0]].max() - df[df_coordinates[0]].min()
-        )
-        x_max = df[df_coordinates[0]].max() + padding * (
-            df[df_coordinates[0]].max() - df[df_coordinates[0]].min()
-        )
-        y_min = df[df_coordinates[1]].min() - padding * (
-            df[df_coordinates[1]].max() - df[df_coordinates[1]].min()
-        )
-        y_max = df[df_coordinates[1]].max() + padding * (
-            df[df_coordinates[1]].max() - df[df_coordinates[1]].min()
-        )
+        x_min = df[df_coordinates[0]].min() - padding * (df[df_coordinates[0]].max() - df[df_coordinates[0]].min())
+        x_max = df[df_coordinates[0]].max() + padding * (df[df_coordinates[0]].max() - df[df_coordinates[0]].min())
+        y_min = df[df_coordinates[1]].min() - padding * (df[df_coordinates[1]].max() - df[df_coordinates[1]].min())
+        y_max = df[df_coordinates[1]].max() + padding * (df[df_coordinates[1]].max() - df[df_coordinates[1]].min())
 
         x_range = x_max - x_min
         y_range = y_max - y_min
@@ -1071,10 +1012,7 @@ def create_combined_visualization(
         from matplotlib import cm
 
         for row_idx, condition_key in enumerate(condition_keys):
-            if (
-                condition_key in image_cache
-                and t in image_cache[condition_key]["images_by_timepoint"]
-            ):
+            if condition_key in image_cache and t in image_cache[condition_key]["images_by_timepoint"]:
                 img = image_cache[condition_key]["images_by_timepoint"][t]
 
                 for col_idx, colormap in enumerate(channel_colormaps):
@@ -1104,15 +1042,11 @@ def create_combined_visualization(
                                 dx=(x_coords[-1] - x_coords[0]) / rgb_img.shape[1],
                                 dy=(y_coords[-1] - y_coords[0]) / rgb_img.shape[0],
                                 colormodel="rgb",
-                                name=subplot_titles[
-                                    row_idx * len(channel_colormaps) + col_idx
-                                ],
+                                name=subplot_titles[row_idx * len(channel_colormaps) + col_idx],
                             )
                         )
                     else:
-                        warnings.warn(
-                            f"Channel {col_idx} does not exist in image cache for timepoint {t}"
-                        )
+                        warnings.warn(f"Channel {col_idx} does not exist in image cache for timepoint {t}")
 
         return traces
 
@@ -1154,12 +1088,8 @@ def create_combined_visualization(
             col=1,
         )
 
-    main_fig.update_xaxes(
-        range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1
-    )
-    main_fig.update_yaxes(
-        range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1
-    )
+    main_fig.update_xaxes(range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1)
+    main_fig.update_yaxes(range=[0, 1], showticklabels=False, showgrid=False, zeroline=False, row=1, col=1)
 
     main_fig.update_xaxes(title="PHATE1", range=imagenet_limits[:2], row=1, col=2)
     main_fig.update_yaxes(

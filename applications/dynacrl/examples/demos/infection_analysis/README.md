@@ -20,13 +20,25 @@ The `demo_infection.py` script demonstrates:
 - **Trajectory Analysis**: Visualize and track cell trajectories over time
 - **Infection State Analysis**: See how different models capture infection dynamics
 
+## Setup
+
+### Download demo data
+
+The `download_data.sh` script downloads the test dataset. By default it saves to `~/data/dynaclr/demo`. You can specify a custom output directory:
+
+```bash
+# Default output directory
+bash download_data.sh
+
+# Custom output directory
+bash download_data.sh /path/to/output
+```
+
+For installation instructions, see the [DynaCLR README](../../../README.md).
 
 ## Usage
 
-After [setting up the environment and downloading the data](../README.md#setup), activate it and run the demo script:
-
 ```bash
-conda activate dynaclr
 python demo_infection.py
 ```
 

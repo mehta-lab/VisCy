@@ -1,3 +1,5 @@
+"""Demo: compare DynaCLR vs ImageNet embeddings for cell infection analysis."""
+
 # %% [markdown]
 # # Demo: Comparing DynaCLR vs ImageNet Embeddings for Cell Infection Analysis
 #
@@ -15,10 +17,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 from skimage.exposure import rescale_intensity
-
 from utils import (
     create_combined_visualization,
 )
+
 from viscy_data.triplet import TripletDataModule
 from viscy_utils.callbacks.embedding_writer import read_embedding_dataset
 
@@ -29,29 +31,21 @@ from viscy_utils.callbacks.embedding_writer import read_embedding_dataset
 #
 # ## Note:
 #
-# Alternatively, you can run the CLI to compute the features yourself by following the instructions in the [README.md](./README.md)
+# Alternatively, you can run the CLI to compute the features yourself
+# by following the instructions in the [README.md](./README.md)
 
 # %%
 # TODO: Update the paths to the downloaded data
 # Point to the *.zarr files
 download_root = Path.home() / "data/dynaclr/demo"
-input_data_path = (
-    download_root / "registered_test.zarr"
-)  # Replace with path to registered_test.zarr
+input_data_path = download_root / "registered_test.zarr"  # Replace with path to registered_test.zarr
 tracks_path = download_root / "track_test.zarr"  # Replace with path to  track_test.zarr
-ann_path = (
-    download_root / "extracted_inf_state.csv"
-)  # Replace with path to extracted_inf_state.csv
+ann_path = download_root / "extracted_inf_state.csv"  # Replace with path to extracted_inf_state.csv
 
 # TODO: Update the path to the DynaCLR and ImageNet features
 # Point to the precomputed embeddings
-dynaclr_features_path = (
-    download_root / "precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
-)
-imagenet_features_path = (
-    download_root
-    / "precomputed_embeddings/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
-)
+dynaclr_features_path = download_root / "precomputed_embeddings/infection_160patch_94ckpt_rev6_dynaclr.zarr"
+imagenet_features_path = download_root / "precomputed_embeddings/20240204_A549_DENV_ZIKV_sensor_only_imagenet.zarr"
 
 # %% [markdown]
 # ## Load the embeddings and annotations
@@ -63,9 +57,7 @@ dynaclr_embeddings = read_embedding_dataset(dynaclr_features_path)
 imagenet_embeddings = read_embedding_dataset(imagenet_features_path)
 
 dynaclr_features_df = dynaclr_embeddings["sample"].to_dataframe().reset_index(drop=True)
-imagenet_features_df = (
-    imagenet_embeddings["sample"].to_dataframe().reset_index(drop=True)
-)
+imagenet_features_df = imagenet_embeddings["sample"].to_dataframe().reset_index(drop=True)
 
 # Load the annotations and create a dataframe with the infection state
 annotation = pd.read_csv(ann_path)
@@ -95,7 +87,8 @@ dynaclr_features_df = dynaclr_features_df[dynaclr_features_df["infection"] != 0]
 # ## Choose a representative track for visualization
 
 # %%
-# NOTE: We have chosen these tracks to be representative of the data. Feel free to open the dataset and select other tracks
+# NOTE: We have chosen these tracks to be representative of the data.
+# Feel free to open the dataset and select other tracks
 fov_name_mock = "/A/3/9"
 track_id_mock = [19]
 fov_name_inf = "/B/4/9"
@@ -130,8 +123,7 @@ for condition, condition_data in conditions_to_compare.items():
         z_range=z_range,
         initial_yx_patch_size=yx_patch_size,
         final_yx_patch_size=yx_patch_size,
-        include_fov_names=condition_data["fov_name_list"]
-        * len(condition_data["track_id_list"]),
+        include_fov_names=condition_data["fov_name_list"] * len(condition_data["track_id_list"]),
         include_track_ids=condition_data["track_id_list"],
         predict_cells=True,
         batch_size=1,
@@ -157,13 +149,12 @@ for condition, condition_data in conditions_to_compare.items():
         z_idx = images.shape[1] // 2
         C, Z, Y, X = images.shape
         image_out = np.zeros((C, 1, Y, X), dtype=np.float32)
-        # NOTE: here we are using the default percentile range for the RFP channel, change if using different channels or this threshold does not work
+        # NOTE: default percentile range for the RFP channel,
+        # change if using different channels or this threshold does not work
         for c_idx, channel in enumerate(channels_to_display):
             if channel in ["Phase3D", "DIC", "BF"]:
                 image_out[c_idx] = images[c_idx, z_idx]
-                image_out[c_idx] = (
-                    image_out[c_idx] - image_out[c_idx].mean()
-                ) / image_out[c_idx].std()
+                image_out[c_idx] = (image_out[c_idx] - image_out[c_idx].mean()) / image_out[c_idx].std()
                 image_out[c_idx] = rescale_intensity(image_out[c_idx], out_range=(0, 1))
             else:
                 image_out[c_idx] = np.max(images[c_idx], axis=0)
@@ -173,9 +164,7 @@ for condition, condition_data in conditions_to_compare.items():
 
         image_cache[condition_key]["images_by_timepoint"][t] = image_out
 
-    print(
-        f"Cached {condition_key} with {len(image_cache[condition_key]['images_by_timepoint'])} timepoints"
-    )
+    print(f"Cached {condition_key} with {len(image_cache[condition_key]['images_by_timepoint'])} timepoints")
 
 # %%
 print("Creating Cell Images and PHATE Embeddings Visualization...")

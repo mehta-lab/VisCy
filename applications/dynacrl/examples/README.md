@@ -1,38 +1,31 @@
-# DynaCLR Demos
+# DynaCLR Examples
 
-This directory contains examples and demos to embed cellular dynamics using DynaCLR.
+## Quick start
 
-## Available Demos
+- [quickstart/](quickstart/) — Get started with model inference in Python
 
-- [ImageNet vs DynaCLR embeddings (cell infection)](DynaCLR-DENV-VS-Ph/README.md)
-- [Embedding visualization](embedding-web-visualization/README.md)
+## Demos
 
-## Setup
+- [demos/infection_analysis/](demos/infection_analysis/) — Compare ImageNet vs DynaCLR-DENV-VS+Ph embeddings for cell infection analysis
+- [demos/embedding_explorer/](demos/embedding_explorer/) — Interactive web-based embedding visualization with Plotly Dash
 
-To run the demos, you need to download the data and activate the environment.
+## Data preparation
 
-> **Note**: The `download_data.sh` script downloads data to `{$HOME}/data/dynaclr/demo` by default. Modify the script to download the data to a different directory if needed.
+- [data_preparation/classical_sampling/](data_preparation/classical_sampling/) — Generate pseudo-tracking data from 2D segmentation masks for classical triplet sampling
 
-```bash
-# To setup the environment
-bash setup.sh
+## Configs
 
-# To download the data
-bash download_data.sh
-```
+- [configs/](configs/) — Training (`fit.yml`), prediction (`predict.yml`), and ONNX export (`export_onnx.yml`) configuration files, plus SLURM submission scripts
 
 ## Generate DynaCLR Embeddings
 
-For this demo, we will use the `DynaCLR-DENV-VS-Ph` model as an example.
-
 The datasets and config files for the models can be found:
--  [Test datasets](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/)
--  [Models](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/)
-
+- [Test datasets](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_data/)
+- [Models](https://public.czbiohub.org/comp.micro/viscy/DynaCLR_models/)
 
 ### Modify the Config File
 
-Open the `dynaclr_denv-vs-ph_test_data.yml` and modify the following to point to your download:
+Open the prediction config and modify the following to point to your download:
 
 Replace the output path where you want to save the xarray `.zarr` file with the embeddings:
 
@@ -49,17 +42,12 @@ Point to the downloaded checkpoint for the desired model (e.g., `DynaCLR-DENV-VS
 ckpt_path: '/downloaded.ckpt'  # Point to ckpt file
 ```
 
----
-### DynaCLR with classical triplet sampling
-
-To train DynaCLR models using the classical triplet sampling, you need to generate pseudo-tracking data from 2D segmentation masks.
-
-These pseudo-tracks are used to run the same. For more information: [README.md](./DynaCLR-classical-sampling/README.md)
-
 ### Exporting DynaCLR models
 
 To export DynaCLR models to ONNX run:
 
-`viscy export -c config.yml`
+```bash
+viscy export -c config.yml
+```
 
-The `config.yml` is similar to the `fit.yml` which describes the model. An example can be found [here](./configs/dynaclr_microglia_onnx.yml).
+An example config can be found at [`configs/export_onnx.yml`](configs/export_onnx.yml).

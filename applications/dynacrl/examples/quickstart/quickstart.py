@@ -1,3 +1,4 @@
+# ruff: noqa
 # %% [markdown]
 """
 # Quickstart: DynaCLR
@@ -278,9 +279,7 @@ mi = pd.MultiIndex.from_arrays(
     ],
     names=["fov_name", "track_id", "t"],
 )
-features_anndata.obs["annotations_infections_state"] = annotation_indexed.reindex(mi)[
-    ANNOTATION_COLUMN
-].values
+features_anndata.obs["annotations_infections_state"] = annotation_indexed.reindex(mi)[ANNOTATION_COLUMN].values
 
 # Plot the PCA and PHATE embeddings colored by infection state
 # Prepare data for plotting
@@ -293,9 +292,7 @@ plot_df = pd.DataFrame(
         "PC2": features_anndata.obsm["X_pca"][:, 1],
         "PHATE1": features_anndata.obsm["X_phate"][:, 0],
         "PHATE2": features_anndata.obsm["X_phate"][:, 1],
-        "infection_state": features_anndata.obs["annotations_infections_state"]
-        .fillna(0)
-        .map(infection_state_labels),
+        "infection_state": features_anndata.obs["annotations_infections_state"].fillna(0).map(infection_state_labels),
     }
 )
 
@@ -399,12 +396,10 @@ channels_to_display_idx = [channel_names.index(c) for c in channels_to_display]
 
 # Filter the centroids of these two tracks
 filtered_centroid_mock = features_anndata.obs[
-    (features_anndata.obs["fov_name"] == fov_name_mock)
-    & (features_anndata.obs["track_id"].isin(track_id_mock))
+    (features_anndata.obs["fov_name"] == fov_name_mock) & (features_anndata.obs["track_id"].isin(track_id_mock))
 ].sort_values("t")
 filtered_centroid_inf = features_anndata.obs[
-    (features_anndata.obs["fov_name"] == fov_name_inf)
-    & (features_anndata.obs["track_id"].isin(track_id_inf))
+    (features_anndata.obs["fov_name"] == fov_name_inf) & (features_anndata.obs["track_id"].isin(track_id_inf))
 ].sort_values("t")
 
 # Define patch size for visualization
@@ -417,9 +412,7 @@ uinfected_stack = []
 for idx, row in filtered_centroid_mock.iterrows():
     t = int(row["t"])
     # Load the image data for this timepoint (CZYX format), select only required channels
-    img_data = uninfected_position.data[
-        t, channels_to_display_idx, z_range[0] : z_range[1]
-    ]
+    img_data = uninfected_position.data[t, channels_to_display_idx, z_range[0] : z_range[1]]
     # For Phase3D take middle slice, for fluorescence take max projection
     cyx = []
     for ch_idx, ch_name in enumerate(channels_to_display):
@@ -439,9 +432,7 @@ infected_stack = []
 for idx, row in filtered_centroid_inf.iterrows():
     t = int(row["t"])
     # Load the image data for this timepoint (CZYX format), select only required channels
-    img_data = infected_position.data[
-        t, channels_to_display_idx, z_range[0] : z_range[1]
-    ]
+    img_data = infected_position.data[t, channels_to_display_idx, z_range[0] : z_range[1]]
     # For Phase3D take middle slice, for fluorescence take max projection
     cyx = []
     for ch_idx, ch_name in enumerate(channels_to_display):

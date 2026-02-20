@@ -3,23 +3,22 @@
 import logging
 from pathlib import Path
 
-from numpy.random import seed
+import numpy as np
 
 from viscy_utils.evaluation.visualization import EmbeddingVisualizationApp
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-seed(42)
+np.random.seed(42)  # noqa: NPY002
 
 
 def main():
-    """Main function to run the visualization app."""
-
+    """Run the embedding visualization app."""
     # Config for the visualization app
     # TODO: Update the paths to the downloaded data. By default the data is downloaded to ~/data/dynaclr/demo
     download_root = Path.home() / "data/dynaclr/demo"
-    output_path = Path.home() / "data/dynaclr/demo/embedding-web-visualization"
+    output_path = Path.home() / "data/dynaclr/demo/embedding_explorer"
     viz_config = {
         "data_path": download_root / "registered_test.zarr",  # TODO add path to data
         "tracks_path": download_root / "track_test.zarr",  # TODO add path to tracks
