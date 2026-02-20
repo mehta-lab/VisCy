@@ -920,6 +920,7 @@ eval = [
 
 [package.dev-dependencies]
 dev = [
+    { name = "anndata" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -927,6 +928,7 @@ dev = [
     { name = "tensorstore" },
 ]
 test = [
+    { name = "anndata" },
     { name = "pandas" },
     { name = "pytest" },
     { name = "pytest-cov" },
@@ -954,6 +956,7 @@ provides-extras = ["eval"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anndata" },
     { name = "pandas" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
@@ -961,6 +964,7 @@ dev = [
     { name = "tensorstore" },
 ]
 test = [
+    { name = "anndata" },
     { name = "pandas" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
