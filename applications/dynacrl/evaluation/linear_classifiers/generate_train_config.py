@@ -22,16 +22,12 @@ embeddings_dir = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics"
 annotations_dir = Path("/hpc/projects/organelle_phenotyping/datasets/annotations")
 model = "DynaCLR-2D-Bag*Channels-timeaware"
 version = "v3"
-output_dir = Path(
-    "/hpc/projects/organelle_phenotyping/models/linear_classifiers/configs"
-)
+output_dir = Path("/hpc/projects/organelle_phenotyping/models/linear_classifiers/configs")
 wandb_project = "DynaCLR-2D-linearclassifiers"
 
 # %%
 # --- Discover datasets ---
-registry, skipped, annotations_only, predictions_only = build_registry(
-    embeddings_dir, annotations_dir, model, version
-)
+registry, skipped, annotations_only, predictions_only = build_registry(embeddings_dir, annotations_dir, model, version)
 print_registry_summary(registry, skipped, annotations_only, predictions_only)
 
 # %%
@@ -89,10 +85,7 @@ print(f"\n## Generated Configs ({len(generated)} total)\n")
 print("| Task | Channel | Datasets | File |")
 print("|------|---------|----------|------|")
 for entry in generated:
-    print(
-        f"| {entry['task']} | {entry['channel']} "
-        f"| {entry['n_datasets']} | `{entry['filename']}` |"
-    )
+    print(f"| {entry['task']} | {entry['channel']} | {entry['n_datasets']} | `{entry['filename']}` |")
 
 # %%
 # --- Write YAML configs ---

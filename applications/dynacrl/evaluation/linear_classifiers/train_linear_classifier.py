@@ -35,12 +35,8 @@ def format_metrics_markdown(metrics: dict) -> str:
     """
     lines = ["## Classification Metrics", ""]
 
-    train_metrics = {
-        k.replace("train_", ""): v for k, v in metrics.items() if k.startswith("train_")
-    }
-    val_metrics = {
-        k.replace("val_", ""): v for k, v in metrics.items() if k.startswith("val_")
-    }
+    train_metrics = {k.replace("train_", ""): v for k, v in metrics.items() if k.startswith("train_")}
+    val_metrics = {k.replace("val_", ""): v for k, v in metrics.items() if k.startswith("val_")}
 
     if train_metrics:
         lines.append("### Training Set")

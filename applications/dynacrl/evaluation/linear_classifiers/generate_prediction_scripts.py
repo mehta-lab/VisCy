@@ -31,17 +31,13 @@ ckpt_path = (
 
 # %%
 # --- Discover datasets and gaps ---
-registry, skipped, annotations_only, predictions_only = build_registry(
-    embeddings_dir, annotations_dir, model, version
-)
+registry, skipped, annotations_only, predictions_only = build_registry(embeddings_dir, annotations_dir, model, version)
 print_registry_summary(registry, skipped, annotations_only, predictions_only)
 
 # %%
 # --- Pick reference dataset ---
 if not registry:
-    raise RuntimeError(
-        "No reference dataset found with both predictions and annotations."
-    )
+    raise RuntimeError("No reference dataset found with both predictions and annotations.")
 
 reference_dataset = registry[0]["dataset"]
 reference_pred_dir = registry[0]["predictions_dir"]
@@ -60,53 +56,31 @@ generation_skipped: list[dict] = []
 for target_dataset in annotations_only:
     target_base = embeddings_dir / target_dataset
     if not target_base.is_dir():
-        generation_skipped.append(
-            {"dataset": target_dataset, "reason": "No directory in embeddings_dir"}
-        )
+        generation_skipped.append({"dataset": target_dataset, "reason": "No directory in embeddings_dir"})
         continue
 
     phenotyping_matches = natsorted(glob(str(target_base / "*phenotyping*")))
     if not phenotyping_matches:
-        generation_skipped.append(
-            {"dataset": target_dataset, "reason": "No *phenotyping* directory"}
-        )
+        generation_skipped.append({"dataset": target_dataset, "reason": "No *phenotyping* directory"})
         continue
     phenotyping_dir = Path(phenotyping_matches[0])
 
     # Find existing predictions parent or default to "predictions"
     pred_parent_matches = natsorted(glob(str(phenotyping_dir / "*prediction*")))
-    pred_parent = (
-        Path(pred_parent_matches[0])
-        if pred_parent_matches
-        else phenotyping_dir / "predictions"
-    )
+    pred_parent = Path(pred_parent_matches[0]) if pred_parent_matches else phenotyping_dir / "predictions"
     target_pred_dir = pred_parent / reference_model_dir / version
 
     # Verify data_path and tracks_path exist
-    data_path_matches = natsorted(
-        glob(str(phenotyping_dir / "train-test" / f"{target_dataset}*.zarr"))
-    )
+    data_path_matches = natsorted(glob(str(phenotyping_dir / "train-test" / f"{target_dataset}*.zarr")))
     tracks_path_matches = natsorted(
-        glob(
-            str(
-                target_base
-                / "1-preprocess"
-                / "label-free"
-                / "3-track"
-                / f"{target_dataset}*cropped.zarr"
-            )
-        )
+        glob(str(target_base / "1-preprocess" / "label-free" / "3-track" / f"{target_dataset}*cropped.zarr"))
     )
 
     if not data_path_matches:
-        generation_skipped.append(
-            {"dataset": target_dataset, "reason": "No train-test zarr found"}
-        )
+        generation_skipped.append({"dataset": target_dataset, "reason": "No train-test zarr found"})
         continue
     if not tracks_path_matches:
-        generation_skipped.append(
-            {"dataset": target_dataset, "reason": "No tracking zarr found"}
-        )
+        generation_skipped.append({"dataset": target_dataset, "reason": "No tracking zarr found"})
         continue
 
     generated_files = []

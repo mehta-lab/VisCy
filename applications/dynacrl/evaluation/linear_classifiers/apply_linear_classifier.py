@@ -43,9 +43,7 @@ def format_predictions_markdown(adata, task: str) -> str:
         lines.append("")
         counts = adata.obs[pred_col].value_counts().sort_index()
         class_counts = {str(k): int(v) for k, v in counts.items()}
-        lines.append(
-            format_markdown_table(class_counts, headers=["Class", "Count"]).strip()
-        )
+        lines.append(format_markdown_table(class_counts, headers=["Class", "Count"]).strip())
         lines.append("")
 
         lines.append(f"**Total predictions:** {len(adata)}")

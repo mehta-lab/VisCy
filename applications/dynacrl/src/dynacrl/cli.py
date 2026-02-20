@@ -18,9 +18,7 @@ class LazyCommand(click.Command):
     def __init__(self, name, import_path, help=None, short_help=None):
         self.import_path = import_path
         self._real_command = None
-        super().__init__(
-            name=name, help=help, short_help=short_help, callback=self._callback
-        )
+        super().__init__(name=name, help=help, short_help=short_help, callback=self._callback)
 
     def _load_real_command(self):
         if self._real_command is None:
@@ -34,7 +32,7 @@ class LazyCommand(click.Command):
         real_cmd = self._load_real_command()
         return real_cmd.callback(*args, **kwargs)
 
-    def get_params(self, ctx):
+    def get_params(self, ctx):  # noqa: D102
         try:
             _ensure_evaluation_importable()
             real_cmd = self._load_real_command()
@@ -78,7 +76,7 @@ dynaclr.add_command(
 
 
 def main():
-    """Main entry point for DynaCLR CLI."""
+    """Run the DynaCLR CLI."""
     dynaclr()
 
 

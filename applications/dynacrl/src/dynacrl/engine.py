@@ -9,6 +9,7 @@ import torch.nn.functional as F
 from lightning.pytorch import LightningModule
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
+
 from viscy_data._typing import TrackingIndex, TripletSample
 from viscy_models.contrastive import ContrastiveEncoder
 from viscy_models.vae import BetaVae25D, BetaVaeMonai
@@ -31,9 +32,9 @@ class ContrastiveModule(LightningModule):
     def __init__(
         self,
         encoder: nn.Module | ContrastiveEncoder,
-        loss_function: (
-            nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss
-        ) = nn.TripletMarginLoss(margin=0.5),
+        loss_function: (nn.Module | nn.CosineEmbeddingLoss | nn.TripletMarginLoss | NTXentLoss) = nn.TripletMarginLoss(
+            margin=0.5
+        ),
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
@@ -57,7 +58,7 @@ class ContrastiveModule(LightningModule):
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
 
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path)["state_dict"])
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections."""
@@ -79,9 +80,7 @@ class ContrastiveModule(LightningModule):
         _logger.debug(f"{phase}/positive_norm: {positive_norm}")
         _logger.debug(f"{phase}/negative_norm: {negative_norm}")
 
-    def _log_metrics(
-        self, loss, anchor, positive, stage: Literal["train", "val"], negative=None
-    ):
+    def _log_metrics(self, loss, anchor, positive, stage: Literal["train", "val"], negative=None):
         self.log(
             f"loss/{stage}",
             loss.to(self.device),
@@ -101,12 +100,8 @@ class ContrastiveModule(LightningModule):
         if negative is not None:
             euclidean_dist_neg = F.pairwise_distance(anchor, negative).mean()
             cosine_sim_neg = F.cosine_similarity(anchor, negative, dim=1).mean()
-            log_metric_dict[f"metrics/cosine_similarity_negative/{stage}"] = (
-                cosine_sim_neg
-            )
-            log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = (
-                euclidean_dist_neg
-            )
+            log_metric_dict[f"metrics/cosine_similarity_negative/{stage}"] = cosine_sim_neg
+            log_metric_dict[f"metrics/euclidean_distance_negative/{stage}"] = euclidean_dist_neg
         elif isinstance(self.loss_function, NTXentLoss):
             if self.current_epoch % self.log_negative_metrics_every_n_epochs == 0:
                 batch_size = anchor.size(0)
@@ -153,17 +148,11 @@ class ContrastiveModule(LightningModule):
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
         grid = render_images(imgs, cmaps=["gray"] * 3)
-        self.logger.experiment.add_image(
-            key, grid, self.current_epoch, dataformats="HWC"
-        )
+        self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
 
     def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
         if batch_idx < self.log_batches_per_epoch:
-            output_list = (
-                self.training_step_outputs
-                if stage == "train"
-                else self.validation_step_outputs
-            )
+            output_list = self.training_step_outputs if stage == "train" else self.validation_step_outputs
             output_list.extend(detach_sample(samples, self.log_samples_per_batch))
 
     def log_embedding_umap(self, embeddings: Tensor, tag: str):
@@ -180,16 +169,14 @@ class ContrastiveModule(LightningModule):
             tag=f"{tag}_umap",
         )
 
-    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         anchor_img = batch["anchor"]
         pos_img = batch["positive"]
         _, anchor_projection = self(anchor_img)
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
-            indices = torch.arange(
-                0, anchor_projection.size(0), device=anchor_projection.device
-            )
+            indices = torch.arange(0, anchor_projection.size(0), device=anchor_projection.device)
             labels = torch.cat((indices, indices))
             embeddings = torch.cat((anchor_projection, positive_projection))
             loss = self.loss_function(embeddings, labels)
@@ -197,9 +184,7 @@ class ContrastiveModule(LightningModule):
         else:
             neg_img = batch["negative"]
             _, negative_projection = self(neg_img)
-            loss = self.loss_function(
-                anchor_projection, positive_projection, negative_projection
-            )
+            loss = self.loss_function(anchor_projection, positive_projection, negative_projection)
             self._log_step_samples(batch_idx, (anchor_img, pos_img, neg_img), "train")
         self._log_metrics(
             loss=loss,
@@ -210,21 +195,19 @@ class ContrastiveModule(LightningModule):
         )
         return loss
 
-    def on_train_epoch_end(self) -> None:
+    def on_train_epoch_end(self) -> None:  # noqa: D102
         super().on_train_epoch_end()
         self._log_samples("train_samples", self.training_step_outputs)
         self.training_step_outputs = []
 
-    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         anchor = batch["anchor"]
         pos_img = batch["positive"]
         _, anchor_projection = self(anchor)
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
-            indices = torch.arange(
-                0, anchor_projection.size(0), device=anchor_projection.device
-            )
+            indices = torch.arange(0, anchor_projection.size(0), device=anchor_projection.device)
             labels = torch.cat((indices, indices))
             embeddings = torch.cat((anchor_projection, positive_projection))
             loss = self.loss_function(embeddings, labels)
@@ -232,9 +215,7 @@ class ContrastiveModule(LightningModule):
         else:
             neg_img = batch["negative"]
             _, negative_projection = self(neg_img)
-            loss = self.loss_function(
-                anchor_projection, positive_projection, negative_projection
-            )
+            loss = self.loss_function(anchor_projection, positive_projection, negative_projection)
             self._log_step_samples(batch_idx, (anchor, pos_img, neg_img), "val")
         self._log_metrics(
             loss=loss,
@@ -245,19 +226,17 @@ class ContrastiveModule(LightningModule):
         )
         return loss
 
-    def on_validation_epoch_end(self) -> None:
+    def on_validation_epoch_end(self) -> None:  # noqa: D102
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
 
-    def configure_optimizers(self):
+    def configure_optimizers(self):  # noqa: D102
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
-    def predict_step(
-        self, batch: TripletSample, batch_idx, dataloader_idx=0
-    ) -> ContrastivePrediction:
-        """Prediction step for extracting embeddings."""
+    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> ContrastivePrediction:
+        """Extract embeddings from anchor images."""
         features, projections = self.model(batch["anchor"])
         return {
             "features": features,
@@ -305,9 +284,7 @@ class BetaVaeModule(LightningModule):
         self.example_input_array = torch.rand(*example_input_array_shape)
 
         self.log_enhanced_visualizations = log_enhanced_visualizations
-        self.log_enhanced_visualizations_frequency = (
-            log_enhanced_visualizations_frequency
-        )
+        self.log_enhanced_visualizations_frequency = log_enhanced_visualizations_frequency
         self.training_step_outputs = []
         self.validation_step_outputs = []
 
@@ -319,22 +296,17 @@ class BetaVaeModule(LightningModule):
             latent_dim = self.model.latent_dim
         elif hasattr(self.model, "latent_size"):
             latent_dim = self.model.latent_size
-        elif hasattr(self.model, "encoder") and hasattr(
-            self.model.encoder, "latent_dim"
-        ):
+        elif hasattr(self.model, "encoder") and hasattr(self.model.encoder, "latent_dim"):
             latent_dim = self.model.encoder.latent_dim
 
         if latent_dim is not None:
             self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
         else:
-            _logger.warning(
-                "No latent dimension provided for BetaVaeLogger. "
-                "Using default with 128 dimensions."
-            )
+            _logger.warning("No latent dimension provided for BetaVaeLogger. Using default with 128 dimensions.")
             self.vae_logger = BetaVaeLogger()
 
     def setup(self, stage: str = None):
-        """Setup hook to initialize device-dependent components."""
+        """Initialize device-dependent components."""
         super().setup(stage)
         self.vae_logger.setup(device=self.device)
 
@@ -347,10 +319,7 @@ class BetaVaeModule(LightningModule):
 
         if self.beta_schedule == "linear":
             if epoch < self.beta_warmup_epochs:
-                beta_val = (
-                    self.beta_min
-                    + (self.beta - self.beta_min) * epoch / self.beta_warmup_epochs
-                )
+                beta_val = self.beta_min + (self.beta - self.beta_min) * epoch / self.beta_warmup_epochs
                 return max(beta_val, self._min_beta)
             else:
                 return max(self.beta, self._min_beta)
@@ -360,9 +329,7 @@ class BetaVaeModule(LightningModule):
                 import math
 
                 progress = epoch / self.beta_warmup_epochs
-                beta_val = self.beta_min + (self.beta - self.beta_min) * 0.5 * (
-                    1 + math.cos(math.pi * (1 - progress))
-                )
+                beta_val = self.beta_min + (self.beta - self.beta_min) * 0.5 * (1 + math.cos(math.pi * (1 - progress)))
                 return max(beta_val, self._min_beta)
             else:
                 return max(self.beta, self._min_beta)
@@ -397,30 +364,17 @@ class BetaVaeModule(LightningModule):
         current_beta = self._get_current_beta()
         batch_size = original_shape[0]
 
-        x_original = (
-            x
-            if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1)
-            else x.unsqueeze(2)
-        )
+        x_original = x if not (is_monai_2d and len(original_shape) == 5 and original_shape[2] == 1) else x.unsqueeze(2)
         recon_loss = self.loss_function(recon_x, x_original)
         if isinstance(self.loss_function, nn.MSELoss):
-            if (
-                hasattr(self.loss_function, "reduction")
-                and self.loss_function.reduction == "sum"
-            ):
+            if hasattr(self.loss_function, "reduction") and self.loss_function.reduction == "sum":
                 recon_loss = recon_loss / batch_size
-            elif (
-                hasattr(self.loss_function, "reduction")
-                and self.loss_function.reduction == "mean"
-            ):
+            elif hasattr(self.loss_function, "reduction") and self.loss_function.reduction == "mean":
                 num_elements_per_image = x_original[0].numel()
                 recon_loss = recon_loss * num_elements_per_image
 
         kl_loss = -0.5 * torch.sum(
-            1
-            + torch.clamp(logvar, self._logvar_minmax[0], self._logvar_minmax[1])
-            - mu.pow(2)
-            - logvar.exp(),
+            1 + torch.clamp(logvar, self._logvar_minmax[0], self._logvar_minmax[1]) - mu.pow(2) - logvar.exp(),
             dim=1,
         )
         kl_loss = torch.mean(kl_loss)
@@ -437,7 +391,7 @@ class BetaVaeModule(LightningModule):
             "total_loss": total_loss,
         }
 
-    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+    def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         x = batch["anchor"]
         model_output = self(x)
         loss = model_output["total_loss"]
@@ -447,30 +401,20 @@ class BetaVaeModule(LightningModule):
         self._log_step_samples(batch_idx, x, model_output["recon_x"], "train")
         return loss
 
-    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:
+    def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         x = batch["anchor"]
         model_output = self(x)
         loss = model_output["total_loss"]
-        self.vae_logger.log_enhanced_metrics(
-            lightning_module=self, model_output=model_output, batch=batch, stage="val"
-        )
+        self.vae_logger.log_enhanced_metrics(lightning_module=self, model_output=model_output, batch=batch, stage="val")
         self._log_step_samples(batch_idx, x, model_output["recon_x"], "val")
         return loss
 
-    def _log_step_samples(
-        self, batch_idx, original, reconstruction, stage: Literal["train", "val"]
-    ):
+    def _log_step_samples(self, batch_idx, original, reconstruction, stage: Literal["train", "val"]):
         if batch_idx < self.log_batches_per_epoch:
-            output_list = (
-                self.training_step_outputs
-                if stage == "train"
-                else self.validation_step_outputs
-            )
+            output_list = self.training_step_outputs if stage == "train" else self.validation_step_outputs
             samples = {
                 "original": original.detach().cpu()[: self.log_samples_per_batch],
-                "reconstruction": reconstruction.detach().cpu()[
-                    : self.log_samples_per_batch
-                ],
+                "reconstruction": reconstruction.detach().cpu()[: self.log_samples_per_batch],
             }
             output_list.append(samples)
 
@@ -490,16 +434,14 @@ class BetaVaeModule(LightningModule):
                 combined.append([orig, recon])
 
             grid = render_images(combined, cmaps=["gray", "gray"])
-            self.logger.experiment.add_image(
-                key, grid, self.current_epoch, dataformats="HWC"
-            )
+            self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
 
-    def on_train_epoch_end(self) -> None:
+    def on_train_epoch_end(self) -> None:  # noqa: D102
         super().on_train_epoch_end()
         self._log_samples("train_reconstructions", self.training_step_outputs)
         self.training_step_outputs = []
 
-    def on_validation_epoch_end(self) -> None:
+    def on_validation_epoch_end(self) -> None:  # noqa: D102
         super().on_validation_epoch_end()
         self._log_samples("val_reconstructions", self.validation_step_outputs)
         self.validation_step_outputs = []
@@ -525,26 +467,18 @@ class BetaVaeModule(LightningModule):
                 _logger.warning("No validation dataloader available for visualizations")
                 return
 
-            _logger.info(
-                f"Logging enhanced visualizations at epoch {self.current_epoch}"
-            )
-            self.vae_logger.log_latent_traversal(
-                lightning_module=self, n_dims=8, n_steps=11
-            )
-            self.vae_logger.log_latent_interpolation(
-                lightning_module=self, n_pairs=3, n_steps=11
-            )
-            self.vae_logger.log_factor_traversal_matrix(
-                lightning_module=self, n_dims=8, n_steps=7
-            )
+            _logger.info(f"Logging enhanced visualizations at epoch {self.current_epoch}")
+            self.vae_logger.log_latent_traversal(lightning_module=self, n_dims=8, n_steps=11)
+            self.vae_logger.log_latent_interpolation(lightning_module=self, n_pairs=3, n_steps=11)
+            self.vae_logger.log_factor_traversal_matrix(lightning_module=self, n_dims=8, n_steps=7)
         except Exception as e:
             _logger.error(f"Error logging enhanced visualizations: {e}")
 
-    def configure_optimizers(self):
+    def configure_optimizers(self):  # noqa: D102
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
         return optimizer
 
-    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> dict:
+    def predict_step(self, batch: TripletSample, batch_idx, dataloader_idx=0) -> dict:  # noqa: D102
         x = batch["anchor"]
         model_output = self(x)
         return {

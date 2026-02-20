@@ -1,10 +1,13 @@
 """Enhanced logging utilities for Beta-VAE training with TensorBoard."""
 
+import logging
 from typing import Callable, Optional, Tuple
 
 import numpy as np
 import torch
 from torchvision.utils import make_grid
+
+_logger = logging.getLogger("lightning.pytorch")
 
 
 class BetaVaeLogger:
@@ -24,9 +27,7 @@ class BetaVaeLogger:
         """Initialize device-dependent components."""
         self.device = device
 
-    def log_enhanced_metrics(
-        self, lightning_module, model_output: dict, batch: dict, stage: str = "train"
-    ):
+    def log_enhanced_metrics(self, lightning_module, model_output: dict, batch: dict, stage: str = "train"):
         """Log enhanced Beta-VAE metrics."""
         x = batch["anchor"]
         z = model_output["z"]
@@ -135,6 +136,13 @@ class BetaVaeLogger:
                 lightning_module.current_epoch,
             )
 
+    def _get_decoder(self, lightning_module):
+        """Resolve decoder from model hierarchy."""
+        if hasattr(lightning_module.model, "decoder"):
+            return lightning_module.model.decoder
+        _logger.warning("No decoder found in model, skipping visualization.")
+        return None
+
     def log_latent_traversal(
         self,
         lightning_module,
@@ -144,6 +152,10 @@ class BetaVaeLogger:
     ):
         """Log latent space traversal visualizations."""
         if not hasattr(lightning_module, "model"):
+            return
+
+        decoder = self._get_decoder(lightning_module)
+        if decoder is None:
             return
 
         lightning_module.model.eval()
@@ -156,12 +168,10 @@ class BetaVaeLogger:
                 for val in np.linspace(range_vals[0], range_vals[1], n_steps):
                     z_modified = z_base.clone()
                     z_modified[0, dim] = val
-                    recon = lightning_module.decoder(z_modified)
+                    recon = decoder(z_modified)
                     mid_z = recon.shape[2] // 2
                     img_2d = recon[0, 0, mid_z].cpu()
-                    img_2d = (img_2d - img_2d.min()) / (
-                        img_2d.max() - img_2d.min() + 1e-8
-                    )
+                    img_2d = (img_2d - img_2d.min()) / (img_2d.max() - img_2d.min() + 1e-8)
                     traversal_images.append(img_2d)
 
                 grid = make_grid(
@@ -176,11 +186,13 @@ class BetaVaeLogger:
                     dataformats="CHW",
                 )
 
-    def log_latent_interpolation(
-        self, lightning_module, n_pairs: int = 3, n_steps: int = 11
-    ):
+    def log_latent_interpolation(self, lightning_module, n_pairs: int = 3, n_steps: int = 11):
         """Log latent space interpolation between random pairs."""
         if not hasattr(lightning_module, "model"):
+            return
+
+        decoder = self._get_decoder(lightning_module)
+        if decoder is None:
             return
 
         lightning_module.model.eval()
@@ -193,12 +205,10 @@ class BetaVaeLogger:
                 interp_images = []
                 for alpha in np.linspace(0, 1, n_steps):
                     z_interp = alpha * z1 + (1 - alpha) * z2
-                    recon = lightning_module.decoder(z_interp)
+                    recon = decoder(z_interp)
                     mid_z = recon.shape[2] // 2
                     img_2d = recon[0, 0, mid_z].cpu()
-                    img_2d = (img_2d - img_2d.min()) / (
-                        img_2d.max() - img_2d.min() + 1e-8
-                    )
+                    img_2d = (img_2d - img_2d.min()) / (img_2d.max() - img_2d.min() + 1e-8)
                     interp_images.append(img_2d)
 
                 grid = make_grid(
@@ -213,11 +223,13 @@ class BetaVaeLogger:
                     dataformats="CHW",
                 )
 
-    def log_factor_traversal_matrix(
-        self, lightning_module, n_dims: int = 8, n_steps: int = 7
-    ):
+    def log_factor_traversal_matrix(self, lightning_module, n_dims: int = 8, n_steps: int = 7):
         """Log factor traversal matrix."""
         if not hasattr(lightning_module, "model"):
+            return
+
+        decoder = self._get_decoder(lightning_module)
+        if decoder is None:
             return
 
         lightning_module.model.eval()
@@ -232,12 +244,10 @@ class BetaVaeLogger:
                     val = -3 + 6 * step / (n_steps - 1)
                     z_mod = z_base.clone()
                     z_mod[0, dim] = val
-                    recon = lightning_module.decoder(z_mod)
+                    recon = decoder(z_mod)
                     mid_z = recon.shape[2] // 2
                     img_2d = recon[0, 0, mid_z].cpu()
-                    img_2d = (img_2d - img_2d.min()) / (
-                        img_2d.max() - img_2d.min() + 1e-8
-                    )
+                    img_2d = (img_2d - img_2d.min()) / (img_2d.max() - img_2d.min() + 1e-8)
                     row_images.append(img_2d)
                 matrix_rows.append(torch.stack(row_images))
 
@@ -250,9 +260,7 @@ class BetaVaeLogger:
                 dataformats="CHW",
             )
 
-    def log_beta_schedule(
-        self, lightning_module, beta_schedule: Optional[Callable] = None
-    ):
+    def log_beta_schedule(self, lightning_module, beta_schedule: Optional[Callable] = None):
         """Log beta annealing schedule."""
         if beta_schedule is None:
             max_epochs = lightning_module.trainer.max_epochs
@@ -260,9 +268,7 @@ class BetaVaeLogger:
             if epoch < max_epochs * 0.1:
                 beta = 0.1
             elif epoch < max_epochs * 0.5:
-                beta = 0.1 + (4.0 - 0.1) * (epoch - max_epochs * 0.1) / (
-                    max_epochs * 0.4
-                )
+                beta = 0.1 + (4.0 - 0.1) * (epoch - max_epochs * 0.1) / (max_epochs * 0.4)
             else:
                 beta = 4.0
         else:

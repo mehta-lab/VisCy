@@ -40,9 +40,7 @@ def discover_predictions(
     dict[str, Path]
         Mapping of dataset_name -> resolved predictions version directory.
     """
-    pattern = str(
-        embeddings_dir / "*" / "*phenotyping*" / "*prediction*" / model_name / version
-    )
+    pattern = str(embeddings_dir / "*" / "*phenotyping*" / "*prediction*" / model_name / version)
     matches = natsorted(glob(pattern))
 
     results = {}
@@ -169,9 +167,7 @@ def build_registry(
 
         available_tasks = get_available_tasks(csv_path)
         if not available_tasks:
-            skipped.append(
-                {"dataset": dataset_name, "reason": "No valid task columns in CSV"}
-            )
+            skipped.append({"dataset": dataset_name, "reason": "No valid task columns in CSV"})
             continue
 
         registry.append(
@@ -206,10 +202,7 @@ def print_registry_summary(
     for entry in registry:
         channels_str = ", ".join(sorted(entry["channel_zarrs"].keys()))
         tasks_str = ", ".join(entry["available_tasks"])
-        print(
-            f"| {entry['dataset']} | {entry['annotations_csv'].name} "
-            f"| {channels_str} | {tasks_str} |"
-        )
+        print(f"| {entry['dataset']} | {entry['annotations_csv'].name} | {channels_str} | {tasks_str} |")
 
     if annotations_only or predictions_only or skipped:
         print("\n## Gaps\n")

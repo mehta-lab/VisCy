@@ -56,7 +56,7 @@ def _build_module(checkpoint_path):
     """Build ContrastiveModule and load pretrained checkpoint."""
     encoder = ContrastiveEncoder(**ENCODER_KWARGS)
     module = ContrastiveModule(encoder=encoder, **MODULE_KWARGS)
-    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    ckpt = torch.load(checkpoint_path, map_location="cpu", weights_only=True)
     result = module.load_state_dict(ckpt["state_dict"])
     return module, result
 
