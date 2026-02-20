@@ -28,6 +28,7 @@ from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
+from viscy_data._select import _filter_fovs, _filter_wells
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import (
     BatchedCenterSpatialCropd,
@@ -35,7 +36,6 @@ from viscy_data._utils import (
     _transform_channel_wise,
 )
 from viscy_data.hcs import HCSDataModule
-from viscy_data.select import _filter_fovs, _filter_wells
 
 _logger = logging.getLogger("lightning.pytorch")
 

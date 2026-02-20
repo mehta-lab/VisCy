@@ -19,6 +19,8 @@ Version:
 """
 
 # Type definitions (from _typing.py)
+# Utility modules (from _select.py, distributed.py)
+from viscy_data._select import SelectWell
 from viscy_data._typing import (
     ULTRACK_INDEX_COLUMNS,
     AnnotationColumns,
@@ -79,9 +81,6 @@ from viscy_data.mmap_cache import MmappedDataModule, MmappedDataset
 
 # Segmentation (from segmentation.py)
 from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
-
-# Utility modules (from select.py, distributed.py)
-from viscy_data.select import SelectWell
 
 # Triplet learning (from triplet.py -- requires [triplet] extra at runtime)
 from viscy_data.triplet import TripletDataModule, TripletDataset

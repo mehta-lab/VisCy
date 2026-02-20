@@ -18,10 +18,10 @@ from torch import Tensor
 from torch.multiprocessing import Manager
 from torch.utils.data import DataLoader, Dataset
 
+from viscy_data._select import SelectWell
 from viscy_data._typing import DictTransform, NormMeta
 from viscy_data._utils import _ensure_channel_list, _read_norm_meta
 from viscy_data.distributed import ShardedDistributedSampler
-from viscy_data.select import SelectWell
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy

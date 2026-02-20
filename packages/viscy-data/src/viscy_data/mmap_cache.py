@@ -22,10 +22,10 @@ try:
 except ImportError:
     MemoryMappedTensor = None
 
+from viscy_data._select import SelectWell
 from viscy_data._typing import DictTransform, NormMeta
 from viscy_data._utils import _ensure_channel_list, _read_norm_meta
 from viscy_data.gpu_aug import GPUTransformDataModule
-from viscy_data.select import SelectWell
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
