@@ -65,6 +65,7 @@ def _build_module(checkpoint_path):
 @pytest.mark.hpc_integration
 def test_checkpoint_loads_into_modular_contrastive_module(checkpoint_path):
     """INFER-01: Checkpoint loads without state dict key mismatches."""
+    seed_everything(42)
     module, result = _build_module(checkpoint_path)
 
     assert len(result.missing_keys) == 0, f"Missing keys: {result.missing_keys}"

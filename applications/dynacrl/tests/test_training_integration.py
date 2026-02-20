@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 import torch
 import yaml
-from lightning.pytorch import LightningDataModule, Trainer
+from lightning.pytorch import LightningDataModule, Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
@@ -68,6 +68,7 @@ class SyntheticTripletDataModule(LightningDataModule):
 
 
 def test_contrastive_fast_dev_run(tmp_path):
+    seed_everything(42)
     encoder = SimpleEncoder()
     module = ContrastiveModule(
         encoder=encoder,
@@ -89,6 +90,7 @@ def test_contrastive_fast_dev_run(tmp_path):
 
 
 def test_contrastive_ntxent_fast_dev_run(tmp_path):
+    seed_everything(42)
     encoder = SimpleEncoder()
     module = ContrastiveModule(
         encoder=encoder,
