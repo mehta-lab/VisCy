@@ -31,7 +31,8 @@ src/viscy/                  # Umbrella package (re-exports)
 
 ```sh
 uv run pytest                          # all tests
-uv run pytest packages/viscy-data/     # single package
+uv run pytest packages/viscy-data/     # single package (data)
+uv run pytest packages/viscy-models/   # single package (models)
 ```
 
 ## Common Commands

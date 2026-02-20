@@ -1,4 +1,4 @@
-"""VisCy Data - Data loading and Lightning DataModules for virtual staining microscopy.
+"""VisCy Data - Data loading and Lightning DataModules for AI x Imaging tasks.
 
 This package provides PyTorch Lightning DataModules and Datasets for loading
 and preprocessing microscopy data in virtual staining workflows.

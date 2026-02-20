@@ -4,7 +4,7 @@ requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
 name = "viscy-data"
-description = "Data loading and Lightning DataModules for virtual staining microscopy"
+description = "Data loading and Lightning DataModules for AI x Imaging tasks"
 readme = "README.md"
 keywords = [
   "data loading",
