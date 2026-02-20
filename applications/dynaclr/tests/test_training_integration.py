@@ -6,13 +6,13 @@ from pathlib import Path
 import pytest
 import torch
 import yaml
-from dynaclr.engine import ContrastiveModule
 from lightning.pytorch import LightningDataModule, Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
+from dynaclr.engine import ContrastiveModule
 from viscy_data._typing import TripletSample
 
 C, D, H, W = 1, 1, 4, 4

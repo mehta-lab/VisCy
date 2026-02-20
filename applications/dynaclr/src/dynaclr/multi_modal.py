@@ -4,10 +4,10 @@ from logging import getLogger
 from typing import Literal, Sequence
 
 import torch
-from dynaclr.engine import ContrastiveModule
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 
+from dynaclr.engine import ContrastiveModule
 from viscy_data._typing import TripletSample
 from viscy_models.contrastive import ContrastiveEncoder
 

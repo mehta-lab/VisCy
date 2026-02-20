@@ -20,10 +20,10 @@ Requirements: INFER-01, INFER-02, INFER-03, TEST-01, TEST-02
 import numpy as np
 import pytest
 import torch
-from dynaclr.engine import ContrastiveModule
 from lightning.pytorch import Trainer, seed_everything
 from scipy import stats
 
+from dynaclr.engine import ContrastiveModule
 from viscy_models.contrastive import ContrastiveEncoder
 from viscy_transforms import NormalizeSampled
 

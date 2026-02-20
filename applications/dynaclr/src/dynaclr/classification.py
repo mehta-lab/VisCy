@@ -22,7 +22,7 @@ class ClassificationPredictionWriter(BasePredictionWriter):
             raise FileExistsError(f"Output path {output_path} already exists.")
         self.output_path = output_path
 
-    def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):
+    def write_on_epoch_end(self, trainer, pl_module, predictions, batch_indices):  # noqa: D102
         all_predictions = []
         for prediction in predictions:
             for key, value in prediction.items():
@@ -62,11 +62,11 @@ class ClassificationModule(LightningModule):
         self.lr = lr
         self.example_input_array = torch.rand(example_input_array_shape)
 
-    def forward(self, x):
+    def forward(self, x):  # noqa: D102
         x = self.stem(x)
         return self.backbone(x)
 
-    def on_fit_start(self):
+    def on_fit_start(self):  # noqa: D102
         self.train_examples = []
         self.val_examples = []
 
