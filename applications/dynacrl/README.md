@@ -1,12 +1,27 @@
 # DynaCLR
 
-Self-supervised contrastive learning for cellular dynamics from time-lapse microscopy.
+Self-supervised contrastive learning for robust representations of cell and organelle dynamics from time-lapse microscopy.
 
 Part of the [VisCy](https://github.com/mehta-lab/VisCy) monorepo.
 
-> **DynaCLR: Dynamic Contrastive Learning of Representations for label-free assessment of live cells**
->
-> [arXiv:2410.11281](https://arxiv.org/abs/2410.11281)
+> **Preprint:** [DynaCLR: Contrastive Learning of Cellular Dynamics with Temporal Regularization](https://arxiv.org/abs/2410.11281)
+
+![DynaCLR schematic](https://github.com/mehta-lab/VisCy/blob/e5318d88e2bb5d404d3bae8d633b8cc07b1fbd61/docs/figures/DynaCLR_schematic_v2.png?raw=true)
+
+<details>
+<summary>Hirata-Miyasaki et al., 2025</summary>
+
+```bibtex
+@misc{hiratamiyasaki2025dynaclr,
+    title = {DynaCLR: Contrastive Learning of Cellular Dynamics with Temporal Regularization},
+    author = {Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Liu, Ziwen and Imran, Alishba and Theodoro, Taylla Milena and Ivanov, Ivan E. and Khadka, Sudip and Lee, See-Chi and Grunberg, Michelle and Woosley, Hunter and Bhave, Madhura and Arias, Carolina and Mehta, Shalin B.},
+    year = {2025},
+    eprint = {2410.11281},
+    archivePrefix = {arXiv},
+    url = {https://arxiv.org/abs/2410.11281},
+}
+```
+</details>
 
 ## Installation
 
