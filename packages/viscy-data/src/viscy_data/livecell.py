@@ -155,7 +155,7 @@ class LiveCellTestDataset(Dataset):
             }
             sample["detections"] = dets
             sample["file_name"] = file_name
-        self.transform(sample)
+        sample = self.transform(sample)
         return sample
 
 
@@ -199,11 +199,11 @@ class LiveCellDataModule(GPUTransformDataModule):
         train_annotations: Path | None = None,
         val_annotations: Path | None = None,
         test_annotations: Path | None = None,
-        train_cpu_transforms: list[MapTransform] = [],
-        val_cpu_transforms: list[MapTransform] = [],
-        train_gpu_transforms: list[MapTransform] = [],
-        val_gpu_transforms: list[MapTransform] = [],
-        test_transforms: list[MapTransform] = [],
+        train_cpu_transforms: list[MapTransform] | None = None,
+        val_cpu_transforms: list[MapTransform] | None = None,
+        train_gpu_transforms: list[MapTransform] | None = None,
+        val_gpu_transforms: list[MapTransform] | None = None,
+        test_transforms: list[MapTransform] | None = None,
         batch_size: int = 16,
         num_workers: int = 8,
         pin_memory: bool = True,
@@ -229,11 +229,11 @@ class LiveCellDataModule(GPUTransformDataModule):
             self.test_annotations = Path(test_annotations)
             if not self.test_annotations.is_file():
                 raise FileNotFoundError(str(test_annotations))
-        self._train_cpu_transforms = Compose(train_cpu_transforms)
-        self._val_cpu_transforms = Compose(val_cpu_transforms)
-        self._train_gpu_transforms = Compose(train_gpu_transforms)
-        self._val_gpu_transforms = Compose(val_gpu_transforms)
-        self.test_transforms = Compose(test_transforms)
+        self._train_cpu_transforms = Compose(train_cpu_transforms or [])
+        self._val_cpu_transforms = Compose(val_cpu_transforms or [])
+        self._train_gpu_transforms = Compose(train_gpu_transforms or [])
+        self._val_gpu_transforms = Compose(val_gpu_transforms or [])
+        self.test_transforms = Compose(test_transforms or [])
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
