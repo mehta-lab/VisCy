@@ -136,6 +136,59 @@ def temporal_hcs_dataset(tmp_path_factory: TempPathFactory) -> Path:
     return dataset_path
 
 
+@fixture(scope="function")
+def single_channel_hcs_pair(tmp_path_factory: TempPathFactory) -> tuple[Path, Path]:
+    """Two single-channel HCS datasets for CTMCv1 train/val."""
+    train_path = tmp_path_factory.mktemp("ctmc_train.zarr")
+    val_path = tmp_path_factory.mktemp("ctmc_val.zarr")
+    _build_hcs(train_path, ["DIC"], (4, 32, 32), np.float32, 1.0)
+    _build_hcs(val_path, ["DIC"], (4, 32, 32), np.float32, 1.0)
+    return train_path, val_path
+
+
+@fixture(scope="function")
+def segmentation_hcs_pair(tmp_path_factory: TempPathFactory) -> tuple[Path, Path]:
+    """Pred and target HCS datasets with matching positions for segmentation."""
+    pred_path = tmp_path_factory.mktemp("seg_pred.zarr")
+    target_path = tmp_path_factory.mktemp("seg_target.zarr")
+    _build_hcs(pred_path, ["Pred"], (4, 32, 32), np.uint16, 100)
+    _build_hcs(target_path, ["Target"], (4, 32, 32), np.uint16, 100)
+    return pred_path, target_path
+
+
+@fixture(scope="function")
+def classification_hcs_dataset(tmp_path_factory: TempPathFactory) -> tuple[Path, Path]:
+    """HCS dataset with norm metadata and annotation CSV for classification."""
+    dataset_path = tmp_path_factory.mktemp("classification.zarr")
+    ch = ["Phase"]
+    _build_hcs(dataset_path, ch, (4, 64, 64), np.float32, 1.0)
+    norm_meta = {c: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for c in ch}
+    with open_ome_zarr(dataset_path, mode="r+") as ds:
+        for _, fov in ds.positions():
+            fov.zattrs["normalization"] = norm_meta
+    rows = []
+    with open_ome_zarr(dataset_path) as ds:
+        for fov_name, _ in ds.positions():
+            for t in range(2):
+                rows.append(
+                    {
+                        "fov_name": fov_name,
+                        "t": t,
+                        "y": 32,
+                        "x": 32,
+                        "z": 2,
+                        "infection_state": t % 2,
+                        "track_id": 0,
+                        "id": t,
+                        "parent_track_id": -1,
+                        "parent_id": -1,
+                    }
+                )
+    ann_path = tmp_path_factory.mktemp("annotations") / "ann.csv"
+    pd.DataFrame(rows).to_csv(ann_path, index=False)
+    return dataset_path, ann_path
+
+
 @fixture(scope="function", params=[False, True], ids=["zarr_v2", "zarr_v3"])
 def tracks_with_gaps_dataset(tmp_path_factory: TempPathFactory, request: FixtureRequest) -> Path:
     """Provides a HCS OME-Zarr dataset with tracking results with gaps in time (v2 and v3)."""
