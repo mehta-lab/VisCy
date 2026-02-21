@@ -21,8 +21,16 @@ wandb_entity: null
 # Path to embeddings zarr file for inference
 embeddings_path: /path/to/embeddings.zarr
 
-# Path to save output zarr file with predictions
-output_path: /path/to/output_with_predictions.zarr
+# Path to save output zarr file with predictions.
+# When omitted (or null), predictions are written back to embeddings_path.
+# output_path: /path/to/output_with_predictions.zarr
 
-# Whether to overwrite output if it already exists
+# Well prefixes to restrict predictions to (optional).
+# When omitted, all cells are predicted. Cells in other wells get NaN.
+# Useful for organelle-specific classifiers where different wells have different markers.
+# include_wells:
+#   - A/1
+#   - A/2
+
+# Whether to overwrite output if it already exists (only used when output_path is set)
 overwrite: false

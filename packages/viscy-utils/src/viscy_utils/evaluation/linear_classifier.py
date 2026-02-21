@@ -140,22 +140,16 @@ def load_and_combine_datasets(datasets: list[dict], task: str) -> ad.AnnData:
         adata = ad.read_zarr(embeddings_path)
 
         try:
-            adata_annotated = load_annotation_anndata(
-                adata, str(annotations_path), task
-            )
+            adata_annotated = load_annotation_anndata(adata, str(annotations_path), task)
         except KeyError as e:
             print(f"⚠ Skipping dataset - task '{task}' not found in annotations:")
             print(f"  Error: {e}")
             continue
 
         if include_wells:
-            well_mask = adata_annotated.obs["fov_name"].str.startswith(
-                tuple(w + "/" for w in include_wells)
-            )
+            well_mask = adata_annotated.obs["fov_name"].str.startswith(tuple(w + "/" for w in include_wells))
             adata_annotated = adata_annotated[well_mask]
-            print(
-                f"  Filtered to {len(adata_annotated)} samples in wells {include_wells}"
-            )
+            print(f"  Filtered to {len(adata_annotated)} samples in wells {include_wells}")
 
         if task not in adata_annotated.obs.columns:
             print(f"⚠ Skipping dataset - task '{task}' not in columns:")
@@ -283,9 +277,7 @@ def train_linear_classifier(
     print("=" * 60)
 
     y_train_pred = classifier.predict(X_train)
-    train_report = classification_report(
-        y_train, y_train_pred, digits=3, output_dict=True
-    )
+    train_report = classification_report(y_train, y_train_pred, digits=3, output_dict=True)
     print("\nTraining Set:")
     print(classification_report(y_train, y_train_pred, digits=3))
 
@@ -298,22 +290,14 @@ def train_linear_classifier(
 
     for class_name in classifier.classes_:
         if class_name in train_report:
-            train_metrics[f"train_{class_name}_precision"] = train_report[class_name][
-                "precision"
-            ]
-            train_metrics[f"train_{class_name}_recall"] = train_report[class_name][
-                "recall"
-            ]
-            train_metrics[f"train_{class_name}_f1"] = train_report[class_name][
-                "f1-score"
-            ]
+            train_metrics[f"train_{class_name}_precision"] = train_report[class_name]["precision"]
+            train_metrics[f"train_{class_name}_recall"] = train_report[class_name]["recall"]
+            train_metrics[f"train_{class_name}_f1"] = train_report[class_name]["f1-score"]
 
     val_metrics = {}
     if X_val is not None and y_val is not None:
         y_val_pred = classifier.predict(X_val)
-        val_report = classification_report(
-            y_val, y_val_pred, digits=3, output_dict=True
-        )
+        val_report = classification_report(y_val, y_val_pred, digits=3, output_dict=True)
         print("\nValidation Set:")
         print(classification_report(y_val, y_val_pred, digits=3))
 
@@ -326,12 +310,8 @@ def train_linear_classifier(
 
         for class_name in classifier.classes_:
             if class_name in val_report:
-                val_metrics[f"val_{class_name}_precision"] = val_report[class_name][
-                    "precision"
-                ]
-                val_metrics[f"val_{class_name}_recall"] = val_report[class_name][
-                    "recall"
-                ]
+                val_metrics[f"val_{class_name}_precision"] = val_report[class_name]["precision"]
+                val_metrics[f"val_{class_name}_recall"] = val_report[class_name]["recall"]
                 val_metrics[f"val_{class_name}_f1"] = val_report[class_name]["f1-score"]
 
     all_metrics = {**train_metrics, **val_metrics}
@@ -361,6 +341,8 @@ def predict_with_classifier(
     adata: ad.AnnData,
     pipeline: LinearClassifierPipeline,
     task: str,
+    artifact_metadata: Optional[dict] = None,
+    include_wells: Optional[list[str]] = None,
 ) -> ad.AnnData:
     """Apply trained classifier to make predictions on new data.
 
@@ -371,7 +353,16 @@ def predict_with_classifier(
     pipeline : LinearClassifierPipeline
         Trained classifier pipeline with preprocessing.
     task : str
-        Name of the classification task.
+        Name of the classification task (used as column suffix).
+    artifact_metadata : Optional[dict]
+        W&B artifact metadata from ``load_pipeline_from_wandb``. When provided,
+        provenance keys are stored in ``adata.uns`` under
+        ``classifier_{task}_artifact``, ``classifier_{task}_id``, and
+        ``classifier_{task}_version``.
+    include_wells : Optional[list[str]]
+        Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
+        Cells in other wells will have ``NaN`` for prediction columns.
+        When ``None``, all cells are predicted.
 
     Returns
     -------
@@ -381,19 +372,42 @@ def predict_with_classifier(
         and class labels in .uns[f"predicted_{task}_classes"].
     """
     print("\nApplying preprocessing and making predictions...")
-    X = adata.X if isinstance(adata.X, np.ndarray) else adata.X.toarray()
 
-    predictions = pipeline.predict(X)
-    prediction_proba = pipeline.predict_proba(X)
+    if include_wells is not None:
+        well_mask = adata.obs["fov_name"].str.startswith(tuple(w + "/" for w in include_wells))
+        n_matched = well_mask.sum()
+        print(f"  Well filter: {include_wells} -> {n_matched}/{len(adata)} cells")
+    else:
+        well_mask = np.ones(len(adata), dtype=bool)
 
-    adata.obs[f"predicted_{task}"] = predictions
-    adata.obsm[f"predicted_{task}_proba"] = prediction_proba
+    X_full = adata.X if isinstance(adata.X, np.ndarray) else adata.X.toarray()
+    X_subset = X_full[well_mask]
+
+    predictions_subset = pipeline.predict(X_subset)
+    proba_subset = pipeline.predict_proba(X_subset)
+    n_classes = proba_subset.shape[1]
+
+    all_predictions = np.full(len(adata), np.nan, dtype=object)
+    all_predictions[well_mask] = predictions_subset
+
+    all_proba = np.full((len(adata), n_classes), np.nan)
+    all_proba[well_mask] = proba_subset
+
+    adata.obs[f"predicted_{task}"] = all_predictions
+    adata.obsm[f"predicted_{task}_proba"] = all_proba
     adata.uns[f"predicted_{task}_classes"] = pipeline.classifier.classes_.tolist()
 
+    if artifact_metadata is not None:
+        adata.uns[f"classifier_{task}_artifact"] = artifact_metadata["artifact_name"]
+        adata.uns[f"classifier_{task}_id"] = artifact_metadata["artifact_id"]
+        adata.uns[f"classifier_{task}_version"] = artifact_metadata["artifact_version"]
+
+    predicted_values = adata.obs[f"predicted_{task}"].dropna()
     print("✓ Predictions complete")
+    print(f"  Predicted {len(predicted_values)}/{len(adata)} cells")
     print("  Predicted class distribution:")
-    print(adata.obs[f"predicted_{task}"].value_counts())
-    print(f"  Probability matrix shape: {prediction_proba.shape}")
+    print(predicted_values.value_counts())
+    print(f"  Probability matrix shape: {all_proba.shape}")
     print(f"  Classes: {pipeline.classifier.classes_.tolist()}")
 
     return adata
@@ -435,17 +449,20 @@ def save_pipeline_to_wandb(
 
     task = config["task"]
     input_channel = config["input_channel"]
+    marker = config.get("marker")
     use_pca = config.get("preprocessing", {}).get("use_pca", False)
     n_pca = config.get("preprocessing", {}).get("n_pca_components")
 
     model_name = f"linear-classifier-{task}-{input_channel}"
+    if marker:
+        model_name += f"-{marker}"
     if use_pca:
         model_name += f"-pca{n_pca}"
 
     run = wandb.init(
         project=wandb_project,
         entity=wandb_entity,
-        job_type=f"linear-classifier-{task}-{input_channel}",
+        job_type=f"linear-classifier-{task}-{input_channel}" + (f"-{marker}" if marker else ""),
         name=model_name,
         group=model_name,
         config=config,
@@ -503,7 +520,7 @@ def load_pipeline_from_wandb(
     model_name: str,
     version: str = "latest",
     wandb_entity: Optional[str] = None,
-) -> tuple[LinearClassifierPipeline, dict]:
+) -> tuple[LinearClassifierPipeline, dict, dict]:
     """Load trained pipeline and config from Weights & Biases.
 
     Parameters
@@ -523,6 +540,9 @@ def load_pipeline_from_wandb(
         Loaded classifier pipeline.
     dict
         Configuration used for training.
+    dict
+        Artifact metadata with keys ``artifact_name``, ``artifact_id``,
+        and ``artifact_version``.
     """
     print("\n" + "=" * 60)
     print("LOADING MODEL FROM WANDB")
@@ -535,6 +555,11 @@ def load_pipeline_from_wandb(
     )
 
     artifact = run.use_artifact(f"{model_name}:{version}")
+    artifact_metadata = {
+        "artifact_name": f"{model_name}:{artifact.version}",
+        "artifact_id": artifact.id,
+        "artifact_version": artifact.version,
+    }
     artifact_dir = Path(artifact.download())
 
     config_path = artifact_dir / f"{model_name}_config.json"
@@ -573,4 +598,4 @@ def load_pipeline_from_wandb(
 
     run.finish()
 
-    return pipeline, config
+    return pipeline, config, artifact_metadata

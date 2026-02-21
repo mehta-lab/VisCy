@@ -59,6 +59,20 @@ def format_predictions_markdown(adata, task: str) -> str:
         lines.append(f"**Classes:** {', '.join(adata.uns[classes_key])}")
         lines.append("")
 
+    artifact_key = f"classifier_{task}_artifact"
+    if artifact_key in adata.uns.keys():
+        provenance = {
+            "Artifact": adata.uns[artifact_key],
+        }
+        id_key = f"classifier_{task}_id"
+        if id_key in adata.uns.keys():
+            provenance["Artifact ID"] = adata.uns[id_key]
+        version_key = f"classifier_{task}_version"
+        if version_key in adata.uns.keys():
+            provenance["Artifact Version"] = adata.uns[version_key]
+        lines.append(format_markdown_table(provenance, title="Classifier Provenance", headers=["Key", "Value"]).strip())
+        lines.append("")
+
     return "\n".join(lines)
 
 
@@ -86,14 +100,20 @@ def main(config: Path):
         click.echo(f"\n Failed to load configuration: {e}", err=True)
         raise click.Abort()
 
+    write_path = (
+        Path(inference_config.output_path)
+        if inference_config.output_path is not None
+        else Path(inference_config.embeddings_path)
+    )
+
     click.echo(f"\n Configuration loaded: {config}")
     click.echo(f"  Model: {inference_config.model_name}")
     click.echo(f"  Version: {inference_config.version}")
     click.echo(f"  Embeddings: {inference_config.embeddings_path}")
-    click.echo(f"  Output: {inference_config.output_path}")
+    click.echo(f"  Output: {write_path}")
 
     try:
-        pipeline, loaded_config = load_pipeline_from_wandb(
+        pipeline, loaded_config, artifact_metadata = load_pipeline_from_wandb(
             wandb_project=inference_config.wandb_project,
             model_name=inference_config.model_name,
             version=inference_config.version,
@@ -101,21 +121,31 @@ def main(config: Path):
         )
 
         task = loaded_config["task"]
+        marker = loaded_config.get("marker")
+        task_key = f"{task}_{marker}" if marker else task
 
         click.echo(f"\nLoading embeddings from: {inference_config.embeddings_path}")
         adata = read_zarr(inference_config.embeddings_path)
         click.echo(f" Loaded embeddings: {adata.shape}")
 
-        adata = predict_with_classifier(adata, pipeline, task)
+        if inference_config.include_wells:
+            click.echo(f"  Well filter: {inference_config.include_wells}")
 
-        output_path = Path(inference_config.output_path)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
+        adata = predict_with_classifier(
+            adata,
+            pipeline,
+            task_key,
+            artifact_metadata=artifact_metadata,
+            include_wells=inference_config.include_wells,
+        )
 
-        click.echo(f"\nSaving predictions to: {output_path}")
-        adata.write_zarr(output_path)
+        write_path.parent.mkdir(parents=True, exist_ok=True)
+
+        click.echo(f"\nSaving predictions to: {write_path}")
+        adata.write_zarr(write_path)
         click.echo(" Saved predictions")
 
-        click.echo("\n" + format_predictions_markdown(adata, task))
+        click.echo("\n" + format_predictions_markdown(adata, task_key))
 
         click.echo("\n Inference complete!")
 
