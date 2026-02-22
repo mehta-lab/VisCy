@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 21
+**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 22
 
 ## Current Position
 
-Phase: 21 of 25 (Cell Index & Lineage)
-Plan: 01 of 02 complete
-Status: 21-01 complete (MultiExperimentIndex), ready for 21-02
-Last activity: 2026-02-22 -- Completed 21-01 MultiExperimentIndex with lineage and border clamping
+Phase: 22 of 25 (Flexible Batch Sampler)
+Plan: 00 of ?? complete
+Status: Phase 21 complete (MultiExperimentIndex with valid anchors), ready for Phase 22
+Last activity: 2026-02-22 -- Completed 21-02 valid anchors, properties, summary
 
-Progress: [######################........] 20/25 phases complete (80%)
+Progress: [######################........] 21/25 phases complete (84%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 30 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 3) + v2.0 manual phases
+- Total plans completed: 32 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 5) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 20/25 phases complete (80%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 3 | dynav2 |
+| v2.2 Sampling | 20-25 | 5 | dynav2 |
 
 ## Accumulated Context
 
@@ -56,15 +56,19 @@ Key decisions carrying forward:
 - Lineage reconstruction chases parent_track_id to root ancestor; missing parents fall back to self
 - Position objects stored directly in DataFrame column for downstream data loading
 - Global track ID format: {exp_name}_{fov_name}_{track_id} for cross-experiment uniqueness
+- Anchor validity uses lineage_id for same-track and daughter-track positive matching -- simple set lookup
+- tau=0 skipped to prevent anchor from being its own positive
+- valid_anchors is reset_index(drop=True) for clean downstream indexing
+- Properties (experiment_groups, condition_groups) use groupby on tracks rather than caching
 
 ### Blockers/Concerns
 
-- None. 21-01 complete, ready for 21-02.
+- None. Phase 21 complete, ready for Phase 22.
 
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 21-01-PLAN.md (MultiExperimentIndex with lineage and border clamping). Ready for 21-02.
+Stopped at: Completed 21-02-PLAN.md (valid anchors, properties, summary). Phase 21 complete. Ready for Phase 22.
 Resume file: None
 
 ---
@@ -73,3 +77,4 @@ Resume file: None
 *Updated for 20-01 completion: 2026-02-21*
 *Updated for 20-02 completion: 2026-02-22*
 *Updated for 21-01 completion: 2026-02-22*
+*Updated for 21-02 completion: 2026-02-22*
