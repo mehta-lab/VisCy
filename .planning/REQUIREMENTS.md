@@ -324,32 +324,32 @@ Deferred to future milestones. Tracked but not in current roadmap.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| MEXP-01 | — | Pending |
-| MEXP-02 | — | Pending |
-| MEXP-03 | — | Pending |
-| MEXP-04 | — | Pending |
-| CELL-01 | — | Pending |
-| CELL-02 | — | Pending |
-| CELL-03 | — | Pending |
-| CELL-04 | — | Pending |
-| SAMP-01 | — | Pending |
-| SAMP-02 | — | Pending |
-| SAMP-03 | — | Pending |
-| SAMP-04 | — | Pending |
-| SAMP-05 | — | Pending |
-| LOSS-01 | — | Pending |
-| LOSS-02 | — | Pending |
-| LOSS-03 | — | Pending |
-| AUG-01 | — | Pending |
-| AUG-02 | — | Pending |
-| AUG-03 | — | Pending |
-| DATA-01 | — | Pending |
-| DATA-02 | — | Pending |
-| DATA-03 | — | Pending |
-| DATA-04 | — | Pending |
-| DATA-05 | — | Pending |
-| INTG-01 | — | Pending |
-| INTG-02 | — | Pending |
+| MEXP-01 | Phase 20 | Pending |
+| MEXP-02 | Phase 20 | Pending |
+| MEXP-03 | Phase 20 | Pending |
+| MEXP-04 | Phase 20 | Pending |
+| CELL-01 | Phase 21 | Pending |
+| CELL-02 | Phase 21 | Pending |
+| CELL-03 | Phase 21 | Pending |
+| CELL-04 | Phase 21 | Pending |
+| SAMP-01 | Phase 22 | Pending |
+| SAMP-02 | Phase 22 | Pending |
+| SAMP-03 | Phase 22 | Pending |
+| SAMP-04 | Phase 22 | Pending |
+| SAMP-05 | Phase 22 | Pending |
+| LOSS-01 | Phase 23 | Pending |
+| LOSS-02 | Phase 23 | Pending |
+| LOSS-03 | Phase 23 | Pending |
+| AUG-01 | Phase 23 | Pending |
+| AUG-02 | Phase 23 | Pending |
+| AUG-03 | Phase 23 | Pending |
+| DATA-01 | Phase 24 | Pending |
+| DATA-02 | Phase 24 | Pending |
+| DATA-03 | Phase 24 | Pending |
+| DATA-04 | Phase 24 | Pending |
+| DATA-05 | Phase 24 | Pending |
+| INTG-01 | Phase 25 | Pending |
+| INTG-02 | Phase 25 | Pending |
 
 **Coverage:**
 - v1.0: 18 requirements, 18 complete
@@ -357,7 +357,7 @@ Deferred to future milestones. Tracked but not in current roadmap.
 - v1.2: 24 requirements, 24 complete
 - v2.0: 22 requirements, 22 complete
 - v2.1: 7 requirements, 7 complete
-- v2.2: 26 requirements, 0 pending
+- v2.2: 26 requirements, 0 pending (all mapped to phases 20-25)
 - **Total: 109 requirements (83 shipped, 26 pending)**
 
 ---
@@ -366,3 +366,4 @@ Deferred to future milestones. Tracked but not in current roadmap.
 *Updated for v2.0 DynaCLR: 2026-02-17*
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
+*Traceability updated with phase mappings for v2.2: 2026-02-21*
