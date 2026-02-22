@@ -147,31 +147,87 @@
 - [x] **APP-01-DEP-01**: wandb, anndata, natsort in dynaclr [eval] optional dependencies
 - [x] **APP-01-DEP-02**: Workspace-level uv configuration updated
 
-## v2.1 Requirements
-
-Requirements for DynaCLR integration validation. Each maps to roadmap phases.
+## v2.1 Requirements (Complete)
 
 ### Training
 
-- [ ] **TRAIN-01**: ContrastiveModule completes a training loop via `fast_dev_run` without errors
-- [ ] **TRAIN-02**: YAML training configs (fit.yml, predict.yml) parse and instantiate correctly with new import paths
+- [x] **TRAIN-01**: ContrastiveModule completes a training loop via `fast_dev_run` without errors
+- [x] **TRAIN-02**: YAML training configs (fit.yml, predict.yml) parse and instantiate correctly with new import paths
 
 ### Inference
 
-- [ ] **INFER-01**: ContrastiveModule loads a pretrained checkpoint in the modular structure
-- [ ] **INFER-02**: Prediction (predict step) writes embeddings via EmbeddingWriter callback
-- [ ] **INFER-03**: Predicted embeddings are an exact match against saved reference outputs
+- [x] **INFER-01**: ContrastiveModule loads a pretrained checkpoint in the modular structure
+- [x] **INFER-02**: Prediction (predict step) writes embeddings via EmbeddingWriter callback
+- [x] **INFER-03**: Predicted embeddings are an exact match against saved reference outputs
 
 ### Test Infrastructure
 
-- [ ] **TEST-01**: Training and inference checks are permanent pytest integration tests
-- [ ] **TEST-02**: Tests are runnable via `uv run --package dynaclr pytest`
+- [x] **TEST-01**: Training and inference checks are permanent pytest integration tests
+- [x] **TEST-02**: Tests are runnable via `uv run --package dynaclr pytest`
+
+## v2.2 Requirements
+
+Requirements for composable, multi-experiment sampling framework. Each maps to roadmap phases.
+
+### Multi-Experiment Configuration
+
+- [ ] **MEXP-01**: User can define an experiment via `ExperimentConfig` dataclass (name, data_path, tracks_path, channel_names, condition_wells, interval_minutes, organelle, date, moi)
+- [ ] **MEXP-02**: User can register multiple experiments in an `ExperimentRegistry` with automatic shared/union channel resolution and per-experiment channel index mapping
+- [ ] **MEXP-03**: User can specify `training_channels` as "shared", "all", or explicit list — Registry resolves per-experiment channel mapping (active_channels, channel_maps)
+- [ ] **MEXP-04**: User can configure experiments via YAML config that Lightning CLI parses into ExperimentRegistry
+
+### Cell Indexing & Lineage
+
+- [ ] **CELL-01**: `MultiExperimentIndex` builds a unified tracks DataFrame across all experiments with columns: experiment, condition, global_track_id, hours_post_infection, well_name, fluorescence_channel
+- [ ] **CELL-02**: `MultiExperimentIndex` reconstructs cell lineage from `parent_track_id`/`track_id` — linking daughter cells to their parent track so positives can follow through division
+- [ ] **CELL-03**: `MultiExperimentIndex` retains border cells by clamping crop centroids — if a cell's center is within `yx_patch_size/2` of the image boundary, the patch origin is shifted inward so the full patch fits within the image (only excludes cells with centroid completely outside)
+- [ ] **CELL-04**: `MultiExperimentIndex` computes `valid_anchors` accounting for variable τ range and lineage continuity (anchor valid if any τ in range has a same-track or daughter-track positive)
+
+### Batch Sampling
+
+- [ ] **SAMP-01**: `FlexibleBatchSampler` restricts each batch to a single experiment when `experiment_aware=True`
+- [ ] **SAMP-02**: `FlexibleBatchSampler` balances conditions within each batch (~50% infected/uninfected) when `condition_balanced=True`
+- [ ] **SAMP-03**: `FlexibleBatchSampler` concentrates batches around a focal HPI with configurable window when `temporal_enrichment=True`
+- [ ] **SAMP-04**: `FlexibleBatchSampler` supports DDP via `set_epoch()` and rank-aware iteration, composing with existing `ShardedDistributedSampler`
+- [ ] **SAMP-05**: `FlexibleBatchSampler` supports leaky experiment mixing (configurable fraction of cross-experiment samples)
+
+### Loss Function
+
+- [ ] **LOSS-01**: `NTXentHCL` implements NT-Xent with hard-negative concentration (beta parameter), returning scalar loss with gradients
+- [ ] **LOSS-02**: `NTXentHCL` is an `nn.Module` drop-in compatible with `ContrastiveModule(loss_function=NTXentHCL(...))`
+- [ ] **LOSS-03**: `NTXentHCL` with `beta=0.0` produces numerically identical results to standard NT-Xent
+
+### Augmentation
+
+- [ ] **AUG-01**: `ChannelDropout` randomly zeros specified channels with configurable probability, compatible with batched (B,C,Z,Y,X) tensors
+- [ ] **AUG-02**: `ChannelDropout` integrates into `on_after_batch_transfer` pipeline after the existing scatter/gather augmentation chain
+- [ ] **AUG-03**: Variable τ sampling uses exponential decay distribution within `tau_range`, favoring small temporal offsets
+
+### Dataset & DataModule
+
+- [ ] **DATA-01**: `MultiExperimentTripletDataset.__getitems__` returns batch dict compatible with existing `ContrastiveModule.training_step` (anchor, positive keys + norm_meta)
+- [ ] **DATA-02**: Positive sampling follows lineage through division events — when anchor track ends at division, daughter track at t+τ is a valid positive
+- [ ] **DATA-03**: `MultiExperimentDataModule` wires FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader with `collate_fn=lambda x: x`
+- [ ] **DATA-04**: `MultiExperimentDataModule` performs train/val split by experiment (whole experiments, not FOVs)
+- [ ] **DATA-05**: `MultiExperimentDataModule` exposes all sampling/loss/augmentation hyperparameters for Lightning CLI YAML configuration
+
+### Integration
+
+- [ ] **INTG-01**: End-to-end training loop (fast_dev_run) completes with MultiExperimentDataModule + ContrastiveModule + NTXentHCL
+- [ ] **INTG-02**: YAML config example for multi-experiment training with all sampling axes enabled
 
 ## Future Requirements
 
-Deferred to v2.0+ milestones. Tracked but not in current roadmap.
+Deferred to future milestones. Tracked but not in current roadmap.
 
-### Applications (v2.0+)
+### Composable Sampling (v2.3+)
+
+- **MEXP-05**: Zero-padding for missing channels when `training_channels="all"` (experiment lacks a channel → pad with zeros)
+- **SAMP-06**: kNN-based hard negative mining in the sampler (currently HCL handles this in the loss)
+- **DATA-06**: Prediction/inference mode for MultiExperimentDataModule (sequential per-experiment)
+- **INTG-03**: Multi-GPU benchmark comparing FlexibleBatchSampler throughput vs standard shuffled batches
+
+### Applications (v3.0+)
 
 - **APP-02**: applications/Cytoland with VSUNet/FcmaeUNet LightningModules
 - **APP-03**: viscy-airtable package abstracted from current Airtable integration
@@ -208,6 +264,9 @@ Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 | Unified batch structure across pipelines | Different pipelines have fundamentally different batch semantics |
 | Split into multiple data packages | Over-fragmentation for 13 modules |
 | Zensical documentation | Deferred |
+| Modifying triplet.py | Backward compatibility — new composable sampling code in new files only |
+| Bag-of-single-channels input | Design decision: 2-channel input (Phase + Fluorescence) with channel dropout |
+| kNN sampler for hard negatives | HCL in loss is sufficient; sampler handles experiment/condition/temporal axes |
 
 ## Traceability
 
@@ -249,28 +308,61 @@ Deferred to v2.0+ milestones. Tracked but not in current roadmap.
 | APP-01-EX-01 through APP-01-EX-07 | Phase 17 | Complete |
 | APP-01-DEP-01, APP-01-DEP-02 | Phase 17 | Complete |
 
-### v2.1 (0/7 complete)
+### v2.1 (7/7 complete)
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| TRAIN-01 | Phase 18 | Pending |
-| TRAIN-02 | Phase 18 | Pending |
-| INFER-01 | Phase 19 | Pending |
-| INFER-02 | Phase 19 | Pending |
-| INFER-03 | Phase 19 | Pending |
-| TEST-01 | Phase 19 | Pending |
-| TEST-02 | Phase 19 | Pending |
+| TRAIN-01 | Phase 18 | Complete |
+| TRAIN-02 | Phase 18 | Complete |
+| INFER-01 | Phase 19 | Complete |
+| INFER-02 | Phase 19 | Complete |
+| INFER-03 | Phase 19 | Complete |
+| TEST-01 | Phase 19 | Complete |
+| TEST-02 | Phase 19 | Complete |
+
+### v2.2 (0/26 pending)
+
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| MEXP-01 | — | Pending |
+| MEXP-02 | — | Pending |
+| MEXP-03 | — | Pending |
+| MEXP-04 | — | Pending |
+| CELL-01 | — | Pending |
+| CELL-02 | — | Pending |
+| CELL-03 | — | Pending |
+| CELL-04 | — | Pending |
+| SAMP-01 | — | Pending |
+| SAMP-02 | — | Pending |
+| SAMP-03 | — | Pending |
+| SAMP-04 | — | Pending |
+| SAMP-05 | — | Pending |
+| LOSS-01 | — | Pending |
+| LOSS-02 | — | Pending |
+| LOSS-03 | — | Pending |
+| AUG-01 | — | Pending |
+| AUG-02 | — | Pending |
+| AUG-03 | — | Pending |
+| DATA-01 | — | Pending |
+| DATA-02 | — | Pending |
+| DATA-03 | — | Pending |
+| DATA-04 | — | Pending |
+| DATA-05 | — | Pending |
+| INTG-01 | — | Pending |
+| INTG-02 | — | Pending |
 
 **Coverage:**
 - v1.0: 18 requirements, 18 complete
 - v1.1: 12 requirements, 12 complete
 - v1.2: 24 requirements, 24 complete
 - v2.0: 22 requirements, 22 complete
-- v2.1: 7 requirements, 0 complete (7 mapped to phases)
-- **Total: 83 requirements (76 shipped, 7 pending)**
+- v2.1: 7 requirements, 7 complete
+- v2.2: 26 requirements, 0 pending
+- **Total: 109 requirements (83 shipped, 26 pending)**
 
 ---
 *Requirements defined: 2025-01-27*
 *Harmonized from modular-data + modular-models branches: 2026-02-16*
 *Updated for v2.0 DynaCLR: 2026-02-17*
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
+*Updated for v2.2 Composable Sampling Framework: 2026-02-21*
