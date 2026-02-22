@@ -212,7 +212,7 @@ Plans:
 **Milestone Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout -- enabling cross-experiment training that resolves heterogeneous cellular responses.
 
 - [x] **Phase 20: Experiment Configuration** - ExperimentConfig and ExperimentRegistry with channel resolution and YAML config parsing
-- [ ] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
+- [x] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
 - [ ] **Phase 22: Batch Sampling** - FlexibleBatchSampler with experiment-aware, condition-balanced, temporal enrichment, leaky mixing, and DDP support
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
 - [ ] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
@@ -249,8 +249,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 21-01-PLAN.md -- TDD: MultiExperimentIndex tracks building, lineage reconstruction, border clamping (CELL-01, CELL-02, CELL-03)
-- [ ] 21-02-PLAN.md -- TDD: Valid anchor computation with variable tau + lineage, properties, summary, package wiring (CELL-04)
+- [x] 21-01-PLAN.md -- TDD: MultiExperimentIndex tracks building, lineage reconstruction, border clamping (CELL-01, CELL-02, CELL-03)
+- [x] 21-02-PLAN.md -- TDD: Valid anchor computation with variable tau + lineage, properties, summary, package wiring (CELL-04)
 
 **Location**: `applications/dynaclr/src/dynaclr/`
 
@@ -264,7 +264,12 @@ Plans:
   3. With temporal_enrichment=True, batches concentrate cells around a focal HPI with a configurable window, while still including a global fraction from all timepoints
   4. FlexibleBatchSampler supports DDP via set_epoch() for deterministic shuffling and rank-aware iteration that composes with the existing ShardedDistributedSampler pattern
   5. Leaky experiment mixing (leaky > 0.0) allows a configurable fraction of cross-experiment samples in otherwise experiment-restricted batches
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 22-01-PLAN.md -- TDD: FlexibleBatchSampler core with experiment-aware batching, condition balancing, leaky mixing (SAMP-01, SAMP-02, SAMP-05)
+- [ ] 22-02-PLAN.md -- TDD: Temporal enrichment, DDP support, and package-level exports (SAMP-03, SAMP-04)
+
 **Location**: `packages/viscy-data/src/viscy_data/`
 
 ### Phase 23: Loss & Augmentation
@@ -340,13 +345,13 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 18. Training Validation | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 19. Inference Reproducibility | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 20. Experiment Configuration | v2.2 | 2/2 | Complete | 2026-02-22 |
-| 21. Cell Index & Lineage | v2.2 | 0/2 | Not started | -- |
-| 22. Batch Sampling | v2.2 | 0/TBD | Not started | -- |
+| 21. Cell Index & Lineage | v2.2 | 2/2 | Complete | 2026-02-22 |
+| 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
 | 25. Integration | v2.2 | 0/TBD | Not started | -- |
 
-**Total plans executed:** 29 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 2) + 3 manual phases (v2.0)
+**Total plans executed:** 31 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 4) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
@@ -356,3 +361,4 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
 *Phase 20 planned: 2026-02-21*
 *Phase 21 planned: 2026-02-21*
+*Phase 22 planned: 2026-02-22*
