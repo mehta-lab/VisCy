@@ -246,7 +246,12 @@ Plans:
   2. Lineage is reconstructed from parent_track_id -- when a cell divides, daughter tracks are linked to the parent track so that temporal positive sampling can follow through division events
   3. Border cells are retained by clamping crop centroids inward rather than excluding them -- cells near the image boundary still appear as valid observations with shifted patch origins
   4. valid_anchors is computed accounting for variable tau range and lineage continuity -- an anchor is valid only if at least one tau in the configured range yields a same-track or daughter-track positive
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 21-01-PLAN.md -- TDD: MultiExperimentIndex tracks building, lineage reconstruction, border clamping (CELL-01, CELL-02, CELL-03)
+- [ ] 21-02-PLAN.md -- TDD: Valid anchor computation with variable tau + lineage, properties, summary, package wiring (CELL-04)
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 22: Batch Sampling
@@ -335,7 +340,7 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 18. Training Validation | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 19. Inference Reproducibility | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 20. Experiment Configuration | v2.2 | 2/2 | Complete | 2026-02-22 |
-| 21. Cell Index & Lineage | v2.2 | 0/TBD | Not started | -- |
+| 21. Cell Index & Lineage | v2.2 | 0/2 | Not started | -- |
 | 22. Batch Sampling | v2.2 | 0/TBD | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
@@ -350,3 +355,4 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
 *Phase 20 planned: 2026-02-21*
+*Phase 21 planned: 2026-02-21*
