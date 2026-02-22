@@ -211,7 +211,7 @@ Plans:
 
 **Milestone Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout -- enabling cross-experiment training that resolves heterogeneous cellular responses.
 
-- [ ] **Phase 20: Experiment Configuration** - ExperimentConfig and ExperimentRegistry with channel resolution and YAML config parsing
+- [x] **Phase 20: Experiment Configuration** - ExperimentConfig and ExperimentRegistry with channel resolution and YAML config parsing
 - [ ] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
 - [ ] **Phase 22: Batch Sampling** - FlexibleBatchSampler with experiment-aware, condition-balanced, temporal enrichment, leaky mixing, and DDP support
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
@@ -232,8 +232,8 @@ Plans:
 **Plans**: 2 plans
 
 Plans:
-- [ ] 20-01-PLAN.md -- TDD: ExperimentConfig and ExperimentRegistry with validation, from_yaml, tau_range_frames
-- [ ] 20-02-PLAN.md -- Package wiring: deps, __init__.py exports, example experiments.yml
+- [x] 20-01-PLAN.md -- TDD: ExperimentConfig and ExperimentRegistry with validation, from_yaml, tau_range_frames
+- [x] 20-02-PLAN.md -- Package wiring: deps, __init__.py exports, example experiments.yml
 
 **Location**: `applications/dynaclr/src/dynaclr/`
 
@@ -334,14 +334,14 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
 | 18. Training Validation | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 19. Inference Reproducibility | v2.1 | 1/1 | Complete | 2026-02-20 |
-| 20. Experiment Configuration | v2.2 | 0/2 | In progress | -- |
+| 20. Experiment Configuration | v2.2 | 2/2 | Complete | 2026-02-22 |
 | 21. Cell Index & Lineage | v2.2 | 0/TBD | Not started | -- |
 | 22. Batch Sampling | v2.2 | 0/TBD | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
 | 25. Integration | v2.2 | 0/TBD | Not started | -- |
 
-**Total plans executed:** 27 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2) + 3 manual phases (v2.0)
+**Total plans executed:** 29 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 2) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
