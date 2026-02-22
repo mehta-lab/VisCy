@@ -1,7 +1,6 @@
 """Tests for ExperimentConfig and ExperimentRegistry."""
 
 import logging
-from pathlib import Path
 
 import numpy as np
 import pytest
@@ -9,7 +8,6 @@ import yaml
 from iohub.ngff import open_ome_zarr
 
 from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

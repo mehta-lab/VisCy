@@ -47,7 +47,7 @@ package = true
 
 [tool.uv.workspace]
 members = [ "packages/*", "applications/*" ]
-exclude = [ "applications/benchmarking", "applications/contrastive_phenotyping", "applications/qc" ]
+exclude = [ "applications/benchmarking", "applications/contrastive_phenotyping", "applications/dynacrl", "applications/qc" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
