@@ -27,7 +27,9 @@ class MultiExperimentIndex:
 
     Builds a flat DataFrame (``self.tracks``) with one row per cell observation
     per timepoint, enriched with experiment metadata, lineage links, and
-    border-clamped centroids.
+    border-clamped centroids.  When *tau_range_hours* is provided, also
+    computes ``valid_anchors`` -- the subset of rows that have at least one
+    temporal positive (same lineage) at any tau in the configured range.
 
     Parameters
     ----------
@@ -37,6 +39,9 @@ class MultiExperimentIndex:
         Z-slice range for data loading.
     yx_patch_size : tuple[int, int]
         Patch size (height, width) used for border clamping.
+    tau_range_hours : tuple[float, float]
+        ``(min_hours, max_hours)`` converted to frames per experiment
+        via :meth:`ExperimentRegistry.tau_range_frames`.
     include_wells : list[str] | None
         If provided, only include positions from these wells (e.g. ``["A/1"]``).
     exclude_fovs : list[str] | None
@@ -48,6 +53,7 @@ class MultiExperimentIndex:
         registry: ExperimentRegistry,
         z_range: slice,
         yx_patch_size: tuple[int, int],
+        tau_range_hours: tuple[float, float] = (0.5, 2.0),
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
     ) -> None:
@@ -67,6 +73,7 @@ class MultiExperimentIndex:
         tracks = self._reconstruct_lineage(tracks)
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
+        self.valid_anchors = self._compute_valid_anchors(tau_range_hours)
 
     # ------- internal methods -------
 
@@ -236,3 +243,109 @@ class MultiExperimentIndex:
         tracks = tracks.drop(columns=["_img_height", "_img_width"])
 
         return tracks
+
+    def _compute_valid_anchors(
+        self, tau_range_hours: tuple[float, float]
+    ) -> pd.DataFrame:
+        """Return the subset of ``self.tracks`` that are valid training anchors.
+
+        An anchor is valid when there exists at least one tau in the
+        per-experiment frame range such that another row with the **same
+        lineage_id** and ``t == anchor_t + tau`` is present in the tracks.
+
+        Parameters
+        ----------
+        tau_range_hours : tuple[float, float]
+            ``(min_hours, max_hours)`` used with each experiment's
+            ``interval_minutes`` for frame conversion.
+
+        Returns
+        -------
+        pd.DataFrame
+            Subset of ``self.tracks`` with reset index.
+        """
+        if self.tracks.empty:
+            return self.tracks.copy()
+
+        valid_mask = pd.Series(False, index=self.tracks.index)
+
+        for exp in self.registry.experiments:
+            min_f, max_f = self.registry.tau_range_frames(
+                exp.name, tau_range_hours
+            )
+            exp_mask = self.tracks["experiment"] == exp.name
+            exp_tracks = self.tracks[exp_mask]
+
+            # Build set of (lineage_id, t) pairs for O(1) lookup
+            lineage_timepoints: set[tuple[str, int]] = set(
+                zip(exp_tracks["lineage_id"], exp_tracks["t"])
+            )
+
+            for idx, row in exp_tracks.iterrows():
+                for tau in range(min_f, max_f + 1):
+                    if tau == 0:
+                        continue  # anchor cannot be its own positive
+                    if (row["lineage_id"], row["t"] + tau) in lineage_timepoints:
+                        valid_mask[idx] = True
+                        break
+
+        return self.tracks[valid_mask].reset_index(drop=True)
+
+    # ------- public properties / methods -------
+
+    @property
+    def experiment_groups(self) -> dict[str, np.ndarray]:
+        """Group ``self.tracks`` row indices by experiment name.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            ``{experiment_name: array_of_row_indices}``.
+        """
+        return {
+            name: group.index.to_numpy()
+            for name, group in self.tracks.groupby("experiment")
+        }
+
+    @property
+    def condition_groups(self) -> dict[str, np.ndarray]:
+        """Group ``self.tracks`` row indices by condition label.
+
+        Returns
+        -------
+        dict[str, np.ndarray]
+            ``{condition_label: array_of_row_indices}``.
+        """
+        return {
+            name: group.index.to_numpy()
+            for name, group in self.tracks.groupby("condition")
+        }
+
+    def summary(self) -> str:
+        """Return a human-readable overview of the index.
+
+        Returns
+        -------
+        str
+            Multi-line string with experiment counts, observation counts,
+            anchor counts, and per-experiment condition breakdowns.
+        """
+        lines = [
+            f"MultiExperimentIndex: {len(self.registry.experiments)} experiments, "
+            f"{len(self.tracks)} total observations, "
+            f"{len(self.valid_anchors)} valid anchors"
+        ]
+        for exp in self.registry.experiments:
+            exp_tracks = self.tracks[self.tracks["experiment"] == exp.name]
+            exp_anchors = self.valid_anchors[
+                self.valid_anchors["experiment"] == exp.name
+            ]
+            cond_counts = exp_tracks.groupby("condition").size()
+            cond_str = ", ".join(
+                f"{c}({n})" for c, n in cond_counts.items()
+            )
+            lines.append(
+                f"  {exp.name}: {len(exp_tracks)} observations, "
+                f"{len(exp_anchors)} anchors, conditions: {cond_str}"
+            )
+        return "\n".join(lines)
