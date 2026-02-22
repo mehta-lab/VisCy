@@ -2,19 +2,17 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-19)
+See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 19 — Inference Reproducibility (v2.1) COMPLETE
+**Current focus:** Milestone v2.2 — Composable Sampling Framework
 
 ## Current Position
 
-Phase: 19 of 19 (Inference Reproducibility)
-Plan: 1 of 1 in current phase (COMPLETE)
-Status: All phases complete. v2.1 milestone finished.
-Last activity: 2026-02-20 — Completed 19-01 inference reproducibility tests
-
-Progress: [====================] 100% (19/19 phases complete)
+Phase: Not started (defining requirements)
+Plan: —
+Status: Defining requirements
+Last activity: 2026-02-21 — Milestone v2.2 started
 
 ## Performance Metrics
 
@@ -54,10 +52,10 @@ Key decisions carrying forward:
 
 ## Session Continuity
 
-Last session: 2026-02-20
-Stopped at: Completed 19-01-PLAN.md (inference reproducibility tests) - v2.1 COMPLETE
+Last session: 2026-02-21
+Stopped at: Defining requirements for v2.2 Composable Sampling Framework
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Updated for v2.1 DynaCLR Integration Validation: 2026-02-20*
+*Updated for v2.2 Composable Sampling Framework: 2026-02-21*

@@ -8,14 +8,19 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 **Independent, reusable subpackages with clean import paths.** Users can `pip install viscy-transforms`, `pip install viscy-data`, `pip install viscy-models`, or `pip install viscy-utils` and use clean imports without pulling in the entire VisCy ecosystem. Applications compose these packages into domain-specific tools (e.g., `pip install dynaclr`).
 
-## Current Milestone: v2.1 DynaCLR Integration Validation
+## Current Milestone: v2.2 Composable Sampling Framework
 
-**Goal:** Prove the modularized DynaCLR application produces identical results to the original monolithic VisCy, with permanent integration tests.
+**Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout — enabling cross-experiment training that resolves heterogeneous cellular responses.
 
 **Target features:**
-- Full training loop (fast_dev_run) with modular DynaCLR
-- Inference reproducibility: checkpoint loading produces exact match against reference outputs
-- Permanent pytest integration tests for training and inference
+- Multi-experiment configuration and registry (ExperimentConfig, ExperimentRegistry)
+- Unified cell observation index with lineage reconstruction (MultiExperimentIndex)
+- Composable batch sampling: experiment-aware, condition-balanced, temporal enrichment, DDP-compatible (FlexibleBatchSampler)
+- NT-Xent with hard-negative concentration loss (NTXentHCL)
+- Channel dropout augmentation for cross-experiment generalization (ChannelDropout)
+- Variable temporal offset sampling with exponential decay and lineage-linked positives
+- Multi-experiment dataset and DataModule wiring everything together
+- YAML config-driven experiment registration
 
 ## Requirements
 
@@ -48,12 +53,18 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 - Evaluation scripts for linear classifiers on cell embeddings — v2.0
 - Examples, tutorials, and training configs migrated to `applications/dynaclr/examples/` — v2.0
 - `cli_utils.py` with `format_markdown_table()` and `load_config()` — v2.0
-
-### Active
-
 - DynaCLR training integration test (fast_dev_run) — v2.1
 - DynaCLR inference reproducibility test (exact match against reference) — v2.1
 - Permanent pytest integration test suite for DynaCLR — v2.1
+
+### Active
+
+- Multi-experiment configuration and cell indexing with lineage — v2.2
+- Composable batch sampling (experiment-aware, condition-balanced, temporal enrichment) — v2.2
+- NT-Xent HCL loss and channel dropout augmentation — v2.2
+- Variable τ with lineage-linked positive sampling — v2.2
+- Multi-experiment dataset, DataModule, and DDP support — v2.2
+- YAML config-driven experiment registration — v2.2
 
 ### Out of Scope
 
@@ -66,7 +77,12 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 
 **Design doc:** https://github.com/mehta-lab/VisCy/issues/353
 
-**Current state (after v2.0 DynaCLR):**
+**Composable sampling reference:** `/Users/eduardo.hirata/Downloads/dynaclr_claude_code_context.md`
+- Biological motivation: resolve heterogeneous infection responses at similar timepoints
+- Based on CONCORD (Zhu et al. Nature Biotech 2026) sampling strategies
+- 7 components: ExperimentConfig, ExperimentRegistry, MultiExperimentIndex, FlexibleBatchSampler, NTXentHCL, ChannelDropout, MultiExperimentTripletDataset+DataModule
+
+**Current state (after v2.1 Validation):**
 - uv workspace monorepo with 4 shared packages + 1 application:
   - `packages/viscy-transforms/` — 16 transform modules, 44 exports
   - `packages/viscy-data/` — 15 data modules, 45 exports, 4015 LOC source + 671 LOC tests
@@ -113,6 +129,11 @@ Restructuring VisCy from a monolithic package into a uv workspace monorepo. This
 | Applications compose packages | dynaclr depends on viscy-data, viscy-models, viscy-transforms, viscy-utils | Good |
 | LazyCommand CLI pattern | Defer heavy imports until invocation; graceful fallback on missing extras | Good |
 | Evaluation outside package src/ | Evaluation scripts are standalone; CLI wires them via sys.path | Good |
+| FlexibleBatchSampler + ChannelDropout in viscy-data | Reusable sampling/augmentation utilities shared across applications | — Pending |
+| DynaCLR-specific components in applications/dynaclr | ExperimentConfig, Registry, Index, Dataset, DataModule are domain-specific | — Pending |
+| NTXentHCL as nn.Module | Drop-in compatible with ContrastiveModule's loss_function= parameter | — Pending |
+| Lineage-linked positive sampling | Follow parent_track_id through division for full cell cycle positives | — Pending |
+| DDP via FlexibleBatchSampler + ShardedDistributedSampler | Compose existing distributed sampler with experiment-aware batching | — Pending |
 
 ---
-*Last updated: 2026-02-19 after starting milestone v2.1 DynaCLR Integration Validation*
+*Last updated: 2026-02-21 after starting milestone v2.2 Composable Sampling Framework*
