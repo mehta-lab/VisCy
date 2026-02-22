@@ -221,15 +221,20 @@ Plans:
 ## Phase Details
 
 ### Phase 20: Experiment Configuration
-**Goal**: Users can define multi-experiment training setups via dataclasses and YAML configs, with automatic channel resolution across experiments
+**Goal**: Users can define multi-experiment training setups via dataclasses and YAML configs, with explicit source_channel lists and positional alignment across experiments
 **Depends on**: Phase 19 (v2.1 validated DynaCLR application)
 **Requirements**: MEXP-01, MEXP-02, MEXP-03, MEXP-04
 **Success Criteria** (what must be TRUE):
-  1. User can instantiate an ExperimentConfig with experiment metadata (name, data_path, tracks_path, channel_names, condition_wells, interval_minutes) and access all fields
-  2. User can create an ExperimentRegistry from multiple ExperimentConfigs and it automatically computes shared_channels (intersection), union_channels (union), active_channels (resolved from training_channels setting), and per-experiment channel_maps
-  3. User can set training_channels to "shared", "all", or an explicit list -- and the Registry resolves the correct per-experiment channel index mapping in channel_maps
-  4. User can define experiment configs in a YAML file that Lightning CLI parses into an ExperimentRegistry without custom parsing code
-**Plans**: TBD
+  1. User can instantiate an ExperimentConfig with experiment metadata (name, data_path, tracks_path, channel_names, source_channel, condition_wells, interval_minutes) and access all fields
+  2. User can create an ExperimentRegistry from multiple ExperimentConfigs and it validates channel count consistency, computes per-experiment channel_maps (source position -> zarr index)
+  3. User specifies explicit source_channel list per experiment -- Registry validates source_channel membership in channel_names and positional alignment (same count across experiments)
+  4. User can define experiment configs in a YAML file that ExperimentRegistry.from_yaml() parses into a valid registry
+**Plans**: 2 plans
+
+Plans:
+- [ ] 20-01-PLAN.md -- TDD: ExperimentConfig and ExperimentRegistry with validation, from_yaml, tau_range_frames
+- [ ] 20-02-PLAN.md -- Package wiring: deps, __init__.py exports, example experiments.yml
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 21: Cell Index & Lineage
@@ -329,7 +334,7 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
 | 18. Training Validation | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 19. Inference Reproducibility | v2.1 | 1/1 | Complete | 2026-02-20 |
-| 20. Experiment Configuration | v2.2 | 0/TBD | Not started | -- |
+| 20. Experiment Configuration | v2.2 | 0/2 | In progress | -- |
 | 21. Cell Index & Lineage | v2.2 | 0/TBD | Not started | -- |
 | 22. Batch Sampling | v2.2 | 0/TBD | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
@@ -344,3 +349,4 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Updated for v2.0 DynaCLR: 2026-02-17*
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
+*Phase 20 planned: 2026-02-21*
