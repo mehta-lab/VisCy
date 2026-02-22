@@ -303,9 +303,6 @@ class TestUnifiedTracksDataFrame:
         )
         # Each track_id+fov combination appears in both experiments
         # but global_track_id should be unique due to experiment prefix
-        gtids = index.tracks.drop_duplicates(["global_track_id", "t"])[
-            "global_track_id"
-        ]
         # 2 exp * 2 wells * 2 FOVs * 5 tracks = 40 unique global_track_ids
         assert index.tracks["global_track_id"].nunique() == 40
 
@@ -389,7 +386,7 @@ class TestUnifiedTracksDataFrame:
             yx_patch_size=_YX_PATCH,
             exclude_fovs=["A/1/0"],
         )
-        assert "A/1/0" not in index.tracks["fov_name"].values
+        assert "A/1/0" not in index.tracks["fov_name"].to_numpy()
         # Removed 1 FOV from each experiment: 2 * (4 - 1) * 5 * 10 = 300
         assert len(index.tracks) == 300
 
