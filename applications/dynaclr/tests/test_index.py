@@ -1,4 +1,4 @@
-"""Tests for MultiExperimentIndex: tracks building, lineage, border clamping."""
+"""Tests for MultiExperimentIndex: tracks, lineage, border clamping, valid anchors."""
 
 from __future__ import annotations
 
@@ -572,3 +572,527 @@ class TestBorderClamping:
         cell = index.tracks.iloc[0]
         assert cell["y_clamp"] == 16.0  # y_half
         assert cell["x_clamp"] == 16.0  # x_half
+
+
+# ---------------------------------------------------------------------------
+# Helpers for anchor / property tests
+# ---------------------------------------------------------------------------
+
+
+def _make_tracks_csv_custom(
+    path: Path,
+    rows: list[dict],
+) -> None:
+    """Write a tracking CSV from explicit row dicts.
+
+    Each dict should contain at least: track_id, t, y, x, z.
+    Missing columns (id, parent_track_id, parent_id) get defaults.
+    """
+    for r in rows:
+        r.setdefault("id", r["track_id"] * 1000 + r["t"])
+        r.setdefault("parent_track_id", float("nan"))
+        r.setdefault("parent_id", float("nan"))
+    df = pd.DataFrame(rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+
+
+def _create_zarr_and_custom_tracks(
+    tmp_path: Path,
+    name: str,
+    channel_names: list[str],
+    well: tuple[str, str],
+    track_rows: list[dict],
+    n_t: int = _N_T,
+) -> tuple[Path, Path]:
+    """Create a mini HCS OME-Zarr with one FOV and custom tracking rows."""
+    zarr_path = tmp_path / f"{name}.zarr"
+    tracks_root = tmp_path / f"tracks_{name}"
+    n_ch = len(channel_names)
+
+    with open_ome_zarr(
+        zarr_path, layout="hcs", mode="w", channel_names=channel_names
+    ) as plate:
+        pos = plate.create_position(well[0], well[1], "0")
+        pos.create_zeros(
+            "0",
+            shape=(n_t, n_ch, _N_Z, _IMG_H, _IMG_W),
+            dtype=np.float32,
+        )
+
+    fov_name = f"{well[0]}/{well[1]}/0"
+    csv_path = tracks_root / fov_name / "tracks.csv"
+    _make_tracks_csv_custom(csv_path, track_rows)
+
+    return zarr_path, tracks_root
+
+
+# ---------------------------------------------------------------------------
+# CELL-04: Valid anchors with variable tau range and lineage continuity
+# ---------------------------------------------------------------------------
+
+
+class TestValidAnchors:
+    """Tests for valid_anchors computation."""
+
+    def test_basic_anchor_validity(self, two_experiment_setup):
+        """Tracks with enough future timepoints are valid anchors.
+
+        With tau_range_hours=(0.5, 1.5) and exp_a interval=30min:
+        tau_range_frames = (1, 3).
+        Track at t=0 with observations at t=1,2,...,9 -> valid (t+1 exists).
+        """
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        assert hasattr(index, "valid_anchors")
+        # valid_anchors is a subset of tracks
+        assert len(index.valid_anchors) <= len(index.tracks)
+        assert len(index.valid_anchors) > 0
+
+    def test_anchor_is_subset_of_tracks(self, two_experiment_setup):
+        """valid_anchors rows are all present in tracks."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        # Every global_track_id+t pair in valid_anchors should exist in tracks
+        anchor_keys = set(
+            zip(
+                index.valid_anchors["global_track_id"],
+                index.valid_anchors["t"],
+            )
+        )
+        track_keys = set(
+            zip(index.tracks["global_track_id"], index.tracks["t"])
+        )
+        assert anchor_keys.issubset(track_keys)
+
+    def test_end_of_track_not_valid(self, tmp_path):
+        """Observations near the end of a track with no future positives are excluded.
+
+        Single track with t=0..9, tau_range_frames=(1,3).
+        t=9: needs t=10,11,12 -> none exist -> NOT valid.
+        t=8: needs t=9 -> exists -> valid.
+        t=7: needs t=8 -> exists -> valid.
+        """
+        track_rows = [
+            {"track_id": 0, "t": t, "z": 0, "y": 32.0, "x": 32.0}
+            for t in range(10)
+        ]
+        zarr_path, tracks_root = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="end_test",
+            channel_names=_CHANNEL_NAMES_A,
+            well=("A", "1"),
+            track_rows=track_rows,
+        )
+        cfg = ExperimentConfig(
+            name="end_test",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        # tau_range_frames at 30min = (1, 3)
+        # t=9 should NOT be valid (no t=10,11,12)
+        anchors_t = set(index.valid_anchors["t"].to_numpy())
+        assert 9 not in anchors_t
+        # t=7 and t=8 should be valid
+        assert 7 in anchors_t
+        assert 8 in anchors_t
+
+    def test_lineage_continuity_across_tracks(self, tmp_path):
+        """Parent anchor is valid because daughter track provides future positive.
+
+        Parent track (tid=0): t=0..4
+        Daughter track (tid=1, parent=0): t=5..9
+        They share lineage_id. So parent at t=3 with tau=2 -> t=5 is
+        in daughter track (same lineage) -> valid.
+        """
+        track_rows = []
+        # Parent track: t=0..4
+        for t in range(5):
+            track_rows.append(
+                {"track_id": 0, "t": t, "z": 0, "y": 32.0, "x": 32.0}
+            )
+        # Daughter track: t=5..9, parent=0
+        for t in range(5, 10):
+            track_rows.append(
+                {
+                    "track_id": 1,
+                    "t": t,
+                    "z": 0,
+                    "y": 32.0,
+                    "x": 32.0,
+                    "parent_track_id": 0,
+                }
+            )
+        zarr_path, tracks_root = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="lineage_anchor",
+            channel_names=_CHANNEL_NAMES_A,
+            well=("A", "1"),
+            track_rows=track_rows,
+        )
+        cfg = ExperimentConfig(
+            name="lineage_anchor",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        # tau_range_frames = (1, 3) at 30min
+        # Parent t=3: check t=4 (parent has it, same lineage) -> valid
+        # Parent t=4: check t=5 (daughter has it, same lineage) -> valid
+        parent_anchors = index.valid_anchors[
+            index.valid_anchors["track_id"] == 0
+        ]
+        parent_anchor_times = set(parent_anchors["t"].to_numpy())
+        assert 3 in parent_anchor_times
+        assert 4 in parent_anchor_times
+
+    def test_different_tau_for_different_intervals(self, tmp_path):
+        """Different experiments with different intervals yield different tau_range_frames.
+
+        exp_fast: interval=15min, tau_range_hours=(0.5,1.5) -> tau_range_frames=(2,6)
+        exp_slow: interval=30min, tau_range_hours=(0.5,1.5) -> tau_range_frames=(1,3)
+        """
+        # Fast experiment: 15min interval
+        fast_rows = [
+            {"track_id": 0, "t": t, "z": 0, "y": 32.0, "x": 32.0}
+            for t in range(10)
+        ]
+        zarr_fast, tracks_fast = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="fast_exp",
+            channel_names=_CHANNEL_NAMES_A,
+            well=("A", "1"),
+            track_rows=fast_rows,
+        )
+        cfg_fast = ExperimentConfig(
+            name="fast_exp",
+            data_path=str(zarr_fast),
+            tracks_path=str(tracks_fast),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=15.0,
+        )
+
+        # Slow experiment: 30min interval
+        slow_rows = [
+            {"track_id": 0, "t": t, "z": 0, "y": 32.0, "x": 32.0}
+            for t in range(10)
+        ]
+        zarr_slow, tracks_slow = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="slow_exp",
+            channel_names=_CHANNEL_NAMES_B,
+            well=("A", "1"),
+            track_rows=slow_rows,
+        )
+        cfg_slow = ExperimentConfig(
+            name="slow_exp",
+            data_path=str(zarr_slow),
+            tracks_path=str(tracks_slow),
+            channel_names=_CHANNEL_NAMES_B,
+            source_channel=["Phase", "Mito"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+
+        registry = ExperimentRegistry(experiments=[cfg_fast, cfg_slow])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+
+        # fast_exp: tau_range_frames=(2,6), so t=9 needs t=11..15 -> invalid
+        # t=4 needs t=6..10 -> t=6,7,8,9 exist -> valid
+        fast_anchors = index.valid_anchors[
+            index.valid_anchors["experiment"] == "fast_exp"
+        ]
+        fast_anchor_times = set(fast_anchors["t"].to_numpy())
+        assert 9 not in fast_anchor_times  # no future at tau=2..6
+        assert 4 in fast_anchor_times  # t=6 exists
+
+        # slow_exp: tau_range_frames=(1,3), so t=9 needs t=10..12 -> invalid
+        # t=7 needs t=8..10 -> t=8 exists -> valid
+        slow_anchors = index.valid_anchors[
+            index.valid_anchors["experiment"] == "slow_exp"
+        ]
+        slow_anchor_times = set(slow_anchors["t"].to_numpy())
+        assert 9 not in slow_anchor_times
+        assert 7 in slow_anchor_times
+
+    def test_empty_tracks_empty_anchors(self, tmp_path):
+        """When tracks is empty, valid_anchors is also empty."""
+        zarr_path = tmp_path / "empty.zarr"
+        tracks_root = tmp_path / "tracks_empty"
+
+        with open_ome_zarr(
+            zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A
+        ) as plate:
+            pos = plate.create_position("A", "1", "0")
+            pos.create_zeros(
+                "0", shape=(1, 2, 1, _IMG_H, _IMG_W), dtype=np.float32
+            )
+
+        # No CSV -> no tracks loaded -> skip with warning
+        cfg = ExperimentConfig(
+            name="empty_exp",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        assert len(index.valid_anchors) == 0
+
+    def test_track_with_gap_still_valid(self, tmp_path):
+        """Track with missing timepoint -> anchor at t=2 still valid if t=4 exists.
+
+        Track: t=0,1,2,4,5 (missing t=3).
+        tau_range_frames=(1,3): t=2 checks t=3(missing),t=4(exists!),t=5 -> valid.
+        """
+        track_rows = [
+            {"track_id": 0, "t": t, "z": 0, "y": 32.0, "x": 32.0}
+            for t in [0, 1, 2, 4, 5]
+        ]
+        zarr_path, tracks_root = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="gap_test",
+            channel_names=_CHANNEL_NAMES_A,
+            well=("A", "1"),
+            track_rows=track_rows,
+            n_t=6,
+        )
+        cfg = ExperimentConfig(
+            name="gap_test",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        anchor_times = set(index.valid_anchors["t"].to_numpy())
+        # t=2: check t=3(missing), t=4(exists!) -> valid
+        assert 2 in anchor_times
+
+    def test_anchor_self_not_positive(self, tmp_path):
+        """An anchor cannot be its own positive (tau=0 is skipped).
+
+        Single observation at t=5 with tau_range including 0 frames:
+        tau_range_hours=(0.0, 0.5) with interval=30min -> tau_range_frames=(0, 1).
+        t=5 checks tau=1 -> t=6 doesn't exist -> NOT valid.
+        """
+        track_rows = [
+            {"track_id": 0, "t": 5, "z": 0, "y": 32.0, "x": 32.0}
+        ]
+        zarr_path, tracks_root = _create_zarr_and_custom_tracks(
+            tmp_path,
+            name="self_test",
+            channel_names=_CHANNEL_NAMES_A,
+            well=("A", "1"),
+            track_rows=track_rows,
+            n_t=10,
+        )
+        cfg = ExperimentConfig(
+            name="self_test",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.0, 0.5),
+        )
+        # Only 1 observation, tau=0 skipped, tau=1 -> t=6 missing -> not valid
+        assert len(index.valid_anchors) == 0
+
+
+# ---------------------------------------------------------------------------
+# CELL-04: Properties and summary
+# ---------------------------------------------------------------------------
+
+
+class TestMultiExperimentIndexProperties:
+    """Tests for experiment_groups, condition_groups, and summary()."""
+
+    def test_experiment_groups_keys(self, two_experiment_setup):
+        """experiment_groups returns dict with experiment names as keys."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        groups = index.experiment_groups
+        assert set(groups.keys()) == {"exp_a", "exp_b"}
+
+    def test_experiment_groups_values_are_index_arrays(self, two_experiment_setup):
+        """experiment_groups values are numpy arrays of row indices."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        groups = index.experiment_groups
+        for name, indices in groups.items():
+            assert isinstance(indices, np.ndarray)
+            # Verify these indices actually correspond to the experiment
+            for idx in indices:
+                assert index.tracks.loc[idx, "experiment"] == name
+
+    def test_experiment_groups_cover_all_rows(self, two_experiment_setup):
+        """All row indices are covered by experiment_groups."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        groups = index.experiment_groups
+        all_indices = np.concatenate(list(groups.values()))
+        assert len(all_indices) == len(index.tracks)
+
+    def test_condition_groups_keys(self, two_experiment_setup):
+        """condition_groups returns dict with condition labels as keys."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        groups = index.condition_groups
+        # exp_a: uninfected, infected; exp_b: control, treated
+        assert set(groups.keys()) == {
+            "uninfected",
+            "infected",
+            "control",
+            "treated",
+        }
+
+    def test_condition_groups_values_correct(self, two_experiment_setup):
+        """condition_groups values point to rows with matching condition."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        groups = index.condition_groups
+        for cond, indices in groups.items():
+            assert isinstance(indices, np.ndarray)
+            for idx in indices:
+                assert index.tracks.loc[idx, "condition"] == cond
+
+    def test_summary_returns_string(self, two_experiment_setup):
+        """summary() returns a non-empty string."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        result = index.summary()
+        assert isinstance(result, str)
+        assert len(result) > 0
+
+    def test_summary_contains_experiment_count(self, two_experiment_setup):
+        """summary() mentions the number of experiments."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        result = index.summary()
+        assert "2 experiments" in result
+
+    def test_summary_contains_per_experiment_lines(self, two_experiment_setup):
+        """summary() has a line per experiment with observation and anchor counts."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        result = index.summary()
+        assert "exp_a:" in result
+        assert "exp_b:" in result
+        assert "observations" in result
+        assert "anchors" in result
+        assert "conditions:" in result
+
+    def test_summary_contains_total_counts(self, two_experiment_setup):
+        """summary() header line contains total observations and valid anchors."""
+        registry, _, _ = two_experiment_setup
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        result = index.summary()
+        assert f"{len(index.tracks)} total observations" in result
+        assert f"{len(index.valid_anchors)} valid anchors" in result
