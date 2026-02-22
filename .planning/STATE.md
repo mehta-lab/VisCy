@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 20
+**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 21
 
 ## Current Position
 
-Phase: 20 of 25 (Experiment Configuration) -- COMPLETE
-Plan: 02 of 02 complete
-Status: Phase 20 complete, ready for Phase 21
-Last activity: 2026-02-22 -- Completed 20-02 package wiring + example config
+Phase: 21 of 25 (Cell Index & Lineage)
+Plan: 01 of 02 complete
+Status: 21-01 complete (MultiExperimentIndex), ready for 21-02
+Last activity: 2026-02-22 -- Completed 21-01 MultiExperimentIndex with lineage and border clamping
 
 Progress: [######################........] 20/25 phases complete (80%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 29 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 2) + v2.0 manual phases
+- Total plans completed: 30 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 3) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 20/25 phases complete (80%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 2 | dynav2 |
+| v2.2 Sampling | 20-25 | 3 | dynav2 |
 
 ## Accumulated Context
 
@@ -52,15 +52,19 @@ Key decisions carrying forward:
 - Positional alignment for source channels across experiments (names can differ, count must match)
 - Excluded stale applications/dynacrl (typo) from uv workspace
 - Explicit iohub/pyyaml deps in dynaclr even though transitive (direct imports require explicit declaration)
+- Border clamping retains all cells within image bounds; only cells with centroid completely outside image are excluded
+- Lineage reconstruction chases parent_track_id to root ancestor; missing parents fall back to self
+- Position objects stored directly in DataFrame column for downstream data loading
+- Global track ID format: {exp_name}_{fov_name}_{track_id} for cross-experiment uniqueness
 
 ### Blockers/Concerns
 
-- None. Phase 20 complete, ready for Phase 21 (Cell Index Builder).
+- None. 21-01 complete, ready for 21-02.
 
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 20-02-PLAN.md (package wiring + example config). Phase 20 complete. Ready for Phase 21.
+Stopped at: Completed 21-01-PLAN.md (MultiExperimentIndex with lineage and border clamping). Ready for 21-02.
 Resume file: None
 
 ---
@@ -68,3 +72,4 @@ Resume file: None
 *Updated for v2.2 Composable Sampling Framework roadmap: 2026-02-21*
 *Updated for 20-01 completion: 2026-02-21*
 *Updated for 20-02 completion: 2026-02-22*
+*Updated for 21-01 completion: 2026-02-22*
