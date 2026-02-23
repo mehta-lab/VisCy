@@ -1,13 +1,15 @@
-"""TDD test suite for FlexibleBatchSampler core sampling axes.
+"""TDD test suite for FlexibleBatchSampler all 5 SAMP requirements.
 
 Tests cover:
 - Experiment-aware batching (SAMP-01)
 - Condition balancing (SAMP-02)
+- Temporal enrichment (SAMP-03)
+- DDP support (SAMP-04)
 - Leaky experiment mixing (SAMP-05)
 - Deterministic reproducibility
 - Replacement sampling fallback for small groups
-- DDP rank partitioning
-- set_epoch behavior
+- Validation guards
+- Package-level import
 """
 
 from __future__ import annotations
@@ -567,3 +569,400 @@ class TestDDPPartitioning:
         s0a.set_epoch(3)
         s0b.set_epoch(3)
         assert list(s0a) == list(s0b)
+
+
+# ---------------------------------------------------------------------------
+# Fixture: temporal enrichment with controlled HPI distribution
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def temporal_anchors() -> pd.DataFrame:
+    """DataFrame with known HPI distribution for temporal enrichment tests.
+
+    Two experiments, 2 conditions, 400 rows total.
+    HPI values: 0, 2, 4, 6, 8, ..., 46, 48  (uniform 2-hour spacing)
+    This ensures clear focal/global separation when window_hours is small.
+    """
+    rows = []
+    idx = 0
+    for exp_name in ["exp_A", "exp_B"]:
+        for cond in ["infected", "uninfected"]:
+            for i in range(100):
+                rows.append(
+                    {
+                        "experiment": exp_name,
+                        "condition": cond,
+                        "hours_post_infection": float(i % 25) * 2.0,
+                        "global_track_id": f"{exp_name}_{cond}_{i}",
+                        "t": i % 25,
+                    }
+                )
+                idx += 1
+    df = pd.DataFrame(rows)
+    return df.reset_index(drop=True)
+
+
+# ---------------------------------------------------------------------------
+# Temporal enrichment (SAMP-03)
+# ---------------------------------------------------------------------------
+
+
+class TestTemporalEnrichment:
+    """temporal_enrichment=True concentrates batches around focal HPI."""
+
+    def test_enriched_batches_concentrate_near_focal(
+        self, temporal_anchors: pd.DataFrame
+    ):
+        """With temporal_enrichment=True and global_fraction=0.3, ~70% of batch
+        indices should have HPI within temporal_window_hours of the focal HPI.
+
+        Statistical test over many batches: average focal fraction >= 0.55
+        (allowing generous margin for small-batch rounding).
+        """
+        sampler = FlexibleBatchSampler(
+            valid_anchors=temporal_anchors,
+            batch_size=20,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            temporal_enrichment=True,
+            temporal_window_hours=2.0,
+            temporal_global_fraction=0.3,
+            seed=42,
+        )
+        batches = list(sampler)
+        assert len(batches) > 0, "Should yield batches"
+
+        hpi_values = temporal_anchors["hours_post_infection"].to_numpy()
+        focal_fractions: list[float] = []
+        for batch in batches:
+            batch_hpi = hpi_values[batch]
+            # We cannot know the focal HPI chosen, but we can check that
+            # the batch is NOT uniformly distributed: most indices should
+            # cluster around some HPI value within the window.
+            # Use the mode HPI +/- window as proxy.
+            unique_hpi, counts = np.unique(batch_hpi, return_counts=True)
+            mode_hpi = unique_hpi[counts.argmax()]
+            n_near = np.sum(np.abs(batch_hpi - mode_hpi) <= 2.0)
+            focal_fractions.append(n_near / len(batch))
+
+        avg_focal = float(np.mean(focal_fractions))
+        assert avg_focal >= 0.55, (
+            f"Average focal fraction {avg_focal:.3f} < 0.55; "
+            f"temporal enrichment not concentrating batches"
+        )
+
+    def test_global_fraction_one_no_enrichment(
+        self, temporal_anchors: pd.DataFrame
+    ):
+        """temporal_global_fraction=1.0 means entire batch is global (no focal)."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=temporal_anchors,
+            batch_size=20,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            temporal_enrichment=True,
+            temporal_window_hours=2.0,
+            temporal_global_fraction=1.0,
+            seed=42,
+        )
+        # Should behave identically to no enrichment -- just verify it runs
+        batches = list(sampler)
+        assert len(batches) > 0
+
+    def test_global_fraction_zero_all_focal(
+        self, temporal_anchors: pd.DataFrame
+    ):
+        """temporal_global_fraction=0.0 means entire batch from focal window."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=temporal_anchors,
+            batch_size=20,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            temporal_enrichment=True,
+            temporal_window_hours=2.0,
+            temporal_global_fraction=0.0,
+            seed=42,
+        )
+        batches = list(sampler)
+        assert len(batches) > 0
+
+        hpi_values = temporal_anchors["hours_post_infection"].to_numpy()
+        for batch in batches:
+            batch_hpi = hpi_values[batch]
+            # All indices should be within +/-2.0 of some focal HPI
+            # Check that range is at most 2 * window
+            assert batch_hpi.max() - batch_hpi.min() <= 4.01, (
+                f"All-focal batch HPI range {batch_hpi.max() - batch_hpi.min():.1f} "
+                f"exceeds 2*window=4.0"
+            )
+
+    def test_enrichment_false_no_temporal_filtering(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """temporal_enrichment=False should work without hours_post_infection
+        column (though our fixture has it, the parameter should be ignored)."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=two_experiment_anchors,
+            batch_size=10,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            temporal_enrichment=False,
+            seed=42,
+        )
+        batches = list(sampler)
+        assert len(batches) > 0
+
+    def test_enrichment_requires_hpi_column(self):
+        """temporal_enrichment=True without hours_post_infection column -> ValueError."""
+        df = pd.DataFrame(
+            {
+                "experiment": ["a"] * 20,
+                "condition": ["ctrl"] * 20,
+            }
+        )
+        with pytest.raises(ValueError, match="hours_post_infection"):
+            FlexibleBatchSampler(
+                valid_anchors=df,
+                batch_size=5,
+                experiment_aware=True,
+                condition_balanced=False,
+                temporal_enrichment=True,
+                seed=0,
+            )
+
+    def test_enrichment_combined_with_condition_balance(
+        self, temporal_anchors: pd.DataFrame
+    ):
+        """temporal_enrichment + condition_balanced should both apply."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=temporal_anchors,
+            batch_size=20,
+            experiment_aware=True,
+            condition_balanced=True,
+            leaky=0.0,
+            temporal_enrichment=True,
+            temporal_window_hours=4.0,
+            temporal_global_fraction=0.3,
+            seed=42,
+        )
+        batches = list(sampler)
+        assert len(batches) > 0
+        for batch in batches:
+            assert len(batch) == 20
+
+
+# ---------------------------------------------------------------------------
+# DDP disjoint coverage (SAMP-04 explicit)
+# ---------------------------------------------------------------------------
+
+
+class TestDDPDisjointCoverage:
+    """Two ranks produce disjoint batch assignments covering all batches."""
+
+    def test_two_ranks_cover_all_batches(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """Rank 0 + Rank 1 together should cover all generated batches."""
+        common = dict(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            seed=42,
+            num_replicas=2,
+        )
+        sampler_r0 = FlexibleBatchSampler(**common, rank=0)
+        sampler_r1 = FlexibleBatchSampler(**common, rank=1)
+        sampler_r0.set_epoch(0)
+        sampler_r1.set_epoch(0)
+
+        batches_r0 = list(sampler_r0)
+        batches_r1 = list(sampler_r1)
+
+        # Interleave back: r0 got [0,2,4,...], r1 got [1,3,5,...]
+        # Combined count should equal total_batches
+        total_batches = len(two_experiment_anchors) // 8  # 25
+        combined = len(batches_r0) + len(batches_r1)
+        assert combined == total_batches, (
+            f"Combined {combined} != total {total_batches}"
+        )
+
+    def test_two_ranks_disjoint_by_interleaving(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """Rank 0 gets even-indexed batches, rank 1 gets odd-indexed batches."""
+        common = dict(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            seed=42,
+            num_replicas=2,
+        )
+        # Build the full batch list from a single-rank sampler for reference
+        full_sampler = FlexibleBatchSampler(
+            **{**common, "num_replicas": 1, "rank": 0}
+        )
+        full_sampler.set_epoch(0)
+        all_batches = list(full_sampler)
+
+        sampler_r0 = FlexibleBatchSampler(**common, rank=0)
+        sampler_r1 = FlexibleBatchSampler(**common, rank=1)
+        sampler_r0.set_epoch(0)
+        sampler_r1.set_epoch(0)
+
+        r0_batches = list(sampler_r0)
+        r1_batches = list(sampler_r1)
+
+        # r0 should match all_batches[0::2], r1 should match all_batches[1::2]
+        assert r0_batches == all_batches[0::2], "Rank 0 should get even-indexed batches"
+        assert r1_batches == all_batches[1::2], "Rank 1 should get odd-indexed batches"
+
+    def test_set_epoch_changes_ddp_sequences(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """set_epoch(0) and set_epoch(1) produce different sequences for same rank."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            seed=42,
+            num_replicas=2,
+            rank=0,
+        )
+        sampler.set_epoch(0)
+        epoch0 = list(sampler)
+        sampler.set_epoch(1)
+        epoch1 = list(sampler)
+        assert epoch0 != epoch1, "Different epochs should produce different sequences"
+
+    def test_set_epoch_reproducible(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """set_epoch(0) called twice produces identical sequence."""
+        sampler = FlexibleBatchSampler(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            seed=42,
+            num_replicas=2,
+            rank=0,
+        )
+        sampler.set_epoch(0)
+        first = list(sampler)
+        sampler.set_epoch(0)
+        second = list(sampler)
+        assert first == second, "Same epoch should reproduce identical sequence"
+
+    def test_len_with_ddp(
+        self, two_experiment_anchors: pd.DataFrame
+    ):
+        """__len__ with num_replicas=2 returns ceil(total_batches / 2)."""
+        import math
+
+        sampler = FlexibleBatchSampler(
+            valid_anchors=two_experiment_anchors,
+            batch_size=8,
+            experiment_aware=True,
+            condition_balanced=False,
+            leaky=0.0,
+            seed=42,
+            num_replicas=2,
+            rank=0,
+        )
+        total_batches = len(two_experiment_anchors) // 8  # 25
+        expected = math.ceil(total_batches / 2)  # 13
+        assert len(sampler) == expected
+
+
+# ---------------------------------------------------------------------------
+# Validation guards
+# ---------------------------------------------------------------------------
+
+
+class TestValidationGuards:
+    """Column validation: required columns checked only when feature enabled."""
+
+    def test_experiment_aware_requires_experiment_column(self):
+        """experiment_aware=True without 'experiment' column -> ValueError."""
+        df = pd.DataFrame(
+            {
+                "condition": ["ctrl"] * 20,
+                "hours_post_infection": [1.0] * 20,
+            }
+        )
+        with pytest.raises(ValueError, match="experiment"):
+            FlexibleBatchSampler(
+                valid_anchors=df,
+                batch_size=5,
+                experiment_aware=True,
+                condition_balanced=False,
+                seed=0,
+            )
+
+    def test_condition_balanced_requires_condition_column(self):
+        """condition_balanced=True without 'condition' column -> ValueError."""
+        df = pd.DataFrame(
+            {
+                "experiment": ["a"] * 20,
+                "hours_post_infection": [1.0] * 20,
+            }
+        )
+        with pytest.raises(ValueError, match="condition"):
+            FlexibleBatchSampler(
+                valid_anchors=df,
+                batch_size=5,
+                experiment_aware=False,
+                condition_balanced=True,
+                seed=0,
+            )
+
+    def test_temporal_enrichment_requires_hpi_column(self):
+        """temporal_enrichment=True without hours_post_infection -> ValueError."""
+        df = pd.DataFrame(
+            {
+                "experiment": ["a"] * 20,
+                "condition": ["ctrl"] * 20,
+            }
+        )
+        with pytest.raises(ValueError, match="hours_post_infection"):
+            FlexibleBatchSampler(
+                valid_anchors=df,
+                batch_size=5,
+                experiment_aware=True,
+                condition_balanced=False,
+                temporal_enrichment=True,
+                seed=0,
+            )
+
+
+# ---------------------------------------------------------------------------
+# Package-level import
+# ---------------------------------------------------------------------------
+
+
+class TestPackageImport:
+    """FlexibleBatchSampler importable from viscy_data top-level."""
+
+    def test_import_from_viscy_data(self):
+        """from viscy_data import FlexibleBatchSampler should work."""
+        from viscy_data import FlexibleBatchSampler as FBS
+
+        assert FBS is FlexibleBatchSampler
+
+    def test_in_all(self):
+        """FlexibleBatchSampler should be in viscy_data.__all__."""
+        import viscy_data
+
+        assert "FlexibleBatchSampler" in viscy_data.__all__
