@@ -81,6 +81,9 @@ from viscy_data.livecell import LiveCellDataModule, LiveCellDataset, LiveCellTes
 # Memory-mapped cache (from mmap_cache.py -- requires [mmap] extra at runtime)
 from viscy_data.mmap_cache import MmappedDataModule, MmappedDataset
 
+# Batch sampler (from sampler.py)
+from viscy_data.sampler import FlexibleBatchSampler
+
 # Segmentation (from segmentation.py)
 from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
 
@@ -110,6 +113,7 @@ __all__ = [
     "TrackingIndex",
     "TripletSample",
     # Utilities
+    "FlexibleBatchSampler",
     "SelectWell",
     "ShardedDistributedSampler",
     # Core
