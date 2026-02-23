@@ -44,6 +44,9 @@ Key decisions carrying forward:
 - FlexibleBatchSampler + ChannelDropout in packages/viscy-data/ (reusable)
 - ExperimentConfig, Registry, Index, Dataset, DataModule in applications/dynaclr/ (domain-specific)
 - NTXentHCL as nn.Module drop-in for ContrastiveModule(loss_function=...)
+- NTXentHCL overrides _compute_loss (pair-based) to integrate with pytorch_metric_learning's reducer/distance pipeline
+- beta=0.0 fast-path delegates to super()._compute_loss for exact numerical identity with NTXentLoss
+- HCL weight normalization: per-anchor sum equals neg_count, preserving loss magnitude across beta values
 - 2-channel input (Phase + Fluorescence) with channel dropout on channel 1
 - HCL in loss only, no kNN sampler -- FlexibleBatchSampler handles experiment/condition/temporal axes
 - Train/val split by whole experiments, not FOVs
@@ -91,3 +94,4 @@ Resume file: None
 *Updated for 22-01 completion: 2026-02-22*
 *Updated for 22-02 completion: 2026-02-22*
 *Updated for 23-02 completion: 2026-02-23*
+*Updated for 23-01 completion: 2026-02-23*
