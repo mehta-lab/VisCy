@@ -281,7 +281,12 @@ Plans:
   2. NTXentHCL is an nn.Module that works as a drop-in replacement via ContrastiveModule(loss_function=NTXentHCL(...)) without any changes to the training step
   3. ChannelDropout randomly zeros specified channels with configurable probability on batched (B,C,Z,Y,X) tensors and integrates into on_after_batch_transfer after the existing scatter/gather augmentation chain
   4. Variable tau sampling uses exponential decay within tau_range, favoring small temporal offsets -- verified by statistical distribution test
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 23-01-PLAN.md -- TDD: NTXentHCL loss with hard-negative concentration, NTXentLoss subclass for drop-in compatibility (LOSS-01, LOSS-02, LOSS-03)
+- [ ] 23-02-PLAN.md -- TDD: ChannelDropout augmentation and variable tau sampling utility with package exports (AUG-01, AUG-02, AUG-03)
+
 **Location**: NTXentHCL in `applications/dynaclr/src/dynaclr/`, ChannelDropout in `packages/viscy-data/src/viscy_data/`
 
 ### Phase 24: Dataset & DataModule
@@ -347,7 +352,7 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 20. Experiment Configuration | v2.2 | 2/2 | Complete | 2026-02-22 |
 | 21. Cell Index & Lineage | v2.2 | 2/2 | Complete | 2026-02-22 |
 | 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
-| 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
+| 23. Loss & Augmentation | v2.2 | 0/2 | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
 | 25. Integration | v2.2 | 0/TBD | Not started | -- |
 
@@ -362,3 +367,4 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Phase 20 planned: 2026-02-21*
 *Phase 21 planned: 2026-02-21*
 *Phase 22 planned: 2026-02-22*
+*Phase 23 planned: 2026-02-22*
