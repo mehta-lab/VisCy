@@ -215,7 +215,7 @@ Plans:
 - [x] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
 - [ ] **Phase 22: Batch Sampling** - FlexibleBatchSampler with experiment-aware, condition-balanced, temporal enrichment, leaky mixing, and DDP support
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
-- [ ] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
+- [x] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
 - [ ] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
 
 ## Phase Details
@@ -298,11 +298,11 @@ Plans:
   2. Positive sampling follows lineage through division events -- when an anchor track ends at a division, the daughter track at t+tau is selected as a valid positive
   3. MultiExperimentDataModule wires FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader with collate_fn=lambda x: x, and train/val split is by whole experiments (not individual FOVs)
   4. All sampling, loss, and augmentation hyperparameters (tau_range, tau_decay, experiment_aware, condition_balanced, temporal_enrichment, hcl_beta, channel_dropout_prob) are exposed as __init__ parameters for Lightning CLI YAML configuration
-**Plans**: 2 plans
+**Plans**: 2 plans (complete 2026-02-23)
 
 Plans:
-- [ ] 24-01-PLAN.md -- TDD: MultiExperimentTripletDataset with lineage-aware positive sampling, tensorstore I/O, channel remapping (DATA-01, DATA-02)
-- [ ] 24-02-PLAN.md -- TDD: MultiExperimentDataModule wiring FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader, experiment-level split, CLI params, package exports (DATA-03, DATA-04, DATA-05)
+- [x] 24-01-PLAN.md -- TDD: MultiExperimentTripletDataset with lineage-aware positive sampling, tensorstore I/O, channel remapping (DATA-01, DATA-02)
+- [x] 24-02-PLAN.md -- TDD: MultiExperimentDataModule wiring FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader, experiment-level split, CLI params, package exports (DATA-03, DATA-04, DATA-05)
 
 **Location**: `applications/dynaclr/src/dynaclr/`
 
@@ -358,10 +358,10 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 21. Cell Index & Lineage | v2.2 | 2/2 | Complete | 2026-02-22 |
 | 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/2 | Not started | -- |
-| 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
+| 24. Dataset & DataModule | v2.2 | 2/2 | Complete | 2026-02-23 |
 | 25. Integration | v2.2 | 0/TBD | Not started | -- |
 
-**Total plans executed:** 31 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 4) + 3 manual phases (v2.0)
+**Total plans executed:** 39 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 12) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
@@ -373,3 +373,4 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Phase 21 planned: 2026-02-21*
 *Phase 22 planned: 2026-02-22*
 *Phase 23 planned: 2026-02-22*
+*Phase 24 planned: 2026-02-23*
