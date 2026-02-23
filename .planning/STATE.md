@@ -9,17 +9,17 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 
 ## Current Position
 
-Phase: 24 of 25 (DynaCLR Dataset & DataModule)
-Plan: 01 of 02 complete
-Status: 24-01 complete (MultiExperimentTripletDataset). Ready for 24-02.
-Last activity: 2026-02-23 -- Completed 24-01 MultiExperimentTripletDataset
+Phase: 24 of 25 (DynaCLR Dataset & DataModule) -- COMPLETE
+Plan: 02 of 02 complete
+Status: Phase 24 complete. All plans (24-01 + 24-02) done. Ready for Phase 25.
+Last activity: 2026-02-23 -- Completed 24-02 MultiExperimentDataModule
 
-Progress: [######################........] 22/25 phases complete (88%)
+Progress: [#########################.....] 24/25 phases complete (96%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 37 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 10) + v2.0 manual phases
+- Total plans completed: 39 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 12) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 22/25 phases complete (88%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 10 | dynav2 |
+| v2.2 Sampling | 20-25 | 12 | dynav2 |
 
 ## Accumulated Context
 
@@ -76,15 +76,19 @@ Key decisions carrying forward:
 - Lineage-timepoint pre-built lookup indexed by (experiment, lineage_id) -> {t: [row_indices]} for O(1) positive candidate retrieval
 - Fallback tau strategy: sample_tau first, then linear scan of full tau range if no candidate at sampled offset
 - Dataset uses numpy.random.default_rng() without fixed seed; determinism delegated to external sampler
+- Generic channel names (ch_0, ch_1) for DataModule transform pipeline -- experiments have different names but same count
+- Norm_meta all-None coalescing in on_after_batch_transfer to prevent collate_meta_tensor crash
+- Separate ExperimentRegistry instances for train/val splits, each building own MultiExperimentIndex
+- ChannelDropout applied AFTER normalizations+augmentations+final_crop in on_after_batch_transfer
 
 ### Blockers/Concerns
 
-- None. Plan 24-01 complete. Ready for Plan 24-02.
+- None. Phase 24 complete. Ready for Phase 25.
 
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 24-01-PLAN.md (MultiExperimentTripletDataset). Ready for 24-02.
+Stopped at: Completed 24-02-PLAN.md (MultiExperimentDataModule). Phase 24 complete. Ready for Phase 25.
 Resume file: None
 
 ---
@@ -99,3 +103,4 @@ Resume file: None
 *Updated for 23-02 completion: 2026-02-23*
 *Updated for 23-01 completion: 2026-02-23*
 *Updated for 24-01 completion: 2026-02-23*
+*Updated for 24-02 completion: 2026-02-23*
