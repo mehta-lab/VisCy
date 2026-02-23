@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 22
+**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 23
 
 ## Current Position
 
-Phase: 22 of 25 (Flexible Batch Sampler)
-Plan: 01 of 02 complete
-Status: 22-01 complete (FlexibleBatchSampler core), ready for 22-02
-Last activity: 2026-02-22 -- Completed 22-01 FlexibleBatchSampler core (experiment-aware, condition-balanced, leaky mixing)
+Phase: 23 of 25 (DynaCLR Dataset)
+Plan: 00 of ?? complete
+Status: Phase 22 complete (FlexibleBatchSampler all 5 SAMP axes), ready for Phase 23
+Last activity: 2026-02-22 -- Completed 22-02 temporal enrichment + DDP + validation guards
 
-Progress: [######################........] 21/25 phases complete (84%)
+Progress: [######################........] 22/25 phases complete (88%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 33 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 6) + v2.0 manual phases
+- Total plans completed: 34 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 7) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 21/25 phases complete (84%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 6 | dynav2 |
+| v2.2 Sampling | 20-25 | 7 | dynav2 |
 
 ## Accumulated Context
 
@@ -64,15 +64,18 @@ Key decisions carrying forward:
 - Default experiment weights proportional to group size, not uniform
 - DDP interleaved batch slicing: all ranks generate same full batch list, each takes rank::num_replicas
 - Condition balancing: last condition gets remainder to prevent rounding-induced batch size mismatch
+- Temporal enrichment draws focal+global directly from experiment pool (not post-filter on pre-sampled primary)
+- Conditional precomputation: groupby only runs for enabled features (avoids KeyError on missing columns)
+- temporal_global_fraction=0.0 yields all-focal batches; 1.0 yields no enrichment effect
 
 ### Blockers/Concerns
 
-- None. 22-01 complete, ready for 22-02 (temporal enrichment + DDP tests).
+- None. Phase 22 complete. Ready for Phase 23 (DynaCLR Dataset).
 
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 22-01-PLAN.md (FlexibleBatchSampler core). Ready for 22-02.
+Stopped at: Completed 22-02-PLAN.md (Phase 22 complete). Ready for Phase 23.
 Resume file: None
 
 ---
@@ -83,3 +86,4 @@ Resume file: None
 *Updated for 21-01 completion: 2026-02-22*
 *Updated for 21-02 completion: 2026-02-22*
 *Updated for 22-01 completion: 2026-02-22*
+*Updated for 22-02 completion: 2026-02-22*
