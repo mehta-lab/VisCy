@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 23 of 25 (DynaCLR Dataset)
-Plan: 00 of ?? complete
-Status: Phase 22 complete (FlexibleBatchSampler all 5 SAMP axes), ready for Phase 23
-Last activity: 2026-02-22 -- Completed 22-02 temporal enrichment + DDP + validation guards
+Plan: 02 of 02 complete
+Status: Phase 23 complete (NTXentHCL + ChannelDropout + tau sampling)
+Last activity: 2026-02-23 -- Completed 23-02 ChannelDropout and variable tau sampling
 
 Progress: [######################........] 22/25 phases complete (88%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 34 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 7) + v2.0 manual phases
+- Total plans completed: 36 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 9) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 22/25 phases complete (88%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 7 | dynav2 |
+| v2.2 Sampling | 20-25 | 9 | dynav2 |
 
 ## Accumulated Context
 
@@ -67,15 +67,18 @@ Key decisions carrying forward:
 - Temporal enrichment draws focal+global directly from experiment pool (not post-filter on pre-sampled primary)
 - Conditional precomputation: groupby only runs for enabled features (avoids KeyError on missing columns)
 - temporal_global_fraction=0.0 yields all-focal batches; 1.0 yields no enrichment effect
+- ChannelDropout clones input tensor (non-destructive) for pipeline safety
+- Per-sample independent dropout via torch.rand mask on batch dimension
+- Exponential decay tau sampling uses normalized offset for consistent behavior across tau ranges
 
 ### Blockers/Concerns
 
-- None. Phase 22 complete. Ready for Phase 23 (DynaCLR Dataset).
+- None. Phase 23 complete. Ready for Phase 24.
 
 ## Session Continuity
 
-Last session: 2026-02-22
-Stopped at: Completed 22-02-PLAN.md (Phase 22 complete). Ready for Phase 23.
+Last session: 2026-02-23
+Stopped at: Completed 23-02-PLAN.md (Phase 23 complete). Ready for Phase 24.
 Resume file: None
 
 ---
@@ -87,3 +90,4 @@ Resume file: None
 *Updated for 21-02 completion: 2026-02-22*
 *Updated for 22-01 completion: 2026-02-22*
 *Updated for 22-02 completion: 2026-02-22*
+*Updated for 23-02 completion: 2026-02-23*
