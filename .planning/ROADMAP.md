@@ -298,7 +298,12 @@ Plans:
   2. Positive sampling follows lineage through division events -- when an anchor track ends at a division, the daughter track at t+tau is selected as a valid positive
   3. MultiExperimentDataModule wires FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader with collate_fn=lambda x: x, and train/val split is by whole experiments (not individual FOVs)
   4. All sampling, loss, and augmentation hyperparameters (tau_range, tau_decay, experiment_aware, condition_balanced, temporal_enrichment, hcl_beta, channel_dropout_prob) are exposed as __init__ parameters for Lightning CLI YAML configuration
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 24-01-PLAN.md -- TDD: MultiExperimentTripletDataset with lineage-aware positive sampling, tensorstore I/O, channel remapping (DATA-01, DATA-02)
+- [ ] 24-02-PLAN.md -- TDD: MultiExperimentDataModule wiring FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader, experiment-level split, CLI params, package exports (DATA-03, DATA-04, DATA-05)
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 25: Integration
