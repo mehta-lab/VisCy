@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 22 of 25 (Flexible Batch Sampler)
-Plan: 00 of ?? complete
-Status: Phase 21 complete (MultiExperimentIndex with valid anchors), ready for Phase 22
-Last activity: 2026-02-22 -- Completed 21-02 valid anchors, properties, summary
+Plan: 01 of 02 complete
+Status: 22-01 complete (FlexibleBatchSampler core), ready for 22-02
+Last activity: 2026-02-22 -- Completed 22-01 FlexibleBatchSampler core (experiment-aware, condition-balanced, leaky mixing)
 
 Progress: [######################........] 21/25 phases complete (84%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 32 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 5) + v2.0 manual phases
+- Total plans completed: 33 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 6) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 21/25 phases complete (84%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 5 | dynav2 |
+| v2.2 Sampling | 20-25 | 6 | dynav2 |
 
 ## Accumulated Context
 
@@ -60,15 +60,19 @@ Key decisions carrying forward:
 - tau=0 skipped to prevent anchor from being its own positive
 - valid_anchors is reset_index(drop=True) for clean downstream indexing
 - Properties (experiment_groups, condition_groups) use groupby on tracks rather than caching
+- FlexibleBatchSampler uses numpy RNG (default_rng) over torch Generator for weighted choice ergonomics
+- Default experiment weights proportional to group size, not uniform
+- DDP interleaved batch slicing: all ranks generate same full batch list, each takes rank::num_replicas
+- Condition balancing: last condition gets remainder to prevent rounding-induced batch size mismatch
 
 ### Blockers/Concerns
 
-- None. Phase 21 complete, ready for Phase 22.
+- None. 22-01 complete, ready for 22-02 (temporal enrichment + DDP tests).
 
 ## Session Continuity
 
 Last session: 2026-02-22
-Stopped at: Completed 21-02-PLAN.md (valid anchors, properties, summary). Phase 21 complete. Ready for Phase 22.
+Stopped at: Completed 22-01-PLAN.md (FlexibleBatchSampler core). Ready for 22-02.
 Resume file: None
 
 ---
@@ -78,3 +82,4 @@ Resume file: None
 *Updated for 20-02 completion: 2026-02-22*
 *Updated for 21-01 completion: 2026-02-22*
 *Updated for 21-02 completion: 2026-02-22*
+*Updated for 22-01 completion: 2026-02-22*
