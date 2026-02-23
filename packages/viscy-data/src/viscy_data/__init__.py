@@ -39,6 +39,9 @@ from viscy_data._typing import (
     TripletSample,
 )
 
+# Channel dropout augmentation (from channel_dropout.py)
+from viscy_data.channel_dropout import ChannelDropout
+
 # Cell classification (from cell_classification.py -- requires pandas at runtime)
 from viscy_data.cell_classification import (
     ClassificationDataModule,
@@ -112,6 +115,8 @@ __all__ = [
     "SegmentationSample",
     "TrackingIndex",
     "TripletSample",
+    # Augmentation
+    "ChannelDropout",
     # Utilities
     "FlexibleBatchSampler",
     "SelectWell",
