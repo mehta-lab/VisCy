@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 23
+**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 24
 
 ## Current Position
 
-Phase: 23 of 25 (DynaCLR Dataset)
-Plan: 02 of 02 complete
-Status: Phase 23 complete (NTXentHCL + ChannelDropout + tau sampling)
-Last activity: 2026-02-23 -- Completed 23-02 ChannelDropout and variable tau sampling
+Phase: 24 of 25 (DynaCLR Dataset & DataModule)
+Plan: 01 of 02 complete
+Status: 24-01 complete (MultiExperimentTripletDataset). Ready for 24-02.
+Last activity: 2026-02-23 -- Completed 24-01 MultiExperimentTripletDataset
 
 Progress: [######################........] 22/25 phases complete (88%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 36 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 9) + v2.0 manual phases
+- Total plans completed: 37 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 10) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [######################........] 22/25 phases complete (88%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 9 | dynav2 |
+| v2.2 Sampling | 20-25 | 10 | dynav2 |
 
 ## Accumulated Context
 
@@ -73,15 +73,18 @@ Key decisions carrying forward:
 - ChannelDropout clones input tensor (non-destructive) for pipeline safety
 - Per-sample independent dropout via torch.rand mask on batch dimension
 - Exponential decay tau sampling uses normalized offset for consistent behavior across tau ranges
+- Lineage-timepoint pre-built lookup indexed by (experiment, lineage_id) -> {t: [row_indices]} for O(1) positive candidate retrieval
+- Fallback tau strategy: sample_tau first, then linear scan of full tau range if no candidate at sampled offset
+- Dataset uses numpy.random.default_rng() without fixed seed; determinism delegated to external sampler
 
 ### Blockers/Concerns
 
-- None. Phase 23 complete. Ready for Phase 24.
+- None. Plan 24-01 complete. Ready for Plan 24-02.
 
 ## Session Continuity
 
 Last session: 2026-02-23
-Stopped at: Completed 23-02-PLAN.md (Phase 23 complete). Ready for Phase 24.
+Stopped at: Completed 24-01-PLAN.md (MultiExperimentTripletDataset). Ready for 24-02.
 Resume file: None
 
 ---
@@ -95,3 +98,4 @@ Resume file: None
 *Updated for 22-02 completion: 2026-02-22*
 *Updated for 23-02 completion: 2026-02-23*
 *Updated for 23-01 completion: 2026-02-23*
+*Updated for 24-01 completion: 2026-02-23*
