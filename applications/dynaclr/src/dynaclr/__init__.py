@@ -1,3 +1,4 @@
+from dynaclr.datamodule import MultiExperimentDataModule
 from dynaclr.dataset import MultiExperimentTripletDataset
 from dynaclr.engine import BetaVaeModule, ContrastiveModule, ContrastivePrediction
 from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
@@ -11,6 +12,7 @@ __all__ = [
     "ContrastivePrediction",
     "ExperimentConfig",
     "ExperimentRegistry",
+    "MultiExperimentDataModule",
     "MultiExperimentIndex",
     "MultiExperimentTripletDataset",
     "NTXentHCL",
