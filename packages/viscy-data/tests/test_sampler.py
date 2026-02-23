@@ -18,7 +18,6 @@ import pytest
 
 from viscy_data.sampler import FlexibleBatchSampler
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
@@ -214,7 +213,7 @@ class TestConditionBalanced:
         for batch in batches:
             conditions = two_experiment_anchors.iloc[batch]["condition"]
             counts = conditions.value_counts()
-            for cond_count in counts.values:
+            for cond_count in counts.to_numpy():
                 fraction = cond_count / len(batch)
                 # Within +/-20% of 50% = between 30% and 70%
                 assert 0.3 <= fraction <= 0.7, (
@@ -305,7 +304,7 @@ class TestLeakyMixing:
         any_leaked = False
         for batch in batches:
             experiments = two_experiment_anchors.iloc[batch]["experiment"]
-            if experiments.nunique() > 1:
+            if len(experiments.unique()) > 1:
                 any_leaked = True
                 # Check approximate count: expect ~2 from other experiment
                 counts = experiments.value_counts()
