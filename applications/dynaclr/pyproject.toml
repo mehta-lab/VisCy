@@ -45,6 +45,7 @@ optional-dependencies.eval = [
   "natsort",
   "phate",
   "scikit-learn",
+  "seaborn",
   "umap-learn",
   "wandb",
 ]
