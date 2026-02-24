@@ -7,6 +7,7 @@ from 2 experiments having different channel sets (GFP vs RFP).
 
 from __future__ import annotations
 
+import importlib
 from pathlib import Path
 
 import numpy as np
@@ -299,3 +300,48 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
 
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
+
+
+# ---------------------------------------------------------------------------
+# Config class_path validation
+# ---------------------------------------------------------------------------
+
+
+def _extract_class_paths(obj):
+    """Recursively extract all class_path values from a parsed YAML dict."""
+    paths = []
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "class_path" and isinstance(value, str):
+                paths.append(value)
+            else:
+                paths.extend(_extract_class_paths(value))
+    elif isinstance(obj, list):
+        for item in obj:
+            paths.extend(_extract_class_paths(item))
+    return paths
+
+
+def _resolve_class_path(class_path: str):
+    """Resolve a dotted class_path to the actual class object."""
+    parts = class_path.rsplit(".", 1)
+    module_path, class_name = parts[0], parts[1]
+    mod = importlib.import_module(module_path)
+    return getattr(mod, class_name)
+
+
+def test_multi_experiment_config_class_paths_resolve():
+    """All class_paths in multi_experiment_fit.yml resolve to importable classes."""
+    configs_dir = Path(__file__).parents[1] / "examples" / "configs"
+    config_path = configs_dir / "multi_experiment_fit.yml"
+    assert config_path.exists(), f"Config file not found: {config_path}"
+
+    with open(config_path) as f:
+        config = yaml.safe_load(f)
+
+    class_paths = _extract_class_paths(config)
+    assert len(class_paths) > 0, "No class_path entries found in multi_experiment_fit.yml"
+
+    for cp in class_paths:
+        cls = _resolve_class_path(cp)
+        assert cls is not None, f"Failed to resolve class_path: {cp}"
