@@ -338,27 +338,37 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
     # remove the rows with missing values
     features = features.dropna()
 
-    # sub_features = features[features["Time"] == 20]
-    feature_df_removed = features.drop(
-        columns=["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id"]
-    )
+    # get the feature values (get the values under headers that start with "feature_")
+    feature_values = features.filter(like="feature_")
+
+    # compute the PCA features
+    pca = PCA(n_components=10)
+    pca_features = pca.fit_transform(feature_values.values)
+    correlation_df = pd.DataFrame(pca_features, columns=[f"PCA{i+1}" for i in range(pca_features.shape[1])], index=features.index)
+    
+    # get the computed features like 'contrast', 'homogeneity', 'energy', 'correlation', 'edge_density', 'organelle_volume', 'organelle_intensity', 'no_organelles', 'size_organelles'
+    image_features_df = features.filter(regex="contrast|homogeneity|energy|correlation|edge_density|organelle_volume|organelle_intensity|no_organelles|size_organelles").copy()
+    
+    # Remove duplicate columns if any exist
+    correlation_df = pd.concat([correlation_df, image_features_df], axis=1)
+    correlation_df = correlation_df.loc[:, ~correlation_df.columns.duplicated()]
 
     # Compute correlation between PCA features and computed features
-    correlation = feature_df_removed.corr(method="spearman")
+    correlation = correlation_df.corr(method="spearman")
+
+    # Select only PCA features (rows) and computed features (columns)
+    pca_columns = [col for col in correlation.columns if col.startswith('PCA')]
+    computed_columns = [col for col in correlation.columns if not col.startswith('PCA')]
+    
+    # Remove duplicates from computed_columns list
+    computed_columns = list(dict.fromkeys(computed_columns))
+    
+    # Select the subset: PCA features as rows, computed features as columns
+    correlation_selected = correlation.loc[pca_columns, computed_columns]
 
     # display PCA correlation as a heatmap
-
-    plt.figure(figsize=(30, 10))
-    sns.heatmap(
-        correlation.drop(
-            columns=["PCA1", "PCA2", "PCA3", "PCA4", "PCA5", "PCA6", "PCA7", "PCA8"]
-        ).loc["PCA1":"PCA8", :],
-        annot=True,
-        cmap="coolwarm",
-        fmt=".2f",
-        annot_kws={"size": 18},
-        cbar=False,
-    )
+    plt.figure(figsize=(10, 15))
+    sns.heatmap(abs(correlation_selected), annot=True, cmap="coolwarm", fmt=".2f", annot_kws={"size": 18}, cbar=False)
     plt.title("Correlation between PCA features and computed features", fontsize=12)
     plt.xlabel("Computed Features", fontsize=18)
     plt.ylabel("PCA Features", fontsize=18)
@@ -368,12 +378,29 @@ def compute_correlation_and_save_png(features: pd.DataFrame, filename: str):
     # Adjust layout to prevent label cutoff
     plt.tight_layout()
 
-    plt.savefig(
-        filename,
-        dpi=300,
-        bbox_inches="tight",
-        pad_inches=0.5,  # Add padding around the figure
-    )
+    # plt.savefig(
+    #     filename,
+    #     dpi=300,
+    #     bbox_inches="tight",
+    #     pad_inches=0.5,  # Add padding around the figure
+    #     format="svg",
+    # )
     plt.close()
 
+    # display the correaltion map with image feature order: edge_density>correlation>energy>homogeneity>contrast>no_organelles>organelle_volume>organelle_intensity
+    # Select columns (features) in the desired order
+    feature_order = ["edge_density", "correlation", "energy", "homogeneity", "contrast", "no_organelles", "organelle_volume", "organelle_intensity"]
+    # Filter to only include features that actually exist in the dataframe
+    feature_order_filtered = [f for f in feature_order if f in correlation_selected.columns]
+    correlation_selected_sorted = correlation_selected[feature_order_filtered]
+    
+    plt.figure(figsize=(10, 7))
+    sns.heatmap(np.transpose(correlation_selected_sorted), annot=True, cmap="coolwarm", fmt=".2f", annot_kws={"size": 18}, cbar=False)
+    plt.title("Correlation between PCA features and computed features", fontsize=12)
+    plt.ylabel("Computed Features", fontsize=18)
+    plt.xlabel("PCA Features", fontsize=18)
+    plt.xticks(fontsize=18, rotation=45, ha="right")  # Rotate labels and align them
+    plt.yticks(fontsize=18)
+    plt.savefig(filename, dpi=300, bbox_inches="tight", pad_inches=0.5,format="svg")
+    plt.close()
     return correlation
