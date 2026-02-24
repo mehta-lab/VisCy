@@ -7,7 +7,7 @@
 - Shipped **v1.2 Extract viscy-models** -- Phases 10-14 (shipped 2026-02-13)
 - Shipped **v2.0 DynaCLR Application** -- Phases 15-17 (shipped 2026-02-17)
 - Shipped **v2.1 DynaCLR Integration Validation** -- Phases 18-19 (shipped 2026-02-20)
-- In Progress **v2.2 Composable Sampling Framework** -- Phases 20-25
+- Shipped **v2.2 Composable Sampling Framework** -- Phases 20-25 (shipped 2026-02-24)
 
 ## Phases
 
@@ -207,7 +207,7 @@ Plans:
 
 </details>
 
-### v2.2 Composable Sampling Framework (In Progress)
+### v2.2 Composable Sampling Framework (SHIPPED 2026-02-24)
 
 **Milestone Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout -- enabling cross-experiment training that resolves heterogeneous cellular responses.
 
@@ -216,7 +216,7 @@ Plans:
 - [ ] **Phase 22: Batch Sampling** - FlexibleBatchSampler with experiment-aware, condition-balanced, temporal enrichment, leaky mixing, and DDP support
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
 - [x] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
-- [ ] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
+- [x] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
 
 ## Phase Details
 
@@ -316,7 +316,7 @@ Plans:
 **Plans**: 1 plan
 
 Plans:
-- [ ] 25-01-PLAN.md -- End-to-end integration test (fast_dev_run) and YAML config example for multi-experiment training
+- [x] 25-01-PLAN.md -- End-to-end integration test (fast_dev_run) and YAML config example for multi-experiment training
 
 **Location**: `applications/dynaclr/tests/`, `applications/dynaclr/examples/configs/`
 
@@ -363,9 +363,9 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/2 | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 2/2 | Complete | 2026-02-23 |
-| 25. Integration | v2.2 | 0/1 | Not started | -- |
+| 25. Integration | v2.2 | 1/1 | Complete | 2026-02-24 |
 
-**Total plans executed:** 39 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 12) + 3 manual phases (v2.0)
+**Total plans executed:** 40 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 13) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
@@ -378,3 +378,5 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Phase 22 planned: 2026-02-22*
 *Phase 23 planned: 2026-02-22*
 *Phase 24 planned: 2026-02-23*
+*Phase 25 planned: 2026-02-24*
+*v2.2 milestone shipped: 2026-02-24*
