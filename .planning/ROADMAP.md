@@ -313,7 +313,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. A fast_dev_run integration test completes without errors using MultiExperimentDataModule + ContrastiveModule + NTXentHCL with synthetic multi-experiment data (at least 2 experiments with different channel sets)
   2. A YAML config example demonstrates multi-experiment training with all sampling axes (experiment_aware, condition_balanced, temporal_enrichment) and is parseable by Lightning CLI
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [ ] 25-01-PLAN.md -- End-to-end integration test (fast_dev_run) and YAML config example for multi-experiment training
+
 **Location**: `applications/dynaclr/tests/`, `applications/dynaclr/examples/configs/`
 
 ### v2.3+ Future Applications (Phases TBD)
@@ -359,7 +363,7 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
 | 23. Loss & Augmentation | v2.2 | 0/2 | Not started | -- |
 | 24. Dataset & DataModule | v2.2 | 2/2 | Complete | 2026-02-23 |
-| 25. Integration | v2.2 | 0/TBD | Not started | -- |
+| 25. Integration | v2.2 | 0/1 | Not started | -- |
 
 **Total plans executed:** 39 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 12) + 3 manual phases (v2.0)
 
