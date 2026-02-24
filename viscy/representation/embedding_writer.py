@@ -9,7 +9,6 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
-from xarray import Dataset, open_zarr
 
 from viscy.data.triplet import INDEX_COLUMNS
 from viscy.representation.engine import ContrastivePrediction
@@ -23,46 +22,13 @@ __all__ = [
     "read_embedding_dataset",
     "EmbeddingWriter",
     "write_embedding_dataset",
-    "get_available_index_columns",
 ]
 _logger = logging.getLogger("lightning.pytorch")
 
 
-def get_available_index_columns(
-    dataset: Dataset, dataset_path: str | None = None
-) -> list[str]:
-    """
-    Get available index columns from a dataset with logging for missing columns.
-
-    Parameters
-    ----------
-    dataset : Dataset
-        The xarray dataset to check for index columns.
-    dataset_path : str, optional
-        Path to the dataset for logging purposes. If None, uses generic message.
-
-    Returns
-    -------
-    list[str]
-        List of available index columns from INDEX_COLUMNS.
-    """
-    available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
-    missing_cols = set(INDEX_COLUMNS) - set(available_cols)
-
-    if missing_cols:
-        path_msg = f" at {dataset_path}" if dataset_path else ""
-        _logger.warning(
-            f"Dataset{path_msg} is missing index columns: {sorted(missing_cols)}. "
-            "This appears to be a legacy dataset format."
-        )
-
-    return available_cols
-
-
-def read_embedding_dataset(path: Path) -> Dataset:
+def read_embedding_dataset(path: Path) -> ad.AnnData:
     """
     Read the embedding dataset written by the EmbeddingWriter callback.
-    Supports both legacy datasets (without x/y coordinates) and new datasets.
 
     Parameters
     ----------
@@ -71,12 +37,20 @@ def read_embedding_dataset(path: Path) -> Dataset:
 
     Returns
     -------
-    Dataset
-        Xarray dataset with features and projections.
+    ad.AnnData
+        AnnData object with features in .X and metadata in .obs.
     """
-    dataset = open_zarr(path)
-    available_cols = get_available_index_columns(dataset, str(path))
-    return dataset.set_index(sample=available_cols)
+    adata = ad.read_zarr(path)
+
+    # Validate INDEX_COLUMNS presence
+    missing_cols = set(INDEX_COLUMNS) - set(adata.obs.columns)
+    if missing_cols:
+        _logger.warning(
+            f"Dataset at {path} is missing index columns: {sorted(missing_cols)}. "
+            "This appears to be a legacy dataset format."
+        )
+
+    return adata
 
 
 def _move_and_stack_embeddings(

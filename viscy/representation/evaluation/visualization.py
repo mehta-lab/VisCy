@@ -12,11 +12,12 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from dash import dcc, html
+from iohub.ngff import open_ome_zarr
 from PIL import Image
 from sklearn.decomposition import PCA
 from sklearn.preprocessing import StandardScaler
 
-from viscy.data.triplet import TripletDataModule
+from viscy.data.triplet import TripletDataset
 from viscy.representation.embedding_writer import read_embedding_dataset
 
 logging.basicConfig(level=logging.INFO)
@@ -30,7 +31,7 @@ class EmbeddingVisualizationApp:
         tracks_path: str,
         features_path: str,
         channels_to_display: list[str] | str,
-        fov_tracks: dict[str, list[int] | str],
+        fov_tracks: dict[str, list[int] | str] | str,
         z_range: tuple[int, int] = (0, 1),
         yx_patch_size: tuple[int, int] = (128, 128),
         num_PC_components: int = 3,
@@ -54,8 +55,9 @@ class EmbeddingVisualizationApp:
             Path to the features directory.
         channels_to_display: list[str] | str
             List of channels to display.
-        fov_tracks: dict[str, list[int] | str]
-            Dictionary of FOV names and track IDs.
+        fov_tracks: dict[str, list[int] | str] | str
+            Dictionary of FOV names and track IDs, or "all" to load all FOVs from embeddings.
+            Examples: {"A/1/000000": "all", "A/2/000000": [1,2,3]} or "all"
         z_range: tuple[int, int] | list[int,int]
             Range of z-slices to display.
         yx_patch_size: tuple[int, int] | list[int,int]
@@ -94,6 +96,7 @@ class EmbeddingVisualizationApp:
         self.clusters = []  # List to store all clusters
         self.cluster_points = set()  # Set to track all points in clusters
         self.cluster_names = {}  # Dictionary to store cluster names
+        self.cluster_descriptions = {}  # Dictionary to store cluster descriptions
         self.next_cluster_id = 1  # Counter for cluster IDs
         # Initialize data
         self._prepare_data()
@@ -102,62 +105,77 @@ class EmbeddingVisualizationApp:
         atexit.register(self._cleanup_cache)
 
     def _prepare_data(self):
-        """Prepare the feature data and PCA transformation"""
-        embedding_dataset = read_embedding_dataset(self.features_path)
-        features = embedding_dataset["features"]
-        self.features_df = features["sample"].to_dataframe().reset_index(drop=True)
+        """Prepare feature data and compute dimensionality reductions"""
+        # Load AnnData
+        adata = read_embedding_dataset(self.features_path)
 
-        # Check if UMAP or PHATE columns already exist
+        # Convert obs to DataFrame (has all INDEX_COLUMNS)
+        self.features_df = adata.obs.copy()
+
+        # Always compute PCA on-the-fly from adata.X
+        logger.info(
+            f"Computing PCA with {self.num_PC_components} components from features"
+        )
+        scaled_features = StandardScaler().fit_transform(adata.X)
+        pca = PCA(n_components=self.num_PC_components, random_state=42)
+        pca_coords = pca.fit_transform(scaled_features)
+
+        # Add PCA to DataFrame
+        for i in range(self.num_PC_components):
+            self.features_df[f"PC{i + 1}"] = pca_coords[:, i]
+
+        # Store explained variance
+        self.pca_explained_variance = [
+            f"PC{i + 1} ({var:.1f}%)"
+            for i, var in enumerate(pca.explained_variance_ratio_ * 100)
+        ]
+
+        # Initialize dimension options
         existing_dims = []
         dim_options = []
 
-        # Check for PCA and compute if needed
-        if not any(col.startswith("PC") for col in self.features_df.columns):
-            # PCA transformation
-            scaled_features = StandardScaler().fit_transform(features.values)
-            pca = PCA(n_components=self.num_PC_components)
-            pca_coords = pca.fit_transform(scaled_features)
+        # Add PCA options (always available)
+        for i, pc_label in enumerate(self.pca_explained_variance):
+            dim_options.append({"label": pc_label, "value": f"PC{i + 1}"})
+            existing_dims.append(f"PC{i + 1}")
 
-            # Add PCA coordinates to the features dataframe
-            for i in range(self.num_PC_components):
-                self.features_df[f"PC{i + 1}"] = pca_coords[:, i]
+        # Check for pre-computed UMAP in obsm (optional)
+        if "X_umap" in adata.obsm:
+            logger.info("Found pre-computed UMAP in obsm, adding to DataFrame")
+            umap_coords = adata.obsm["X_umap"]
+            for i in range(umap_coords.shape[1]):
+                col_name = f"UMAP{i + 1}"
+                self.features_df[col_name] = umap_coords[:, i]
+                dim_options.append({"label": col_name, "value": col_name})
+                existing_dims.append(col_name)
 
-            # Store explained variance for PCA
-            self.pca_explained_variance = [
-                f"PC{i + 1} ({var:.1f}%)"
-                for i, var in enumerate(pca.explained_variance_ratio_ * 100)
-            ]
+        # Check for pre-computed PHATE in obsm (optional)
+        if "X_phate" in adata.obsm:
+            logger.info("Found pre-computed PHATE in obsm, adding to DataFrame")
+            phate_coords = adata.obsm["X_phate"]
+            for i in range(phate_coords.shape[1]):
+                col_name = f"PHATE{i + 1}"
+                self.features_df[col_name] = phate_coords[:, i]
+                dim_options.append({"label": col_name, "value": col_name})
+                existing_dims.append(col_name)
 
-            # Add PCA options
-            for i, pc_label in enumerate(self.pca_explained_variance):
-                dim_options.append({"label": pc_label, "value": f"PC{i + 1}"})
-                existing_dims.append(f"PC{i + 1}")
-
-        # Check for UMAP coordinates
-        umap_dims = [col for col in self.features_df.columns if col.startswith("UMAP")]
-        if umap_dims:
-            for dim in umap_dims:
-                dim_options.append({"label": dim, "value": dim})
-                existing_dims.append(dim)
-
-        # Check for PHATE coordinates
-        phate_dims = [
-            col for col in self.features_df.columns if col.startswith("PHATE")
-        ]
-        if phate_dims:
-            for dim in phate_dims:
-                dim_options.append({"label": dim, "value": dim})
-                existing_dims.append(dim)
-
-        # Store dimension options for dropdowns
+        # Store options and defaults
         self.dim_options = dim_options
-
-        # Set default x and y axes based on available dimensions
         self.default_x = existing_dims[0] if existing_dims else "PC1"
         self.default_y = existing_dims[1] if len(existing_dims) > 1 else "PC2"
 
-        # Process each FOV and its track IDs
+        # Process FOV filtering (DataFrame operations remain unchanged)
         all_filtered_features = []
+
+        # Handle "all" to load all FOVs from embeddings
+        if self.fov_tracks == "all":
+            logger.info("Loading all FOVs from embeddings")
+            all_fov_names = self.features_df["fov_name"].unique()
+            self.fov_tracks = {fov_name: "all" for fov_name in all_fov_names}
+            logger.info(
+                f"Found {len(all_fov_names)} FOVs: {sorted(all_fov_names)[:5]}..."
+            )
+
         for fov_name, track_ids in self.fov_tracks.items():
             if track_ids == "all":
                 fov_tracks = (
@@ -299,7 +317,17 @@ class EmbeddingVisualizationApp:
                             id="cluster-name-input",
                             type="text",
                             placeholder="Enter cluster name...",
-                            style={"width": "100%", "marginBottom": "20px"},
+                            style={"width": "100%", "marginBottom": "10px"},
+                        ),
+                        html.Label("Cluster Description:", style={"marginTop": "10px"}),
+                        dcc.Textarea(
+                            id="cluster-description-input",
+                            placeholder="Enter cluster description...",
+                            style={
+                                "width": "100%",
+                                "marginBottom": "20px",
+                                "minHeight": "80px",
+                            },
                         ),
                         html.Div(
                             [
@@ -560,15 +588,27 @@ class EmbeddingVisualizationApp:
                 return html.Div("Click on a point to see the track timeline")
 
             # Parse the hover text to get track_id, time and fov_name
-            hover_text = clickData["points"][0]["text"]
-            track_id = int(hover_text.split("<br>")[0].split(": ")[1])
-            clicked_time = int(hover_text.split("<br>")[1].split(": ")[1])
-            fov_name = hover_text.split("<br>")[2].split(": ")[1]
+            try:
+                hover_text = clickData["points"][0]["text"]
+                logger.info(f"Click detected! Hover text: {hover_text}")
 
-            # Get all timepoints for this track
-            track_data = self.features_df[
-                (self.features_df["fov_name"] == fov_name)
-                & (self.features_df["track_id"] == track_id)
+                track_id = int(hover_text.split("<br>")[0].split(": ")[1])
+                clicked_time = int(hover_text.split("<br>")[1].split(": ")[1])
+                fov_name = hover_text.split("<br>")[2].split(": ")[1]
+
+                logger.info(
+                    f"Parsed: track_id={track_id}, t={clicked_time}, fov={fov_name}"
+                )
+            except Exception as e:
+                logger.error(f"Error parsing click data: {e}")
+                logger.error(f"clickData: {clickData}")
+                return html.Div(f"Error parsing click data: {e}")
+
+            # Get all timepoints for this track from filtered features
+            # Note: We use filtered_features_df because only these tracks have cached images
+            track_data = self.filtered_features_df[
+                (self.filtered_features_df["fov_name"] == fov_name)
+                & (self.filtered_features_df["track_id"] == track_id)
             ].sort_values("t")
 
             if track_data.empty:
@@ -576,6 +616,9 @@ class EmbeddingVisualizationApp:
 
             # Get unique timepoints
             timepoints = track_data["t"].unique()
+            logger.info(
+                f"Found {len(timepoints)} timepoints for track {track_id}: {sorted(timepoints)}"
+            )
 
             # Create a list to store all timepoint columns
             timepoint_columns = []
@@ -608,6 +651,8 @@ class EmbeddingVisualizationApp:
             )
 
             # Then create image rows for each channel
+            images_found = 0
+            images_missing = 0
             for channel in self.channels_to_display:
                 channel_images = []
                 for t in timepoints:
@@ -616,10 +661,13 @@ class EmbeddingVisualizationApp:
                         cache_key in self.image_cache
                         and channel in self.image_cache[cache_key]
                     ):
+                        images_found += 1
                         is_clicked = t == clicked_time
+                        # Make clicked image bigger and with thicker border
+                        image_size = "180px" if is_clicked else "150px"
                         image_style = {
-                            "width": "150px",
-                            "height": "150px",
+                            "width": image_size,
+                            "height": image_size,
                             "border": (
                                 "3px solid #007bff" if is_clicked else "1px solid #ddd"
                             ),
@@ -632,11 +680,17 @@ class EmbeddingVisualizationApp:
                                     style=image_style,
                                 ),
                                 style={
-                                    "width": "150px",
+                                    "width": image_size,
                                     "padding": "5px",
                                 },
                             )
                         )
+                    else:
+                        images_missing += 1
+                        if images_missing <= 5:  # Only log first 5 missing
+                            logger.warning(
+                                f"Image not found for cache_key={cache_key}, channel={channel}"
+                            )
 
                 if channel_images:
                     # Add channel label
@@ -668,6 +722,10 @@ class EmbeddingVisualizationApp:
                             ]
                         )
                     )
+
+            logger.info(
+                f"Timeline gallery: found {images_found} images, missing {images_missing} images"
+            )
 
             # Create the main container with synchronized scrolling
             return html.Div(
@@ -706,6 +764,7 @@ class EmbeddingVisualizationApp:
                 dd.Output("scatter-plot", "figure", allow_duplicate=True),
                 dd.Output("cluster-name-modal", "style"),
                 dd.Output("cluster-name-input", "value"),
+                dd.Output("cluster-description-input", "value"),
                 dd.Output("scatter-plot", "selectedData", allow_duplicate=True),
             ],
             [
@@ -723,6 +782,7 @@ class EmbeddingVisualizationApp:
                 dd.State("x-axis", "value"),
                 dd.State("y-axis", "value"),
                 dd.State("cluster-name-input", "value"),
+                dd.State("cluster-description-input", "value"),
             ],
             prevent_initial_call=True,
         )
@@ -739,10 +799,12 @@ class EmbeddingVisualizationApp:
             x_axis,
             y_axis,
             cluster_name,
+            cluster_description,
         ):
             ctx = dash.callback_context
             if not ctx.triggered:
                 return (
+                    dash.no_update,
                     dash.no_update,
                     dash.no_update,
                     dash.no_update,
@@ -760,10 +822,11 @@ class EmbeddingVisualizationApp:
                     id_dict = json.loads(button_id)
                     cluster_idx = id_dict["index"]
 
-                    # Get current cluster name
+                    # Get current cluster name and description
                     current_name = self.cluster_names.get(
                         cluster_idx, f"Cluster {cluster_idx + 1}"
                     )
+                    current_description = self.cluster_descriptions.get(cluster_idx, "")
 
                     # Show modal
                     modal_style = {
@@ -786,10 +849,12 @@ class EmbeddingVisualizationApp:
                         dash.no_update,
                         modal_style,
                         current_name,
+                        current_description,
                         dash.no_update,  # Don't change selection
                     )
                 except Exception:
                     return (
+                        dash.no_update,
                         dash.no_update,
                         dash.no_update,
                         dash.no_update,
@@ -846,15 +911,20 @@ class EmbeddingVisualizationApp:
                         "clusters-tab",
                         dash.no_update,  # Don't update figure yet
                         modal_style,  # Show modal
-                        "",  # Clear input
+                        "",  # Clear name input
+                        "",  # Clear description input
                         None,  # Clear selection
                     )
 
             elif button_id == "save-cluster-name" and cluster_name:
-                # Assign name to the most recently created cluster
+                # Assign name and description to the most recently created cluster
                 if self.clusters:
                     cluster_id = len(self.clusters) - 1
                     self.cluster_names[cluster_id] = cluster_name.strip()
+                    if cluster_description:
+                        self.cluster_descriptions[cluster_id] = (
+                            cluster_description.strip()
+                        )
 
                     # Create new figure with updated colors
                     fig = self._create_track_colored_figure(
@@ -876,7 +946,8 @@ class EmbeddingVisualizationApp:
                         "clusters-tab",
                         fig,
                         modal_style,  # Hide modal
-                        "",  # Clear input
+                        "",  # Clear name input
+                        "",  # Clear description input
                         None,  # Clear selection
                     )
 
@@ -914,7 +985,8 @@ class EmbeddingVisualizationApp:
                         "timeline-tab" if not self.clusters else "clusters-tab",
                         fig,
                         modal_style,  # Hide modal
-                        "",  # Clear input
+                        "",  # Clear name input
+                        "",  # Clear description input
                         None,  # Clear selection
                     )
 
@@ -922,6 +994,7 @@ class EmbeddingVisualizationApp:
                 self.clusters = []
                 self.cluster_points.clear()
                 self.cluster_names.clear()
+                self.cluster_descriptions.clear()
                 # Restore original coloring
                 fig = self._create_track_colored_figure(
                     len(show_arrows or []) > 0,
@@ -943,10 +1016,12 @@ class EmbeddingVisualizationApp:
                     fig,
                     modal_style,
                     "",
+                    "",
                     None,
                 )  # Clear selection
 
             return (
+                dash.no_update,
                 dash.no_update,
                 dash.no_update,
                 dash.no_update,
@@ -1597,72 +1672,116 @@ class EmbeddingVisualizationApp:
             return False
 
     def preload_images(self):
-        """Preload all images into memory"""
+        """Preload all images into memory by directly loading from TripletDataset."""
         # Try to load from cache first
         if self.cache_path and self.load_cache():
             return
 
         logger.info("Preloading images into cache...")
-        logger.info(f"FOVs to process: {list(self.filtered_tracks_by_fov.keys())}")
 
-        # Process each FOV and its tracks
-        for fov_name, track_ids in self.filtered_tracks_by_fov.items():
-            if not track_ids:  # Skip FOVs with no tracks
-                logger.info(f"Skipping FOV {fov_name} as it has no tracks")
-                continue
+        # Get all unique (fov_name, track_id, t) combinations from filtered embeddings
+        total_images = len(self.filtered_features_df)
+        logger.info(f"Total images to cache: {total_images}")
 
-            logger.info(f"Processing FOV {fov_name} with tracks {track_ids}")
+        # Open the data store
+        data_store = open_ome_zarr(self.data_path, mode="r")
+
+        # Group by FOV for efficiency
+        fov_groups = self.filtered_features_df.groupby("fov_name")
+        logger.info(f"Processing {len(fov_groups)} FOVs")
+
+        cached_count = 0
+        for fov_name, fov_df in fov_groups:
+            logger.info(f"Processing FOV {fov_name} with {len(fov_df)} images")
 
             try:
-                data_module = TripletDataModule(
-                    data_path=self.data_path,
-                    tracks_path=self.tracks_path,
-                    include_fov_names=[fov_name] * len(track_ids),
-                    include_track_ids=track_ids,
-                    source_channel=self.channels_to_display,
-                    z_range=self.z_range,
-                    initial_yx_patch_size=self.yx_patch_size,
-                    final_yx_patch_size=self.yx_patch_size,
-                    batch_size=1,
-                    num_workers=self.num_loading_workers,
-                    normalizations=None,
-                    predict_cells=True,
-                )
-                data_module.setup("predict")
+                # Get the position from the data store
+                data_position = data_store[fov_name]
 
-                for batch in data_module.predict_dataloader():
+                # Load tracks CSV for this FOV
+                # The CSV is stored in the filesystem at: tracks_path/fov_name/tracks_fov_name.csv
+                from pathlib import Path
+
+                tracks_csv_path = (
+                    Path(self.tracks_path)
+                    / fov_name
+                    / f"tracks_{fov_name.replace('/', '_')}.csv"
+                )
+
+                if not tracks_csv_path.exists():
+                    logger.error(f"Tracks CSV not found at {tracks_csv_path}")
+                    continue
+
+                # Read and filter tracks to only those in our embeddings
+                tracks_df = pd.read_csv(tracks_csv_path)
+
+                # Filter to only the tracks and timepoints we need
+                fov_track_ids = fov_df["track_id"].unique()
+                filtered_tracks = tracks_df[
+                    tracks_df["track_id"].isin(fov_track_ids)
+                ].copy()
+
+                # Convert y, x coordinates to integers (required for slicing)
+                filtered_tracks["y"] = filtered_tracks["y"].astype(int)
+                filtered_tracks["x"] = filtered_tracks["x"].astype(int)
+
+                # Add fov_name column if it doesn't exist
+                if "fov_name" not in filtered_tracks.columns:
+                    filtered_tracks["fov_name"] = fov_name
+
+                logger.info(
+                    f"  Filtered tracks: {len(filtered_tracks)} rows from {len(tracks_df)} total"
+                )
+
+                # Create TripletDataset with the filtered tracks
+                dataset = TripletDataset(
+                    positions=[data_position],
+                    tracks_tables=[filtered_tracks],
+                    channel_names=self.channels_to_display,
+                    initial_yx_patch_size=self.yx_patch_size,
+                    z_range=slice(self.z_range[0], self.z_range[1]),
+                    fit=False,  # Don't sample triplets, just load images
+                    predict_cells=False,  # We already filtered the tracks
+                )
+
+                logger.info(f"  Dataset length: {len(dataset)}")
+
+                # Load all images by iterating directly over dataset indices
+                for idx in range(len(dataset)):
                     try:
+                        # Get single item from dataset (uses __getitems__ with list of 1 index)
+                        batch = dataset.__getitems__([idx])
+
                         images = batch["anchor"].numpy()
                         indices = batch["index"]
-                        track_id = indices["track_id"].tolist()
-                        t = indices["t"].tolist()
 
-                        img = np.stack(images)
-                        cache_key = (fov_name, track_id[0], t[0])
+                        # Extract track_id and t from the index dict
+                        index_dict = indices[0]
+                        batch_track_id = int(index_dict["track_id"])
+                        batch_t = int(index_dict["t"])
 
-                        logger.debug(f"Processing cache key: {cache_key}")
+                        cache_key = (fov_name, batch_track_id, batch_t)
 
-                        # Process each channel based on its type
+                        # Process each channel
                         processed_channels = {}
-                        for idx, channel in enumerate(self.channels_to_display):
+                        img = images[0]  # First item in batch
+
+                        for ch_idx, channel in enumerate(self.channels_to_display):
                             try:
                                 if channel in ["Phase3D", "DIC", "BF"]:
                                     # For phase contrast, use the middle z-slice
                                     z_idx = (self.z_range[1] - self.z_range[0]) // 2
                                     processed = self._normalize_image(
-                                        img[0, idx, z_idx]
+                                        img[ch_idx, z_idx]
                                     )
                                 else:
                                     # For fluorescence, use max projection
                                     processed = self._normalize_image(
-                                        np.max(img[0, idx], axis=0)
+                                        np.max(img[ch_idx], axis=0)
                                     )
 
                                 processed_channels[channel] = self._numpy_to_base64(
                                     processed
-                                )
-                                logger.debug(
-                                    f"Successfully processed channel {channel} for {cache_key}"
                                 )
                             except Exception as e:
                                 logger.error(
@@ -1670,19 +1789,24 @@ class EmbeddingVisualizationApp:
                                 )
                                 continue
 
-                        if (
-                            processed_channels
-                        ):  # Only store if at least one channel was processed
+                        if processed_channels:
                             self.image_cache[cache_key] = processed_channels
+                            cached_count += 1
+
+                            if cached_count % 100 == 0:
+                                logger.info(
+                                    f"Cached {cached_count}/{total_images} images..."
+                                )
 
                     except Exception as e:
-                        logger.error(
-                            f"Error processing batch for {fov_name}, track {track_id}: {e}"
-                        )
+                        logger.error(f"Error processing batch: {e}")
                         continue
 
             except Exception as e:
-                logger.error(f"Error setting up data module for FOV {fov_name}: {e}")
+                logger.error(f"Error loading FOV {fov_name}: {e}")
+                import traceback
+
+                traceback.print_exc()
                 continue
 
         logger.info(f"Successfully cached {len(self.image_cache)} images")
@@ -1691,6 +1815,29 @@ class EmbeddingVisualizationApp:
         cached_tracks = set((key[0], key[1]) for key in self.image_cache.keys())
         logger.info(f"Cached FOVs: {cached_fovs}")
         logger.info(f"Number of unique track-FOV combinations: {len(cached_tracks)}")
+
+        # Log sample cache keys and channels for debugging
+        if self.image_cache:
+            sample_key = list(self.image_cache.keys())[0]
+            logger.info(f"Sample cache key: {sample_key}")
+            logger.info(
+                f"Channels in sample: {list(self.image_cache[sample_key].keys())}"
+            )
+
+        # Filter features to only include rows that have cached images
+        # This is necessary because TripletDataset filters out cells near edges
+        logger.info(
+            f"Filtering features_df from {len(self.filtered_features_df)} to only cached images"
+        )
+        cached_keys_set = set(self.image_cache.keys())
+        mask = self.filtered_features_df.apply(
+            lambda row: (row["fov_name"], row["track_id"], row["t"]) in cached_keys_set,
+            axis=1,
+        )
+        self.filtered_features_df = self.filtered_features_df[mask].copy()
+        logger.info(
+            f"Filtered features_df now has {len(self.filtered_features_df)} rows matching cached images"
+        )
 
         # Save cache if path is specified
         if self.cache_path:
@@ -2119,10 +2266,11 @@ class EmbeddingVisualizationApp:
 
     def save_clusters_to_csv(self, output_path: str | None = None) -> str:
         """
-        Save cluster information to CSV file.
+        Save cluster information to CSV file with full INDEX_COLUMNS metadata.
 
         This method exports all cluster data including track_id, time, FOV,
-        cluster assignment, and cluster names to a CSV file for further analysis.
+        cluster assignment, cluster names, descriptions, and all INDEX_COLUMNS
+        to a CSV file for further analysis.
 
         Parameters
         ----------
@@ -2140,14 +2288,15 @@ class EmbeddingVisualizationApp:
         The CSV will contain columns:
         - cluster_id: The cluster number (1-indexed)
         - cluster_name: The custom name assigned to the cluster
-        - track_id: The track identifier
-        - time: The timepoint
-        - fov_name: The field of view name
+        - cluster_description: The description of the cluster
         - cluster_size: Number of points in the cluster
+        - All INDEX_COLUMNS: fov_name, track_id, t, id, parent_track_id, parent_id, z, y, x
         """
         if not self.clusters:
             logger.warning("No clusters to save")
             return ""
+
+        from viscy.data.triplet import INDEX_COLUMNS
 
         # Prepare data for CSV export
         csv_data = []
@@ -2155,18 +2304,40 @@ class EmbeddingVisualizationApp:
             cluster_id = cluster_idx + 1  # 1-indexed for user-friendly output
             cluster_size = len(cluster)
             cluster_name = self.cluster_names.get(cluster_idx, f"Cluster {cluster_id}")
+            cluster_description = self.cluster_descriptions.get(cluster_idx, "")
 
             for point in cluster:
-                csv_data.append(
-                    {
-                        "cluster_id": cluster_id,
-                        "cluster_name": cluster_name,
-                        "track_id": point["track_id"],
-                        "time": point["t"],
-                        "fov_name": point["fov_name"],
-                        "cluster_size": cluster_size,
-                    }
+                # Get full metadata for this point from features_df
+                point_mask = (
+                    (self.features_df["fov_name"] == point["fov_name"])
+                    & (self.features_df["track_id"] == point["track_id"])
+                    & (self.features_df["t"] == point["t"])
                 )
+                matching_rows = self.features_df[point_mask]
+
+                if matching_rows.empty:
+                    logger.warning(
+                        f"Could not find metadata for point: fov={point['fov_name']}, "
+                        f"track_id={point['track_id']}, t={point['t']}"
+                    )
+                    continue
+
+                point_metadata = matching_rows.iloc[0]
+
+                # Build row with cluster info + all INDEX_COLUMNS
+                row = {
+                    "cluster_id": cluster_id,
+                    "cluster_name": cluster_name,
+                    "cluster_description": cluster_description,
+                    "cluster_size": cluster_size,
+                }
+
+                # Add all INDEX_COLUMNS
+                for col in INDEX_COLUMNS:
+                    if col in point_metadata.index:
+                        row[col] = point_metadata[col]
+
+                csv_data.append(row)
 
         # Create DataFrame and save to CSV
         df = pd.DataFrame(csv_data)
