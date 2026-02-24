@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 24
+**Current focus:** Milestone v2.2 -- Composable Sampling Framework -- COMPLETE
 
 ## Current Position
 
-Phase: 24 of 25 (DynaCLR Dataset & DataModule) -- COMPLETE
-Plan: 02 of 02 complete
-Status: Phase 24 complete. All plans (24-01 + 24-02) done. Ready for Phase 25.
-Last activity: 2026-02-23 -- Completed 24-02 MultiExperimentDataModule
+Phase: 25 of 25 (Integration) -- COMPLETE
+Plan: 01 of 01 complete
+Status: Phase 25 complete. Milestone v2.2 Composable Sampling Framework complete.
+Last activity: 2026-02-24 -- Completed 25-01 Integration (end-to-end tests + YAML config)
 
-Progress: [#########################.....] 24/25 phases complete (96%)
+Progress: [##############################] 25/25 phases complete (100%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 39 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 12) + v2.0 manual phases
+- Total plans completed: 40 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 13) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -30,7 +30,7 @@ Progress: [#########################.....] 24/25 phases complete (96%)
 | v1.2 Models | 10-14 | 9 | modular-models |
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 12 | dynav2 |
+| v2.2 Sampling | 20-25 | 13 | dynav2 |
 
 ## Accumulated Context
 
@@ -80,15 +80,18 @@ Key decisions carrying forward:
 - Norm_meta all-None coalescing in on_after_batch_transfer to prevent collate_meta_tensor crash
 - Separate ExperimentRegistry instances for train/val splits, each building own MultiExperimentIndex
 - ChannelDropout applied AFTER normalizations+augmentations+final_crop in on_after_batch_transfer
+- Integration test uses SimpleEncoder (fc+proj) for fast CPU testing
+- YAML config uses generic ch_0/ch_1 keys for normalizations/augmentations
+- use_distributed_sampler: false in config since FlexibleBatchSampler handles DDP
 
 ### Blockers/Concerns
 
-- None. Phase 24 complete. Ready for Phase 25.
+- None. Milestone v2.2 Composable Sampling Framework complete.
 
 ## Session Continuity
 
-Last session: 2026-02-23
-Stopped at: Completed 24-02-PLAN.md (MultiExperimentDataModule). Phase 24 complete. Ready for Phase 25.
+Last session: 2026-02-24
+Stopped at: Completed 25-01-PLAN.md (Integration). Phase 25 complete. Milestone v2.2 complete.
 Resume file: None
 
 ---
@@ -104,3 +107,4 @@ Resume file: None
 *Updated for 23-01 completion: 2026-02-23*
 *Updated for 24-01 completion: 2026-02-23*
 *Updated for 24-02 completion: 2026-02-23*
+*Updated for 25-01 completion: 2026-02-24*
