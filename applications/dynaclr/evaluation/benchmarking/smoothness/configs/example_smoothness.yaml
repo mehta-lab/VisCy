@@ -1,0 +1,31 @@
+# Example configuration file for temporal smoothness evaluation
+# This config evaluates and compares multiple representation learning models
+
+models:
+  # List of models to evaluate
+  # Each model requires a path to the zarr file and a label for display
+  - path: /hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/6-phenotype/predictions/DynaCLR-3D-Phase3D-timeaware-tau3-temp-0p5/v1/test_embeddings.zarr
+    label: DynaCLR-3D-Phase3D-timeaware-tau3-temp-0p5_v1
+
+  # Add more models to compare
+  # - path: /path/to/imagenet_model.zarr
+  #   label: ImageNet-ConvNext
+  # - path: /path/to/sam2_model.zarr
+  #   label: SAM2
+
+evaluation:
+  # Distance metric to use for computing embeddings similarity
+  # Options: "cosine" (recommended) or "euclidean"
+  distance_metric: cosine
+
+  # Output directory for results (plots and CSV files)
+  output_dir: /hpc/projects/intracellular_dashboard/viral-sensor/2024_08_14_ZIKV_pal17_48h/6-phenotype/predictions/DynaCLR-3D-Phase3D-timeaware-tau3-temp-0p5/v1/evaluation/smoothness
+
+  # Whether to save individual distribution plots for each model
+  save_plots: true
+
+  # Whether to save full distributions (can be large for many samples)
+  save_distributions: false
+
+  # Print verbose progress messages
+  verbose: true
