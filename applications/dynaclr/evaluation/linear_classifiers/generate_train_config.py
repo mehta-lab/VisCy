@@ -9,7 +9,7 @@ datasets that have both.
 from pathlib import Path
 
 import yaml
-from dataset_discovery import (
+from utils import (
     CHANNELS,
     TASKS,
     build_registry,

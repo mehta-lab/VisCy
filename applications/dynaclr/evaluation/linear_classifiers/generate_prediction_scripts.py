@@ -9,12 +9,12 @@ import re
 from glob import glob
 from pathlib import Path
 
-from dataset_discovery import (
+from natsort import natsorted
+from utils import (
     CHANNELS,
     build_registry,
     print_registry_summary,
 )
-from natsort import natsorted
 
 # %%
 # --- Configuration ---
