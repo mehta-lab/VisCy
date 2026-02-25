@@ -7,3 +7,4 @@ Evaluation tools for DynaCLR cell embedding models. Each evaluation method lives
 | Method | Directory | Description |
 |--------|-----------|-------------|
 | Linear classifiers | `linear_classifiers/` | Logistic regression on embeddings for supervised cell phenotyping |
+| Temporal smoothness | `benchmarking/smoothness/` | Evaluate how smoothly embeddings change across adjacent time frames |

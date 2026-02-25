@@ -3,16 +3,10 @@ build-backend = "hatchling.build"
 requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "dynaclr"
-description = "DynaCLR: Self-supervised contrastive learning for cellular dynamics"
+name = "qc"
+description = "Quality control metrics for OME-Zarr microscopy datasets"
 readme = "README.md"
-keywords = [
-  "contrastive learning",
-  "deep learning",
-  "microscopy",
-  "self-supervised learning",
-  "virtual staining",
-]
+keywords = [ "microscopy", "quality control", "zarr" ]
 license = "BSD-3-Clause"
 authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
 requires-python = ">=3.11"
@@ -26,53 +20,39 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Programming Language :: Python :: 3.14",
-  "Topic :: Scientific/Engineering :: Artificial Intelligence",
   "Topic :: Scientific/Engineering :: Image Processing",
 ]
 dynamic = [ "version" ]
 dependencies = [
   "click",
-  "pytorch-metric-learning",
-  "torchvision",
-  "viscy-data",
-  "viscy-models",
-  "viscy-transforms",
+  "pydantic",
   "viscy-utils",
+  "waveorder",
 ]
 
-optional-dependencies.eval = [
-  "anndata",
-  "natsort",
-  "phate",
-  "scikit-learn",
-  "seaborn",
-  "umap-learn",
-  "wandb",
-]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
-scripts.dynaclr = "dynaclr.cli:main"
+scripts.qc = "qc.cli:main"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
 test = [
-  "anndata",
-  "pandas",
   "pytest>=9.0.2",
   "pytest-cov>=7",
-  "tensorboard",
-  "tensorstore",
 ]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/dynaclr" ]
+packages = [ "src/qc" ]
+
+[tool.uv.sources]
+waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
-pattern-prefix = "dynaclr-"
+pattern-prefix = "qc-"
 fallback-version = "0.0.0"

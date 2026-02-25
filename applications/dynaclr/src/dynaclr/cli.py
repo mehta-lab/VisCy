@@ -74,6 +74,22 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="evaluate-smoothness",
+        import_path="benchmarking.smoothness.evaluate_smoothness.main",
+        short_help="Evaluate temporal smoothness of embedding models",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
+        name="compare-models",
+        import_path="benchmarking.smoothness.compare_models.main",
+        short_help="Compare previously saved smoothness results",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""
