@@ -1,8 +1,12 @@
 """PCA, UMAP, and PHATE dimensionality reduction."""
 
+import logging
+
 import pandas as pd
 from numpy.typing import NDArray
 from xarray import Dataset
+
+_logger = logging.getLogger(__name__)
 
 
 def compute_phate(
@@ -47,6 +51,11 @@ def compute_phate(
     embeddings = (
         embedding_dataset["features"].to_numpy() if isinstance(embedding_dataset, Dataset) else embedding_dataset
     )
+    n_samples = embeddings.shape[0]
+    if knn >= n_samples:
+        clamped = max(2, n_samples // 2)
+        _logger.warning(f"Reducing knn from {knn} to {clamped} due to small dataset size ({n_samples} samples)")
+        knn = clamped
 
     from sklearn.preprocessing import StandardScaler
 
@@ -132,6 +141,14 @@ def _fit_transform_umap(
     """Fit UMAP model and transform embeddings."""
     import umap
     from sklearn.preprocessing import StandardScaler
+
+    n_samples = embeddings.shape[0]
+    if n_neighbors >= n_samples:
+        clamped = min(15, n_samples // 2)
+        _logger.warning(
+            f"Reducing n_neighbors from {n_neighbors} to {clamped} due to small dataset size ({n_samples} samples)"
+        )
+        n_neighbors = clamped
 
     if normalize:
         embeddings = StandardScaler().fit_transform(embeddings)

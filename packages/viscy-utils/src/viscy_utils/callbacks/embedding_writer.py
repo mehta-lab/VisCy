@@ -117,7 +117,6 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
-    n_samples = len(features)
 
     adata = ad.AnnData(X=features, obs=ultrack_indices)
     if projections is not None:
@@ -128,13 +127,6 @@ def write_embedding_dataset(
             _fit_transform_umap,
         )
 
-        if umap_kwargs["n_neighbors"] >= n_samples:
-            _logger.warning(
-                f"Reducing n_neighbors from {umap_kwargs['n_neighbors']} "
-                f"to {min(15, n_samples // 2)} due to small dataset size"
-            )
-            umap_kwargs["n_neighbors"] = min(15, n_samples // 2)
-
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
         _, UMAP = _fit_transform_umap(features, **umap_kwargs)
         adata.obsm["X_umap"] = UMAP
@@ -143,12 +135,6 @@ def write_embedding_dataset(
         from viscy_utils.evaluation.dimensionality_reduction import compute_phate
 
         _logger.debug(f"Using PHATE kwargs: {phate_kwargs}")
-        if phate_kwargs["knn"] >= n_samples:
-            _logger.warning(
-                f"Reducing knn from {phate_kwargs['knn']} to {max(2, n_samples // 2)} due to small dataset size"
-            )
-            phate_kwargs["knn"] = max(2, n_samples // 2)
-
         try:
             _logger.debug("Computing PHATE")
             _, PHATE = compute_phate(features, **phate_kwargs)

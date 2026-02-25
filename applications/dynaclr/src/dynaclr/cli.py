@@ -90,6 +90,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="reduce-dimensionality",
+        import_path="dimensionality_reduction.reduce_dimensionality.main",
+        short_help="Compute PCA, UMAP, and/or PHATE on saved embeddings",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""
