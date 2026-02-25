@@ -2,6 +2,7 @@
 
 import click
 
+from qc.annotation import write_annotation_metadata
 from qc.config import QCConfig
 from qc.focus import FocusSliceMetric
 from qc.qc_metrics import generate_qc_metadata
@@ -30,6 +31,12 @@ def run(config_path: str):
     raw = load_config(config_path)
     cfg = QCConfig(**raw)
 
+    # Write annotation metadata if configured
+    if cfg.annotation is not None:
+        write_annotation_metadata(zarr_dir=cfg.data_path, annotation=cfg.annotation)
+        click.echo("Annotation metadata written.")
+
+    # Build and run QC metrics
     metrics = []
     if cfg.focus_slice is not None:
         metrics.append(
@@ -43,16 +50,17 @@ def run(config_path: str):
             )
         )
 
-    if not metrics:
+    if not metrics and cfg.annotation is None:
         click.echo("No QC metrics configured. Nothing to do.")
         return
 
-    generate_qc_metadata(
-        zarr_dir=cfg.data_path,
-        metrics=metrics,
-        num_workers=cfg.num_workers,
-    )
-    click.echo("QC metrics complete.")
+    if metrics:
+        generate_qc_metadata(
+            zarr_dir=cfg.data_path,
+            metrics=metrics,
+            num_workers=cfg.num_workers,
+        )
+        click.echo("QC metrics complete.")
 
 
 def main():

@@ -1,0 +1,26 @@
+data_path: /path/to/dataset.zarr
+num_workers: 4
+
+annotation:
+  channel_annotation:
+    Phase3D:
+      channel_type: labelfree
+      biological_annotation: null
+    raw_GFP_EX488_EM525:
+      channel_type: fluorescence
+      biological_annotation:
+        organelle: endoplasmic_reticulum
+        marker: SEC61B
+        marker_type: protein_tag
+        fluorophore: eGFP
+
+  experiment_metadata:
+    A/1:
+      perturbations:
+        - name: ZIKV
+          type: virus
+          hours_post: 24.0
+      time_sampling_minutes: 30.0
+    A/2:
+      perturbations: []
+      time_sampling_minutes: 30.0
