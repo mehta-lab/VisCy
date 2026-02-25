@@ -19,7 +19,7 @@ class FocusSliceConfig(BaseModel):
     midband_fractions : tuple[float, float]
         Inner and outer fractions of cutoff frequency.
     device : str
-        Torch device for FFT computation.
+        Torch device for FFT computation (e.g. "cpu", "cuda").
     """
 
     channel_names: list[str] = Field(..., min_length=1)

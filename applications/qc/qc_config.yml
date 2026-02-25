@@ -3,11 +3,11 @@ num_workers: 4
 
 focus_slice:
   channel_names:
-    - Phase
+    - Phase3D
   NA_det: 0.55
   lambda_ill: 0.532
   pixel_size: 0.325
   midband_fractions:
     - 0.125
     - 0.25
-  device: cpu
+  device: cuda

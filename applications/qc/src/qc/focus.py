@@ -2,6 +2,7 @@
 
 import numpy as np
 import tensorstore
+import torch
 from waveorder.focus import focus_from_transverse_band
 
 from qc.qc_metrics import QCMetric
@@ -22,6 +23,8 @@ class FocusSliceMetric(QCMetric):
         Channel names to compute focus for.
     midband_fractions : tuple[float, float]
         Inner and outer fractions of cutoff frequency.
+    device : str
+        Torch device for FFT computation (e.g. "cpu", "cuda").
     """
 
     field_name = "focus_slice"
@@ -33,12 +36,14 @@ class FocusSliceMetric(QCMetric):
         pixel_size: float,
         channel_names: list[str],
         midband_fractions: tuple[float, float] = (0.125, 0.25),
+        device: str = "cpu",
     ):
         self.NA_det = NA_det
         self.lambda_ill = lambda_ill
         self.pixel_size = pixel_size
         self.channel_names = channel_names
         self.midband_fractions = midband_fractions
+        self.device = torch.device(device)
 
     def channels(self) -> list[str]:
         return self.channel_names
@@ -57,7 +62,7 @@ class FocusSliceMetric(QCMetric):
         focus_indices = np.empty(T, dtype=int)
 
         for t in range(T):
-            zyx = np.asarray(tzyx[t])
+            zyx = torch.as_tensor(np.asarray(tzyx[t]), device=self.device)
             focus_indices[t] = focus_from_transverse_band(
                 zyx,
                 NA_det=self.NA_det,
