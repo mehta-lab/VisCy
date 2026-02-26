@@ -83,6 +83,7 @@ def write_embedding_dataset(
     phate_kwargs: Optional[Dict[str, Any]] = None,
     pca_kwargs: Optional[Dict[str, Any]] = None,
     overwrite: bool = False,
+    uns_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write embeddings to an AnnData Zarr Store.
 
@@ -104,6 +105,9 @@ def write_embedding_dataset(
         Keyword arguments passed to PCA, by default None.
     overwrite : bool, optional
         Whether to overwrite existing zarr store, by default False.
+    uns_metadata : dict, optional
+        Additional metadata to store in ``adata.uns``, e.g.
+        ``{"data_path": "/path/to/data.zarr", "tracks_path": "..."}``.
     """
     import anndata as ad
 
@@ -153,6 +157,9 @@ def write_embedding_dataset(
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
 
+    if uns_metadata:
+        adata.uns.update(uns_metadata)
+
     _logger.debug(f"Writing dataset to {output_path}")
     adata.write_zarr(output_path)
 
@@ -198,6 +205,18 @@ class EmbeddingWriter(BasePredictionWriter):
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")
 
+    @staticmethod
+    def _collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
+        """Extract data and tracks paths from the datamodule if available."""
+        metadata: Dict[str, Any] = {}
+        datamodule = getattr(trainer, "datamodule", None)
+        if datamodule is not None:
+            if hasattr(datamodule, "data_path"):
+                metadata["data_path"] = str(datamodule.data_path)
+            if hasattr(datamodule, "tracks_path"):
+                metadata["tracks_path"] = str(datamodule.tracks_path)
+        return metadata
+
     def write_on_epoch_end(
         self,
         trainer: Trainer,
@@ -219,4 +238,5 @@ class EmbeddingWriter(BasePredictionWriter):
             phate_kwargs=self.phate_kwargs,
             pca_kwargs=self.pca_kwargs,
             overwrite=self.overwrite,
+            uns_metadata=self._collect_data_provenance(trainer),
         )

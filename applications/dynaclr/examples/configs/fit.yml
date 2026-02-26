@@ -28,6 +28,13 @@ trainer:
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
+    - class_path: viscy_utils.callbacks.EmbeddingSnapshotCallback
+      init_args:
+        output_dir: #TODO point to the path to save embedding snapshots
+        every_n_epochs: 10
+        store_images: true
+        pca_kwargs:
+          n_components: 8
   fast_dev_run: false
   max_epochs: 100
   log_every_n_steps: 10

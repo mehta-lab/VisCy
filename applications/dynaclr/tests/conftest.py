@@ -7,6 +7,15 @@ import numpy as np
 import pandas as pd
 import pytest
 import torch
+from lightning.pytorch import LightningDataModule
+from torch import Tensor, nn
+from torch.utils.data import DataLoader, Dataset
+
+from viscy_data._typing import TripletSample
+
+# Synthetic tensor dimensions shared across unit tests.
+SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W = 1, 1, 4, 4
+SYNTH_FLAT_DIM = SYNTH_C * SYNTH_D * SYNTH_H * SYNTH_W
 
 CHECKPOINT_PATH = Path(
     "/hpc/projects/organelle_phenotyping/models/"
@@ -99,3 +108,62 @@ def annotated_adata_zarr(annotated_adata, tmp_path) -> dict:
     annotated_adata.obs[["fov_name", "id", "cell_death_state"]].to_csv(csv_path, index=False)
 
     return {"embeddings": str(zarr_path), "annotations": str(csv_path)}
+
+
+class SimpleEncoder(nn.Module):
+    """Lightweight encoder that mimics ContrastiveEncoder's (features, projections) API."""
+
+    def __init__(self, in_dim: int = SYNTH_FLAT_DIM, feature_dim: int = 64, projection_dim: int = 32):
+        super().__init__()
+        self.fc = nn.Linear(in_dim, feature_dim)
+        self.proj = nn.Linear(feature_dim, projection_dim)
+
+    def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
+        x = x.flatten(1)
+        features = self.fc(x)
+        projections = self.proj(features)
+        return features, projections
+
+
+class SyntheticTripletDataset(Dataset):
+    """Generate random triplets with tracking index metadata."""
+
+    def __init__(self, size: int = 8):
+        self.size = size
+
+    def __len__(self) -> int:
+        return self.size
+
+    def __getitem__(self, idx: int) -> TripletSample:
+        return {
+            "anchor": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "positive": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "negative": torch.randn(SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            "index": {
+                "fov_name": f"fov_{idx}",
+                "id": idx,
+                "track_id": idx % 3,
+                "t": idx,
+            },
+        }
+
+
+class SyntheticTripletDataModule(LightningDataModule):
+    """DataModule wrapping SyntheticTripletDataset for train and val."""
+
+    def __init__(self, batch_size: int = 4, num_samples: int = 8):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_samples = num_samples
+
+    def train_dataloader(self) -> DataLoader:
+        return DataLoader(
+            SyntheticTripletDataset(self.num_samples),
+            batch_size=self.batch_size,
+        )
+
+    def val_dataloader(self) -> DataLoader:
+        return DataLoader(
+            SyntheticTripletDataset(self.num_samples),
+            batch_size=self.batch_size,
+        )
