@@ -175,6 +175,9 @@ def test_livecell_datamodule_setup_fit(livecell_data):
     assert hasattr(dm, "val_dataset")
     assert len(dm.train_dataset) == 2
     assert len(dm.val_dataset) == 1
+    batch = next(iter(dm.train_dataloader()))
+    assert isinstance(batch, dict)
+    assert "source" in batch
 
 
 def test_livecell_datamodule_setup_test(livecell_data):
@@ -189,3 +192,6 @@ def test_livecell_datamodule_setup_test(livecell_data):
     dm.setup("test")
     assert hasattr(dm, "test_dataset")
     assert len(dm.test_dataset) == 1
+    batch = next(iter(dm.test_dataloader()))
+    assert isinstance(batch, dict)
+    assert "source" in batch

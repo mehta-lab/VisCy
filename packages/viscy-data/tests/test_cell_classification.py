@@ -68,6 +68,11 @@ def test_classification_datamodule_setup_fit(classification_hcs_dataset):
     dm.setup("fit")
     assert len(dm.train_dataset) > 0
     assert len(dm.val_dataset) > 0
+    batch = next(iter(dm.train_dataloader()))
+    img, label = batch
+    assert img.ndim == 5  # B, C, Z, Y, X
+    assert img.shape[0] <= 4  # batch_size
+    assert label.shape[0] <= 4
 
 
 def test_classification_datamodule_setup_predict(classification_hcs_dataset):
@@ -89,6 +94,10 @@ def test_classification_datamodule_setup_predict(classification_hcs_dataset):
     )
     dm.setup("predict")
     assert len(dm.predict_dataset) > 0
+    batch = next(iter(dm.predict_dataloader()))
+    img, label, indices = batch
+    assert img.ndim == 5  # B, C, Z, Y, X
+    assert isinstance(indices, dict)
 
 
 def test_classification_datamodule_exclude_timepoints(classification_hcs_dataset):

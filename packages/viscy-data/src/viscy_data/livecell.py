@@ -237,6 +237,7 @@ class LiveCellDataModule(GPUTransformDataModule):
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.prefetch_factor = None
 
     @property
     def train_cpu_transforms(self) -> Compose:
