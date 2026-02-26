@@ -78,8 +78,8 @@ class SegmentationDataModule(LightningDataModule):
         num_workers: int,
     ) -> None:
         super().__init__()
-        self.pred_dataset = open_ome_zarr(pred_dataset)
-        self.target_dataset = open_ome_zarr(target_dataset)
+        self.pred_path = pred_dataset
+        self.target_path = target_dataset
         self.pred_channel = pred_channel
         self.target_channel = target_channel
         self.pred_z_slice = pred_z_slice
@@ -91,6 +91,8 @@ class SegmentationDataModule(LightningDataModule):
         """Set up the test dataset."""
         if stage != "test":
             raise NotImplementedError("Only test stage is supported!")
+        self.pred_dataset = open_ome_zarr(self.pred_path)
+        self.target_dataset = open_ome_zarr(self.target_path)
         self.test_dataset = SegmentationDataset(
             self.pred_dataset,
             self.target_dataset,
