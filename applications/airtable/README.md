@@ -38,14 +38,10 @@ datasets = db.get_unique_datasets()
 # Get all FOV records for a dataset
 records = db.get_dataset_records("2024_10_16_A549_SEC61_ZIKV_DENV")
 
-# Get unified zattrs dicts (matching #375 schema)
-for rec in records:
-    channel_ann = rec.to_channel_annotation()
-    # {"Phase3D": {"channel_type": "labelfree", "biological_annotation": null}, ...}
-
-    experiment_meta = rec.to_experiment_metadata()
-    # {"perturbations": [{"name": "ZIKV", "type": "unknown", "hours_post": 48.0, "moi": 5.0}],
-    #  "time_sampling_minutes": 30.0}
+# Build zattrs dicts from a record (see Unified .zattrs Schema below)
+rec = records[0]
+pos.zattrs["channel_annotation"] = rec.to_channel_annotation()
+pos.zattrs["experiment_metadata"] = rec.to_experiment_metadata()
 
 # All records as a DataFrame
 df = db.list_records()
@@ -162,7 +158,7 @@ This will:
 
 ### Unified `.zattrs` Schema
 
-Both the Airtable `write` command and the QC annotation module produce the same schema (issue #375):
+Both the Airtable `write` command and the QC annotation module produce the same schema:
 
 **`channel_annotation`** — keyed by channel name:
 ```json
