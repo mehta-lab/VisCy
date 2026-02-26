@@ -146,13 +146,21 @@ class LiveCellTestDataset(Dataset):
             sample["target"] = image
         if self.load_labels:
             anns = self.coco.loadAnns(self.coco.getAnnIds(image_id)) or []
-            boxes = [torch.tensor(ann["bbox"]).to(torch.float32) for ann in anns]
-            masks = [torch.from_numpy(self.coco.annToMask(ann)).to(torch.bool) for ann in anns]
-            dets = {
-                "boxes": box_convert(torch.stack(boxes), in_fmt="xywh", out_fmt="xyxy"),
-                "labels": torch.zeros(len(anns)).to(torch.uint8),
-                "masks": torch.stack(masks),
-            }
+            if anns:
+                boxes = [torch.tensor(ann["bbox"]).to(torch.float32) for ann in anns]
+                masks = [torch.from_numpy(self.coco.annToMask(ann)).to(torch.bool) for ann in anns]
+                dets = {
+                    "boxes": box_convert(torch.stack(boxes), in_fmt="xywh", out_fmt="xyxy"),
+                    "labels": torch.zeros(len(anns)).to(torch.uint8),
+                    "masks": torch.stack(masks),
+                }
+            else:
+                h, w = self.coco.imgs[image_id]["height"], self.coco.imgs[image_id]["width"]
+                dets = {
+                    "boxes": torch.zeros((0, 4), dtype=torch.float32),
+                    "labels": torch.zeros(0, dtype=torch.uint8),
+                    "masks": torch.zeros((0, h, w), dtype=torch.bool),
+                }
             sample["detections"] = dets
             sample["file_name"] = file_name
         sample = self.transform(sample)
@@ -266,7 +274,7 @@ class LiveCellDataModule(GPUTransformDataModule):
         elif stage == "test":
             self._setup_test()
 
-    def _parse_image_names(self, annotations: Path) -> list[Path]:
+    def _parse_image_names(self, annotations: Path) -> list[str]:
         """Parse image file names from COCO annotations."""
         with open(annotations) as f:
             images = [f["file_name"] for f in json.load(f)["images"]]
