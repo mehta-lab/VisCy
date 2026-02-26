@@ -31,7 +31,6 @@ from torch.utils.data import Dataset
 from viscy_data._select import _filter_fovs, _filter_wells
 from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import (
-    BatchedCenterSpatialCropd,
     _read_norm_meta,
     _transform_channel_wise,
 )
@@ -417,8 +416,8 @@ class TripletDataModule(HCSDataModule):
         self.return_negative = return_negative
         self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
-        self._augmentation_transform = Compose(self.normalizations + self.augmentations + [self._final_crop()])
-        self._no_augmentation_transform = Compose(self.normalizations + [self._final_crop()])
+        self._augmentation_transform = Compose(self.normalizations + self.augmentations)
+        self._no_augmentation_transform = Compose(self.normalizations)
 
     def _align_tracks_tables_with_positions(
         self,
@@ -551,17 +550,6 @@ class TripletDataModule(HCSDataModule):
             collate_fn=lambda x: x,
         )
 
-    def _final_crop(self) -> BatchedCenterSpatialCropd:
-        """Set up final cropping: center crop to the target size."""
-        return BatchedCenterSpatialCropd(
-            keys=self.source_channel,
-            roi_size=(
-                self.z_window_size,
-                self.yx_patch_size[0],
-                self.yx_patch_size[1],
-            ),
-        )
-
     def _find_transform(self, key: str):
         """Find the appropriate transform for a given sample key."""
         if self.trainer:
@@ -579,6 +567,7 @@ class TripletDataModule(HCSDataModule):
         if isinstance(batch, Tensor):
             # example array
             return batch
+        expected_spatial = (self.z_window_size, *self.yx_patch_size)
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
@@ -592,5 +581,10 @@ class TripletDataModule(HCSDataModule):
                 batch[key] = transformed_patches
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]
+                actual_spatial = tuple(batch[key].shape[2:])
+                if actual_spatial != expected_spatial:
+                    raise ValueError(
+                        f"Spatial shape mismatch for '{key}': got {actual_spatial}, expected {expected_spatial}"
+                    )
 
         return batch

@@ -30,7 +30,7 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, tracks_hcs_dataset, incl
         tracks_path=tracks_hcs_dataset,
         source_channel=channel_names,
         z_range=(4, 9),
-        initial_yx_patch_size=(64, 64),
+        initial_yx_patch_size=(32, 32),
         final_yx_patch_size=(32, 32),
         num_workers=0,
         split_ratio=split_ratio,
@@ -69,7 +69,10 @@ def test_datamodule_setup_fit(preprocessed_hcs_dataset, tracks_hcs_dataset, incl
 
 @mark.parametrize("z_window_size", [None, 3])
 def test_datamodule_z_window_size(preprocessed_hcs_dataset, tracks_hcs_dataset, z_window_size):
-    z_range = (4, 9)
+    if z_window_size is not None:
+        z_range = (4, 4 + z_window_size)
+    else:
+        z_range = (4, 9)
     yx_patch_size = [32, 32]
     batch_size = 4
     with open_ome_zarr(preprocessed_hcs_dataset) as dataset:
@@ -79,7 +82,7 @@ def test_datamodule_z_window_size(preprocessed_hcs_dataset, tracks_hcs_dataset, 
         tracks_path=tracks_hcs_dataset,
         source_channel=channel_names,
         z_range=z_range,
-        initial_yx_patch_size=(64, 64),
+        initial_yx_patch_size=(32, 32),
         final_yx_patch_size=(32, 32),
         num_workers=0,
         batch_size=batch_size,
@@ -87,10 +90,7 @@ def test_datamodule_z_window_size(preprocessed_hcs_dataset, tracks_hcs_dataset, 
         z_window_size=z_window_size,
     )
     dm.setup(stage="fit")
-    if z_window_size is None:
-        expected_z_shape = z_range[1] - z_range[0]
-    else:
-        expected_z_shape = z_window_size
+    expected_z_shape = z_range[1] - z_range[0]
     for batch in dm.train_dataloader():
         dm.on_after_batch_transfer(batch, 0)
         assert batch["anchor"].shape == (
