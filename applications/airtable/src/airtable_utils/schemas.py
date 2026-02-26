@@ -1,10 +1,11 @@
-"""Pydantic models for Airtable Datasets table records."""
+"""Pydantic models for Airtable Datasets table records and unified zattrs schema."""
 
 from __future__ import annotations
 
 import re
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 def parse_channel_name(name: str) -> dict:
@@ -67,6 +68,98 @@ def parse_channel_name(name: str) -> dict:
 
     result["channel_type"] = "unknown"
     return result
+
+
+def parse_position_name(name: str) -> tuple[str, str]:
+    """Split an OME-Zarr position name into well path and FOV.
+
+    Parameters
+    ----------
+    name : str
+        Position name, e.g. ``"B/1/000000"``.
+
+    Returns
+    -------
+    tuple[str, str]
+        ``(well_path, fov)`` — e.g. ``("B/1", "000000")``.
+    """
+    parts = name.split("/")
+    well_path = "/".join(parts[:2])
+    fov = parts[2] if len(parts) > 2 else ""
+    return well_path, fov
+
+
+class BiologicalAnnotation(BaseModel):
+    """Biological meaning of a channel.
+
+    Parameters
+    ----------
+    organelle : str
+        Target organelle (e.g. "endoplasmic_reticulum", "nucleus").
+    marker : str
+        Marker protein or dye name (e.g. "SEC61B", "H2B").
+    marker_type : str
+        How the marker is attached to the target.
+    fluorophore : str or None
+        Fluorophore name if applicable (e.g. "eGFP", "mCherry").
+    """
+
+    organelle: str
+    marker: str
+    marker_type: Literal["protein_tag", "direct_label", "nuclear_dye", "virtual_stain"]
+    fluorophore: str | None = None
+
+
+class ChannelAnnotationEntry(BaseModel):
+    """Annotation for a single channel.
+
+    Parameters
+    ----------
+    channel_type : str
+        Modality of the channel.
+    biological_annotation : BiologicalAnnotation or None
+        Biological meaning; None for label-free channels.
+    """
+
+    channel_type: Literal["fluorescence", "labelfree", "virtual_stain"]
+    biological_annotation: BiologicalAnnotation | None = None
+
+
+class Perturbation(BaseModel):
+    """A perturbation applied to a well.
+
+    Extra fields (moi, concentration_nm, etc.) are allowed.
+
+    Parameters
+    ----------
+    name : str
+        Perturbation name (e.g. "ZIKV", "DMSO").
+    type : str
+        Perturbation category (e.g. "virus", "drug", "control").
+    hours_post : float
+        Hours post-perturbation at imaging time.
+    """
+
+    model_config = {"extra": "allow"}
+
+    name: str
+    type: str = "unknown"
+    hours_post: float
+
+
+class WellExperimentMetadata(BaseModel):
+    """Experiment metadata for a single well.
+
+    Parameters
+    ----------
+    perturbations : list[Perturbation]
+        Perturbations applied to this well.
+    time_sampling_minutes : float
+        Time interval between frames in minutes.
+    """
+
+    perturbations: list[Perturbation] = Field(default_factory=list)
+    time_sampling_minutes: float
 
 
 class DatasetRecord(BaseModel):
@@ -160,44 +253,63 @@ class DatasetRecord(BaseModel):
             record_id=record.get("id"),
         )
 
+    def to_channel_annotation(self) -> dict[str, dict]:
+        """Return dict for writing to ``.zattrs["channel_annotation"]``.
+
+        Maps each channel name to a ``ChannelAnnotationEntry``-compatible dict
+        with ``channel_type`` (derived from channel name parsing) and
+        ``biological_annotation`` (from the Airtable biology field).
+        """
+        annotation: dict[str, dict] = {}
+        for i in range(4):
+            name = getattr(self, f"channel_{i}_name")
+            if name is None:
+                continue
+            parsed = parse_channel_name(name)
+            ch_type = parsed.get("channel_type", "unknown")
+            # Map "unknown" to a valid literal for the schema
+            if ch_type not in ("fluorescence", "labelfree", "virtual_stain"):
+                ch_type = "labelfree"
+
+            biology = getattr(self, f"channel_{i}_biology")
+            bio_dict = None
+            if biology is not None:
+                bio_dict = {
+                    "organelle": biology.lower().replace(" ", "_"),
+                    "marker": "unknown",
+                    "marker_type": "protein_tag",
+                    "fluorophore": None,
+                }
+
+            annotation[name] = {
+                "channel_type": ch_type,
+                "biological_annotation": bio_dict,
+            }
+        return annotation
+
     def to_experiment_metadata(self) -> dict:
         """Return dict for writing to ``.zattrs["experiment_metadata"]``.
 
-        Includes platemap fields and a ``channels`` dict mapping
-        channel_name to ``{biology, index}``. Excludes ``None`` values.
+        Produces the unified schema: ``perturbations`` list +
+        ``time_sampling_minutes``.
         """
-        meta: dict = {}
+        perturbations: list[dict] = []
+        if self.perturbation is not None:
+            p: dict = {
+                "name": self.perturbation,
+                "type": "unknown",
+                "hours_post": self.hours_post_perturbation or 0.0,
+            }
+            if self.moi is not None:
+                p["moi"] = self.moi
+            if self.treatment_concentration_nm is not None:
+                p["concentration_nm"] = self.treatment_concentration_nm
+            perturbations.append(p)
 
-        for key in (
-            "cell_type",
-            "cell_state",
-            "cell_line",
-            "organelle",
-            "perturbation",
-            "hours_post_perturbation",
-            "moi",
-            "time_interval_min",
-            "seeding_density",
-            "treatment_concentration_nm",
-        ):
-            val = getattr(self, key)
-            if val is not None:
-                meta[key] = val
-
-        # Build channels mapping: channel_name -> {biology, index}
-        channels = {}
-        for i in range(4):
-            name = getattr(self, f"channel_{i}_name")
-            biology = getattr(self, f"channel_{i}_biology")
-            if name is not None:
-                entry: dict = {"index": i}
-                if biology is not None:
-                    entry["biology"] = biology
-                channels[name] = entry
-        if channels:
-            meta["channels"] = channels
-
-        return meta
+        return {
+            "perturbations": perturbations,
+            "time_sampling_minutes": self.time_interval_min or 0.0,
+        }
 
     def to_airtable_fields(self) -> dict:
         """Return dict for creating/updating an Airtable record.

@@ -4,15 +4,15 @@ import pytest
 from iohub import open_ome_zarr
 from pydantic import ValidationError
 
-from qc.annotation import _well_from_position_name, write_annotation_metadata
-from qc.config import (
-    AnnotationConfig,
+from airtable_utils.schemas import (
     BiologicalAnnotation,
     ChannelAnnotationEntry,
     Perturbation,
     WellExperimentMetadata,
+    parse_position_name,
 )
-
+from qc.annotation import write_annotation_metadata
+from qc.config import AnnotationConfig
 
 # -- Pydantic validation tests --
 
@@ -59,9 +59,9 @@ def test_invalid_marker_type_rejected():
 # -- Helper tests --
 
 
-def test_well_from_position_name():
-    assert _well_from_position_name("A/1/0") == "A/1"
-    assert _well_from_position_name("B/3/2") == "B/3"
+def test_parse_position_name():
+    assert parse_position_name("A/1/0") == ("A/1", "0")
+    assert parse_position_name("B/3/2") == ("B/3", "2")
 
 
 # -- Integration tests --
@@ -79,11 +79,7 @@ def _make_annotation_config(
     experiment_metadata = {}
     for i, wp in enumerate(well_paths):
         experiment_metadata[wp] = WellExperimentMetadata(
-            perturbations=(
-                [Perturbation(name="ZIKV", type="virus", hours_post=24.0)]
-                if i == 0
-                else []
-            ),
+            perturbations=([Perturbation(name="ZIKV", type="virus", hours_post=24.0)] if i == 0 else []),
             time_sampling_minutes=30.0,
         )
 
@@ -123,7 +119,7 @@ def test_write_experiment_metadata_per_well(multi_well_hcs_dataset):
     with open_ome_zarr(multi_well_hcs_dataset, mode="r") as plate:
         for name, pos in plate.positions():
             meta = pos.zattrs["experiment_metadata"]
-            well_path = _well_from_position_name(name)
+            well_path = parse_position_name(name)[0]
             if well_path == "A/1":
                 assert len(meta["perturbations"]) == 1
                 assert meta["perturbations"][0]["name"] == "ZIKV"

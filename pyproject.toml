@@ -55,6 +55,7 @@ viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
 viscy-utils = { workspace = true }
 dynaclr = { workspace = true }
+airtable-utils = { workspace = true }
 qc = { workspace = true }
 waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 

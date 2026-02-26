@@ -29,7 +29,7 @@ from pathlib import Path
 from iohub import open_ome_zarr
 
 from airtable_utils.database import AirtableDatasets
-from airtable_utils.schemas import DatasetRecord, parse_channel_name
+from airtable_utils.schemas import DatasetRecord, parse_channel_name, parse_position_name
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -73,25 +73,6 @@ def _append_tracking_csv(row: dict) -> None:
         if write_header:
             writer.writeheader()
         writer.writerow(row)
-
-
-def _parse_position_name(name: str) -> tuple[str, str]:
-    """Split position name into well_path and fov.
-
-    Parameters
-    ----------
-    name : str
-        Position name from zarr, e.g. ``"B/1/000000"``.
-
-    Returns
-    -------
-    tuple[str, str]
-        ``(well_path, fov)`` — e.g. ``("B/1", "000000")``.
-    """
-    parts = name.split("/")
-    well_path = "/".join(parts[:2])
-    fov = parts[2] if len(parts) > 2 else ""
-    return well_path, fov
 
 
 def _build_validation_table(
@@ -181,7 +162,7 @@ def register(zarr_path: Path, dry_run: bool = False) -> None:
     unmatched = []
 
     for pos_name, pos in position_list:
-        well_path, fov = _parse_position_name(pos_name)
+        well_path, fov = parse_position_name(pos_name)
         shape = pos.data.shape
         expected_data_path = str(zarr_path / pos_name)
 
@@ -318,7 +299,7 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
 
     fov_count = 0
     for pos_name, pos in position_list:
-        well_path, fov = _parse_position_name(pos_name)
+        well_path, fov = parse_position_name(pos_name)
 
         rec = record_lookup.get((well_path, fov))
         if rec is None:
@@ -338,7 +319,8 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
             if i <= 3:
                 setattr(rec, f"channel_{i}_name", ch_name)
 
-        metadata = rec.to_experiment_metadata()
+        channel_annotation = rec.to_channel_annotation()
+        experiment_metadata = rec.to_experiment_metadata()
 
         # Build Airtable update: channel names, shapes, data_path
         airtable_fields: dict = {}
@@ -354,17 +336,27 @@ def write(zarr_path: Path, dry_run: bool = False) -> None:
 
         if dry_run:
             logger.info(
-                "[DRY RUN] %s\n  zattrs:   %s\n  airtable: %s",
+                "[DRY RUN] %s\n  channel_annotation: %s\n  experiment_metadata: %s\n  airtable: %s",
                 pos_name,
-                metadata,
+                channel_annotation,
+                experiment_metadata,
                 airtable_fields,
             )
         else:
-            pos.zattrs["experiment_metadata"] = metadata
+            pos.zattrs["channel_annotation"] = channel_annotation
+            pos.zattrs["experiment_metadata"] = experiment_metadata
             fov_count += 1
 
         if airtable_fields and rec.record_id:
             airtable_updates.append({"id": rec.record_id, "fields": airtable_fields})
+
+    # Write plate-level channel_annotation (use first record's annotation)
+    if not dry_run and fov_records:
+        first_rec = fov_records[0]
+        for i, ch_name in enumerate(channel_names):
+            if i <= 3:
+                setattr(first_rec, f"channel_{i}_name", ch_name)
+        plate.zattrs["channel_annotation"] = first_rec.to_channel_annotation()
 
     plate.close()
 

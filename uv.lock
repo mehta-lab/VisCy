@@ -4134,6 +4134,7 @@ wheels = [
 name = "qc"
 source = { editable = "applications/qc" }
 dependencies = [
+    { name = "airtable-utils" },
     { name = "click" },
     { name = "pydantic" },
     { name = "viscy-utils" },
@@ -4152,6 +4153,7 @@ test = [
 
 [package.metadata]
 requires-dist = [
+    { name = "airtable-utils", editable = "applications/airtable" },
     { name = "click" },
     { name = "pydantic" },
     { name = "viscy-utils", editable = "packages/viscy-utils" },

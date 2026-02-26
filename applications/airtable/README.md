@@ -38,9 +38,14 @@ datasets = db.get_unique_datasets()
 # Get all FOV records for a dataset
 records = db.get_dataset_records("2024_10_16_A549_SEC61_ZIKV_DENV")
 
-# Get experiment metadata dict (for writing to .zattrs)
+# Get unified zattrs dicts (matching #375 schema)
 for rec in records:
-    meta = rec.to_experiment_metadata()
+    channel_ann = rec.to_channel_annotation()
+    # {"Phase3D": {"channel_type": "labelfree", "biological_annotation": null}, ...}
+
+    experiment_meta = rec.to_experiment_metadata()
+    # {"perturbations": [{"name": "ZIKV", "type": "unknown", "hours_post": 48.0, "moi": 5.0}],
+    #  "time_sampling_minutes": 30.0}
 
 # All records as a DataFrame
 df = db.list_records()
@@ -134,7 +139,7 @@ This will:
 
 #### Step 2: `write` — Airtable → zarr
 
-After reviewing/correcting channel biology in Airtable, write `experiment_metadata` to each FOV's `.zattrs`.
+After reviewing/correcting channel biology in Airtable, write `channel_annotation` and `experiment_metadata` to each FOV's `.zattrs`.
 
 ```bash
 # Dry run — see what metadata would be written
@@ -150,9 +155,40 @@ uv run --package airtable-utils \
 
 This will:
 - Read per-FOV records from Airtable (must have `fov` set — run `register` first)
-- Write `experiment_metadata` to each position's `.zattrs`
+- Write `channel_annotation` and `experiment_metadata` to each position's `.zattrs`
+- Write `channel_annotation` at plate level
 - Update `data_path` to FOV-level if it was plate-level
 - Track processed datasets in `experiment_metadata_tracking.csv`
+
+### Unified `.zattrs` Schema
+
+Both the Airtable `write` command and the QC annotation module produce the same schema (issue #375):
+
+**`channel_annotation`** — keyed by channel name:
+```json
+{
+    "Phase3D": {"channel_type": "labelfree", "biological_annotation": null},
+    "raw GFP EX488 EM525-45": {
+        "channel_type": "fluorescence",
+        "biological_annotation": {
+            "organelle": "endoplasmic_reticulum",
+            "marker": "SEC61B",
+            "marker_type": "protein_tag",
+            "fluorophore": "eGFP"
+        }
+    }
+}
+```
+
+**`experiment_metadata`** — perturbations + time sampling:
+```json
+{
+    "perturbations": [{"name": "ZIKV", "type": "virus", "hours_post": 48.0, "moi": 5.0}],
+    "time_sampling_minutes": 30.0
+}
+```
+
+The Pydantic models (`BiologicalAnnotation`, `ChannelAnnotationEntry`, `Perturbation`, `WellExperimentMetadata`) live in `airtable_utils.schemas` and are re-exported by the QC package for backward compatibility.
 
 ### Verification
 
@@ -161,5 +197,6 @@ from iohub import open_ome_zarr
 
 plate = open_ome_zarr("/path/to/dataset.zarr", mode="r")
 for name, pos in plate.positions():
+    print(name, pos.zattrs.get("channel_annotation"))
     print(name, pos.zattrs.get("experiment_metadata"))
 ```

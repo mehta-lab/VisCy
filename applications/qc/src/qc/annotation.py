@@ -2,13 +2,8 @@
 
 from iohub import open_ome_zarr
 
+from airtable_utils.schemas import parse_position_name
 from qc.config import AnnotationConfig
-
-
-def _well_from_position_name(name: str) -> str:
-    """Extract well path from a position name (e.g. 'A/1/0' -> 'A/1')."""
-    parts = name.split("/")
-    return "/".join(parts[:2])
 
 
 def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> None:
@@ -46,7 +41,7 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
     plate_well_paths: set[str] = set()
     position_list = list(plate.positions())
     for name, _ in position_list:
-        plate_well_paths.add(_well_from_position_name(name))
+        plate_well_paths.add(parse_position_name(name)[0])
 
     # Validate well paths
     for well_path in annotation.experiment_metadata:
@@ -58,9 +53,7 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
             )
 
     # Serialize channel_annotation once
-    channel_annotation_dict = {
-        k: v.model_dump() for k, v in annotation.channel_annotation.items()
-    }
+    channel_annotation_dict = {k: v.model_dump() for k, v in annotation.channel_annotation.items()}
 
     # Write channel_annotation to plate-level zattrs
     plate.zattrs["channel_annotation"] = channel_annotation_dict
@@ -71,10 +64,8 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
         pos.zattrs["channel_annotation"] = channel_annotation_dict
 
         # experiment_metadata per well
-        well_path = _well_from_position_name(name)
+        well_path = parse_position_name(name)[0]
         if well_path in annotation.experiment_metadata:
-            pos.zattrs["experiment_metadata"] = annotation.experiment_metadata[
-                well_path
-            ].model_dump()
+            pos.zattrs["experiment_metadata"] = annotation.experiment_metadata[well_path].model_dump()
 
     plate.close()
