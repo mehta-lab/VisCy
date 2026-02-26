@@ -29,11 +29,17 @@ __all__ = [
 
 
 def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
-    """
-    Ensure channel argument is a list of strings.
+    """Ensure channel argument is a list of strings.
 
-    :param Union[str, Sequence[str]] str_or_seq: channel name or list of channel names
-    :return list[str]: list of channel names
+    Parameters
+    ----------
+    str_or_seq : str | Sequence[str]
+        Channel name or list of channel names.
+
+    Returns
+    -------
+    list[str]
+        List of channel names.
     """
     if isinstance(str_or_seq, str):
         return [str_or_seq]
@@ -58,10 +64,17 @@ def _search_int_in_str(pattern: str, file_name: str) -> str:
 def _collate_samples(batch: Sequence[Sample]) -> Sample:
     """Collate samples into a batch sample.
 
-    :param Sequence[Sample] batch: a sequence of dictionaries,
-        where each key may point to a value of a single tensor or a list of tensors,
-        as is the case with ``train_patches_per_stack > 1``.
-    :return Sample: Batch sample (dictionary of tensors)
+    Parameters
+    ----------
+    batch : Sequence[Sample]
+        A sequence of dictionaries, where each key may point to a value of
+        a single tensor or a list of tensors, as is the case with
+        ``train_patches_per_stack > 1``.
+
+    Returns
+    -------
+    Sample
+        Batch sample (dictionary of tensors).
     """
     collated: Sample = {}
     for key in batch[0].keys():
