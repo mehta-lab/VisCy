@@ -144,7 +144,7 @@ class CachedOmeZarrDataset(Dataset):
                 cache_map[key] = None
                 self._metadata_map[key] = (position, time_idx, norm_meta)
                 key += 1
-        self.channels = {ch: position.get_channel_index(ch) for ch in channel_names}
+        self.channels = {ch: positions[0].get_channel_index(ch) for ch in channel_names}
         self.array_key = array_key
         self._cache_map = cache_map
         self.transform = transform
