@@ -61,7 +61,7 @@ jobs:
           cache-suffix: ${{ matrix.os }}-${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --frozen --all-extras --dev
+        run: uv sync --frozen --dev
         working-directory: packages/viscy-data
 
       - name: Run tests with coverage

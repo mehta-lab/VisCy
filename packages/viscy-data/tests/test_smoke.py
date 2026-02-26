@@ -8,12 +8,14 @@ Testing strategy:
        the optional deps are installed).
     4. Verify importing ``viscy_data`` does not pull in the old ``viscy.data``
        namespace.
+    5. Verify lazy imports are not eagerly loaded at ``import viscy_data`` time.
 """
 
 from __future__ import annotations
 
 import importlib
 import inspect
+import subprocess
 import sys
 
 import pytest
@@ -87,3 +89,29 @@ def test_no_viscy_dependency():
     """
     # viscy_data is already imported at module level; check sys.modules.
     assert "viscy.data" not in sys.modules, "viscy_data should not import from the legacy viscy.data namespace"
+
+
+# ---------------------------------------------------------------------------
+# Test 5: Lazy imports are not eagerly loaded
+# ---------------------------------------------------------------------------
+
+
+def test_lazy_imports_not_eagerly_loaded():
+    """Verify no lazy submodule is loaded by a bare ``import viscy_data``.
+
+    Runs in a subprocess so ``sys.modules`` reflects only the initial import,
+    not any names accessed by earlier tests in this process.
+    """
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "import sys, viscy_data; "
+            "lazy = set(viscy_data._LAZY_IMPORTS.values()); "
+            "loaded = lazy & set(sys.modules); "
+            "assert not loaded, f'Eagerly loaded: {loaded}'",
+        ],
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, f"Lazy import check failed:\n{result.stderr}"
