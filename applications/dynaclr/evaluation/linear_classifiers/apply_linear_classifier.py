@@ -85,7 +85,7 @@ def format_predictions_markdown(adata, task: str) -> str:
     help="Path to YAML configuration file",
 )
 def main(config: Path):
-    """Apply a trained linear classifier to new embeddings."""
+    """Apply trained linear classifiers to embeddings."""
     click.echo("=" * 60)
     click.echo("LINEAR CLASSIFIER INFERENCE")
     click.echo("=" * 60)
@@ -107,45 +107,50 @@ def main(config: Path):
     )
 
     click.echo(f"\n Configuration loaded: {config}")
-    click.echo(f"  Model: {inference_config.model_name}")
-    click.echo(f"  Version: {inference_config.version}")
+    click.echo(f"  W&B project: {inference_config.wandb_project}")
+    click.echo(f"  Models: {len(inference_config.models)}")
+    for spec in inference_config.models:
+        click.echo(f"    - {spec.model_name} ({spec.version})")
     click.echo(f"  Embeddings: {inference_config.embeddings_path}")
     click.echo(f"  Output: {write_path}")
 
     try:
-        pipeline, loaded_config, artifact_metadata = load_pipeline_from_wandb(
-            wandb_project=inference_config.wandb_project,
-            model_name=inference_config.model_name,
-            version=inference_config.version,
-            wandb_entity=inference_config.wandb_entity,
-        )
-
-        task = loaded_config["task"]
-        marker = loaded_config.get("marker")
-        task_key = f"{task}_{marker}" if marker else task
-
         click.echo(f"\nLoading embeddings from: {inference_config.embeddings_path}")
         adata = read_zarr(inference_config.embeddings_path)
         click.echo(f" Loaded embeddings: {adata.shape}")
 
-        if inference_config.include_wells:
-            click.echo(f"  Well filter: {inference_config.include_wells}")
+        for i, spec in enumerate(inference_config.models, 1):
+            click.echo(f"\n--- Model {i}/{len(inference_config.models)}: {spec.model_name} ---")
 
-        adata = predict_with_classifier(
-            adata,
-            pipeline,
-            task_key,
-            artifact_metadata=artifact_metadata,
-            include_wells=inference_config.include_wells,
-        )
+            pipeline, loaded_config, artifact_metadata = load_pipeline_from_wandb(
+                wandb_project=inference_config.wandb_project,
+                model_name=spec.model_name,
+                version=spec.version,
+                wandb_entity=inference_config.wandb_entity,
+            )
+
+            task = loaded_config["task"]
+            marker = loaded_config.get("marker")
+            task_key = f"{task}_{marker}" if marker else task
+
+            if spec.include_wells:
+                click.echo(f"  Well filter: {spec.include_wells}")
+
+            adata = predict_with_classifier(
+                adata,
+                pipeline,
+                task_key,
+                artifact_metadata=artifact_metadata,
+                include_wells=spec.include_wells,
+            )
+
+            click.echo(format_predictions_markdown(adata, task_key))
 
         write_path.parent.mkdir(parents=True, exist_ok=True)
 
         click.echo(f"\nSaving predictions to: {write_path}")
         adata.write_zarr(write_path)
         click.echo(" Saved predictions")
-
-        click.echo("\n" + format_predictions_markdown(adata, task_key))
 
         click.echo("\n Inference complete!")
 

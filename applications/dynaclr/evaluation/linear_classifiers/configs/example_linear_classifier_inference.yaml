@@ -1,19 +1,13 @@
-# Example configuration for applying a trained linear classifier
+# Example configuration for applying trained linear classifiers
 #
 # Usage:
 #   dynaclr apply-linear-classifier \
 #       -c evaluation/linear_classifiers/configs/example_linear_classifier_inference.yaml
 
-# W&B project name where the model artifact is stored
-wandb_project: DynaCLR-2D-linearclassifiers
-
-# Name of the model artifact in W&B
-# (e.g., linear-classifier-cell_death_state-phase)
-model_name: linear-classifier-cell_death_state-phase
-
-# Version of the model artifact
-# Use 'latest' for the most recent version, or specific version like 'v0', 'v1'
-version: latest
+# Embedding model identity — used to derive the W&B project name:
+#   linearclassifiers-{embedding_model_name}-{embedding_model_version}
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
 
 # W&B entity (username or team, null for default)
 wandb_entity: null
@@ -25,12 +19,20 @@ embeddings_path: /path/to/embeddings.zarr
 # When omitted (or null), predictions are written back to embeddings_path.
 # output_path: /path/to/output_with_predictions.zarr
 
-# Well prefixes to restrict predictions to (optional).
-# When omitted, all cells are predicted. Cells in other wells get NaN.
-# Useful for organelle-specific classifiers where different wells have different markers.
-# include_wells:
-#   - A/1
-#   - A/2
-
 # Whether to overwrite output if it already exists (only used when output_path is set)
 overwrite: false
+
+# Classifier models to apply.
+# Each model can optionally specify include_wells for marker-specific filtering.
+models:
+  - model_name: linear-classifier-infection_state-sensor
+    version: latest
+  - model_name: linear-classifier-infection_state-phase
+    version: latest
+  - model_name: linear-classifier-organelle_state-organelle-g3bp1
+    version: latest
+    include_wells:
+      - A/1
+      - A/2
+  - model_name: linear-classifier-cell_division_state-phase
+    version: latest

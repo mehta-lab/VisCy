@@ -82,7 +82,8 @@ def main(config: Path):
     click.echo(f"  Input channel: {train_config.input_channel}")
     if train_config.marker:
         click.echo(f"  Marker: {train_config.marker}")
-    click.echo(f"  Model: {train_config.embedding_model}")
+    click.echo(f"  Embedding model: {train_config.embedding_model_name} ({train_config.embedding_model_version})")
+    click.echo(f"  W&B project: {train_config.wandb_project}")
     click.echo(f"  Datasets: {len(train_config.train_datasets)}")
 
     try:

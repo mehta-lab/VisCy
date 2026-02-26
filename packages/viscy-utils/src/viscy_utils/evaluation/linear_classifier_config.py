@@ -11,6 +11,8 @@ VALID_TASKS = Literal["infection_state", "organelle_state", "cell_division_state
 # Valid input channels
 VALID_CHANNELS = Literal["phase", "sensor", "organelle"]
 
+WANDB_PROJECT_PREFIX = "linearclassifiers"
+
 
 class LinearClassifierTrainConfig(BaseModel):
     """Configuration for linear classifier training.
@@ -22,8 +24,10 @@ class LinearClassifierTrainConfig(BaseModel):
         cell_division_state, cell_death_state).
     input_channel : str
         Input channel name (one of: phase, sensor, organelle).
-    embedding_model : str
-        Name of the embedding model used.
+    embedding_model_name : str
+        Name of the embedding model (e.g. ``DynaCLR-2D-BagOfChannels-timeaware``).
+    embedding_model_version : str
+        Version of the embedding model (e.g. ``v3``).
     train_datasets : list[dict]
         List of training datasets with 'embeddings' and 'annotations' paths.
         Each dict may optionally include 'include_wells', a list of well
@@ -44,8 +48,6 @@ class LinearClassifierTrainConfig(BaseModel):
         Fraction of data to use for training (rest for validation).
     random_seed : int
         Random seed for reproducibility.
-    wandb_project : str
-        W&B project name.
     wandb_entity : Optional[str]
         W&B entity (username or team).
     wandb_tags : list[str]
@@ -59,7 +61,8 @@ class LinearClassifierTrainConfig(BaseModel):
         default=None,
         description="Marker name for marker-specific tasks (e.g. g3bp1, sec61b, tomm20).",
     )
-    embedding_model: str = Field(..., min_length=1)
+    embedding_model_name: str = Field(..., min_length=1)
+    embedding_model_version: str = Field(..., min_length=1)
 
     # Training datasets
     train_datasets: list[dict] = Field(..., min_length=1)
@@ -79,17 +82,21 @@ class LinearClassifierTrainConfig(BaseModel):
     random_seed: int = Field(default=42)
 
     # W&B configuration
-    wandb_project: str = Field(..., min_length=1)
     wandb_entity: Optional[str] = Field(default=None)
     wandb_tags: list[str] = Field(default_factory=list)
 
-    @field_validator("embedding_model", "wandb_project")
+    @field_validator("embedding_model_name", "embedding_model_version")
     @classmethod
     def validate_non_empty_strings(cls, v: str) -> str:
         """Ensure string fields are non-empty."""
         if not v or not v.strip():
             raise ValueError("Field cannot be empty")
         return v
+
+    @property
+    def wandb_project(self) -> str:
+        """Derive W&B project name from embedding model name and version."""
+        return f"{WANDB_PROJECT_PREFIX}-{self.embedding_model_name}-{self.embedding_model_version}"
 
     @model_validator(mode="after")
     def validate_config(self):
@@ -119,17 +126,35 @@ class LinearClassifierTrainConfig(BaseModel):
         return self
 
 
+class ClassifierModelSpec(BaseModel):
+    """Specification for a single classifier model in batch inference.
+
+    Parameters
+    ----------
+    model_name : str
+        Name of the model artifact in W&B.
+    version : str
+        Version of the model artifact (e.g., 'latest', 'v0').
+    include_wells : Optional[list[str]]
+        Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
+        Cells in other wells will have ``NaN`` for prediction columns.
+        When ``None`` (the default), all cells are predicted.
+    """
+
+    model_name: str = Field(..., min_length=1)
+    version: str = Field(default="latest", min_length=1)
+    include_wells: Optional[list[str]] = Field(default=None)
+
+
 class LinearClassifierInferenceConfig(BaseModel):
     """Configuration for linear classifier inference.
 
     Parameters
     ----------
-    wandb_project : str
-        W&B project name where model artifact is stored.
-    model_name : str
-        Name of the model artifact in W&B.
-    version : str
-        Version of the model artifact (e.g., 'latest', 'v0').
+    embedding_model_name : str
+        Name of the embedding model (e.g. ``DynaCLR-2D-BagOfChannels-timeaware``).
+    embedding_model_version : str
+        Version of the embedding model (e.g. ``v3``).
     wandb_entity : Optional[str]
         W&B entity (username or team).
     embeddings_path : str
@@ -137,30 +162,33 @@ class LinearClassifierInferenceConfig(BaseModel):
     output_path : Optional[str]
         Path to save output zarr file with predictions. When ``None``
         (the default), predictions are written back to ``embeddings_path``.
-    include_wells : Optional[list[str]]
-        Well prefixes to restrict prediction to (e.g. ``["A/1", "B/2"]``).
-        Cells in other wells will have ``NaN`` for prediction columns.
-        When ``None`` (the default), all cells are predicted.
     overwrite : bool
         Whether to overwrite output if it exists.
+    models : list[ClassifierModelSpec]
+        List of classifier models to apply. Each model can specify
+        its own ``include_wells`` filter.
     """
 
-    wandb_project: str = Field(..., min_length=1)
-    model_name: str = Field(..., min_length=1)
-    version: str = Field(default="latest", min_length=1)
+    embedding_model_name: str = Field(..., min_length=1)
+    embedding_model_version: str = Field(..., min_length=1)
     wandb_entity: Optional[str] = Field(default=None)
     embeddings_path: str = Field(..., min_length=1)
     output_path: Optional[str] = Field(default=None)
-    include_wells: Optional[list[str]] = Field(default=None)
     overwrite: bool = Field(default=False)
+    models: list[ClassifierModelSpec] = Field(..., min_length=1)
 
-    @field_validator("wandb_project", "model_name", "version", "embeddings_path")
+    @field_validator("embedding_model_name", "embedding_model_version", "embeddings_path")
     @classmethod
     def validate_non_empty(cls, v: str) -> str:
         """Ensure string fields are non-empty."""
         if not v or not v.strip():
             raise ValueError("Field cannot be empty")
         return v
+
+    @property
+    def wandb_project(self) -> str:
+        """Derive W&B project name from embedding model name and version."""
+        return f"{WANDB_PROJECT_PREFIX}-{self.embedding_model_name}-{self.embedding_model_version}"
 
     @model_validator(mode="after")
     def validate_paths(self):

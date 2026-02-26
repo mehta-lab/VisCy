@@ -23,7 +23,6 @@ annotations_dir = Path("/hpc/projects/organelle_phenotyping/datasets/annotations
 model = "DynaCLR-2D-Bag*Channels-timeaware"
 version = "v3"
 output_dir = Path("/hpc/projects/organelle_phenotyping/models/linear_classifiers/configs")
-wandb_project = "DynaCLR-2D-linearclassifiers"
 
 # %%
 # --- Discover datasets ---
@@ -32,7 +31,8 @@ print_registry_summary(registry, skipped, annotations_only, predictions_only)
 
 # %%
 # --- Generate configs for each task x channel ---
-embedding_model_label = f"{model.replace('*', '')}-{version}"
+embedding_model_name = model.replace("*", "")
+embedding_model_version = version
 generated: list[dict] = []
 
 for task in TASKS:
@@ -53,7 +53,8 @@ for task in TASKS:
         config = {
             "task": task,
             "input_channel": channel,
-            "embedding_model": embedding_model_label,
+            "embedding_model_name": embedding_model_name,
+            "embedding_model_version": embedding_model_version,
             "train_datasets": datasets_for_combo,
             "use_scaling": True,
             "use_pca": False,
@@ -63,7 +64,6 @@ for task in TASKS:
             "solver": "liblinear",
             "split_train_data": 0.8,
             "random_seed": 42,
-            "wandb_project": wandb_project,
             "wandb_entity": None,
             "wandb_tags": [],
         }

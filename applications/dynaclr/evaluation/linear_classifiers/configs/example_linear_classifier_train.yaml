@@ -12,8 +12,10 @@ task: cell_death_state
 # Valid options: phase, sensor, organelle
 input_channel: phase
 
-# Name of the embedding model
-embedding_model: DynaCLR-2D-BagOfChannels-timeaware-v3
+# Embedding model identity — used to derive the W&B project name:
+#   linearclassifiers-{embedding_model_name}-{embedding_model_version}
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
 
 # Training datasets - list of exact file paths (no glob patterns)
 # Each dataset must have both embeddings (zarr) and annotations (csv)
@@ -40,6 +42,5 @@ split_train_data: 0.8  # Fraction of data for training (rest for validation, 1.0
 random_seed: 42        # Random seed for reproducibility
 
 # Weights & Biases configuration
-wandb_project: DynaCLR-2D-linearclassifiers  # W&B project name
 wandb_entity: null                           # W&B entity (username or team, null for default)
 wandb_tags: []                               # Tags to add to the run
