@@ -189,8 +189,7 @@ class TripletDataset(Dataset):
     def _specific_cells(self, tracks: "pd.DataFrame") -> "pd.DataFrame":
         """Filter tracks to specific cells by FOV name and track ID."""
         specific_tracks = pd.DataFrame()
-        print(self.include_fov_names)
-        print(self.include_track_ids)
+        _logger.debug(f"Filtering tracks to specific cells: {self.include_fov_names} and {self.include_track_ids}")
         for fov_name, track_id in zip(self.include_fov_names, self.include_track_ids):
             filtered_tracks = tracks[(tracks["fov_name"] == fov_name) & (tracks["track_id"] == track_id)]
             specific_tracks = pd.concat([specific_tracks, filtered_tracks])
