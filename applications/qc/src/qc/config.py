@@ -86,7 +86,7 @@ class Perturbation(BaseModel):
     model_config = {"extra": "allow"}
 
     name: str
-    type: str
+    type: str = "unknown"
     hours_post: float
 
 
