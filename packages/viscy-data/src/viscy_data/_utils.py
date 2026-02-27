@@ -118,7 +118,7 @@ def _scatter_channels(
 
 def _gather_channels(
     patch_channels: dict[str, Tensor | NormMeta],
-) -> list[Tensor]:
+) -> Tensor:
     patch_channels.pop("norm_meta", None)
     return torch.cat(list(patch_channels.values()), dim=1)
 
@@ -128,7 +128,7 @@ def _transform_channel_wise(
     channel_names: list[str],
     patch: Tensor,
     norm_meta: NormMeta | None,
-) -> list[Tensor]:
+) -> Tensor:
     scattered_channels = _scatter_channels(channel_names, patch, norm_meta)
     transformed_channels = transform(scattered_channels)
     return _gather_channels(transformed_channels)
