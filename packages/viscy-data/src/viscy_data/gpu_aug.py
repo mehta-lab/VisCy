@@ -18,10 +18,10 @@ from torch import Tensor
 from torch.multiprocessing import Manager
 from torch.utils.data import DataLoader, Dataset
 
+from viscy_data._select import SelectWell
 from viscy_data._typing import DictTransform, NormMeta
 from viscy_data._utils import _ensure_channel_list, _read_norm_meta
 from viscy_data.distributed import ShardedDistributedSampler
-from viscy_data.select import SelectWell
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -144,7 +144,7 @@ class CachedOmeZarrDataset(Dataset):
                 cache_map[key] = None
                 self._metadata_map[key] = (position, time_idx, norm_meta)
                 key += 1
-        self.channels = {ch: position.get_channel_index(ch) for ch in channel_names}
+        self.channels = {ch: positions[0].get_channel_index(ch) for ch in channel_names}
         self.array_key = array_key
         self._cache_map = cache_map
         self.transform = transform
@@ -274,23 +274,6 @@ class CachedOmeZarrDataModule(GPUTransformDataModule, SelectWell):
         set_track_meta(False)
         # shuffle positions, randomness is handled globally
         return torch.randperm(num_positions).tolist()
-
-    def _include_well_name(self, name: str) -> bool:
-        if self._include_wells is None:
-            return True
-        else:
-            return name in self._include_wells
-
-    def _filter_fit_fovs(self, plate: Plate) -> list[Position]:
-        """Filter FOVs from HCS plate for fitting."""
-        positions = []
-        for well_name, well in plate.wells():
-            if self._include_well_name(well_name):
-                for _, p in well.positions():
-                    positions.append(p)
-        if len(positions) < 2:
-            raise ValueError("At least 2 FOVs are required for training and validation.")
-        return positions
 
     def setup(self, stage: Literal["fit", "validate"]) -> None:
         """Set up datasets for fit or validate stage."""

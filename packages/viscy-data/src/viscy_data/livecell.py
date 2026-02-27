@@ -146,16 +146,24 @@ class LiveCellTestDataset(Dataset):
             sample["target"] = image
         if self.load_labels:
             anns = self.coco.loadAnns(self.coco.getAnnIds(image_id)) or []
-            boxes = [torch.tensor(ann["bbox"]).to(torch.float32) for ann in anns]
-            masks = [torch.from_numpy(self.coco.annToMask(ann)).to(torch.bool) for ann in anns]
-            dets = {
-                "boxes": box_convert(torch.stack(boxes), in_fmt="xywh", out_fmt="xyxy"),
-                "labels": torch.zeros(len(anns)).to(torch.uint8),
-                "masks": torch.stack(masks),
-            }
+            if anns:
+                boxes = [torch.tensor(ann["bbox"]).to(torch.float32) for ann in anns]
+                masks = [torch.from_numpy(self.coco.annToMask(ann)).to(torch.bool) for ann in anns]
+                dets = {
+                    "boxes": box_convert(torch.stack(boxes), in_fmt="xywh", out_fmt="xyxy"),
+                    "labels": torch.zeros(len(anns)).to(torch.uint8),
+                    "masks": torch.stack(masks),
+                }
+            else:
+                h, w = self.coco.imgs[image_id]["height"], self.coco.imgs[image_id]["width"]
+                dets = {
+                    "boxes": torch.zeros((0, 4), dtype=torch.float32),
+                    "labels": torch.zeros(0, dtype=torch.uint8),
+                    "masks": torch.zeros((0, h, w), dtype=torch.bool),
+                }
             sample["detections"] = dets
             sample["file_name"] = file_name
-        self.transform(sample)
+        sample = self.transform(sample)
         return sample
 
 
@@ -199,11 +207,11 @@ class LiveCellDataModule(GPUTransformDataModule):
         train_annotations: Path | None = None,
         val_annotations: Path | None = None,
         test_annotations: Path | None = None,
-        train_cpu_transforms: list[MapTransform] = [],
-        val_cpu_transforms: list[MapTransform] = [],
-        train_gpu_transforms: list[MapTransform] = [],
-        val_gpu_transforms: list[MapTransform] = [],
-        test_transforms: list[MapTransform] = [],
+        train_cpu_transforms: list[MapTransform] | None = None,
+        val_cpu_transforms: list[MapTransform] | None = None,
+        train_gpu_transforms: list[MapTransform] | None = None,
+        val_gpu_transforms: list[MapTransform] | None = None,
+        test_transforms: list[MapTransform] | None = None,
         batch_size: int = 16,
         num_workers: int = 8,
         pin_memory: bool = True,
@@ -229,14 +237,15 @@ class LiveCellDataModule(GPUTransformDataModule):
             self.test_annotations = Path(test_annotations)
             if not self.test_annotations.is_file():
                 raise FileNotFoundError(str(test_annotations))
-        self._train_cpu_transforms = Compose(train_cpu_transforms)
-        self._val_cpu_transforms = Compose(val_cpu_transforms)
-        self._train_gpu_transforms = Compose(train_gpu_transforms)
-        self._val_gpu_transforms = Compose(val_gpu_transforms)
-        self.test_transforms = Compose(test_transforms)
+        self._train_cpu_transforms = Compose(train_cpu_transforms or [])
+        self._val_cpu_transforms = Compose(val_cpu_transforms or [])
+        self._train_gpu_transforms = Compose(train_gpu_transforms or [])
+        self._val_gpu_transforms = Compose(val_gpu_transforms or [])
+        self.test_transforms = Compose(test_transforms or [])
         self.batch_size = batch_size
         self.num_workers = num_workers
         self.pin_memory = pin_memory
+        self.prefetch_factor = None
 
     @property
     def train_cpu_transforms(self) -> Compose:
@@ -265,7 +274,7 @@ class LiveCellDataModule(GPUTransformDataModule):
         elif stage == "test":
             self._setup_test()
 
-    def _parse_image_names(self, annotations: Path) -> list[Path]:
+    def _parse_image_names(self, annotations: Path) -> list[str]:
         """Parse image file names from COCO annotations."""
         with open(annotations) as f:
             images = [f["file_name"] for f in json.load(f)["images"]]

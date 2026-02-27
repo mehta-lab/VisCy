@@ -22,10 +22,10 @@ try:
 except ImportError:
     MemoryMappedTensor = None
 
+from viscy_data._select import SelectWell
 from viscy_data._typing import DictTransform, NormMeta
 from viscy_data._utils import _ensure_channel_list, _read_norm_meta
 from viscy_data.gpu_aug import GPUTransformDataModule
-from viscy_data.select import SelectWell
 
 if TYPE_CHECKING:
     from multiprocessing.managers import DictProxy
@@ -80,7 +80,7 @@ class MmappedDataset(Dataset):
                 cache_map[key] = None
                 self._metadata_map[key] = (position, time_idx, norm_meta)
                 key += 1
-        self.channels = {ch: position.get_channel_index(ch) for ch in channel_names}
+        self.channels = {ch: positions[0].get_channel_index(ch) for ch in channel_names}
         self.array_key = array_key
         self._buffer = buffer
         self._cache_map = cache_map

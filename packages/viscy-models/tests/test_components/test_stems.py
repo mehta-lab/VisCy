@@ -1,9 +1,9 @@
-"""Tests for stem modules in viscy_models._components.stems."""
+"""Tests for stem modules in viscy_models.components.stems."""
 
 import pytest
 import torch
 
-from viscy_models._components.stems import StemDepthtoChannels, UNeXt2Stem
+from viscy_models.components.stems import StemDepthtoChannels, UNeXt2Stem
 
 
 def test_unext2_stem_output_shape(device):

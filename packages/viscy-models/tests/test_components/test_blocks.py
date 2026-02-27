@@ -1,9 +1,9 @@
-"""Tests for block modules in viscy_models._components.blocks."""
+"""Tests for block modules in viscy_models.components.blocks."""
 
 import torch
 from torch import nn
 
-from viscy_models._components.blocks import (
+from viscy_models.components.blocks import (
     UNeXt2Decoder,
     UNeXt2UpStage,
     _get_convnext_stage,

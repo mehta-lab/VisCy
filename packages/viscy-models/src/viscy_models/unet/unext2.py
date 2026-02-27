@@ -5,12 +5,14 @@ from typing import Literal
 import timm
 from torch import Tensor, nn
 
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead
-from viscy_models._components.stems import UNeXt2Stem
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead
+from viscy_models.components.stems import UNeXt2Stem
 
 
 class UNeXt2(nn.Module):
+    """UNeXt2 model composing a timm encoder with custom stem, decoder, and head."""
+
     def __init__(
         self,
         in_channels: int = 1,
@@ -31,8 +33,7 @@ class UNeXt2(nn.Module):
         super().__init__()
         if in_stack_depth % stem_kernel_size[0] != 0:
             raise ValueError(
-                f"Input stack depth {in_stack_depth} is not divisible "
-                f"by stem kernel depth {stem_kernel_size[0]}."
+                f"Input stack depth {in_stack_depth} is not divisible by stem kernel depth {stem_kernel_size[0]}."
             )
         if out_stack_depth is None:
             out_stack_depth = in_stack_depth
@@ -46,14 +47,10 @@ class UNeXt2(nn.Module):
         # replace first convolution layer with a projection tokenizer
         multi_scale_encoder.stem_0 = nn.Identity()
         self.encoder_stages = multi_scale_encoder
-        self.stem = UNeXt2Stem(
-            in_channels, num_channels[0], stem_kernel_size, in_stack_depth
-        )
+        self.stem = UNeXt2Stem(in_channels, num_channels[0], stem_kernel_size, in_stack_depth)
         decoder_channels = num_channels
         decoder_channels.reverse()
-        decoder_channels[-1] = (
-            (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
-        )
+        decoder_channels[-1] = (out_stack_depth + 2) * out_channels * 2**2 * head_expansion_ratio
         self.decoder = UNeXt2Decoder(
             decoder_channels,
             norm_name=decoder_norm_layer,
@@ -77,6 +74,7 @@ class UNeXt2(nn.Module):
         return 6
 
     def forward(self, x: Tensor) -> Tensor:
+        """Forward pass through the UNeXt2 model."""
         x = self.stem(x)
         x: list = self.encoder_stages(x)
         x.reverse()

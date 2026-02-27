@@ -1,4 +1,4 @@
-"""VisCy Data - Data loading and Lightning DataModules for virtual staining microscopy.
+"""VisCy Data - Data loading and Lightning DataModules for AI x Imaging tasks.
 
 This package provides PyTorch Lightning DataModules and Datasets for loading
 and preprocessing microscopy data in virtual staining workflows.
@@ -18,13 +18,13 @@ Version:
     Use ``importlib.metadata.version('viscy-data')`` to get version.
 """
 
-# Type definitions (from _typing.py)
+import importlib
+from typing import Any
+
+# Lightweight, always-needed types and utilities -- keep eager
+from viscy_data._select import SelectWell
 from viscy_data._typing import (
-    INDEX_COLUMNS,
-    LABEL_CELL_CYCLE_STATE,
-    LABEL_CELL_DIVISION_STATE,
-    LABEL_CELL_REMODELING_STATE,
-    LABEL_INFECTION_STATE,
+    ULTRACK_INDEX_COLUMNS,
     AnnotationColumns,
     ChannelMap,
     ChannelNormStats,
@@ -39,56 +39,48 @@ from viscy_data._typing import (
     TripletSample,
 )
 
-# Cell classification (from cell_classification.py -- requires pandas at runtime)
-from viscy_data.cell_classification import (
-    ClassificationDataModule,
-    ClassificationDataset,
-)
-
-# Cell division triplet (from cell_division_triplet.py)
-from viscy_data.cell_division_triplet import (
-    CellDivisionTripletDataModule,
-    CellDivisionTripletDataset,
-)
-
-# Combined/Concat DataModules (from combined.py)
-from viscy_data.combined import (
-    BatchedConcatDataModule,
-    BatchedConcatDataset,
-    CachedConcatDataModule,
-    CombinedDataModule,
-    CombineMode,
-    ConcatDataModule,
-)
-
-# CTMC v1 (from ctmc_v1.py)
-from viscy_data.ctmc_v1 import CTMCv1DataModule
-from viscy_data.distributed import ShardedDistributedSampler
-
-# GPU augmentation DataModules (from gpu_aug.py)
-from viscy_data.gpu_aug import (
-    CachedOmeZarrDataModule,
-    CachedOmeZarrDataset,
-    GPUTransformDataModule,
-)
-
-# Core DataModules (from hcs.py)
-from viscy_data.hcs import HCSDataModule, MaskTestDataset, SlidingWindowDataset
-
-# LiveCell benchmark (from livecell.py -- requires [livecell] extra at runtime)
-from viscy_data.livecell import LiveCellDataModule, LiveCellDataset, LiveCellTestDataset
-
-# Memory-mapped cache (from mmap_cache.py -- requires [mmap] extra at runtime)
-from viscy_data.mmap_cache import MmappedDataModule, MmappedDataset
-
-# Segmentation (from segmentation.py)
-from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
-
-# Utility modules (from select.py, distributed.py)
-from viscy_data.select import SelectWell
-
-# Triplet learning (from triplet.py -- requires [triplet] extra at runtime)
-from viscy_data.triplet import TripletDataModule, TripletDataset
+# Mapping of lazily-loaded names to their submodules.
+# Submodules are only imported on first access.
+_LAZY_IMPORTS: dict[str, str] = {
+    # Cell classification
+    "ClassificationDataModule": "viscy_data.cell_classification",
+    "ClassificationDataset": "viscy_data.cell_classification",
+    # Cell division triplet
+    "CellDivisionTripletDataModule": "viscy_data.cell_division_triplet",
+    "CellDivisionTripletDataset": "viscy_data.cell_division_triplet",
+    # Combined/Concat
+    "BatchedConcatDataModule": "viscy_data.combined",
+    "BatchedConcatDataset": "viscy_data.combined",
+    "CachedConcatDataModule": "viscy_data.combined",
+    "CombinedDataModule": "viscy_data.combined",
+    "CombineMode": "viscy_data.combined",
+    "ConcatDataModule": "viscy_data.combined",
+    # CTMC v1
+    "CTMCv1DataModule": "viscy_data.ctmc_v1",
+    # Distributed
+    "ShardedDistributedSampler": "viscy_data.distributed",
+    # GPU augmentation
+    "CachedOmeZarrDataModule": "viscy_data.gpu_aug",
+    "CachedOmeZarrDataset": "viscy_data.gpu_aug",
+    "GPUTransformDataModule": "viscy_data.gpu_aug",
+    # Core HCS
+    "HCSDataModule": "viscy_data.hcs",
+    "MaskTestDataset": "viscy_data.hcs",
+    "SlidingWindowDataset": "viscy_data.hcs",
+    # LiveCell
+    "LiveCellDataModule": "viscy_data.livecell",
+    "LiveCellDataset": "viscy_data.livecell",
+    "LiveCellTestDataset": "viscy_data.livecell",
+    # Memory-mapped cache
+    "MmappedDataModule": "viscy_data.mmap_cache",
+    "MmappedDataset": "viscy_data.mmap_cache",
+    # Segmentation
+    "SegmentationDataModule": "viscy_data.segmentation",
+    "SegmentationDataset": "viscy_data.segmentation",
+    # Triplet
+    "TripletDataModule": "viscy_data.triplet",
+    "TripletDataset": "viscy_data.triplet",
+}
 
 __all__ = [
     # Types
@@ -97,11 +89,7 @@ __all__ = [
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "INDEX_COLUMNS",
-    "LABEL_CELL_CYCLE_STATE",
-    "LABEL_CELL_DIVISION_STATE",
-    "LABEL_CELL_REMODELING_STATE",
-    "LABEL_INFECTION_STATE",
+    "ULTRACK_INDEX_COLUMNS",
     "LevelNormStats",
     "NormMeta",
     "OneOrSeq",
@@ -149,3 +137,18 @@ __all__ = [
     "CombineMode",
     "ConcatDataModule",
 ]
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily import a public name from its submodule on first access."""
+    if name in _LAZY_IMPORTS:
+        module = importlib.import_module(_LAZY_IMPORTS[name])
+        attr = getattr(module, name)
+        globals()[name] = attr
+        return attr
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
+
+def __dir__() -> list[str]:
+    """List public API names and standard module attributes."""
+    return list(__all__) + [k for k in globals() if k.startswith("__")]

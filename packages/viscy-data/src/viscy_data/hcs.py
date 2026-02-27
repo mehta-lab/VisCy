@@ -3,13 +3,13 @@
 import logging
 import math
 import os
+import shutil
 import tempfile
 from pathlib import Path
 from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
-import zarr
 from imageio import imread
 from iohub.ngff import ImageArray, Plate, Position, open_ome_zarr
 from lightning.pytorch import LightningDataModule
@@ -211,6 +211,8 @@ class MaskTestDataset(SlidingWindowDataset):
         A callable that transforms data, defaults to None.
     ground_truth_masks : str | None
         Path to the ground truth masks.
+    array_key : str, optional
+        Name of the image arrays (multiscales level), by default "0".
     """
 
     def __init__(
@@ -220,9 +222,12 @@ class MaskTestDataset(SlidingWindowDataset):
         z_window_size: int,
         transform: DictTransform | None = None,
         ground_truth_masks: str | None = None,
+        array_key: str = "0",
     ) -> None:
-        super().__init__(positions, channels, z_window_size, transform)
+        super().__init__(positions, channels, z_window_size, array_key=array_key, transform=transform)
         self.masks = {}
+        if ground_truth_masks is None:
+            return
         for img_path in Path(ground_truth_masks).glob("*cp_masks.png"):
             img_name = img_path.name
             position_name = _search_int_in_str(r"(?<=_p)\d{3}", img_name)
@@ -271,12 +276,12 @@ class HCSDataModule(LightningDataModule):
         defaults to False.
     yx_patch_size : tuple[int, int], optional
         Patch size in (Y, X), defaults to (256, 256).
-    normalizations : list of MapTransform, optional
+    normalizations : list of MapTransform or None, optional
         MONAI dictionary transforms applied to selected channels,
-        defaults to ``[]`` (no normalization).
-    augmentations : list of MapTransform, optional
+        defaults to None (no normalization).
+    augmentations : list of MapTransform or None, optional
         MONAI dictionary transforms applied to the training set,
-        defaults to ``[]`` (no augmentation).
+        defaults to None (no augmentation).
     caching : bool, optional
         Whether to decompress all the images and cache the result,
         will store in `/tmp/$SLURM_JOB_ID/` if available,
@@ -306,8 +311,8 @@ class HCSDataModule(LightningDataModule):
         num_workers: int = 8,
         target_2d: bool = False,
         yx_patch_size: tuple[int, int] = (256, 256),
-        normalizations: list[MapTransform] = [],
-        augmentations: list[MapTransform] = [],
+        normalizations: list[MapTransform] | None = None,
+        augmentations: list[MapTransform] | None = None,
         caching: bool = False,
         ground_truth_masks: Path | None = None,
         persistent_workers=False,
@@ -325,8 +330,8 @@ class HCSDataModule(LightningDataModule):
         self.z_window_size = z_window_size
         self.split_ratio = split_ratio
         self.yx_patch_size = yx_patch_size
-        self.normalizations = normalizations
-        self.augmentations = augmentations
+        self.normalizations = normalizations or []
+        self.augmentations = augmentations or []
         self.caching = caching
         self.ground_truth_masks = ground_truth_masks
         self.prepare_data_per_node = True
@@ -373,18 +378,11 @@ class HCSDataModule(LightningDataModule):
         file_handler.setLevel(logging.DEBUG)
         logger.addHandler(file_handler)
         logger.info(f"Caching dataset at {self.cache_path}.")
-        tmp_store = zarr.NestedDirectoryStore(self.cache_path)
-        with open_ome_zarr(self.data_path, mode="r") as lazy_plate:
-            _, skipped, _ = zarr.copy(
-                lazy_plate.zgroup,
-                zarr.open(tmp_store, mode="a"),
-                name="/",
-                log=logger.debug,
-                if_exists="skip_initialized",
-                compressor=None,
-            )
-        if skipped > 0:
-            logger.warning(f"Skipped {skipped} items when caching. Check debug log for details.")
+        if self.cache_path.exists():
+            logger.info("Cache already exists, skipping copy.")
+            return
+        shutil.copytree(self.data_path, self.cache_path)
+        logger.info("Cached dataset.")
 
     @property
     def _base_dataset_settings(self) -> dict[str, dict[str, list[str]] | int]:

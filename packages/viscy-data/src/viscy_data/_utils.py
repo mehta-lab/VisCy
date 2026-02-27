@@ -13,13 +13,11 @@ from typing import Sequence
 import torch
 from iohub.ngff import Position
 from monai.data.utils import collate_meta_tensor
-from monai.transforms import CenterSpatialCrop, Cropd
 from torch import Tensor
 
 from viscy_data._typing import DictTransform, NormMeta, Sample
 
 __all__ = [
-    "BatchedCenterSpatialCropd",
     "_collate_samples",
     "_ensure_channel_list",
     "_gather_channels",
@@ -30,57 +28,18 @@ __all__ = [
 ]
 
 
-class _BatchedCenterSpatialCrop(CenterSpatialCrop):
-    """CenterSpatialCrop that operates on (B, C, *spatial) tensors.
-
-    Standard MONAI CenterSpatialCrop expects (C, *spatial) and crops
-    spatial dims = img.shape[1:]. This variant skips both batch and
-    channel dimensions, cropping spatial dims = img.shape[2:].
-    """
-
-    def __init__(self, roi_size: Sequence[int] | int) -> None:
-        super().__init__(roi_size, lazy=False)
-
-    def __call__(
-        self,
-        img: torch.Tensor,
-        lazy: bool | None = None,
-    ) -> torch.Tensor:
-        spatial_size = img.shape[2:]
-        crop_slices = self.compute_slices(spatial_size)
-        slices = (slice(None), slice(None)) + crop_slices
-        return img[slices]
-
-
-class BatchedCenterSpatialCropd(Cropd):
-    """CenterSpatialCropd for (B, C, *spatial) batched tensors.
+def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
+    """Ensure channel argument is a list of strings.
 
     Parameters
     ----------
-    keys : Sequence[str]
-        Keys to pick data for transformation.
-    roi_size : Sequence[int] | int
-        Expected ROI size to crop.
-    allow_missing_keys : bool, optional
-        Don't raise exception if key is missing. Default is False.
-    """
+    str_or_seq : str | Sequence[str]
+        Channel name or list of channel names.
 
-    def __init__(
-        self,
-        keys: Sequence[str],
-        roi_size: Sequence[int] | int,
-        allow_missing_keys: bool = False,
-    ) -> None:
-        cropper = _BatchedCenterSpatialCrop(roi_size)
-        super().__init__(keys, cropper=cropper, allow_missing_keys=allow_missing_keys)
-
-
-def _ensure_channel_list(str_or_seq: str | Sequence[str]) -> list[str]:
-    """
-    Ensure channel argument is a list of strings.
-
-    :param Union[str, Sequence[str]] str_or_seq: channel name or list of channel names
-    :return list[str]: list of channel names
+    Returns
+    -------
+    list[str]
+        List of channel names.
     """
     if isinstance(str_or_seq, str):
         return [str_or_seq]
@@ -105,10 +64,17 @@ def _search_int_in_str(pattern: str, file_name: str) -> str:
 def _collate_samples(batch: Sequence[Sample]) -> Sample:
     """Collate samples into a batch sample.
 
-    :param Sequence[Sample] batch: a sequence of dictionaries,
-        where each key may point to a value of a single tensor or a list of tensors,
-        as is the case with ``train_patches_per_stack > 1``.
-    :return Sample: Batch sample (dictionary of tensors)
+    Parameters
+    ----------
+    batch : Sequence[Sample]
+        A sequence of dictionaries, where each key may point to a value of
+        a single tensor or a list of tensors, as is the case with
+        ``train_patches_per_stack > 1``.
+
+    Returns
+    -------
+    Sample
+        Batch sample (dictionary of tensors).
     """
     collated: Sample = {}
     for key in batch[0].keys():
@@ -152,7 +118,7 @@ def _scatter_channels(
 
 def _gather_channels(
     patch_channels: dict[str, Tensor | NormMeta],
-) -> list[Tensor]:
+) -> Tensor:
     patch_channels.pop("norm_meta", None)
     return torch.cat(list(patch_channels.values()), dim=1)
 
@@ -162,7 +128,7 @@ def _transform_channel_wise(
     channel_names: list[str],
     patch: Tensor,
     norm_meta: NormMeta | None,
-) -> list[Tensor]:
+) -> Tensor:
     scattered_channels = _scatter_channels(channel_names, patch, norm_meta)
     transformed_channels = transform(scattered_channels)
     return _gather_channels(transformed_channels)

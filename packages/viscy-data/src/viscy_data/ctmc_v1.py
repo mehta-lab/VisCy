@@ -67,6 +67,7 @@ class CTMCv1DataModule(GPUTransformDataModule):
         self.num_workers = num_workers
         self.val_subsample_ratio = val_subsample_ratio
         self.pin_memory = pin_memory
+        self.prefetch_factor = None
 
     @property
     def train_cpu_transforms(self) -> Compose:

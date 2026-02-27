@@ -7,7 +7,7 @@
 - Shipped **v1.2 Extract viscy-models** -- Phases 10-14 (shipped 2026-02-13)
 - Shipped **v2.0 DynaCLR Application** -- Phases 15-17 (shipped 2026-02-17)
 - Shipped **v2.1 DynaCLR Integration Validation** -- Phases 18-19 (shipped 2026-02-20)
-- In Progress **v2.2 Composable Sampling Framework** -- Phases 20-25
+- Deferred **v2.2 Composable Sampling Framework** -- Phases 20-25
 
 ## Phases
 
@@ -207,7 +207,8 @@ Plans:
 
 </details>
 
-### v2.2 Composable Sampling Framework (In Progress)
+<details>
+<summary>v2.2 Composable Sampling Framework (Phases 20-25) -- DEFERRED</summary>
 
 **Milestone Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout -- enabling cross-experiment training that resolves heterogeneous cellular responses.
 
@@ -217,8 +218,6 @@ Plans:
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
 - [ ] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
 - [ ] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
-
-## Phase Details
 
 ### Phase 20: Experiment Configuration
 **Goal**: Users can define multi-experiment training setups via dataclasses and YAML configs, with automatic channel resolution across experiments
@@ -290,6 +289,8 @@ Plans:
   2. A YAML config example demonstrates multi-experiment training with all sampling axes (experiment_aware, condition_balanced, temporal_enrichment) and is parseable by Lightning CLI
 **Plans**: TBD
 **Location**: `applications/dynaclr/tests/`, `applications/dynaclr/examples/configs/`
+
+</details>
 
 ### v2.3+ Future Applications (Phases TBD)
 

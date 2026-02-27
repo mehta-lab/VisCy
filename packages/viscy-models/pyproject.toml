@@ -4,13 +4,14 @@ requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
 name = "viscy-models"
-description = "Neural network architectures for virtual staining microscopy"
+description = "Neural network architectures primarily for AI x Imaging"
 readme = "README.md"
 keywords = [
   "deep learning",
   "microscopy",
   "neural networks",
   "pytorch",
+  "representation learning",
   "virtual staining",
 ]
 license = "BSD-3-Clause"

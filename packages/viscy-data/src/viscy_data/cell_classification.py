@@ -20,7 +20,7 @@ from monai.transforms import Compose
 from torch import Tensor
 from torch.utils.data import DataLoader, Dataset
 
-from viscy_data._typing import INDEX_COLUMNS, AnnotationColumns
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, AnnotationColumns
 from viscy_data._utils import _read_norm_meta
 
 
@@ -60,9 +60,7 @@ class ClassificationDataset(Dataset):
             Column name for the label, by default "infection_state"
         """
         if pd is None:
-            raise ImportError(
-                "pandas is required for ClassificationDataset. Install with: pip install 'viscy-data[triplet]'"
-            )
+            raise ImportError("pandas is required for ClassificationDataset. Install with: pip install pandas")
         self.plate = plate
         self.z_range = z_range
         self.initial_yx_patch_size = initial_yx_patch_size
@@ -102,13 +100,16 @@ class ClassificationDataset(Dataset):
                 slice(x - x_half, x + x_half),
             ]
         ).float()[None]
-        norm_meta = _read_norm_meta(fov)[self.channel_name]["fov_statistics"]
+        norm_meta = _read_norm_meta(fov)
+        if norm_meta is None:
+            raise ValueError(f"Normalization metadata not found for FOV '{fov_name}'.")
+        norm_meta = norm_meta[self.channel_name]["fov_statistics"]
         img = (image - norm_meta["mean"]) / norm_meta["std"]
         if self.transform is not None:
             img = self.transform(img)
         label = torch.tensor(row[self.label_column]).float()[None]
         if self.return_indices:
-            return img, label, row[INDEX_COLUMNS].to_dict()
+            return img, label, row[ULTRACK_INDEX_COLUMNS].to_dict()
         else:
             return img, label
 
@@ -120,7 +121,7 @@ class ClassificationDataModule(LightningDataModule):
         self,
         image_path: Path,
         annotation_path: Path,
-        val_fovs: list[str] | None,
+        val_fovs: list[str],
         channel_name: str,
         z_range: tuple[int, int],
         train_exclude_timepoints: list[int],
@@ -139,7 +140,7 @@ class ClassificationDataModule(LightningDataModule):
             Path to the OME-Zarr image store
         annotation_path : Path
             Path to the annotation CSV file
-        val_fovs : list[str] | None
+        val_fovs : list[str]
             FOV names for validation
         channel_name : str
             Input channel name
@@ -180,11 +181,11 @@ class ClassificationDataModule(LightningDataModule):
         annotation: "pd.DataFrame",
         fov_names: list[str],
         transform: Callable | None,
-        exclude_timepoints: list[int] = [],
+        exclude_timepoints: list[int] | None = None,
         return_indices: bool = False,
     ) -> ClassificationDataset:
         """Create a classification dataset subset for specific FOVs."""
-        if exclude_timepoints:
+        if exclude_timepoints is not None and len(exclude_timepoints) > 0:
             filter_timepoints = annotation["t"].isin(exclude_timepoints)
             annotation = annotation[~filter_timepoints]
         return ClassificationDataset(
@@ -200,6 +201,8 @@ class ClassificationDataModule(LightningDataModule):
 
     def setup(self, stage=None):
         """Set up datasets for the given stage."""
+        if pd is None:
+            raise ImportError("pandas is required for ClassificationDataModule. Install with: pip install pandas")
         plate = open_ome_zarr(self.image_path)
         annotation = pd.read_csv(self.annotation_path)
         all_fovs = [name for (name, _) in plate.positions()]
@@ -242,7 +245,7 @@ class ClassificationDataModule(LightningDataModule):
         elif stage == "test":
             raise NotImplementedError("Test stage not implemented.")
         else:
-            raise (f"Unknown stage: {stage}")
+            raise ValueError(f"Unknown stage: {stage}")
 
     def train_dataloader(self):
         """Return training data loader."""

@@ -1,8 +1,8 @@
-"""Tests for head modules in viscy_models._components.heads."""
+"""Tests for head modules in viscy_models.components.heads."""
 
 import torch
 
-from viscy_models._components.heads import (
+from viscy_models.components.heads import (
     PixelToVoxelHead,
     PixelToVoxelShuffleHead,
     UnsqueezeHead,

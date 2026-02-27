@@ -47,7 +47,7 @@ package = true
 
 [tool.uv.workspace]
 members = [ "packages/*", "applications/*" ]
-exclude = [ "applications/benchmarking", "applications/contrastive_phenotyping" ]
+exclude = [ "applications/benchmarking", "applications/contrastive_phenotyping", "applications/dynacell" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
@@ -68,12 +68,15 @@ src = [ "applications/*/src", "packages/*/src" ]
 format.indent-style = "space"
 format.quote-style = "double"
 format.skip-magic-trailing-comma = false
+format.docstring-code-line-length = "dynamic"
 format.docstring-code-format = true
-lint.select = [ "E", "F", "I", "NPY", "PD", "W" ]
-lint.per-file-ignores."**/*.ipynb" = [ "E402", "E501", "PD" ]
-lint.per-file-ignores."**/__init__.py" = [ "F401" ]
+lint.select = [ "D", "E", "F", "I", "NPY", "PD", "W" ]
+lint.per-file-ignores."**/*.ipynb" = [ "D", "E402", "E501", "PD" ]
+lint.per-file-ignores."**/__init__.py" = [ "D104", "F401" ]
 lint.per-file-ignores."**/docs/**" = [ "I" ]
-lint.per-file-ignores."**/evaluation/**" = [ "E501", "NPY002", "PD011" ]
+lint.per-file-ignores."**/evaluation/**" = [ "D", "E501", "NPY002", "PD011" ]
+lint.per-file-ignores."**/tests/**" = [ "D" ]
+lint.pydocstyle.convention = "numpy"
 
 [tool.pytest]
 minversion = "9.0"

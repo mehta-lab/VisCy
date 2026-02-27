@@ -136,8 +136,7 @@ def test_unet25d_state_dict_keys():
     # AvgPool3d has no params, so down_samp should NOT be in state dict
     down_samp_keys = [k for k in keys if k.startswith("down_samp")]
     assert len(down_samp_keys) == 0, (
-        f"down_samp should not have state dict keys (AvgPool has no params), "
-        f"found: {down_samp_keys}"
+        f"down_samp should not have state dict keys (AvgPool has no params), found: {down_samp_keys}"
     )
 
 

@@ -94,7 +94,7 @@ re_verification: false
 **Contrastive models:** 5 tests run, 5 passed in 2.68s
 ```
 test_contrastive_encoder_convnext_tiny - PASSED
-test_contrastive_encoder_resnet50 - PASSED  
+test_contrastive_encoder_resnet50 - PASSED
 test_contrastive_encoder_custom_stem - PASSED
 test_resnet3d_encoder_resnet18 - PASSED
 test_resnet3d_encoder_resnet10 - PASSED

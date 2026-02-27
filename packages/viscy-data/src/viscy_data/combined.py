@@ -168,6 +168,8 @@ class ConcatDataModule(LightningDataModule):
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         """Set up constituent data modules and create concatenated datasets."""
+        if stage != "fit":
+            raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
             dm.setup(stage)
@@ -176,8 +178,6 @@ class ConcatDataModule(LightningDataModule):
                     self.train_patches_per_stack = patches
                 elif self.train_patches_per_stack != patches:
                     raise ValueError("Inconsistent patches per stack")
-        if stage != "fit":
-            raise NotImplementedError("Only fit stage is supported")
         self.train_dataset = self._ConcatDataset([dm.train_dataset for dm in self.data_modules])
         self.val_dataset = self._ConcatDataset([dm.val_dataset for dm in self.data_modules])
 
@@ -304,6 +304,8 @@ class CachedConcatDataModule(LightningDataModule):
 
     def setup(self, stage: Literal["fit", "validate", "test", "predict"]):
         """Set up constituent data modules and create concatenated datasets."""
+        if stage != "fit":
+            raise NotImplementedError("Only fit stage is supported")
         self.train_patches_per_stack = 0
         for dm in self.data_modules:
             dm.setup(stage)
@@ -312,8 +314,6 @@ class CachedConcatDataModule(LightningDataModule):
                     self.train_patches_per_stack = patches
                 elif self.train_patches_per_stack != patches:
                     raise ValueError("Inconsistent patches per stack")
-        if stage != "fit":
-            raise NotImplementedError("Only fit stage is supported")
         self.train_dataset = ConcatDataset([dm.train_dataset for dm in self.data_modules])
         self.val_dataset = ConcatDataset([dm.val_dataset for dm in self.data_modules])
 

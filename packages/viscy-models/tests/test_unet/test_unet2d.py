@@ -92,15 +92,12 @@ def test_unet2d_state_dict_keys():
     # AvgPool2d has no params, so down_samp should NOT be in state dict
     down_samp_keys = [k for k in keys if k.startswith("down_samp")]
     assert len(down_samp_keys) == 0, (
-        f"down_samp should not have state dict keys (AvgPool has no params), "
-        f"found: {down_samp_keys}"
+        f"down_samp should not have state dict keys (AvgPool has no params), found: {down_samp_keys}"
     )
 
     # skip_conv_layer should NOT exist in Unet2d
     skip_keys = [k for k in keys if k.startswith("skip_conv_layer")]
-    assert len(skip_keys) == 0, (
-        f"Unet2d should not have skip_conv_layer keys, found: {skip_keys}"
-    )
+    assert len(skip_keys) == 0, f"Unet2d should not have skip_conv_layer keys, found: {skip_keys}"
 
 
 @torch.no_grad()

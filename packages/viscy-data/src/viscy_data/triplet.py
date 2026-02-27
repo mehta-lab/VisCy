@@ -28,14 +28,13 @@ from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from viscy_data._typing import INDEX_COLUMNS, NormMeta
+from viscy_data._select import _filter_fovs, _filter_wells
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import (
-    BatchedCenterSpatialCropd,
     _read_norm_meta,
     _transform_channel_wise,
 )
 from viscy_data.hcs import HCSDataModule
-from viscy_data.select import _filter_fovs, _filter_wells
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -189,8 +188,7 @@ class TripletDataset(Dataset):
     def _specific_cells(self, tracks: "pd.DataFrame") -> "pd.DataFrame":
         """Filter tracks to specific cells by FOV name and track ID."""
         specific_tracks = pd.DataFrame()
-        print(self.include_fov_names)
-        print(self.include_track_ids)
+        _logger.debug(f"Filtering tracks to specific cells: {self.include_fov_names} and {self.include_track_ids}")
         for fov_name, track_id in zip(self.include_fov_names, self.include_track_ids):
             filtered_tracks = tracks[(tracks["fov_name"] == fov_name) & (tracks["track_id"] == track_id)]
             specific_tracks = pd.concat([specific_tracks, filtered_tracks])
@@ -283,7 +281,7 @@ class TripletDataset(Dataset):
             indices_list = []
             for _, anchor_row in anchor_rows.iterrows():
                 index_dict = {}
-                for col in INDEX_COLUMNS:
+                for col in ULTRACK_INDEX_COLUMNS:
                     if col in anchor_row.index:
                         index_dict[col] = anchor_row[col]
                     elif col not in ["y", "x", "z"]:
@@ -308,8 +306,8 @@ class TripletDataModule(HCSDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 1,
-        normalizations: list[MapTransform] = [],
-        augmentations: list[MapTransform] = [],
+        normalizations: list[MapTransform] | None = None,
+        augmentations: list[MapTransform] | None = None,
         augment_validation: bool = True,
         caching: bool = False,
         fit_include_wells: list[str] | None = None,
@@ -349,10 +347,10 @@ class TripletDataModule(HCSDataModule):
             Number of thread workers.
             Set to 0 to disable threading. Using more than 1 is not recommended.
             by default 1
-        normalizations : list[MapTransform], optional
-            Normalization transforms, by default []
-        augmentations : list[MapTransform], optional
-            Augmentation transforms, by default []
+        normalizations : list[MapTransform] or None, optional
+            Normalization transforms, by default None
+        augmentations : list[MapTransform] or None, optional
+            Augmentation transforms, by default None
         augment_validation : bool, optional
             Apply augmentations to validation data, by default True.
             Set to False for VAE training where clean validation is needed.
@@ -418,8 +416,8 @@ class TripletDataModule(HCSDataModule):
         self.return_negative = return_negative
         self.augment_validation = augment_validation
         self._cache_pool_bytes = cache_pool_bytes
-        self._augmentation_transform = Compose(self.normalizations + self.augmentations + [self._final_crop()])
-        self._no_augmentation_transform = Compose(self.normalizations + [self._final_crop()])
+        self._augmentation_transform = Compose(self.normalizations + self.augmentations)
+        self._no_augmentation_transform = Compose(self.normalizations)
 
     def _align_tracks_tables_with_positions(
         self,
@@ -431,6 +429,10 @@ class TripletDataModule(HCSDataModule):
         tuple[list[Position], list[pd.DataFrame]]
             List of positions and list of tracks tables for each position
         """
+        if pd is None:
+            raise ImportError(
+                "pandas is required for TripletDataModule. Install with: pip install 'viscy-data[triplet]'"
+            )
         positions = []
         tracks_tables = []
         images_plate = open_ome_zarr(self.data_path)
@@ -548,17 +550,6 @@ class TripletDataModule(HCSDataModule):
             collate_fn=lambda x: x,
         )
 
-    def _final_crop(self) -> BatchedCenterSpatialCropd:
-        """Set up final cropping: center crop to the target size."""
-        return BatchedCenterSpatialCropd(
-            keys=self.source_channel,
-            roi_size=(
-                self.z_window_size,
-                self.yx_patch_size[0],
-                self.yx_patch_size[1],
-            ),
-        )
-
     def _find_transform(self, key: str):
         """Find the appropriate transform for a given sample key."""
         if self.trainer:
@@ -576,6 +567,7 @@ class TripletDataModule(HCSDataModule):
         if isinstance(batch, Tensor):
             # example array
             return batch
+        expected_spatial = (self.z_window_size, *self.yx_patch_size)
         for key in ["anchor", "positive", "negative"]:
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
@@ -589,5 +581,10 @@ class TripletDataModule(HCSDataModule):
                 batch[key] = transformed_patches
                 if norm_meta_key in batch:
                     del batch[norm_meta_key]
+                actual_spatial = tuple(batch[key].shape[2:])
+                if actual_spatial != expected_spatial:
+                    raise ValueError(
+                        f"Spatial shape mismatch for '{key}': got {actual_spatial}, expected {expected_spatial}"
+                    )
 
         return batch

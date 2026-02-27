@@ -61,7 +61,7 @@ jobs:
           cache-suffix: ${{ matrix.os }}-${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --frozen --all-extras --dev
+        run: uv sync --frozen --dev
         working-directory: packages/viscy-data
 
       - name: Run tests with coverage
@@ -88,7 +88,7 @@ jobs:
         working-directory: packages/viscy-data
 
       - name: Run tests with coverage
-        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing -m "not slow"
+        run: uv run --frozen pytest --cov=viscy_data --cov-report=term-missing
         working-directory: packages/viscy-data
 
   check:
