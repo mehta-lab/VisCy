@@ -1,0 +1,65 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "viscy-data"
+description = "Data loading and Lightning DataModules for AI x Imaging tasks"
+readme = "README.md"
+keywords = [
+  "data loading",
+  "deep learning",
+  "lightning",
+  "microscopy",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "imageio",
+  "iohub>=0.3a2",
+  "lightning>=2.3",
+  "monai>=1.5.2",
+  "numpy>=2.4.1",
+  "torch>=2.10",
+  "zarr",
+]
+
+optional-dependencies.all = [ "viscy-data[livecell,mmap,triplet]" ]
+optional-dependencies.livecell = [ "pycocotools", "tifffile", "torchvision" ]
+optional-dependencies.mmap = [ "tensordict" ]
+optional-dependencies.triplet = [ "pandas", "tensorstore" ]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [ "pandas", "pytest>=9.0.2", "pytest-cov>=7", "tensorstore" ]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/viscy_data" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-data-"
+fallback-version = "0.0.0"
