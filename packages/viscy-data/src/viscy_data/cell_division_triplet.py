@@ -296,8 +296,8 @@ class CellDivisionTripletDataModule(HCSDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 8,
-        normalizations: list[MapTransform] = [],
-        augmentations: list[MapTransform] = [],
+        normalizations: list[MapTransform] | None = None,
+        augmentations: list[MapTransform] | None = None,
         augment_validation: bool = True,
         time_interval: Literal["any"] | int = "any",
         return_negative: bool = True,
@@ -322,10 +322,10 @@ class CellDivisionTripletDataModule(HCSDataModule):
             Batch size, by default 16
         num_workers : int, optional
             Number of data-loading workers, by default 8
-        normalizations : list[MapTransform], optional
-            Normalization transforms, by default []
-        augmentations : list[MapTransform], optional
-            Augmentation transforms, by default []
+        normalizations : list[MapTransform] or None, optional
+            Normalization transforms, by default None
+        augmentations : list[MapTransform] or None, optional
+            Augmentation transforms, by default None
         augment_validation : bool, optional
             Apply augmentations to validation data, by default True
         time_interval : Literal["any"] | int, optional

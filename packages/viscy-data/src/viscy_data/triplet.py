@@ -306,8 +306,8 @@ class TripletDataModule(HCSDataModule):
         split_ratio: float = 0.8,
         batch_size: int = 16,
         num_workers: int = 1,
-        normalizations: list[MapTransform] = [],
-        augmentations: list[MapTransform] = [],
+        normalizations: list[MapTransform] | None = None,
+        augmentations: list[MapTransform] | None = None,
         augment_validation: bool = True,
         caching: bool = False,
         fit_include_wells: list[str] | None = None,
@@ -347,10 +347,10 @@ class TripletDataModule(HCSDataModule):
             Number of thread workers.
             Set to 0 to disable threading. Using more than 1 is not recommended.
             by default 1
-        normalizations : list[MapTransform], optional
-            Normalization transforms, by default []
-        augmentations : list[MapTransform], optional
-            Augmentation transforms, by default []
+        normalizations : list[MapTransform] or None, optional
+            Normalization transforms, by default None
+        augmentations : list[MapTransform] or None, optional
+            Augmentation transforms, by default None
         augment_validation : bool, optional
             Apply augmentations to validation data, by default True.
             Set to False for VAE training where clean validation is needed.
