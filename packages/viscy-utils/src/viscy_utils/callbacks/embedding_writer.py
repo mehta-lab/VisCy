@@ -12,7 +12,7 @@ from lightning.pytorch.callbacks import BasePredictionWriter
 from numpy.typing import NDArray
 from xarray import Dataset, open_zarr
 
-from viscy_data._typing import INDEX_COLUMNS
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS
 
 __all__ = [
     "read_embedding_dataset",
@@ -38,8 +38,8 @@ def get_available_index_columns(dataset: Dataset, dataset_path: str | None = Non
     list[str]
         List of available index columns.
     """
-    available_cols = [col for col in INDEX_COLUMNS if col in dataset.coords]
-    missing_cols = set(INDEX_COLUMNS) - set(available_cols)
+    available_cols = [col for col in ULTRACK_INDEX_COLUMNS if col in dataset.coords]
+    missing_cols = set(ULTRACK_INDEX_COLUMNS) - set(available_cols)
 
     if missing_cols:
         path_msg = f" at {dataset_path}" if dataset_path else ""

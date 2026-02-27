@@ -10,7 +10,7 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy_data._typing import INDEX_COLUMNS, TripletSample
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, TripletSample
 from viscy_utils.callbacks.embedding_writer import EmbeddingWriter, write_embedding_dataset
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -85,6 +85,7 @@ class EmbeddingSnapshotCallback(Callback):
         self._images = None
 
     def on_validation_epoch_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Enable collection if current epoch matches snapshot frequency."""
         if self._should_collect(trainer):
             self._collecting = True
 
@@ -97,6 +98,7 @@ class EmbeddingSnapshotCallback(Callback):
         batch_idx: int,
         dataloader_idx: int = 0,
     ) -> None:
+        """Collect embeddings from the first validation batch when active."""
         if not self._collecting or self._features is not None:
             return
         with torch.no_grad():
@@ -108,6 +110,7 @@ class EmbeddingSnapshotCallback(Callback):
             self._images = _extract_mid_z_patches(batch["anchor"])
 
     def on_validation_epoch_end(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Write snapshot to disk on rank 0 when collection is complete."""
         if not self._collecting or self._features is None:
             self._reset()
             return
@@ -123,7 +126,7 @@ class EmbeddingSnapshotCallback(Callback):
         projections_np = self._projections.numpy()
 
         if self._index is not None:
-            available = {k: v for k, v in self._index.items() if k in INDEX_COLUMNS}
+            available = {k: v for k, v in self._index.items() if k in ULTRACK_INDEX_COLUMNS}
             index_df = pd.DataFrame(available)
         else:
             index_df = pd.DataFrame({"fov_name": ["unknown"] * features_np.shape[0]})
