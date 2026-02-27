@@ -1,0 +1,71 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "viscy-translation"
+description = "Virtual staining translation application using UNet architectures"
+readme = "README.md"
+keywords = [
+  "deep learning",
+  "fluorescence prediction",
+  "microscopy",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "imageio",
+  "monai",
+  "torchmetrics",
+  "torchvision",
+  "viscy-data",
+  "viscy-models",
+  "viscy-transforms",
+  "viscy-utils",
+]
+
+optional-dependencies.metrics = [
+  "cellpose",
+]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+  "tensorboard",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/viscy_translation" ]
+
+[tool.pytest.ini_options]
+pythonpath = [ "tests" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "viscy-translation-"
+fallback-version = "0.0.0"
