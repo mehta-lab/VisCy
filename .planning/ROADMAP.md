@@ -337,7 +337,19 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
 | 25. Integration | v2.2 | 0/TBD | Not started | -- |
 
-**Total plans executed:** 27 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2) + 3 manual phases (v2.0)
+**Total plans executed:** 28 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.3: 1) + 3 manual phases (v2.0)
+
+### Phase 26: Refactor translation application
+
+**Goal:** Extract viscy/translation/ into a standalone application at applications/translation/ that composes shared packages (viscy-data, viscy-models, viscy-transforms, viscy-utils), with reusable components (HCSPredictionWriter, MixedLoss, metrics) extracted to shared packages
+**Requirements**: None (standalone refactoring phase)
+**Depends on:** v1.2 (viscy-models), v1.1 (viscy-data), v2.0 (viscy-utils)
+**Plans:** 2 plans
+**Location:** `applications/translation/src/viscy_translation/`, `packages/viscy-utils/`
+
+Plans:
+- [x] 26-01-PLAN.md -- Extract reusable components (HCSPredictionWriter, MixedLoss) to viscy-utils + create application scaffold
+- [ ] 26-02-PLAN.md -- Migrate engine code (VSUNet, FcmaeUNet, evaluation) + tests with state dict regression
 
 ---
 *Roadmap created: 2025-01-27*
@@ -345,3 +357,5 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Updated for v2.0 DynaCLR: 2026-02-17*
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
+*Phase 26 planned: 2026-02-27*
+*Phase 26 Plan 01 completed: 2026-02-27*

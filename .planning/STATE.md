@@ -5,21 +5,21 @@
 See: .planning/PROJECT.md (updated 2026-02-21)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework, Phase 20
+**Current focus:** Phase 26 -- Refactor Translation Application
 
 ## Current Position
 
-Phase: 20 of 25 (Experiment Configuration)
-Plan: --
-Status: Ready to plan
-Last activity: 2026-02-21 -- Roadmap created for v2.2 (6 phases, 26 requirements)
+Phase: 26 (Refactor Translation Application)
+Plan: 01 of 2 complete
+Status: In Progress (Plan 01 complete, Plan 02 pending)
+Last activity: 2026-02-27 -- Plan 26-01 executed (shared infra extraction + app scaffold)
 
 Progress: [####################..........] 19/25 phases complete (76%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 27 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2) + v2.0 manual phases
+- Total plans completed: 28 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.3: 1) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -31,6 +31,7 @@ Progress: [####################..........] 19/25 phases complete (76%)
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
 | v2.2 Sampling | 20-25 | TBD | app-dynaclr |
+| v2.3 Translation | 26 | 1/2 | app-cytoland |
 
 ## Accumulated Context
 
@@ -48,19 +49,24 @@ Key decisions carrying forward:
 - HCL in loss only, no kNN sampler -- FlexibleBatchSampler handles experiment/condition/temporal axes
 - Train/val split by whole experiments, not FOVs
 - DDP via FlexibleBatchSampler + ShardedDistributedSampler composition
+- TYPE_CHECKING guard for cross-package type-only imports (HCSPredictionWriter pattern)
+- viscy_utils.losses as shared location for reconstruction losses (MixedLoss)
+- Translation app delegates to viscy_utils.cli.main for LightningCLI entry point
 
 ### Roadmap Evolution
 
 - Phase 26 added: Refactor translation application
+- Phase 26 planned: 2 plans (26-01 shared infra, 26-02 engine migration)
+- Phase 26 Plan 01 executed: HCSPredictionWriter + MixedLoss to viscy-utils, translation scaffold created
 
 ### Blockers/Concerns
 
-- None. Ready to start Phase 20.
+- None. Phase 26 is planned and ready for execution.
 
 ## Session Continuity
 
-Last session: 2026-02-21
-Stopped at: Roadmap created for v2.2. Ready to plan Phase 20.
+Last session: 2026-02-27
+Stopped at: Completed 26-01-PLAN.md. Ready to execute Plan 26-02.
 Resume file: None
 
 ---
