@@ -49,6 +49,10 @@ Key decisions carrying forward:
 - Train/val split by whole experiments, not FOVs
 - DDP via FlexibleBatchSampler + ShardedDistributedSampler composition
 
+### Roadmap Evolution
+
+- Phase 26 added: Refactor translation application
+
 ### Blockers/Concerns
 
 - None. Ready to start Phase 20.
