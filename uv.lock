@@ -5598,9 +5598,9 @@ name = "viscy-translation"
 source = { editable = "applications/translation" }
 dependencies = [
     { name = "imageio" },
+    { name = "lightning" },
     { name = "monai" },
     { name = "torchmetrics" },
-    { name = "torchvision" },
     { name = "viscy-data" },
     { name = "viscy-models" },
     { name = "viscy-transforms" },
@@ -5628,9 +5628,9 @@ test = [
 requires-dist = [
     { name = "cellpose", marker = "extra == 'metrics'" },
     { name = "imageio" },
+    { name = "lightning", specifier = ">=2.3" },
     { name = "monai" },
-    { name = "torchmetrics" },
-    { name = "torchvision" },
+    { name = "torchmetrics", specifier = ">=1.0" },
     { name = "viscy-data", editable = "packages/viscy-data" },
     { name = "viscy-models", editable = "packages/viscy-models" },
     { name = "viscy-transforms", editable = "packages/viscy-transforms" },

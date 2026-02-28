@@ -31,9 +31,9 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "imageio",
+  "lightning>=2.3",
   "monai",
-  "torchmetrics",
-  "torchvision",
+  "torchmetrics>=1",
   "viscy-data",
   "viscy-models",
   "viscy-transforms",

@@ -21,7 +21,7 @@ trainer:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: loss/val
+        monitor: loss/validate
         every_n_epochs: 1
         save_top_k: 4
         save_last: true

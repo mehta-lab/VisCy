@@ -11,7 +11,7 @@ trainer:
   callbacks:
     - class_path: viscy_utils.callbacks.HCSPredictionWriter
       init_args:
-        output_path: #TODO point to the path to save predictions
+        output_store: #TODO point to the path to save predictions
   inference_mode: true
 model:
   class_path: viscy_translation.engine.VSUNet
