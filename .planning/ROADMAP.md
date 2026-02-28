@@ -344,7 +344,7 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 **Goal:** Extract viscy/translation/ into a standalone application at applications/translation/ that composes shared packages (viscy-data, viscy-models, viscy-transforms, viscy-utils), with reusable components (HCSPredictionWriter, MixedLoss, metrics) extracted to shared packages
 **Requirements**: None (standalone refactoring phase)
 **Depends on:** v1.2 (viscy-models), v1.1 (viscy-data), v2.0 (viscy-utils)
-**Plans:** 2 plans
+**Plans:** 2/2 plans complete
 **Location:** `applications/translation/src/viscy_translation/`, `packages/viscy-utils/`
 
 Plans:

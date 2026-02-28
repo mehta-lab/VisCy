@@ -10,16 +10,16 @@ See: .planning/PROJECT.md (updated 2026-02-21)
 ## Current Position
 
 Phase: 26 (Refactor Translation Application)
-Plan: 01 of 2 complete
-Status: In Progress (Plan 01 complete, Plan 02 pending)
-Last activity: 2026-02-27 -- Plan 26-01 executed (shared infra extraction + app scaffold)
+Plan: 02 of 2 complete
+Status: Phase Complete (all plans executed)
+Last activity: 2026-02-28 -- Plan 26-02 executed (engine migration + test suite)
 
-Progress: [####################..........] 19/25 phases complete (76%)
+Progress: [######################........] 20/25 phases complete (80%)
 
 ## Performance Metrics
 
 **Combined velocity (all branches):**
-- Total plans completed: 28 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.3: 1) + v2.0 manual phases
+- Total plans completed: 29 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.3: 2) + v2.0 manual phases
 
 **By Milestone:**
 
@@ -31,7 +31,7 @@ Progress: [####################..........] 19/25 phases complete (76%)
 | v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
 | v2.1 Validation | 18-19 | 2 | app-dynaclr |
 | v2.2 Sampling | 20-25 | TBD | app-dynaclr |
-| v2.3 Translation | 26 | 1/2 | app-cytoland |
+| v2.3 Translation | 26 | 2/2 | app-cytoland |
 
 ## Accumulated Context
 
@@ -52,21 +52,24 @@ Key decisions carrying forward:
 - TYPE_CHECKING guard for cross-package type-only imports (HCSPredictionWriter pattern)
 - viscy_utils.losses as shared location for reconstruction losses (MixedLoss)
 - Translation app delegates to viscy_utils.cli.main for LightningCLI entry point
+- MixedLoss removed from translation engine.py (imported from viscy_utils.losses)
+- Top-level viscy_data imports for Sample/SegmentationSample (both exported at top level)
 
 ### Roadmap Evolution
 
 - Phase 26 added: Refactor translation application
 - Phase 26 planned: 2 plans (26-01 shared infra, 26-02 engine migration)
 - Phase 26 Plan 01 executed: HCSPredictionWriter + MixedLoss to viscy-utils, translation scaffold created
+- Phase 26 Plan 02 executed: VSUNet, FcmaeUNet, AugmentedPredictionVSUNet migrated with test suite
 
 ### Blockers/Concerns
 
-- None. Phase 26 is planned and ready for execution.
+- None. Phase 26 is complete.
 
 ## Session Continuity
 
-Last session: 2026-02-27
-Stopped at: Completed 26-01-PLAN.md. Ready to execute Plan 26-02.
+Last session: 2026-02-28
+Stopped at: Completed 26-02-PLAN.md. Phase 26 complete.
 Resume file: None
 
 ---
