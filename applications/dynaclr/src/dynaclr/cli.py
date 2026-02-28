@@ -1,8 +1,6 @@
 """Click-based CLI for DynaCLR evaluation and analysis tools."""
 
 import importlib
-import sys
-from pathlib import Path
 
 import click
 
@@ -42,11 +40,8 @@ class LazyCommand(click.Command):
 
 
 def _ensure_evaluation_importable():
-    """Add the evaluation directory to sys.path if not already present."""
-    eval_dir = Path(__file__).resolve().parents[2] / "evaluation"
-    eval_dir_str = str(eval_dir)
-    if eval_dir_str not in sys.path:
-        sys.path.insert(0, eval_dir_str)
+    """No-op: evaluation is now part of the dynaclr package."""
+    pass
 
 
 CONTEXT_SETTINGS = {"help_option_names": ["-h", "--help"]}
@@ -61,7 +56,7 @@ def dynaclr():
 dynaclr.add_command(
     LazyCommand(
         name="train-linear-classifier",
-        import_path="linear_classifiers.train_linear_classifier.main",
+        import_path="dynaclr.evaluation.linear_classifiers.scripts.train_linear_classifier.main",
         short_help="Train a linear classifier on cell embeddings",
     )
 )
@@ -69,7 +64,7 @@ dynaclr.add_command(
 dynaclr.add_command(
     LazyCommand(
         name="apply-linear-classifier",
-        import_path="linear_classifiers.apply_linear_classifier.main",
+        import_path="dynaclr.evaluation.linear_classifiers.scripts.apply_linear_classifier.main",
         short_help="Apply a trained linear classifier to new embeddings",
     )
 )
@@ -77,7 +72,7 @@ dynaclr.add_command(
 dynaclr.add_command(
     LazyCommand(
         name="evaluate-smoothness",
-        import_path="benchmarking.smoothness.evaluate_smoothness.main",
+        import_path="dynaclr.evaluation.benchmarking.smoothness.evaluate_smoothness.main",
         short_help="Evaluate temporal smoothness of embedding models",
     )
 )
@@ -85,7 +80,7 @@ dynaclr.add_command(
 dynaclr.add_command(
     LazyCommand(
         name="compare-models",
-        import_path="benchmarking.smoothness.compare_models.main",
+        import_path="dynaclr.evaluation.benchmarking.smoothness.compare_models.main",
         short_help="Compare previously saved smoothness results",
     )
 )
@@ -93,7 +88,7 @@ dynaclr.add_command(
 dynaclr.add_command(
     LazyCommand(
         name="reduce-dimensionality",
-        import_path="dimensionality_reduction.reduce_dimensionality.main",
+        import_path="dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality.main",
         short_help="Compute PCA, UMAP, and/or PHATE on saved embeddings",
     )
 )
