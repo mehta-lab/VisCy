@@ -9,3 +9,4 @@ Evaluation tools for DynaCLR cell embedding models. Each evaluation method lives
 | Linear classifiers | `linear_classifiers/` | Logistic regression on embeddings for supervised cell phenotyping |
 | Temporal smoothness | `benchmarking/smoothness/` | Evaluate how smoothly embeddings change across adjacent time frames |
 | Dimensionality reduction | `dimensionality_reduction/` | Compute PCA, UMAP, and/or PHATE on saved AnnData zarr embeddings |
+| Pseudotime remodeling | `pseudotime/` | Lineage-aware remodeling timing analysis (annotation, prediction, embedding distance) |
