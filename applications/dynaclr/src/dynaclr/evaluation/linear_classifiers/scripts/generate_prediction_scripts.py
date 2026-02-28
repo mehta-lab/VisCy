@@ -6,14 +6,12 @@ target dataset name, and enforces a single checkpoint across all datasets.
 """
 
 import re
-import sys
 from glob import glob
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 from natsort import natsorted
-from utils import (
+
+from dynaclr.evaluation.linear_classifiers.src.utils import (
     CHANNELS,
     build_registry,
     print_registry_summary,

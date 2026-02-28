@@ -91,10 +91,7 @@ def extract_prediction_signal(
     """
     pred_col = f"predicted_{task}"
     if pred_col not in adata.obs.columns:
-        raise KeyError(
-            f"Column '{pred_col}' not found in adata.obs. "
-            f"Run apply_linear_classifier first."
-        )
+        raise KeyError(f"Column '{pred_col}' not found in adata.obs. Run apply_linear_classifier first.")
 
     result = aligned_df.copy()
 
@@ -106,18 +103,13 @@ def extract_prediction_signal(
 
     # Match rows
     common_idx = result_key.index.intersection(obs_key.index)
-    _logger.info(
-        f"Matched {len(common_idx)}/{len(result)} rows between aligned_df and adata"
-    )
+    _logger.info(f"Matched {len(common_idx)}/{len(result)} rows between aligned_df and adata")
 
     if use_probability:
         proba_key = f"predicted_{task}_proba"
         classes_key = f"predicted_{task}_classes"
         if proba_key not in adata.obsm:
-            raise KeyError(
-                f"'{proba_key}' not found in adata.obsm. "
-                f"Ensure classifier was run with probability output."
-            )
+            raise KeyError(f"'{proba_key}' not found in adata.obsm. Ensure classifier was run with probability output.")
         classes = adata.uns[classes_key]
         pos_idx = list(classes).index(positive_value)
         proba_matrix = adata.obsm[proba_key]
@@ -127,9 +119,7 @@ def extract_prediction_signal(
         obs_lookup = obs.set_index(["fov_name", "track_id", "t"])["_proba_positive"]
         result["signal"] = np.nan
         matched = result_key.index.isin(common_idx)
-        result.loc[matched, "signal"] = (
-            obs_lookup.reindex(result_key.index[matched]).values
-        )
+        result.loc[matched, "signal"] = obs_lookup.reindex(result_key.index[matched]).values
     else:
         obs_lookup = obs.set_index(["fov_name", "track_id", "t"])[pred_col]
         predictions = obs_lookup.reindex(result_key.index)
@@ -195,9 +185,7 @@ def extract_embedding_distance(
     result_row_mask = result_key.index.isin(common_idx)
     result_rows = np.where(result_row_mask)[0]
 
-    _logger.info(
-        f"Matched {len(common_idx)}/{len(result)} rows between aligned_df and adata"
-    )
+    _logger.info(f"Matched {len(common_idx)}/{len(result)} rows between aligned_df and adata")
 
     # Get embedding matrix for matched rows
     embeddings = adata.X[adata_indices]
@@ -208,19 +196,13 @@ def extract_embedding_distance(
     control_embeddings = None
     if baseline_method == "control_well" or pca_n_components is not None:
         if control_fov_pattern is not None:
-            ctrl_mask = (
-                adata.obs["fov_name"]
-                .astype(str)
-                .str.contains(control_fov_pattern, regex=True)
-            )
+            ctrl_mask = adata.obs["fov_name"].astype(str).str.contains(control_fov_pattern, regex=True)
             ctrl_emb = adata.X[ctrl_mask.values]
             if not isinstance(ctrl_emb, np.ndarray):
                 ctrl_emb = np.asarray(ctrl_emb)
             if len(ctrl_emb) > 0:
                 control_embeddings = ctrl_emb
-                _logger.info(
-                    f"Control baseline: {len(ctrl_emb)} cells from '{control_fov_pattern}'"
-                )
+                _logger.info(f"Control baseline: {len(ctrl_emb)} cells from '{control_fov_pattern}'")
 
     # Optional PCA projection
     if pca_n_components is not None:
@@ -233,8 +215,7 @@ def extract_embedding_distance(
         else:
             embeddings = pca.fit_transform(embeddings)
         _logger.info(
-            f"PCA: {pca_n_components} components, "
-            f"{pca.explained_variance_ratio_.sum() * 100:.1f}% variance explained"
+            f"PCA: {pca_n_components} components, {pca.explained_variance_ratio_.sum() * 100:.1f}% variance explained"
         )
 
     # Build a local DataFrame for distance computation
@@ -246,10 +227,7 @@ def extract_embedding_distance(
 
     if baseline_method == "control_well":
         if control_embeddings is None:
-            raise ValueError(
-                "baseline_method='control_well' requires control_fov_pattern "
-                "that matches cells in adata."
-            )
+            raise ValueError("baseline_method='control_well' requires control_fov_pattern that matches cells in adata.")
         baseline = control_embeddings.mean(axis=0, keepdims=True)
         distances = cdist(embeddings, baseline, metric=distance_metric).flatten()
 
@@ -258,9 +236,9 @@ def extract_embedding_distance(
             group_emb_idx = group["_emb_idx"].values
 
             # Find baseline frames
-            bl_mask = (
-                group["t_relative_minutes"] >= baseline_window_minutes[0]
-            ) & (group["t_relative_minutes"] <= baseline_window_minutes[1])
+            bl_mask = (group["t_relative_minutes"] >= baseline_window_minutes[0]) & (
+                group["t_relative_minutes"] <= baseline_window_minutes[1]
+            )
 
             if bl_mask.sum() < min_baseline_frames:
                 # Fall back to control baseline if available
@@ -273,9 +251,7 @@ def extract_embedding_distance(
                 baseline = embeddings[bl_idx].mean(axis=0, keepdims=True)
 
             track_emb = embeddings[group_emb_idx]
-            track_dist = cdist(
-                track_emb, baseline, metric=distance_metric
-            ).flatten()
+            track_dist = cdist(track_emb, baseline, metric=distance_metric).flatten()
             distances[group_emb_idx] = track_dist
 
     # Write distances back to result

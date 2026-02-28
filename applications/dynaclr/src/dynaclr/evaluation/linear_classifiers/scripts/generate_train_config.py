@@ -6,13 +6,11 @@ that pairs embedding zarr files with annotation CSVs across all
 datasets that have both.
 """
 
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 import yaml
-from utils import (
+
+from dynaclr.evaluation.linear_classifiers.src.utils import (
     CHANNELS,
     TASKS,
     build_registry,

@@ -12,11 +12,6 @@ Usage::
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 import argparse
 import json
 import logging
@@ -28,12 +23,12 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, f1_score, roc_auc_score
-from utils import (
+
+from dynaclr.evaluation.linear_classifiers.src.utils import (
     find_channel_zarrs,
     get_available_tasks,
     resolve_task_channels,
 )
-
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
 from viscy_utils.evaluation.linear_classifier import (
@@ -765,7 +760,7 @@ if __name__ == "__main__":
     results_df, summary_df = cross_validate(config)
 
     if args.report and not results_df.empty:
-        from report import generate_cv_report
+        from dynaclr.evaluation.linear_classifiers.src.report import generate_cv_report
 
         config_summary = {
             "use_scaling": config.get("use_scaling", True),

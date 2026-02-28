@@ -117,9 +117,7 @@ def filter_tracks(
         patterns = [fov_pattern] if isinstance(fov_pattern, str) else fov_pattern
         fov_mask = pd.Series(False, index=result.index)
         for pattern in patterns:
-            fov_mask |= result["fov_name"].astype(str).str.contains(
-                pattern, regex=False
-            )
+            fov_mask |= result["fov_name"].astype(str).str.contains(pattern, regex=False)
         result = result[fov_mask].copy()
         if len(result) == 0:
             _logger.warning(f"No FOVs matched pattern(s): {patterns}")
@@ -129,11 +127,7 @@ def filter_tracks(
     if min_timepoints > 1:
         track_lengths = result.groupby(["fov_name", "track_id"]).size()
         valid_tracks = track_lengths[track_lengths >= min_timepoints].index
-        result = (
-            result.set_index(["fov_name", "track_id"])
-            .loc[valid_tracks]
-            .reset_index()
-        )
+        result = result.set_index(["fov_name", "track_id"]).loc[valid_tracks].reset_index()
 
     return result
 
@@ -186,10 +180,7 @@ def assign_t_perturb(
     col = f"predicted_{infection_col}" if source == "prediction" else infection_col
 
     if col not in df.columns:
-        raise KeyError(
-            f"Column '{col}' not found in dataframe. "
-            f"Available columns: {list(df.columns)}"
-        )
+        raise KeyError(f"Column '{col}' not found in dataframe. Available columns: {list(df.columns)}")
 
     lineages = identify_lineages(df, return_both_branches=True)
 
@@ -198,9 +189,7 @@ def assign_t_perturb(
     tracks_in_lineages: set[tuple[str, int]] = set()
 
     for fov_name, track_ids in lineages:
-        lineage_rows = df[
-            (df["fov_name"] == fov_name) & (df["track_id"].isin(track_ids))
-        ]
+        lineage_rows = df[(df["fov_name"] == fov_name) & (df["track_id"].isin(track_ids))]
         infected = lineage_rows[lineage_rows[col] == infected_value]
         if len(infected) == 0:
             continue
@@ -240,8 +229,7 @@ def assign_t_perturb(
     df["t_relative_minutes"] = (df["t"] - df["t_perturb"]) * frame_interval_minutes
 
     _logger.info(
-        f"Tracks with infection: {len(track_to_tperturb)} "
-        f"(lineage: {n_lineage_tracks}, orphan: {n_orphan_tracks})"
+        f"Tracks with infection: {len(track_to_tperturb)} (lineage: {n_lineage_tracks}, orphan: {n_orphan_tracks})"
     )
 
     return df

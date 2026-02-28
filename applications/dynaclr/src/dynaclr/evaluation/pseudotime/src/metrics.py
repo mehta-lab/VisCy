@@ -85,9 +85,7 @@ def aggregate_population(
                 )
             else:
                 fraction = n_positive / n_total
-                ci_low, ci_high = proportion_confint(
-                    n_positive, n_total, alpha=ci_alpha, method="wilson"
-                )
+                ci_low, ci_high = proportion_confint(n_positive, n_total, alpha=ci_alpha, method="wilson")
                 results.append(
                     {
                         "time_minutes": bin_start,
@@ -172,8 +170,7 @@ def find_onset_time(
     threshold = mean_bl + sigma_threshold * std_bl
 
     post_infection = population_df[
-        (population_df["time_minutes"] >= 0)
-        & (population_df["n_cells"] >= min_cells_per_bin)
+        (population_df["time_minutes"] >= 0) & (population_df["n_cells"] >= min_cells_per_bin)
     ]
     onset_rows = post_infection[post_infection[signal_col] > threshold]
 
@@ -209,9 +206,7 @@ def find_half_max_time(
 
     max_val = post_infection[signal_col].max()
     baseline_data = population_df[population_df["time_minutes"] < -60]
-    baseline_mean = (
-        baseline_data[signal_col].mean() if len(baseline_data) > 0 else 0.0
-    )
+    baseline_mean = baseline_data[signal_col].mean() if len(baseline_data) > 0 else 0.0
 
     half_max = baseline_mean + (max_val - baseline_mean) / 2
 
@@ -257,9 +252,7 @@ def find_peak_metrics(
     if len(post_infection) == 0 or post_infection[signal_col].isna().all():
         return nan_result
 
-    baseline_mean = (
-        baseline_data[signal_col].mean() if len(baseline_data) > 0 else 0.0
-    )
+    baseline_mean = baseline_data[signal_col].mean() if len(baseline_data) > 0 else 0.0
     baseline_std = baseline_data[signal_col].std() if len(baseline_data) > 0 else 0.0
 
     # Peak
@@ -462,17 +455,11 @@ def run_statistical_tests(
         for j in range(i + 1, len(organelle_names)):
             org_a, org_b = organelle_names[i], organelle_names[j]
 
-            onset_a = track_timing_df[track_timing_df["organelle"] == org_a][
-                "onset_minutes"
-            ]
-            onset_b = track_timing_df[track_timing_df["organelle"] == org_b][
-                "onset_minutes"
-            ]
+            onset_a = track_timing_df[track_timing_df["organelle"] == org_a]["onset_minutes"]
+            onset_b = track_timing_df[track_timing_df["organelle"] == org_b]["onset_minutes"]
 
             if len(onset_a) > 0 and len(onset_b) > 0:
-                u_stat, p_val = mannwhitneyu(
-                    onset_a, onset_b, alternative="two-sided"
-                )
+                u_stat, p_val = mannwhitneyu(onset_a, onset_b, alternative="two-sided")
                 stat_rows.append(
                     {
                         "Test": f"Onset timing {org_a} vs {org_b}",
@@ -484,17 +471,11 @@ def run_statistical_tests(
                     }
                 )
 
-            dur_a = track_timing_df[track_timing_df["organelle"] == org_a][
-                "span_minutes"
-            ]
-            dur_b = track_timing_df[track_timing_df["organelle"] == org_b][
-                "span_minutes"
-            ]
+            dur_a = track_timing_df[track_timing_df["organelle"] == org_a]["span_minutes"]
+            dur_b = track_timing_df[track_timing_df["organelle"] == org_b]["span_minutes"]
 
             if len(dur_a) > 0 and len(dur_b) > 0:
-                u_stat, p_val = mannwhitneyu(
-                    dur_a, dur_b, alternative="two-sided"
-                )
+                u_stat, p_val = mannwhitneyu(dur_a, dur_b, alternative="two-sided")
                 stat_rows.append(
                     {
                         "Test": f"Duration {org_a} vs {org_b}",

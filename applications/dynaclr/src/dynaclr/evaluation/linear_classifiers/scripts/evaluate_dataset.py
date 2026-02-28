@@ -12,11 +12,6 @@ Usage::
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 import argparse
 from pathlib import Path
 from typing import Any
@@ -25,12 +20,12 @@ import anndata as ad
 import joblib
 import pandas as pd
 from sklearn.metrics import classification_report
-from utils import (
+
+from dynaclr.evaluation.linear_classifiers.src.utils import (
     find_channel_zarrs,
     get_available_tasks,
     resolve_task_channels,
 )
-
 from viscy_utils.cli_utils import format_markdown_table, load_config
 from viscy_utils.evaluation.annotation import load_annotation_anndata
 from viscy_utils.evaluation.linear_classifier import (
@@ -442,7 +437,7 @@ if __name__ == "__main__":
     train_results, eval_results = run_evaluation(config)
 
     if args.report:
-        from report import generate_comparison_report
+        from dynaclr.evaluation.linear_classifiers.src.report import generate_comparison_report
 
         test_csv = Path(config["test_annotations_csv"])
         tc = resolve_task_channels(config.get("task_channels"), [test_csv])

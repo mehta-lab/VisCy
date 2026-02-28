@@ -72,7 +72,7 @@ source = "uv-dynamic-versioning"
 packages = [ "src/dynaclr" ]
 
 [tool.pytest.ini_options]
-pythonpath = [ "evaluation/pseudotime", "evaluation", "tests" ]
+pythonpath = [ "tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

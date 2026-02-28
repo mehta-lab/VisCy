@@ -61,9 +61,7 @@ def plot_response_curves(
     -------
     plt.Figure
     """
-    fig, axes = plt.subplots(
-        2, 1, figsize=(10, 7), height_ratios=[3, 1], sharex=True
-    )
+    fig, axes = plt.subplots(2, 1, figsize=(10, 7), height_ratios=[3, 1], sharex=True)
 
     if signal_type == "fraction":
         signal_col = "fraction"
@@ -181,9 +179,7 @@ def plot_cell_heatmap(
         )
         # Sort by time of max signal
         first_positive = pivot.apply(
-            lambda row: (
-                row.idxmax() if row.notna().any() and row.max() > 0 else np.inf
-            ),
+            lambda row: (row.idxmax() if row.notna().any() and row.max() > 0 else np.inf),
             axis=1,
         )
 

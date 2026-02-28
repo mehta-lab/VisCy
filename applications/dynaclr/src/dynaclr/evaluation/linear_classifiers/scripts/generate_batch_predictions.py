@@ -10,13 +10,11 @@ Usage: run cells interactively or execute as a script.
 """
 
 import subprocess
-import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
-
 from iohub import open_ome_zarr
-from utils import (
+
+from dynaclr.evaluation.linear_classifiers.src.utils import (
     FOCUS_PARAMS,
     MODEL_2D_BAG_TIMEAWARE,  # noqa: F401
     MODEL_3D_BAG_TIMEAWARE,
