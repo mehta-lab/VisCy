@@ -160,8 +160,8 @@ class UNeXt2Decoder(nn.Module):
 
     def forward(self, features: Sequence[Tensor]) -> Tensor:
         feat = features[0]
-        # padding
-        features.append(None)
-        for skip, stage in zip(features[1:], self.decoder_stages):
+        # padding with None for final decoder stage (no skip connection)
+        skips = list(features[1:]) + [None]
+        for skip, stage in zip(skips, self.decoder_stages):
             feat = stage(feat, skip)
         return feat

@@ -16,7 +16,13 @@ class UNeXt2Stem(nn.Module):
         in_stack_depth: int,
     ) -> None:
         super().__init__()
+        if in_stack_depth < kernel_size[0]:
+            raise ValueError(f"in_stack_depth ({in_stack_depth}) must be >= kernel_size[0] ({kernel_size[0]})")
         ratio = in_stack_depth // kernel_size[0]
+        if out_channels % ratio != 0:
+            raise ValueError(
+                f"out_channels ({out_channels}) must be divisible by in_stack_depth // kernel_size[0] ({ratio})"
+            )
         self.conv = nn.Conv3d(
             in_channels=in_channels,
             out_channels=out_channels // ratio,
