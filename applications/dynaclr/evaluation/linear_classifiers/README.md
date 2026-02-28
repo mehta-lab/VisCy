@@ -8,11 +8,15 @@ This directory contains:
 
 | File | Description |
 |------|-------------|
-| `dataset_discovery.py` | Shared functions for discovering predictions, annotations, and gaps across datasets |
-| `generate_prediction_scripts.py` | Generates SLURM `.sh`/`.yml` scripts for datasets missing embeddings |
-| `generate_train_config.py` | Generates training YAML configs for all valid task x channel combinations |
-| `train_linear_classifier.py` | CLI for training a classifier from a config |
-| `apply_linear_classifier.py` | CLI for applying a trained classifier to new embeddings |
+| `src/utils.py` | Shared functions for discovering predictions, annotations, channel resolution, and path utilities |
+| `src/report.py` | PDF report generation for cross-validation and evaluation (optional) |
+| `scripts/generate_prediction_scripts.py` | Generates SLURM `.sh`/`.yml` scripts for datasets missing embeddings |
+| `scripts/generate_batch_predictions.py` | Batch prediction config & SLURM script generator with auto z-range |
+| `scripts/generate_train_config.py` | Generates training YAML configs for all valid task x channel combinations |
+| `scripts/train_linear_classifier.py` | CLI for training a classifier from a config |
+| `scripts/apply_linear_classifier.py` | CLI for applying a trained classifier to new embeddings |
+| `scripts/cross_validation.py` | Leave-one-dataset-out CV with impact scoring (helps/hurts/uncertain) |
+| `scripts/evaluate_dataset.py` | Compare embedding models (e.g. 2D vs 3D) on a held-out test set |
 
 ## Prerequisites
 
@@ -35,7 +39,7 @@ wandb login
 If some annotated datasets don't have embeddings yet, generate the SLURM prediction scripts:
 
 ```python
-# Edit configuration in generate_prediction_scripts.py, then run cells
+# Edit configuration in scripts/generate_prediction_scripts.py, then run cells
 # Key parameters:
 #   embeddings_dir  - base directory with dataset folders
 #   annotations_dir - base directory with annotation CSVs
@@ -55,7 +59,7 @@ This will:
 Once datasets have both embeddings and annotations:
 
 ```python
-# Edit configuration in generate_train_config.py, then run cells
+# Edit configuration in scripts/generate_train_config.py, then run cells
 # Generates one YAML config per (task, channel) combination
 ```
 
@@ -70,6 +74,45 @@ dynaclr train-linear-classifier -c configs/generated/cell_death_state_phase.yaml
 ```bash
 dynaclr apply-linear-classifier -c configs/example_linear_classifier_inference.yaml
 ```
+
+### 5. Cross-validate training datasets
+
+Determine which training datasets help or hurt classifier performance using rotating leave-one-dataset-out CV. Run from the `linear_classifiers/` directory:
+
+```bash
+python scripts/cross_validation.py -c configs/cross_validate_example.yaml
+python scripts/cross_validation.py -c configs/cross_validate_example.yaml --report  # with PDF
+```
+
+Outputs:
+- `cv_results.csv` — raw results (one row per fold x seed)
+- `cv_summary.csv` — aggregated impact labels per dataset
+- `cv_recommended_subsets.csv` — recommended training subsets with harmful datasets excluded
+- `cv_report.pdf` — (optional) impact heatmaps, AUROC distributions, temporal curves
+
+Each dataset is labeled as:
+- **helps** — removing it hurts performance (keep it)
+- **hurts** — removing it improves performance (exclude it)
+- **uncertain** — delta within noise
+- **unsafe** — fold skipped due to insufficient class samples
+
+### 6. Evaluate models on a held-out test set
+
+Compare embedding models by training classifiers and evaluating on a held-out dataset:
+
+```bash
+python scripts/evaluate_dataset.py -c configs/evaluate_dataset_example.yaml
+python scripts/evaluate_dataset.py -c configs/evaluate_dataset_example.yaml --report  # with PDF
+```
+
+Outputs per model:
+- `{model}/{task}_{channel}_pipeline.joblib` — trained classifier
+- `{model}/{task}_{channel}_predictions.zarr` — test predictions
+- `{model}/metrics_summary.csv` — per-model metrics
+
+Combined outputs:
+- `train_metrics_comparison.csv` — validation metrics across models
+- `test_metrics_comparison.csv` — test metrics across models
 
 ## Training Configuration
 

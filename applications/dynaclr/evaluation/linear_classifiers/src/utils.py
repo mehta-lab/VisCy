@@ -472,6 +472,80 @@ srun viscy predict -c {config_file}
 # ---------------------------------------------------------------------------
 
 
+def resolve_task_channels(
+    task_channels: dict[str, list[str]] | None = None,
+    annotation_csvs: list[Path] | None = None,
+) -> dict[str, list[str]]:
+    """Resolve task -> channels mapping.
+
+    Parameters
+    ----------
+    task_channels : dict or None
+        Explicit mapping. Returned as-is when provided.
+    annotation_csvs : list[Path] or None
+        One or more annotation CSVs. When a single CSV is given, tasks are
+        auto-detected from its columns and paired with all channels. When
+        multiple CSVs are given, the task set is the intersection across
+        all CSVs.
+
+    Returns
+    -------
+    dict[str, list[str]]
+        Task name -> list of channel names.
+    """
+    if task_channels is not None:
+        return task_channels
+
+    if not annotation_csvs:
+        return {}
+
+    all_channels = list(CHANNELS)
+
+    task_sets = [set(get_available_tasks(csv)) for csv in annotation_csvs]
+    common_tasks = task_sets[0]
+    for ts in task_sets[1:]:
+        common_tasks &= ts
+
+    return {task: all_channels for task in sorted(common_tasks)}
+
+
+def find_predictions_dir(
+    embeddings_base: Path,
+    dataset_name: str,
+    model_name: str,
+    version: str,
+) -> Path:
+    """Locate the predictions version directory for a dataset.
+
+    Parameters
+    ----------
+    embeddings_base : Path
+        Base directory containing all dataset folders.
+    dataset_name : str
+        Dataset folder name.
+    model_name : str
+        Model directory name (supports glob patterns).
+    version : str
+        Version subdirectory (e.g. ``"v3"``).
+
+    Returns
+    -------
+    Path
+        Resolved predictions version directory.
+
+    Raises
+    ------
+    FileNotFoundError
+        If no matching predictions directory is found.
+    """
+    dataset_dir = embeddings_base / dataset_name
+    pattern = str(dataset_dir / "*phenotyping*" / "*prediction*" / model_name / version)
+    matches = natsorted(glob(pattern))
+    if not matches:
+        raise FileNotFoundError(f"No predictions found for {dataset_name}/{model_name}/{version}")
+    return Path(matches[0])
+
+
 def discover_predictions(
     embeddings_dir: Path,
     model_name: str,

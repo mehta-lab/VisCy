@@ -1,0 +1,38 @@
+# Example configuration for evaluate_dataset.py
+#
+# Usage:
+#   python evaluate_dataset.py -c configs/evaluate_dataset_example.yaml
+#   python evaluate_dataset.py -c configs/evaluate_dataset_example.yaml --report
+
+dataset_name: my_test_dataset
+test_annotations_csv: /path/to/test_annotations.csv
+output_dir: /path/to/output
+
+models:
+  2D:
+    name: DynaCLR-2D-BagOfChannels-timeaware
+    version: v3
+    wandb_project: linearclassifiers-DynaCLR-2D-BagOfChannels-timeaware-v3
+    test_embeddings_dir: /path/to/2D/embeddings/
+    train_datasets:
+      - embeddings_dir: /path/to/train_ds1/embeddings/
+        annotations: /path/to/train_ds1/annotations.csv
+      - embeddings_dir: /path/to/train_ds2/embeddings/
+        annotations: /path/to/train_ds2/annotations.csv
+
+# Optional: auto-detected from test CSV if omitted
+task_channels:
+  infection_state: [phase, sensor]
+  cell_division_state: [phase]
+
+# Classifier hyperparams (all optional, shown with defaults)
+use_scaling: true
+n_pca_components: null
+max_iter: 1000
+class_weight: balanced
+solver: liblinear
+split_train_data: 0.8
+random_seed: 42
+
+# W&B logging (set to false for local-only runs)
+wandb_logging: true
