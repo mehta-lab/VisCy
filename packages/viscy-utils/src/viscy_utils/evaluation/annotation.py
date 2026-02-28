@@ -42,11 +42,11 @@ def convert(
     Examples
     --------
     >>> embeddings_ds = xr.open_zarr(embeddings_path)
-    >>> adata = convert_xarray_annotation_to_anndata(embeddings_ds, output_path, overwrite=True, return_anndata=True)
+    >>> adata = convert(embeddings_ds, output_path, overwrite=True, return_anndata=True)
     >>> adata
     AnnData object with n_obs × n_vars = 18861 × 768
         obs: 'id', 'fov_name', 'track_id', 'parent_track_id', 'parent_id', 't', 'y', 'x'
-        obsm: 'X_projections', 'X_PCA', 'X_UMAP', 'X_PHATE'
+        obsm: 'X_projections', 'X_pca', 'X_umap', 'X_phate'
     """
     # Check if output_path exists
     if output_path.exists() and not overwrite:
@@ -75,9 +75,7 @@ def convert(
 
     # Embeddings
     for embedding in ["PCA", "UMAP", "PHATE"]:
-        embedding_coords = natsorted(
-            [coord for coord in embeddings_ds.coords if embedding in coord]
-        )
+        embedding_coords = natsorted([coord for coord in embeddings_ds.coords if embedding in coord])
         if embedding_coords:
             obsm[f"X_{embedding.lower()}"] = np.column_stack(
                 [embeddings_ds.coords[coord] for coord in embedding_coords]
@@ -93,9 +91,7 @@ def convert(
         return adata
 
 
-def load_annotation_anndata(
-    adata: ad.AnnData, path: str, name: str, categories: dict | None = None
-):
+def load_annotation_anndata(adata: ad.AnnData, path: str, name: str, categories: dict | None = None):
     """
     Load annotations from a CSV file and map them to the AnnData object.
 
@@ -120,9 +116,7 @@ def load_annotation_anndata(
 
     annotation = annotation.set_index(["fov_name", "id"])
 
-    mi = pd.MultiIndex.from_arrays(
-        [adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"]
-    )
+    mi = pd.MultiIndex.from_arrays([adata.obs["fov_name"], adata.obs["id"]], names=["fov_name", "id"])
 
     # Use reindex to handle missing annotations gracefully
     # This will return NaN for observations that don't have annotations
