@@ -18,8 +18,8 @@ import anndata as ad
 import numpy as np
 import pandas as pd
 
-from applications.dynaclr.evaluation.pseudotime.alignment import align_tracks
-from applications.dynaclr.evaluation.pseudotime.metrics import (
+from applications.dynaclr.evaluation.pseudotime.src.alignment import align_tracks
+from applications.dynaclr.evaluation.pseudotime.src.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -27,13 +27,13 @@ from applications.dynaclr.evaluation.pseudotime.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from applications.dynaclr.evaluation.pseudotime.plotting import (
+from applications.dynaclr.evaluation.pseudotime.src.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from applications.dynaclr.evaluation.pseudotime.signals import (
+from applications.dynaclr.evaluation.pseudotime.src.signals import (
     extract_embedding_distance,
 )
 

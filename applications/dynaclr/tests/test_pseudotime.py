@@ -10,13 +10,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pseudotime.alignment import (
+from src.alignment import (
     align_tracks,
     assign_t_perturb,
     filter_tracks,
     identify_lineages,
 )
-from pseudotime.metrics import (
+from src.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -24,13 +24,13 @@ from pseudotime.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from pseudotime.plotting import (
+from src.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from pseudotime.signals import (
+from src.signals import (
     extract_annotation_signal,
     extract_embedding_distance,
     extract_prediction_signal,
