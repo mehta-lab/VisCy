@@ -201,7 +201,7 @@ class EmbeddingWriter(BasePredictionWriter):
 
     def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
         """Check output path before prediction starts."""
-        if self.output_path.exists():
+        if self.output_path.exists() and not self.overwrite:
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")
 

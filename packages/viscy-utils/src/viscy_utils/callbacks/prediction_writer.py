@@ -102,7 +102,7 @@ def _blend_in(old_stack: NDArray, new_stack: NDArray, z_slice: slice) -> NDArray
     for i in reversed(list(range(depth))):
         factors.append(min(i + 1, samples))
     _logger.debug(f"Blending with factors {factors}.")
-    factors = np.array(factors)[np.newaxis :, np.newaxis, np.newaxis]
+    factors = np.array(factors)[np.newaxis, :, np.newaxis, np.newaxis]
     return old_stack * (factors - 1) / factors + new_stack / factors
 
 
@@ -290,7 +290,7 @@ class HCSPredictionWriter(BasePredictionWriter):
             sample_prediction = _blend_in(old_stack, sample_prediction, z_slice)
         image.oindex[t_index, self.prediction_index, z_slice] = sample_prediction
 
-    def _create_image(self, img_name: str, shape: tuple[int], dtype: DTypeLike):
+    def _create_image(self, img_name: str, shape: tuple[int, ...], dtype: DTypeLike):
         """Create or retrieve an image in the zarr store.
 
         Parameters
