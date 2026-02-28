@@ -6,13 +6,13 @@
 
 ## Summary
 
-Phase 6 creates the `viscy-models` package scaffold within the existing uv workspace and extracts shared architectural components from the original monolithic VisCy codebase. The scaffold follows the identical pattern established by `viscy-transforms` in v1.0: src layout, hatchling + uv-dynamic-versioning build system, PEP 735 dependency groups. The critical new work is component extraction -- identifying and isolating the 14+ shared nn.Module classes from `unext2.py` and related files into a `components/` subpackage, plus migrating ConvBlock2D/3D to `unet/_layers/`.
+Phase 6 creates the `viscy-models` package scaffold within the existing uv workspace and extracts shared architectural components from the original monolithic VisCy codebase. The scaffold follows the identical pattern established by `viscy-transforms` in v1.0: src layout, hatchling + uv-dynamic-versioning build system, PEP 735 dependency groups. The critical new work is component extraction -- identifying and isolating the 14+ shared nn.Module classes from `unext2.py` and related files into a `_components/` subpackage, plus migrating ConvBlock2D/3D to `unet/_layers/`.
 
-The source code lives in the pre-migration VisCy repo (tag `v0.3.3`). Key files are `viscy/unet/networks/unext2.py` (contains UNeXt2Stem, StemDepthtoChannels, PixelToVoxelHead, UnsqueezeHead, UNeXt2Decoder, UNeXt2UpStage, UNeXt2, and helper functions), `viscy/unet/networks/layers/ConvBlock2D.py` and `ConvBlock3D.py`, and `viscy/unet/networks/fcmae.py` (which imports shared components from unext2.py). The VAE models (`viscy/representation/vae.py` on commit c591950) also import `StemDepthtoChannels` and `PixelToVoxelHead` from unext2.py, confirming these are genuinely shared. The contrastive encoder (`viscy/representation/contrastive.py`) imports `StemDepthtoChannels`. This cross-model sharing validates the `components/` extraction approach.
+The source code lives in the pre-migration VisCy repo (tag `v0.3.3`). Key files are `viscy/unet/networks/unext2.py` (contains UNeXt2Stem, StemDepthtoChannels, PixelToVoxelHead, UnsqueezeHead, UNeXt2Decoder, UNeXt2UpStage, UNeXt2, and helper functions), `viscy/unet/networks/layers/ConvBlock2D.py` and `ConvBlock3D.py`, and `viscy/unet/networks/fcmae.py` (which imports shared components from unext2.py). The VAE models (`viscy/representation/vae.py` on commit c591950) also import `StemDepthtoChannels` and `PixelToVoxelHead` from unext2.py, confirming these are genuinely shared. The contrastive encoder (`viscy/representation/contrastive.py`) imports `StemDepthtoChannels`. This cross-model sharing validates the `_components/` extraction approach.
 
 Mutable defaults needing conversion to tuples exist in: `FullyConvolutionalMAE.__init__` (encoder_blocks, dims as lists), `Unet2d.__init__` (num_filters=[]), `Unet25d.__init__` (num_filters=[]), and `VaeDecoder.__init__` (decoder_channels, strides as lists). The UNeXt2 class itself uses immutable defaults already. State dict key compatibility is non-negotiable -- the module naming (`self.stem`, `self.encoder`, `self.decoder`, `self.head`, etc.) must be preserved exactly during extraction.
 
-**Primary recommendation:** Mirror the viscy-transforms scaffold exactly (pyproject.toml, src layout, test structure), extract shared components into `components/{stems,heads,blocks}.py`, and migrate ConvBlock2D/3D into `unet/_layers/` with snake_case filenames. Keep module attribute names identical to preserve state dict keys.
+**Primary recommendation:** Mirror the viscy-transforms scaffold exactly (pyproject.toml, src layout, test structure), extract shared components into `_components/{stems,heads,blocks}.py`, and migrate ConvBlock2D/3D into `unet/_layers/` with snake_case filenames. Keep module attribute names identical to preserve state dict keys.
 
 ## Standard Stack
 
@@ -54,7 +54,7 @@ packages/viscy-models/
     src/viscy_models/
         __init__.py              # Public API: from viscy_models import UNeXt2
         py.typed                 # PEP 561 marker
-        components/             # MPKG-04: Shared architectural components
+        _components/             # MPKG-04: Shared architectural components
             __init__.py
             stems.py             # UNeXt2Stem, StemDepthtoChannels
             heads.py             # PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead
@@ -80,7 +80,7 @@ packages/viscy-models/
     tests/
         __init__.py
         conftest.py
-        test_components/         # Tests for components
+        test_components/         # Tests for _components
             __init__.py
             test_stems.py
             test_heads.py
@@ -91,14 +91,14 @@ packages/viscy-models/
 ```
 
 ### Pattern 1: Component Extraction with Preserved State Dict Keys
-**What:** Extract shared nn.Module classes from model files into `components/` while keeping the exact same class names and `__init__` parameter signatures.
+**What:** Extract shared nn.Module classes from model files into `_components/` while keeping the exact same class names and `__init__` parameter signatures.
 **When to use:** Every shared component that appears in multiple models.
 **Why critical:** State dict keys are derived from module attribute names. If `self.stem = UNeXt2Stem(...)` becomes `self.stem = SomethingElse(...)` with different internal names, checkpoint loading breaks.
 
 **Example:**
 ```python
 # Source: v0.3.3 viscy/unet/networks/unext2.py
-# components/stems.py - extracted verbatim, only imports change
+# _components/stems.py - extracted verbatim, only imports change
 from torch import Tensor, nn
 
 
@@ -231,9 +231,9 @@ src = ["packages/*/src"]  # Already covers new package via glob
 
 ### Anti-Patterns to Avoid
 - **Renaming module attributes during extraction:** `self.stem` must remain `self.stem` in the model class, even if you move `UNeXt2Stem` to a different file. Renaming breaks state dict keys.
-- **Creating circular imports between components and model subpackages:** `components/` should have zero imports from `unet/`, `vae/`, or `contrastive/`. It should only import from torch, timm, monai, numpy.
+- **Creating circular imports between _components and model subpackages:** `_components/` should have zero imports from `unet/`, `vae/`, or `contrastive/`. It should only import from torch, timm, monai, numpy.
 - **Importing from viscy-transforms:** viscy-models must be independent of viscy-transforms. Only torch/timm/monai/numpy dependencies.
-- **Putting model-specific code in components:** Only truly shared code belongs in `components/`. If something is used by only one model, keep it in that model's file.
+- **Putting model-specific code in _components:** Only truly shared code belongs in `_components/`. If something is used by only one model, keep it in that model's file.
 - **Splitting ConvBlock into too many files:** conv_block_2d.py and conv_block_3d.py are sufficient. Do not over-decompose.
 
 ## Don't Hand-Roll
@@ -257,10 +257,10 @@ src = ["packages/*/src"]  # Already covers new package via glob
 **How to avoid:** Keep module attribute names IDENTICAL. Only change the import path, never the attribute name or internal structure of extracted classes.
 **Warning signs:** `model.load_state_dict(checkpoint)` raises `RuntimeError: Error(s) in loading state_dict` with "Missing key" or "Unexpected key" messages.
 
-### Pitfall 2: Import Cycles Between components and Model Subpackages
-**What goes wrong:** `components/blocks.py` imports from `unet/unext2.py` which imports from `components/stems.py`, creating a circular import.
-**Why it happens:** `UNeXt2UpStage` and `UNeXt2Decoder` use `_get_convnext_stage` which is a utility, not a shared component. Putting model-specific utilities in `components` tempts circular imports.
-**How to avoid:** `components/` must have ZERO imports from model subpackages (unet/, vae/, contrastive/). It should only import from torch, timm, monai, numpy. Functions like `_get_convnext_stage` and `icnr_init` that are used by both UNeXt2 and FCMAE belong in `components/blocks.py`, but they must not reference any model classes.
+### Pitfall 2: Import Cycles Between _components and Model Subpackages
+**What goes wrong:** `_components/blocks.py` imports from `unet/unext2.py` which imports from `_components/stems.py`, creating a circular import.
+**Why it happens:** `UNeXt2UpStage` and `UNeXt2Decoder` use `_get_convnext_stage` which is a utility, not a shared component. Putting model-specific utilities in `_components` tempts circular imports.
+**How to avoid:** `_components/` must have ZERO imports from model subpackages (unet/, vae/, contrastive/). It should only import from torch, timm, monai, numpy. Functions like `_get_convnext_stage` and `icnr_init` that are used by both UNeXt2 and FCMAE belong in `_components/blocks.py`, but they must not reference any model classes.
 **Warning signs:** `ImportError: cannot import name 'X' from partially initialized module`.
 
 ### Pitfall 3: Mutable Default Shared State
@@ -326,9 +326,9 @@ class VaeDecoder(nn.Module):  # Used by BetaVae25D
 ### Component Import Pattern (after extraction)
 ```python
 # In packages/viscy-models/src/viscy_models/unet/unext2.py
-from viscy_models.components.stems import UNeXt2Stem
-from viscy_models.components.heads import PixelToVoxelHead
-from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models._components.stems import UNeXt2Stem
+from viscy_models._components.heads import PixelToVoxelHead
+from viscy_models._components.blocks import UNeXt2Decoder
 ```
 
 ### ConvBlock Migration (unet/_layers/)
@@ -393,21 +393,21 @@ addopts = ["-ra", "-q", "--import-mode=importlib"]
 
 1. **Where does projection_mlp belong?**
    - What we know: `projection_mlp()` is a standalone function used only by `ContrastiveEncoder` and `ResNet3dEncoder` (both in contrastive.py). It is NOT used by UNeXt2, FCMAE, or VAE models.
-   - What's unclear: Whether it belongs in `components/` or stays in the contrastive module.
+   - What's unclear: Whether it belongs in `_components/` or stays in the contrastive module.
    - Recommendation: Keep it in `contrastive/encoder.py` since it's only used by contrastive models. Not a shared component.
 
-2. **Should VaeUpStage/VaeEncoder/VaeDecoder go in components/blocks.py or vae/?**
+2. **Should VaeUpStage/VaeEncoder/VaeDecoder go in _components/blocks.py or vae/?**
    - What we know: VaeUpStage is similar to UNeXt2UpStage but lacks skip connections. VaeEncoder/VaeDecoder are only used by BetaVae25D.
    - What's unclear: Whether they will be reused by future models.
-   - Recommendation: Keep VaeUpStage, VaeEncoder, VaeDecoder in `vae/` module (Phase 8 scope), not in `components/`. They are specific to VAE architecture. Only truly cross-family components (stems, heads used by UNet+VAE+contrastive) belong in `components/`.
+   - Recommendation: Keep VaeUpStage, VaeEncoder, VaeDecoder in `vae/` module (Phase 8 scope), not in `_components/`. They are specific to VAE architecture. Only truly cross-family components (stems, heads used by UNet+VAE+contrastive) belong in `_components/`.
 
-3. **Should FCMAE's masked operation functions go in components/?**
+3. **Should FCMAE's masked operation functions go in _components/?**
    - What we know: `generate_mask`, `upsample_mask`, `masked_patchify`, `masked_unpatchify` are only used by FCMAE classes.
    - What's unclear: Whether future models will need masking operations.
    - Recommendation: Keep in `unet/fcmae.py` (Phase 7 scope). Not shared.
 
 4. **Phase 6 scope boundary: empty model dirs vs. populated dirs?**
-   - What we know: Phase 6 requires components/ and unet/_layers/ to be populated. Phases 7-9 migrate actual models.
+   - What we know: Phase 6 requires _components/ and unet/_layers/ to be populated. Phases 7-9 migrate actual models.
    - What's unclear: Should `unet/__init__.py`, `vae/__init__.py`, `contrastive/__init__.py` be created empty in Phase 6?
    - Recommendation: Create the directory structure with empty `__init__.py` files in Phase 6. This allows Phase 7/8/9 to focus purely on model migration without structural work.
 

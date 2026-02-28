@@ -7,11 +7,11 @@ tags: [nn-module, component-extraction, stems, heads, blocks, state-dict-compat,
 # Dependency graph
 requires:
   - phase: 06-01
-    provides: "Package scaffold with components/ subpackage directory"
+    provides: "Package scaffold with _components/ subpackage directory"
 provides:
-  - "UNeXt2Stem and StemDepthtoChannels in components/stems.py"
-  - "PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead in components/heads.py"
-  - "icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder in components/blocks.py"
+  - "UNeXt2Stem and StemDepthtoChannels in _components/stems.py"
+  - "PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead in _components/heads.py"
+  - "icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder in _components/blocks.py"
   - "Full test coverage for all shared components (10 tests)"
 affects: [06-03, 07, 08, 09]
 
@@ -22,23 +22,23 @@ tech-stack:
 
 key-files:
   created:
-    - packages/viscy-models/src/viscy_models/components/stems.py
-    - packages/viscy-models/src/viscy_models/components/heads.py
-    - packages/viscy-models/src/viscy_models/components/blocks.py
+    - packages/viscy-models/src/viscy_models/_components/stems.py
+    - packages/viscy-models/src/viscy_models/_components/heads.py
+    - packages/viscy-models/src/viscy_models/_components/blocks.py
     - packages/viscy-models/tests/test_components/test_stems.py
     - packages/viscy-models/tests/test_components/test_heads.py
     - packages/viscy-models/tests/test_components/test_blocks.py
   modified:
-    - packages/viscy-models/src/viscy_models/components/__init__.py
+    - packages/viscy-models/src/viscy_models/_components/__init__.py
 
 key-decisions:
-  - "Intra-components import allowed: heads.py imports icnr_init from blocks.py"
+  - "Intra-_components import allowed: heads.py imports icnr_init from blocks.py"
   - "Docstring formatting adjusted for ruff D205/D400 compliance while preserving code logic"
   - "_get_convnext_stage is private (underscore prefix) but importable, excluded from __all__"
 
 patterns-established:
   - "Component extraction: copy verbatim from v0.3.3, only change import paths"
-  - "Intra-components dependency: blocks.py is standalone, heads.py depends on blocks.py"
+  - "Intra-_components dependency: blocks.py is standalone, heads.py depends on blocks.py"
   - "Test pattern: forward-pass shape verification with device fixture"
 
 # Metrics
@@ -48,7 +48,7 @@ completed: 2026-02-13
 
 # Phase 6 Plan 2: Shared Components Extraction Summary
 
-**8 shared nn.Module components (2 stems, 3 heads, 2 blocks + 2 functions) extracted verbatim from v0.3.3 into components/ with 10 forward-pass tests**
+**8 shared nn.Module components (2 stems, 3 heads, 2 blocks + 2 functions) extracted verbatim from v0.3.3 into _components/ with 10 forward-pass tests**
 
 ## Performance
 
@@ -60,7 +60,7 @@ completed: 2026-02-13
 
 ## Accomplishments
 - Extracted all shared architectural components from v0.3.3 unext2.py and fcmae.py into three focused modules (stems, heads, blocks)
-- Zero imports from model subpackages (unet/, vae/, contrastive/) in components/ -- verified by grep
+- Zero imports from model subpackages (unet/, vae/, contrastive/) in _components/ -- verified by grep
 - All class names, method names, and attribute names preserved identically for state dict compatibility
 - 10 forward-pass tests verify correct output shapes for all components
 
@@ -68,20 +68,20 @@ completed: 2026-02-13
 
 Each task was committed atomically:
 
-1. **Task 1: Extract shared components into components/ module** - `0a2a15c` (feat)
-2. **Task 2: Write tests for all extracted components** - `29d76d9` (test)
+1. **Task 1: Extract shared components into _components/ module** - `0a2a15c` (feat)
+2. **Task 2: Write tests for all extracted _components** - `29d76d9` (test)
 
 ## Files Created/Modified
-- `packages/viscy-models/src/viscy_models/components/stems.py` - UNeXt2Stem, StemDepthtoChannels (from v0.3.3 unext2.py)
-- `packages/viscy-models/src/viscy_models/components/heads.py` - PixelToVoxelHead, UnsqueezeHead (from unext2.py), PixelToVoxelShuffleHead (from fcmae.py)
-- `packages/viscy-models/src/viscy_models/components/blocks.py` - icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder (from unext2.py)
-- `packages/viscy-models/src/viscy_models/components/__init__.py` - Public re-exports of all 8 shared components
+- `packages/viscy-models/src/viscy_models/_components/stems.py` - UNeXt2Stem, StemDepthtoChannels (from v0.3.3 unext2.py)
+- `packages/viscy-models/src/viscy_models/_components/heads.py` - PixelToVoxelHead, UnsqueezeHead (from unext2.py), PixelToVoxelShuffleHead (from fcmae.py)
+- `packages/viscy-models/src/viscy_models/_components/blocks.py` - icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder (from unext2.py)
+- `packages/viscy-models/src/viscy_models/_components/__init__.py` - Public re-exports of all 8 shared components
 - `packages/viscy-models/tests/test_components/test_stems.py` - 3 tests: shape verification for both stems + mismatch error
 - `packages/viscy-models/tests/test_components/test_heads.py` - 3 tests: shape verification for all 3 heads
 - `packages/viscy-models/tests/test_components/test_blocks.py` - 4 tests: icnr_init, _get_convnext_stage, UNeXt2UpStage, UNeXt2Decoder
 
 ## Decisions Made
-- Allowed intra-components import: heads.py imports icnr_init from blocks.py (blocks.py has no model imports, so no circular dependency risk)
+- Allowed intra-_components import: heads.py imports icnr_init from blocks.py (blocks.py has no model imports, so no circular dependency risk)
 - _get_convnext_stage kept as private function (underscore prefix) but still importable for model files in later phases; excluded from __all__
 - Adjusted docstring formatting for ruff D205/D400 compliance without changing code semantics
 
@@ -112,7 +112,7 @@ None - no external service configuration required.
 
 ## Next Phase Readiness
 - All shared components ready for import by model files in Phases 7-9
-- Import path pattern established: `from viscy_models.components.stems import UNeXt2Stem`
+- Import path pattern established: `from viscy_models._components.stems import UNeXt2Stem`
 - Plan 03 (ConvBlock2D/3D migration to unet/_layers/) can proceed independently
 
 ## Self-Check: PASSED

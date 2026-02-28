@@ -11,8 +11,8 @@ keywords = [
   "microscopy",
   "neural networks",
   "pytorch",
-  "virtual staining",
   "representation learning",
+  "virtual staining",
 ]
 license = "BSD-3-Clause"
 authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]

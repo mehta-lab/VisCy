@@ -1,0 +1,81 @@
+[build-system]
+build-backend = "hatchling.build"
+requires = [ "hatchling", "uv-dynamic-versioning" ]
+
+[project]
+name = "dynaclr"
+description = "DynaCLR: Self-supervised contrastive learning for cellular dynamics"
+readme = "README.md"
+keywords = [
+  "contrastive learning",
+  "deep learning",
+  "microscopy",
+  "self-supervised learning",
+  "virtual staining",
+]
+license = "BSD-3-Clause"
+authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
+requires-python = ">=3.11"
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: BSD License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
+  "Topic :: Scientific/Engineering :: Image Processing",
+]
+dynamic = [ "version" ]
+dependencies = [
+  "click",
+  "pytorch-metric-learning",
+  "torchvision",
+  "viscy-data",
+  "viscy-models",
+  "viscy-transforms",
+  "viscy-utils",
+]
+
+optional-dependencies.eval = [
+  "anndata",
+  "natsort",
+  "phate",
+  "scikit-learn",
+  "seaborn",
+  "umap-learn",
+  "wandb",
+]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
+scripts.dynaclr = "dynaclr.cli:main"
+
+[dependency-groups]
+dev = [ { include-group = "test" } ]
+test = [
+  "anndata",
+  "pandas",
+  "pytest>=9.0.2",
+  "pytest-cov>=7",
+  "tensorboard",
+  "tensorstore",
+]
+
+[tool.hatch.version]
+source = "uv-dynamic-versioning"
+
+[tool.hatch.build.targets.wheel]
+packages = [ "src/dynaclr" ]
+
+[tool.pytest.ini_options]
+pythonpath = [ "evaluation", "tests" ]
+
+[tool.uv-dynamic-versioning]
+vcs = "git"
+style = "pep440"
+pattern-prefix = "dynaclr-"
+fallback-version = "0.0.0"

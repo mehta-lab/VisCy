@@ -25,7 +25,7 @@ classifiers = [
 ]
 
 dynamic = [ "version" ]
-dependencies = [ "viscy-data", "viscy-models", "viscy-transforms" ]
+dependencies = [ "viscy-data", "viscy-models", "viscy-transforms", "viscy-utils" ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
@@ -46,41 +46,42 @@ packages = [ "src/viscy" ]
 package = true
 
 [tool.uv.workspace]
-members = [ "packages/*" ]
+members = [ "packages/*", "applications/*" ]
+exclude = [ "applications/dynacell" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
 viscy-models = { workspace = true }
 viscy-transforms = { workspace = true }
+viscy-utils = { workspace = true }
+dynaclr = { workspace = true }
+viscy-translation = { workspace = true }
+airtable-utils = { workspace = true }
+qc = { workspace = true }
+waveorder = { git = "https://github.com/mehta-lab/waveorder.git", branch = "main" }
 
 [tool.ruff]
 target-version = "py311"
 line-length = 120
 indent-width = 4
-src = [ "packages/*/src" ]
+src = [ "applications/*/src", "packages/*/src" ]
 
-[tool.ruff.format]
-quote-style = "double"
-indent-style = "space"
-skip-magic-trailing-comma = false
-docstring-code-format = true
-docstring-code-line-length = "dynamic"
-
-[tool.ruff.lint]
-select = [ "D", "E", "F", "I", "NPY", "PD", "W" ]
-
-[tool.ruff.lint.per-file-ignores]
-"**/*.ipynb" = [ "D" ]
-"**/__init__.py" = [ "D104", "F401" ]
-"**/docs/**" = [ "I" ]
-"**/tests/**" = [ "D" ]
-
-[tool.ruff.lint.pydocstyle]
-convention = "numpy"
+format.indent-style = "space"
+format.quote-style = "double"
+format.skip-magic-trailing-comma = false
+format.docstring-code-line-length = "dynamic"
+format.docstring-code-format = true
+lint.select = [ "D", "E", "F", "I", "NPY", "PD", "W" ]
+lint.per-file-ignores."**/*.ipynb" = [ "D", "E402", "E501", "PD" ]
+lint.per-file-ignores."**/__init__.py" = [ "D104", "F401" ]
+lint.per-file-ignores."**/docs/**" = [ "I" ]
+lint.per-file-ignores."**/evaluation/**" = [ "D", "E501", "NPY002", "PD011" ]
+lint.per-file-ignores."**/tests/**" = [ "D" ]
+lint.pydocstyle.convention = "numpy"
 
 [tool.pytest]
 minversion = "9.0"
-testpaths = [ "packages/*/tests", "tests" ]
+testpaths = [ "packages/*/tests", "applications/*/tests", "tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib" ]
 
 [tool.uv-dynamic-versioning]
