@@ -37,7 +37,7 @@ class SegmentationMetrics2D(LightningModule):
         """
         pred = batch["pred"]
         target = batch["target"]
-        if not pred.shape[0] == 1 and target.shape[0] == 1:
+        if not (pred.shape[0] == 1 and target.shape[0] == 1):
             raise ValueError(f"Expected 2D segmentation, got {pred.shape[0]} and {target.shape[0]}")
         pred = pred[0]
         target = target[0]

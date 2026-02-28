@@ -3,7 +3,7 @@
 import logging
 import os
 import random
-from typing import Callable, Literal, Sequence, Union
+from typing import Callable, Literal, Sequence
 
 import numpy as np
 import torch
@@ -31,7 +31,6 @@ from viscy_data import CombinedDataModule, GPUTransformDataModule, Sample
 from viscy_models import FullyConvolutionalMAE, Unet2d, Unet25d, UNeXt2
 from viscy_utils.evaluation.metrics import mean_average_precision
 from viscy_utils.log_images import detach_sample, render_images
-from viscy_utils.losses import MixedLoss
 
 _UNET_ARCHITECTURE = {
     "2D": Unet2d,
@@ -78,7 +77,7 @@ class VSUNet(LightningModule):
         Architecture type to use.
     model_config : dict
         Model configuration dictionary.
-    loss_function : Union[nn.Module, MixedLoss] | None
+    loss_function : nn.Module | None
         Loss function for training/validation.
         Defaults to L2 (mean squared error).
     lr : float
@@ -110,8 +109,8 @@ class VSUNet(LightningModule):
     def __init__(
         self,
         architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
-        model_config: dict = {},
-        loss_function: Union[nn.Module, MixedLoss] | None = None,
+        model_config: dict | None = None,
+        loss_function: nn.Module | None = None,
         lr: float = 1e-3,
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         freeze_encoder: bool = False,
@@ -126,6 +125,8 @@ class VSUNet(LightningModule):
         tta_type: Literal["mean", "median", "product"] = "mean",
     ) -> None:
         super().__init__()
+        if model_config is None:
+            model_config = {}
         net_class = _UNET_ARCHITECTURE.get(architecture)
         if not net_class:
             raise ValueError(f"Architecture {architecture} not in {_UNET_ARCHITECTURE.keys()}")
@@ -159,7 +160,7 @@ class VSUNet(LightningModule):
         self.freeze_encoder = freeze_encoder
         self._original_shape_yx = None
         if ckpt_path is not None:
-            self.load_state_dict(torch.load(ckpt_path)["state_dict"])  # loading only weights
+            self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])  # loading only weights
 
     def forward(self, x: Tensor) -> Tensor:
         """Run forward pass through the model.
@@ -610,9 +611,9 @@ class AugmentedPredictionVSUNet(LightningModule):
         source = batch["source"]
         preds = []
         for forward_t, inverse_t in zip(self._forward_transforms, self._inverse_transforms):
-            source = forward_t(source)
-            source = self._predict_pad(source)
-            pred = self.forward(source)
+            aug_source = forward_t(source)
+            aug_source = self._predict_pad(aug_source)
+            pred = self.forward(aug_source)
             pred = self._predict_pad.inverse(pred)
             pred = inverse_t(pred)
             preds.append(pred)
@@ -730,6 +731,7 @@ class FcmaeUNet(VSUNet):
         tuple[Tensor, Tensor | None, Tensor]
             Prediction, optional target, and loss.
         """
+        return_target = False
         if self.model.pretraining:
             if batch_idx < self.log_batches_per_epoch:
                 return_target = True
