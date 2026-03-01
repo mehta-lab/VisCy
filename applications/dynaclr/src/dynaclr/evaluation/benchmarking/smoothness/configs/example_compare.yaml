@@ -1,0 +1,31 @@
+# Example configuration file for comparing previously saved results
+# This loads CSV files from multiple models and creates a comparison table
+
+result_files:
+  # List of result files to compare
+  # Each entry requires a path to the CSV file and a label for display
+  - path: /home/eduardo.hirata/repos/viscy/applications/dynaclr/evaluation/benchmarking/smoothness/output/smoothness/DynaCLRv3_smoothness_stats.csv
+    label: DynaCLRv3
+
+  # Add more result files to compare
+  # - path: results/smoothness/ImageNet_smoothness_stats.csv
+  #   label: ImageNet-ConvNext
+  # - path: results/smoothness/SAM2_smoothness_stats.csv
+  #   label: SAM2
+
+comparison:
+  # Metrics to include in the comparison table
+  metrics:
+    - smoothness_score
+    - dynamic_range
+    - adjacent_frame_mean
+    - adjacent_frame_peak
+    - random_frame_mean
+    - random_frame_peak
+
+  # Output format for the comparison
+  # Options: "markdown" (default), "csv", "json"
+  output_format: markdown
+
+  # Optional: Save combined results to file
+  # output_path: results/combined_comparison.csv

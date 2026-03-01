@@ -47,6 +47,7 @@ optional-dependencies.eval = [
   "natsort",
   "phate",
   "scikit-learn",
+  "seaborn",
   "umap-learn",
   "wandb",
 ]
@@ -71,6 +72,9 @@ source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/dynaclr" ]
+
+[tool.pytest.ini_options]
+pythonpath = [ "tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

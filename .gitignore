@@ -1,3 +1,6 @@
+# Secrets
+.env
+
 # IDE/Editor
 .idea/
 .vscode/

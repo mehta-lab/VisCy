@@ -65,6 +65,15 @@ uv run --package dynaclr dynaclr train-linear-classifier --help
 
 # Apply a trained classifier to new embeddings
 uv run --package dynaclr dynaclr apply-linear-classifier --help
+
+# Compute PCA, UMAP, and/or PHATE on saved embeddings
+uv run --package dynaclr dynaclr reduce-dimensionality --help
+
+# Evaluate temporal smoothness of embedding models
+uv run --package dynaclr dynaclr evaluate-smoothness --help
+
+# Compare previously saved smoothness results
+uv run --package dynaclr dynaclr compare-models --help
 ```
 
 ## Examples

@@ -1,0 +1,34 @@
+# Example configuration for cross_validation.py
+#
+# Usage:
+#   python cross_validation.py -c configs/cross_validate_example.yaml
+#   python cross_validation.py -c configs/cross_validate_example.yaml --report
+
+output_dir: /path/to/cv_output
+ranking_metric: auroc  # auroc, weighted_f1, accuracy
+n_bootstrap: 5
+
+models:
+  2D:
+    name: DynaCLR-2D-BagOfChannels-timeaware
+    version: v3
+    wandb_project: linearclassifiers-DynaCLR-2D-BagOfChannels-timeaware-v3
+    datasets:  # need >=3 for leave-one-out
+      - name: dataset_A
+        embeddings_dir: /path/to/A/embeddings/
+        annotations: /path/to/A/annotations.csv
+      - name: dataset_B
+        embeddings_dir: /path/to/B/embeddings/
+        annotations: /path/to/B/annotations.csv
+      - name: dataset_C
+        embeddings_dir: /path/to/C/embeddings/
+        annotations: /path/to/C/annotations.csv
+
+# Classifier hyperparams (all optional, shown with defaults)
+use_scaling: true
+n_pca_components: null
+max_iter: 1000
+class_weight: balanced
+solver: liblinear
+split_train_data: 0.8
+random_seed: 42

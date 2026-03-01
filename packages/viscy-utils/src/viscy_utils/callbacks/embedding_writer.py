@@ -83,6 +83,7 @@ def write_embedding_dataset(
     phate_kwargs: Optional[Dict[str, Any]] = None,
     pca_kwargs: Optional[Dict[str, Any]] = None,
     overwrite: bool = False,
+    uns_metadata: Optional[Dict[str, Any]] = None,
 ) -> None:
     """Write embeddings to an AnnData Zarr Store.
 
@@ -104,6 +105,9 @@ def write_embedding_dataset(
         Keyword arguments passed to PCA, by default None.
     overwrite : bool, optional
         Whether to overwrite existing zarr store, by default False.
+    uns_metadata : dict, optional
+        Additional metadata to store in ``adata.uns``, e.g.
+        ``{"data_path": "/path/to/data.zarr", "tracks_path": "..."}``.
     """
     import anndata as ad
 
@@ -117,7 +121,6 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
-    n_samples = len(features)
 
     adata = ad.AnnData(X=features, obs=ultrack_indices)
     if projections is not None:
@@ -128,13 +131,6 @@ def write_embedding_dataset(
             _fit_transform_umap,
         )
 
-        if umap_kwargs["n_neighbors"] >= n_samples:
-            _logger.warning(
-                f"Reducing n_neighbors from {umap_kwargs['n_neighbors']} "
-                f"to {min(15, n_samples // 2)} due to small dataset size"
-            )
-            umap_kwargs["n_neighbors"] = min(15, n_samples // 2)
-
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
         _, UMAP = _fit_transform_umap(features, **umap_kwargs)
         adata.obsm["X_umap"] = UMAP
@@ -143,12 +139,6 @@ def write_embedding_dataset(
         from viscy_utils.evaluation.dimensionality_reduction import compute_phate
 
         _logger.debug(f"Using PHATE kwargs: {phate_kwargs}")
-        if phate_kwargs["knn"] >= n_samples:
-            _logger.warning(
-                f"Reducing knn from {phate_kwargs['knn']} to {max(2, n_samples // 2)} due to small dataset size"
-            )
-            phate_kwargs["knn"] = max(2, n_samples // 2)
-
         try:
             _logger.debug("Computing PHATE")
             _, PHATE = compute_phate(features, **phate_kwargs)
@@ -166,6 +156,9 @@ def write_embedding_dataset(
             adata.obsm["X_pca"] = PCA_features
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}")
+
+    if uns_metadata:
+        adata.uns.update(uns_metadata)
 
     _logger.debug(f"Writing dataset to {output_path}")
     adata.write_zarr(output_path)
@@ -212,6 +205,18 @@ class EmbeddingWriter(BasePredictionWriter):
             raise FileExistsError(f"Output path {self.output_path} already exists.")
         _logger.debug(f"Writing embeddings to {self.output_path}")
 
+    @staticmethod
+    def _collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
+        """Extract data and tracks paths from the datamodule if available."""
+        metadata: Dict[str, Any] = {}
+        datamodule = getattr(trainer, "datamodule", None)
+        if datamodule is not None:
+            if hasattr(datamodule, "data_path"):
+                metadata["data_path"] = str(datamodule.data_path)
+            if hasattr(datamodule, "tracks_path"):
+                metadata["tracks_path"] = str(datamodule.tracks_path)
+        return metadata
+
     def write_on_epoch_end(
         self,
         trainer: Trainer,
@@ -233,4 +238,5 @@ class EmbeddingWriter(BasePredictionWriter):
             phate_kwargs=self.phate_kwargs,
             pca_kwargs=self.pca_kwargs,
             overwrite=self.overwrite,
+            uns_metadata=self._collect_data_provenance(trainer),
         )

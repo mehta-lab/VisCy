@@ -1,0 +1,30 @@
+data_path: /home/eduardo.hirata/mydata/data/dummy_data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_drifting_ztest.zarr
+num_workers: 4
+
+annotation:
+  channel_annotation:
+    Phase3D:
+      channel_type: labelfree
+      biological_annotation: null
+    raw GFP EX488 EM525-45:
+      channel_type: fluorescence
+      biological_annotation:
+        organelle: endoplasmic_reticulum
+        marker: SEC61B
+        marker_type: protein_tag
+        fluorophore: eGFP
+    'nuclei_prediction':
+      channel_type: virtual_stain
+      biological_annotation:
+        organelle: nucleus
+        marker: virtual_stain
+        marker_type: virtual_stain
+        fluorophore: virtual_stain
+
+  experiment_metadata:
+    C/2:
+      perturbations:
+        - name: ZIKV
+          type: virus
+          hours_post: 3.0
+      time_sampling_minutes: 30.0
