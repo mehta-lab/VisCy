@@ -1,0 +1,64 @@
+# Multi-experiment DynaCLR configuration
+# ========================================
+#
+# This file defines multiple experiments for joint contrastive training.
+# Load it via:
+#   registry = ExperimentRegistry.from_yaml("experiments.yml")
+# or reference it in a DataModule config as:
+#   experiments_file: "experiments.yml"
+#
+# Positional channel alignment
+# ----------------------------
+# Source channels are aligned by *position*, not by name.
+# In this example both experiments use 2 source channels:
+#   position 0 = phase contrast channel (Phase3D in both)
+#   position 1 = fluorescence channel (GFP in exp 1, RFP in exp 2)
+#
+# The model receives a 2-channel input regardless of which experiment
+# the sample comes from. Channel dropout (Phase 22) can optionally
+# zero out position 1 to encourage label-free representation learning.
+
+experiments:
+  # Experiment 1: SEC61B-tagged endoplasmic reticulum
+  # 30-minute imaging interval, infection starting at 3 HPI
+  - name: "2025_07_22_SEC61"
+    data_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/registered.zarr"
+    tracks_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/tracks"
+    channel_names: ["Phase3D", "GFP", "Mito"]
+    source_channel: ["Phase3D", "GFP"]
+    condition_wells:
+      uninfected: ["A/1", "A/2", "A/3"]
+      infected: ["B/1", "B/2", "B/3"]
+    interval_minutes: 30.0
+    start_hpi: 3.0
+    organelle: "endoplasmic_reticulum"
+    date: "2025-07-22"
+    moi: 1.0
+
+  # Experiment 2: TOMM20-tagged mitochondria
+  # 15-minute imaging interval, infection starting at 2 HPI
+  # Includes a mock condition (virus-free control with vehicle)
+  # Note: source_channel uses "RFP" here (not "GFP") -- positional
+  #       alignment means position 1 maps to the fluorescence reporter
+  #       regardless of the specific channel name.
+  - name: "2025_08_15_TOMM20"
+    data_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/registered.zarr"
+    tracks_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/tracks"
+    channel_names: ["Phase3D", "RFP", "StressGranules"]
+    source_channel: ["Phase3D", "RFP"]
+    condition_wells:
+      uninfected: ["A/1", "A/2"]
+      infected: ["B/1", "B/2"]
+      mock: ["C/1"]
+    interval_minutes: 15.0
+    start_hpi: 2.0
+    organelle: "mitochondria"
+    date: "2025-08-15"
+    moi: 0.5
+
+# tau_range example (used in FlexibleBatchSampler config, not here):
+#   tau_range_hours: [0.5, 2.0]
+#   With interval_minutes=30 -> frames [1, 4]
+#   With interval_minutes=15 -> frames [2, 8]
+#
+# See ExperimentRegistry.tau_range_frames() for the conversion API.

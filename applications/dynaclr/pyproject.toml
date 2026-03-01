@@ -32,7 +32,9 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "click",
+  "iohub>=0.3a2",
   "pytorch-metric-learning",
+  "pyyaml",
   "torchvision",
   "viscy-data",
   "viscy-models",

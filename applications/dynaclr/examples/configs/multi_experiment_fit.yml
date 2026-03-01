@@ -1,0 +1,161 @@
+# Multi-experiment DynaCLR training configuration
+# ================================================
+# This config demonstrates training with MultiExperimentDataModule
+# and NTXentHCL loss across multiple experiments with different
+# fluorescence reporters but shared phase contrast channel.
+#
+# Key differences from fit.yml:
+# 1. data.class_path uses MultiExperimentDataModule (not TripletDataModule)
+# 2. loss_function uses NTXentHCL (not TripletMarginLoss)
+# 3. use_distributed_sampler: false (FlexibleBatchSampler handles DDP)
+# 4. Normalizations/augmentations use generic ch_0/ch_1 keys
+# 5. All sampling axes configured: experiment_aware, condition_balanced,
+#    temporal_enrichment
+#
+# Usage:
+#   dynaclr fit --config multi_experiment_fit.yml
+#
+# Requires an experiments.yml file (see experiments.yml in this directory)
+# with experiment definitions.
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  precision: 32-true
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: #TODO path to log directory
+      version: #TODO version name
+      log_graph: True
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/val
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 100
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  use_distributed_sampler: false  # FlexibleBatchSampler handles DDP internally
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 2
+        in_stack_depth: 30
+        stem_kernel_size: [5, 4, 4]
+        stem_stride: [5, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    loss_function:
+      class_path: dynaclr.loss.NTXentHCL
+      init_args:
+        temperature: 0.07
+        beta: 0.5
+    lr: 0.00002
+    log_batches_per_epoch: 3
+    log_samples_per_batch: 3
+    example_input_array_shape: [1, 2, 30, 256, 256]
+data:
+  class_path: dynaclr.datamodule.MultiExperimentDataModule
+  init_args:
+    experiments_yaml: #TODO path to experiments.yml
+    z_range: [15, 45]
+    yx_patch_size: [384, 384]
+    final_yx_patch_size: [160, 160]
+    val_experiments:
+      - #TODO experiment name(s) for validation
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    batch_size: 64
+    num_workers: 12
+    # Sampling axes
+    experiment_aware: true
+    condition_balanced: true
+    leaky: 0.0
+    temporal_enrichment: true
+    temporal_window_hours: 2.0
+    temporal_global_fraction: 0.3
+    # Augmentation
+    channel_dropout_channels: [1]  # Drop fluorescence channel
+    channel_dropout_prob: 0.5
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [ch_0]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [ch_1]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+    augmentations:
+      - class_path: viscy_transforms.RandAffined
+        init_args:
+          keys: [ch_0, ch_1]
+          prob: 0.8
+          scale_range: [0, 0.2, 0.2]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.0, 0.01, 0.01]
+          padding_mode: zeros
+      - class_path: viscy_transforms.RandAdjustContrastd
+        init_args:
+          keys: [ch_1]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.RandAdjustContrastd
+        init_args:
+          keys: [ch_0]
+          prob: 0.5
+          gamma: [0.8, 1.2]
+      - class_path: viscy_transforms.RandScaleIntensityd
+        init_args:
+          keys: [ch_1]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.RandScaleIntensityd
+        init_args:
+          keys: [ch_0]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.RandGaussianSmoothd
+        init_args:
+          keys: [ch_0, ch_1]
+          prob: 0.5
+          sigma_x: [0.25, 0.75]
+          sigma_y: [0.25, 0.75]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.RandGaussianNoised
+        init_args:
+          keys: [ch_1]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2
+      - class_path: viscy_transforms.RandGaussianNoised
+        init_args:
+          keys: [ch_0]
+          prob: 0.5
+          mean: 0.0
+          std: 0.2
+    # Loss reference (informational -- actual loss is on model.loss_function)
+    hcl_beta: 0.5
+    cache_pool_bytes: 0
+    seed: 0

@@ -39,6 +39,9 @@ from viscy_data._typing import (
     TripletSample,
 )
 
+# Channel dropout augmentation (from channel_dropout.py)
+from viscy_data.channel_dropout import ChannelDropout
+
 # Cell classification (from cell_classification.py -- requires pandas at runtime)
 from viscy_data.cell_classification import (
     ClassificationDataModule,
@@ -81,6 +84,9 @@ from viscy_data.livecell import LiveCellDataModule, LiveCellDataset, LiveCellTes
 # Memory-mapped cache (from mmap_cache.py -- requires [mmap] extra at runtime)
 from viscy_data.mmap_cache import MmappedDataModule, MmappedDataset
 
+# Batch sampler (from sampler.py)
+from viscy_data.sampler import FlexibleBatchSampler
+
 # Segmentation (from segmentation.py)
 from viscy_data.segmentation import SegmentationDataModule, SegmentationDataset
 
@@ -109,7 +115,10 @@ __all__ = [
     "SegmentationSample",
     "TrackingIndex",
     "TripletSample",
+    # Augmentation
+    "ChannelDropout",
     # Utilities
+    "FlexibleBatchSampler",
     "SelectWell",
     "ShardedDistributedSampler",
     # Core

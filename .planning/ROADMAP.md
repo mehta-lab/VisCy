@@ -7,7 +7,7 @@
 - Shipped **v1.2 Extract viscy-models** -- Phases 10-14 (shipped 2026-02-13)
 - Shipped **v2.0 DynaCLR Application** -- Phases 15-17 (shipped 2026-02-17)
 - Shipped **v2.1 DynaCLR Integration Validation** -- Phases 18-19 (shipped 2026-02-20)
-- In Progress **v2.2 Composable Sampling Framework** -- Phases 20-25
+- Shipped **v2.2 Composable Sampling Framework** -- Phases 20-25 (shipped 2026-02-24)
 
 ## Phases
 
@@ -207,29 +207,34 @@ Plans:
 
 </details>
 
-### v2.2 Composable Sampling Framework (In Progress)
+### v2.2 Composable Sampling Framework (SHIPPED 2026-02-24)
 
 **Milestone Goal:** Implement a composable, multi-experiment sampling framework for DynaCLR with experiment-aware batching, lineage-linked temporal positives, hard-negative concentration loss, and channel dropout -- enabling cross-experiment training that resolves heterogeneous cellular responses.
 
-- [ ] **Phase 20: Experiment Configuration** - ExperimentConfig and ExperimentRegistry with channel resolution and YAML config parsing
-- [ ] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
+- [x] **Phase 20: Experiment Configuration** - ExperimentConfig and ExperimentRegistry with channel resolution and YAML config parsing
+- [x] **Phase 21: Cell Index & Lineage** - MultiExperimentIndex with unified tracks, lineage reconstruction, border clamping, and valid anchor computation
 - [ ] **Phase 22: Batch Sampling** - FlexibleBatchSampler with experiment-aware, condition-balanced, temporal enrichment, leaky mixing, and DDP support
 - [ ] **Phase 23: Loss & Augmentation** - NTXentHCL loss with hard-negative concentration plus ChannelDropout and variable tau sampling
-- [ ] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
-- [ ] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
+- [x] **Phase 24: Dataset & DataModule** - MultiExperimentTripletDataset and MultiExperimentDataModule wiring all components together
+- [x] **Phase 25: Integration** - End-to-end training validation and YAML config example for multi-experiment training
 
 ## Phase Details
 
 ### Phase 20: Experiment Configuration
-**Goal**: Users can define multi-experiment training setups via dataclasses and YAML configs, with automatic channel resolution across experiments
+**Goal**: Users can define multi-experiment training setups via dataclasses and YAML configs, with explicit source_channel lists and positional alignment across experiments
 **Depends on**: Phase 19 (v2.1 validated DynaCLR application)
 **Requirements**: MEXP-01, MEXP-02, MEXP-03, MEXP-04
 **Success Criteria** (what must be TRUE):
-  1. User can instantiate an ExperimentConfig with experiment metadata (name, data_path, tracks_path, channel_names, condition_wells, interval_minutes) and access all fields
-  2. User can create an ExperimentRegistry from multiple ExperimentConfigs and it automatically computes shared_channels (intersection), union_channels (union), active_channels (resolved from training_channels setting), and per-experiment channel_maps
-  3. User can set training_channels to "shared", "all", or an explicit list -- and the Registry resolves the correct per-experiment channel index mapping in channel_maps
-  4. User can define experiment configs in a YAML file that Lightning CLI parses into an ExperimentRegistry without custom parsing code
-**Plans**: TBD
+  1. User can instantiate an ExperimentConfig with experiment metadata (name, data_path, tracks_path, channel_names, source_channel, condition_wells, interval_minutes) and access all fields
+  2. User can create an ExperimentRegistry from multiple ExperimentConfigs and it validates channel count consistency, computes per-experiment channel_maps (source position -> zarr index)
+  3. User specifies explicit source_channel list per experiment -- Registry validates source_channel membership in channel_names and positional alignment (same count across experiments)
+  4. User can define experiment configs in a YAML file that ExperimentRegistry.from_yaml() parses into a valid registry
+**Plans**: 2 plans
+
+Plans:
+- [x] 20-01-PLAN.md -- TDD: ExperimentConfig and ExperimentRegistry with validation, from_yaml, tau_range_frames
+- [x] 20-02-PLAN.md -- Package wiring: deps, __init__.py exports, example experiments.yml
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 21: Cell Index & Lineage
@@ -241,7 +246,12 @@ Plans:
   2. Lineage is reconstructed from parent_track_id -- when a cell divides, daughter tracks are linked to the parent track so that temporal positive sampling can follow through division events
   3. Border cells are retained by clamping crop centroids inward rather than excluding them -- cells near the image boundary still appear as valid observations with shifted patch origins
   4. valid_anchors is computed accounting for variable tau range and lineage continuity -- an anchor is valid only if at least one tau in the configured range yields a same-track or daughter-track positive
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [x] 21-01-PLAN.md -- TDD: MultiExperimentIndex tracks building, lineage reconstruction, border clamping (CELL-01, CELL-02, CELL-03)
+- [x] 21-02-PLAN.md -- TDD: Valid anchor computation with variable tau + lineage, properties, summary, package wiring (CELL-04)
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 22: Batch Sampling
@@ -254,7 +264,12 @@ Plans:
   3. With temporal_enrichment=True, batches concentrate cells around a focal HPI with a configurable window, while still including a global fraction from all timepoints
   4. FlexibleBatchSampler supports DDP via set_epoch() for deterministic shuffling and rank-aware iteration that composes with the existing ShardedDistributedSampler pattern
   5. Leaky experiment mixing (leaky > 0.0) allows a configurable fraction of cross-experiment samples in otherwise experiment-restricted batches
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 22-01-PLAN.md -- TDD: FlexibleBatchSampler core with experiment-aware batching, condition balancing, leaky mixing (SAMP-01, SAMP-02, SAMP-05)
+- [ ] 22-02-PLAN.md -- TDD: Temporal enrichment, DDP support, and package-level exports (SAMP-03, SAMP-04)
+
 **Location**: `packages/viscy-data/src/viscy_data/`
 
 ### Phase 23: Loss & Augmentation
@@ -266,7 +281,12 @@ Plans:
   2. NTXentHCL is an nn.Module that works as a drop-in replacement via ContrastiveModule(loss_function=NTXentHCL(...)) without any changes to the training step
   3. ChannelDropout randomly zeros specified channels with configurable probability on batched (B,C,Z,Y,X) tensors and integrates into on_after_batch_transfer after the existing scatter/gather augmentation chain
   4. Variable tau sampling uses exponential decay within tau_range, favoring small temporal offsets -- verified by statistical distribution test
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 23-01-PLAN.md -- TDD: NTXentHCL loss with hard-negative concentration, NTXentLoss subclass for drop-in compatibility (LOSS-01, LOSS-02, LOSS-03)
+- [ ] 23-02-PLAN.md -- TDD: ChannelDropout augmentation and variable tau sampling utility with package exports (AUG-01, AUG-02, AUG-03)
+
 **Location**: NTXentHCL in `applications/dynaclr/src/dynaclr/`, ChannelDropout in `packages/viscy-data/src/viscy_data/`
 
 ### Phase 24: Dataset & DataModule
@@ -278,7 +298,12 @@ Plans:
   2. Positive sampling follows lineage through division events -- when an anchor track ends at a division, the daughter track at t+tau is selected as a valid positive
   3. MultiExperimentDataModule wires FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader with collate_fn=lambda x: x, and train/val split is by whole experiments (not individual FOVs)
   4. All sampling, loss, and augmentation hyperparameters (tau_range, tau_decay, experiment_aware, condition_balanced, temporal_enrichment, hcl_beta, channel_dropout_prob) are exposed as __init__ parameters for Lightning CLI YAML configuration
-**Plans**: TBD
+**Plans**: 2 plans (complete 2026-02-23)
+
+Plans:
+- [x] 24-01-PLAN.md -- TDD: MultiExperimentTripletDataset with lineage-aware positive sampling, tensorstore I/O, channel remapping (DATA-01, DATA-02)
+- [x] 24-02-PLAN.md -- TDD: MultiExperimentDataModule wiring FlexibleBatchSampler + Dataset + ChannelDropout + ThreadDataLoader, experiment-level split, CLI params, package exports (DATA-03, DATA-04, DATA-05)
+
 **Location**: `applications/dynaclr/src/dynaclr/`
 
 ### Phase 25: Integration
@@ -288,7 +313,11 @@ Plans:
 **Success Criteria** (what must be TRUE):
   1. A fast_dev_run integration test completes without errors using MultiExperimentDataModule + ContrastiveModule + NTXentHCL with synthetic multi-experiment data (at least 2 experiments with different channel sets)
   2. A YAML config example demonstrates multi-experiment training with all sampling axes (experiment_aware, condition_balanced, temporal_enrichment) and is parseable by Lightning CLI
-**Plans**: TBD
+**Plans**: 1 plan
+
+Plans:
+- [x] 25-01-PLAN.md -- End-to-end integration test (fast_dev_run) and YAML config example for multi-experiment training
+
 **Location**: `applications/dynaclr/tests/`, `applications/dynaclr/examples/configs/`
 
 ### v2.3+ Future Applications (Phases TBD)
@@ -329,14 +358,14 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 | 17. Examples & Evaluation | v2.0 | manual | Complete | 2026-02-17 |
 | 18. Training Validation | v2.1 | 1/1 | Complete | 2026-02-20 |
 | 19. Inference Reproducibility | v2.1 | 1/1 | Complete | 2026-02-20 |
-| 20. Experiment Configuration | v2.2 | 0/TBD | Not started | -- |
-| 21. Cell Index & Lineage | v2.2 | 0/TBD | Not started | -- |
-| 22. Batch Sampling | v2.2 | 0/TBD | Not started | -- |
-| 23. Loss & Augmentation | v2.2 | 0/TBD | Not started | -- |
-| 24. Dataset & DataModule | v2.2 | 0/TBD | Not started | -- |
-| 25. Integration | v2.2 | 0/TBD | Not started | -- |
+| 20. Experiment Configuration | v2.2 | 2/2 | Complete | 2026-02-22 |
+| 21. Cell Index & Lineage | v2.2 | 2/2 | Complete | 2026-02-22 |
+| 22. Batch Sampling | v2.2 | 0/2 | Not started | -- |
+| 23. Loss & Augmentation | v2.2 | 0/2 | Not started | -- |
+| 24. Dataset & DataModule | v2.2 | 2/2 | Complete | 2026-02-23 |
+| 25. Integration | v2.2 | 1/1 | Complete | 2026-02-24 |
 
-**Total plans executed:** 27 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2) + 3 manual phases (v2.0)
+**Total plans executed:** 40 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 13) + 3 manual phases (v2.0)
 
 ---
 *Roadmap created: 2025-01-27*
@@ -344,3 +373,10 @@ Phases execute in numeric order: 20 -> 21 -> 22 -> 23 -> 24 -> 25
 *Updated for v2.0 DynaCLR: 2026-02-17*
 *Updated for v2.1 DynaCLR Integration Validation: 2026-02-19*
 *Updated for v2.2 Composable Sampling Framework: 2026-02-21*
+*Phase 20 planned: 2026-02-21*
+*Phase 21 planned: 2026-02-21*
+*Phase 22 planned: 2026-02-22*
+*Phase 23 planned: 2026-02-22*
+*Phase 24 planned: 2026-02-23*
+*Phase 25 planned: 2026-02-24*
+*v2.2 milestone shipped: 2026-02-24*
