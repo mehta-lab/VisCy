@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from viscy_models._components.conv_block_2d import ConvBlock2D
+from viscy_models.components.conv_block_2d import ConvBlock2D
 
 __all__ = ["Unet2d"]
 
@@ -73,8 +73,7 @@ class Unet2d(nn.Module):
         # ----- Standardize Filter Sequence -----#
         if len(num_filters) != 0:
             assert len(num_filters) == num_blocks + 1, (
-                "Length of num_filters must be equal to num_blocks + 1 "
-                "(number of convolutional blocks per path)."
+                "Length of num_filters must be equal to num_blocks + 1 (number of convolutional blocks per path)."
             )
             self.num_filters = list(num_filters)
         else:
@@ -103,9 +102,7 @@ class Unet2d(nn.Module):
         self.up_list = []
         if up_mode == "bilinear":
             for i in range(num_blocks):
-                self.up_list.append(
-                    nn.Upsample(mode=up_mode, scale_factor=2, align_corners=False)
-                )
+                self.up_list.append(nn.Upsample(mode=up_mode, scale_factor=2, align_corners=False))
         elif up_mode == "conv":
             raise NotImplementedError("Not yet implemented!")
             # TODO: implement

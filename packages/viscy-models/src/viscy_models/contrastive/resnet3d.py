@@ -36,9 +36,7 @@ class ResNet3dEncoder(nn.Module):
         pretrained: bool = False,
     ) -> None:
         super().__init__()
-        self.encoder = ResNetFeatures(
-            backbone, pretrained=pretrained, spatial_dims=3, in_channels=in_channels
-        )
+        self.encoder = ResNetFeatures(backbone, pretrained=pretrained, spatial_dims=3, in_channels=in_channels)
         self.projection = projection_mlp(embedding_dim, embedding_dim, projection_dim)
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:

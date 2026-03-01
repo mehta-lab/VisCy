@@ -146,6 +146,14 @@ uvx ruff format .         # format
 When executed within the project root directory, ruff automatically uses
 the [project settings](./pyproject.toml).
 
+> **Important**: All ruff configuration lives in the **root** `pyproject.toml` only.
+> Sub-packages must not define their own `[tool.ruff.*]` sections — ruff does not
+> inherit config, so any `[tool.ruff.*]` in a sub-package silently overrides the
+> entire root config (including `lint.select`, `per-file-ignores`, etc.).
+
+Docstrings follow the [numpy style](https://numpydoc.readthedocs.io/en/latest/format.html)
+(`convention = "numpy"` in `[tool.ruff.lint.pydocstyle]`).
+
 ## Useful links
 
 ### uv documentation

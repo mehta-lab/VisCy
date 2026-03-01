@@ -2,109 +2,95 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-21)
+See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Milestone v2.2 -- Composable Sampling Framework -- COMPLETE
+**Current focus:** Phase 10 - Public API & CI Integration -- PHASE COMPLETE -- v1.1 MILESTONE COMPLETE
 
 ## Current Position
 
-Phase: 25 of 25 (Integration) -- COMPLETE
-Plan: 01 of 01 complete
-Status: Phase 25 complete. Milestone v2.2 Composable Sampling Framework complete.
-Last activity: 2026-02-24 -- Completed 25-01 Integration (end-to-end tests + YAML config)
+Phase: 10 of 10 (Public API & CI Integration) -- PHASE COMPLETE
+Plan: 1 of 1 in current phase
+Status: v1.1 Milestone Complete
+Last activity: 2026-02-13 -- Completed 10-01 Public API, state dict tests, CI integration
 
-Progress: [##############################] 25/25 phases complete (100%)
+Progress: [==================] 100% (v1.0 complete, v1.1 complete: all 10 phases done)
 
 ## Performance Metrics
 
-**Combined velocity (all branches):**
-- Total plans completed: 40 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.2: 13) + v2.0 manual phases
+**Velocity:**
+- Total plans completed: 16 (v1.0: 7, v1.1: 9)
+- Average duration: ~15 min
+- Total execution time: ~4.1 hours
 
-**By Milestone:**
+**By Phase:**
 
-| Milestone | Phases | Plans | Branch |
-|-----------|--------|-------|--------|
-| v1.0 Transforms | 1-5 | 7 | shared |
-| v1.1 Data | 6-9 | 9 | modular-data |
-| v1.2 Models | 10-14 | 9 | modular-models |
-| v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
-| v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | 13 | dynav2 |
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1. Foundation | 2 | ~60m | ~30m |
+| 2. Package | 1 | ~30m | ~30m |
+| 3. Migration | 3 | ~90m | ~30m |
+| 5. CI/CD | 1 | ~30m | ~30m |
+| 6. Package Scaffold | 3 | ~10m | ~3m |
+| 7. Core UNet Models | 2 | ~6m | ~3m |
+| 8. Representation Models | 2 | ~8m | ~4m |
+| 9. Legacy UNet Models | 1 | ~4m | ~4m |
+| 10. Public API & CI | 1 | ~4m | ~4m |
 
 ## Accumulated Context
 
 ### Decisions
 
-Key decisions carrying forward:
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
 
-- Clean break on imports: `from viscy_{pkg} import X` (no backward compatibility)
-- Applications compose packages: dynaclr depends on viscy-data, viscy-models, viscy-transforms, viscy-utils
-- triplet.py is NOT modified -- new composable sampling code in new files only
-- FlexibleBatchSampler + ChannelDropout in packages/viscy-data/ (reusable)
-- ExperimentConfig, Registry, Index, Dataset, DataModule in applications/dynaclr/ (domain-specific)
-- NTXentHCL as nn.Module drop-in for ContrastiveModule(loss_function=...)
-- NTXentHCL overrides _compute_loss (pair-based) to integrate with pytorch_metric_learning's reducer/distance pipeline
-- beta=0.0 fast-path delegates to super()._compute_loss for exact numerical identity with NTXentLoss
-- HCL weight normalization: per-anchor sum equals neg_count, preserving loss magnitude across beta values
-- 2-channel input (Phase + Fluorescence) with channel dropout on channel 1
-- HCL in loss only, no kNN sampler -- FlexibleBatchSampler handles experiment/condition/temporal axes
-- Train/val split by whole experiments, not FOVs
-- DDP via FlexibleBatchSampler + ShardedDistributedSampler composition
-- ExperimentConfig is pure data container (dataclass, no validation); ExperimentRegistry validates the ensemble at __post_init__
-- Positional alignment for source channels across experiments (names can differ, count must match)
-- Excluded stale applications/dynacrl (typo) from uv workspace
-- Explicit iohub/pyyaml deps in dynaclr even though transitive (direct imports require explicit declaration)
-- Border clamping retains all cells within image bounds; only cells with centroid completely outside image are excluded
-- Lineage reconstruction chases parent_track_id to root ancestor; missing parents fall back to self
-- Position objects stored directly in DataFrame column for downstream data loading
-- Global track ID format: {exp_name}_{fov_name}_{track_id} for cross-experiment uniqueness
-- Anchor validity uses lineage_id for same-track and daughter-track positive matching -- simple set lookup
-- tau=0 skipped to prevent anchor from being its own positive
-- valid_anchors is reset_index(drop=True) for clean downstream indexing
-- Properties (experiment_groups, condition_groups) use groupby on tracks rather than caching
-- FlexibleBatchSampler uses numpy RNG (default_rng) over torch Generator for weighted choice ergonomics
-- Default experiment weights proportional to group size, not uniform
-- DDP interleaved batch slicing: all ranks generate same full batch list, each takes rank::num_replicas
-- Condition balancing: last condition gets remainder to prevent rounding-induced batch size mismatch
-- Temporal enrichment draws focal+global directly from experiment pool (not post-filter on pre-sampled primary)
-- Conditional precomputation: groupby only runs for enabled features (avoids KeyError on missing columns)
-- temporal_global_fraction=0.0 yields all-focal batches; 1.0 yields no enrichment effect
-- ChannelDropout clones input tensor (non-destructive) for pipeline safety
-- Per-sample independent dropout via torch.rand mask on batch dimension
-- Exponential decay tau sampling uses normalized offset for consistent behavior across tau ranges
-- Lineage-timepoint pre-built lookup indexed by (experiment, lineage_id) -> {t: [row_indices]} for O(1) positive candidate retrieval
-- Fallback tau strategy: sample_tau first, then linear scan of full tau range if no candidate at sampled offset
-- Dataset uses numpy.random.default_rng() without fixed seed; determinism delegated to external sampler
-- Generic channel names (ch_0, ch_1) for DataModule transform pipeline -- experiments have different names but same count
-- Norm_meta all-None coalescing in on_after_batch_transfer to prevent collate_meta_tensor crash
-- Separate ExperimentRegistry instances for train/val splits, each building own MultiExperimentIndex
-- ChannelDropout applied AFTER normalizations+augmentations+final_crop in on_after_batch_transfer
-- Integration test uses SimpleEncoder (fc+proj) for fast CPU testing
-- YAML config uses generic ch_0/ch_1 keys for normalizations/augmentations
-- use_distributed_sampler: false in config since FlexibleBatchSampler handles DDP
+- Pure nn.Module in viscy-models: No Lightning/Hydra coupling
+- Function-based grouping: unet/, vae/, contrastive/ with shared components/
+- viscy-models independent of viscy-transforms (torch/timm/monai/numpy only)
+- 14+ shared components in unext2.py need extraction to components/
+- Mutable defaults must be fixed to tuples during migration
+- State dict key compatibility is non-negotiable for checkpoint loading
+- Followed viscy-transforms pyproject.toml pattern exactly for consistency
+- No optional-dependencies for viscy-models (no notebook extras needed)
+- Dev dependency group includes only test (no jupyter for models package)
+- Preserved register_modules/add_module pattern verbatim for state dict key compatibility
+- Fixed only docstring formatting for ruff D-series compliance, no logic changes to legacy code
+- Intra-components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
+- _get_convnext_stage private but importable; excluded from __all__
+- Preserved exact list mutation pattern (decoder_channels = num_channels alias) in UNeXt2 for compatibility
+- Marked deconv decoder test as xfail due to pre-existing channel mismatch bug in original code
+- Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
+- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical components.heads location
+- Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
+- Used encoder.num_features instead of encoder.head.fc.in_features for timm backbone-agnostic projection dim (fixes ResNet50 bug)
+- Added pretrained parameter (default False) to contrastive encoders for pure nn.Module semantics
+- VaeEncoder pretrained default changed to False for pure nn.Module semantics
+- VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
+- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not components
+- SimpleNamespace return type preserved for VAE backward compatibility
+- Convert user-provided num_filters tuple to list internally for list concatenation compatibility
+- up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters
+- Used --cov=src/ for cross-platform CI coverage (avoids hyphen-to-underscore conversion on Windows)
+- State dict tests use structural assertions (count + prefixes + sentinels) not frozen key lists
+
+### Pending Todos
+
+- Fix deconv decoder channel mismatch in UNeXt2UpStage (pre-existing bug, xfailed test documents it)
 
 ### Blockers/Concerns
 
-- None. Milestone v2.2 Composable Sampling Framework complete.
+None currently.
+
+## v1.0 Completion Summary
+
+All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 
 ## Session Continuity
 
-Last session: 2026-02-24
-Stopped at: Completed 25-01-PLAN.md (Integration). Phase 25 complete. Milestone v2.2 complete.
+Last session: 2026-02-13
+Stopped at: Completed 10-01-PLAN.md (Public API & CI -- Phase 10 complete -- v1.1 MILESTONE COMPLETE)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Updated for v2.2 Composable Sampling Framework roadmap: 2026-02-21*
-*Updated for 20-01 completion: 2026-02-21*
-*Updated for 20-02 completion: 2026-02-22*
-*Updated for 21-01 completion: 2026-02-22*
-*Updated for 21-02 completion: 2026-02-22*
-*Updated for 22-01 completion: 2026-02-22*
-*Updated for 22-02 completion: 2026-02-22*
-*Updated for 23-02 completion: 2026-02-23*
-*Updated for 23-01 completion: 2026-02-23*
-*Updated for 24-01 completion: 2026-02-23*
-*Updated for 24-02 completion: 2026-02-23*
-*Updated for 25-01 completion: 2026-02-24*
+*Last updated: 2026-02-13 (10-01 summary added, Phase 10 complete, v1.1 milestone complete)*

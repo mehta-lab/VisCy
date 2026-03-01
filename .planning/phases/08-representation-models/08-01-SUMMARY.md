@@ -9,7 +9,7 @@ requires:
   - phase: 06-package-scaffold
     provides: viscy-models package structure and contrastive/ directory
   - phase: 07-core-unet-models
-    provides: _components/stems.py with StemDepthtoChannels
+    provides: components/stems.py with StemDepthtoChannels
 provides:
   - ContrastiveEncoder with convnext_tiny/convnextv2_tiny/resnet50 timm backbones
   - ResNet3dEncoder with MONAI ResNetFeatures backends

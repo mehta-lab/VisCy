@@ -3,7 +3,7 @@
 import torch
 import torch.nn as nn
 
-from viscy_models._components.conv_block_3d import ConvBlock3D
+from viscy_models.components.conv_block_3d import ConvBlock3D
 
 __all__ = ["Unet25d"]
 
@@ -69,9 +69,7 @@ class Unet25d(nn.Module):
         self.num_blocks = num_blocks
         self.kernel_size = xy_kernel_size
         self.residual = residual
-        assert dropout >= 0 and dropout <= 0.5, (
-            f"Dropout {dropout} not in allowed range: [0, 0.5]"
-        )
+        assert dropout >= 0 and dropout <= 0.5, f"Dropout {dropout} not in allowed range: [0, 0.5]"
         self.dropout = dropout
         self.task = task
         self.debug_mode = False
@@ -87,8 +85,7 @@ class Unet25d(nn.Module):
         # ----- Standardize Filter Sequence ----- #
         if len(num_filters) != 0:
             assert len(num_filters) == num_blocks + 1, (
-                "Length of num_filters must be equal to num_"
-                "blocks + 1 (number of convolutional blocks per path)."
+                "Length of num_filters must be equal to num_blocks + 1 (number of convolutional blocks per path)."
             )
             self.num_filters = list(num_filters)
         else:
@@ -104,14 +101,10 @@ class Unet25d(nn.Module):
         self.down_list = []
         if down_mode == "maxpool":
             for i in range(num_blocks):
-                self.down_list.append(
-                    nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
-                )
+                self.down_list.append(nn.MaxPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2)))
         elif down_mode == "avgpool":
             for i in range(num_blocks):
-                self.down_list.append(
-                    nn.AvgPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2))
-                )
+                self.down_list.append(nn.AvgPool3d(kernel_size=(1, 2, 2), stride=(1, 2, 2)))
         elif down_mode == "conv":
             raise NotImplementedError("Not yet implemented!")
             # TODO: implement.
@@ -120,9 +113,7 @@ class Unet25d(nn.Module):
         # ----- Upsampling steps ----- #
         self.up_list = []
         for i in range(num_blocks):
-            self.up_list.append(
-                nn.Upsample(scale_factor=(1, 2, 2), mode=up_mode, align_corners=False)
-            )
+            self.up_list.append(nn.Upsample(scale_factor=(1, 2, 2), mode=up_mode, align_corners=False))
 
         # ----- Convolutional blocks ----- #
         self.down_conv_blocks = []

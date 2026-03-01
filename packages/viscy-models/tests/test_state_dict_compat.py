@@ -10,17 +10,15 @@ This guards requirement COMPAT-01: state dict keys must match original
 monolithic counterparts exactly for backward-compatible checkpoint loading.
 """
 
-import pytest
-
 from viscy_models import (
     BetaVae25D,
     BetaVaeMonai,
     ContrastiveEncoder,
     FullyConvolutionalMAE,
     ResNet3dEncoder,
-    UNeXt2,
     Unet2d,
     Unet25d,
+    UNeXt2,
 )
 
 
