@@ -10,13 +10,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from src.alignment import (
+from dynaclr.evaluation.pseudotime.src.alignment import (
     align_tracks,
     assign_t_perturb,
     filter_tracks,
     identify_lineages,
 )
-from src.metrics import (
+from dynaclr.evaluation.pseudotime.src.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -24,13 +24,13 @@ from src.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from src.plotting import (
+from dynaclr.evaluation.pseudotime.src.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from src.signals import (
+from dynaclr.evaluation.pseudotime.src.signals import (
     extract_annotation_signal,
     extract_embedding_distance,
     extract_prediction_signal,

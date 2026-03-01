@@ -49,8 +49,8 @@ def test_all_exports_importable(name: str):
 
 
 def test_all_count():
-    """__all__ contains exactly 46 names (detect accidental add/remove)."""
-    assert len(viscy_data.__all__) == 46, f"Expected 46 names in __all__, got {len(viscy_data.__all__)}"
+    """__all__ contains exactly 47 names (detect accidental add/remove)."""
+    assert len(viscy_data.__all__) == 47, f"Expected 47 names in __all__, got {len(viscy_data.__all__)}"
 
 
 # ---------------------------------------------------------------------------

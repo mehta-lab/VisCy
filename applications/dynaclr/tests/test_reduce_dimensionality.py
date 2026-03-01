@@ -3,13 +3,13 @@
 import anndata as ad
 import numpy as np
 import pytest
-from dimensionality_reduction.config import (
+from dynaclr.evaluation.dimensionality_reduction.config import (
     DimensionalityReductionConfig,
     PCAConfig,
     PHATEConfig,
     UMAPConfig,
 )
-from dimensionality_reduction.reduce_dimensionality import (
+from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import (
     _run_pca,
     _run_phate,
     _run_umap,
@@ -26,6 +26,7 @@ def synthetic_zarr(tmp_path):
     X = rng.standard_normal((n_samples, n_features)).astype(np.float32)
     adata = ad.AnnData(X=X)
     zarr_path = tmp_path / "embeddings.zarr"
+    ad.settings.allow_write_nullable_strings = True
     adata.write_zarr(zarr_path)
     return str(zarr_path)
 
@@ -151,7 +152,7 @@ class TestRunPHATE:
 class TestCLIIntegration:
     def test_pca_end_to_end(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
-        from dimensionality_reduction.reduce_dimensionality import main
+        from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         output_path = str(tmp_path / "output.zarr")
         config_content = f"input_path: {synthetic_zarr}\noutput_path: {output_path}\npca:\n  n_components: 10\n"
@@ -168,7 +169,7 @@ class TestCLIIntegration:
 
     def test_overwrite_keys_protection(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
-        from dimensionality_reduction.reduce_dimensionality import main
+        from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         # Pre-populate X_pca
         adata = ad.read_zarr(synthetic_zarr)
@@ -186,7 +187,7 @@ class TestCLIIntegration:
 
     def test_overwrite_keys_allowed(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
-        from dimensionality_reduction.reduce_dimensionality import main
+        from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         # Pre-populate X_pca
         adata = ad.read_zarr(synthetic_zarr)
@@ -206,7 +207,7 @@ class TestCLIIntegration:
 
     def test_writes_back_to_input_when_no_output(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
-        from dimensionality_reduction.reduce_dimensionality import main
+        from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         config_content = f"input_path: {synthetic_zarr}\npca:\n  n_components: 5\n"
         config_path = tmp_path / "test_config.yaml"
