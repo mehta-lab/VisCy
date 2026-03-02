@@ -9,6 +9,7 @@ Usage
 dynaclr reduce-dimensionality -c reduce_config.yaml
 """
 
+import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
@@ -18,6 +19,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from viscy_utils.cli_utils import format_markdown_table, load_config
+from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
 from .config import (
     DimensionalityReductionConfig,
@@ -121,8 +123,11 @@ def main(config: Path):
         adata.obsm[key] = embedding
 
     output_path = cfg.output_path or cfg.input_path
-    click.echo(f"Writing results to {output_path}...")
-    adata.write_zarr(output_path)
+    if output_path != cfg.input_path:
+        click.echo(f"Copying {cfg.input_path} -> {output_path}...")
+        shutil.copytree(cfg.input_path, output_path, dirs_exist_ok=True)
+    click.echo(f"Saving results to {output_path}...")
+    append_to_anndata_zarr(output_path, obsm=results)
 
     # Print summary
     summary_data = []
