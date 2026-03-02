@@ -64,6 +64,8 @@ class EmbeddingSnapshotCallback(Callback):
         pca_kwargs: dict[str, Any] | None = None,
     ):
         super().__init__()
+        if every_n_epochs < 1:
+            raise ValueError(f"every_n_epochs must be >= 1, got {every_n_epochs}")
         self.output_dir = Path(output_dir)
         self.every_n_epochs = every_n_epochs
         self.store_images = store_images
