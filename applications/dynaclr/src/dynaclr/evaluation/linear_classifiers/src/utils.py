@@ -57,7 +57,7 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
     "organelle": {
         "keyword": "GFP",
         "yaml_alias": "fluor",
-        "normalization_class": "viscy.transforms.ScaleIntensityRangePercentilesd",
+        "normalization_class": "viscy_transforms.ScaleIntensityRangePercentilesd",
         "normalization_args": {
             "lower": 50,
             "upper": 99,
@@ -70,7 +70,7 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
     "phase": {
         "keyword": "Phase",
         "yaml_alias": "Ph",
-        "normalization_class": "viscy.transforms.NormalizeSampled",
+        "normalization_class": "viscy_transforms.NormalizeSampled",
         "normalization_args": {
             "level": "fov_statistics",
             "subtrahend": "mean",
@@ -82,7 +82,7 @@ CHANNEL_DEFAULTS: dict[str, dict] = {
     "sensor": {
         "keyword": "mCherry",
         "yaml_alias": "fluor",
-        "normalization_class": "viscy.transforms.ScaleIntensityRangePercentilesd",
+        "normalization_class": "viscy_transforms.ScaleIntensityRangePercentilesd",
         "normalization_args": {
             "lower": 50,
             "upper": 99,
@@ -393,7 +393,7 @@ trainer:
   num_nodes: 1
   precision: 32-true
   callbacks:
-    - class_path: viscy.representation.embedding_writer.EmbeddingWriter
+    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
       init_args:
         output_path: "{output_zarr}"
   logger:
@@ -401,10 +401,10 @@ trainer:
     name: "{logger_name}"
   inference_mode: true
 model:
-  class_path: viscy.representation.engine.ContrastiveModule
+  class_path: dynaclr.engine.ContrastiveModule
   init_args:
     encoder:
-      class_path: viscy.representation.contrastive.ContrastiveEncoder
+      class_path: viscy_models.contrastive.encoder.ContrastiveEncoder
       init_args:
         backbone: convnext_tiny
         in_channels: 1
@@ -416,7 +416,7 @@ model:
         drop_path_rate: 0.0
     example_input_array_shape: [1, 1, {depth}, {patch}, {patch}]
 data:
-  class_path: viscy.data.triplet.TripletDataModule
+  class_path: viscy_data.triplet.TripletDataModule
   init_args:
     data_path: {data_path}
     tracks_path: {tracks_path}
@@ -454,16 +454,21 @@ def generate_slurm_script(
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu
-#SBATCH --cpus-per-task=32
+#SBATCH --cpus-per-task=16
 #SBATCH --mem-per-cpu=8G
 #SBATCH --time=0-02:00:00
 #SBATCH --output={slurm_out}
 
-module load anaconda/latest
-conda activate viscy
+export PYTHONNOUSERSITE=1
+
+WORKSPACE_DIR=/hpc/mydata/eduardo.hirata/repos/viscy
+
+scontrol show job $SLURM_JOB_ID
 
 cat {config_file}
-srun viscy predict -c {config_file}
+
+uv run --project "$WORKSPACE_DIR" --package dynaclr \\
+    viscy predict -c {config_file}
 """
 
 
@@ -485,7 +490,7 @@ def resolve_task_channels(
     annotation_csvs : list[Path] or None
         One or more annotation CSVs. When a single CSV is given, tasks are
         auto-detected from its columns and paired with all channels. When
-        multiple CSVs are given, the task set is the intersection across
+        multiple CSVs are given, the task set is the union across
         all CSVs.
 
     Returns
@@ -502,11 +507,11 @@ def resolve_task_channels(
     all_channels = list(CHANNELS)
 
     task_sets = [set(get_available_tasks(csv)) for csv in annotation_csvs]
-    common_tasks = task_sets[0]
-    for ts in task_sets[1:]:
-        common_tasks &= ts
+    all_tasks = set()
+    for ts in task_sets:
+        all_tasks |= ts
 
-    return {task: all_channels for task in sorted(common_tasks)}
+    return {task: all_channels for task in sorted(all_tasks)}
 
 
 def find_predictions_dir(

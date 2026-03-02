@@ -227,7 +227,22 @@ for organelle, res in organelle_results.items():
     track_timing["organelle"] = organelle
     all_track_timing.append(track_timing)
 
-track_timing_df = pd.concat(all_track_timing, ignore_index=True)
+if all_track_timing:
+    track_timing_df = pd.concat(all_track_timing, ignore_index=True)
+else:
+    track_timing_df = pd.DataFrame(
+        columns=[
+            "fov_name",
+            "track_id",
+            "onset_minutes",
+            "total_positive_minutes",
+            "span_minutes",
+            "n_positive_frames",
+            "n_total_frames",
+            "organelle",
+        ]
+    )
+    print("WARNING: No tracks with positive signal detected across any organelle.")
 
 # %%
 # ===========================================================================

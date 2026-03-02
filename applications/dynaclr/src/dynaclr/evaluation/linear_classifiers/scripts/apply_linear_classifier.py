@@ -6,7 +6,9 @@ Usage:
 
 from pathlib import Path
 
+import anndata as ad
 import click
+import zarr
 from anndata import read_zarr
 from pydantic import ValidationError
 
@@ -18,6 +20,39 @@ from viscy_utils.evaluation.linear_classifier import (
 from viscy_utils.evaluation.linear_classifier_config import (
     LinearClassifierInferenceConfig,
 )
+
+
+def _patch_predictions_zarr(adata, zarr_path: Path, task_keys: list[str]) -> None:
+    """Write only prediction-related data into an existing zarr store.
+
+    Uses ``anndata.io.write_elem`` to write obs, obsm, and uns entries
+    with the correct anndata encoding, then reconsolidates metadata.
+
+    Parameters
+    ----------
+    adata : anndata.AnnData
+        AnnData with predictions from ``predict_with_classifier``.
+    zarr_path : Path
+        Path to the existing zarr store.
+    task_keys : list[str]
+        Task keys that were predicted (used to identify which keys to write).
+    """
+    store = zarr.open(str(zarr_path), mode="a", use_consolidated=False)
+
+    ad.settings.allow_write_nullable_strings = True
+
+    del store["obs"]
+    ad.io.write_elem(store, "obs", adata.obs)
+
+    for task_key in task_keys:
+        proba_key = f"predicted_{task_key}_proba"
+        if proba_key in adata.obsm:
+            ad.io.write_elem(store, f"obsm/{proba_key}", adata.obsm[proba_key])
+
+    del store["uns"]
+    ad.io.write_elem(store, "uns", dict(adata.uns))
+
+    zarr.consolidate_metadata(str(zarr_path))
 
 
 def format_predictions_markdown(adata, task: str) -> str:
@@ -119,6 +154,7 @@ def main(config: Path):
         adata = read_zarr(inference_config.embeddings_path)
         click.echo(f" Loaded embeddings: {adata.shape}")
 
+        task_keys = []
         for i, spec in enumerate(inference_config.models, 1):
             click.echo(f"\n--- Model {i}/{len(inference_config.models)}: {spec.model_name} ---")
 
@@ -132,6 +168,7 @@ def main(config: Path):
             task = loaded_config["task"]
             marker = loaded_config.get("marker")
             task_key = f"{task}_{marker}" if marker else task
+            task_keys.append(task_key)
 
             if spec.include_wells:
                 click.echo(f"  Well filter: {spec.include_wells}")
@@ -146,10 +183,8 @@ def main(config: Path):
 
             click.echo(format_predictions_markdown(adata, task_key))
 
-        write_path.parent.mkdir(parents=True, exist_ok=True)
-
         click.echo(f"\nSaving predictions to: {write_path}")
-        adata.write_zarr(write_path)
+        _patch_predictions_zarr(adata, write_path, task_keys)
         click.echo(" Saved predictions")
 
         click.echo("\n Inference complete!")

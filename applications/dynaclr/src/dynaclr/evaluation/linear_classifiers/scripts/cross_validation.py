@@ -13,9 +13,13 @@ Usage::
 from __future__ import annotations
 
 import argparse
+import contextlib
+import io
 import json
 import logging
+import os
 import warnings
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any
 
@@ -151,6 +155,7 @@ def _train_and_evaluate(
     test_dataset_name: str,
     seed: int,
     excluded_dataset: str | None = None,
+    quiet: bool = False,
 ) -> dict[str, Any]:
     """Train on train_datasets and evaluate on test_dataset.
 
@@ -174,6 +179,8 @@ def _train_and_evaluate(
         Random seed for this run.
     excluded_dataset : str or None
         Name of the excluded dataset (None for baseline).
+    quiet : bool
+        If True, suppress stdout from underlying loaders (used in parallel mode).
 
     Returns
     -------
@@ -208,7 +215,9 @@ def _train_and_evaluate(
     split_train_data = config.get("split_train_data", 0.8)
 
     try:
-        combined_adata = load_and_combine_datasets(train_datasets, task)
+        stdout_ctx = contextlib.redirect_stdout(io.StringIO()) if quiet else contextlib.nullcontext()
+        with stdout_ctx:
+            combined_adata = load_and_combine_datasets(train_datasets, task)
 
         classifier_params = {
             "max_iter": config.get("max_iter", 1000),
@@ -373,6 +382,11 @@ def _compute_temporal_metrics(
     )
 
 
+def _run_fold(args: tuple) -> dict[str, Any]:
+    """Module-level wrapper for picklability with ProcessPoolExecutor."""
+    return _train_and_evaluate(*args)
+
+
 # ---------------------------------------------------------------------------
 # Main rotating CV loop
 # ---------------------------------------------------------------------------
@@ -390,6 +404,7 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
         - ranking_metric: str (default "auroc")
         - n_bootstrap: int (default 5)
         - min_class_samples: int or None
+        - n_workers: int or None (default None = all CPUs; 1 = sequential)
         - use_scaling, n_pca_components, max_iter, class_weight,
           solver, split_train_data, random_seed
 
@@ -403,6 +418,7 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     ranking_metric = config.get("ranking_metric", "auroc")
     n_bootstrap = config.get("n_bootstrap", 5)
     min_class_samples = config.get("min_class_samples")
+    n_workers = config.get("n_workers")
 
     tc = _resolve_task_channels_from_datasets(config)
     if not tc:
@@ -416,6 +432,8 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     base_seed = config.get("random_seed", 42)
     seeds = [base_seed + i for i in range(n_bootstrap)]
 
+    # --- Phase 1: Build job list ---
+    jobs: list[tuple] = []
     all_rows: list[dict[str, Any]] = []
 
     for model_label, model_spec in config["models"].items():
@@ -441,18 +459,7 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     # BASELINE: train on full training pool
                     print(f"    Baseline: {len(train_dicts)} datasets, {n_bootstrap} seeds")
                     for seed in seeds:
-                        row = _train_and_evaluate(
-                            config,
-                            model_label,
-                            task,
-                            channel,
-                            train_dicts,
-                            test_dict,
-                            test_name,
-                            seed,
-                            excluded_dataset=None,
-                        )
-                        all_rows.append(row)
+                        jobs.append((config, model_label, task, channel, train_dicts, test_dict, test_name, seed, None))
 
                     # Leave-one-out from training pool
                     for loo_idx, (loo_ds, _) in enumerate(train_pool):
@@ -479,19 +486,34 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
 
                         print(f"    Excluding {loo_name}: {len(remaining)} remaining, {n_bootstrap} seeds")
                         for seed in seeds:
-                            row = _train_and_evaluate(
-                                config,
-                                model_label,
-                                task,
-                                channel,
-                                remaining,
-                                test_dict,
-                                test_name,
-                                seed,
-                                excluded_dataset=loo_name,
+                            jobs.append(
+                                (config, model_label, task, channel, remaining, test_dict, test_name, seed, loo_name)
                             )
-                            all_rows.append(row)
 
+    # --- Phase 2: Dispatch jobs ---
+    parallel = n_workers != 1 and len(jobs) > 1
+    if n_workers is None:
+        n_workers = min(os.cpu_count(), 32)
+
+    if parallel:
+        print(f"\nDispatching {len(jobs)} folds across {n_workers} workers ...")
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            futures = {executor.submit(_run_fold, (*args, True)): i for i, args in enumerate(jobs)}
+            completed = 0
+            for future in as_completed(futures):
+                completed += 1
+                if completed % 10 == 0 or completed == len(jobs):
+                    print(f"  CV progress: {completed}/{len(jobs)} folds completed")
+                all_rows.append(future.result())
+    else:
+        if jobs:
+            print(f"\nRunning {len(jobs)} folds sequentially ...")
+        for i, args in enumerate(jobs):
+            all_rows.append(_train_and_evaluate(*args))
+            if (i + 1) % 10 == 0 or (i + 1) == len(jobs):
+                print(f"  CV progress: {i + 1}/{len(jobs)} folds completed")
+
+    # --- Phase 3: Collect results ---
     if not all_rows:
         return pd.DataFrame(), pd.DataFrame()
 
@@ -508,6 +530,19 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
         recommendations.to_csv(output_dir / "cv_recommended_subsets.csv", index=False)
 
     _print_markdown_summary(summary_df, ranking_metric)
+
+    if config.get("report", False):
+        from dynaclr.evaluation.linear_classifiers.src.report import generate_cv_report
+
+        config_summary = {
+            "use_scaling": config.get("use_scaling", True),
+            "n_pca_components": config.get("n_pca_components"),
+            "solver": config.get("solver", "liblinear"),
+            "class_weight": config.get("class_weight", "balanced"),
+            "max_iter": config.get("max_iter", 1000),
+            "split_train_data": config.get("split_train_data", 0.8),
+        }
+        generate_cv_report(output_dir, results_df, summary_df, config_summary, ranking_metric=ranking_metric)
 
     return results_df, summary_df
 
@@ -751,6 +786,9 @@ if __name__ == "__main__":
 
     config = load_config(args.config)
 
+    if args.report:
+        config["report"] = True
+
     output_dir = Path(config["output_dir"])
     print(f"Output: {output_dir}")
     for label, spec in config["models"].items():
@@ -758,22 +796,3 @@ if __name__ == "__main__":
         print(f"  {label}: {n_ds} datasets (all rotate as test)")
 
     results_df, summary_df = cross_validate(config)
-
-    if args.report and not results_df.empty:
-        from dynaclr.evaluation.linear_classifiers.src.report import generate_cv_report
-
-        config_summary = {
-            "use_scaling": config.get("use_scaling", True),
-            "n_pca_components": config.get("n_pca_components"),
-            "solver": config.get("solver", "liblinear"),
-            "class_weight": config.get("class_weight", "balanced"),
-            "max_iter": config.get("max_iter", 1000),
-            "split_train_data": config.get("split_train_data", 0.8),
-        }
-        generate_cv_report(
-            output_dir,
-            results_df,
-            summary_df,
-            config_summary,
-            ranking_metric=config.get("ranking_metric", "auroc"),
-        )
