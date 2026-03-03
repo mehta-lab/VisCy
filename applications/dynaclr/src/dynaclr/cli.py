@@ -56,7 +56,7 @@ def dynaclr():
 dynaclr.add_command(
     LazyCommand(
         name="train-linear-classifier",
-        import_path="dynaclr.evaluation.linear_classifiers.scripts.train_linear_classifier.main",
+        import_path="dynaclr.evaluation.linear_classifiers.train_linear_classifier.main",
         short_help="Train a linear classifier on cell embeddings",
     )
 )
@@ -64,7 +64,7 @@ dynaclr.add_command(
 dynaclr.add_command(
     LazyCommand(
         name="apply-linear-classifier",
-        import_path="dynaclr.evaluation.linear_classifiers.scripts.apply_linear_classifier.main",
+        import_path="dynaclr.evaluation.linear_classifiers.apply_linear_classifier.main",
         short_help="Apply a trained linear classifier to new embeddings",
     )
 )

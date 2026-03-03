@@ -12,8 +12,6 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import pytest
-import torch
 import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
@@ -116,9 +114,7 @@ def _create_experiment(
     n_ch = len(channel_names)
     rng = np.random.default_rng(42)
 
-    with open_ome_zarr(
-        zarr_path, layout="hcs", mode="w", channel_names=channel_names
-    ) as plate:
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
         for row, col in wells:
             pos = plate.create_position(row, col, "0")
             arr = pos.create_zeros(
@@ -143,9 +139,7 @@ def _create_experiment(
     )
 
 
-def _write_experiments_yaml(
-    tmp_path: Path, configs: list[ExperimentConfig]
-) -> Path:
+def _write_experiments_yaml(tmp_path: Path, configs: list[ExperimentConfig]) -> Path:
     """Write experiments YAML from a list of ExperimentConfig objects."""
     yaml_path = tmp_path / "experiments.yaml"
     data = {
@@ -332,7 +326,7 @@ def _resolve_class_path(class_path: str):
 
 def test_multi_experiment_config_class_paths_resolve():
     """All class_paths in multi_experiment_fit.yml resolve to importable classes."""
-    configs_dir = Path(__file__).parents[1] / "examples" / "configs"
+    configs_dir = Path(__file__).parents[1] / "configs" / "training"
     config_path = configs_dir / "multi_experiment_fit.yml"
     assert config_path.exists(), f"Config file not found: {config_path}"
 

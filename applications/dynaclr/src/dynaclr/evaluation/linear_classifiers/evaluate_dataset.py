@@ -21,7 +21,7 @@ import joblib
 import pandas as pd
 from sklearn.metrics import classification_report
 
-from dynaclr.evaluation.linear_classifiers.src.utils import (
+from dynaclr.evaluation.linear_classifiers.utils import (
     find_channel_zarrs,
     get_available_tasks,
     resolve_task_channels,
@@ -437,7 +437,7 @@ if __name__ == "__main__":
     train_results, eval_results = run_evaluation(config)
 
     if args.report:
-        from dynaclr.evaluation.linear_classifiers.src.report import generate_comparison_report
+        from dynaclr.evaluation.linear_classifiers.report import generate_comparison_report
 
         test_csv = Path(config["test_annotations_csv"])
         tc = resolve_task_channels(config.get("task_channels"), [test_csv])

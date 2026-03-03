@@ -11,7 +11,7 @@ from pathlib import Path
 
 from natsort import natsorted
 
-from dynaclr.evaluation.linear_classifiers.src.utils import (
+from dynaclr.evaluation.linear_classifiers.utils import (
     CHANNELS,
     build_registry,
     print_registry_summary,

@@ -10,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from dynaclr.evaluation.linear_classifiers.src.utils import (
+from dynaclr.evaluation.linear_classifiers.utils import (
     CHANNELS,
     TASKS,
     build_registry,

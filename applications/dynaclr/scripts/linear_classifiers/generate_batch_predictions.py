@@ -14,10 +14,9 @@ from pathlib import Path
 
 from iohub import open_ome_zarr
 
-from dynaclr.evaluation.linear_classifiers.src.utils import (
+from dynaclr.evaluation.linear_classifiers.utils import (
     FOCUS_PARAMS,
     MODEL_2D_BAG_TIMEAWARE,  # noqa: F401
-    MODEL_3D_BAG_TIMEAWARE,
     build_registry,
     extract_epoch,
     find_phenotyping_predictions_dir,
@@ -37,26 +36,31 @@ from dynaclr.evaluation.linear_classifiers.src.utils import (
 BASE_DIR = Path("/hpc/projects/intracellular_dashboard/organelle_dynamics")
 
 # Choose model template
-MODEL = MODEL_3D_BAG_TIMEAWARE
-# MODEL = MODEL_2D_BAG_TIMEAWARE
+# MODEL = MODEL_3D_BAG_TIMEAWARE
+MODEL = MODEL_2D_BAG_TIMEAWARE
 
-VERSION = "v1"
+VERSION = "v3"
 
 CHANNELS = ["phase", "organelle", "sensor"]
 
+# 3D model checkpoints
+# CHECKPOINTS = [
+#     "/hpc/projects/organelle_phenotyping/models/bag_of_channels/"
+#     "h2b_caax_tomm_sec61_g3bp1_sensor_phase/tb_logs/"
+#     "dynaclr3d_bag_channels_v1/version_2/checkpoints/"
+#     "epoch=40-step=44746.ckpt",
+# ]
+# 2D model checkpoints
 CHECKPOINTS = [
-    "/hpc/projects/organelle_phenotyping/models/bag_of_channels/"
-    "h2b_caax_tomm_sec61_g3bp1_sensor_phase/tb_logs/"
-    "dynaclr3d_bag_channels_v1/version_2/checkpoints/"
-    "epoch=40-step=44746.ckpt",
+    "/hpc/projects/organelle_phenotyping/models/SEC61_TOMM20_G3BP1_Sensor/time_interval/dynaclr_gfp_rfp_Ph/organelle_sensor_phase_maxproj_ver3_150epochs/saved_checkpoints/epoch=104-step=53760.ckpt",
 ]
 
 # Datasets to process. Set to [] to auto-discover from annotations_only.
 DATASETS = [
     "2025_01_24_A549_G3BP1_DENV",
-    "2024_11_07_A549_SEC61_DENV",
-    "2025_01_28_A549_G3BP1_ZIKV_DENV",
-    "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV",
+    # "2024_11_07_A549_SEC61_DENV",
+    # "2025_01_28_A549_G3BP1_ZIKV_DENV",
+    # "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV",
 ]
 
 # Per-dataset channel keyword overrides.

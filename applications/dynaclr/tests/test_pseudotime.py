@@ -10,13 +10,13 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from dynaclr.evaluation.pseudotime.src.alignment import (
+from dynaclr.evaluation.pseudotime.alignment import (
     align_tracks,
     assign_t_perturb,
     filter_tracks,
     identify_lineages,
 )
-from dynaclr.evaluation.pseudotime.src.metrics import (
+from dynaclr.evaluation.pseudotime.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -24,18 +24,17 @@ from dynaclr.evaluation.pseudotime.src.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from dynaclr.evaluation.pseudotime.src.plotting import (
+from dynaclr.evaluation.pseudotime.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from dynaclr.evaluation.pseudotime.src.signals import (
+from dynaclr.evaluation.pseudotime.signals import (
     extract_annotation_signal,
     extract_embedding_distance,
     extract_prediction_signal,
 )
-
 
 # ── Shared Fixtures ─────────────────────────────────────────────────
 
@@ -95,7 +94,7 @@ def synthetic_adata(tracking_df):
     X = rng.standard_normal((n, 16)).astype(np.float32)
 
     obs = tracking_df[["fov_name", "track_id", "t"]].copy().reset_index(drop=True)
-    predicted = tracking_df["organelle_state"].values.copy()
+    predicted = tracking_df["organelle_state"].to_numpy().copy()
     obs["predicted_organelle_state"] = predicted
 
     adata = ad.AnnData(X=X, obs=obs)
@@ -117,9 +116,7 @@ def aligned_df(tracking_df):
     infected.loc[infected["fov_name"] == "C/2/000", "t_perturb"] = 5
     infected.loc[infected["fov_name"] == "C/2/001", "t_perturb"] = 7
     infected["t_perturb"] = infected["t_perturb"].astype(int)
-    infected["t_relative_minutes"] = (
-        (infected["t"] - infected["t_perturb"]) * 30.0
-    )
+    infected["t_relative_minutes"] = (infected["t"] - infected["t_perturb"]) * 30.0
     return infected.reset_index(drop=True)
 
 
@@ -154,18 +151,14 @@ class TestAlignment:
 
     def test_assign_t_perturb_lineage_aware(self, tracking_df):
         fov_df = tracking_df[tracking_df["fov_name"] == "C/2/000"].copy()
-        result = assign_t_perturb(
-            fov_df, frame_interval_minutes=30.0, min_track_timepoints=1
-        )
+        result = assign_t_perturb(fov_df, frame_interval_minutes=30.0, min_track_timepoints=1)
         t_perturbs = result.groupby("track_id")["t_perturb"].first()
-        assert t_perturbs.nunique() == 1
+        assert (t_perturbs == t_perturbs.iloc[0]).all()
         assert t_perturbs.iloc[0] == 5
 
     def test_assign_t_perturb_orphan(self, tracking_df):
         fov_df = tracking_df[tracking_df["fov_name"] == "C/2/001"].copy()
-        result = assign_t_perturb(
-            fov_df, frame_interval_minutes=30.0, min_track_timepoints=1
-        )
+        result = assign_t_perturb(fov_df, frame_interval_minutes=30.0, min_track_timepoints=1)
         assert result["t_perturb"].iloc[0] == 7
 
     def test_align_tracks_convenience(self, tracking_df):
@@ -191,9 +184,7 @@ class TestSignals:
         assert (result.loc[~remodel, "signal"] == 0.0).all()
 
     def test_prediction_signal_binary(self, synthetic_adata, aligned_df):
-        result = extract_prediction_signal(
-            synthetic_adata, aligned_df, task="organelle_state"
-        )
+        result = extract_prediction_signal(synthetic_adata, aligned_df, task="organelle_state")
         assert "signal" in result.columns
         remodel = aligned_df["organelle_state"] == "remodel"
         assert (result.loc[remodel, "signal"] == 1.0).all()
@@ -243,9 +234,7 @@ class TestMetrics:
     def test_aggregate_population_fraction(self, aligned_df):
         df = extract_annotation_signal(aligned_df)
         time_bins = np.arange(-180, 181, 30)
-        pop = aggregate_population(
-            df, time_bins, signal_type="fraction", min_cells_per_bin=1
-        )
+        pop = aggregate_population(df, time_bins, signal_type="fraction", min_cells_per_bin=1)
         assert "fraction" in pop.columns
         assert "ci_lower" in pop.columns
         assert "ci_upper" in pop.columns
@@ -258,15 +247,11 @@ class TestMetrics:
         df = pd.DataFrame(
             {
                 "t_relative_minutes": np.linspace(-300, 300, n),
-                "signal": np.concatenate(
-                    [rng.normal(0.1, 0.05, 50), rng.normal(0.5, 0.1, 50)]
-                ),
+                "signal": np.concatenate([rng.normal(0.1, 0.05, 50), rng.normal(0.5, 0.1, 50)]),
             }
         )
         time_bins = np.arange(-300, 301, 60)
-        pop = aggregate_population(
-            df, time_bins, signal_type="continuous", min_cells_per_bin=1
-        )
+        pop = aggregate_population(df, time_bins, signal_type="continuous", min_cells_per_bin=1)
         assert "mean" in pop.columns
         assert "median" in pop.columns
         assert "q25" in pop.columns
@@ -283,10 +268,7 @@ class TestMetrics:
         assert onset == 120
 
     def test_find_onset_time_not_detected(self):
-        rows = [
-            {"time_minutes": t, "fraction": 0.0, "n_cells": 20}
-            for t in range(-600, 901, 30)
-        ]
+        rows = [{"time_minutes": t, "fraction": 0.0, "n_cells": 20} for t in range(-600, 901, 30)]
         pop_df = pd.DataFrame(rows)
         onset, threshold, bl_mean, bl_std = find_onset_time(pop_df)
         assert onset is None
@@ -365,9 +347,7 @@ class TestPlotting:
     def test_plot_response_curves_saves_files(self, aligned_df, tmp_path):
         df = extract_annotation_signal(aligned_df)
         time_bins = np.arange(-180, 181, 30)
-        pop = aggregate_population(
-            df, time_bins, signal_type="fraction", min_cells_per_bin=1
-        )
+        pop = aggregate_population(df, time_bins, signal_type="fraction", min_cells_per_bin=1)
         curves = {"SEC61": pop}
         configs = {"SEC61": {"label": "SEC61", "color": "blue"}}
         fig = plot_response_curves(curves, configs, tmp_path)

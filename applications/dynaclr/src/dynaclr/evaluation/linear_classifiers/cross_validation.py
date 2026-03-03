@@ -28,7 +28,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, f1_score, roc_auc_score
 
-from dynaclr.evaluation.linear_classifiers.src.utils import (
+from dynaclr.evaluation.linear_classifiers.utils import (
     find_channel_zarrs,
     get_available_tasks,
     resolve_task_channels,
@@ -532,7 +532,7 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     _print_markdown_summary(summary_df, ranking_metric)
 
     if config.get("report", False):
-        from dynaclr.evaluation.linear_classifiers.src.report import generate_cv_report
+        from dynaclr.evaluation.linear_classifiers.report import generate_cv_report
 
         config_summary = {
             "use_scaling": config.get("use_scaling", True),

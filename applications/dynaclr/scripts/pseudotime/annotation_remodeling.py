@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from dynaclr.evaluation.pseudotime.src.alignment import align_tracks
-from dynaclr.evaluation.pseudotime.src.metrics import (
+from dynaclr.evaluation.pseudotime.alignment import align_tracks
+from dynaclr.evaluation.pseudotime.metrics import (
     aggregate_population,
     compute_track_timing,
     find_half_max_time,
@@ -24,13 +24,13 @@ from dynaclr.evaluation.pseudotime.src.metrics import (
     find_peak_metrics,
     run_statistical_tests,
 )
-from dynaclr.evaluation.pseudotime.src.plotting import (
+from dynaclr.evaluation.pseudotime.plotting import (
     plot_cell_heatmap,
     plot_onset_comparison,
     plot_response_curves,
     plot_timing_distributions,
 )
-from dynaclr.evaluation.pseudotime.src.signals import (
+from dynaclr.evaluation.pseudotime.signals import (
     extract_annotation_signal,
 )
 
