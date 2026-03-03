@@ -19,7 +19,7 @@ from torch import Tensor, nn
 
 from dynaclr.engine import ContrastiveModule
 from dynaclr.experiment import ExperimentConfig
-from dynaclr.loss import NTXentHCL
+from viscy_models.contrastive.loss import NTXentHCL
 
 # ---------------------------------------------------------------------------
 # Constants

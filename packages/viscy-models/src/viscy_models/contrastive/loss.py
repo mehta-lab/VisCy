@@ -67,9 +67,7 @@ class NTXentHCL(NTXentLoss):
 
             # Build per-anchor negative mask: n_per_p[i, j] = 1 if neg j
             # belongs to anchor i
-            n_per_p = c_f.to_dtype(
-                a2.unsqueeze(0) == a1.unsqueeze(1), dtype=dtype
-            )
+            n_per_p = c_f.to_dtype(a2.unsqueeze(0) == a1.unsqueeze(1), dtype=dtype)
 
             # HCL reweighting: multiply each negative by exp(beta * sim)
             # neg_pairs are raw similarities (before /temperature)
@@ -97,9 +95,7 @@ class NTXentHCL(NTXentLoss):
             weighted_neg = hcl_weights * torch.exp(neg_pairs_masked - max_val)
             denominator = torch.sum(weighted_neg, dim=1) + numerator
 
-            log_exp = torch.log(
-                (numerator / denominator) + c_f.small_val(dtype)
-            )
+            log_exp = torch.log((numerator / denominator) + c_f.small_val(dtype))
             return {
                 "loss": {
                     "losses": -log_exp,

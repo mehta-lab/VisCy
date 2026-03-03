@@ -5,7 +5,7 @@ import torch
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import nn
 
-from dynaclr.loss import NTXentHCL
+from viscy_models.contrastive.loss import NTXentHCL
 
 
 def _make_embeddings_and_labels(
@@ -52,8 +52,7 @@ class TestNTXentHCLBetaZero:
         loss_hcl = hcl(embeddings, labels)
 
         assert torch.allclose(loss_hcl, loss_standard, atol=1e-6), (
-            f"beta=0.0 HCL loss ({loss_hcl.item():.8f}) != "
-            f"standard NTXent loss ({loss_standard.item():.8f})"
+            f"beta=0.0 HCL loss ({loss_hcl.item():.8f}) != standard NTXent loss ({loss_standard.item():.8f})"
         )
 
 
@@ -70,8 +69,7 @@ class TestNTXentHCLBetaPositive:
         loss_pos = hcl_pos(embeddings, labels)
 
         assert not torch.allclose(loss_zero, loss_pos, atol=1e-6), (
-            f"beta=0.5 loss ({loss_pos.item():.8f}) should differ from "
-            f"beta=0.0 loss ({loss_zero.item():.8f})"
+            f"beta=0.5 loss ({loss_pos.item():.8f}) should differ from beta=0.0 loss ({loss_zero.item():.8f})"
         )
 
     def test_ntxent_hcl_hard_negatives_increase_loss(self):
@@ -168,9 +166,7 @@ class TestNTXentHCLEdgeCases:
     def test_ntxent_hcl_large_batch(self):
         """128 pairs should complete without numerical issues."""
         hcl = NTXentHCL(temperature=0.07, beta=0.5)
-        embeddings, labels = _make_embeddings_and_labels(
-            batch_size=128, embed_dim=128
-        )
+        embeddings, labels = _make_embeddings_and_labels(batch_size=128, embed_dim=128)
         loss = hcl(embeddings, labels)
 
         assert not torch.isnan(loss), "Loss should not be NaN for large batch"
@@ -192,14 +188,11 @@ class TestNTXentHCLCUDA:
         standard = NTXentLoss(temperature=temperature).cuda()
         hcl = NTXentHCL(temperature=temperature, beta=0.0).cuda()
 
-        embeddings, labels = _make_embeddings_and_labels(
-            batch_size=16, embed_dim=128, device="cuda"
-        )
+        embeddings, labels = _make_embeddings_and_labels(batch_size=16, embed_dim=128, device="cuda")
 
         loss_standard = standard(embeddings, labels)
         loss_hcl = hcl(embeddings, labels)
 
         assert torch.allclose(loss_hcl, loss_standard, atol=1e-6), (
-            f"CUDA: beta=0.0 HCL ({loss_hcl.item():.8f}) != "
-            f"standard ({loss_standard.item():.8f})"
+            f"CUDA: beta=0.0 HCL ({loss_hcl.item():.8f}) != standard ({loss_standard.item():.8f})"
         )
