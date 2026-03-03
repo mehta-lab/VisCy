@@ -1,0 +1,67 @@
+# DINOv3 frozen-inference config for benchmarking.
+# Produces anndata zarr compatible with EmbeddingWriter / downstream eval.
+#
+# NOTE: DINOv3 is a 2D model. Set z_range to a single focal slice, e.g.
+#   z_range: [z_focus, z_focus+1]
+# Use get_z_range() from dynaclr.evaluation.linear_classifiers.src.utils
+# to compute the focal plane from .zattrs metadata automatically.
+#
+# TODO: point to the path to save the embeddings
+# TODO: point to the path to the data
+# TODO: point to the path to the tracks
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy_utils.callbacks.embedding_writer.EmbeddingWriter
+      init_args:
+        output_path: #TODO point to the path to save the embeddings
+        phate_kwargs:
+          knn: 5
+          decay: 40
+          n_jobs: -1
+          random_state: 42
+        pca_kwargs:
+          n_components: 8
+  inference_mode: true
+model:
+  class_path: dynaclr.dinov3_engine.DINOv3Module
+  init_args:
+    model:
+      class_path: viscy_models.foundation.DINOv3Model
+      init_args:
+        model_name: facebook/dinov3-small-imagenet1k-1-layer
+        freeze: true
+data:
+  class_path: viscy_data.triplet.TripletDataModule
+  init_args:
+    data_path: #TODO point to the path to the data (e.g. /registered_test.zarr)
+    tracks_path: #TODO point to the path to the tracks (e.g. /track_test.zarr)
+    source_channel:
+      - Phase3D
+      - RFP
+    z_range: [29, 30]  # TODO: set to focal plane from .zattrs (single slice for 2D model)
+    batch_size: 32
+    num_workers: 30
+    initial_yx_patch_size: [160, 160]
+    final_yx_patch_size: [160, 160]
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
+        init_args:
+          keys: [RFP]
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+return_predictions: false
