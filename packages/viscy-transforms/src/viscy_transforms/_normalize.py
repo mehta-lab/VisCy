@@ -21,7 +21,7 @@ class NormalizeSampled(MapTransform):
     ----------
     keys : str | Iterable[str]
         Keys to normalize.
-    level : {'fov_statistics', 'dataset_statistics'}
+    level : {'fov_statistics', 'dataset_statistics', 'timepoint_statistics'}
         Level of normalization.
     subtrahend : str, optional
         Subtrahend for normalization, defaults to "mean".
@@ -34,7 +34,7 @@ class NormalizeSampled(MapTransform):
     def __init__(
         self,
         keys: str | Iterable[str],
-        level: Literal["fov_statistics", "dataset_statistics"],
+        level: Literal["fov_statistics", "dataset_statistics", "timepoint_statistics"],
         subtrahend="mean",
         divisor="std",
         remove_meta: bool = False,
@@ -64,6 +64,9 @@ class NormalizeSampled(MapTransform):
         """
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
+            if self.level == "timepoint_statistics":
+                time_idx = sample["index"][1]
+                level_meta = level_meta[str(time_idx)]
             subtrahend_val = level_meta[self.subtrahend]
             subtrahend_val = self._match_image(subtrahend_val, sample[key])
             divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero

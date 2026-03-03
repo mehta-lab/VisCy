@@ -46,11 +46,12 @@ class LevelNormStats(TypedDict):
     iqr: Tensor
 
 
-class ChannelNormStats(TypedDict):
+class ChannelNormStats(TypedDict, total=False):
     """Per-channel normalization statistics."""
 
     dataset_statistics: LevelNormStats
     fov_statistics: LevelNormStats
+    timepoint_statistics: dict[str, LevelNormStats]
 
 
 NormMeta = dict[str, ChannelNormStats]
