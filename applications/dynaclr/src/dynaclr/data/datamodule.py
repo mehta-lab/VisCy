@@ -17,13 +17,12 @@ from monai.data.thread_buffer import ThreadDataLoader
 from monai.transforms import Compose, MapTransform
 from torch import Tensor
 
+from dynaclr.data.dataset import MultiExperimentTripletDataset
+from dynaclr.data.experiment import ExperimentRegistry
+from dynaclr.data.index import MultiExperimentIndex
 from viscy_data._utils import BatchedCenterSpatialCropd, _transform_channel_wise
 from viscy_data.channel_dropout import ChannelDropout
 from viscy_data.sampler import FlexibleBatchSampler
-
-from dynaclr.dataset import MultiExperimentTripletDataset
-from dynaclr.experiment import ExperimentRegistry
-from dynaclr.index import MultiExperimentIndex
 
 _logger = logging.getLogger(__name__)
 
@@ -152,9 +151,7 @@ class MultiExperimentDataModule(LightningDataModule):
         self.condition_ratio = condition_ratio
 
         # Augmentation hyperparameters
-        self.channel_dropout_channels = (
-            channel_dropout_channels if channel_dropout_channels is not None else [1]
-        )
+        self.channel_dropout_channels = channel_dropout_channels if channel_dropout_channels is not None else [1]
         self.channel_dropout_prob = channel_dropout_prob
         self.normalizations = normalizations if normalizations is not None else []
         self.augmentations = augmentations if augmentations is not None else []
@@ -194,16 +191,8 @@ class MultiExperimentDataModule(LightningDataModule):
             registry = ExperimentRegistry.from_yaml(self.experiments_yaml)
 
             # Split by experiment name
-            train_configs = [
-                exp
-                for exp in registry.experiments
-                if exp.name not in self.val_experiments
-            ]
-            val_configs = [
-                exp
-                for exp in registry.experiments
-                if exp.name in self.val_experiments
-            ]
+            train_configs = [exp for exp in registry.experiments if exp.name not in self.val_experiments]
+            val_configs = [exp for exp in registry.experiments if exp.name in self.val_experiments]
 
             if not train_configs:
                 raise ValueError(
@@ -212,8 +201,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 )
             if not val_configs:
                 _logger.warning(
-                    "No validation experiments found. "
-                    "val_experiments=%s not present in registry.",
+                    "No validation experiments found. val_experiments=%s not present in registry.",
                     self.val_experiments,
                 )
 
@@ -261,17 +249,11 @@ class MultiExperimentDataModule(LightningDataModule):
             self._channel_names = [f"ch_{i}" for i in range(n_ch)]
 
             # Build transform pipelines
-            self._augmentation_transform = Compose(
-                self.normalizations + self.augmentations + [self._final_crop()]
-            )
-            self._no_augmentation_transform = Compose(
-                self.normalizations + [self._final_crop()]
-            )
+            self._augmentation_transform = Compose(self.normalizations + self.augmentations + [self._final_crop()])
+            self._no_augmentation_transform = Compose(self.normalizations + [self._final_crop()])
 
             _logger.info(
-                "MultiExperimentDataModule setup: "
-                "%d train experiments (%d anchors), "
-                "%d val experiments (%d anchors)",
+                "MultiExperimentDataModule setup: %d train experiments (%d anchors), %d val experiments (%d anchors)",
                 len(train_configs),
                 len(self.train_dataset) if self.train_dataset else 0,
                 len(val_configs),

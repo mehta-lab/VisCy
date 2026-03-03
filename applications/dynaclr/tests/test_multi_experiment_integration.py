@@ -17,8 +17,8 @@ from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch import Tensor, nn
 
+from dynaclr.data.experiment import ExperimentConfig
 from dynaclr.engine import ContrastiveModule
-from dynaclr.experiment import ExperimentConfig
 from viscy_models.contrastive.loss import NTXentHCL
 
 # ---------------------------------------------------------------------------
@@ -190,7 +190,7 @@ def test_multi_experiment_fast_dev_run(tmp_path):
     )
     yaml_path = _write_experiments_yaml(tmp_path, [exp_alpha, exp_beta])
 
-    from dynaclr.datamodule import MultiExperimentDataModule
+    from dynaclr.data.datamodule import MultiExperimentDataModule
 
     datamodule = MultiExperimentDataModule(
         experiments_yaml=str(yaml_path),
@@ -254,7 +254,7 @@ def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
     )
     yaml_path = _write_experiments_yaml(tmp_path, [exp_alpha, exp_beta])
 
-    from dynaclr.datamodule import MultiExperimentDataModule
+    from dynaclr.data.datamodule import MultiExperimentDataModule
 
     datamodule = MultiExperimentDataModule(
         experiments_yaml=str(yaml_path),

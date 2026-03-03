@@ -7,7 +7,7 @@ import pytest
 import yaml
 from iohub.ngff import open_ome_zarr
 
-from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
+from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -18,9 +18,7 @@ from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
 def mini_zarr(tmp_path):
     """Create a minimal HCS OME-Zarr store with channels ['Phase', 'GFP', 'RFP']."""
     zarr_path = tmp_path / "exp_a.zarr"
-    with open_ome_zarr(
-        zarr_path, layout="hcs", mode="w", channel_names=["Phase", "GFP", "RFP"]
-    ) as plate:
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["Phase", "GFP", "RFP"]) as plate:
         pos = plate.create_position("A", "1", "0")
         pos.create_zeros("0", shape=(1, 3, 1, 64, 64), dtype=np.float32)
     return zarr_path
@@ -30,9 +28,7 @@ def mini_zarr(tmp_path):
 def mini_zarr_mito(tmp_path):
     """Create a second zarr with channels ['Phase', 'Mito']."""
     zarr_path = tmp_path / "exp_b.zarr"
-    with open_ome_zarr(
-        zarr_path, layout="hcs", mode="w", channel_names=["Phase", "Mito"]
-    ) as plate:
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=["Phase", "Mito"]) as plate:
         pos = plate.create_position("A", "1", "0")
         pos.create_zeros("0", shape=(1, 2, 1, 64, 64), dtype=np.float32)
     return zarr_path
@@ -114,21 +110,15 @@ class TestExperimentRegistry:
         # Position 0 -> index 0 (Phase), Position 1 -> index 2 (RFP)
         assert registry.channel_maps["exp_a"] == {0: 0, 1: 2}
 
-    def test_registry_channel_maps_different_names(
-        self, exp_config_a, exp_config_b
-    ):
+    def test_registry_channel_maps_different_names(self, exp_config_a, exp_config_b):
         """Positional alignment: different channel names, same position count."""
-        registry = ExperimentRegistry(
-            experiments=[exp_config_a, exp_config_b]
-        )
+        registry = ExperimentRegistry(experiments=[exp_config_a, exp_config_b])
         # exp_a: source=["Phase", "RFP"] in ["Phase", "GFP", "RFP"] -> {0:0, 1:2}
         assert registry.channel_maps["exp_a"] == {0: 0, 1: 2}
         # exp_b: source=["Phase", "Mito"] in ["Phase", "Mito"] -> {0:0, 1:1}
         assert registry.channel_maps["exp_b"] == {0: 0, 1: 1}
 
-    def test_registry_source_channel_not_in_channel_names(
-        self, mini_zarr, tmp_path
-    ):
+    def test_registry_source_channel_not_in_channel_names(self, mini_zarr, tmp_path):
         """ValueError when source_channel has entry not in channel_names."""
         cfg = ExperimentConfig(
             name="bad_source",
@@ -141,9 +131,7 @@ class TestExperimentRegistry:
         with pytest.raises(ValueError, match="DAPI"):
             ExperimentRegistry(experiments=[cfg])
 
-    def test_registry_mismatched_source_channel_count(
-        self, mini_zarr, mini_zarr_mito, tmp_path
-    ):
+    def test_registry_mismatched_source_channel_count(self, mini_zarr, mini_zarr_mito, tmp_path):
         """ValueError when experiments have different source_channel counts."""
         cfg_a = ExperimentConfig(
             name="exp_a",

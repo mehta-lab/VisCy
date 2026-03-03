@@ -71,7 +71,7 @@ model:
     log_samples_per_batch: 3
     example_input_array_shape: [1, 2, 30, 256, 256]
 data:
-  class_path: dynaclr.datamodule.MultiExperimentDataModule
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
     experiments_yaml: #TODO path to experiments.yml
     z_range: [15, 45]

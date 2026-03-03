@@ -5,15 +5,13 @@ exposure for Lightning CLI configurability."""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 
-from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
-from dynaclr.index import MultiExperimentIndex
+from dynaclr.data.experiment import ExperimentConfig
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -78,9 +76,7 @@ def _create_experiment(
     tracks_root = tmp_path / f"tracks_{name}"
     n_ch = len(_CHANNEL_NAMES)
 
-    with open_ome_zarr(
-        zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES
-    ) as plate:
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES) as plate:
         for row, col in wells:
             for fov_idx in range(fovs_per_well):
                 pos = plate.create_position(row, col, str(fov_idx))
@@ -122,9 +118,7 @@ def _create_four_experiments(tmp_path: Path) -> list[ExperimentConfig]:
     return configs
 
 
-def _write_experiments_yaml(
-    tmp_path: Path, configs: list[ExperimentConfig]
-) -> Path:
+def _write_experiments_yaml(tmp_path: Path, configs: list[ExperimentConfig]) -> Path:
     """Write experiments YAML from a list of ExperimentConfig objects."""
     import yaml
 
@@ -192,7 +186,7 @@ class TestInitExposesAllHyperparameters:
 
     def test_init_exposes_all_hyperparameters(self, two_experiments):
         """Instantiate with all hyperparameters explicitly set and verify storage."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = two_experiments
         dm = MultiExperimentDataModule(
@@ -240,7 +234,7 @@ class TestTrainValSplitByExperiment:
 
     def test_train_val_split_by_experiment(self, four_experiments):
         """With 4 experiments and val_experiments=[exp_c, exp_d], verify correct split."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = four_experiments
         dm = MultiExperimentDataModule(
@@ -262,16 +256,12 @@ class TestTrainValSplitByExperiment:
 
         # Val dataset should only contain exp_c and exp_d
         val_experiments = set(dm.val_dataset.index.tracks["experiment"].unique())
-        assert val_experiments == {"exp_c", "exp_d"}, (
-            f"Val experiments {val_experiments} should be {{exp_c, exp_d}}"
-        )
+        assert val_experiments == {"exp_c", "exp_d"}, f"Val experiments {val_experiments} should be {{exp_c, exp_d}}"
 
         # No overlap: train FOVs should not appear in val
         train_fovs = set(dm.train_dataset.index.tracks["fov_name"].unique())
         val_fovs = set(dm.val_dataset.index.tracks["fov_name"].unique())
-        assert train_fovs.isdisjoint(val_fovs), (
-            f"FOV overlap between train and val: {train_fovs & val_fovs}"
-        )
+        assert train_fovs.isdisjoint(val_fovs), f"FOV overlap between train and val: {train_fovs & val_fovs}"
 
 
 class TestTrainDataloaderUsesFlexibleBatchSampler:
@@ -279,7 +269,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
 
     def test_train_dataloader_uses_flexible_batch_sampler(self, two_experiments):
         """train_dataloader() returns a ThreadDataLoader with FlexibleBatchSampler."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = two_experiments
         dm = MultiExperimentDataModule(
@@ -298,11 +288,10 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         train_dl = dm.train_dataloader()
 
         from monai.data.thread_buffer import ThreadDataLoader
+
         from viscy_data.sampler import FlexibleBatchSampler
 
-        assert isinstance(train_dl, ThreadDataLoader), (
-            f"Expected ThreadDataLoader, got {type(train_dl)}"
-        )
+        assert isinstance(train_dl, ThreadDataLoader), f"Expected ThreadDataLoader, got {type(train_dl)}"
         # The batch_sampler should be a FlexibleBatchSampler
         assert isinstance(train_dl.batch_sampler, FlexibleBatchSampler), (
             f"Expected FlexibleBatchSampler, got {type(train_dl.batch_sampler)}"
@@ -319,7 +308,7 @@ class TestValDataloaderNoBatchSampler:
 
     def test_val_dataloader_no_batch_sampler(self, two_experiments):
         """val_dataloader uses simple sequential loading."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = two_experiments
         dm = MultiExperimentDataModule(
@@ -345,11 +334,9 @@ class TestValDataloaderNoBatchSampler:
 class TestOnAfterBatchTransferAppliesTransforms:
     """Verify on_after_batch_transfer applies transforms and ChannelDropout."""
 
-    def test_on_after_batch_transfer_applies_channel_dropout_and_transforms(
-        self, two_experiments
-    ):
+    def test_on_after_batch_transfer_applies_channel_dropout_and_transforms(self, two_experiments):
         """Create a mock batch and verify on_after_batch_transfer processes it."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = two_experiments
         dm = MultiExperimentDataModule(
@@ -396,7 +383,7 @@ class TestChannelDropoutIntegration:
 
     def test_channel_dropout_integration(self, two_experiments):
         """With p=1.0 on channel 1, training zeros ch1; eval preserves it."""
-        from dynaclr.datamodule import MultiExperimentDataModule
+        from dynaclr.data.datamodule import MultiExperimentDataModule
 
         yaml_path, _ = two_experiments
         dm = MultiExperimentDataModule(
@@ -423,9 +410,7 @@ class TestChannelDropoutIntegration:
         # Training mode: channel 1 should be zeroed
         dm.channel_dropout.train()
         result_train = dm.on_after_batch_transfer(batch_train, 0)
-        assert torch.all(result_train["anchor"][:, 1] == 0.0), (
-            "Training: channel 1 should be all zeros with p=1.0"
-        )
+        assert torch.all(result_train["anchor"][:, 1] == 0.0), "Training: channel 1 should be all zeros with p=1.0"
         assert torch.all(result_train["positive"][:, 1] == 0.0), (
             "Training: positive channel 1 should be all zeros with p=1.0"
         )
@@ -439,6 +424,4 @@ class TestChannelDropoutIntegration:
             "positive_norm_meta": [None] * B,
         }
         result_eval = dm.on_after_batch_transfer(batch_eval, 0)
-        assert not torch.all(result_eval["anchor"][:, 1] == 0.0), (
-            "Eval: channel 1 should NOT be zeroed"
-        )
+        assert not torch.all(result_eval["anchor"][:, 1] == 0.0), "Eval: channel 1 should NOT be zeroed"

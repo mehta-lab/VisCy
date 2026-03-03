@@ -1,9 +1,9 @@
-from dynaclr.datamodule import MultiExperimentDataModule
-from dynaclr.dataset import MultiExperimentTripletDataset
+from dynaclr.data.datamodule import MultiExperimentDataModule
+from dynaclr.data.dataset import MultiExperimentTripletDataset
+from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
+from dynaclr.data.index import MultiExperimentIndex
+from dynaclr.data.tau_sampling import sample_tau
 from dynaclr.engine import BetaVaeModule, ContrastiveModule, ContrastivePrediction
-from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
-from dynaclr.index import MultiExperimentIndex
-from dynaclr.tau_sampling import sample_tau
 from viscy_models.contrastive.loss import NTXentHCL
 
 __all__ = [

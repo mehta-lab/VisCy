@@ -22,11 +22,10 @@ try:
 except ImportError:
     ts = None
 
+from dynaclr.data.index import MultiExperimentIndex
+from dynaclr.data.tau_sampling import sample_tau
 from viscy_data._typing import INDEX_COLUMNS, NormMeta
 from viscy_data._utils import _read_norm_meta
-
-from dynaclr.index import MultiExperimentIndex
-from dynaclr.tau_sampling import sample_tau
 
 _logger = logging.getLogger(__name__)
 
@@ -78,8 +77,7 @@ class MultiExperimentTripletDataset(Dataset):
     ) -> None:
         if ts is None:
             raise ImportError(
-                "tensorstore is required for MultiExperimentTripletDataset. "
-                "Install with: pip install tensorstore"
+                "tensorstore is required for MultiExperimentTripletDataset. Install with: pip install tensorstore"
             )
         self.index = index
         self.fit = fit
@@ -112,9 +110,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         Structure: ``{(experiment, lineage_id): {t: [row_indices_in_tracks]}}``
         """
-        self._lineage_timepoints: dict[
-            tuple[str, str], dict[int, list[int]]
-        ] = defaultdict(lambda: defaultdict(list))
+        self._lineage_timepoints: dict[tuple[str, str], dict[int, list[int]]] = defaultdict(lambda: defaultdict(list))
 
         for idx, row in self.index.tracks.iterrows():
             key = (row["experiment"], row["lineage_id"])
@@ -222,9 +218,7 @@ class MultiExperimentTripletDataset(Dataset):
         anchor_t = anchor_row["t"]
 
         # Convert tau range to frames for this experiment
-        tau_min, tau_max = self.index.registry.tau_range_frames(
-            exp_name, self.tau_range_hours
-        )
+        tau_min, tau_max = self.index.registry.tau_range_frames(exp_name, self.tau_range_hours)
 
         # Get lineage-timepoint lookup
         lt_key = (exp_name, lineage_id)
@@ -257,9 +251,7 @@ class MultiExperimentTripletDataset(Dataset):
     # Patch extraction (tensorstore I/O)
     # ------------------------------------------------------------------
 
-    def _get_tensorstore(
-        self, position, fov_name: str
-    ) -> "ts.TensorStore":
+    def _get_tensorstore(self, position, fov_name: str) -> "ts.TensorStore":
         """Get or create a cached tensorstore object for the given FOV.
 
         Parameters
@@ -280,9 +272,7 @@ class MultiExperimentTripletDataset(Dataset):
             )
         return self._tensorstores[fov_name]
 
-    def _slice_patch(
-        self, track_row: pd.Series
-    ) -> tuple["ts.TensorStore", NormMeta | None]:
+    def _slice_patch(self, track_row: pd.Series) -> tuple["ts.TensorStore", NormMeta | None]:
         """Slice a patch from the image store for a given track row.
 
         Uses per-experiment ``channel_maps`` for channel index remapping
@@ -324,9 +314,7 @@ class MultiExperimentTripletDataset(Dataset):
         ]
         return patch, _read_norm_meta(position)
 
-    def _slice_patches(
-        self, track_rows: pd.DataFrame
-    ) -> tuple[torch.Tensor, list[NormMeta | None]]:
+    def _slice_patches(self, track_rows: pd.DataFrame) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
         Parameters
@@ -345,7 +333,5 @@ class MultiExperimentTripletDataset(Dataset):
             patch, norm = self._slice_patch(row)
             patches.append(patch)
             norms.append(norm)
-        results = ts.stack(
-            [p.translate_to[0] for p in patches]
-        ).read().result()  # noqa: PD013
+        results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
         return torch.from_numpy(results), norms

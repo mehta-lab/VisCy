@@ -1,9 +1,8 @@
 """TDD tests for variable tau sampling with exponential decay."""
 
 import numpy as np
-import pytest
 
-from dynaclr.tau_sampling import sample_tau
+from dynaclr.data.tau_sampling import sample_tau
 
 
 class TestSampleTauRange:

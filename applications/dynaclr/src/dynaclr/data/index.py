@@ -15,7 +15,7 @@ import numpy as np
 import pandas as pd
 from iohub.ngff import Position, open_ome_zarr
 
-from dynaclr.experiment import ExperimentRegistry
+from dynaclr.data.experiment import ExperimentRegistry
 
 _logger = logging.getLogger(__name__)
 
@@ -61,15 +61,9 @@ class MultiExperimentIndex:
         self.z_range = z_range
         self.yx_patch_size = yx_patch_size
 
-        positions, tracks_dfs = self._load_all_experiments(
-            include_wells=include_wells, exclude_fovs=exclude_fovs
-        )
+        positions, tracks_dfs = self._load_all_experiments(include_wells=include_wells, exclude_fovs=exclude_fovs)
         self.positions = positions
-        tracks = (
-            pd.concat(tracks_dfs, ignore_index=True)
-            if tracks_dfs
-            else pd.DataFrame()
-        )
+        tracks = pd.concat(tracks_dfs, ignore_index=True) if tracks_dfs else pd.DataFrame()
         tracks = self._reconstruct_lineage(tracks)
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
@@ -106,9 +100,7 @@ class MultiExperimentIndex:
                 tracks_dir = Path(exp.tracks_path) / fov_name
                 csv_files = list(tracks_dir.glob("*.csv"))
                 if not csv_files:
-                    _logger.warning(
-                        "No tracking CSV in %s, skipping", tracks_dir
-                    )
+                    _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
                     continue
                 tracks_df = pd.read_csv(csv_files[0])
 
@@ -117,21 +109,9 @@ class MultiExperimentIndex:
                 tracks_df["condition"] = condition
                 tracks_df["well_name"] = well_name
                 tracks_df["fov_name"] = fov_name
-                tracks_df["global_track_id"] = (
-                    exp.name
-                    + "_"
-                    + fov_name
-                    + "_"
-                    + tracks_df["track_id"].astype(str)
-                )
-                tracks_df["hours_post_infection"] = (
-                    exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
-                )
-                fluorescence_ch = (
-                    exp.source_channel[1]
-                    if len(exp.source_channel) > 1
-                    else ""
-                )
+                tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+                tracks_df["hours_post_infection"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
+                fluorescence_ch = exp.source_channel[1] if len(exp.source_channel) > 1 else ""
                 tracks_df["fluorescence_channel"] = fluorescence_ch
                 tracks_df["position"] = [position] * len(tracks_df)
 
@@ -174,9 +154,7 @@ class MultiExperimentIndex:
         # Build parent->child mapping per experiment+fov and propagate lineage
         for (exp, fov), group in tracks.groupby(["experiment", "fov_name"]):
             # Map track_id -> global_track_id within this FOV
-            tid_to_gtid: dict[int, str] = dict(
-                zip(group["track_id"], group["global_track_id"])
-            )
+            tid_to_gtid: dict[int, str] = dict(zip(group["track_id"], group["global_track_id"]))
 
             # Build parent graph: child_gtid -> parent_gtid
             parent_map: dict[str, str] = {}
@@ -197,9 +175,7 @@ class MultiExperimentIndex:
             mask = (tracks["experiment"] == exp) & (tracks["fov_name"] == fov)
             for gtid in group["global_track_id"].unique():
                 root = _find_root(gtid)
-                tracks.loc[
-                    mask & (tracks["global_track_id"] == gtid), "lineage_id"
-                ] = root
+                tracks.loc[mask & (tracks["global_track_id"] == gtid), "lineage_id"] = root
 
         return tracks
 
@@ -244,9 +220,7 @@ class MultiExperimentIndex:
 
         return tracks
 
-    def _compute_valid_anchors(
-        self, tau_range_hours: tuple[float, float]
-    ) -> pd.DataFrame:
+    def _compute_valid_anchors(self, tau_range_hours: tuple[float, float]) -> pd.DataFrame:
         """Return the subset of ``self.tracks`` that are valid training anchors.
 
         An anchor is valid when there exists at least one tau in the
@@ -270,16 +244,12 @@ class MultiExperimentIndex:
         valid_mask = pd.Series(False, index=self.tracks.index)
 
         for exp in self.registry.experiments:
-            min_f, max_f = self.registry.tau_range_frames(
-                exp.name, tau_range_hours
-            )
+            min_f, max_f = self.registry.tau_range_frames(exp.name, tau_range_hours)
             exp_mask = self.tracks["experiment"] == exp.name
             exp_tracks = self.tracks[exp_mask]
 
             # Build set of (lineage_id, t) pairs for O(1) lookup
-            lineage_timepoints: set[tuple[str, int]] = set(
-                zip(exp_tracks["lineage_id"], exp_tracks["t"])
-            )
+            lineage_timepoints: set[tuple[str, int]] = set(zip(exp_tracks["lineage_id"], exp_tracks["t"]))
 
             for idx, row in exp_tracks.iterrows():
                 for tau in range(min_f, max_f + 1):
@@ -302,10 +272,7 @@ class MultiExperimentIndex:
         dict[str, np.ndarray]
             ``{experiment_name: array_of_row_indices}``.
         """
-        return {
-            name: group.index.to_numpy()
-            for name, group in self.tracks.groupby("experiment")
-        }
+        return {name: group.index.to_numpy() for name, group in self.tracks.groupby("experiment")}
 
     @property
     def condition_groups(self) -> dict[str, np.ndarray]:
@@ -316,10 +283,7 @@ class MultiExperimentIndex:
         dict[str, np.ndarray]
             ``{condition_label: array_of_row_indices}``.
         """
-        return {
-            name: group.index.to_numpy()
-            for name, group in self.tracks.groupby("condition")
-        }
+        return {name: group.index.to_numpy() for name, group in self.tracks.groupby("condition")}
 
     def summary(self) -> str:
         """Return a human-readable overview of the index.
@@ -337,15 +301,10 @@ class MultiExperimentIndex:
         ]
         for exp in self.registry.experiments:
             exp_tracks = self.tracks[self.tracks["experiment"] == exp.name]
-            exp_anchors = self.valid_anchors[
-                self.valid_anchors["experiment"] == exp.name
-            ]
+            exp_anchors = self.valid_anchors[self.valid_anchors["experiment"] == exp.name]
             cond_counts = exp_tracks.groupby("condition").size()
-            cond_str = ", ".join(
-                f"{c}({n})" for c, n in cond_counts.items()
-            )
+            cond_str = ", ".join(f"{c}({n})" for c, n in cond_counts.items())
             lines.append(
-                f"  {exp.name}: {len(exp_tracks)} observations, "
-                f"{len(exp_anchors)} anchors, conditions: {cond_str}"
+                f"  {exp.name}: {len(exp_tracks)} observations, {len(exp_anchors)} anchors, conditions: {cond_str}"
             )
         return "\n".join(lines)

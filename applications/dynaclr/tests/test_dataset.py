@@ -4,15 +4,14 @@ positive sampling, channel remapping, and predict-mode index output."""
 from __future__ import annotations
 
 from pathlib import Path
-from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pandas as pd
 import pytest
 import torch
 
-from dynaclr.experiment import ExperimentConfig, ExperimentRegistry
-from dynaclr.index import MultiExperimentIndex
+from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
+from dynaclr.data.index import MultiExperimentIndex
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -87,9 +86,7 @@ def _create_zarr_and_tracks(
     tracks_root = tmp_path / f"tracks_{name}"
     n_ch = len(channel_names)
 
-    with open_ome_zarr(
-        zarr_path, layout="hcs", mode="w", channel_names=channel_names
-    ) as plate:
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
         for row, col in wells:
             for fov_idx in range(fovs_per_well):
                 pos = plate.create_position(row, col, str(fov_idx))
@@ -203,7 +200,7 @@ class TestGetitemsReturnFormat:
 
     def test_getitems_returns_anchor_positive_keys(self, single_experiment_index):
         """__getitems__ returns dict with 'anchor' and 'positive' Tensor keys."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
@@ -217,16 +214,14 @@ class TestGetitemsReturnFormat:
         assert isinstance(batch["positive"], torch.Tensor)
         # Shape: (B=2, C=2, Z=1, Y=32, X=32)
         expected_shape = (2, 2, 1, 32, 32)
-        assert batch["anchor"].shape == expected_shape, (
-            f"Anchor shape {batch['anchor'].shape} != {expected_shape}"
-        )
+        assert batch["anchor"].shape == expected_shape, f"Anchor shape {batch['anchor'].shape} != {expected_shape}"
         assert batch["positive"].shape == expected_shape, (
             f"Positive shape {batch['positive'].shape} != {expected_shape}"
         )
 
     def test_getitems_returns_norm_meta(self, single_experiment_index):
         """__getitems__ returns 'anchor_norm_meta' key."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
@@ -244,7 +239,7 @@ class TestPositiveSampling:
 
     def test_positive_same_lineage(self, single_experiment_index):
         """Positive comes from same lineage_id at t+tau (tau>0)."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
@@ -262,13 +257,11 @@ class TestPositiveSampling:
         assert pos_row["lineage_id"] == anchor_lineage, (
             f"Positive lineage {pos_row['lineage_id']} != anchor {anchor_lineage}"
         )
-        assert pos_row["t"] > anchor_t, (
-            f"Positive t={pos_row['t']} should be > anchor t={anchor_t}"
-        )
+        assert pos_row["t"] > anchor_t, f"Positive t={pos_row['t']} should be > anchor t={anchor_t}"
 
     def test_positive_through_division(self, lineage_index):
         """When anchor is on parent track that divides, positive can be a daughter."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=lineage_index,
@@ -276,27 +269,22 @@ class TestPositiveSampling:
         )
 
         # Tracks 0, 1, 2 share the same lineage_id due to parent_map={1:0, 2:0}
-        # Verify lineage reconstruction happened
-        lineage_ids = lineage_index.tracks["lineage_id"].unique()
         # All three tracks should share one lineage (rooted at track 0)
-        parent_lineage = lineage_index.tracks[
-            lineage_index.tracks["global_track_id"].str.endswith("_0")
-        ]["lineage_id"].iloc[0]
-        daughter1_lineage = lineage_index.tracks[
-            lineage_index.tracks["global_track_id"].str.endswith("_1")
-        ]["lineage_id"].iloc[0]
-        daughter2_lineage = lineage_index.tracks[
-            lineage_index.tracks["global_track_id"].str.endswith("_2")
-        ]["lineage_id"].iloc[0]
+        parent_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_0")][
+            "lineage_id"
+        ].iloc[0]
+        daughter1_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_1")][
+            "lineage_id"
+        ].iloc[0]
+        daughter2_lineage = lineage_index.tracks[lineage_index.tracks["global_track_id"].str.endswith("_2")][
+            "lineage_id"
+        ].iloc[0]
         assert parent_lineage == daughter1_lineage == daughter2_lineage, (
-            f"Lineage mismatch: parent={parent_lineage}, "
-            f"d1={daughter1_lineage}, d2={daughter2_lineage}"
+            f"Lineage mismatch: parent={parent_lineage}, d1={daughter1_lineage}, d2={daughter2_lineage}"
         )
 
         # Find an anchor on the parent track
-        parent_anchors = ds.index.valid_anchors[
-            ds.index.valid_anchors["global_track_id"].str.endswith("_0")
-        ]
+        parent_anchors = ds.index.valid_anchors[ds.index.valid_anchors["global_track_id"].str.endswith("_0")]
         assert len(parent_anchors) > 0, "Parent track should have valid anchors"
 
         # Verify positive sampling can reach daughters (same lineage, different track)
@@ -319,7 +307,7 @@ class TestChannelRemapping:
 
     def test_channel_remapping(self, two_experiment_index):
         """Two experiments with different channels produce correctly shaped patches."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=two_experiment_index,
@@ -335,12 +323,8 @@ class TestChannelRemapping:
         assert len(maps["exp_b"]) == 2
 
         # Get anchors from each experiment
-        exp_a_anchors = ds.index.valid_anchors[
-            ds.index.valid_anchors["experiment"] == "exp_a"
-        ]
-        exp_b_anchors = ds.index.valid_anchors[
-            ds.index.valid_anchors["experiment"] == "exp_b"
-        ]
+        exp_a_anchors = ds.index.valid_anchors[ds.index.valid_anchors["experiment"] == "exp_a"]
+        exp_b_anchors = ds.index.valid_anchors[ds.index.valid_anchors["experiment"] == "exp_b"]
         assert len(exp_a_anchors) > 0, "exp_a should have anchors"
         assert len(exp_b_anchors) > 0, "exp_b should have anchors"
 
@@ -359,7 +343,7 @@ class TestPredictMode:
 
     def test_predict_mode_returns_index(self, single_experiment_index):
         """With fit=False, result contains 'index' key with tracking info."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,
@@ -382,7 +366,7 @@ class TestDatasetLength:
 
     def test_len_matches_valid_anchors(self, single_experiment_index):
         """len(dataset) == len(index.valid_anchors)."""
-        from dynaclr.dataset import MultiExperimentTripletDataset
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
 
         ds = MultiExperimentTripletDataset(
             index=single_experiment_index,

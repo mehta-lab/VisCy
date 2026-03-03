@@ -104,26 +104,19 @@ class ExperimentRegistry:
     channel_maps: dict[str, dict[int, int]] = field(init=False)
 
     # internal lookup
-    _name_map: dict[str, ExperimentConfig] = field(
-        init=False, repr=False, compare=False
-    )
+    _name_map: dict[str, ExperimentConfig] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         # 1. Empty check
         if not self.experiments:
-            raise ValueError(
-                "Empty experiments list: at least one ExperimentConfig is required."
-            )
+            raise ValueError("Empty experiments list: at least one ExperimentConfig is required.")
 
         # 2. Duplicate names
         names: list[str] = [e.name for e in self.experiments]
         seen: set[str] = set()
         for n in names:
             if n in seen:
-                raise ValueError(
-                    f"Duplicate experiment name '{n}'. "
-                    "Each experiment must have a unique name."
-                )
+                raise ValueError(f"Duplicate experiment name '{n}'. Each experiment must have a unique name.")
             seen.add(n)
 
         # Build name -> config map
@@ -134,20 +127,15 @@ class ExperimentRegistry:
             # 5. Negative interval
             if exp.interval_minutes <= 0:
                 raise ValueError(
-                    f"Experiment '{exp.name}': interval_minutes must be "
-                    f"positive, got {exp.interval_minutes}."
+                    f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
 
             # 6. Empty condition_wells
             if not exp.condition_wells:
-                raise ValueError(
-                    f"Experiment '{exp.name}': condition_wells must not be empty."
-                )
+                raise ValueError(f"Experiment '{exp.name}': condition_wells must not be empty.")
 
             # 3. Source channel membership
-            missing = [
-                ch for ch in exp.source_channel if ch not in exp.channel_names
-            ]
+            missing = [ch for ch in exp.source_channel if ch not in exp.channel_names]
             if missing:
                 raise ValueError(
                     f"Experiment '{exp.name}': source_channel entries "
@@ -156,10 +144,7 @@ class ExperimentRegistry:
 
             # 7. data_path existence
             if not Path(exp.data_path).exists():
-                raise ValueError(
-                    f"Experiment '{exp.name}': data_path does not exist: "
-                    f"{exp.data_path}"
-                )
+                raise ValueError(f"Experiment '{exp.name}': data_path does not exist: {exp.data_path}")
 
             # 8. Zarr channel validation
             with open_ome_zarr(exp.data_path, mode="r") as plate:
@@ -175,23 +160,16 @@ class ExperimentRegistry:
         # 4. Consistent source channel count
         counts = {len(e.source_channel) for e in self.experiments}
         if len(counts) > 1:
-            detail = ", ".join(
-                f"'{e.name}': {len(e.source_channel)}"
-                for e in self.experiments
-            )
+            detail = ", ".join(f"'{e.name}': {len(e.source_channel)}" for e in self.experiments)
             raise ValueError(
-                f"All experiments must have the same number of source_channel "
-                f"entries, but found: {detail}."
+                f"All experiments must have the same number of source_channel entries, but found: {detail}."
             )
         self.num_source_channels = counts.pop()
 
         # Compute channel_maps
         self.channel_maps = {}
         for exp in self.experiments:
-            self.channel_maps[exp.name] = {
-                i: exp.channel_names.index(sc)
-                for i, sc in enumerate(exp.source_channel)
-            }
+            self.channel_maps[exp.name] = {i: exp.channel_names.index(sc) for i, sc in enumerate(exp.source_channel)}
 
     # ------------------------------------------------------------------
     # Public API
@@ -255,8 +233,7 @@ class ExperimentRegistry:
 
         if min_frames >= max_frames:
             _logger.warning(
-                "Experiment '%s': tau_range_hours=%s yields fewer than 2 "
-                "valid frames (min=%d, max=%d).",
+                "Experiment '%s': tau_range_hours=%s yields fewer than 2 valid frames (min=%d, max=%d).",
                 experiment_name,
                 tau_range_hours,
                 min_frames,
@@ -285,7 +262,4 @@ class ExperimentRegistry:
         try:
             return self._name_map[name]
         except KeyError:
-            raise KeyError(
-                f"Experiment '{name}' not found in registry. "
-                f"Available: {list(self._name_map.keys())}"
-            )
+            raise KeyError(f"Experiment '{name}' not found in registry. Available: {list(self._name_map.keys())}")
