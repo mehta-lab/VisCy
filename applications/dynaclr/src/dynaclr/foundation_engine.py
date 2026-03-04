@@ -1,4 +1,4 @@
-"""DINOv3 LightningModule for frozen inference (and future fine-tuning)."""
+"""Foundation model LightningModule for frozen inference (and future fine-tuning)."""
 
 import torch
 from lightning.pytorch import LightningModule
@@ -8,13 +8,14 @@ from dynaclr.engine import ContrastivePrediction
 from viscy_data._typing import TripletSample
 
 
-class DINOv3Module(LightningModule):
-    """Lightning wrapper around a DINOv3 model for prediction.
+class FoundationModule(LightningModule):
+    """Lightning wrapper around a foundation model for prediction.
 
     Parameters
     ----------
     model : nn.Module
-        A ``DINOv3Model`` (or any module returning ``(features, projections)``).
+        A foundation model (e.g. ``DINOv3Model``, ``OpenPhenomModel``)
+        returning ``(features, projections)``.
     lr : float
         Learning rate for future fine-tuning, by default ``1e-4``.
     """

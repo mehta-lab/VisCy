@@ -30,12 +30,12 @@ trainer:
           n_components: 8
   inference_mode: true
 model:
-  class_path: dynaclr.dinov3_engine.DINOv3Module
+  class_path: dynaclr.foundation_engine.FoundationModule
   init_args:
     model:
       class_path: viscy_models.foundation.DINOv3Model
       init_args:
-        model_name: facebook/dinov3-small-imagenet1k-1-layer
+        model_name: facebook/dinov3-convnext-tiny-pretrain-lvd1689m
         freeze: true
 data:
   class_path: viscy_data.triplet.TripletDataModule
@@ -57,11 +57,11 @@ data:
           level: fov_statistics
           subtrahend: mean
           divisor: std
-      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
-        init_args:
-          keys: [RFP]
-          lower: 50
-          upper: 99
-          b_min: 0.0
-          b_max: 1.0
+      # - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
+      #   init_args:
+      #     keys: [RFP]
+      #     lower: 50
+      #     upper: 99
+      #     b_min: 0.0
+      #     b_max: 1.0
 return_predictions: false
