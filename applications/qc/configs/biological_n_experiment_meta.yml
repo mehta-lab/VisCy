@@ -1,4 +1,4 @@
-data_path: /home/eduardo.hirata/mydata/data/dummy_data/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_drifting_ztest.zarr
+data_path: /path/to/dataset.zarr
 num_workers: 4
 
 annotation:
