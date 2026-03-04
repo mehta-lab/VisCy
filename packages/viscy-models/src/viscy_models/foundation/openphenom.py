@@ -25,10 +25,9 @@ class OpenPhenomModel(nn.Module):
     def __init__(self, model_name: str, freeze: bool = True) -> None:
         super().__init__()
 
-        from huggingface_hub import PyTorchModelHubMixin  # noqa: F401
-        from open_phenom import MAEModel
+        from transformers import AutoModel
 
-        self.model = MAEModel.from_pretrained(model_name)
+        self.model = AutoModel.from_pretrained(model_name, trust_remote_code=True)
         self.model.return_channelwise_embeddings = False
         self.target_size = (256, 256)
 
