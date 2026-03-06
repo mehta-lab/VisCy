@@ -93,6 +93,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="info",
+        import_path="dynaclr.info.main",
+        short_help="Print summary of an AnnData zarr store",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""
