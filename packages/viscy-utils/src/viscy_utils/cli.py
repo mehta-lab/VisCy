@@ -8,6 +8,7 @@ from datetime import datetime
 import torch
 from jsonargparse import lazy_instance
 from lightning.pytorch import LightningDataModule, LightningModule
+from lightning.pytorch.callbacks import TQDMProgressBar
 from lightning.pytorch.cli import LightningCLI
 from lightning.pytorch.loggers import TensorBoardLogger
 
@@ -29,17 +30,18 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger."""
-        parser.set_defaults(
-            {
-                "trainer.logger": lazy_instance(
-                    TensorBoardLogger,
-                    save_dir="",
-                    version=datetime.now().strftime(r"%Y%m%d-%H%M%S"),
-                    log_graph=True,
-                )
-            }
-        )
+        """Set default logger and progress bar."""
+        defaults = {
+            "trainer.logger": lazy_instance(
+                TensorBoardLogger,
+                save_dir="",
+                version=datetime.now().strftime(r"%Y%m%d-%H%M%S"),
+                log_graph=True,
+            ),
+        }
+        if not sys.stdout.isatty():
+            defaults["trainer.callbacks"] = [lazy_instance(TQDMProgressBar, refresh_rate=10)]
+        parser.set_defaults(defaults)
 
     def _parse_ckpt_path(self) -> None:
         try:
@@ -81,9 +83,7 @@ def main() -> None:
         seed_everything_default=42,
         subclass_mode_model=require_model,
         subclass_mode_data=require_data,
-        parser_kwargs={
-            "description": "Computer vision models for single-cell phenotyping."
-        },
+        parser_kwargs={"description": "Computer vision models for single-cell phenotyping."},
     )
 
 
