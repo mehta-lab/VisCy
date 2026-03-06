@@ -33,7 +33,7 @@ The tracking data is a csv with the following columns:
 - track_id: from segmentation mask, list of labels
 - t: all 0 since there is just one timepoint
 - x, y: the coordinates of the centroid of the segmentation mask
-- id: must be all unqiue 6 digit numbers starting from 100000
+- id: must be all unique 6 digit numbers starting from 100000
 - parent_track_id: all -1
 - parent_id: all -1
 """
