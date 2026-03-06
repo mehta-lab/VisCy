@@ -45,23 +45,21 @@ class SegmentationMetrics2D(LightningModule):
         target_binary = target > 0
         coco_metrics = mean_average_precision(pred, target)
         _logger.debug(coco_metrics)
-        self.logger.log_metrics(
+        self.log_dict(
             {
-                "position": batch["position_idx"][0],
-                "time": batch["time_idx"][0],
-                "accuracy": (accuracy(pred_binary, target_binary, task="binary")),
-                "dice": (
-                    dice_score(
-                        pred_binary.long()[None],
-                        target_binary.long()[None],
-                        num_classes=2,
-                        input_format="index",
-                    )
+                "test_metrics/accuracy": accuracy(pred_binary, target_binary, task="binary"),
+                "test_metrics/dice": dice_score(
+                    pred_binary.long()[None],
+                    target_binary.long()[None],
+                    num_classes=2,
+                    input_format="index",
                 ),
-                "jaccard": (jaccard_index(pred_binary, target_binary, task="binary")),
-                "mAP": coco_metrics["map"],
-                "mAP_50": coco_metrics["map_50"],
-                "mAP_75": coco_metrics["map_75"],
-                "mAR_100": coco_metrics["mar_100"],
-            }
+                "test_metrics/jaccard": jaccard_index(pred_binary, target_binary, task="binary"),
+                "test_metrics/mAP": coco_metrics["map"],
+                "test_metrics/mAP_50": coco_metrics["map_50"],
+                "test_metrics/mAP_75": coco_metrics["map_75"],
+                "test_metrics/mAR_100": coco_metrics["mar_100"],
+            },
+            on_step=True,
+            on_epoch=False,
         )
