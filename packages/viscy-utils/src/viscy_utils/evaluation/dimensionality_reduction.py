@@ -15,6 +15,7 @@ def compute_phate(
     n_components: int = 2,
     knn: int = 5,
     decay: int = 40,
+    knn_dist: str = "cosine",
     update_dataset: bool = False,
     random_state: int = 42,
     **phate_kwargs,
@@ -69,7 +70,9 @@ def compute_phate(
         n_components=n_components,
         knn=knn,
         decay=decay,
+        knn_dist=knn_dist,
         random_state=random_state,
+        n_jobs=-1,
         **phate_kwargs,
     )
 

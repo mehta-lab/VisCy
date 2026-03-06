@@ -27,6 +27,7 @@ class PHATEConfig(BaseModel):
     n_components: int = 2
     knn: int = 5
     decay: int = 40
+    knn_dist: str = "cosine"
     scale_embeddings: bool = False
     random_state: int = 42
 

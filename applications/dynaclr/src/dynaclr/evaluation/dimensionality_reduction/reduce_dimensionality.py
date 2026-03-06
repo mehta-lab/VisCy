@@ -10,7 +10,6 @@ dynaclr reduce-dimensionality -c reduce_config.yaml
 """
 
 import shutil
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 
 import anndata as ad
@@ -60,6 +59,7 @@ def _run_phate(features: NDArray, cfg: PHATEConfig) -> tuple[str, NDArray]:
         n_components=cfg.n_components,
         knn=cfg.knn,
         decay=cfg.decay,
+        knn_dist=cfg.knn_dist,
         scale_embeddings=cfg.scale_embeddings,
         random_state=cfg.random_state,
     )
@@ -104,20 +104,13 @@ def main(config: Path):
     click.echo(f"Computing {len(methods_to_run)} reduction(s): {', '.join(name for name, _, _ in methods_to_run)}")
 
     results = {}
-    with ThreadPoolExecutor(max_workers=len(methods_to_run)) as executor:
-        futures = {}
-        for method_name, method_cfg, obsm_key in methods_to_run:
-            future = executor.submit(runner_map[method_name], features, method_cfg)
-            futures[future] = method_name
-
-        for future in as_completed(futures):
-            method_name = futures[future]
-            try:
-                key, embedding = future.result()
-                results[key] = embedding
-                click.echo(f"  {method_name.upper()} done -> {key} ({embedding.shape[1]} components)")
-            except Exception as e:
-                click.echo(f"  {method_name.upper()} failed: {e}", err=True)
+    for method_name, method_cfg, obsm_key in methods_to_run:
+        try:
+            key, embedding = runner_map[method_name](features, method_cfg)
+            results[key] = embedding
+            click.echo(f"  {method_name.upper()} done -> {key} ({embedding.shape[1]} components)")
+        except Exception as e:
+            click.echo(f"  {method_name.upper()} failed: {e}", err=True)
 
     for key, embedding in results.items():
         adata.obsm[key] = embedding
