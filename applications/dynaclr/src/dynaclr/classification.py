@@ -51,14 +51,14 @@ class ClassificationModule(LightningModule):
         self,
         encoder: ContrastiveEncoder,
         lr: float | None,
-        loss: nn.Module | None = nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0)),
+        loss: nn.Module | None = None,
         example_input_array_shape: tuple[int, ...] = (2, 1, 15, 160, 160),
     ):
         super().__init__()
         self.stem = encoder.stem
         self.backbone = encoder.encoder
         self.backbone.head.fc = nn.Linear(768, 1)
-        self.loss = loss
+        self.loss = loss if loss is not None else nn.BCEWithLogitsLoss(pos_weight=torch.tensor(1.0))
         self.lr = lr
         self.example_input_array = torch.rand(example_input_array_shape)
 
@@ -84,19 +84,19 @@ class ClassificationModule(LightningModule):
         )
         return loss, x[0, 0, x.shape[2] // 2].detach().cpu().numpy()
 
-    def training_step(self, batch, batch_idx: int):
+    def training_step(self, batch, batch_idx: int):  # noqa: D102
         loss, example = self._fit_step(batch, "train", loss_on_step=True)
         if batch_idx < 4:
             self.train_examples.append([example])
         return loss
 
-    def validation_step(self, batch, batch_idx: int):
+    def validation_step(self, batch, batch_idx: int):  # noqa: D102
         loss, example = self._fit_step(batch, "val", loss_on_step=False)
         if batch_idx < 4:
             self.val_examples.append([example])
         return loss
 
-    def predict_step(self, batch, batch_idx: int, dataloader_idx: int | None = None):
+    def predict_step(self, batch, batch_idx: int, dataloader_idx: int | None = None):  # noqa: D102
         x, y, indices = batch
         y_hat = nn.functional.sigmoid(self(x))
         indices["label"] = y
@@ -112,13 +112,13 @@ class ClassificationModule(LightningModule):
             dataformats="HWC",
         )
 
-    def on_train_epoch_end(self):
+    def on_train_epoch_end(self):  # noqa: D102
         self._log_images(self.train_examples, "train")
         self.train_examples.clear()
 
-    def on_validation_epoch_end(self):
+    def on_validation_epoch_end(self):  # noqa: D102
         self._log_images(self.val_examples, "val")
         self.val_examples.clear()
 
-    def configure_optimizers(self):
+    def configure_optimizers(self):  # noqa: D102
         return torch.optim.AdamW(self.parameters(), lr=self.lr)
