@@ -182,7 +182,7 @@ class SlidingWindowDataset(Dataset):
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
-        if self.load_normalization_metadata:
+        if self.load_normalization_metadata and norm_meta is not None:
             sample["norm_meta"] = norm_meta
         return sample
 
