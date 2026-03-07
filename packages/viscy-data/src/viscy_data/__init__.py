@@ -20,6 +20,10 @@ Version:
 
 # Type definitions (from _typing.py)
 from viscy_data._typing import (
+    CELL_INDEX_CORE_COLUMNS,
+    CELL_INDEX_GROUPING_COLUMNS,
+    CELL_INDEX_OPS_COLUMNS,
+    CELL_INDEX_TIMELAPSE_COLUMNS,
     INDEX_COLUMNS,
     LABEL_CELL_CYCLE_STATE,
     LABEL_CELL_DIVISION_STATE,
@@ -39,9 +43,6 @@ from viscy_data._typing import (
     TripletSample,
 )
 
-# Channel dropout augmentation (from channel_dropout.py)
-from viscy_data.channel_dropout import ChannelDropout
-
 # Cell classification (from cell_classification.py -- requires pandas at runtime)
 from viscy_data.cell_classification import (
     ClassificationDataModule,
@@ -53,6 +54,12 @@ from viscy_data.cell_division_triplet import (
     CellDivisionTripletDataModule,
     CellDivisionTripletDataset,
 )
+
+# Cell index (from cell_index.py -- requires [triplet] extra for pyarrow at runtime)
+from viscy_data.cell_index import read_cell_index, validate_cell_index, write_cell_index
+
+# Channel dropout augmentation (from channel_dropout.py)
+from viscy_data.channel_dropout import ChannelDropout
 
 # Combined/Concat DataModules (from combined.py)
 from viscy_data.combined import (
@@ -99,6 +106,10 @@ from viscy_data.triplet import TripletDataModule, TripletDataset
 __all__ = [
     # Types
     "AnnotationColumns",
+    "CELL_INDEX_CORE_COLUMNS",
+    "CELL_INDEX_GROUPING_COLUMNS",
+    "CELL_INDEX_OPS_COLUMNS",
+    "CELL_INDEX_TIMELAPSE_COLUMNS",
     "ChannelMap",
     "ChannelNormStats",
     "DictTransform",
@@ -115,6 +126,10 @@ __all__ = [
     "SegmentationSample",
     "TrackingIndex",
     "TripletSample",
+    # Cell index
+    "read_cell_index",
+    "validate_cell_index",
+    "write_cell_index",
     # Augmentation
     "ChannelDropout",
     # Utilities

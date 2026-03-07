@@ -190,6 +190,7 @@ class DatasetRecord(BaseModel):
     channel_3_name: str | None = None
     channel_3_biology: str | None = None
     data_path: str | None = None
+    tracks_path: str | None = None
     fluorescence_modality: str | None = None
     t_shape: int | None = None
     c_shape: int | None = None
@@ -244,6 +245,7 @@ class DatasetRecord(BaseModel):
             channel_3_name=fields.get("channel_3_name"),
             channel_3_biology=_select_val(fields.get("channel_3_biology")),
             data_path=fields.get("data_path"),
+            tracks_path=fields.get("tracks_path"),
             fluorescence_modality=_select_val(fields.get("fluorescence_modality")),
             t_shape=fields.get("t_shape"),
             c_shape=fields.get("c_shape"),

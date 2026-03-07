@@ -12,6 +12,10 @@ from torch import ShortTensor, Tensor
 
 __all__ = [
     "AnnotationColumns",
+    "CELL_INDEX_CORE_COLUMNS",
+    "CELL_INDEX_GROUPING_COLUMNS",
+    "CELL_INDEX_OPS_COLUMNS",
+    "CELL_INDEX_TIMELAPSE_COLUMNS",
     "ChannelMap",
     "ChannelNormStats",
     "DictTransform",
@@ -153,6 +157,32 @@ LABEL_CELL_REMODELING_STATE = {
     "remodeling": 1,
     "unknown": -1,
 }
+
+CELL_INDEX_CORE_COLUMNS = [
+    "cell_id",
+    "experiment",
+    "store_path",
+    "tracks_path",
+    "fov",
+    "well",
+    "y",
+    "x",
+    "z",
+    "source_channels",
+]
+
+CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name"]
+
+CELL_INDEX_TIMELAPSE_COLUMNS = [
+    "t",
+    "track_id",
+    "global_track_id",
+    "lineage_id",
+    "parent_track_id",
+    "hours_post_infection",
+]
+
+CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]
 
 # Extracted from viscy/data/triplet.py for shared access
 INDEX_COLUMNS = [

@@ -109,6 +109,14 @@ dynaclr.add_command(
     )
 )
 
+dynaclr.add_command(
+    LazyCommand(
+        name="build-cell-index",
+        import_path="dynaclr.data.build_cell_index.main",
+        short_help="Build cell index parquet from time-lapse experiment config",
+    )
+)
+
 
 def main():
     """Run the DynaCLR CLI."""
