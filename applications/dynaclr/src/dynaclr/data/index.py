@@ -13,9 +13,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
-from iohub.ngff import Position, open_ome_zarr
+from iohub.ngff import Plate, Position, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry
+from viscy_data.cell_index import read_cell_index
 
 _logger = logging.getLogger(__name__)
 
@@ -46,6 +47,11 @@ class MultiExperimentIndex:
         If provided, only include positions from these wells (e.g. ``["A/1"]``).
     exclude_fovs : list[str] | None
         If provided, exclude these FOVs by name (e.g. ``["A/1/0"]``).
+    cell_index_path : str | Path | None
+        Optional path to a pre-built cell index parquet (from
+        ``build_timelapse_cell_index``).  When provided, tracks are loaded
+        from the parquet instead of traversing every zarr store and CSV,
+        dramatically speeding up startup.
     """
 
     def __init__(
@@ -56,15 +62,31 @@ class MultiExperimentIndex:
         tau_range_hours: tuple[float, float] = (0.5, 2.0),
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
+        cell_index_path: str | Path | None = None,
     ) -> None:
         self.registry = registry
         self.z_range = z_range
         self.yx_patch_size = yx_patch_size
+        self._store_cache: dict[str, Plate] = {}
 
-        positions, tracks_dfs = self._load_all_experiments(include_wells=include_wells, exclude_fovs=exclude_fovs)
-        self.positions = positions
-        tracks = pd.concat(tracks_dfs, ignore_index=True) if tracks_dfs else pd.DataFrame()
-        tracks = self._reconstruct_lineage(tracks)
+        if cell_index_path is not None:
+            _logger.info("Loading cell index from parquet: %s", cell_index_path)
+            tracks = read_cell_index(cell_index_path)
+            tracks = self._align_parquet_columns(tracks)
+            if include_wells is not None:
+                tracks = tracks[tracks["well_name"].isin(include_wells)].copy()
+            if exclude_fovs is not None:
+                tracks = tracks[~tracks["fov_name"].isin(exclude_fovs)].copy()
+            tracks = self._filter_to_registry_experiments(tracks)
+            positions, tracks = self._resolve_positions_and_dims(tracks)
+            self.positions = positions
+            # lineage_id already present from build step — skip _reconstruct_lineage
+        else:
+            positions, tracks_dfs = self._load_all_experiments(include_wells=include_wells, exclude_fovs=exclude_fovs)
+            self.positions = positions
+            tracks = pd.concat(tracks_dfs, ignore_index=True) if tracks_dfs else pd.DataFrame()
+            tracks = self._reconstruct_lineage(tracks)
+
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
         self.valid_anchors = self._compute_valid_anchors(tau_range_hours)
@@ -105,6 +127,7 @@ class MultiExperimentIndex:
                 tracks_df = pd.read_csv(csv_files[0])
 
                 # Enrich columns
+                tracks_df["store_path"] = str(exp.data_path)
                 tracks_df["experiment"] = exp.name
                 tracks_df["condition"] = condition
                 tracks_df["well_name"] = well_name
@@ -132,6 +155,53 @@ class MultiExperimentIndex:
             if well_name in wells:
                 return condition_label
         return "unknown"
+
+    @staticmethod
+    def _align_parquet_columns(tracks: pd.DataFrame) -> pd.DataFrame:
+        """Rename parquet columns to match runtime expectations.
+
+        The cell index parquet uses ``fov``, ``well``, ``channel_name``
+        while the runtime code expects ``fov_name``, ``well_name``,
+        ``fluorescence_channel``.
+        """
+        return tracks.rename(columns={"fov": "fov_name", "well": "well_name", "channel_name": "fluorescence_channel"})
+
+    def _filter_to_registry_experiments(self, tracks: pd.DataFrame) -> pd.DataFrame:
+        """Keep only rows whose experiment is present in the registry."""
+        registry_names = {exp.name for exp in self.registry.experiments}
+        return tracks[tracks["experiment"].isin(registry_names)].copy()
+
+    def _resolve_positions_and_dims(self, tracks: pd.DataFrame) -> tuple[list[Position], pd.DataFrame]:
+        """Open zarr stores for unique (store_path, fov_name) pairs.
+
+        Attaches ``position``, ``_img_height``, ``_img_width`` columns to
+        *tracks* and returns the list of resolved Position objects.
+        """
+        all_positions: list[Position] = []
+        pos_lookup: dict[tuple[str, str], Position] = {}
+        dim_lookup: dict[tuple[str, str], tuple[int, int]] = {}
+
+        if tracks.empty:
+            tracks["position"] = pd.Series(dtype=object)
+            tracks["_img_height"] = pd.Series(dtype=int)
+            tracks["_img_width"] = pd.Series(dtype=int)
+            return all_positions, tracks
+
+        for (store_path, fov_name), _group in tracks.groupby(["store_path", "fov_name"]):
+            if store_path not in self._store_cache:
+                self._store_cache[store_path] = open_ome_zarr(store_path, mode="r")
+            plate = self._store_cache[store_path]
+            position = plate[fov_name]
+            pos_lookup[(store_path, fov_name)] = position
+            image = position["0"]
+            dim_lookup[(store_path, fov_name)] = (image.height, image.width)
+            all_positions.append(position)
+
+        tracks["position"] = [pos_lookup[(sp, fn)] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
+        tracks["_img_height"] = [dim_lookup[(sp, fn)][0] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
+        tracks["_img_width"] = [dim_lookup[(sp, fn)][1] for sp, fn in zip(tracks["store_path"], tracks["fov_name"])]
+
+        return all_positions, tracks
 
     @staticmethod
     def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:

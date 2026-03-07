@@ -73,6 +73,7 @@ model:
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
   init_args:
+    cell_index_path: null  # Optional: path to pre-built cell_index.parquet (faster startup)
     experiments_yaml: #TODO path to experiments.yml
     z_range: [15, 45]
     yx_patch_size: [384, 384]

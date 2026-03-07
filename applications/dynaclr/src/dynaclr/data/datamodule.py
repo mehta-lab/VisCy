@@ -92,6 +92,10 @@ class MultiExperimentDataModule(LightningDataModule):
         Only include these wells. Default: None.
     exclude_fovs : list[str] | None
         Exclude these FOVs. Default: None.
+    cell_index_path : str | None
+        Optional path to a pre-built cell index parquet for faster startup.
+        When provided, both train and val indices load from this parquet
+        (filtered by their respective registries). Default: None.
     """
 
     def __init__(
@@ -126,6 +130,7 @@ class MultiExperimentDataModule(LightningDataModule):
         seed: int = 0,
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
+        cell_index_path: str | None = None,
     ) -> None:
         super().__init__()
 
@@ -164,6 +169,7 @@ class MultiExperimentDataModule(LightningDataModule):
         self.seed = seed
         self.include_wells = include_wells
         self.exclude_fovs = exclude_fovs
+        self.cell_index_path = cell_index_path
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -216,6 +222,7 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_range_hours=self.tau_range,
                 include_wells=self.include_wells,
                 exclude_fovs=self.exclude_fovs,
+                cell_index_path=self.cell_index_path,
             )
             self.train_dataset = MultiExperimentTripletDataset(
                 index=train_index,
@@ -234,6 +241,7 @@ class MultiExperimentDataModule(LightningDataModule):
                     tau_range_hours=self.tau_range,
                     include_wells=self.include_wells,
                     exclude_fovs=self.exclude_fovs,
+                    cell_index_path=self.cell_index_path,
                 )
                 self.val_dataset = MultiExperimentTripletDataset(
                     index=val_index,

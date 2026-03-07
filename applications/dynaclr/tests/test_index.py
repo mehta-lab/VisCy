@@ -7,10 +7,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from iohub.ngff import open_ome_zarr
+import yaml
+from iohub.ngff import Position, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
+from viscy_data.cell_index import build_timelapse_cell_index
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1008,3 +1010,256 @@ class TestMultiExperimentIndexProperties:
         result = index.summary()
         assert f"{len(index.tracks)} total observations" in result
         assert f"{len(index.valid_anchors)} valid anchors" in result
+
+
+# ---------------------------------------------------------------------------
+# Parquet path helpers
+# ---------------------------------------------------------------------------
+
+
+def _build_cell_index_parquet(tmp_path: Path, registry: ExperimentRegistry) -> Path:
+    """Build a cell index parquet from a registry for testing."""
+    yaml_path = tmp_path / "experiments.yaml"
+    experiments_list = []
+    for exp in registry.experiments:
+        experiments_list.append(
+            {
+                "name": exp.name,
+                "data_path": exp.data_path,
+                "tracks_path": exp.tracks_path,
+                "channel_names": exp.channel_names,
+                "source_channel": exp.source_channel,
+                "condition_wells": exp.condition_wells,
+                "interval_minutes": exp.interval_minutes,
+                "start_hpi": exp.start_hpi,
+            }
+        )
+    with open(yaml_path, "w") as f:
+        yaml.dump({"experiments": experiments_list}, f)
+
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(yaml_path, parquet_path)
+    return parquet_path
+
+
+# ---------------------------------------------------------------------------
+# CELL-05: Parquet path loading
+# ---------------------------------------------------------------------------
+
+
+class TestParquetPath:
+    """Tests for loading MultiExperimentIndex from a pre-built parquet."""
+
+    def test_parquet_all_observations_present(self, two_experiment_setup, tmp_path):
+        """Parquet path yields same row count as legacy path."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints = 400
+        assert len(index.tracks) == 400
+
+    def test_parquet_column_alignment(self, two_experiment_setup, tmp_path):
+        """Parquet columns are renamed: fov_name, well_name, fluorescence_channel."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        assert "fov_name" in index.tracks.columns
+        assert "well_name" in index.tracks.columns
+        assert "fluorescence_channel" in index.tracks.columns
+        # Original parquet names should be gone
+        assert "fov" not in index.tracks.columns
+        assert "well" not in index.tracks.columns
+        assert "channel_name" not in index.tracks.columns
+
+    def test_parquet_include_wells(self, two_experiment_setup, tmp_path):
+        """include_wells filters correctly with parquet path."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            include_wells=["A/1"],
+            cell_index_path=parquet_path,
+        )
+        assert set(index.tracks["well_name"].unique()) == {"A/1"}
+        assert len(index.tracks) == 200
+
+    def test_parquet_exclude_fovs(self, two_experiment_setup, tmp_path):
+        """exclude_fovs removes specified FOVs with parquet path."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            exclude_fovs=["A/1/0"],
+            cell_index_path=parquet_path,
+        )
+        assert "A/1/0" not in index.tracks["fov_name"].to_numpy()
+        assert len(index.tracks) == 300
+
+    def test_parquet_train_val_split(self, two_experiment_setup, tmp_path):
+        """Same parquet, two registries → correct experiment filtering."""
+        registry, cfg_a, cfg_b = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        # Train: only exp_a
+        train_registry = ExperimentRegistry(experiments=[cfg_a])
+        train_index = MultiExperimentIndex(
+            registry=train_registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        assert set(train_index.tracks["experiment"].unique()) == {"exp_a"}
+        assert len(train_index.tracks) == 200
+
+        # Val: only exp_b
+        val_registry = ExperimentRegistry(experiments=[cfg_b])
+        val_index = MultiExperimentIndex(
+            registry=val_registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        assert set(val_index.tracks["experiment"].unique()) == {"exp_b"}
+        assert len(val_index.tracks) == 200
+
+    def test_parquet_valid_anchors_count(self, two_experiment_setup, tmp_path):
+        """valid_anchors count matches legacy path."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        legacy_index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+        )
+        parquet_index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            tau_range_hours=(0.5, 1.5),
+            cell_index_path=parquet_path,
+        )
+        assert len(parquet_index.valid_anchors) == len(legacy_index.valid_anchors)
+
+    def test_parquet_positions_resolved(self, two_experiment_setup, tmp_path):
+        """position column contains iohub Position objects."""
+        registry, _, _ = two_experiment_setup
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        sample_pos = index.tracks.iloc[0]["position"]
+        assert isinstance(sample_pos, Position)
+
+    def test_parquet_border_clamping(self, tmp_path):
+        """y_clamp, x_clamp are computed correctly from parquet path."""
+        zarr_path, tracks_root = _create_zarr_and_tracks(
+            tmp_path,
+            name="border_pq",
+            channel_names=_CHANNEL_NAMES_A,
+            wells=[("A", "1")],
+            fovs_per_well=1,
+            border_cell_track=3,
+            outside_cell_track=4,
+        )
+        cfg = ExperimentConfig(
+            name="border_pq",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+
+        index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+        # Track 3 at y=2, x=2 -> clamped to (16, 16)
+        border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
+        assert border_cell["y_clamp"] == 16.0
+        assert border_cell["x_clamp"] == 16.0
+        # Track 4 at y=-1 -> excluded
+        assert len(index.tracks[index.tracks["track_id"] == 4]) == 0
+        # 4 remaining tracks * 10 timepoints = 40
+        assert len(index.tracks) == 40
+
+    def test_parquet_lineage_preserved(self, tmp_path):
+        """lineage_id from parquet matches legacy reconstruction."""
+        parent_map = {1: 0, 2: 1, 3: 99}
+        zarr_path, tracks_root = _create_zarr_and_tracks(
+            tmp_path,
+            name="lineage_pq",
+            channel_names=_CHANNEL_NAMES_A,
+            wells=[("A", "1")],
+            fovs_per_well=1,
+            parent_map=parent_map,
+        )
+        cfg = ExperimentConfig(
+            name="lineage_pq",
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=_CHANNEL_NAMES_A,
+            source_channel=["Phase", "GFP"],
+            condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
+        )
+        registry = ExperimentRegistry(experiments=[cfg])
+
+        # Legacy path
+        legacy_index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+        )
+        # Parquet path
+        parquet_path = _build_cell_index_parquet(tmp_path, registry)
+        parquet_index = MultiExperimentIndex(
+            registry=registry,
+            z_range=slice(0, 1),
+            yx_patch_size=_YX_PATCH,
+            cell_index_path=parquet_path,
+        )
+
+        # Compare lineage_id per global_track_id
+        legacy_lineage = (
+            legacy_index.tracks[["global_track_id", "lineage_id"]]
+            .drop_duplicates("global_track_id")
+            .set_index("global_track_id")["lineage_id"]
+            .sort_index()
+        )
+        parquet_lineage = (
+            parquet_index.tracks[["global_track_id", "lineage_id"]]
+            .drop_duplicates("global_track_id")
+            .set_index("global_track_id")["lineage_id"]
+            .sort_index()
+        )
+        pd.testing.assert_series_equal(legacy_lineage, parquet_lineage)
