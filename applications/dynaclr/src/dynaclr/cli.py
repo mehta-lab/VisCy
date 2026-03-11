@@ -103,6 +103,14 @@ dynaclr.add_command(
 
 dynaclr.add_command(
     LazyCommand(
+        name="cross-validate",
+        import_path="dynaclr.evaluation.linear_classifiers.cross_validation.main",
+        short_help="Run rotating leave-one-dataset-out cross-validation",
+    )
+)
+
+dynaclr.add_command(
+    LazyCommand(
         name="info",
         import_path="dynaclr.info.main",
         short_help="Print summary of an AnnData zarr store",
