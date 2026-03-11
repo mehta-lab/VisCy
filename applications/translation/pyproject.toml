@@ -4,7 +4,7 @@ requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
 name = "viscy-translation"
-description = "Virtual staining translation application using UNet architectures"
+description = "Virtual staining translation application"
 readme = "README.md"
 keywords = [
   "deep learning",

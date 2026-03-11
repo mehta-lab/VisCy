@@ -2,8 +2,18 @@
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 import torch
+from iohub.ngff import open_ome_zarr
+from lightning.pytorch import LightningDataModule
+from monai.transforms import Decollated
+from monai.transforms.compose import Compose
+from torch.utils.data import DataLoader, Dataset
+
+from viscy_data.combined import CombinedDataModule
+from viscy_data.gpu_aug import GPUTransformDataModule
+from viscy_transforms import StackChannelsd
 
 # Synthetic data dimensions
 SYNTH_B = 2  # batch size
@@ -11,6 +21,14 @@ SYNTH_C = 1  # input channels (phase)
 SYNTH_D = 5  # depth (z-stack)
 SYNTH_H = 64  # height
 SYNTH_W = 64  # width
+
+# FCMAE needs 128x128 (64x64 creates degenerate 2x2 bottleneck with 7x7 depthwise conv).
+FCMAE_H = 128
+FCMAE_W = 128
+
+# MixedLoss 5-scale MS-SSIM needs spatial/16 >= 11 (no padding in MONAI SSIM kernel).
+MIXED_LOSS_H = 192
+MIXED_LOSS_W = 192
 
 # HPC path constants for inference reproducibility tests.
 CHECKPOINT_PATH = Path(
@@ -72,3 +90,154 @@ def synthetic_batch():
             [torch.tensor(0) for _ in range(SYNTH_B)],
         ),
     }
+
+
+# ---------------------------------------------------------------------------
+# Synthetic datasets and data modules for training integration tests
+# ---------------------------------------------------------------------------
+
+
+class SyntheticHCSDataset(Dataset):
+    """Synthetic dataset returning Sample dicts with source, target, index."""
+
+    def __init__(self, size=8, n_channels=1, depth=SYNTH_D, height=SYNTH_H, width=SYNTH_W):
+        self.size = size
+        self.n_channels = n_channels
+        self.depth = depth
+        self.height = height
+        self.width = width
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        return {
+            "source": torch.randn(self.n_channels, self.depth, self.height, self.width),
+            "target": torch.randn(self.n_channels, self.depth, self.height, self.width),
+            "index": (f"row/col/pos/{idx}", torch.tensor(0), torch.tensor(0)),
+        }
+
+
+class SyntheticHCSDataModule(LightningDataModule):
+    """DataModule wrapping SyntheticHCSDataset for VSUNet train/val."""
+
+    def __init__(self, batch_size=2, num_samples=8, **dataset_kwargs):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_samples = num_samples
+        self.dataset_kwargs = dataset_kwargs
+
+    def train_dataloader(self):
+        return DataLoader(
+            SyntheticHCSDataset(self.num_samples, **self.dataset_kwargs),
+            batch_size=self.batch_size,
+        )
+
+    def val_dataloader(self):
+        return DataLoader(
+            SyntheticHCSDataset(self.num_samples, **self.dataset_kwargs),
+            batch_size=self.batch_size,
+        )
+
+
+class SyntheticGPUTransformDataset(Dataset):
+    """Synthetic dataset returning [dict] matching CachedOmeZarrDataset format.
+
+    Each item is a list containing one dict with per-channel-name tensors,
+    compatible with ``list_data_collate``.
+    """
+
+    def __init__(self, size=8, depth=SYNTH_D, height=FCMAE_H, width=FCMAE_W):
+        self.size = size
+        self.depth = depth
+        self.height = height
+        self.width = width
+
+    def __len__(self):
+        return self.size
+
+    def __getitem__(self, idx):
+        return [
+            {
+                "Phase3D": torch.randn(1, self.depth, self.height, self.width),
+                "Fluorescence": torch.randn(1, self.depth, self.height, self.width),
+            }
+        ]
+
+
+class SyntheticGPUTransformDataModule(GPUTransformDataModule):
+    """Synthetic GPUTransformDataModule with StackChannelsd for FCMAE tests.
+
+    GPU transforms include Decollated (to split collated batch back into
+    per-sample dicts) followed by StackChannelsd (to map channel-name keys
+    to source/target), matching the production CachedOmeZarrDataModule pattern.
+    """
+
+    def __init__(self, batch_size=2, num_samples=8, depth=SYNTH_D, height=FCMAE_H, width=FCMAE_W):
+        super().__init__()
+        self.batch_size = batch_size
+        self.num_workers = 0
+        self.pin_memory = False
+        self.prefetch_factor = None
+        self._depth = depth
+        self._height = height
+        self._width = width
+        self._num_samples = num_samples
+        channels = ["Phase3D", "Fluorescence"]
+        stack = StackChannelsd({"source": ["Phase3D"], "target": ["Fluorescence"]})
+        self._train_gpu = Compose([Decollated(keys=channels), stack])
+        self._val_gpu = Compose([Decollated(keys=channels), stack])
+
+    def setup(self, stage):
+        self.train_dataset = SyntheticGPUTransformDataset(self._num_samples, self._depth, self._height, self._width)
+        self.val_dataset = SyntheticGPUTransformDataset(self._num_samples, self._depth, self._height, self._width)
+
+    @property
+    def train_cpu_transforms(self):
+        return Compose([])
+
+    @property
+    def train_gpu_transforms(self):
+        return self._train_gpu
+
+    @property
+    def val_cpu_transforms(self):
+        return Compose([])
+
+    @property
+    def val_gpu_transforms(self):
+        return self._val_gpu
+
+
+def make_synthetic_combined_datamodule(**kwargs):
+    """Create a CombinedDataModule wrapping one SyntheticGPUTransformDataModule."""
+    return CombinedDataModule([SyntheticGPUTransformDataModule(**kwargs)])
+
+
+@pytest.fixture
+def tiny_hcs_zarr(tmp_path):
+    """Create a minimal HCS OME-Zarr with 4 positions for integration tests.
+
+    Uses FCMAE_H/W spatial dims so both VSUNet (with yx_patch_size crop)
+    and FCMAE tests can use the same fixture.
+    """
+    zarr_path = tmp_path / "tiny.zarr"
+    channel_names = ["Phase3D", "Fluorescence"]
+    dataset = open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names)
+    rng = np.random.default_rng(42)
+    for row in ("A",):
+        for col in ("1", "2"):
+            for fov in ("0", "1"):
+                pos = dataset.create_position(row, col, fov)
+                pos.create_image(
+                    "0",
+                    rng.random((1, len(channel_names), SYNTH_D, FCMAE_H, FCMAE_W)).astype(np.float32),
+                    chunks=(1, 1, SYNTH_D, FCMAE_H, FCMAE_W),
+                )
+    dataset.close()
+    # Write per-FOV normalization metadata.
+    norm_meta = {ch: {"fov_statistics": {"mean": 0.5, "std": 0.29}} for ch in channel_names}
+    with open_ome_zarr(zarr_path, mode="r+") as ds:
+        for _, fov in ds.positions():
+            fov.zattrs["normalization"] = norm_meta
+    return zarr_path
