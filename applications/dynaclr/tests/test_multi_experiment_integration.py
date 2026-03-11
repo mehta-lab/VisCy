@@ -229,6 +229,73 @@ def test_multi_experiment_fast_dev_run(tmp_path):
     assert trainer.state.status == "finished"
 
 
+def test_multi_experiment_fast_dev_run_with_parquet(tmp_path):
+    """End-to-end: same as test_multi_experiment_fast_dev_run but loading from cell_index parquet."""
+    seed_everything(42)
+
+    from dynaclr.data.datamodule import MultiExperimentDataModule
+    from viscy_data.cell_index import build_timelapse_cell_index
+
+    exp_alpha = _create_experiment(
+        tmp_path,
+        name="exp_alpha",
+        channel_names=["Phase3D", "GFP", "Mito"],
+        source_channel=["Phase3D", "GFP"],
+        wells=[("A", "1")],
+        condition_wells={"control": ["A/1"]},
+    )
+    exp_beta = _create_experiment(
+        tmp_path,
+        name="exp_beta",
+        channel_names=["Phase3D", "RFP", "StressGranules"],
+        source_channel=["Phase3D", "RFP"],
+        wells=[("B", "1")],
+        condition_wells={"control": ["B/1"]},
+    )
+    yaml_path = _write_experiments_yaml(tmp_path, [exp_alpha, exp_beta])
+
+    # Build cell index parquet
+    parquet_path = tmp_path / "cell_index.parquet"
+    build_timelapse_cell_index(yaml_path, parquet_path)
+
+    datamodule = MultiExperimentDataModule(
+        experiments_yaml=str(yaml_path),
+        z_range=(0, 1),
+        yx_patch_size=(32, 32),
+        final_yx_patch_size=(24, 24),
+        val_experiments=["exp_beta"],
+        tau_range=(0.5, 2.0),
+        batch_size=4,
+        num_workers=1,
+        experiment_aware=True,
+        condition_balanced=False,
+        temporal_enrichment=False,
+        channel_dropout_channels=[1],
+        channel_dropout_prob=0.5,
+        cell_index_path=str(parquet_path),
+    )
+
+    encoder = SimpleEncoder()
+    module = ContrastiveModule(
+        encoder=encoder,
+        loss_function=NTXentHCL(temperature=0.07, beta=0.5),
+        lr=1e-3,
+        example_input_array_shape=(1, _C, _Z, _Y, _X),
+    )
+
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=datamodule)
+
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
 def test_multi_experiment_fast_dev_run_with_all_sampling_axes(tmp_path):
     """End-to-end: 2 experiments with all sampling axes enabled."""
     seed_everything(42)
