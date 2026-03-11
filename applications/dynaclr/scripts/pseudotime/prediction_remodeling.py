@@ -55,10 +55,49 @@ ORGANELLE_CONFIG = {
                 "annotations_path": ANNOTATIONS_ROOT
                 / "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV"
                 / "2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv",
-                "fov_pattern": "C/2",
-                "frame_interval_minutes": 30,
-                "task": "organelle_state",
+                "fov_pattern": "C/2",  # uninf c/1, inf c/2
+                "frame_interval_minutes": 10,
+                "task": "organelle_state_g3bp1",
                 "label": "2025_07_22 ZIKV",
+            },
+            {
+                "embeddings_path": EMBEDDINGS_ROOT
+                / "2025_01_24_A549_G3BP1_DENV"
+                / "4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3",
+                "embeddings_pattern": "*organelle*.zarr",
+                "annotations_path": ANNOTATIONS_ROOT
+                / "2025_01_24_A549_G3BP1_DENV"
+                / "2025_01_24_A549_G3BP1_DENV_combined_annotations.csv",
+                "fov_pattern": "C/2",  # ZIKV uninf B/3, inf C/2
+                "frame_interval_minutes": 10,
+                "task": "organelle_state_g3bp1",
+                "label": "2025_01_24 DENV",
+            },
+            {
+                "embeddings_path": EMBEDDINGS_ROOT
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
+                / "4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3",
+                "embeddings_pattern": "*organelle*.zarr",
+                "annotations_path": ANNOTATIONS_ROOT
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV"
+                / "2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv",
+                "fov_pattern": "C/4",  # DENV uninf B/4 and inf C/4
+                "frame_interval_minutes": 30,
+                "task": "organelle_state_g3bp1",
+                "label": "2025_01_28 ZIKV",
+            },
+            {
+                "embeddings_path": EMBEDDINGS_ROOT
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
+                / "4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3",
+                "embeddings_pattern": "*organelle*.zarr",
+                "annotations_path": ANNOTATIONS_ROOT
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv",
+                "fov_pattern": "C/2",  # ZIKV uinf C/1 and inf C/2
+                "frame_interval_minutes": 30,
+                "task": "organelle_state_g3bp1",
+                "label": "2025_07_24 ZIKV",
             },
         ],
         "controls": [],
@@ -69,16 +108,16 @@ ORGANELLE_CONFIG = {
         "experiments": [
             {
                 "embeddings_path": EMBEDDINGS_ROOT
-                / "2024_11_07_A549_SEC61_DENV"
-                / "4-phenotyping/2-predictions/DynaCLR-2D-BagOfChannels-timeaware/v3",
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
+                / "4-phenotyping/predictions/DynaCLR-2D-BagOfChannels-timeaware/v3",
                 "embeddings_pattern": "*organelle*.zarr",
                 "annotations_path": ANNOTATIONS_ROOT
-                / "2024_11_07_A549_SEC61B_DENV"
-                / "2024_11_07_A549_SEC61B_DENV_combined_annotations.csv",
-                "fov_pattern": "C/2",
-                "frame_interval_minutes": 10,
-                "task": "organelle_state",
-                "label": "2024_11_07 DENV",
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV"
+                / "2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv",
+                "fov_pattern": "A/2",
+                "frame_interval_minutes": 30,
+                "task": "organelle_state_sec61b",
+                "label": "2025_07_24 ZIKV",
             },
         ],
         "controls": [],
@@ -115,7 +154,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
         print(f"\n  Experiment: {exp['label']}")
 
         # Load embeddings (AnnData with predictions)
-        emb_files = glob.glob(str(exp["embeddings_path"] / exp["embeddings_pattern"]))
+        emb_files = glob.glob(str(Path(exp["embeddings_path"]) / exp["embeddings_pattern"]))
         if not emb_files:
             print(f"    No embeddings found matching: {exp['embeddings_pattern']}")
             continue
