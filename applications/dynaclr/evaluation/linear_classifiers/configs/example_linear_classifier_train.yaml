@@ -1,0 +1,46 @@
+# Example configuration for training a linear classifier
+#
+# Usage:
+#   dynaclr train-linear-classifier \
+#       -c evaluation/linear_classifiers/configs/example_linear_classifier_train.yaml
+
+# Classification task name
+# Valid options: infection_state, organelle_state, cell_division_state, cell_death_state
+task: cell_death_state
+
+# Input channel name used for embeddings
+# Valid options: phase, sensor, organelle
+input_channel: phase
+
+# Embedding model identity — used to derive the W&B project name:
+#   linearclassifiers-{embedding_model_name}-{embedding_model_version}
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
+
+# Training datasets - list of exact file paths (no glob patterns)
+# Each dataset must have both embeddings (zarr) and annotations (csv)
+# Optionally specify include_wells to filter by well prefix (e.g. A/1, B/2)
+train_datasets:
+  - embeddings: /path/to/dataset1/embeddings_phase.zarr
+    annotations: /path/to/dataset1/annotations.csv
+  - embeddings: /path/to/dataset2/embeddings_phase.zarr
+    annotations: /path/to/dataset2/annotations.csv
+    include_wells: ["A/1", "C/2"]  # optional: only use these wells
+
+# Preprocessing
+use_scaling: true  # Apply StandardScaler normalization
+use_pca: false     # Apply PCA dimensionality reduction
+n_pca_components: null  # Number of PCA components (required if use_pca is true)
+
+# Classifier hyperparameters
+max_iter: 1000           # Maximum number of iterations for solver
+class_weight: balanced   # Class weighting strategy ('balanced' or null)
+solver: liblinear        # Optimization algorithm
+
+# Training parameters
+split_train_data: 0.8  # Fraction of data for training (rest for validation, 1.0 = use all)
+random_seed: 42        # Random seed for reproducibility
+
+# Weights & Biases configuration
+wandb_entity: null                           # W&B entity (username or team, null for default)
+wandb_tags: []                               # Tags to add to the run

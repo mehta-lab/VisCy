@@ -1,0 +1,38 @@
+# Example configuration for applying trained linear classifiers
+#
+# Usage:
+#   dynaclr apply-linear-classifier \
+#       -c evaluation/linear_classifiers/configs/example_linear_classifier_inference.yaml
+
+# Embedding model identity — used to derive the W&B project name:
+#   linearclassifiers-{embedding_model_name}-{embedding_model_version}
+embedding_model_name: DynaCLR-2D-BagOfChannels-timeaware
+embedding_model_version: v3
+
+# W&B entity (username or team, null for default)
+wandb_entity: null
+
+# Path to embeddings zarr file for inference
+embeddings_path: /path/to/embeddings.zarr
+
+# Path to save output zarr file with predictions.
+# When omitted (or null), predictions are written back to embeddings_path.
+# output_path: /path/to/output_with_predictions.zarr
+
+# Whether to overwrite output if it already exists (only used when output_path is set)
+overwrite: false
+
+# Classifier models to apply.
+# Each model can optionally specify include_wells for marker-specific filtering.
+models:
+  - model_name: linear-classifier-infection_state-sensor
+    version: latest
+  - model_name: linear-classifier-infection_state-phase
+    version: latest
+  - model_name: linear-classifier-organelle_state-organelle-g3bp1
+    version: latest
+    include_wells:
+      - A/1
+      - A/2
+  - model_name: linear-classifier-cell_division_state-phase
+    version: latest

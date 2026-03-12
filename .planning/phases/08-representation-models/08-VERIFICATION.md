@@ -55,12 +55,12 @@ re_verification: false
 
 | From | To | Via | Status | Details |
 |------|----|----|--------|---------|
-| contrastive/encoder.py | components/stems.py | import StemDepthtoChannels | ✓ WIRED | Line 9: imported, Line 110: instantiated in __init__ |
+| contrastive/encoder.py | _components/stems.py | import StemDepthtoChannels | ✓ WIRED | Line 9: imported, Line 110: instantiated in __init__ |
 | contrastive/resnet3d.py | contrastive/encoder.py | import projection_mlp | ✓ WIRED | Line 7: imported, Line 42: called in __init__ |
 | contrastive/__init__.py | contrastive/encoder.py | re-export ContrastiveEncoder | ✓ WIRED | Line 3: imports and line 6: exports |
 | contrastive/__init__.py | contrastive/resnet3d.py | re-export ResNet3dEncoder | ✓ WIRED | Line 4: imports and line 6: exports |
-| vae/beta_vae_25d.py | components/stems.py | import StemDepthtoChannels | ✓ WIRED | Line 14: imported, Line 140: instantiated in VaeEncoder.__init__ |
-| vae/beta_vae_25d.py | components/heads.py | import PixelToVoxelHead | ✓ WIRED | Line 13: imported, Line 251: instantiated in VaeDecoder.__init__ |
+| vae/beta_vae_25d.py | _components/stems.py | import StemDepthtoChannels | ✓ WIRED | Line 14: imported, Line 140: instantiated in VaeEncoder.__init__ |
+| vae/beta_vae_25d.py | _components/heads.py | import PixelToVoxelHead | ✓ WIRED | Line 13: imported, Line 251: instantiated in VaeDecoder.__init__ |
 | vae/__init__.py | vae/beta_vae_25d.py | re-export BetaVae25D | ✓ WIRED | Line 3: imports and line 6: exports |
 | vae/__init__.py | vae/beta_vae_monai.py | re-export BetaVaeMonai | ✓ WIRED | Line 4: imports and line 6: exports |
 
@@ -94,7 +94,7 @@ re_verification: false
 **Contrastive models:** 5 tests run, 5 passed in 2.68s
 ```
 test_contrastive_encoder_convnext_tiny - PASSED
-test_contrastive_encoder_resnet50 - PASSED  
+test_contrastive_encoder_resnet50 - PASSED
 test_contrastive_encoder_custom_stem - PASSED
 test_resnet3d_encoder_resnet18 - PASSED
 test_resnet3d_encoder_resnet10 - PASSED
@@ -139,7 +139,7 @@ From ROADMAP.md Phase 8 success criteria:
 1. **Contrastive models importable:** Both ContrastiveEncoder and ResNet3dEncoder can be imported from `viscy_models.contrastive` and produce correct outputs
 2. **VAE models importable:** Both BetaVae25D and BetaVaeMonai can be imported from `viscy_models.vae` and produce correct outputs
 3. **Test coverage:** 9 forward-pass tests verify all models with multiple configurations
-4. **Component wiring:** All imports to components (StemDepthtoChannels, PixelToVoxelHead) are working
+4. **Component wiring:** All imports to _components (StemDepthtoChannels, PixelToVoxelHead) are working
 5. **State dict compatibility:** All attribute names preserved for checkpoint loading
 6. **Bug fixes applied:** ResNet50 projection bug fixed using encoder.num_features
 7. **COMPAT-02 compliance:** VaeDecoder mutable defaults changed to tuples

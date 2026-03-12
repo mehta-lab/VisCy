@@ -1,0 +1,242 @@
+"""Callback for writing embeddings to zarr store."""
+
+import logging
+from pathlib import Path
+from typing import Any, Dict, Literal, Optional, Sequence
+
+import numpy as np
+import pandas as pd
+import torch
+from lightning.pytorch import LightningModule, Trainer
+from lightning.pytorch.callbacks import BasePredictionWriter
+from numpy.typing import NDArray
+from xarray import Dataset, open_zarr
+
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS
+
+__all__ = [
+    "read_embedding_dataset",
+    "EmbeddingWriter",
+    "write_embedding_dataset",
+    "get_available_index_columns",
+]
+_logger = logging.getLogger("lightning.pytorch")
+
+
+def get_available_index_columns(dataset: Dataset, dataset_path: str | None = None) -> list[str]:
+    """Get available index columns from a dataset.
+
+    Parameters
+    ----------
+    dataset : Dataset
+        The xarray dataset to check for index columns.
+    dataset_path : str, optional
+        Path for logging purposes.
+
+    Returns
+    -------
+    list[str]
+        List of available index columns.
+    """
+    available_cols = [col for col in ULTRACK_INDEX_COLUMNS if col in dataset.coords]
+    missing_cols = set(ULTRACK_INDEX_COLUMNS) - set(available_cols)
+
+    if missing_cols:
+        path_msg = f" at {dataset_path}" if dataset_path else ""
+        _logger.warning(
+            f"Dataset{path_msg} is missing index columns: {sorted(missing_cols)}. "
+            "This appears to be a legacy dataset format."
+        )
+
+    return available_cols
+
+
+def read_embedding_dataset(path: Path) -> Dataset:
+    """Read the embedding dataset written by the EmbeddingWriter callback.
+
+    Parameters
+    ----------
+    path : Path
+        Path to the zarr store.
+
+    Returns
+    -------
+    Dataset
+        Xarray dataset with features and projections.
+    """
+    dataset = open_zarr(path)
+    available_cols = get_available_index_columns(dataset, str(path))
+    return dataset.set_index(sample=available_cols)
+
+
+def _move_and_stack_embeddings(predictions: Sequence, key: str) -> NDArray:
+    """Move embeddings to CPU and stack them into a numpy array."""
+    return torch.cat([p[key].cpu() for p in predictions], dim=0).numpy()
+
+
+def write_embedding_dataset(
+    output_path: Path,
+    features: np.ndarray,
+    index_df: pd.DataFrame,
+    projections: Optional[np.ndarray] = None,
+    umap_kwargs: Optional[Dict[str, Any]] = None,
+    phate_kwargs: Optional[Dict[str, Any]] = None,
+    pca_kwargs: Optional[Dict[str, Any]] = None,
+    overwrite: bool = False,
+    uns_metadata: Optional[Dict[str, Any]] = None,
+) -> None:
+    """Write embeddings to an AnnData Zarr Store.
+
+    Parameters
+    ----------
+    output_path : Path
+        Path to the zarr store.
+    features : np.ndarray
+        Array of shape (n_samples, n_features) containing the embeddings.
+    index_df : pd.DataFrame
+        DataFrame containing the index information for each embedding.
+    projections : np.ndarray, optional
+        Array of shape (n_samples, n_projections) containing projections.
+    umap_kwargs : dict, optional
+        Keyword arguments passed to UMAP, by default None.
+    phate_kwargs : dict, optional
+        Keyword arguments passed to PHATE, by default None.
+    pca_kwargs : dict, optional
+        Keyword arguments passed to PCA, by default None.
+    overwrite : bool, optional
+        Whether to overwrite existing zarr store, by default False.
+    uns_metadata : dict, optional
+        Additional metadata to store in ``adata.uns``, e.g.
+        ``{"data_path": "/path/to/data.zarr", "tracks_path": "..."}``.
+    """
+    import anndata as ad
+
+    if hasattr(ad, "settings") and hasattr(ad.settings, "allow_write_nullable_strings"):
+        ad.settings.allow_write_nullable_strings = True
+
+    output_path = Path(output_path)
+
+    if output_path.exists() and not overwrite:
+        raise FileExistsError(f"Output path {output_path} already exists.")
+
+    ultrack_indices = index_df.copy()
+    ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
+
+    adata = ad.AnnData(X=features, obs=ultrack_indices)
+    if projections is not None:
+        adata.obsm["X_projections"] = projections
+
+    if umap_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import (
+            _fit_transform_umap,
+        )
+
+        _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
+        _, UMAP = _fit_transform_umap(features, **umap_kwargs)
+        adata.obsm["X_umap"] = UMAP
+
+    if phate_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import compute_phate
+
+        _logger.debug(f"Using PHATE kwargs: {phate_kwargs}")
+        try:
+            _logger.debug("Computing PHATE")
+            _, PHATE = compute_phate(features, **phate_kwargs)
+            adata.obsm["X_phate"] = PHATE
+        except Exception as e:
+            _logger.warning(f"PHATE computation failed: {str(e)}")
+
+    if pca_kwargs:
+        from viscy_utils.evaluation.dimensionality_reduction import compute_pca
+
+        _logger.debug(f"Using PCA kwargs: {pca_kwargs}")
+        try:
+            _logger.debug("Computing PCA")
+            PCA_features, _ = compute_pca(features, **pca_kwargs)
+            adata.obsm["X_pca"] = PCA_features
+        except Exception as e:
+            _logger.warning(f"PCA computation failed: {str(e)}")
+
+    if uns_metadata:
+        adata.uns.update(uns_metadata)
+
+    _logger.debug(f"Writing dataset to {output_path}")
+    adata.write_zarr(output_path)
+
+
+class EmbeddingWriter(BasePredictionWriter):
+    """Callback to write embeddings to a zarr store.
+
+    Parameters
+    ----------
+    output_path : Path
+        Path to the zarr store.
+    write_interval : str, optional
+        When to write the embeddings, by default 'epoch'.
+    umap_kwargs : dict, optional
+        Keyword arguments passed to UMAP, by default None.
+    phate_kwargs : dict, optional
+        Keyword arguments passed to PHATE, by default None.
+    pca_kwargs : dict, optional
+        Keyword arguments passed to PCA, by default None.
+    overwrite : bool, optional
+        Whether to overwrite existing output, by default False.
+    """
+
+    def __init__(
+        self,
+        output_path: Path,
+        write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "epoch",
+        umap_kwargs: dict | None = None,
+        phate_kwargs: dict | None = None,
+        pca_kwargs: dict | None = None,
+        overwrite: bool = False,
+    ):
+        super().__init__(write_interval)
+        self.output_path = Path(output_path)
+        self.umap_kwargs = umap_kwargs
+        self.phate_kwargs = phate_kwargs
+        self.pca_kwargs = pca_kwargs
+        self.overwrite = overwrite
+
+    def on_predict_start(self, trainer: Trainer, pl_module: LightningModule) -> None:
+        """Check output path before prediction starts."""
+        if self.output_path.exists() and not self.overwrite:
+            raise FileExistsError(f"Output path {self.output_path} already exists.")
+        _logger.debug(f"Writing embeddings to {self.output_path}")
+
+    @staticmethod
+    def _collect_data_provenance(trainer: Trainer) -> Dict[str, Any]:
+        """Extract data and tracks paths from the datamodule if available."""
+        metadata: Dict[str, Any] = {}
+        datamodule = getattr(trainer, "datamodule", None)
+        if datamodule is not None:
+            if hasattr(datamodule, "data_path"):
+                metadata["data_path"] = str(datamodule.data_path)
+            if hasattr(datamodule, "tracks_path"):
+                metadata["tracks_path"] = str(datamodule.tracks_path)
+        return metadata
+
+    def write_on_epoch_end(
+        self,
+        trainer: Trainer,
+        pl_module: LightningModule,
+        predictions: Sequence,
+        batch_indices: Sequence[int],
+    ) -> None:
+        """Write predictions and dimensionality reductions to a zarr store."""
+        features = _move_and_stack_embeddings(predictions, "features")
+        projections = _move_and_stack_embeddings(predictions, "projections")
+        ultrack_indices = pd.concat([pd.DataFrame(p["index"]) for p in predictions])
+
+        write_embedding_dataset(
+            output_path=self.output_path,
+            features=features,
+            index_df=ultrack_indices,
+            projections=projections,
+            umap_kwargs=self.umap_kwargs,
+            phate_kwargs=self.phate_kwargs,
+            pca_kwargs=self.pca_kwargs,
+            overwrite=self.overwrite,
+            uns_metadata=self._collect_data_provenance(trainer),
+        )

@@ -8,7 +8,7 @@
 
 Phase 8 migrates four representation models from the pre-monorepo VisCy codebase into the `viscy-models` package: `ContrastiveEncoder`, `ResNet3dEncoder`, `BetaVae25D`, and `BetaVaeMonai`. The source code lives at `viscy/representation/contrastive.py` (latest version at commit fe7a5da^, which includes both `projection_mlp()`, `ContrastiveEncoder`, and `ResNet3dEncoder` from PR #285) and `viscy/representation/vae.py` (same commit, containing `VaeUpStage`, `VaeEncoder`, `VaeDecoder`, `BetaVae25D`, and `BetaVaeMonai`).
 
-The contrastive models are straightforward wrappers: `ContrastiveEncoder` wraps a timm backbone (convnext_tiny/convnextv2_tiny/resnet50) with `StemDepthtoChannels` + a projection MLP, while `ResNet3dEncoder` wraps MONAI's `ResNetFeatures` with a projection MLP. The VAE models are more complex: `BetaVae25D` composes `VaeEncoder` (timm backbone with 3D-to-2D stem) and `VaeDecoder` (custom upsampling stages with `PixelToVoxelHead`), while `BetaVaeMonai` is a thin wrapper around MONAI's `VarAutoEncoder`. Per the Phase 6 research decision, `VaeUpStage`, `VaeEncoder`, and `VaeDecoder` stay in `vae/` module -- NOT in `components/`.
+The contrastive models are straightforward wrappers: `ContrastiveEncoder` wraps a timm backbone (convnext_tiny/convnextv2_tiny/resnet50) with `StemDepthtoChannels` + a projection MLP, while `ResNet3dEncoder` wraps MONAI's `ResNetFeatures` with a projection MLP. The VAE models are more complex: `BetaVae25D` composes `VaeEncoder` (timm backbone with 3D-to-2D stem) and `VaeDecoder` (custom upsampling stages with `PixelToVoxelHead`), while `BetaVaeMonai` is a thin wrapper around MONAI's `VarAutoEncoder`. Per the Phase 6 research decision, `VaeUpStage`, `VaeEncoder`, and `VaeDecoder` stay in `vae/` module -- NOT in `_components/`.
 
 A critical finding during research: the `ContrastiveEncoder` code uses `encoder.head.fc.in_features` unconditionally for all backbones, but timm's ResNet models expose the classifier at `encoder.fc` (not `encoder.head.fc`). ConvNeXt models DO have `head.fc`. This means the `backbone="resnet50"` path has always been broken for `ContrastiveEncoder`. Since the original code has this bug and there are no existing checkpoints using this path (no tests ever existed), the migration should fix it by using timm's uniform API (`model.num_features` / `model.get_classifier()`). However, this fix must be carefully scoped to preserve state dict keys for the working convnext backbone paths.
 
@@ -64,7 +64,7 @@ packages/viscy-models/tests/
 
 ### Pattern 1: Contrastive Model Migration (ContrastiveEncoder)
 
-**What:** Migrate ContrastiveEncoder from `viscy/representation/contrastive.py` (commit fe7a5da^), updating imports from `viscy.unet.networks.unext2` to `viscy_models.components.stems`.
+**What:** Migrate ContrastiveEncoder from `viscy/representation/contrastive.py` (commit fe7a5da^), updating imports from `viscy.unet.networks.unext2` to `viscy_models._components.stems`.
 
 **Import changes (the ONLY changes from original):**
 ```python
@@ -72,7 +72,7 @@ packages/viscy-models/tests/
 from viscy.unet.networks.unext2 import StemDepthtoChannels
 
 # AFTER (migrated):
-from viscy_models.components.stems import StemDepthtoChannels
+from viscy_models._components.stems import StemDepthtoChannels
 ```
 
 **State dict keys preserved:** `self.stem`, `self.encoder`, `self.projection` -- these three module attribute names must remain identical.
@@ -95,7 +95,7 @@ from viscy_models.contrastive.encoder import projection_mlp  # Import from sibli
 
 ### Pattern 3: VAE Model Migration (BetaVae25D with helpers)
 
-**What:** Migrate BetaVae25D along with its helper classes VaeUpStage, VaeEncoder, VaeDecoder to `vae/beta_vae_25d.py`. Per Phase 6 decision, these helpers stay in the vae/ module, NOT in components/.
+**What:** Migrate BetaVae25D along with its helper classes VaeUpStage, VaeEncoder, VaeDecoder to `vae/beta_vae_25d.py`. Per Phase 6 decision, these helpers stay in the vae/ module, NOT in _components/.
 
 **Import changes:**
 ```python
@@ -103,8 +103,8 @@ from viscy_models.contrastive.encoder import projection_mlp  # Import from sibli
 from viscy.unet.networks.unext2 import PixelToVoxelHead, StemDepthtoChannels
 
 # AFTER (migrated):
-from viscy_models.components.heads import PixelToVoxelHead
-from viscy_models.components.stems import StemDepthtoChannels
+from viscy_models._components.heads import PixelToVoxelHead
+from viscy_models._components.stems import StemDepthtoChannels
 ```
 
 **State dict keys preserved:**
@@ -123,7 +123,7 @@ from viscy_models.components.stems import StemDepthtoChannels
 
 ### Pattern 5: projection_mlp Placement
 
-**What:** The `projection_mlp()` function is used by both `ContrastiveEncoder` and `ResNet3dEncoder`. Per Phase 6 research recommendation, it stays in the contrastive module (NOT components/) since it is only used by contrastive models.
+**What:** The `projection_mlp()` function is used by both `ContrastiveEncoder` and `ResNet3dEncoder`. Per Phase 6 research recommendation, it stays in the contrastive module (NOT _components/) since it is only used by contrastive models.
 
 **Placement:** Define in `contrastive/encoder.py`, import in `contrastive/resnet3d.py`.
 
@@ -168,8 +168,8 @@ class VaeDecoder(nn.Module):
 
 ### Anti-Patterns to Avoid
 
-- **Moving VaeUpStage/VaeEncoder/VaeDecoder to components/:** Phase 6 research explicitly decided these stay in `vae/`. They are VAE-specific, not shared across model families.
-- **Putting projection_mlp in components/:** Only used by contrastive models. Not a shared component.
+- **Moving VaeUpStage/VaeEncoder/VaeDecoder to _components/:** Phase 6 research explicitly decided these stay in `vae/`. They are VAE-specific, not shared across model families.
+- **Putting projection_mlp in _components/:** Only used by contrastive models. Not a shared component.
 - **Using pretrained=True in tests:** Both timm and MONAI pretrained options download weights from the internet. Tests MUST use `pretrained=False` to avoid network calls and keep tests fast/deterministic.
 - **Splitting VaeEncoder/VaeDecoder into separate files:** They are tightly coupled to BetaVae25D and should stay in `beta_vae_25d.py` as internal classes.
 - **Changing module attribute names:** `self.stem`, `self.encoder`, `self.projection`, `self.decoder`, `self.model`, `self.head` etc. must remain exactly as-is.
@@ -296,7 +296,7 @@ import timm
 import torch.nn as nn
 from torch import Tensor
 
-from viscy_models.components.stems import StemDepthtoChannels
+from viscy_models._components.stems import StemDepthtoChannels
 
 
 def projection_mlp(in_dims: int, hidden_dims: int, out_dims: int) -> nn.Module:
@@ -536,7 +536,7 @@ The original code uses `pretrained=True` in ContrastiveEncoder and ResNet3dEncod
 ### ContrastiveEncoder Dependencies
 ```
 contrastive/encoder.py
-    imports: viscy_models.components.stems.StemDepthtoChannels  [EXISTING]
+    imports: viscy_models._components.stems.StemDepthtoChannels  [EXISTING]
     imports: timm (create_model)                                  [EXTERNAL]
     imports: torch.nn                                             [EXTERNAL]
     defines: projection_mlp(), ContrastiveEncoder
@@ -554,8 +554,8 @@ contrastive/resnet3d.py
 ### BetaVae25D Dependencies
 ```
 vae/beta_vae_25d.py
-    imports: viscy_models.components.stems.StemDepthtoChannels  [EXISTING]
-    imports: viscy_models.components.heads.PixelToVoxelHead     [EXISTING]
+    imports: viscy_models._components.stems.StemDepthtoChannels  [EXISTING]
+    imports: viscy_models._components.heads.PixelToVoxelHead     [EXISTING]
     imports: timm (create_model)                                  [EXTERNAL]
     imports: monai.networks.blocks (ResidualUnit, UpSample)      [EXTERNAL]
     imports: monai.networks.blocks.dynunet_block (get_conv_layer)[EXTERNAL]
@@ -607,7 +607,7 @@ All other model classes in Phase 8 scope use immutable defaults already.
 - **Live Python verification** -- timm 1.0.24 model structure tested for resnet50, convnext_tiny, convnextv2_tiny
 - **Live Python verification** -- MONAI ResNetFeatures API tested with resnet10/18/50
 - **Live Python verification** -- MONAI VarAutoEncoder API tested with 2D VAE construction
-- **Existing viscy-models code** -- `components/stems.py` (StemDepthtoChannels), `components/heads.py` (PixelToVoxelHead), `components/blocks.py` (all verified in Phase 6/7)
+- **Existing viscy-models code** -- `_components/stems.py` (StemDepthtoChannels), `_components/heads.py` (PixelToVoxelHead), `_components/blocks.py` (all verified in Phase 6/7)
 - **Phase 6 RESEARCH.md** -- Component categorization, architecture patterns, confirmed VaeUpStage/VaeEncoder/VaeDecoder stay in vae/ module
 - **Phase 7 PLAN files** -- Migration pattern: import changes only, state dict preservation, test patterns
 

@@ -7,9 +7,9 @@ tags: [fcmae, convnextv2, masked-autoencoder, unet, pytorch]
 # Dependency graph
 requires:
   - phase: 07-01
-    provides: "UNeXt2 migration, unet subpackage structure, components package"
+    provides: "UNeXt2 migration, unet subpackage structure, _components package"
   - phase: 06-viscy-models-scaffold
-    provides: "viscy-models package scaffold, components/heads.py with PixelToVoxelShuffleHead"
+    provides: "viscy-models package scaffold, _components/heads.py with PixelToVoxelShuffleHead"
 provides:
   - "FullyConvolutionalMAE model at viscy_models.unet.fcmae"
   - "Complete unet subpackage public API (UNeXt2 + FullyConvolutionalMAE)"
@@ -20,7 +20,7 @@ affects: [08-cli-configs, 09-lightning-training, 10-integration-testing]
 tech-stack:
   added: []
   patterns:
-    - "Import shared components from components instead of duplicating"
+    - "Import shared components from _components instead of duplicating"
     - "Tuple defaults for mutable Sequence parameters"
 provides: []
 
@@ -32,11 +32,11 @@ key-files:
     - packages/viscy-models/src/viscy_models/unet/__init__.py
 
 key-decisions:
-  - "Removed PixelToVoxelShuffleHead duplication from fcmae.py -- imported from canonical components.heads location"
+  - "Removed PixelToVoxelShuffleHead duplication from fcmae.py -- imported from canonical _components.heads location"
   - "Fixed mutable list defaults (encoder_blocks, dims) to tuples for safety"
 
 patterns-established:
-  - "Deduplicate shared classes by importing from components rather than redefining"
+  - "Deduplicate shared classes by importing from _components rather than redefining"
 
 # Metrics
 duration: 3min
@@ -57,7 +57,7 @@ completed: 2026-02-13
 
 ## Accomplishments
 - Migrated FullyConvolutionalMAE and all 10 FCMAE-specific items (5 functions, 5 classes) to viscy_models.unet.fcmae
-- Removed duplicated PixelToVoxelShuffleHead class definition; imported from components.heads canonical location
+- Removed duplicated PixelToVoxelShuffleHead class definition; imported from _components.heads canonical location
 - Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE.__init__
 - Migrated all 11 FCMAE tests with zero test logic changes
 - All 37 tests pass across the full viscy-models test suite (no regressions)
@@ -76,7 +76,7 @@ Each task was committed atomically:
 - `packages/viscy-models/src/viscy_models/unet/__init__.py` - Updated to export both UNeXt2 and FullyConvolutionalMAE
 
 ## Decisions Made
-- Removed PixelToVoxelShuffleHead class from fcmae.py (was duplicate of components.heads version); import instead
+- Removed PixelToVoxelShuffleHead class from fcmae.py (was duplicate of _components.heads version); import instead
 - Fixed mutable defaults to tuples; safe because internal code uses list() conversion or iteration
 
 ## Deviations from Plan

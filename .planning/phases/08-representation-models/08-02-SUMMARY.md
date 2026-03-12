@@ -9,7 +9,7 @@ requires:
   - phase: 06-package-scaffold
     provides: viscy-models package structure with vae/ directory scaffold
   - phase: 07-core-unet-models
-    provides: components/stems.py (StemDepthtoChannels), components/heads.py (PixelToVoxelHead)
+    provides: _components/stems.py (StemDepthtoChannels), _components/heads.py (PixelToVoxelHead)
 provides:
   - BetaVae25D model with VaeEncoder/VaeDecoder/VaeUpStage helpers
   - BetaVaeMonai model wrapping MONAI VarAutoEncoder
@@ -35,7 +35,7 @@ key-files:
 key-decisions:
   - "VaeEncoder pretrained default changed to False for pure nn.Module semantics"
   - "VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)"
-  - "Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not components"
+  - "Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not _components"
   - "SimpleNamespace return type preserved for backward compatibility"
 
 patterns-established:
@@ -86,7 +86,7 @@ Each task was committed atomically:
 ## Decisions Made
 - VaeEncoder pretrained default changed to False for pure nn.Module semantics (consistent with UNeXt2 and ContrastiveEncoder patterns)
 - VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
-- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not extracted to components (per plan)
+- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not extracted to _components (per plan)
 - SimpleNamespace return type preserved for backward compatibility
 
 ## Deviations from Plan
