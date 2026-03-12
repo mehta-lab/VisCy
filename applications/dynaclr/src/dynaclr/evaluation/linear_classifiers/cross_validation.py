@@ -6,13 +6,16 @@ is aggregated across ALL test folds for unbiased generalization scores.
 
 Usage::
 
-    python scripts/cross_validation.py -c configs/cross_validate_example.yaml
-    python scripts/cross_validation.py -c config.yaml --report
+    dynaclr cross-validate -c configs/cross_validate_example.yaml
+    dynaclr cross-validate -c config.yaml --task infection_state  # CLI override
+    dynaclr cross-validate -c config.yaml --report
+
+The task can be set in the YAML config (``task: infection_state``) or
+overridden via ``--task`` on the CLI. Output goes to ``output_dir/<task>/``.
 """
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 import io
 import json
@@ -24,6 +27,7 @@ from pathlib import Path
 from typing import Any
 
 import anndata as ad
+import click
 import numpy as np
 import pandas as pd
 from sklearn.metrics import classification_report, f1_score, roc_auc_score
@@ -76,15 +80,13 @@ def _build_cv_pairs(datasets: list[dict], channel: str, task: str) -> list[tuple
         available_tasks = get_available_tasks(annotations_path)
         if task not in available_tasks:
             continue
-        result.append(
-            (
-                ds,
-                {
-                    "embeddings": str(channel_zarrs[channel]),
-                    "annotations": str(annotations_path),
-                },
-            )
-        )
+        training_dict = {
+            "embeddings": str(channel_zarrs[channel]),
+            "annotations": str(annotations_path),
+        }
+        if "include_wells" in ds:
+            training_dict["include_wells"] = ds["include_wells"]
+        result.append((ds, training_dict))
     return result
 
 
@@ -106,6 +108,9 @@ def _check_class_safety(
     all_labels: list[str] = []
     for ds in datasets_for_combo:
         ann = pd.read_csv(ds["annotations"])
+        include_wells = ds.get("include_wells")
+        if include_wells and "fov_name" in ann.columns:
+            ann = ann[ann["fov_name"].str.startswith(tuple(w + "/" for w in include_wells))]
         if task in ann.columns:
             valid = ann[task].dropna()
             valid = valid[valid != "unknown"]
@@ -122,6 +127,9 @@ def _get_class_counts(datasets_for_combo: list[dict], task: str) -> dict[str, in
     all_labels: list[str] = []
     for ds in datasets_for_combo:
         ann = pd.read_csv(ds["annotations"])
+        include_wells = ds.get("include_wells")
+        if include_wells and "fov_name" in ann.columns:
+            ann = ann[ann["fov_name"].str.startswith(tuple(w + "/" for w in include_wells))]
         if task in ann.columns:
             valid = ann[task].dropna()
             valid = valid[valid != "unknown"]
@@ -459,7 +467,19 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                     # BASELINE: train on full training pool
                     print(f"    Baseline: {len(train_dicts)} datasets, {n_bootstrap} seeds")
                     for seed in seeds:
-                        jobs.append((config, model_label, task, channel, train_dicts, test_dict, test_name, seed, None))
+                        jobs.append(
+                            (
+                                config,
+                                model_label,
+                                task,
+                                channel,
+                                train_dicts,
+                                test_dict,
+                                test_name,
+                                seed,
+                                None,
+                            )
+                        )
 
                     # Leave-one-out from training pool
                     for loo_idx, (loo_ds, _) in enumerate(train_pool):
@@ -487,7 +507,17 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
                         print(f"    Excluding {loo_name}: {len(remaining)} remaining, {n_bootstrap} seeds")
                         for seed in seeds:
                             jobs.append(
-                                (config, model_label, task, channel, remaining, test_dict, test_name, seed, loo_name)
+                                (
+                                    config,
+                                    model_label,
+                                    task,
+                                    channel,
+                                    remaining,
+                                    test_dict,
+                                    test_name,
+                                    seed,
+                                    loo_name,
+                                )
                             )
 
     # --- Phase 2: Dispatch jobs ---
@@ -526,7 +556,10 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
     summary_df.to_csv(output_dir / "cv_summary.csv", index=False)
 
     recommendations = _get_recommended_subsets(summary_df)
+    marker = config.get("marker")
     if not recommendations.empty:
+        if marker:
+            recommendations["marker"] = marker
         recommendations.to_csv(output_dir / "cv_recommended_subsets.csv", index=False)
 
     _print_markdown_summary(summary_df, ranking_metric)
@@ -542,7 +575,13 @@ def cross_validate(config: dict) -> tuple[pd.DataFrame, pd.DataFrame]:
             "max_iter": config.get("max_iter", 1000),
             "split_train_data": config.get("split_train_data", 0.8),
         }
-        generate_cv_report(output_dir, results_df, summary_df, config_summary, ranking_metric=ranking_metric)
+        generate_cv_report(
+            output_dir,
+            results_df,
+            summary_df,
+            config_summary,
+            ranking_metric=ranking_metric,
+        )
 
     return results_df, summary_df
 
@@ -768,31 +807,55 @@ def _get_recommended_subsets(summary_df: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Rotating test-set leave-one-dataset-out cross-validation")
-    parser.add_argument(
-        "-c",
-        "--config",
-        type=str,
-        required=True,
-        help="Path to YAML config file",
-    )
-    parser.add_argument(
-        "--report",
-        action="store_true",
-        help="Generate PDF report",
-    )
-    args = parser.parse_args()
+@click.command(context_settings={"help_option_names": ["-h", "--help"]})
+@click.option(
+    "-c",
+    "--config",
+    type=click.Path(exists=True, path_type=Path),
+    required=True,
+    help="Path to YAML configuration file",
+)
+@click.option(
+    "--task",
+    type=str,
+    default=None,
+    help="Run CV for a single task (e.g. infection_state). Overrides config task.",
+)
+@click.option(
+    "--report",
+    is_flag=True,
+    help="Generate PDF report",
+)
+def main(config: Path, task: str | None, report: bool):
+    """Run rotating test-set leave-one-dataset-out cross-validation."""
+    config_dict = load_config(config)
 
-    config = load_config(args.config)
+    if report:
+        config_dict["report"] = True
 
-    if args.report:
-        config["report"] = True
+    # CLI --task overrides config task
+    task = task or config_dict.get("task")
 
-    output_dir = Path(config["output_dir"])
+    if task:
+        tc = _resolve_task_channels_from_datasets(config_dict)
+        if task not in tc:
+            available = list(tc.keys())
+            raise click.BadParameter(
+                f"Task '{task}' not found. Available: {available}",
+                param_hint="--task / config.task",
+            )
+        channels = config_dict.get("channels", tc[task])
+        config_dict["task_channels"] = {task: channels}
+        config_dict["output_dir"] = str(Path(config_dict["output_dir"]) / task)
+
+    output_dir = Path(config_dict["output_dir"])
     print(f"Output: {output_dir}")
-    for label, spec in config["models"].items():
+    for label, spec in config_dict["models"].items():
         n_ds = len(spec["datasets"])
         print(f"  {label}: {n_ds} datasets (all rotate as test)")
 
-    results_df, summary_df = cross_validate(config)
+    cross_validate(config_dict)
+
+
+if __name__ == "__main__":
+    main()

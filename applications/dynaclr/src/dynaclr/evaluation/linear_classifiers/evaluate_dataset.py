@@ -134,7 +134,7 @@ def run_evaluation(config: dict) -> None:
                         wandb_config = {
                             "task": task,
                             "input_channel": channel,
-                            "marker": None,
+                            "marker": config.get("marker"),
                             "embedding_model": f"{model_spec['name']}-{model_spec['version']}",
                             "test_dataset": config["dataset_name"],
                             "use_scaling": use_scaling,
@@ -305,12 +305,13 @@ def _build_train_datasets(train_datasets: list[dict], task: str, channel: str) -
             print(f"    Skipping {embeddings_dir.parent.name} - no {task} column")
             continue
 
-        result.append(
-            {
-                "embeddings": str(channel_zarrs[channel]),
-                "annotations": str(annotations_path),
-            }
-        )
+        training_dict = {
+            "embeddings": str(channel_zarrs[channel]),
+            "annotations": str(annotations_path),
+        }
+        if "include_wells" in ds:
+            training_dict["include_wells"] = ds["include_wells"]
+        result.append(training_dict)
     return result
 
 

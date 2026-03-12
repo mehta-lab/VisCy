@@ -23,13 +23,20 @@ embeddings_path: /path/to/embeddings.zarr
 overwrite: false
 
 # Classifier models to apply.
-# Each model can optionally specify include_wells for marker-specific filtering.
+# Non-marker tasks (infection_state, cell_division_state) apply to all cells.
+# Marker-specific tasks (organelle_state) need include_wells to restrict to the
+# correct wells — different wells have different organelles in the same plate.
 models:
   - model_name: linear-classifier-infection_state-sensor
     version: latest
   - model_name: linear-classifier-infection_state-phase
     version: latest
   - model_name: linear-classifier-organelle_state-organelle-g3bp1
+    version: latest
+    include_wells:
+      - C/1
+      - C/2
+  - model_name: linear-classifier-organelle_state-organelle-sec61b
     version: latest
     include_wells:
       - A/1
