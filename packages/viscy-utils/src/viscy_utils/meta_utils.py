@@ -49,54 +49,15 @@ def _grid_sample(position, grid_spacing, channel_index, num_workers):
     """Sample a position using grid sampling across all timepoints."""
     return (
         position["0"]
-        .tensorstore(
-            context=tensorstore.Context(
-                {"data_copy_concurrency": {"limit": num_workers}}
-            )
-        )[:, channel_index, :, ::grid_spacing, ::grid_spacing]
+        .tensorstore(context=tensorstore.Context({"data_copy_concurrency": {"limit": num_workers}}))[
+            :, channel_index, :, ::grid_spacing, ::grid_spacing
+        ]
         .read()
         .result()
     )
 
 
-def _grid_sample_timepoint(
-    position, grid_spacing, channel_index, timepoint_index, num_workers
-):
-    """Sample a specific timepoint from a position using grid sampling.
-
-    Parameters
-    ----------
-    position : ngff.Position
-        NGFF position node object.
-    grid_spacing : int
-        Distance between points in sampling grid.
-    channel_index : int
-        Index of channel to sample.
-    timepoint_index : int
-        Index of timepoint to sample.
-    num_workers : int
-        Number of cpu workers.
-
-    Returns
-    -------
-    np.ndarray
-        Sampled values for the specified timepoint.
-    """
-    return (
-        position["0"]
-        .tensorstore(
-            context=tensorstore.Context(
-                {"data_copy_concurrency": {"limit": num_workers}}
-            )
-        )[timepoint_index, channel_index, :, ::grid_spacing, ::grid_spacing]
-        .read()
-        .result()
-    )
-
-
-def generate_normalization_metadata(
-    zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32
-):
+def generate_normalization_metadata(zarr_dir, num_workers=4, channel_ids=-1, grid_spacing=32):
     """Generate pixel intensity metadata for normalization.
 
     Normalization values are recorded in the image-level metadata in the
@@ -135,28 +96,26 @@ def generate_normalization_metadata(
         for _, pos in tqdm(position_map, desc="Positions"):
             samples = _grid_sample(pos, grid_spacing, channel_index, num_workers)
             dataset_sample_values.append(samples)
-            fov_level_statistics = {"fov_statistics": get_val_stats(samples)}
-            position_and_statistics.append((pos, fov_level_statistics))
+            fov_statistics = {"fov_statistics": get_val_stats(samples)}
+            fov_timepoint_statistics = {}
+            for t in range(num_timepoints):
+                fov_timepoint_statistics[str(t)] = get_val_stats(samples[t])
+            fov_statistics["timepoint_statistics"] = fov_timepoint_statistics
+            position_and_statistics.append((pos, fov_statistics))
 
         dataset_statistics = {
             "dataset_statistics": get_val_stats(np.stack(dataset_sample_values)),
         }
 
         print(f"Computing per-timepoint statistics for channel {channel_name}")
-        timepoint_statistics = {}
+        dataset_timepoint_statistics = {}
         for t in tqdm(range(num_timepoints), desc="Timepoints"):
-            timepoint_samples = []
-            for _, pos in position_map:
-                t_samples = _grid_sample_timepoint(
-                    pos, grid_spacing, channel_index, t, num_workers
-                )
-                timepoint_samples.append(t_samples)
-            timepoint_statistics[str(t)] = get_val_stats(np.stack(timepoint_samples))
+            all_fov_samples_at_t = np.stack([samples[t] for samples in dataset_sample_values])
+            dataset_timepoint_statistics[str(t)] = get_val_stats(all_fov_samples_at_t)
 
         write_meta_field(
             position=plate,
-            metadata=dataset_statistics
-            | {"timepoint_statistics": timepoint_statistics},
+            metadata=dataset_statistics | {"timepoint_statistics": dataset_timepoint_statistics},
             field_name="normalization",
             subfield_name=channel_name,
         )
@@ -164,9 +123,7 @@ def generate_normalization_metadata(
         for pos, position_statistics in position_and_statistics:
             write_meta_field(
                 position=pos,
-                metadata=dataset_statistics
-                | position_statistics
-                | {"timepoint_statistics": timepoint_statistics},
+                metadata=dataset_statistics | position_statistics,
                 field_name="normalization",
                 subfield_name=channel_name,
             )
