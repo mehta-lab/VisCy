@@ -28,17 +28,18 @@ class BatchedRandAffined(MapTransform):
     prob : float
         Probability of applying the transform. Default: 0.1.
     rotate_range : Sequence[tuple[float, float] | float] | float | None
-        Rotation angle range in radians for each axis (Z, Y, X order).
-        Converted to degrees for Kornia (X, Y, Z order). Default: None.
+        Rotation angle range in radians per axis in (Z, Y, X) order.
+        Reversed to Kornia's (X, Y, Z) order and converted to degrees. Default: None.
     shear_range : Sequence[tuple[float, float] | float] | float | None
-        Shear factor range for each axis (Z, Y, X order).
-        Converted to degrees for Kornia. Default: None.
+        Shear angle range in radians per facet in (szy, szx, syz, syx, sxz, sxy) order.
+        Reversed to Kornia's (sxy, sxz, syx, syz, szx, szy) order and converted to degrees.
+        Also accepts a scalar or 2-tuple to apply uniformly to all 6 facets. Default: None.
     translate_range : Sequence[tuple[float, float] | float] | float | None
-        Translation range for each axis (Z, Y, X order).
-        Converted to XYZ order for Kornia. Default: None.
+        Translation range as a fraction of image size per axis in (Z, Y, X) order.
+        Reversed to Kornia's (X, Y, Z) order. Default: None.
     scale_range : Sequence[tuple[float, float] | float] | float | None
-        Scale factor range for each axis (Z, Y, X order).
-        Converted to XYZ order for Kornia. Default: None.
+        Scale factor range per axis in (Z, Y, X) order.
+        Reversed to Kornia's (X, Y, Z) order. Default: None.
     mode : str
         Interpolation mode. Default: "bilinear".
     allow_missing_keys : bool
@@ -100,10 +101,17 @@ class BatchedRandAffined(MapTransform):
     @staticmethod
     def _radians_to_degrees(
         rotate_range: Sequence[tuple[float, float] | float] | float | None,
-    ) -> Sequence[tuple[float, float] | float] | float | None:
+    ) -> tuple[tuple[float, float], ...] | None:
         if rotate_range is None:
             return None
-        return torch.from_numpy(np.rad2deg(rotate_range))
+        result = []
+        for v in rotate_range:
+            if isinstance(v, (tuple, list)):
+                result.append((float(np.rad2deg(v[0])), float(np.rad2deg(v[1]))))
+            else:
+                deg = float(np.rad2deg(v))
+                result.append((-deg, deg))
+        return tuple(result)
 
     @torch.no_grad()
     def __call__(self, sample: dict[str, Tensor]) -> dict[str, Tensor]:

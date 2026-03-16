@@ -14,8 +14,19 @@ __all__ = ["NormalizeSampled"]
 
 
 class NormalizeSampled(MapTransform):
-    """
-    Normalize the sample.
+    """Normalize using precomputed statistics stored in ``sample["norm_meta"]``.
+
+    Expects ``norm_meta`` to have structure::
+
+        {channel_label: {level: {stat_name: Tensor, ...}, ...}, ...}
+
+    For ``timepoint_statistics``, the dataset must pre-resolve the correct
+    timepoint so that the level value is ``{stat_name: Tensor}`` directly
+    (not nested by timepoint index).
+
+    Stats tensors may be scalar ``()`` or batched ``(B,)``.
+    ``_match_image`` reshapes them to broadcast against
+    ``(B, 1, Z, Y, X)`` image tensors.
 
     Parameters
     ----------
@@ -50,31 +61,13 @@ class NormalizeSampled(MapTransform):
         return tensor.reshape(tensor.shape + (1,) * (target.ndim - tensor.ndim)).to(device=target.device)
 
     def __call__(self, sample: Sample) -> Sample:
-        """Normalize the sample using precomputed statistics.
-
-        Parameters
-        ----------
-        sample : Sample
-            Dictionary containing tensors and norm_meta with statistics.
-
-        Returns
-        -------
-        Sample
-            Dictionary with normalized tensors for specified keys.
-        """
         for key in self.keys:
             level_meta = sample["norm_meta"][key][self.level]
-            if self.level == "timepoint_statistics":
-                time_idx = sample["index"][1]
-                level_meta = level_meta[str(time_idx)]
             subtrahend_val = level_meta[self.subtrahend]
             subtrahend_val = self._match_image(subtrahend_val, sample[key])
-            divisor_val = level_meta[self.divisor] + 1e-8  # avoid div by zero
+            divisor_val = level_meta[self.divisor] + 1e-8
             divisor_val = self._match_image(divisor_val, sample[key])
             sample[key] = (sample[key] - subtrahend_val) / divisor_val
         if self.remove_meta:
             sample.pop("norm_meta")
         return sample
-
-    def _normalize():
-        NotImplementedError("_normalization() not implemented")
