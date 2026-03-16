@@ -60,7 +60,7 @@ def _make_timelapse_df() -> pd.DataFrame:
     df["global_track_id"] = ["exp_a_A/1/0_0", "exp_a_A/1/0_0", "exp_a_A/1/0_1", "exp_a_A/1/0_1"]
     df["lineage_id"] = df["global_track_id"]
     df["parent_track_id"] = pd.array([-1, -1, -1, -1], dtype="Int32")
-    df["hours_post_infection"] = [0.0, 0.5, 0.0, 0.5]
+    df["hours_post_perturbation"] = [0.0, 0.5, 0.0, 0.5]
     return df
 
 
@@ -167,35 +167,35 @@ class TestIO:
 # ---------------------------------------------------------------------------
 
 
-def _create_experiment_yaml(
+def _create_collection_yaml(
     tmp_path: Path,
     dataset_path: Path,
     tracks_path: Path | None = None,
     channel_names: list[str] | None = None,
-    source_channel: list[str] | None = None,
 ) -> Path:
-    """Write a minimal experiment YAML for testing the builder."""
+    """Write a minimal collection YAML for testing the builder."""
     if channel_names is None:
         channel_names = ["nuclei_labels"]
-    if source_channel is None:
-        source_channel = ["nuclei_labels"]
     if tracks_path is None:
         tracks_path = dataset_path
 
-    yaml_path = tmp_path / "experiments.yaml"
+    yaml_path = tmp_path / "collection.yml"
     config = {
+        "name": "test_collection",
+        "source_channels": [
+            {"label": "labelfree", "per_experiment": {"test_exp": channel_names[0]}},
+        ],
         "experiments": [
             {
                 "name": "test_exp",
                 "data_path": str(dataset_path),
                 "tracks_path": str(tracks_path),
                 "channel_names": channel_names,
-                "source_channel": source_channel,
                 "condition_wells": {"uninfected": ["A/1", "A/2"], "infected": ["B/1", "B/2"]},
                 "interval_minutes": 30.0,
                 "start_hpi": 0.0,
             }
-        ]
+        ],
     }
     yaml_path.write_text(yaml.dump(config))
     return yaml_path
@@ -206,7 +206,7 @@ class TestTimelapseBuilder:
 
     def test_produces_correct_schema(self, tracks_hcs_dataset, tmp_path):
         """6. Builder produces correct schema from mock experiment."""
-        yaml_path = _create_experiment_yaml(tmp_path, tracks_hcs_dataset)
+        yaml_path = _create_collection_yaml(tmp_path, tracks_hcs_dataset)
         output = tmp_path / "output.parquet"
         df = build_timelapse_cell_index(yaml_path, output)
 
@@ -242,7 +242,7 @@ class TestTimelapseBuilder:
         (dataset_path / "A" / "1" / "0").mkdir(parents=True, exist_ok=True)
         tracks_df.to_csv(dataset_path / "A/1/0" / "tracks.csv", index=False)
 
-        yaml_path = _create_experiment_yaml(tmp_path, dataset_path, channel_names=["nuclei_labels"])
+        yaml_path = _create_collection_yaml(tmp_path, dataset_path, channel_names=["nuclei_labels"])
         output = tmp_path / "lineage_output.parquet"
         df = build_timelapse_cell_index(yaml_path, output, include_wells=["A/1"])
 
@@ -252,7 +252,7 @@ class TestTimelapseBuilder:
 
     def test_well_filtering(self, tracks_hcs_dataset, tmp_path):
         """8. include_wells filters to specified wells only."""
-        yaml_path = _create_experiment_yaml(tmp_path, tracks_hcs_dataset)
+        yaml_path = _create_collection_yaml(tmp_path, tracks_hcs_dataset)
         output = tmp_path / "filtered.parquet"
         df = build_timelapse_cell_index(yaml_path, output, include_wells=["A/1"])
 
@@ -261,7 +261,7 @@ class TestTimelapseBuilder:
 
     def test_fov_exclusion(self, tracks_hcs_dataset, tmp_path):
         """9. exclude_fovs excludes specified FOVs."""
-        yaml_path = _create_experiment_yaml(tmp_path, tracks_hcs_dataset)
+        yaml_path = _create_collection_yaml(tmp_path, tracks_hcs_dataset)
         output = tmp_path / "excluded.parquet"
         df = build_timelapse_cell_index(yaml_path, output, exclude_fovs=["A/1/0"])
 
@@ -269,7 +269,7 @@ class TestTimelapseBuilder:
 
     def test_cell_id_unique(self, tracks_hcs_dataset, tmp_path):
         """10. cell_id is unique across all observations."""
-        yaml_path = _create_experiment_yaml(tmp_path, tracks_hcs_dataset)
+        yaml_path = _create_collection_yaml(tmp_path, tracks_hcs_dataset)
         output = tmp_path / "unique.parquet"
         df = build_timelapse_cell_index(yaml_path, output)
 

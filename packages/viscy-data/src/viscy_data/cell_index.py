@@ -17,7 +17,6 @@ from pathlib import Path
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
-import yaml
 from iohub.ngff import open_ome_zarr
 
 from viscy_data._typing import (
@@ -61,7 +60,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("global_track_id", pa.string()),
         ("lineage_id", pa.string()),
         ("parent_track_id", pa.int32()),
-        ("hours_post_infection", pa.float32()),
+        ("hours_post_perturbation", pa.float32()),
         ("gene_name", pa.string()),
         ("reporter", pa.string()),
         ("sgRNA", pa.string()),
@@ -230,18 +229,17 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_timelapse_cell_index(
-    experiments_yaml: str | Path,
+    collection_path: str | Path,
     output_path: str | Path,
     include_wells: list[str] | None = None,
     exclude_fovs: list[str] | None = None,
 ) -> pd.DataFrame:
-    """Build a cell index parquet from time-lapse experiment configurations.
+    """Build a cell index parquet from a collection YAML.
 
     Parameters
     ----------
-    experiments_yaml : str | Path
-        Path to YAML with ``experiments`` list (same format as
-        ``ExperimentRegistry.from_yaml``).
+    collection_path : str | Path
+        Path to collection YAML file.
     output_path : str | Path
         Destination parquet path.
     include_wells : list[str] | None
@@ -254,52 +252,64 @@ def build_timelapse_cell_index(
     pd.DataFrame
         The written cell index.
     """
-    experiments = _load_experiments_yaml(experiments_yaml)
+    from viscy_data.collection import load_collection
+
+    collection = load_collection(collection_path)
     all_tracks: list[pd.DataFrame] = []
 
-    for exp in experiments:
-        plate = open_ome_zarr(exp["data_path"], mode="r")
+    for exp in collection.experiments:
+        condition_wells = exp.condition_wells
+        declared_wells = {w for wells in condition_wells.values() for w in wells}
+
+        # Merge collection-level exclude_fovs
+        all_exclude = set(exp.exclude_fovs)
+        if exclude_fovs is not None:
+            all_exclude.update(exclude_fovs)
+
+        plate = open_ome_zarr(exp.data_path, mode="r")
         for _pos_path, position in plate.positions():
             fov_name = position.zgroup.name.strip("/")
             parts = fov_name.split("/")
             well_name = "/".join(parts[:2])
 
+            if declared_wells and well_name not in declared_wells:
+                continue
             if include_wells is not None and well_name not in include_wells:
                 continue
-            if exclude_fovs is not None and fov_name in exclude_fovs:
+            if all_exclude and fov_name in all_exclude:
                 continue
 
             # Resolve condition
-            condition = _resolve_condition(exp.get("condition_wells", {}), well_name)
+            condition = _resolve_condition(condition_wells, well_name)
 
             # Find tracking CSV
-            tracks_dir = Path(exp["tracks_path"]) / fov_name
+            tracks_dir = Path(exp.tracks_path) / fov_name
             csv_files = list(tracks_dir.glob("*.csv"))
             if not csv_files:
                 _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
                 continue
             tracks_df = pd.read_csv(csv_files[0])
 
-            name = exp["name"]
-            source_channel = exp.get("source_channel", [])
-            interval_minutes = exp.get("interval_minutes", 30.0)
-            start_hpi = exp.get("start_hpi", 0.0)
+            # Derive source_channels from collection source_channels
+            source_channel_names = [
+                sc.per_experiment[exp.name] for sc in collection.source_channels if exp.name in sc.per_experiment
+            ]
+            fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
 
             # Enrich
             tracks_df["cell_id"] = (
-                name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
+                exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
             )
-            tracks_df["experiment"] = name
-            tracks_df["store_path"] = str(exp["data_path"])
-            tracks_df["tracks_path"] = str(exp["tracks_path"])
+            tracks_df["experiment"] = exp.name
+            tracks_df["store_path"] = str(exp.data_path)
+            tracks_df["tracks_path"] = str(exp.tracks_path)
             tracks_df["fov"] = fov_name
             tracks_df["well"] = well_name
             tracks_df["condition"] = condition
-            fluorescence_ch = source_channel[1] if len(source_channel) > 1 else ""
             tracks_df["channel_name"] = fluorescence_ch
-            tracks_df["source_channels"] = json.dumps(source_channel)
-            tracks_df["global_track_id"] = name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
-            tracks_df["hours_post_infection"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
+            tracks_df["source_channels"] = json.dumps(source_channel_names)
+            tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+            tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
 
             # Ensure z column exists
             if "z" not in tracks_df.columns:
@@ -492,26 +502,6 @@ def build_ops_cell_index(
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _load_experiments_yaml(path: str | Path) -> list[dict]:
-    """Load experiment list from a YAML file.
-
-    Expected structure::
-
-        experiments:
-          - name: "exp_a"
-            data_path: "/path/to/exp_a.zarr"
-            tracks_path: "/path/to/tracks"
-            source_channel: ["Phase"]
-            condition_wells:
-              uninfected: ["A/1"]
-            interval_minutes: 30.0
-            start_hpi: 0.0
-    """
-    with open(Path(path)) as f:
-        data = yaml.safe_load(f)
-    return data["experiments"]
 
 
 def _resolve_condition(condition_wells: dict[str, list[str]], well_name: str) -> str:

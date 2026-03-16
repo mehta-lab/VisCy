@@ -179,7 +179,7 @@ CELL_INDEX_TIMELAPSE_COLUMNS = [
     "global_track_id",
     "lineage_id",
     "parent_track_id",
-    "hours_post_infection",
+    "hours_post_perturbation",
 ]
 
 CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]

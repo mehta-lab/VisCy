@@ -5,7 +5,9 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+from viscy_data.schemas import FOVRecord
 
 
 def parse_channel_name(name: str) -> dict:
@@ -162,25 +164,13 @@ class WellExperimentMetadata(BaseModel):
     time_sampling_minutes: float
 
 
-class DatasetRecord(BaseModel):
+class DatasetRecord(FOVRecord):
     """A single FOV-level record from the Airtable Datasets table.
 
-    Field names match the renamed snake_case Airtable column names 1:1.
+    Extends :class:`~viscy_data.schemas.FOVRecord` with Airtable-specific
+    raw channel fields (before flattening to ``channel_names``).
     """
 
-    dataset: str
-    well_id: str
-    fov: str | None = None
-    cell_type: str | None = None
-    cell_state: str | None = None
-    cell_line: list[str] | None = None
-    organelle: str | None = None
-    perturbation: str | None = None
-    hours_post_perturbation: float | None = None
-    moi: float | None = None
-    time_interval_min: float | None = None
-    seeding_density: int | None = None
-    treatment_concentration_nm: float | None = None
     channel_0_name: str | None = None
     channel_0_biology: str | None = None
     channel_1_name: str | None = None
@@ -189,15 +179,19 @@ class DatasetRecord(BaseModel):
     channel_2_biology: str | None = None
     channel_3_name: str | None = None
     channel_3_biology: str | None = None
-    data_path: str | None = None
-    tracks_path: str | None = None
-    fluorescence_modality: str | None = None
-    t_shape: int | None = None
-    c_shape: int | None = None
-    z_shape: int | None = None
-    y_shape: int | None = None
-    x_shape: int | None = None
     record_id: str | None = None
+
+    @model_validator(mode="after")
+    def _derive_channel_names(self) -> DatasetRecord:
+        """Populate ``channel_names`` from ``channel_0..3_name`` fields."""
+        if not self.channel_names:
+            names = []
+            for i in range(4):
+                name = getattr(self, f"channel_{i}_name")
+                if name is not None:
+                    names.append(name)
+            self.channel_names = names
+        return self
 
     @classmethod
     def from_airtable_record(cls, record: dict) -> DatasetRecord:
@@ -229,6 +223,7 @@ class DatasetRecord(BaseModel):
             cell_type=_select_val(fields.get("cell_type")),
             cell_state=_select_val(fields.get("cell_state")),
             cell_line=_multi_select_val(fields.get("cell_line")),
+            marker=_select_val(fields.get("marker")),
             organelle=_select_val(fields.get("organelle")),
             perturbation=_select_val(fields.get("perturbation")),
             hours_post_perturbation=fields.get("hours_post_perturbation"),
