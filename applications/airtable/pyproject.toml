@@ -27,15 +27,13 @@ dependencies = [
   "pandas",
   "pyairtable",
   "pydantic",
+  "viscy-data",
 ]
 
-[project.optional-dependencies]
-dev = [ "pytest" ]
-
-[project.urls]
-Homepage = "https://github.com/mehta-lab/VisCy"
-Issues = "https://github.com/mehta-lab/VisCy/issues"
-Repository = "https://github.com/mehta-lab/VisCy"
+optional-dependencies.dev = [ "pytest" ]
+urls.Homepage = "https://github.com/mehta-lab/VisCy"
+urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
+urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"
