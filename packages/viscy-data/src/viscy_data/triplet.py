@@ -580,6 +580,8 @@ class TripletDataModule(HCSDataModule):
             if key in batch:
                 norm_meta_key = f"{key}_norm_meta"
                 norm_meta = batch.get(norm_meta_key)
+                if isinstance(norm_meta, list) and all(m is None for m in norm_meta):
+                    norm_meta = None
                 transformed_patches = _transform_channel_wise(
                     transform=self._find_transform(key),
                     channel_names=self.source_channel,

@@ -7,6 +7,7 @@ This module centralizes helper functions that are used by multiple data modules:
   ``_transform_channel_wise``
 """
 
+import copy
 import re
 from typing import Sequence
 
@@ -127,9 +128,10 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
 
     Convert to float32 tensors to avoid automatic casting to float64.
     """
-    norm_meta = fov.zattrs.get("normalization", None)
-    if norm_meta is None:
+    raw = fov.zattrs.get("normalization", None)
+    if raw is None:
         return None
+    norm_meta = copy.deepcopy(raw)
     for channel, channel_values in norm_meta.items():
         for level, level_values in channel_values.items():
             if level == "timepoint_statistics":
@@ -150,19 +152,46 @@ def _read_norm_meta(fov: Position) -> NormMeta | None:
     return norm_meta
 
 
+def _collate_norm_meta(norm_metas: list[NormMeta]) -> NormMeta:
+    """Stack per-sample norm_meta dicts into batched tensors.
+
+    Each input dict has structure
+    ``{channel: {level: {stat: scalar_tensor, ...}, ...}, ...}``.
+    Returns the same structure but with ``(B,)`` tensors so that
+    ``_match_image`` broadcasts them against ``(B, 1, Z, Y, X)`` patches.
+    """
+    ref = norm_metas[0]
+    result: NormMeta = {}
+    for ch, ch_stats in ref.items():
+        result[ch] = {}
+        for level, level_stats in ch_stats.items():
+            if level_stats is None:
+                result[ch][level] = None
+                continue
+            result[ch][level] = {stat: torch.stack([m[ch][level][stat] for m in norm_metas]) for stat in level_stats}
+    return result
+
+
 def _scatter_channels(
-    channel_names: list[str], patch: Tensor, norm_meta: NormMeta | None
+    channel_names: list[str],
+    patch: Tensor,
+    norm_meta: list[NormMeta] | None,
+    extra: dict | None = None,
 ) -> dict[str, Tensor | NormMeta] | dict[str, Tensor]:
     channels = {name: patch[:, c : c + 1] for name, c in zip(channel_names, range(patch.shape[1]))}
     if norm_meta is not None:
-        channels["norm_meta"] = collate_meta_tensor(norm_meta)
+        channels["norm_meta"] = _collate_norm_meta(norm_meta)
+    if extra is not None:
+        channels.update(extra)
     return channels
 
 
 def _gather_channels(
     patch_channels: dict[str, Tensor | NormMeta],
+    extra_keys: tuple[str, ...] = ("norm_meta",),
 ) -> list[Tensor]:
-    patch_channels.pop("norm_meta", None)
+    for k in extra_keys:
+        patch_channels.pop(k, None)
     return torch.cat(list(patch_channels.values()), dim=1)
 
 
@@ -170,8 +199,9 @@ def _transform_channel_wise(
     transform: DictTransform,
     channel_names: list[str],
     patch: Tensor,
-    norm_meta: NormMeta | None,
+    norm_meta: list[NormMeta] | None,
+    extra: dict | None = None,
 ) -> list[Tensor]:
-    scattered_channels = _scatter_channels(channel_names, patch, norm_meta)
+    scattered_channels = _scatter_channels(channel_names, patch, norm_meta, extra)
     transformed_channels = transform(scattered_channels)
     return _gather_channels(transformed_channels)
