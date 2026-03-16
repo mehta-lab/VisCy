@@ -157,7 +157,16 @@ class MultiExperimentTripletDataset(Dataset):
             In predict mode: ``{"anchor": Tensor, "index": list[dict]}``.
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
+
+        # In bag-of-channels mode, pre-sample one channel index per item so that
+        # anchor and positive always use the same channel (phase↔phase, fluor↔fluor).
+        if self.bag_of_channels:
+            n_channels = len(self.index.registry.source_channel_labels)
+            forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+        else:
+            forced_channel_indices = None
+
+        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_indices)
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
@@ -166,7 +175,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
-            positive_patches, positive_norms = self._slice_patches(positive_rows)
+            positive_patches, positive_norms = self._slice_patches(positive_rows, forced_channel_indices)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -308,7 +317,9 @@ class MultiExperimentTripletDataset(Dataset):
             )
         return self._tensorstores[fov_name]
 
-    def _slice_patch(self, track_row: pd.Series) -> tuple["ts.TensorStore", NormMeta | None]:
+    def _slice_patch(
+        self, track_row: pd.Series, forced_source_idx: int | None = None
+    ) -> tuple["ts.TensorStore", NormMeta | None]:
         """Slice a patch from the image store for a given track row.
 
         Uses per-experiment ``channel_maps`` for channel index remapping
@@ -341,8 +352,9 @@ class MultiExperimentTripletDataset(Dataset):
         channel_map = self.index.registry.channel_maps[exp_name]
         source_labels = self.index.registry.source_channel_labels
         if self.bag_of_channels:
-            # Randomly select one source channel
-            source_idx = int(self._rng.integers(len(channel_map)))
+            source_idx = int(
+                forced_source_idx if forced_source_idx is not None else self._rng.integers(len(channel_map))
+            )
             channel_indices = [channel_map[source_idx]]
             selected_label = source_labels[source_idx]
         else:
@@ -378,13 +390,20 @@ class MultiExperimentTripletDataset(Dataset):
 
         return patch, raw_norm_meta
 
-    def _slice_patches(self, track_rows: pd.DataFrame) -> tuple[torch.Tensor, list[NormMeta | None]]:
+    def _slice_patches(
+        self,
+        track_rows: pd.DataFrame,
+        forced_channel_indices: list[int] | None = None,
+    ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
         Parameters
         ----------
         track_rows : pd.DataFrame
             Multiple rows from ``tracks`` / ``valid_anchors``.
+        forced_channel_indices : list[int] or None
+            Per-sample source channel indices to use (bag-of-channels mode).
+            When provided, overrides the random draw in ``_slice_patch``.
 
         Returns
         -------
@@ -393,8 +412,9 @@ class MultiExperimentTripletDataset(Dataset):
         """
         patches = []
         norms = []
-        for _, row in track_rows.iterrows():
-            patch, norm = self._slice_patch(row)
+        for i, (_, row) in enumerate(track_rows.iterrows()):
+            forced = forced_channel_indices[i] if forced_channel_indices is not None else None
+            patch, norm = self._slice_patch(row, forced_source_idx=forced)
             patches.append(patch)
             norms.append(norm)
         results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
