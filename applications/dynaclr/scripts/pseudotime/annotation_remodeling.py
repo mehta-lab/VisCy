@@ -129,11 +129,11 @@ RESULTS_DIR = Path(__file__).parent / "results" / "annotation_remodeling"
 # Step 1 + 2: Load data, alignment, and signal extraction
 # ===========================================================================
 
-organelle_results = {}
+marker_results = {}
 
-for organelle, config in ORGANELLE_CONFIG.items():
+for marker, config in ORGANELLE_CONFIG.items():
     print(f"\n{'=' * 60}")
-    print(f"Processing {organelle}")
+    print(f"Processing {marker}")
     print(f"{'=' * 60}")
 
     all_experiment_dfs = []
@@ -159,11 +159,11 @@ for organelle, config in ORGANELLE_CONFIG.items():
         # Step 2: Signal extraction (annotation-based)
         aligned = extract_annotation_signal(aligned, state_col="organelle_state", positive_value="remodel")
         aligned["experiment"] = exp["label"]
-        aligned["organelle"] = organelle
+        aligned["marker"] = marker
         all_experiment_dfs.append(aligned)
 
     if not all_experiment_dfs:
-        print(f"  No data for {organelle}, skipping")
+        print(f"  No data for {marker}, skipping")
         continue
 
     combined = pd.concat(all_experiment_dfs, ignore_index=True)
@@ -172,7 +172,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
     fraction_df = aggregate_population(combined, TIME_BINS_MINUTES, signal_type="fraction")
 
     n_tracks = combined.groupby(["fov_name", "track_id", "experiment"]).ngroups
-    organelle_results[organelle] = {
+    marker_results[marker] = {
         "combined_df": combined,
         "fraction_df": fraction_df,
         "config": config,
@@ -182,7 +182,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
     }
 
     print(
-        f"\n  **{organelle} summary**: {n_tracks} tracks, "
+        f"\n  **{marker} summary**: {n_tracks} tracks, "
         f"{len(config['experiments'])} experiments, {len(combined):,} total frames"
     )
 
@@ -192,7 +192,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
 # ===========================================================================
 
 control_results = {}
-for organelle, config in ORGANELLE_CONFIG.items():
+for marker, config in ORGANELLE_CONFIG.items():
     if not config.get("controls"):
         continue
     ctrl_dfs = []
@@ -205,12 +205,12 @@ for organelle, config in ORGANELLE_CONFIG.items():
         n_total = len(control_combined.dropna(subset=["organelle_state"]))
         n_remodel = (control_combined["organelle_state"] == "remodel").sum()
         fraction = n_remodel / n_total if n_total > 0 else 0
-        control_results[organelle] = {
+        control_results[marker] = {
             "n_total": n_total,
             "n_remodel": n_remodel,
             "fraction": fraction,
         }
-        print(f"  {organelle} control: {n_remodel}/{n_total} = {fraction:.4f}")
+        print(f"  {marker} control: {n_remodel}/{n_total} = {fraction:.4f}")
 
 # %%
 # ===========================================================================
@@ -218,7 +218,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
 # ===========================================================================
 
 timing_rows = []
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     frac_df = res["fraction_df"]
 
     t_onset, threshold, bl_mean, bl_std = find_onset_time(
@@ -231,7 +231,7 @@ for organelle, res in organelle_results.items():
 
     timing_rows.append(
         {
-            "organelle": organelle,
+            "marker": marker,
             "T_onset_minutes": t_onset,
             "T_50_minutes": t_50,
             "T_peak_minutes": peak["T_peak_minutes"],
@@ -252,9 +252,9 @@ print(timing_df.to_string(index=False))
 
 # Per-track timing
 all_track_timing = []
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     track_timing = compute_track_timing(res["combined_df"], signal_type="fraction")
-    track_timing["organelle"] = organelle
+    track_timing["marker"] = marker
     all_track_timing.append(track_timing)
 
 track_timing_df = pd.concat(all_track_timing, ignore_index=True)
@@ -264,12 +264,12 @@ track_timing_df = pd.concat(all_track_timing, ignore_index=True)
 # Step 5: Plotting
 # ===========================================================================
 
-organelle_curves = {org: res["fraction_df"] for org, res in organelle_results.items()}
-organelle_configs = {org: res["config"] for org, res in organelle_results.items()}
+marker_curves = {m: res["fraction_df"] for m, res in marker_results.items()}
+marker_configs = {m: res["config"] for m, res in marker_results.items()}
 
 plot_response_curves(
-    organelle_curves,
-    organelle_configs,
+    marker_curves,
+    marker_configs,
     RESULTS_DIR,
     signal_type="fraction",
     min_cells_per_bin=MIN_CELLS_PER_BIN,
@@ -277,19 +277,19 @@ plot_response_curves(
     filename_prefix="annotation_remodeling_comparison",
 )
 
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     plot_cell_heatmap(
         res["combined_df"],
         TIME_BINS_MINUTES,
         signal_type="fraction",
         organelle_label=res["config"]["label"],
         output_dir=RESULTS_DIR,
-        filename_prefix=f"{organelle}_annotation_heatmap",
+        filename_prefix=f"{marker}_annotation_heatmap",
     )
 
 plot_timing_distributions(
     track_timing_df,
-    organelle_configs,
+    marker_configs,
     RESULTS_DIR,
     filename_prefix="per_track_onset_duration",
 )
@@ -305,8 +305,8 @@ plot_onset_comparison(
 # Step 6: Statistical tests
 # ===========================================================================
 
-if len(organelle_results) > 1:
-    stats_df = run_statistical_tests(organelle_results, track_timing_df, control_results or None)
+if len(marker_results) > 1:
+    stats_df = run_statistical_tests(marker_results, track_timing_df, control_results or None)
     print("\n## Statistical Tests\n")
     print(stats_df.to_string(index=False))
     stats_df.to_csv(RESULTS_DIR / "statistical_tests.csv", index=False)
@@ -321,8 +321,8 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 timing_df.to_csv(RESULTS_DIR / "timing_metrics.csv", index=False)
 track_timing_df.to_csv(RESULTS_DIR / "per_track_timing.csv", index=False)
 
-for organelle, res in organelle_results.items():
-    frac_path = RESULTS_DIR / f"{organelle}_fraction_curve.csv"
+for marker, res in marker_results.items():
+    frac_path = RESULTS_DIR / f"{marker}_fraction_curve.csv"
     res["fraction_df"].to_csv(frac_path, index=False)
 
 print(f"\nResults saved to {RESULTS_DIR}")

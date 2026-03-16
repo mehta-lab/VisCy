@@ -141,11 +141,11 @@ RESULTS_DIR = Path(__file__).parent / "results" / "prediction_remodeling"
 # Step 1 + 2: Load data, alignment, and signal extraction
 # ===========================================================================
 
-organelle_results = {}
+marker_results = {}
 
-for organelle, config in ORGANELLE_CONFIG.items():
+for marker, config in ORGANELLE_CONFIG.items():
     print(f"\n{'=' * 60}")
-    print(f"Processing {organelle}")
+    print(f"Processing {marker}")
     print(f"{'=' * 60}")
 
     all_experiment_dfs = []
@@ -192,11 +192,11 @@ for organelle, config in ORGANELLE_CONFIG.items():
             use_probability=USE_PROBABILITY,
         )
         aligned["experiment"] = exp["label"]
-        aligned["organelle"] = organelle
+        aligned["marker"] = marker
         all_experiment_dfs.append(aligned)
 
     if not all_experiment_dfs:
-        print(f"  No data for {organelle}, skipping")
+        print(f"  No data for {marker}, skipping")
         continue
 
     combined = pd.concat(all_experiment_dfs, ignore_index=True)
@@ -206,7 +206,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
     population_df = aggregate_population(combined, TIME_BINS_MINUTES, signal_type=signal_type)
 
     n_tracks = combined.groupby(["fov_name", "track_id", "experiment"]).ngroups
-    organelle_results[organelle] = {
+    marker_results[marker] = {
         "combined_df": combined,
         "population_df": population_df,
         "config": config,
@@ -216,7 +216,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
     }
 
     print(
-        f"\n  **{organelle} summary**: {n_tracks} tracks, "
+        f"\n  **{marker} summary**: {n_tracks} tracks, "
         f"{len(config['experiments'])} experiments, {len(combined):,} total frames"
     )
 
@@ -226,7 +226,7 @@ for organelle, config in ORGANELLE_CONFIG.items():
 # ===========================================================================
 
 timing_rows = []
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     pop_df = res["population_df"]
 
     t_onset, threshold, bl_mean, bl_std = find_onset_time(
@@ -239,7 +239,7 @@ for organelle, res in organelle_results.items():
 
     timing_rows.append(
         {
-            "organelle": organelle,
+            "marker": marker,
             "T_onset_minutes": t_onset,
             "T_50_minutes": t_50,
             "T_peak_minutes": peak["T_peak_minutes"],
@@ -261,9 +261,9 @@ print(timing_df.to_string(index=False))
 # Per-track timing
 signal_type = "continuous" if USE_PROBABILITY else "fraction"
 all_track_timing = []
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     track_timing = compute_track_timing(res["combined_df"], signal_type=signal_type)
-    track_timing["organelle"] = organelle
+    track_timing["marker"] = marker
     all_track_timing.append(track_timing)
 
 if all_track_timing:
@@ -278,22 +278,22 @@ else:
             "span_minutes",
             "n_positive_frames",
             "n_total_frames",
-            "organelle",
+            "marker",
         ]
     )
-    print("WARNING: No tracks with positive signal detected across any organelle.")
+    print("WARNING: No tracks with positive signal detected across any marker.")
 
 # %%
 # ===========================================================================
 # Step 5: Plotting
 # ===========================================================================
 
-organelle_curves = {org: res["population_df"] for org, res in organelle_results.items()}
-organelle_configs = {org: res["config"] for org, res in organelle_results.items()}
+marker_curves = {m: res["population_df"] for m, res in marker_results.items()}
+marker_configs = {m: res["config"] for m, res in marker_results.items()}
 
 plot_response_curves(
-    organelle_curves,
-    organelle_configs,
+    marker_curves,
+    marker_configs,
     RESULTS_DIR,
     signal_type=signal_type,
     min_cells_per_bin=MIN_CELLS_PER_BIN,
@@ -301,20 +301,20 @@ plot_response_curves(
     filename_prefix="prediction_remodeling_comparison",
 )
 
-for organelle, res in organelle_results.items():
+for marker, res in marker_results.items():
     plot_cell_heatmap(
         res["combined_df"],
         TIME_BINS_MINUTES,
         signal_type=signal_type,
         organelle_label=res["config"]["label"],
         output_dir=RESULTS_DIR,
-        filename_prefix=f"{organelle}_prediction_heatmap",
+        filename_prefix=f"{marker}_prediction_heatmap",
     )
 
 if len(track_timing_df) > 0:
     plot_timing_distributions(
         track_timing_df,
-        organelle_configs,
+        marker_configs,
         RESULTS_DIR,
         filename_prefix="per_track_onset_duration",
     )
@@ -330,8 +330,8 @@ if len(track_timing_df) > 0:
 # Step 6: Statistical tests
 # ===========================================================================
 
-if len(organelle_results) > 1 and len(track_timing_df) > 0:
-    stats_df = run_statistical_tests(organelle_results, track_timing_df)
+if len(marker_results) > 1 and len(track_timing_df) > 0:
+    stats_df = run_statistical_tests(marker_results, track_timing_df)
     print("\n## Statistical Tests\n")
     print(stats_df.to_string(index=False))
     stats_df.to_csv(RESULTS_DIR / "statistical_tests.csv", index=False)
@@ -346,8 +346,8 @@ RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 timing_df.to_csv(RESULTS_DIR / "timing_metrics.csv", index=False)
 track_timing_df.to_csv(RESULTS_DIR / "per_track_timing.csv", index=False)
 
-for organelle, res in organelle_results.items():
-    curve_path = RESULTS_DIR / f"{organelle}_population_curve.csv"
+for marker, res in marker_results.items():
+    curve_path = RESULTS_DIR / f"{marker}_population_curve.csv"
     res["population_df"].to_csv(curve_path, index=False)
 
 print(f"\nResults saved to {RESULTS_DIR}")

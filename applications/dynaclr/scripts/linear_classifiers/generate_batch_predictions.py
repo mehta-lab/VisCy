@@ -41,7 +41,7 @@ MODEL = MODEL_2D_BAG_TIMEAWARE
 
 VERSION = "v3"
 
-CHANNELS = ["phase", "organelle", "sensor"]
+CHANNELS = ["phase", "marker", "sensor"]
 
 # 3D model checkpoints
 # CHECKPOINTS = [
@@ -64,7 +64,7 @@ DATASETS = [
 ]
 
 # Per-dataset channel keyword overrides.
-# E.g., {"2025_04_10_...": {"organelle": "Cy5"}}
+# E.g., {"2025_04_10_...": {"marker": "Cy5"}}
 CHANNEL_OVERRIDES: dict[str, dict[str, str]] = {}
 
 # Annotations directory (used for auto-discovery when DATASETS is empty).
