@@ -36,6 +36,7 @@ dependencies = [
   "lightning>=2.3",
   "monai>=1.5.2",
   "numpy>=2.4.1",
+  "pydantic>=2",
   "torch>=2.10",
   "zarr",
 ]
