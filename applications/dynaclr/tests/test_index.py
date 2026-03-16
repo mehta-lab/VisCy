@@ -7,12 +7,13 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-import yaml
+from conftest import IMG_H, IMG_W, N_T, N_TRACKS, N_Z
 from iohub.ngff import Position, open_ome_zarr
 
-from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
+from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
 from viscy_data.cell_index import build_timelapse_cell_index
+from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -20,19 +21,49 @@ from viscy_data.cell_index import build_timelapse_cell_index
 
 _CHANNEL_NAMES_A = ["Phase", "GFP"]
 _CHANNEL_NAMES_B = ["Phase", "Mito"]
-
-_IMG_H = 64
-_IMG_W = 64
-_N_T = 10
-_N_Z = 1
-_N_TRACKS = 5
 _YX_PATCH = (32, 32)
+
+
+def _make_collection(
+    experiments: list[ExperimentEntry],
+    source_channels: list[SourceChannel] | None = None,
+) -> Collection:
+    """Build a minimal Collection from test experiments.
+
+    Parameters
+    ----------
+    experiments : list[ExperimentEntry]
+        Experiment entries to include.
+    source_channels : list[SourceChannel] | None
+        If None, derives defaults: first channel is labelfree, second is reporter.
+
+    Returns
+    -------
+    Collection
+        Validated collection wrapping the given experiments.
+    """
+    if source_channels is None:
+        lf: dict[str, str] = {}
+        rp: dict[str, str] = {}
+        for exp in experiments:
+            lf[exp.name] = exp.channel_names[0]
+            if len(exp.channel_names) > 1:
+                rp[exp.name] = exp.channel_names[1]
+        sc: list[SourceChannel] = [SourceChannel(label="labelfree", per_experiment=lf)]
+        if rp:
+            sc.append(SourceChannel(label="reporter", per_experiment=rp))
+        source_channels = sc
+    return Collection(
+        name="test_collection",
+        source_channels=source_channels,
+        experiments=experiments,
+    )
 
 
 def _make_tracks_csv(
     path: Path,
-    n_tracks: int = _N_TRACKS,
-    n_t: int = _N_T,
+    n_tracks: int = N_TRACKS,
+    n_t: int = N_T,
     *,
     parent_map: dict[int, int] | None = None,
     border_cell_track: int | None = None,
@@ -110,7 +141,7 @@ def _create_zarr_and_tracks(
                 pos = plate.create_position(row, col, str(fov_idx))
                 pos.create_zeros(
                     "0",
-                    shape=(_N_T, n_ch, _N_Z, _IMG_H, _IMG_W),
+                    shape=(N_T, n_ch, N_Z, IMG_H, IMG_W),
                     dtype=np.float32,
                 )
                 fov_name = f"{row}/{col}/{fov_idx}"
@@ -148,28 +179,26 @@ def two_experiment_setup(tmp_path):
         fovs_per_well=2,
     )
 
-    cfg_a = ExperimentConfig(
+    cfg_a = ExperimentEntry(
         name="exp_a",
         data_path=str(zarr_a),
         tracks_path=str(tracks_a),
         channel_names=_CHANNEL_NAMES_A,
-        source_channel=["Phase", "GFP"],
         condition_wells={"uninfected": ["A/1"], "infected": ["B/1"]},
         interval_minutes=30.0,
         start_hpi=0.0,
     )
-    cfg_b = ExperimentConfig(
+    cfg_b = ExperimentEntry(
         name="exp_b",
         data_path=str(zarr_b),
         tracks_path=str(tracks_b),
         channel_names=_CHANNEL_NAMES_B,
-        source_channel=["Phase", "Mito"],
         condition_wells={"control": ["A/1"], "treated": ["B/1"]},
         interval_minutes=15.0,
         start_hpi=2.0,
     )
 
-    registry = ExperimentRegistry(experiments=[cfg_a, cfg_b])
+    registry = ExperimentRegistry(collection=_make_collection([cfg_a, cfg_b]))
     return registry, cfg_a, cfg_b
 
 
@@ -191,17 +220,16 @@ def lineage_setup(tmp_path):
         parent_map=parent_map,
     )
 
-    cfg = ExperimentConfig(
+    cfg = ExperimentEntry(
         name="lineage_exp",
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=_CHANNEL_NAMES_A,
-        source_channel=["Phase", "GFP"],
         condition_wells={"ctrl": ["A/1"]},
         interval_minutes=30.0,
     )
 
-    registry = ExperimentRegistry(experiments=[cfg])
+    registry = ExperimentRegistry(collection=_make_collection([cfg]))
     return registry
 
 
@@ -222,17 +250,16 @@ def border_setup(tmp_path):
         outside_cell_track=4,
     )
 
-    cfg = ExperimentConfig(
+    cfg = ExperimentEntry(
         name="border_exp",
         data_path=str(zarr_path),
         tracks_path=str(tracks_root),
         channel_names=_CHANNEL_NAMES_A,
-        source_channel=["Phase", "GFP"],
         condition_wells={"ctrl": ["A/1"]},
         interval_minutes=30.0,
     )
 
-    registry = ExperimentRegistry(experiments=[cfg])
+    registry = ExperimentRegistry(collection=_make_collection([cfg]))
     return registry
 
 
@@ -247,14 +274,14 @@ class TestUnifiedTracksDataFrame:
     def test_all_observations_present(self, two_experiment_setup):
         """2 experiments x 2 wells x 2 FOVs x 5 tracks x 10 timepoints = 400 rows."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # 2 experiments * 2 wells * 2 FOVs * 5 tracks * 10 timepoints = 400
         assert len(index.tracks) == 400
 
     def test_experiment_column(self, two_experiment_setup):
         """'experiment' column matches exp.name for each row."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         assert set(index.tracks["experiment"].unique()) == {"exp_a", "exp_b"}
         # Each experiment contributes half the rows
         exp_a_rows = index.tracks[index.tracks["experiment"] == "exp_a"]
@@ -265,7 +292,7 @@ class TestUnifiedTracksDataFrame:
     def test_condition_column(self, two_experiment_setup):
         """'condition' column correctly maps wells to conditions."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # exp_a: A/1 -> uninfected, B/1 -> infected
         exp_a_well_a = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["well_name"] == "A/1")]
         assert (exp_a_well_a["condition"] == "uninfected").all()
@@ -276,7 +303,7 @@ class TestUnifiedTracksDataFrame:
     def test_global_track_id_format(self, two_experiment_setup):
         """global_track_id is '{exp_name}_{fov_name}_{track_id}'."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         sample = index.tracks.iloc[0]
         expected_prefix = f"{sample['experiment']}_{sample['fov_name']}_{sample['track_id']}"
         assert sample["global_track_id"] == expected_prefix
@@ -284,30 +311,30 @@ class TestUnifiedTracksDataFrame:
     def test_global_track_id_unique_across_experiments(self, two_experiment_setup):
         """global_track_ids are unique across experiments."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # Each track_id+fov combination appears in both experiments
         # but global_track_id should be unique due to experiment prefix
         # 2 exp * 2 wells * 2 FOVs * 5 tracks = 40 unique global_track_ids
         assert index.tracks["global_track_id"].nunique() == 40
 
-    def test_hours_post_infection(self, two_experiment_setup):
-        """hours_post_infection = start_hpi + t * interval_minutes / 60."""
+    def test_hours_post_perturbation(self, two_experiment_setup):
+        """hours_post_perturbation = start_hpi + t * interval_minutes / 60."""
         registry, cfg_a, cfg_b = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # Check exp_a (start_hpi=0.0, interval=30min)
         row_a = index.tracks[(index.tracks["experiment"] == "exp_a") & (index.tracks["t"] == 3)].iloc[0]
         expected_a = 0.0 + 3 * 30.0 / 60.0  # = 1.5
-        assert row_a["hours_post_infection"] == pytest.approx(expected_a)
+        assert row_a["hours_post_perturbation"] == pytest.approx(expected_a)
 
         # Check exp_b (start_hpi=2.0, interval=15min)
         row_b = index.tracks[(index.tracks["experiment"] == "exp_b") & (index.tracks["t"] == 4)].iloc[0]
         expected_b = 2.0 + 4 * 15.0 / 60.0  # = 3.0
-        assert row_b["hours_post_infection"] == pytest.approx(expected_b)
+        assert row_b["hours_post_perturbation"] == pytest.approx(expected_b)
 
     def test_fluorescence_channel(self, two_experiment_setup):
         """fluorescence_channel is source_channel[1] when len > 1."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         exp_a_rows = index.tracks[index.tracks["experiment"] == "exp_a"]
         assert (exp_a_rows["fluorescence_channel"] == "GFP").all()
 
@@ -317,7 +344,7 @@ class TestUnifiedTracksDataFrame:
     def test_required_columns_present(self, two_experiment_setup):
         """All required columns exist in the final DataFrame."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         required = {
             "track_id",
             "t",
@@ -330,7 +357,7 @@ class TestUnifiedTracksDataFrame:
             "experiment",
             "condition",
             "global_track_id",
-            "hours_post_infection",
+            "hours_post_perturbation",
             "fluorescence_channel",
             "lineage_id",
             "y_clamp",
@@ -343,7 +370,6 @@ class TestUnifiedTracksDataFrame:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             include_wells=["A/1"],
         )
@@ -356,7 +382,6 @@ class TestUnifiedTracksDataFrame:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             exclude_fovs=["A/1/0"],
         )
@@ -367,18 +392,37 @@ class TestUnifiedTracksDataFrame:
     def test_positions_stored(self, two_experiment_setup):
         """Position objects are stored in self.positions."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         # 2 experiments * 2 wells * 2 FOVs = 8 positions
         assert len(index.positions) == 8
 
     def test_position_column_is_position_object(self, two_experiment_setup):
         """'position' column contains iohub Position objects."""
         registry, _, _ = two_experiment_setup
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
         from iohub.ngff import Position
 
         sample_pos = index.tracks.iloc[0]["position"]
         assert isinstance(sample_pos, Position)
+
+    def test_parallel_load_matches_serial(self, two_experiment_setup):
+        """Parallel loading (num_workers=2) produces same result as serial (num_workers=1)."""
+        registry, _, _ = two_experiment_setup
+        sort_cols = ["experiment", "fov_name", "track_id", "t"]
+
+        index_serial = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, num_workers=1)
+        index_parallel = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, num_workers=2)
+
+        serial_tracks = index_serial.tracks.sort_values(sort_cols).reset_index(drop=True)
+        parallel_tracks = index_parallel.tracks.sort_values(sort_cols).reset_index(drop=True)
+
+        # Drop position column (object identity differs across processes)
+        pd.testing.assert_frame_equal(
+            serial_tracks.drop(columns=["position"]),
+            parallel_tracks.drop(columns=["position"]),
+            check_like=True,
+        )
+        assert len(index_serial.valid_anchors) == len(index_parallel.valid_anchors)
 
 
 # ---------------------------------------------------------------------------
@@ -391,14 +435,14 @@ class TestLineageReconstruction:
 
     def test_root_track_lineage(self, lineage_setup):
         """Track without parent -> lineage_id = own global_track_id."""
-        index = MultiExperimentIndex(registry=lineage_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=lineage_setup, yx_patch_size=_YX_PATCH)
         # Track 0 is root (no parent)
         track0 = index.tracks[index.tracks["track_id"] == 0].iloc[0]
         assert track0["lineage_id"] == track0["global_track_id"]
 
     def test_daughter_track_lineage(self, lineage_setup):
         """Track with parent -> lineage_id = parent's lineage_id."""
-        index = MultiExperimentIndex(registry=lineage_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=lineage_setup, yx_patch_size=_YX_PATCH)
         # Track 1 is daughter of track 0
         track0 = index.tracks[index.tracks["track_id"] == 0].iloc[0]
         track1 = index.tracks[index.tracks["track_id"] == 1].iloc[0]
@@ -406,7 +450,7 @@ class TestLineageReconstruction:
 
     def test_granddaughter_lineage_chain(self, lineage_setup):
         """Chain: track 0 -> track 1 -> track 2, all share track 0's lineage_id."""
-        index = MultiExperimentIndex(registry=lineage_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=lineage_setup, yx_patch_size=_YX_PATCH)
         track0 = index.tracks[index.tracks["track_id"] == 0].iloc[0]
         track2 = index.tracks[index.tracks["track_id"] == 2].iloc[0]
         # Granddaughter should have root's lineage_id
@@ -414,13 +458,13 @@ class TestLineageReconstruction:
 
     def test_missing_parent_fallback(self, lineage_setup):
         """parent_track_id=99 (not in data) -> lineage_id = own global_track_id."""
-        index = MultiExperimentIndex(registry=lineage_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=lineage_setup, yx_patch_size=_YX_PATCH)
         track3 = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         assert track3["lineage_id"] == track3["global_track_id"]
 
     def test_independent_track_lineage(self, lineage_setup):
         """Track 4: no parent -> lineage_id = own global_track_id."""
-        index = MultiExperimentIndex(registry=lineage_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=lineage_setup, yx_patch_size=_YX_PATCH)
         track4 = index.tracks[index.tracks["track_id"] == 4].iloc[0]
         assert track4["lineage_id"] == track4["global_track_id"]
 
@@ -435,7 +479,7 @@ class TestBorderClamping:
 
     def test_center_cell_unchanged(self, border_setup):
         """Cell at center (y=32, x=32) in 64x64 with 32x32 patch -> unchanged."""
-        index = MultiExperimentIndex(registry=border_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         # Track 0 is at center (y=32, x=32)
         center_cell = index.tracks[index.tracks["track_id"] == 0].iloc[0]
         assert center_cell["y_clamp"] == 32.0
@@ -443,7 +487,7 @@ class TestBorderClamping:
 
     def test_border_cell_clamped(self, border_setup):
         """Cell near border (y=2, x=2) -> clamped to (16, 16) for 32x32 patch."""
-        index = MultiExperimentIndex(registry=border_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         # Track 3 is at y=2, x=2 (border)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         # y_half = 16, x_half = 16 -> clamp to (16, 16)
@@ -452,14 +496,14 @@ class TestBorderClamping:
 
     def test_border_cell_original_preserved(self, border_setup):
         """Original y, x are preserved even after clamping."""
-        index = MultiExperimentIndex(registry=border_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         border_cell = index.tracks[index.tracks["track_id"] == 3].iloc[0]
         assert border_cell["y"] == 2.0
         assert border_cell["x"] == 2.0
 
     def test_outside_cell_excluded(self, border_setup):
         """Cell completely outside image (y=-1) is excluded."""
-        index = MultiExperimentIndex(registry=border_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         # Track 4 had y=-1 -> should be excluded
         track4_rows = index.tracks[index.tracks["track_id"] == 4]
         assert len(track4_rows) == 0
@@ -470,7 +514,7 @@ class TestBorderClamping:
         5 tracks total, 1 outside (track 4) -> 4 tracks remain.
         4 tracks * 10 timepoints = 40 rows.
         """
-        index = MultiExperimentIndex(registry=border_setup, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        index = MultiExperimentIndex(registry=border_setup, yx_patch_size=_YX_PATCH)
         assert len(index.tracks) == 40
 
     def test_edge_cell_clamped(self, tmp_path):
@@ -481,7 +525,7 @@ class TestBorderClamping:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, _IMG_H, _IMG_W), dtype=np.float32)
+            pos.create_zeros("0", shape=(1, 2, 1, IMG_H, IMG_W), dtype=np.float32)
 
         # Create CSV with cell at exact edge
         csv_path = tracks_root / "A" / "1" / "0" / "tracks.csv"
@@ -502,16 +546,16 @@ class TestBorderClamping:
         )
         df.to_csv(csv_path, index=False)
 
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="edge_exp",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
+            interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
-        index = MultiExperimentIndex(registry=registry, z_range=slice(0, 1), yx_patch_size=_YX_PATCH)
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
+        index = MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH)
 
         cell = index.tracks.iloc[0]
         assert cell["y_clamp"] == 16.0  # y_half
@@ -547,7 +591,7 @@ def _create_zarr_and_custom_tracks(
     channel_names: list[str],
     well: tuple[str, str],
     track_rows: list[dict],
-    n_t: int = _N_T,
+    n_t: int = N_T,
 ) -> tuple[Path, Path]:
     """Create a mini HCS OME-Zarr with one FOV and custom tracking rows."""
     zarr_path = tmp_path / f"{name}.zarr"
@@ -558,7 +602,7 @@ def _create_zarr_and_custom_tracks(
         pos = plate.create_position(well[0], well[1], "0")
         pos.create_zeros(
             "0",
-            shape=(n_t, n_ch, _N_Z, _IMG_H, _IMG_W),
+            shape=(n_t, n_ch, N_Z, IMG_H, IMG_W),
             dtype=np.float32,
         )
 
@@ -587,7 +631,6 @@ class TestValidAnchors:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -601,7 +644,6 @@ class TestValidAnchors:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -631,19 +673,17 @@ class TestValidAnchors:
             well=("A", "1"),
             track_rows=track_rows,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="end_test",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -686,19 +726,17 @@ class TestValidAnchors:
             well=("A", "1"),
             track_rows=track_rows,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="lineage_anchor",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -725,12 +763,11 @@ class TestValidAnchors:
             well=("A", "1"),
             track_rows=fast_rows,
         )
-        cfg_fast = ExperimentConfig(
+        cfg_fast = ExperimentEntry(
             name="fast_exp",
             data_path=str(zarr_fast),
             tracks_path=str(tracks_fast),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=15.0,
         )
@@ -744,20 +781,18 @@ class TestValidAnchors:
             well=("A", "1"),
             track_rows=slow_rows,
         )
-        cfg_slow = ExperimentConfig(
+        cfg_slow = ExperimentEntry(
             name="slow_exp",
             data_path=str(zarr_slow),
             tracks_path=str(tracks_slow),
             channel_names=_CHANNEL_NAMES_B,
-            source_channel=["Phase", "Mito"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
 
-        registry = ExperimentRegistry(experiments=[cfg_fast, cfg_slow])
+        registry = ExperimentRegistry(collection=_make_collection([cfg_fast, cfg_slow]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -783,22 +818,20 @@ class TestValidAnchors:
 
         with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES_A) as plate:
             pos = plate.create_position("A", "1", "0")
-            pos.create_zeros("0", shape=(1, 2, 1, _IMG_H, _IMG_W), dtype=np.float32)
+            pos.create_zeros("0", shape=(1, 2, 1, IMG_H, IMG_W), dtype=np.float32)
 
         # No CSV -> no tracks loaded -> skip with warning
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="empty_exp",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -819,19 +852,17 @@ class TestValidAnchors:
             track_rows=track_rows,
             n_t=6,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="gap_test",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -855,19 +886,17 @@ class TestValidAnchors:
             track_rows=track_rows,
             n_t=10,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="self_test",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.0, 0.5),
         )
@@ -888,7 +917,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -900,7 +928,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -916,7 +943,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -929,7 +955,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -947,7 +972,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -962,7 +986,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -975,7 +998,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -987,7 +1009,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -1003,7 +1024,6 @@ class TestMultiExperimentIndexProperties:
         registry, _, _ = two_experiment_setup
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
@@ -1019,26 +1039,11 @@ class TestMultiExperimentIndexProperties:
 
 def _build_cell_index_parquet(tmp_path: Path, registry: ExperimentRegistry) -> Path:
     """Build a cell index parquet from a registry for testing."""
-    yaml_path = tmp_path / "experiments.yaml"
-    experiments_list = []
-    for exp in registry.experiments:
-        experiments_list.append(
-            {
-                "name": exp.name,
-                "data_path": exp.data_path,
-                "tracks_path": exp.tracks_path,
-                "channel_names": exp.channel_names,
-                "source_channel": exp.source_channel,
-                "condition_wells": exp.condition_wells,
-                "interval_minutes": exp.interval_minutes,
-                "start_hpi": exp.start_hpi,
-            }
-        )
-    with open(yaml_path, "w") as f:
-        yaml.dump({"experiments": experiments_list}, f)
+    collection_path = tmp_path / "collection.yml"
+    save_collection(registry.collection, collection_path)
 
     parquet_path = tmp_path / "cell_index.parquet"
-    build_timelapse_cell_index(yaml_path, parquet_path)
+    build_timelapse_cell_index(collection_path, parquet_path)
     return parquet_path
 
 
@@ -1057,7 +1062,6 @@ class TestParquetPath:
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1071,7 +1075,6 @@ class TestParquetPath:
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1090,7 +1093,6 @@ class TestParquetPath:
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             include_wells=["A/1"],
             cell_index_path=parquet_path,
@@ -1105,7 +1107,6 @@ class TestParquetPath:
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             exclude_fovs=["A/1/0"],
             cell_index_path=parquet_path,
@@ -1119,10 +1120,9 @@ class TestParquetPath:
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
         # Train: only exp_a
-        train_registry = ExperimentRegistry(experiments=[cfg_a])
+        train_registry = ExperimentRegistry(collection=_make_collection([cfg_a]))
         train_index = MultiExperimentIndex(
             registry=train_registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1130,10 +1130,9 @@ class TestParquetPath:
         assert len(train_index.tracks) == 200
 
         # Val: only exp_b
-        val_registry = ExperimentRegistry(experiments=[cfg_b])
+        val_registry = ExperimentRegistry(collection=_make_collection([cfg_b]))
         val_index = MultiExperimentIndex(
             registry=val_registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1147,13 +1146,11 @@ class TestParquetPath:
 
         legacy_index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
         )
         parquet_index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             tau_range_hours=(0.5, 1.5),
             cell_index_path=parquet_path,
@@ -1167,7 +1164,6 @@ class TestParquetPath:
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1185,21 +1181,19 @@ class TestParquetPath:
             border_cell_track=3,
             outside_cell_track=4,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="border_pq",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
 
         index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )
@@ -1223,28 +1217,25 @@ class TestParquetPath:
             fovs_per_well=1,
             parent_map=parent_map,
         )
-        cfg = ExperimentConfig(
+        cfg = ExperimentEntry(
             name="lineage_pq",
             data_path=str(zarr_path),
             tracks_path=str(tracks_root),
             channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
             condition_wells={"ctrl": ["A/1"]},
             interval_minutes=30.0,
         )
-        registry = ExperimentRegistry(experiments=[cfg])
+        registry = ExperimentRegistry(collection=_make_collection([cfg]))
 
         # Legacy path
         legacy_index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
         )
         # Parquet path
         parquet_path = _build_cell_index_parquet(tmp_path, registry)
         parquet_index = MultiExperimentIndex(
             registry=registry,
-            z_range=slice(0, 1),
             yx_patch_size=_YX_PATCH,
             cell_index_path=parquet_path,
         )

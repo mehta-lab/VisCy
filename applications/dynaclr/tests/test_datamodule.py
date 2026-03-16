@@ -6,140 +6,41 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import numpy as np
-import pandas as pd
 import pytest
 import torch
+from conftest import create_experiment, write_collection_yaml
 
-from dynaclr.data.experiment import ExperimentConfig
+from viscy_data.collection import ExperimentEntry
 
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
 
 _CHANNEL_NAMES = ["Phase", "GFP"]
-_IMG_H = 64
-_IMG_W = 64
-_N_T = 10
-_N_Z = 1
-_N_TRACKS = 5
 _YX_PATCH = (32, 32)
 _FINAL_YX_PATCH = (24, 24)
-_Z_RANGE = (0, 1)
+
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_tracks_csv(
-    path: Path,
-    n_tracks: int = _N_TRACKS,
-    n_t: int = _N_T,
-    *,
-    start_t: int = 0,
-) -> None:
-    """Write a tracking CSV with standard columns."""
-    rows = []
-    for tid in range(n_tracks):
-        for t in range(start_t, start_t + n_t):
-            rows.append(
-                {
-                    "track_id": tid,
-                    "t": t,
-                    "id": tid * n_t + t,
-                    "parent_track_id": float("nan"),
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": 32.0,
-                    "x": 32.0,
-                }
-            )
-    df = pd.DataFrame(rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
-
-
-def _create_experiment(
-    tmp_path: Path,
-    name: str,
-    wells: list[tuple[str, str]],
-    condition_wells: dict[str, list[str]],
-    fovs_per_well: int = 1,
-    n_tracks: int = _N_TRACKS,
-    n_t: int = _N_T,
-) -> ExperimentConfig:
-    """Create a mini HCS OME-Zarr store, tracking CSVs, and return an ExperimentConfig."""
-    from iohub.ngff import open_ome_zarr
-
-    zarr_path = tmp_path / f"{name}.zarr"
-    tracks_root = tmp_path / f"tracks_{name}"
-    n_ch = len(_CHANNEL_NAMES)
-
-    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=_CHANNEL_NAMES) as plate:
-        for row, col in wells:
-            for fov_idx in range(fovs_per_well):
-                pos = plate.create_position(row, col, str(fov_idx))
-                arr = pos.create_zeros(
-                    "0",
-                    shape=(n_t, n_ch, _N_Z, _IMG_H, _IMG_W),
-                    dtype=np.float32,
-                )
-                rng = np.random.default_rng(42)
-                arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
-                fov_name = f"{row}/{col}/{fov_idx}"
-                csv_path = tracks_root / fov_name / "tracks.csv"
-                _make_tracks_csv(csv_path, n_tracks=n_tracks, n_t=n_t)
-
-    return ExperimentConfig(
-        name=name,
-        data_path=str(zarr_path),
-        tracks_path=str(tracks_root),
-        channel_names=_CHANNEL_NAMES,
-        source_channel=["Phase", "GFP"],
-        condition_wells=condition_wells,
-        interval_minutes=30.0,
-    )
-
-
-def _create_four_experiments(tmp_path: Path) -> list[ExperimentConfig]:
+def _create_four_experiments(tmp_path: Path) -> list[ExperimentEntry]:
     """Create 4 experiments for train/val split testing."""
-    configs = []
+    entries = []
     for i, name in enumerate(["exp_a", "exp_b", "exp_c", "exp_d"]):
         row_letter = chr(ord("A") + i)
-        configs.append(
-            _create_experiment(
+        entries.append(
+            create_experiment(
                 tmp_path,
                 name=name,
+                channel_names=_CHANNEL_NAMES,
                 wells=[(row_letter, "1")],
                 condition_wells={"control": [f"{row_letter}/1"]},
             )
         )
-    return configs
-
-
-def _write_experiments_yaml(tmp_path: Path, configs: list[ExperimentConfig]) -> Path:
-    """Write experiments YAML from a list of ExperimentConfig objects."""
-    import yaml
-
-    yaml_path = tmp_path / "experiments.yaml"
-    data = {
-        "experiments": [
-            {
-                "name": c.name,
-                "data_path": c.data_path,
-                "tracks_path": c.tracks_path,
-                "channel_names": c.channel_names,
-                "source_channel": c.source_channel,
-                "condition_wells": c.condition_wells,
-                "interval_minutes": c.interval_minutes,
-            }
-            for c in configs
-        ]
-    }
-    with open(yaml_path, "w") as f:
-        yaml.safe_dump(data, f)
-    return yaml_path
+    return entries
 
 
 # ---------------------------------------------------------------------------
@@ -149,31 +50,58 @@ def _write_experiments_yaml(tmp_path: Path, configs: list[ExperimentConfig]) -> 
 
 @pytest.fixture()
 def four_experiments(tmp_path):
-    """Four synthetic experiments with YAML config."""
-    configs = _create_four_experiments(tmp_path)
-    yaml_path = _write_experiments_yaml(tmp_path, configs)
-    return yaml_path, configs
+    """Four synthetic experiments with collection YAML."""
+    entries = _create_four_experiments(tmp_path)
+    collection_path = write_collection_yaml(tmp_path, entries)
+    return collection_path, entries
 
 
 @pytest.fixture()
 def two_experiments(tmp_path):
     """Two synthetic experiments for simpler tests."""
-    configs = [
-        _create_experiment(
+    entries = [
+        create_experiment(
             tmp_path,
             name="exp_a",
+            channel_names=_CHANNEL_NAMES,
             wells=[("A", "1")],
             condition_wells={"control": ["A/1"]},
         ),
-        _create_experiment(
+        create_experiment(
             tmp_path,
             name="exp_b",
+            channel_names=_CHANNEL_NAMES,
             wells=[("B", "1")],
             condition_wells={"treated": ["B/1"]},
         ),
     ]
-    yaml_path = _write_experiments_yaml(tmp_path, configs)
-    return yaml_path, configs
+    collection_path = write_collection_yaml(tmp_path, entries)
+    return collection_path, entries
+
+
+@pytest.fixture()
+def multi_fov_experiments(tmp_path):
+    """Two experiments with 5 FOVs each for FOV-level split testing."""
+    entries = [
+        create_experiment(
+            tmp_path,
+            name="exp_a",
+            channel_names=_CHANNEL_NAMES,
+            wells=[("A", "1")],
+            condition_wells={"control": ["A/1"]},
+            fovs_per_well=5,
+        ),
+        create_experiment(
+            tmp_path,
+            name="exp_b",
+            channel_names=_CHANNEL_NAMES,
+            wells=[("B", "1")],
+            condition_wells={"treated": ["B/1"]},
+            fovs_per_well=5,
+        ),
+    ]
+    collection_path = write_collection_yaml(tmp_path, entries)
+    return collection_path, entries
 
 
 # ---------------------------------------------------------------------------
@@ -188,19 +116,20 @@ class TestInitExposesAllHyperparameters:
         """Instantiate with all hyperparameters explicitly set and verify storage."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = two_experiments
+        collection_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_b"],
+            split_ratio=0.7,
             tau_range=(0.5, 2.0),
             tau_decay_rate=3.0,
             batch_size=64,
             num_workers=2,
             experiment_aware=False,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.1,
             temporal_enrichment=True,
             temporal_window_hours=3.0,
@@ -212,12 +141,13 @@ class TestInitExposesAllHyperparameters:
             seed=42,
         )
 
+        assert dm.split_ratio == 0.7
         assert dm.tau_range == (0.5, 2.0)
         assert dm.tau_decay_rate == 3.0
         assert dm.batch_size == 64
         assert dm.num_workers == 2
         assert dm.experiment_aware is False
-        assert dm.condition_balanced is False
+        assert dm.stratify_by is None
         assert dm.leaky == 0.1
         assert dm.temporal_enrichment is True
         assert dm.temporal_window_hours == 3.0
@@ -236,10 +166,10 @@ class TestTrainValSplitByExperiment:
         """With 4 experiments and val_experiments=[exp_c, exp_d], verify correct split."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = four_experiments
+        collection_path, _ = four_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_c", "exp_d"],
@@ -271,17 +201,17 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         """train_dataloader() returns a ThreadDataLoader with FlexibleBatchSampler."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = two_experiments
+        collection_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_b"],
             tau_range=(0.5, 2.0),
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=True,
+            stratify_by="condition",
             temporal_enrichment=False,
         )
         dm.setup("fit")
@@ -299,7 +229,7 @@ class TestTrainDataloaderUsesFlexibleBatchSampler:
         # Verify sampler settings match
         sampler = train_dl.batch_sampler
         assert sampler.experiment_aware is True
-        assert sampler.condition_balanced is True
+        assert sampler.stratify_by == ["condition"]
         assert sampler.temporal_enrichment is False
 
 
@@ -310,10 +240,10 @@ class TestValDataloaderNoBatchSampler:
         """val_dataloader uses simple sequential loading."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = two_experiments
+        collection_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_b"],
@@ -338,10 +268,10 @@ class TestOnAfterBatchTransferAppliesTransforms:
         """Create a mock batch and verify on_after_batch_transfer processes it."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = two_experiments
+        collection_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_b"],
@@ -385,10 +315,10 @@ class TestChannelDropoutIntegration:
         """With p=1.0 on channel 1, training zeros ch1; eval preserves it."""
         from dynaclr.data.datamodule import MultiExperimentDataModule
 
-        yaml_path, _ = two_experiments
+        collection_path, _ = two_experiments
         dm = MultiExperimentDataModule(
-            experiments_yaml=str(yaml_path),
-            z_range=_Z_RANGE,
+            collection_path=str(collection_path),
+            z_window=1,
             yx_patch_size=_YX_PATCH,
             final_yx_patch_size=_FINAL_YX_PATCH,
             val_experiments=["exp_b"],
@@ -425,3 +355,85 @@ class TestChannelDropoutIntegration:
         }
         result_eval = dm.on_after_batch_transfer(batch_eval, 0)
         assert not torch.all(result_eval["anchor"][:, 1] == 0.0), "Eval: channel 1 should NOT be zeroed"
+
+
+class TestFovLevelSplit:
+    """FOV-level split when val_experiments is empty."""
+
+    def test_fov_split_no_overlap(self, multi_fov_experiments):
+        """With split_ratio=0.6, FOVs are split within each experiment with no overlap."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = multi_fov_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=[],
+            split_ratio=0.6,
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+            seed=42,
+        )
+        dm.setup("fit")
+
+        assert dm.train_dataset is not None
+        assert dm.val_dataset is not None
+
+        train_fovs = set(dm.train_dataset.index.tracks["fov_name"].unique())
+        val_fovs = set(dm.val_dataset.index.tracks["fov_name"].unique())
+
+        # No overlap
+        assert train_fovs.isdisjoint(val_fovs), f"FOV overlap: {train_fovs & val_fovs}"
+
+        # Both experiments should be represented in train
+        train_exps = set(dm.train_dataset.index.tracks["experiment"].unique())
+        assert train_exps == {"exp_a", "exp_b"}
+
+        # Val should also have FOVs from both experiments
+        val_exps = set(dm.val_dataset.index.tracks["experiment"].unique())
+        assert val_exps == {"exp_a", "exp_b"}
+
+    def test_fov_split_ratio_1_no_val(self, multi_fov_experiments):
+        """With split_ratio=1.0, all FOVs go to train and val_dataset is None."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = multi_fov_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            val_experiments=[],
+            split_ratio=1.0,
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+        )
+        dm.setup("fit")
+
+        assert dm.train_dataset is not None
+        assert dm.val_dataset is None
+
+    def test_fov_split_default_val_experiments(self, multi_fov_experiments):
+        """Default val_experiments=[] triggers FOV split."""
+        from dynaclr.data.datamodule import MultiExperimentDataModule
+
+        collection_path, _ = multi_fov_experiments
+        dm = MultiExperimentDataModule(
+            collection_path=str(collection_path),
+            z_window=1,
+            yx_patch_size=_YX_PATCH,
+            final_yx_patch_size=_FINAL_YX_PATCH,
+            split_ratio=0.8,
+            tau_range=(0.5, 2.0),
+            batch_size=8,
+        )
+        dm.setup("fit")
+
+        assert dm.train_dataset is not None
+        assert dm.val_dataset is not None
+
+        train_fovs = set(dm.train_dataset.index.tracks["fov_name"].unique())
+        val_fovs = set(dm.val_dataset.index.tracks["fov_name"].unique())
+        assert train_fovs.isdisjoint(val_fovs)

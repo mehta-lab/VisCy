@@ -27,6 +27,16 @@ from dynaclr.data.tau_sampling import sample_tau
 from viscy_data._typing import INDEX_COLUMNS, NormMeta
 from viscy_data._utils import _read_norm_meta
 
+_META_COLUMNS = [
+    "experiment",
+    "condition",
+    "fov_name",
+    "global_track_id",
+    "t",
+    "hours_post_perturbation",
+    "lineage_id",
+]
+
 _logger = logging.getLogger(__name__)
 
 __all__ = ["MultiExperimentTripletDataset"]
@@ -64,6 +74,10 @@ class MultiExperimentTripletDataset(Dataset):
         in-batch negatives).
     cache_pool_bytes : int
         Tensorstore cache pool size in bytes.
+    bag_of_channels : bool
+        If ``True``, randomly select one source channel per sample instead
+        of reading all source channels.  Output shape is ``(B, 1, Z, Y, X)``
+        instead of ``(B, C, Z, Y, X)``.
     """
 
     def __init__(
@@ -74,6 +88,7 @@ class MultiExperimentTripletDataset(Dataset):
         tau_decay_rate: float = 2.0,
         return_negative: bool = False,
         cache_pool_bytes: int = 0,
+        bag_of_channels: bool = False,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -84,6 +99,7 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_range_hours = tau_range_hours
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
+        self.bag_of_channels = bag_of_channels
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
@@ -136,7 +152,8 @@ class MultiExperimentTripletDataset(Dataset):
         -------
         dict
             In fit mode: ``{"anchor": Tensor, "positive": Tensor,
-            "anchor_norm_meta": list, "positive_norm_meta": list}``.
+            "anchor_norm_meta": list, "positive_norm_meta": list,
+            "anchor_meta": list[dict], "positive_meta": list[dict]}``.
             In predict mode: ``{"anchor": Tensor, "index": list[dict]}``.
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
@@ -144,6 +161,7 @@ class MultiExperimentTripletDataset(Dataset):
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
+            "anchor_meta": self._extract_meta(anchor_rows),
         }
 
         if self.fit:
@@ -151,6 +169,7 @@ class MultiExperimentTripletDataset(Dataset):
             positive_patches, positive_norms = self._slice_patches(positive_rows)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
+            sample["positive_meta"] = self._extract_meta(positive_rows)
         else:
             indices_list = []
             for _, anchor_row in anchor_rows.iterrows():
@@ -165,6 +184,23 @@ class MultiExperimentTripletDataset(Dataset):
             sample["index"] = indices_list
 
         return sample
+
+    @staticmethod
+    def _extract_meta(rows: pd.DataFrame) -> list[dict]:
+        """Extract lightweight metadata dicts from track rows.
+
+        Parameters
+        ----------
+        rows : pd.DataFrame
+            Rows from ``valid_anchors`` or ``tracks``.
+
+        Returns
+        -------
+        list[dict]
+            One dict per row with keys from ``_META_COLUMNS``.
+        """
+        cols = [c for c in _META_COLUMNS if c in rows.columns]
+        return rows[cols].to_dict(orient="records")
 
     # ------------------------------------------------------------------
     # Positive sampling
@@ -303,16 +339,44 @@ class MultiExperimentTripletDataset(Dataset):
 
         # Per-experiment channel remapping
         channel_map = self.index.registry.channel_maps[exp_name]
-        channel_indices = [channel_map[i] for i in sorted(channel_map.keys())]
+        source_labels = self.index.registry.source_channel_labels
+        if self.bag_of_channels:
+            # Randomly select one source channel
+            source_idx = int(self._rng.integers(len(channel_map)))
+            channel_indices = [channel_map[source_idx]]
+            selected_label = source_labels[source_idx]
+        else:
+            channel_indices = [channel_map[i] for i in sorted(channel_map.keys())]
 
+        # Per-experiment z_range
+        z_start, z_end = self.index.registry.z_ranges[exp_name]
         patch = image.oindex[
             t,
             [int(c) for c in channel_indices],
-            self.index.z_range,
+            slice(z_start, z_end),
             slice(y_center - y_half, y_center + y_half),
             slice(x_center - x_half, x_center + x_half),
         ]
-        return patch, _read_norm_meta(position)
+
+        # Remap norm_meta keys from zarr channel names to source labels
+        # and pre-resolve timepoint_statistics for this sample's timepoint
+        raw_norm_meta = _read_norm_meta(position)
+        if raw_norm_meta is not None:
+            key_map = self.index.registry.norm_meta_key_maps[exp_name]
+            remapped = {key_map[k]: v for k, v in raw_norm_meta.items() if k in key_map}
+            for label, ch_meta in remapped.items():
+                if "timepoint_statistics" in ch_meta:
+                    tp_stats = ch_meta["timepoint_statistics"].get(str(t))
+                    ch_meta["timepoint_statistics"] = tp_stats
+            if self.bag_of_channels:
+                if selected_label in remapped:
+                    raw_norm_meta = {"channel": remapped[selected_label]}
+                else:
+                    raw_norm_meta = None
+            else:
+                raw_norm_meta = remapped
+
+        return patch, raw_norm_meta
 
     def _slice_patches(self, track_rows: pd.DataFrame) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.

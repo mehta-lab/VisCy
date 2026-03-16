@@ -1,8 +1,8 @@
-"""Experiment configuration and registry for multi-experiment DynaCLR training.
+"""Experiment registry for multi-experiment DynaCLR training.
 
-Provides :class:`ExperimentConfig` (per-experiment metadata) and
-:class:`ExperimentRegistry` (validated collection with channel resolution,
-YAML loading, and tau-range conversion).
+Provides :class:`ExperimentRegistry` — a validated collection with channel
+resolution, tau-range conversion, and Z-range auto-resolution, backed by
+:class:`~viscy_data.collection.Collection`.
 """
 
 from __future__ import annotations
@@ -11,108 +11,67 @@ import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
-import yaml
 from iohub.ngff import open_ome_zarr
+
+from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, load_collection
 
 _logger = logging.getLogger(__name__)
 
-__all__ = ["ExperimentConfig", "ExperimentRegistry"]
-
-
-# ---------------------------------------------------------------------------
-# ExperimentConfig
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class ExperimentConfig:
-    """Configuration for a single experiment in a multi-experiment training setup.
-
-    Parameters
-    ----------
-    name : str
-        Unique identifier for this experiment.
-    data_path : str
-        Path to the HCS OME-Zarr store.
-    tracks_path : str
-        Root directory for per-FOV tracking CSVs.
-    channel_names : list[str]
-        All channel names present in the zarr store.
-    source_channel : list[str]
-        Which channels to use for training (subset of *channel_names*).
-    condition_wells : dict[str, list[str]]
-        Mapping of condition label to well names (e.g. ``{"uninfected": ["A/1"]}``).
-    interval_minutes : float
-        Time between frames in minutes.
-    start_hpi : float
-        Hours post infection (or perturbation) at frame 0.
-    organelle : str
-        Optional organelle label.
-    date : str
-        Optional experiment date string.
-    moi : float
-        Multiplicity of infection (0.0 if not applicable).
-    """
-
-    name: str
-    data_path: str
-    tracks_path: str
-    channel_names: list[str]
-    source_channel: list[str]
-    condition_wells: dict[str, list[str]]
-    interval_minutes: float = 30.0
-    start_hpi: float = 0.0
-    organelle: str = ""
-    date: str = ""
-    moi: float = 0.0
-
-
-# ---------------------------------------------------------------------------
-# ExperimentRegistry
-# ---------------------------------------------------------------------------
+__all__ = ["ExperimentRegistry"]
 
 
 @dataclass
 class ExperimentRegistry:
-    """Validated collection of :class:`ExperimentConfig` instances.
+    """Validated collection of experiments with channel and Z resolution.
 
     On creation (``__post_init__``), the registry performs fail-fast validation:
 
     1. Experiments list must not be empty.
     2. Experiment names must be unique.
-    3. Each experiment's ``source_channel`` entries must exist in its ``channel_names``.
-    4. All experiments must have the same number of ``source_channel`` entries.
-    5. ``interval_minutes`` must be positive for each experiment.
-    6. ``condition_wells`` must not be empty for each experiment.
-    7. ``data_path`` must point to an existing directory.
-    8. Zarr metadata channel names must match ``channel_names``.
+    3. Source channel mappings must reference valid channel names (experiments
+       may omit a source channel — not every experiment needs every channel).
+    4. ``interval_minutes`` must be positive for each experiment.
+    5. ``condition_wells`` must not be empty for each experiment.
+    6. ``data_path`` must point to an existing directory.
+    7. Zarr metadata channel names must match ``channel_names``.
 
     After validation the registry computes:
 
     * ``num_source_channels`` -- common count of source channels.
     * ``channel_maps`` -- per-experiment mapping of source position to zarr
       channel index.
+    * ``z_ranges`` -- per-experiment ``(z_start, z_end)`` ranges.
 
     Parameters
     ----------
-    experiments : list[ExperimentConfig]
-        List of experiment configurations.
+    collection : Collection
+        Validated collection of experiment configurations.
+    z_window : int or None
+        Number of Z slices the model consumes.
+    focus_channel : str or None
+        Channel name to look up ``focus_slice`` metadata in plate zattrs.
     """
 
-    experiments: list[ExperimentConfig]
+    collection: Collection
+    z_window: int | None = None
+    focus_channel: str | None = None
     num_source_channels: int = field(init=False)
     channel_maps: dict[str, dict[int, int]] = field(init=False)
+    norm_meta_key_maps: dict[str, dict[str, str]] = field(init=False)
+    z_ranges: dict[str, tuple[int, int]] = field(init=False)
 
     # internal lookup
-    _name_map: dict[str, ExperimentConfig] = field(init=False, repr=False, compare=False)
+    _name_map: dict[str, ExperimentEntry] = field(init=False, repr=False, compare=False)
 
     def __post_init__(self) -> None:
+        experiments = self.collection.experiments
+
         # 1. Empty check
-        if not self.experiments:
-            raise ValueError("Empty experiments list: at least one ExperimentConfig is required.")
+        if not experiments:
+            raise ValueError("Empty experiments list: at least one experiment is required.")
 
         # 2. Duplicate names
-        names: list[str] = [e.name for e in self.experiments]
+        names: list[str] = [e.name for e in experiments]
         seen: set[str] = set()
         for n in names:
             if n in seen:
@@ -120,33 +79,25 @@ class ExperimentRegistry:
             seen.add(n)
 
         # Build name -> config map
-        self._name_map = {e.name: e for e in self.experiments}
+        self._name_map = {e.name: e for e in experiments}
 
         # Per-experiment validations
-        for exp in self.experiments:
-            # 5. Negative interval
+        for exp in experiments:
+            # 4. Negative interval
             if exp.interval_minutes <= 0:
                 raise ValueError(
                     f"Experiment '{exp.name}': interval_minutes must be positive, got {exp.interval_minutes}."
                 )
 
-            # 6. Empty condition_wells
+            # 5. Empty condition_wells
             if not exp.condition_wells:
                 raise ValueError(f"Experiment '{exp.name}': condition_wells must not be empty.")
 
-            # 3. Source channel membership
-            missing = [ch for ch in exp.source_channel if ch not in exp.channel_names]
-            if missing:
-                raise ValueError(
-                    f"Experiment '{exp.name}': source_channel entries "
-                    f"{missing} not found in channel_names {exp.channel_names}."
-                )
-
-            # 7. data_path existence
+            # 6. data_path existence
             if not Path(exp.data_path).exists():
                 raise ValueError(f"Experiment '{exp.name}': data_path does not exist: {exp.data_path}")
 
-            # 8. Zarr channel validation
+            # 7. Zarr channel validation
             with open_ome_zarr(exp.data_path, mode="r") as plate:
                 first_position = next(iter(plate.positions()))[1]
                 zarr_channels = list(first_position.channel_names)
@@ -157,56 +108,172 @@ class ExperimentRegistry:
                     f"got (from zarr): {zarr_channels}."
                 )
 
-        # 4. Consistent source channel count
-        counts = {len(e.source_channel) for e in self.experiments}
-        if len(counts) > 1:
-            detail = ", ".join(f"'{e.name}': {len(e.source_channel)}" for e in self.experiments)
-            raise ValueError(
-                f"All experiments must have the same number of source_channel entries, but found: {detail}."
-            )
-        self.num_source_channels = counts.pop()
-
-        # Compute channel_maps
+        # Compute channel_maps from source_channels
+        # Experiments may not have all source channels — skip missing ones.
+        source_channels = self.collection.source_channels
         self.channel_maps = {}
-        for exp in self.experiments:
-            self.channel_maps[exp.name] = {i: exp.channel_names.index(sc) for i, sc in enumerate(exp.source_channel)}
+        for exp in experiments:
+            self.channel_maps[exp.name] = {
+                i: exp.channel_names.index(sc.per_experiment[exp.name])
+                for i, sc in enumerate(source_channels)
+                if exp.name in sc.per_experiment
+            }
+
+        # Build norm_meta key maps: zarr channel name -> source label
+        self.norm_meta_key_maps = {}
+        for exp in experiments:
+            self.norm_meta_key_maps[exp.name] = {
+                sc.per_experiment[exp.name]: sc.label for sc in source_channels if exp.name in sc.per_experiment
+            }
+
+        # Validate consistent source channel count
+        self.num_source_channels = len(source_channels)
+
+        # Resolve per-experiment z_ranges
+        self.z_ranges = self._resolve_z_ranges()
+
+    @property
+    def experiments(self) -> list[ExperimentEntry]:
+        """Return the list of experiment entries."""
+        return self.collection.experiments
+
+    @property
+    def source_channel_labels(self) -> list[str]:
+        """Return the list of source channel labels."""
+        return [sc.label for sc in self.collection.source_channels]
+
+    # ------------------------------------------------------------------
+    # Internal helpers
+    # ------------------------------------------------------------------
+
+    def _resolve_z_ranges(self) -> dict[str, tuple[int, int]]:
+        """Resolve per-experiment Z ranges.
+
+        For experiments with explicit ``z_range`` in zattrs, use it directly.
+        Otherwise read ``focus_slice`` metadata from the plate-level zattrs
+        and center a window of ``self.z_window`` slices around ``z_focus_mean``.
+        """
+        experiments = self.collection.experiments
+        z_ranges: dict[str, tuple[int, int]] = {}
+
+        for exp in experiments:
+            # Auto-resolve from focus_slice zattrs
+            first_sc = self.collection.source_channels[0] if self.collection.source_channels else None
+            focus_ch = self.focus_channel or (first_sc.per_experiment.get(exp.name) if first_sc else None)
+
+            with open_ome_zarr(exp.data_path, mode="r") as plate:
+                first_pos = next(iter(plate.positions()))[1]
+                z_total = first_pos["0"].shape[2]
+
+                if self.z_window is None:
+                    # Use full Z
+                    z_ranges[exp.name] = (0, z_total)
+                    continue
+
+                focus_data = plate.zattrs.get("focus_slice", {})
+                ch_focus = focus_data.get(focus_ch, {}) if focus_ch else {}
+                ds_stats = ch_focus.get("dataset_statistics", {})
+                z_focus_mean = ds_stats.get("z_focus_mean")
+
+            if z_focus_mean is None:
+                # Default to center of Z stack
+                z_center = z_total // 2
+            else:
+                z_center = int(round(z_focus_mean))
+
+            z_half = self.z_window // 2
+            z_start = max(0, z_center - z_half)
+            z_end = min(z_total, z_start + self.z_window)
+            z_start = max(0, z_end - self.z_window)
+
+            z_ranges[exp.name] = (z_start, z_end)
+            _logger.info(
+                "Experiment '%s': z_range=(%d, %d), z_total=%d, z_window=%d",
+                exp.name,
+                z_start,
+                z_end,
+                z_total,
+                self.z_window,
+            )
+
+        # Validate all z windows have the same size
+        if z_ranges:
+            window_sizes = {name: r[1] - r[0] for name, r in z_ranges.items()}
+            unique_sizes = set(window_sizes.values())
+            if len(unique_sizes) > 1:
+                detail = ", ".join(f"'{n}': {s}" for n, s in window_sizes.items())
+                raise ValueError(
+                    f"All experiments must have the same z_window size, but found: {detail}. "
+                    f"Adjust z_range values or ensure consistent z_window."
+                )
+
+        return z_ranges
 
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
 
     @classmethod
-    def from_yaml(cls, path: str | Path) -> ExperimentRegistry:
-        """Load experiments from a YAML file.
-
-        Expected YAML structure::
-
-            experiments:
-              - name: "exp_a"
-                data_path: "/path/to/exp_a.zarr"
-                tracks_path: "/path/to/tracks"
-                channel_names: ["Phase", "GFP"]
-                source_channel: ["Phase"]
-                condition_wells:
-                  uninfected: ["A/1"]
-                interval_minutes: 30.0
+    def from_collection(
+        cls,
+        path: str | Path,
+        z_window: int | None = None,
+        focus_channel: str | None = None,
+    ) -> ExperimentRegistry:
+        """Load experiments from a collection YAML file.
 
         Parameters
         ----------
         path : str | Path
-            Path to the YAML configuration file.
+            Path to the collection YAML.
+        z_window : int or None
+            Number of Z slices the model consumes.
+        focus_channel : str or None
+            Channel name for ``focus_slice`` lookup.
 
         Returns
         -------
         ExperimentRegistry
             Validated registry of experiments.
         """
-        path = Path(path)
-        with open(path) as f:
-            data = yaml.safe_load(f)
+        collection = load_collection(path)
+        return cls(collection=collection, z_window=z_window, focus_channel=focus_channel)
 
-        configs = [ExperimentConfig(**entry) for entry in data["experiments"]]
-        return cls(experiments=configs)
+    def subset(self, experiment_names: list[str]) -> ExperimentRegistry:
+        """Create a new registry with a subset of experiments.
+
+        Parameters
+        ----------
+        experiment_names : list[str]
+            Experiment names to include.
+
+        Returns
+        -------
+        ExperimentRegistry
+            New registry with only the specified experiments.
+        """
+        subset_experiments = [e for e in self.collection.experiments if e.name in experiment_names]
+        name_set = set(experiment_names)
+        subset_source_channels = [
+            SourceChannel(
+                label=sc.label,
+                per_experiment={k: v for k, v in sc.per_experiment.items() if k in name_set},
+            )
+            for sc in self.collection.source_channels
+        ]
+        subset_collection = Collection(
+            name=self.collection.name,
+            description=self.collection.description,
+            provenance=self.collection.provenance,
+            source_channels=subset_source_channels,
+            experiments=subset_experiments,
+            fov_records=self.collection.fov_records,
+        )
+        return ExperimentRegistry(
+            collection=subset_collection,
+            z_window=self.z_window,
+            focus_channel=self.focus_channel,
+        )
 
     def tau_range_frames(
         self,
@@ -242,7 +309,7 @@ class ExperimentRegistry:
 
         return (min_frames, max_frames)
 
-    def get_experiment(self, name: str) -> ExperimentConfig:
+    def get_experiment(self, name: str) -> ExperimentEntry:
         """Look up an experiment by name.
 
         Parameters
@@ -252,7 +319,7 @@ class ExperimentRegistry:
 
         Returns
         -------
-        ExperimentConfig
+        ExperimentEntry
 
         Raises
         ------

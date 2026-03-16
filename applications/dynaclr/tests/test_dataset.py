@@ -6,12 +6,13 @@ from __future__ import annotations
 from pathlib import Path
 
 import numpy as np
-import pandas as pd
 import pytest
 import torch
+from conftest import IMG_H, IMG_W, N_T, N_TRACKS, N_Z, make_tracks_csv
 
-from dynaclr.data.experiment import ExperimentConfig, ExperimentRegistry
+from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex
+from viscy_data.collection import Collection, ExperimentEntry, SourceChannel
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -19,53 +20,12 @@ from dynaclr.data.index import MultiExperimentIndex
 
 _CHANNEL_NAMES_A = ["Phase", "GFP"]
 _CHANNEL_NAMES_B = ["Phase", "Mito"]
-
-_IMG_H = 64
-_IMG_W = 64
-_N_T = 10
-_N_Z = 1
-_N_TRACKS = 5
 _YX_PATCH = (32, 32)
-_Z_RANGE = slice(0, 1)
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
-
-def _make_tracks_csv(
-    path: Path,
-    n_tracks: int = _N_TRACKS,
-    n_t: int = _N_T,
-    *,
-    parent_map: dict[int, int] | None = None,
-    start_t: int = 0,
-) -> None:
-    """Write a tracking CSV with standard columns."""
-    rows = []
-    for tid in range(n_tracks):
-        for t in range(start_t, start_t + n_t):
-            y = 32.0
-            x = 32.0
-            ptid = float("nan")
-            if parent_map and tid in parent_map:
-                ptid = parent_map[tid]
-            rows.append(
-                {
-                    "track_id": tid,
-                    "t": t,
-                    "id": tid * n_t + t,
-                    "parent_track_id": ptid,
-                    "parent_id": float("nan"),
-                    "z": 0,
-                    "y": y,
-                    "x": x,
-                }
-            )
-    df = pd.DataFrame(rows)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_csv(path, index=False)
 
 
 def _create_zarr_and_tracks(
@@ -75,8 +35,8 @@ def _create_zarr_and_tracks(
     wells: list[tuple[str, str]],
     fovs_per_well: int = 1,
     parent_map: dict[int, int] | None = None,
-    n_tracks: int = _N_TRACKS,
-    n_t: int = _N_T,
+    n_tracks: int = N_TRACKS,
+    n_t: int = N_T,
     start_t: int = 0,
 ) -> tuple[Path, Path]:
     """Create a mini HCS OME-Zarr store and matching tracking CSVs."""
@@ -93,14 +53,14 @@ def _create_zarr_and_tracks(
                 # Fill with random data so patches are nonzero
                 arr = pos.create_zeros(
                     "0",
-                    shape=(n_t + start_t, n_ch, _N_Z, _IMG_H, _IMG_W),
+                    shape=(n_t + start_t, n_ch, N_Z, IMG_H, IMG_W),
                     dtype=np.float32,
                 )
                 rng = np.random.default_rng(42)
                 arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
                 fov_name = f"{row}/{col}/{fov_idx}"
                 csv_path = tracks_root / fov_name / "tracks.csv"
-                _make_tracks_csv(
+                make_tracks_csv(
                     csv_path,
                     n_tracks=n_tracks,
                     n_t=n_t,
@@ -115,7 +75,7 @@ def _build_index(
     tmp_path: Path,
     *,
     parent_map: dict[int, int] | None = None,
-    n_tracks: int = _N_TRACKS,
+    n_tracks: int = N_TRACKS,
     two_experiments: bool = False,
 ) -> MultiExperimentIndex:
     """Build a MultiExperimentIndex from synthetic data."""
@@ -127,17 +87,20 @@ def _build_index(
         parent_map=parent_map,
         n_tracks=n_tracks,
     )
-    configs = [
-        ExperimentConfig(
-            name="exp_a",
-            data_path=str(zarr_a),
-            tracks_path=str(tracks_a),
-            channel_names=_CHANNEL_NAMES_A,
-            source_channel=["Phase", "GFP"],
-            condition_wells={"control": ["A/1"]},
-            interval_minutes=30.0,
-        )
+    exp_a = ExperimentEntry(
+        name="exp_a",
+        data_path=str(zarr_a),
+        tracks_path=str(tracks_a),
+        channel_names=_CHANNEL_NAMES_A,
+        condition_wells={"control": ["A/1"]},
+        interval_minutes=30.0,
+    )
+    experiments = [exp_a]
+    source_channels = [
+        SourceChannel(label="labelfree", per_experiment={"exp_a": "Phase"}),
+        SourceChannel(label="reporter", per_experiment={"exp_a": "GFP"}),
     ]
+
     if two_experiments:
         zarr_b, tracks_b = _create_zarr_and_tracks(
             tmp_path,
@@ -146,21 +109,26 @@ def _build_index(
             wells=[("A", "1")],
             n_tracks=n_tracks,
         )
-        configs.append(
-            ExperimentConfig(
-                name="exp_b",
-                data_path=str(zarr_b),
-                tracks_path=str(tracks_b),
-                channel_names=_CHANNEL_NAMES_B,
-                source_channel=["Phase", "Mito"],
-                condition_wells={"treated": ["A/1"]},
-                interval_minutes=15.0,
-            )
+        exp_b = ExperimentEntry(
+            name="exp_b",
+            data_path=str(zarr_b),
+            tracks_path=str(tracks_b),
+            channel_names=_CHANNEL_NAMES_B,
+            condition_wells={"treated": ["A/1"]},
+            interval_minutes=15.0,
         )
-    registry = ExperimentRegistry(experiments=configs)
+        experiments.append(exp_b)
+        for sc in source_channels:
+            sc.per_experiment["exp_b"] = "Phase" if sc.label == "labelfree" else "Mito"
+
+    collection = Collection(
+        name="test",
+        source_channels=source_channels,
+        experiments=experiments,
+    )
+    registry = ExperimentRegistry(collection=collection, z_window=1)
     return MultiExperimentIndex(
         registry=registry,
-        z_range=_Z_RANGE,
         yx_patch_size=_YX_PATCH,
         tau_range_hours=(0.5, 2.0),
     )
@@ -359,6 +327,55 @@ class TestPredictMode:
         for idx_entry in batch["index"]:
             assert "fov_name" in idx_entry
             assert "id" in idx_entry
+
+
+class TestBagOfChannels:
+    """Test bag_of_channels mode reads a single random channel per sample."""
+
+    def test_bag_of_channels_shape(self, single_experiment_index):
+        """bag_of_channels=True produces (B, 1, Z, Y, X) output."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            bag_of_channels=True,
+        )
+        batch = ds.__getitems__([0, 1])
+        expected_shape = (2, 1, 1, 32, 32)
+        assert batch["anchor"].shape == expected_shape, f"Anchor shape {batch['anchor'].shape} != {expected_shape}"
+        assert batch["positive"].shape == expected_shape, (
+            f"Positive shape {batch['positive'].shape} != {expected_shape}"
+        )
+
+    def test_bag_of_channels_varies_channel(self, single_experiment_index):
+        """Over many calls, bag_of_channels selects different channels."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            bag_of_channels=True,
+        )
+        # Collect anchor patches over many calls — values should vary
+        # because different channels have different data
+        values = set()
+        for _ in range(20):
+            batch = ds.__getitems__([0])
+            values.add(float(batch["anchor"][0, 0, 0, 0, 0]))
+        assert len(values) > 1, "bag_of_channels should produce varying channel selections"
+
+    def test_bag_of_channels_false_gives_all_channels(self, single_experiment_index):
+        """bag_of_channels=False (default) reads all source channels."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            bag_of_channels=False,
+        )
+        batch = ds.__getitems__([0])
+        assert batch["anchor"].shape[1] == 2, "Default should read all 2 source channels"
 
 
 class TestDatasetLength:

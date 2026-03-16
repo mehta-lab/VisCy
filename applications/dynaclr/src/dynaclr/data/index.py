@@ -9,6 +9,7 @@ metadata, lineage links, and border-clamped centroids.
 from __future__ import annotations
 
 import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import numpy as np
@@ -23,6 +24,110 @@ _logger = logging.getLogger(__name__)
 __all__ = ["MultiExperimentIndex"]
 
 
+def _load_experiment_fovs(
+    exp_name: str,
+    data_path: str,
+    tracks_path: str,
+    condition_wells: dict[str, list[str]],
+    marker: str,
+    organelle: str,
+    start_hpi: float,
+    interval_minutes: float,
+    fluorescence_channel: str,
+    include_wells: list[str] | None,
+    exclude_fovs: list[str] | None,
+) -> list[pd.DataFrame]:
+    """Load all FOV track DataFrames for one experiment (no Position objects).
+
+    Module-level for ProcessPoolExecutor picklability.
+
+    Parameters
+    ----------
+    exp_name : str
+        Experiment name.
+    data_path : str
+        Path to the OME-Zarr plate store.
+    tracks_path : str
+        Root directory of tracking CSVs.
+    condition_wells : dict[str, list[str]]
+        Mapping of condition label to list of well names.
+    marker : str
+        Marker name.
+    organelle : str
+        Organelle name.
+    start_hpi : float
+        Hours post perturbation at t=0.
+    interval_minutes : float
+        Minutes per frame.
+    fluorescence_channel : str
+        Fluorescence channel name for this experiment.
+    include_wells : list[str] | None
+        If provided, only include these wells.
+    exclude_fovs : list[str] | None
+        If provided, exclude these FOVs.
+
+    Returns
+    -------
+    list[pd.DataFrame]
+        One DataFrame per FOV with store_path/fov_name but no position column
+        (resolved later by _resolve_positions_and_dims).
+    """
+    registered_wells: set[str] = set()
+    for wells in condition_wells.values():
+        registered_wells.update(wells)
+
+    plate = open_ome_zarr(data_path, mode="r")
+    fov_dfs: list[pd.DataFrame] = []
+
+    for _pos_path, position in plate.positions():
+        fov_name = position.zgroup.name.strip("/")
+        parts = fov_name.split("/")
+        well_name = "/".join(parts[:2])
+
+        if well_name not in registered_wells:
+            continue
+        if include_wells is not None and well_name not in include_wells:
+            continue
+        if exclude_fovs is not None and fov_name in exclude_fovs:
+            continue
+
+        # Resolve condition from condition_wells
+        condition = None
+        for condition_label, wells in condition_wells.items():
+            if well_name in wells:
+                condition = condition_label
+                break
+        if condition is None:
+            raise ValueError(
+                f"Well '{well_name}' not found in condition_wells mapping "
+                f"for experiment '{exp_name}'. Available wells: {dict(condition_wells)}"
+            )
+
+        # Read tracking CSV
+        tracks_dir = Path(tracks_path) / fov_name
+        csv_files = list(tracks_dir.glob("*.csv"))
+        if not csv_files:
+            _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
+            continue
+        tracks_df = pd.read_csv(csv_files[0])
+
+        # Enrich columns
+        tracks_df["store_path"] = data_path
+        tracks_df["experiment"] = exp_name
+        tracks_df["condition"] = condition
+        tracks_df["marker"] = marker
+        tracks_df["organelle"] = organelle
+        tracks_df["well_name"] = well_name
+        tracks_df["fov_name"] = fov_name
+        tracks_df["global_track_id"] = exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+        tracks_df["hours_post_perturbation"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
+        tracks_df["fluorescence_channel"] = fluorescence_channel
+
+        fov_dfs.append(tracks_df)
+
+    return fov_dfs
+
+
 class MultiExperimentIndex:
     """Unified cell observation index across multiple experiments.
 
@@ -35,9 +140,8 @@ class MultiExperimentIndex:
     Parameters
     ----------
     registry : ExperimentRegistry
-        Validated collection of experiment configurations.
-    z_range : slice
-        Z-slice range for data loading.
+        Validated collection of experiment configurations.  Must have
+        resolved ``z_ranges`` (per-experiment Z slices).
     yx_patch_size : tuple[int, int]
         Patch size (height, width) used for border clamping.
     tau_range_hours : tuple[float, float]
@@ -52,22 +156,36 @@ class MultiExperimentIndex:
         ``build_timelapse_cell_index``).  When provided, tracks are loaded
         from the parquet instead of traversing every zarr store and CSV,
         dramatically speeding up startup.
+    num_workers : int
+        Number of parallel processes for loading experiments. Default 1
+        (sequential). When > 1, dispatches one process per experiment via
+        ``ProcessPoolExecutor``. Ignored when *cell_index_path* is provided.
     """
 
     def __init__(
         self,
         registry: ExperimentRegistry,
-        z_range: slice,
         yx_patch_size: tuple[int, int],
         tau_range_hours: tuple[float, float] = (0.5, 2.0),
         include_wells: list[str] | None = None,
         exclude_fovs: list[str] | None = None,
         cell_index_path: str | Path | None = None,
+        num_workers: int = 1,
     ) -> None:
         self.registry = registry
-        self.z_range = z_range
         self.yx_patch_size = yx_patch_size
         self._store_cache: dict[str, Plate] = {}
+
+        # Merge collection-level exclude_fovs with runtime exclude_fovs
+        collection_excludes: set[str] = set()
+        for exp in registry.experiments:
+            collection_excludes.update(exp.exclude_fovs)
+        if exclude_fovs is not None:
+            all_exclude_fovs = list(collection_excludes | set(exclude_fovs))
+        elif collection_excludes:
+            all_exclude_fovs = list(collection_excludes)
+        else:
+            all_exclude_fovs = None
 
         if cell_index_path is not None:
             _logger.info("Loading cell index from parquet: %s", cell_index_path)
@@ -75,17 +193,20 @@ class MultiExperimentIndex:
             tracks = self._align_parquet_columns(tracks)
             if include_wells is not None:
                 tracks = tracks[tracks["well_name"].isin(include_wells)].copy()
-            if exclude_fovs is not None:
-                tracks = tracks[~tracks["fov_name"].isin(exclude_fovs)].copy()
+            if all_exclude_fovs is not None:
+                tracks = tracks[~tracks["fov_name"].isin(all_exclude_fovs)].copy()
             tracks = self._filter_to_registry_experiments(tracks)
             positions, tracks = self._resolve_positions_and_dims(tracks)
             self.positions = positions
             # lineage_id already present from build step — skip _reconstruct_lineage
         else:
-            positions, tracks_dfs = self._load_all_experiments(include_wells=include_wells, exclude_fovs=exclude_fovs)
-            self.positions = positions
-            tracks = pd.concat(tracks_dfs, ignore_index=True) if tracks_dfs else pd.DataFrame()
+            all_tracks = self._load_all_experiments(
+                include_wells=include_wells, exclude_fovs=all_exclude_fovs, num_workers=num_workers
+            )
+            tracks = pd.concat(all_tracks, ignore_index=True) if all_tracks else pd.DataFrame()
             tracks = self._reconstruct_lineage(tracks)
+            positions, tracks = self._resolve_positions_and_dims(tracks)
+            self.positions = positions
 
         tracks = self._clamp_borders(tracks)
         self.tracks = tracks.reset_index(drop=True)
@@ -97,64 +218,68 @@ class MultiExperimentIndex:
         self,
         include_wells: list[str] | None,
         exclude_fovs: list[str] | None,
-    ) -> tuple[list[Position], list[pd.DataFrame]]:
-        """Load positions and enriched tracks for every experiment."""
-        all_positions: list[Position] = []
-        all_tracks: list[pd.DataFrame] = []
+        num_workers: int,
+    ) -> list[pd.DataFrame]:
+        """Load enriched track DataFrames for every experiment.
 
+        Parameters
+        ----------
+        include_wells : list[str] | None
+            If provided, only include these wells.
+        exclude_fovs : list[str] | None
+            If provided, exclude these FOVs.
+        num_workers : int
+            Number of parallel processes. 1 = sequential.
+
+        Returns
+        -------
+        list[pd.DataFrame]
+            All per-FOV DataFrames (no Position objects; resolved later).
+        """
+        source_channels = self.registry.collection.source_channels
+
+        job_args = []
         for exp in self.registry.experiments:
-            plate = open_ome_zarr(exp.data_path, mode="r")
-            for _pos_path, position in plate.positions():
-                fov_name = position.zgroup.name.strip("/")
-                # well_name is the first two path components (e.g. "A/1")
-                parts = fov_name.split("/")
-                well_name = "/".join(parts[:2])
+            fluorescence_ch = source_channels[1].per_experiment.get(exp.name, "") if len(source_channels) > 1 else ""
+            job_args.append(
+                (
+                    exp.name,
+                    str(exp.data_path),
+                    str(exp.tracks_path),
+                    dict(exp.condition_wells),
+                    exp.marker,
+                    exp.organelle,
+                    exp.start_hpi,
+                    exp.interval_minutes,
+                    fluorescence_ch,
+                    include_wells,
+                    exclude_fovs,
+                )
+            )
 
-                if include_wells is not None and well_name not in include_wells:
-                    continue
-                if exclude_fovs is not None and fov_name in exclude_fovs:
-                    continue
+        if num_workers == 1:
+            results = []
+            for args in job_args:
+                _logger.info("Building cell index for experiment: %s", args[0])
+                results.append(_load_experiment_fovs(*args))
+        else:
+            results = [None] * len(job_args)
+            with ProcessPoolExecutor(max_workers=num_workers) as executor:
+                futures = {
+                    executor.submit(_load_experiment_fovs, *args): (i, args[0]) for i, args in enumerate(job_args)
+                }
+                for future in as_completed(futures):
+                    idx, exp_name = futures[future]
+                    _logger.info("Finished loading experiment: %s", exp_name)
+                    results[idx] = future.result()
 
-                # Resolve condition from experiment's condition_wells
-                condition = self._resolve_condition(exp, well_name)
-
-                # Read tracking CSV
-                tracks_dir = Path(exp.tracks_path) / fov_name
-                csv_files = list(tracks_dir.glob("*.csv"))
-                if not csv_files:
-                    _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
-                    continue
-                tracks_df = pd.read_csv(csv_files[0])
-
-                # Enrich columns
-                tracks_df["store_path"] = str(exp.data_path)
-                tracks_df["experiment"] = exp.name
-                tracks_df["condition"] = condition
-                tracks_df["well_name"] = well_name
-                tracks_df["fov_name"] = fov_name
-                tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
-                tracks_df["hours_post_infection"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
-                fluorescence_ch = exp.source_channel[1] if len(exp.source_channel) > 1 else ""
-                tracks_df["fluorescence_channel"] = fluorescence_ch
-                tracks_df["position"] = [position] * len(tracks_df)
-
-                # Store image dims for border clamping
-                image = position["0"]
-                tracks_df["_img_height"] = image.height
-                tracks_df["_img_width"] = image.width
-
-                all_positions.append(position)
-                all_tracks.append(tracks_df)
-
-        return all_positions, all_tracks
-
-    @staticmethod
-    def _resolve_condition(exp, well_name: str) -> str:
-        """Map well_name to condition label from exp.condition_wells."""
-        for condition_label, wells in exp.condition_wells.items():
-            if well_name in wells:
-                return condition_label
-        return "unknown"
+        all_tracks = [df for fov_dfs in results for df in fov_dfs]
+        _logger.info(
+            "Cell index built: %d FOVs across %d experiments",
+            len(all_tracks),
+            len(self.registry.experiments),
+        )
+        return all_tracks
 
     @staticmethod
     def _align_parquet_columns(tracks: pd.DataFrame) -> pd.DataFrame:
