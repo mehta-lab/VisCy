@@ -37,7 +37,7 @@ def two_experiment_anchors() -> pd.DataFrame:
                     {
                         "experiment": exp_name,
                         "condition": cond,
-                        "hours_post_infection": rng.uniform(0, 48),
+                        "hours_post_perturbation": rng.uniform(0, 48),
                         "global_track_id": f"{exp_name}_{cond}_{i}",
                         "t": rng.integers(0, 20),
                     }
@@ -58,7 +58,7 @@ def three_experiment_anchors() -> pd.DataFrame:
                     {
                         "experiment": exp_name,
                         "condition": cond,
-                        "hours_post_infection": rng.uniform(0, 24),
+                        "hours_post_perturbation": rng.uniform(0, 24),
                         "global_track_id": f"{exp_name}_{cond}_{i}",
                         "t": rng.integers(0, 10),
                     }
@@ -77,7 +77,7 @@ def three_condition_anchors() -> pd.DataFrame:
                 {
                     "experiment": "exp_single",
                     "condition": cond,
-                    "hours_post_infection": float(i),
+                    "hours_post_perturbation": float(i),
                     "global_track_id": f"exp_single_{cond}_{i}",
                     "t": i,
                 }
@@ -96,7 +96,7 @@ def small_group_anchors() -> pd.DataFrame:
             {
                 "experiment": "tiny_exp",
                 "condition": "ctrl",
-                "hours_post_infection": float(i),
+                "hours_post_perturbation": float(i),
                 "global_track_id": f"tiny_{i}",
                 "t": i,
             }
@@ -107,7 +107,7 @@ def small_group_anchors() -> pd.DataFrame:
             {
                 "experiment": "big_exp",
                 "condition": "ctrl",
-                "hours_post_infection": float(i),
+                "hours_post_perturbation": float(i),
                 "global_track_id": f"big_{i}",
                 "t": i,
             }
@@ -124,15 +124,13 @@ def small_group_anchors() -> pd.DataFrame:
 class TestExperimentAware:
     """experiment_aware=True restricts every batch to one experiment."""
 
-    def test_batch_indices_from_single_experiment(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_batch_indices_from_single_experiment(self, two_experiment_anchors: pd.DataFrame):
         """Every batch should contain indices from exactly one experiment."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -140,19 +138,15 @@ class TestExperimentAware:
         assert len(batches) > 0, "Sampler should yield batches"
         for batch in batches:
             experiments = two_experiment_anchors.iloc[batch]["experiment"].unique()
-            assert len(experiments) == 1, (
-                f"Experiment-aware batch has indices from {len(experiments)} experiments"
-            )
+            assert len(experiments) == 1, f"Experiment-aware batch has indices from {len(experiments)} experiments"
 
-    def test_all_experiments_appear(
-        self, three_experiment_anchors: pd.DataFrame
-    ):
+    def test_all_experiments_appear(self, three_experiment_anchors: pd.DataFrame):
         """Over many batches, all experiments should appear at least once."""
         sampler = FlexibleBatchSampler(
             valid_anchors=three_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -162,19 +156,15 @@ class TestExperimentAware:
             exps = three_experiment_anchors.iloc[batch]["experiment"].unique()
             seen_experiments.update(exps)
         expected = {"exp_X", "exp_Y", "exp_Z"}
-        assert seen_experiments == expected, (
-            f"Not all experiments seen: {seen_experiments} vs {expected}"
-        )
+        assert seen_experiments == expected, f"Not all experiments seen: {seen_experiments} vs {expected}"
 
-    def test_experiment_aware_false_allows_mixing(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_experiment_aware_false_allows_mixing(self, two_experiment_anchors: pd.DataFrame):
         """experiment_aware=False should allow multiple experiments per batch."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=False,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -185,28 +175,24 @@ class TestExperimentAware:
             if len(experiments) > 1:
                 any_mixed = True
                 break
-        assert any_mixed, (
-            "With experiment_aware=False, at least one batch should mix experiments"
-        )
+        assert any_mixed, "With experiment_aware=False, at least one batch should mix experiments"
 
 
 # ---------------------------------------------------------------------------
-# Condition balancing (SAMP-02)
+# Stratified sampling (SAMP-02)
 # ---------------------------------------------------------------------------
 
 
-class TestConditionBalanced:
-    """condition_balanced=True produces ~equal condition representation."""
+class TestStratifyBy:
+    """stratify_by='condition' produces ~equal condition representation."""
 
-    def test_two_conditions_balanced(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_two_conditions_balanced(self, two_experiment_anchors: pd.DataFrame):
         """Each batch should have ~50% of each condition (within tolerance)."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=16,
             experiment_aware=True,
-            condition_balanced=True,
+            stratify_by="condition",
             leaky=0.0,
             seed=42,
         )
@@ -219,19 +205,16 @@ class TestConditionBalanced:
                 fraction = cond_count / len(batch)
                 # Within +/-20% of 50% = between 30% and 70%
                 assert 0.3 <= fraction <= 0.7, (
-                    f"Condition fraction {fraction:.2f} outside tolerance for "
-                    f"2-condition balance (expected ~0.5)"
+                    f"Condition fraction {fraction:.2f} outside tolerance for 2-condition balance (expected ~0.5)"
                 )
 
-    def test_three_conditions_balanced(
-        self, three_condition_anchors: pd.DataFrame
-    ):
+    def test_three_conditions_balanced(self, three_condition_anchors: pd.DataFrame):
         """Each batch should have ~33% of each condition."""
         sampler = FlexibleBatchSampler(
             valid_anchors=three_condition_anchors,
             batch_size=18,
             experiment_aware=True,
-            condition_balanced=True,
+            stratify_by="condition",
             leaky=0.0,
             seed=42,
         )
@@ -248,15 +231,13 @@ class TestConditionBalanced:
                     f"for 3-condition balance (expected ~0.33)"
                 )
 
-    def test_condition_balanced_false_no_constraint(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
-        """condition_balanced=False should not enforce any condition ratio."""
+    def test_stratify_by_none_no_constraint(self, two_experiment_anchors: pd.DataFrame):
+        """stratify_by=None should not enforce any stratification."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -273,15 +254,13 @@ class TestConditionBalanced:
 class TestLeakyMixing:
     """leaky > 0.0 injects cross-experiment samples into experiment-aware batches."""
 
-    def test_leaky_zero_no_cross_experiment(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_leaky_zero_no_cross_experiment(self, two_experiment_anchors: pd.DataFrame):
         """leaky=0.0 with experiment_aware should have 0 cross-experiment indices."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -289,15 +268,13 @@ class TestLeakyMixing:
             experiments = two_experiment_anchors.iloc[batch]["experiment"].unique()
             assert len(experiments) == 1
 
-    def test_leaky_injects_cross_experiment(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_leaky_injects_cross_experiment(self, two_experiment_anchors: pd.DataFrame):
         """leaky=0.2, batch_size=10 -> ~2 cross-experiment indices per batch."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.2,
             seed=42,
         )
@@ -312,20 +289,16 @@ class TestLeakyMixing:
                 counts = experiments.value_counts()
                 minority_count = counts.min()
                 # Should be approximately int(10 * 0.2) = 2
-                assert minority_count <= 4, (
-                    f"Too many leaked samples: {minority_count} (expected ~2)"
-                )
+                assert minority_count <= 4, f"Too many leaked samples: {minority_count} (expected ~2)"
         assert any_leaked, "leaky=0.2 should inject cross-experiment samples"
 
-    def test_leaky_ignored_when_not_experiment_aware(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_leaky_ignored_when_not_experiment_aware(self, two_experiment_anchors: pd.DataFrame):
         """leaky has no effect when experiment_aware=False."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
             experiment_aware=False,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.5,
             seed=42,
         )
@@ -342,24 +315,20 @@ class TestLeakyMixing:
 class TestSmallGroupFallback:
     """Small groups fall back to replacement sampling with a logged warning."""
 
-    def test_small_group_does_not_crash(
-        self, small_group_anchors: pd.DataFrame
-    ):
+    def test_small_group_does_not_crash(self, small_group_anchors: pd.DataFrame):
         """batch_size > smallest group should not raise."""
         sampler = FlexibleBatchSampler(
             valid_anchors=small_group_anchors,
             batch_size=32,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
         batches = list(sampler)
         assert len(batches) > 0
 
-    def test_small_group_emits_warning(
-        self, small_group_anchors: pd.DataFrame, caplog
-    ):
+    def test_small_group_emits_warning(self, small_group_anchors: pd.DataFrame, caplog):
         """Sampler should warn when a group < batch_size."""
         import logging
 
@@ -368,7 +337,7 @@ class TestSmallGroupFallback:
                 valid_anchors=small_group_anchors,
                 batch_size=32,
                 experiment_aware=True,
-                condition_balanced=False,
+                stratify_by=None,
                 leaky=0.0,
                 seed=42,
             )
@@ -388,15 +357,13 @@ class TestSmallGroupFallback:
 class TestDeterminism:
     """Deterministic: same seed + same epoch -> same batch sequence."""
 
-    def test_same_seed_same_result(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_same_seed_same_result(self, two_experiment_anchors: pd.DataFrame):
         """Two samplers with same config should produce identical batches."""
         kwargs = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=True,
+            stratify_by="condition",
             leaky=0.0,
             seed=123,
         )
@@ -408,15 +375,13 @@ class TestDeterminism:
         for b1, b2 in zip(batches1, batches2):
             assert b1 == b2, "Same seed should produce identical batches"
 
-    def test_set_epoch_changes_sequence(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_set_epoch_changes_sequence(self, two_experiment_anchors: pd.DataFrame):
         """set_epoch(n) should change the batch sequence."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -425,19 +390,15 @@ class TestDeterminism:
         sampler.set_epoch(1)
         batches_epoch1 = list(sampler)
         # At least one batch should differ
-        assert batches_epoch0 != batches_epoch1, (
-            "Different epochs should produce different batch sequences"
-        )
+        assert batches_epoch0 != batches_epoch1, "Different epochs should produce different batch sequences"
 
-    def test_set_epoch_same_epoch_same_result(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_set_epoch_same_epoch_same_result(self, two_experiment_anchors: pd.DataFrame):
         """Calling set_epoch(5) twice should produce the same sequence."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -456,15 +417,13 @@ class TestDeterminism:
 class TestSamplerProtocol:
     """Verify Sampler[list[int]] protocol."""
 
-    def test_yields_list_of_int(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_yields_list_of_int(self, two_experiment_anchors: pd.DataFrame):
         """__iter__ should yield list[int], not individual ints."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
         )
@@ -472,31 +431,23 @@ class TestSamplerProtocol:
             assert isinstance(batch, list), f"Expected list, got {type(batch)}"
             assert len(batch) == 8, f"Batch size should be 8, got {len(batch)}"
             for idx in batch:
-                assert isinstance(idx, (int, np.integer)), (
-                    f"Expected int, got {type(idx)}"
-                )
+                assert isinstance(idx, (int, np.integer)), f"Expected int, got {type(idx)}"
 
-    def test_len_returns_expected_value(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_len_returns_expected_value(self, two_experiment_anchors: pd.DataFrame):
         """__len__ should return total_batches // num_replicas."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=1,
         )
         expected = len(two_experiment_anchors) // 8  # 200 // 8 = 25
-        assert len(sampler) == expected, (
-            f"Expected __len__={expected}, got {len(sampler)}"
-        )
+        assert len(sampler) == expected, f"Expected __len__={expected}, got {len(sampler)}"
 
-    def test_len_with_replicas(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_len_with_replicas(self, two_experiment_anchors: pd.DataFrame):
         """__len__ with num_replicas=2 should halve the count."""
         import math
 
@@ -504,7 +455,7 @@ class TestSamplerProtocol:
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -523,15 +474,13 @@ class TestSamplerProtocol:
 class TestDDPPartitioning:
     """DDP: ranks get disjoint interleaved batch slices."""
 
-    def test_two_ranks_disjoint_batches(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_two_ranks_disjoint_batches(self, two_experiment_anchors: pd.DataFrame):
         """Rank 0 and rank 1 should get different (interleaved) batches."""
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -551,15 +500,13 @@ class TestDDPPartitioning:
         # Batches should not be identical (different ranks get different slices)
         assert batches_r0 != batches_r1
 
-    def test_ddp_same_seed_deterministic(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_ddp_same_seed_deterministic(self, two_experiment_anchors: pd.DataFrame):
         """Both ranks with same seed+epoch should yield deterministic batches."""
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -593,7 +540,7 @@ def temporal_anchors() -> pd.DataFrame:
                     {
                         "experiment": exp_name,
                         "condition": cond,
-                        "hours_post_infection": float(i % 25) * 2.0,
+                        "hours_post_perturbation": float(i % 25) * 2.0,
                         "global_track_id": f"{exp_name}_{cond}_{i}",
                         "t": i % 25,
                     }
@@ -611,9 +558,7 @@ def temporal_anchors() -> pd.DataFrame:
 class TestTemporalEnrichment:
     """temporal_enrichment=True concentrates batches around focal HPI."""
 
-    def test_enriched_batches_concentrate_near_focal(
-        self, temporal_anchors: pd.DataFrame
-    ):
+    def test_enriched_batches_concentrate_near_focal(self, temporal_anchors: pd.DataFrame):
         """With temporal_enrichment=True and global_fraction=0.3, ~70% of batch
         indices should have HPI within temporal_window_hours of the focal HPI.
 
@@ -624,7 +569,7 @@ class TestTemporalEnrichment:
             valid_anchors=temporal_anchors,
             batch_size=20,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
             temporal_window_hours=2.0,
@@ -634,7 +579,7 @@ class TestTemporalEnrichment:
         batches = list(sampler)
         assert len(batches) > 0, "Should yield batches"
 
-        hpi_values = temporal_anchors["hours_post_infection"].to_numpy()
+        hpi_values = temporal_anchors["hours_post_perturbation"].to_numpy()
         focal_fractions: list[float] = []
         for batch in batches:
             batch_hpi = hpi_values[batch]
@@ -649,19 +594,16 @@ class TestTemporalEnrichment:
 
         avg_focal = float(np.mean(focal_fractions))
         assert avg_focal >= 0.55, (
-            f"Average focal fraction {avg_focal:.3f} < 0.55; "
-            f"temporal enrichment not concentrating batches"
+            f"Average focal fraction {avg_focal:.3f} < 0.55; temporal enrichment not concentrating batches"
         )
 
-    def test_global_fraction_one_no_enrichment(
-        self, temporal_anchors: pd.DataFrame
-    ):
+    def test_global_fraction_one_no_enrichment(self, temporal_anchors: pd.DataFrame):
         """temporal_global_fraction=1.0 means entire batch is global (no focal)."""
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
             temporal_window_hours=2.0,
@@ -672,15 +614,13 @@ class TestTemporalEnrichment:
         batches = list(sampler)
         assert len(batches) > 0
 
-    def test_global_fraction_zero_all_focal(
-        self, temporal_anchors: pd.DataFrame
-    ):
+    def test_global_fraction_zero_all_focal(self, temporal_anchors: pd.DataFrame):
         """temporal_global_fraction=0.0 means entire batch from focal window."""
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             temporal_enrichment=True,
             temporal_window_hours=2.0,
@@ -690,26 +630,23 @@ class TestTemporalEnrichment:
         batches = list(sampler)
         assert len(batches) > 0
 
-        hpi_values = temporal_anchors["hours_post_infection"].to_numpy()
+        hpi_values = temporal_anchors["hours_post_perturbation"].to_numpy()
         for batch in batches:
             batch_hpi = hpi_values[batch]
             # All indices should be within +/-2.0 of some focal HPI
             # Check that range is at most 2 * window
             assert batch_hpi.max() - batch_hpi.min() <= 4.01, (
-                f"All-focal batch HPI range {batch_hpi.max() - batch_hpi.min():.1f} "
-                f"exceeds 2*window=4.0"
+                f"All-focal batch HPI range {batch_hpi.max() - batch_hpi.min():.1f} exceeds 2*window=4.0"
             )
 
-    def test_enrichment_false_no_temporal_filtering(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
-        """temporal_enrichment=False should work without hours_post_infection
+    def test_enrichment_false_no_temporal_filtering(self, two_experiment_anchors: pd.DataFrame):
+        """temporal_enrichment=False should work without hours_post_perturbation
         column (though our fixture has it, the parameter should be ignored)."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=10,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             temporal_enrichment=False,
             seed=42,
@@ -718,32 +655,30 @@ class TestTemporalEnrichment:
         assert len(batches) > 0
 
     def test_enrichment_requires_hpi_column(self):
-        """temporal_enrichment=True without hours_post_infection column -> ValueError."""
+        """temporal_enrichment=True without hours_post_perturbation column -> ValueError."""
         df = pd.DataFrame(
             {
                 "experiment": ["a"] * 20,
                 "condition": ["ctrl"] * 20,
             }
         )
-        with pytest.raises(ValueError, match="hours_post_infection"):
+        with pytest.raises(ValueError, match="hours_post_perturbation"):
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
                 experiment_aware=True,
-                condition_balanced=False,
+                stratify_by=None,
                 temporal_enrichment=True,
                 seed=0,
             )
 
-    def test_enrichment_combined_with_condition_balance(
-        self, temporal_anchors: pd.DataFrame
-    ):
-        """temporal_enrichment + condition_balanced should both apply."""
+    def test_enrichment_combined_with_stratify_by(self, temporal_anchors: pd.DataFrame):
+        """temporal_enrichment + stratify_by should both apply."""
         sampler = FlexibleBatchSampler(
             valid_anchors=temporal_anchors,
             batch_size=20,
             experiment_aware=True,
-            condition_balanced=True,
+            stratify_by="condition",
             leaky=0.0,
             temporal_enrichment=True,
             temporal_window_hours=4.0,
@@ -764,15 +699,13 @@ class TestTemporalEnrichment:
 class TestDDPDisjointCoverage:
     """Two ranks produce disjoint batch assignments covering all batches."""
 
-    def test_two_ranks_cover_all_batches(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_two_ranks_cover_all_batches(self, two_experiment_anchors: pd.DataFrame):
         """Rank 0 + Rank 1 together should cover all generated batches."""
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -789,27 +722,21 @@ class TestDDPDisjointCoverage:
         # Combined count should equal total_batches
         total_batches = len(two_experiment_anchors) // 8  # 25
         combined = len(batches_r0) + len(batches_r1)
-        assert combined == total_batches, (
-            f"Combined {combined} != total {total_batches}"
-        )
+        assert combined == total_batches, f"Combined {combined} != total {total_batches}"
 
-    def test_two_ranks_disjoint_by_interleaving(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_two_ranks_disjoint_by_interleaving(self, two_experiment_anchors: pd.DataFrame):
         """Rank 0 gets even-indexed batches, rank 1 gets odd-indexed batches."""
         common = dict(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
         )
         # Build the full batch list from a single-rank sampler for reference
-        full_sampler = FlexibleBatchSampler(
-            **{**common, "num_replicas": 1, "rank": 0}
-        )
+        full_sampler = FlexibleBatchSampler(**{**common, "num_replicas": 1, "rank": 0})
         full_sampler.set_epoch(0)
         all_batches = list(full_sampler)
 
@@ -825,15 +752,13 @@ class TestDDPDisjointCoverage:
         assert r0_batches == all_batches[0::2], "Rank 0 should get even-indexed batches"
         assert r1_batches == all_batches[1::2], "Rank 1 should get odd-indexed batches"
 
-    def test_set_epoch_changes_ddp_sequences(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_set_epoch_changes_ddp_sequences(self, two_experiment_anchors: pd.DataFrame):
         """set_epoch(0) and set_epoch(1) produce different sequences for same rank."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -845,15 +770,13 @@ class TestDDPDisjointCoverage:
         epoch1 = list(sampler)
         assert epoch0 != epoch1, "Different epochs should produce different sequences"
 
-    def test_set_epoch_reproducible(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_set_epoch_reproducible(self, two_experiment_anchors: pd.DataFrame):
         """set_epoch(0) called twice produces identical sequence."""
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -865,9 +788,7 @@ class TestDDPDisjointCoverage:
         second = list(sampler)
         assert first == second, "Same epoch should reproduce identical sequence"
 
-    def test_len_with_ddp(
-        self, two_experiment_anchors: pd.DataFrame
-    ):
+    def test_len_with_ddp(self, two_experiment_anchors: pd.DataFrame):
         """__len__ with num_replicas=2 returns ceil(total_batches / 2)."""
         import math
 
@@ -875,7 +796,7 @@ class TestDDPDisjointCoverage:
             valid_anchors=two_experiment_anchors,
             batch_size=8,
             experiment_aware=True,
-            condition_balanced=False,
+            stratify_by=None,
             leaky=0.0,
             seed=42,
             num_replicas=2,
@@ -899,7 +820,7 @@ class TestValidationGuards:
         df = pd.DataFrame(
             {
                 "condition": ["ctrl"] * 20,
-                "hours_post_infection": [1.0] * 20,
+                "hours_post_perturbation": [1.0] * 20,
             }
         )
         with pytest.raises(ValueError, match="experiment"):
@@ -907,16 +828,16 @@ class TestValidationGuards:
                 valid_anchors=df,
                 batch_size=5,
                 experiment_aware=True,
-                condition_balanced=False,
+                stratify_by=None,
                 seed=0,
             )
 
-    def test_condition_balanced_requires_condition_column(self):
-        """condition_balanced=True without 'condition' column -> ValueError."""
+    def test_stratify_by_requires_column(self):
+        """stratify_by='condition' without 'condition' column -> ValueError."""
         df = pd.DataFrame(
             {
                 "experiment": ["a"] * 20,
-                "hours_post_infection": [1.0] * 20,
+                "hours_post_perturbation": [1.0] * 20,
             }
         )
         with pytest.raises(ValueError, match="condition"):
@@ -924,24 +845,24 @@ class TestValidationGuards:
                 valid_anchors=df,
                 batch_size=5,
                 experiment_aware=False,
-                condition_balanced=True,
+                stratify_by="condition",
                 seed=0,
             )
 
     def test_temporal_enrichment_requires_hpi_column(self):
-        """temporal_enrichment=True without hours_post_infection -> ValueError."""
+        """temporal_enrichment=True without hours_post_perturbation -> ValueError."""
         df = pd.DataFrame(
             {
                 "experiment": ["a"] * 20,
                 "condition": ["ctrl"] * 20,
             }
         )
-        with pytest.raises(ValueError, match="hours_post_infection"):
+        with pytest.raises(ValueError, match="hours_post_perturbation"):
             FlexibleBatchSampler(
                 valid_anchors=df,
                 batch_size=5,
                 experiment_aware=True,
-                condition_balanced=False,
+                stratify_by=None,
                 temporal_enrichment=True,
                 seed=0,
             )
