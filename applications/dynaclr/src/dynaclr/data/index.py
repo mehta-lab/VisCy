@@ -31,6 +31,7 @@ def _load_experiment_fovs(
     condition_wells: dict[str, list[str]],
     marker: str,
     organelle: str,
+    microscope: str,
     start_hpi: float,
     interval_minutes: float,
     fluorescence_channel: str,
@@ -55,6 +56,8 @@ def _load_experiment_fovs(
         Marker name.
     organelle : str
         Organelle name.
+    microscope : str
+        Microscope identifier.
     start_hpi : float
         Hours post perturbation at t=0.
     interval_minutes : float
@@ -117,6 +120,7 @@ def _load_experiment_fovs(
         tracks_df["condition"] = condition
         tracks_df["marker"] = marker
         tracks_df["organelle"] = organelle
+        tracks_df["microscope"] = microscope
         tracks_df["well_name"] = well_name
         tracks_df["fov_name"] = fov_name
         tracks_df["global_track_id"] = exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
@@ -249,6 +253,7 @@ class MultiExperimentIndex:
                     dict(exp.condition_wells),
                     exp.marker,
                     exp.organelle,
+                    exp.microscope,
                     exp.start_hpi,
                     exp.interval_minutes,
                     fluorescence_ch,
@@ -289,7 +294,10 @@ class MultiExperimentIndex:
         while the runtime code expects ``fov_name``, ``well_name``,
         ``fluorescence_channel``.
         """
-        return tracks.rename(columns={"fov": "fov_name", "well": "well_name", "channel_name": "fluorescence_channel"})
+        tracks = tracks.rename(columns={"fov": "fov_name", "well": "well_name", "channel_name": "fluorescence_channel"})
+        if "microscope" not in tracks.columns:
+            tracks["microscope"] = ""
+        return tracks
 
     def _filter_to_registry_experiments(self, tracks: pd.DataFrame) -> pd.DataFrame:
         """Keep only rows whose experiment is present in the registry."""

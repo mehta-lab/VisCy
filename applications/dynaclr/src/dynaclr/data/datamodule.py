@@ -122,6 +122,17 @@ class MultiExperimentDataModule(LightningDataModule):
         Number of parallel processes for building the cell index. Default: 1
         (sequential). When > 1, one process is spawned per experiment.
         Ignored when ``cell_index_path`` is provided.
+    reference_pixel_size_xy_um : float or None
+        Reference pixel size in XY (micrometers) for physical-scale normalization.
+        None = no rescaling. Default: None.
+    reference_pixel_size_z_um : float or None
+        Reference voxel size in Z (micrometers) for physical-scale normalization.
+        None = no rescaling. Default: None.
+    cross_scope_fraction : float
+        Fraction of positives sampled as cross-microscope positives.
+        0.0 = pure temporal positives. Default: 0.0.
+    hpi_window : float
+        Half-width of HPI window (hours) for cross-scope positive matching. Default: 1.0.
     """
 
     def __init__(
@@ -161,6 +172,10 @@ class MultiExperimentDataModule(LightningDataModule):
         cell_index_path: str | None = None,
         focus_channel: str | None = None,
         num_workers_index: int = 1,
+        reference_pixel_size_xy_um: float | None = None,
+        reference_pixel_size_z_um: float | None = None,
+        cross_scope_fraction: float = 0.0,
+        hpi_window: float = 1.0,
     ) -> None:
         super().__init__()
 
@@ -205,6 +220,10 @@ class MultiExperimentDataModule(LightningDataModule):
         self.cell_index_path = cell_index_path
         self.focus_channel = focus_channel
         self.num_workers_index = num_workers_index
+        self.reference_pixel_size_xy_um = reference_pixel_size_xy_um
+        self.reference_pixel_size_z_um = reference_pixel_size_z_um
+        self.cross_scope_fraction = cross_scope_fraction
+        self.hpi_window = hpi_window
 
         # Create ChannelDropout module
         self.channel_dropout = ChannelDropout(
@@ -241,6 +260,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 self.collection_path,
                 z_window=self.z_window,
                 focus_channel=getattr(self, "focus_channel", None),
+                reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+                reference_pixel_size_z_um=self.reference_pixel_size_z_um,
             )
 
             if self.val_experiments:
@@ -296,6 +317,8 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
             bag_of_channels=self.bag_of_channels,
+            cross_scope_fraction=self.cross_scope_fraction,
+            hpi_window=self.hpi_window,
         )
 
         if val_names:
@@ -316,6 +339,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
                 bag_of_channels=self.bag_of_channels,
+                cross_scope_fraction=self.cross_scope_fraction,
+                hpi_window=self.hpi_window,
             )
 
     def _setup_fov_split(self, registry: ExperimentRegistry) -> None:
@@ -368,6 +393,8 @@ class MultiExperimentDataModule(LightningDataModule):
             tau_decay_rate=self.tau_decay_rate,
             cache_pool_bytes=self.cache_pool_bytes,
             bag_of_channels=self.bag_of_channels,
+            cross_scope_fraction=self.cross_scope_fraction,
+            hpi_window=self.hpi_window,
         )
 
         if val_fovs:
@@ -388,6 +415,8 @@ class MultiExperimentDataModule(LightningDataModule):
                 tau_decay_rate=self.tau_decay_rate,
                 cache_pool_bytes=self.cache_pool_bytes,
                 bag_of_channels=self.bag_of_channels,
+                cross_scope_fraction=self.cross_scope_fraction,
+                hpi_window=self.hpi_window,
             )
 
     # ------------------------------------------------------------------

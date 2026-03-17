@@ -171,7 +171,7 @@ CELL_INDEX_CORE_COLUMNS = [
     "source_channels",
 ]
 
-CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name"]
+CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name", "microscope"]
 
 CELL_INDEX_TIMELAPSE_COLUMNS = [
     "t",

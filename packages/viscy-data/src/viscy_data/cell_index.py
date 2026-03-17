@@ -64,6 +64,7 @@ CELL_INDEX_SCHEMA = pa.schema(
         ("gene_name", pa.string()),
         ("reporter", pa.string()),
         ("sgRNA", pa.string()),
+        ("microscope", pa.string()),
     ]
 )
 
@@ -310,6 +311,7 @@ def build_timelapse_cell_index(
             tracks_df["source_channels"] = json.dumps(source_channel_names)
             tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
             tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
+            tracks_df["microscope"] = exp.microscope
 
             # Ensure z column exists
             if "z" not in tracks_df.columns:

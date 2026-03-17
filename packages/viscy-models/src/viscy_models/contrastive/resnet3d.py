@@ -4,8 +4,6 @@ import torch.nn as nn
 from monai.networks.nets.resnet import ResNetFeatures
 from torch import Tensor
 
-from viscy_models.contrastive.encoder import projection_mlp
-
 __all__ = ["ResNet3dEncoder"]
 
 
@@ -37,7 +35,13 @@ class ResNet3dEncoder(nn.Module):
     ) -> None:
         super().__init__()
         self.encoder = ResNetFeatures(backbone, pretrained=pretrained, spatial_dims=3, in_channels=in_channels)
-        self.projection = projection_mlp(embedding_dim, embedding_dim, projection_dim)
+        self.projection = nn.Sequential(
+            nn.Linear(embedding_dim, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(embedding_dim, projection_dim),
+            nn.BatchNorm1d(projection_dim),
+        )
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Forward pass.

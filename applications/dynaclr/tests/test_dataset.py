@@ -390,3 +390,138 @@ class TestDatasetLength:
             fit=True,
         )
         assert len(ds) == len(single_experiment_index.valid_anchors)
+
+
+class TestRescalePatch:
+    """Unit tests for _rescale_patch."""
+
+    def test_rescale_identity(self):
+        """scale=1.0 returns the same tensor (no-op)."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        patch = torch.randn(2, 10, 32, 32)
+        result = _rescale_patch(patch, (1.0, 1.0, 1.0), (10, 32, 32))
+        assert result.shape == patch.shape
+        assert torch.allclose(result, patch)
+
+    def test_rescale_down_then_up(self):
+        """scale=2.0 reads half the pixels; after rescale result is target shape."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        # Simulate reading with scale=2.0: read half-size patch
+        small_patch = torch.randn(1, 5, 16, 16)
+        # Rescale back to target (10, 32, 32)
+        result = _rescale_patch(small_patch, (2.0, 2.0, 2.0), (10, 32, 32))
+        assert result.shape == (1, 10, 32, 32)
+
+    def test_rescale_non_unity_changes_shape(self):
+        """Non-unity scale factor changes the spatial dimensions."""
+        from dynaclr.data.dataset import _rescale_patch
+
+        patch = torch.randn(1, 8, 24, 24)
+        result = _rescale_patch(patch, (2.0, 2.0, 2.0), (16, 48, 48))
+        assert result.shape == (1, 16, 48, 48)
+
+
+def _build_two_scope_index(tmp_path: Path) -> MultiExperimentIndex:
+    """Build a two-experiment index with different microscope fields."""
+    from iohub.ngff import open_ome_zarr
+
+    channel_names = ["Phase"]
+
+    def _make(name: str, microscope: str, condition: str):
+        zarr_path = tmp_path / f"{name}.zarr"
+        tracks_root = tmp_path / f"tracks_{name}"
+        with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
+            pos = plate.create_position("A", "1", "0")
+            arr = pos.create_zeros("0", shape=(N_T, 1, N_Z, IMG_H, IMG_W), dtype=np.float32)
+            arr[:] = np.random.default_rng(42).standard_normal(arr.shape).astype(np.float32)
+            fov_name = "A/1/0"
+            csv_path = tracks_root / fov_name / "tracks.csv"
+            make_tracks_csv(csv_path, n_tracks=N_TRACKS, n_t=N_T)
+        return ExperimentEntry(
+            name=name,
+            data_path=str(zarr_path),
+            tracks_path=str(tracks_root),
+            channel_names=channel_names,
+            condition_wells={condition: ["A/1"]},
+            interval_minutes=30.0,
+            microscope=microscope,
+        )
+
+    exp_a = _make("scope_a", "scope1", "control")
+    exp_b = _make("scope_b", "scope2", "control")  # same condition, different microscope
+
+    from viscy_data.collection import Collection, SourceChannel
+
+    collection = Collection(
+        name="two_scope_test",
+        source_channels=[SourceChannel(label="labelfree", per_experiment={"scope_a": "Phase", "scope_b": "Phase"})],
+        experiments=[exp_a, exp_b],
+    )
+    registry = ExperimentRegistry(collection=collection, z_window=1)
+    return MultiExperimentIndex(registry=registry, yx_patch_size=_YX_PATCH, tau_range_hours=(0.5, 2.0))
+
+
+class TestCrossScopePositive:
+    """Tests for cross-scope positive sampling."""
+
+    def test_find_cross_scope_positive_returns_different_microscope(self, tmp_path):
+        """_find_cross_scope_positive returns row with different microscope."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        index = _build_two_scope_index(tmp_path)
+        ds = MultiExperimentTripletDataset(index=index, fit=True, cross_scope_fraction=0.5)
+        rng = np.random.default_rng(0)
+
+        # Pick an anchor from scope_a
+        scope_a_anchors = index.valid_anchors[index.valid_anchors["experiment"] == "scope_a"]
+        assert len(scope_a_anchors) > 0
+        anchor_row = scope_a_anchors.iloc[0]
+
+        pos = ds._find_cross_scope_positive(anchor_row, rng)
+        assert pos is not None, "Should find cross-scope positive"
+        assert pos["microscope"] != anchor_row["microscope"]
+        assert pos["condition"] == anchor_row["condition"]
+
+    def test_find_cross_scope_positive_returns_none_when_no_candidates(self, single_experiment_index):
+        """_find_cross_scope_positive returns None when all tracks share one microscope."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        # Single experiment — no cross-scope candidates possible
+        # Force microscope field to a value
+        single_experiment_index.tracks["microscope"] = "scope1"
+        single_experiment_index.valid_anchors["microscope"] = "scope1"
+
+        ds = MultiExperimentTripletDataset(
+            index=single_experiment_index,
+            fit=True,
+            cross_scope_fraction=0.0,  # avoid validation error
+        )
+        rng = np.random.default_rng(0)
+        anchor_row = single_experiment_index.valid_anchors.iloc[0]
+        # Manually call — should find no candidates with different microscope
+        pos = ds._find_cross_scope_positive(anchor_row, rng)
+        assert pos is None
+
+    def test_cross_scope_fraction_zero_gives_temporal_positives(self, tmp_path):
+        """cross_scope_fraction=0.0 uses only temporal positives (regression guard)."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        index = _build_two_scope_index(tmp_path)
+        ds = MultiExperimentTripletDataset(index=index, fit=True, cross_scope_fraction=0.0)
+        batch = ds.__getitems__(list(range(min(4, len(ds)))))
+        # Just verify it runs and returns expected keys
+        assert "anchor" in batch
+        assert "positive" in batch
+
+    def test_cross_scope_fraction_positive_requires_microscope_field(self, single_experiment_index):
+        """cross_scope_fraction > 0 raises ValueError if microscope field is empty."""
+        from dynaclr.data.dataset import MultiExperimentTripletDataset
+
+        with pytest.raises(ValueError, match="microscope"):
+            MultiExperimentTripletDataset(
+                index=single_experiment_index,
+                fit=True,
+                cross_scope_fraction=0.5,
+            )
