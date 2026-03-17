@@ -9,8 +9,8 @@
 task: organelle_state
 
 # Input channel name used for embeddings
-# Valid options: phase, sensor, organelle
-input_channel: organelle
+# Valid options: phase, sensor, marker
+input_channel: marker
 
 # Marker name for marker-specific tasks like organelle_state.
 # Different wells in the same plate can have different organelles, so each

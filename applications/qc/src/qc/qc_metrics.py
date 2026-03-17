@@ -1,11 +1,14 @@
 """Composable QC metrics for OME-Zarr datasets."""
 
+import logging
 from abc import ABC, abstractmethod
 
 import iohub.ngff as ngff
 from tqdm import tqdm
 
 from viscy_utils.meta_utils import write_meta_field
+
+_logger = logging.getLogger(__name__)
 
 
 class QCMetric(ABC):
@@ -88,7 +91,7 @@ def generate_qc_metadata(
 
         for channel_name in channel_list:
             channel_index = plate.channel_names.index(channel_name)
-            print(f"Computing {metric.field_name} for channel '{channel_name}'")
+            _logger.info(f"Computing {metric.field_name} for channel '{channel_name}'")
 
             position_results = []
 

@@ -1,6 +1,7 @@
 """Core functions for training and applying linear classifiers on embeddings."""
 
 import json
+import logging
 import tempfile
 from pathlib import Path
 from typing import Any, Optional
@@ -16,6 +17,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 from viscy_utils.evaluation.annotation import load_annotation_anndata
+
+_logger = logging.getLogger(__name__)
 
 
 class LinearClassifierPipeline:
@@ -229,7 +232,7 @@ def train_linear_classifier(
         classifier_params = {}
 
     X_full = adata.X if isinstance(adata.X, np.ndarray) else adata.X.toarray()
-    y_full = adata.obs[task].values
+    y_full = adata.obs[task].to_numpy(dtype=object)
 
     scaler = None
     pca = None
@@ -295,8 +298,8 @@ def train_linear_classifier(
         else:
             train_metrics["train_auroc"] = roc_auc_score(y_train, y_train_proba, multi_class="ovr", average="macro")
         print(f"  Train AUROC: {train_metrics['train_auroc']:.3f}")
-    except ValueError:
-        pass
+    except ValueError as e:
+        _logger.warning(f"Could not compute train AUROC (likely only one class present): {e}")
 
     for class_name in classifier.classes_:
         if class_name in train_report:
@@ -325,8 +328,8 @@ def train_linear_classifier(
             else:
                 val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba, multi_class="ovr", average="macro")
             print(f"  Val AUROC: {val_metrics['val_auroc']:.3f}")
-        except ValueError:
-            pass
+        except ValueError as e:
+            _logger.warning(f"Could not compute val AUROC (likely only one class present): {e}")
 
         for class_name in classifier.classes_:
             if class_name in val_report:

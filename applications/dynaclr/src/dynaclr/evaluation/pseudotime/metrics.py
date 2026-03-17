@@ -307,7 +307,7 @@ def compute_track_timing(
     ----------
     df : pd.DataFrame
         Dataframe with signal, t_relative_minutes, fov_name, track_id columns.
-        Should also have "experiment" and "organelle" columns if available.
+        Should also have "experiment" and "marker" columns if available.
     signal_col : str
         Column containing signal values.
     signal_type : {"fraction", "continuous"}
@@ -320,14 +320,14 @@ def compute_track_timing(
     Returns
     -------
     pd.DataFrame
-        Columns: organelle, fov_name, track_id, experiment, onset_minutes,
+        Columns: marker, fov_name, track_id, experiment, onset_minutes,
         total_positive_minutes, span_minutes, n_positive_frames, n_total_frames.
     """
     valid = df.dropna(subset=[signal_col]).copy()
 
     group_cols = ["fov_name", "track_id"]
     extra_cols = []
-    for col in ["experiment", "organelle"]:
+    for col in ["experiment", "marker"]:
         if col in valid.columns:
             group_cols.append(col)
             extra_cols.append(col)
@@ -360,7 +360,8 @@ def compute_track_timing(
 
         # Estimate frame interval
         frame_interval = track_df["t_relative_minutes"].diff().dropna()
-        interval = frame_interval.mode().iloc[0] if len(frame_interval) > 0 else 30.0
+        mode = frame_interval.mode()
+        interval = mode.iloc[0] if len(mode) > 0 else 30.0
 
         total_positive_minutes = len(positive_frames) * interval
         span_minutes = last_t_rel - first_t_rel + interval
@@ -396,10 +397,10 @@ def run_statistical_tests(
     Parameters
     ----------
     organelle_results : dict[str, dict]
-        Per-organelle results. Each value must have "combined_df" with
+        Per-marker results. Each value must have "combined_df" with
         columns: organelle_state (or signal), t_relative_minutes.
     track_timing_df : pd.DataFrame
-        Output of compute_track_timing with "organelle" column.
+        Output of compute_track_timing with "marker" column.
     control_results : dict[str, dict] or None
         Per-organelle control data with keys: n_total, n_remodel, fraction.
 
@@ -455,8 +456,8 @@ def run_statistical_tests(
         for j in range(i + 1, len(organelle_names)):
             org_a, org_b = organelle_names[i], organelle_names[j]
 
-            onset_a = track_timing_df[track_timing_df["organelle"] == org_a]["onset_minutes"]
-            onset_b = track_timing_df[track_timing_df["organelle"] == org_b]["onset_minutes"]
+            onset_a = track_timing_df[track_timing_df["marker"] == org_a]["onset_minutes"]
+            onset_b = track_timing_df[track_timing_df["marker"] == org_b]["onset_minutes"]
 
             if len(onset_a) > 0 and len(onset_b) > 0:
                 u_stat, p_val = mannwhitneyu(onset_a, onset_b, alternative="two-sided")
@@ -471,8 +472,8 @@ def run_statistical_tests(
                     }
                 )
 
-            dur_a = track_timing_df[track_timing_df["organelle"] == org_a]["span_minutes"]
-            dur_b = track_timing_df[track_timing_df["organelle"] == org_b]["span_minutes"]
+            dur_a = track_timing_df[track_timing_df["marker"] == org_a]["span_minutes"]
+            dur_b = track_timing_df[track_timing_df["marker"] == org_b]["span_minutes"]
 
             if len(dur_a) > 0 and len(dur_b) > 0:
                 u_stat, p_val = mannwhitneyu(dur_a, dur_b, alternative="two-sided")

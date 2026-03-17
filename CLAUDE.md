@@ -45,7 +45,7 @@ uvx ruff format packages/       # format
 - `D` rules are ignored in `**/tests/**` and notebooks.
 - Format: double quotes, spaces, 120 char line length.
 - Prefer {file}_test.py in the same directory as {file}.py, unless there are import issues, in which case use tests/...
-- Run `uvx pre-commit run --files {files_you_editted}` (unless the change was simple) and fix typing and linting errors, you make `# type: ignore` as needed.
+- Run `uvx prek run --files {files_you_editted}` (unless the change was simple) and fix typing and linting errors, you make `# type: ignore` as needed.
   The precommit will give you type errors which is nice - especially to know if you have incorrect code - but for many minor changes it's better to do this after testing.
   Use a subagent to apply complex fixes.
 - Use a subagent to run tests and complex bash commands, especially that which you think will return complex output.
