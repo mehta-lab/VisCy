@@ -243,6 +243,7 @@ trainer = VisCyTrainer(
             output_path,
             pca_kwargs={"n_components": 8},
             phate_kwargs={"knn": 5, "decay": 40, "n_jobs": -1},
+            overwrite=True,
         )
     ]
 )

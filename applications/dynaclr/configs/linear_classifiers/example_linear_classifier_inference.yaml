@@ -31,12 +31,12 @@ models:
     version: latest
   - model_name: linear-classifier-infection_state-phase
     version: latest
-  - model_name: linear-classifier-organelle_state-organelle-g3bp1
+  - model_name: linear-classifier-organelle_state-marker-g3bp1
     version: latest
     include_wells:
       - C/1
       - C/2
-  - model_name: linear-classifier-organelle_state-organelle-sec61b
+  - model_name: linear-classifier-organelle_state-marker-sec61b
     version: latest
     include_wells:
       - A/1

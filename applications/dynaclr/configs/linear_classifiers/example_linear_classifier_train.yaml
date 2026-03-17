@@ -14,7 +14,7 @@ input_channel: marker
 
 # Marker name for marker-specific tasks like organelle_state.
 # Different wells in the same plate can have different organelles, so each
-# organelle gets its own classifier: organelle_state-organelle-g3bp1, etc.
+# organelle gets its own classifier: organelle_state-marker-g3bp1, etc.
 # Set to null for non-marker tasks (infection_state, cell_division_state).
 marker: g3bp1
 
@@ -28,9 +28,9 @@ embedding_model_version: v3
 # Use include_wells to select wells for a specific organelle when a plate
 # contains multiple markers in different wells.
 train_datasets:
-  - embeddings: /path/to/2025_01_24_A549_G3BP1_DENV/embeddings_organelle.zarr
+  - embeddings: /path/to/2025_01_24_A549_G3BP1_DENV/embeddings_marker.zarr
     annotations: /path/to/2025_01_24_A549_G3BP1_DENV/combined_annotations.csv
-  - embeddings: /path/to/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/embeddings_organelle.zarr
+  - embeddings: /path/to/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/embeddings_marker.zarr
     annotations: /path/to/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/combined_annotations.csv
     include_wells: ["C/1", "C/2"]  # g3bp1 wells only (sec61b in A/, tomm20 in B/)
 
