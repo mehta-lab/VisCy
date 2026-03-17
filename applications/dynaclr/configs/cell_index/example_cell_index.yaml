@@ -16,7 +16,7 @@
 # Schema columns (per row = one cell observation at one timepoint):
 #   CORE:      cell_id, experiment, store_path, tracks_path, fov, well, y, x, z, source_channels
 #   GROUPING:  condition, channel_name
-#   TIMELAPSE: t, track_id, global_track_id, lineage_id, parent_track_id, hours_post_infection
+#   TIMELAPSE: t, track_id, global_track_id, lineage_id, parent_track_id, hours_post_perturbation
 #   OPS:       gene_name, reporter, sgRNA  (null for time-lapse data)
 #
 # Tracking CSV format (per FOV directory under tracks_path):
@@ -32,26 +32,25 @@
 experiments:
   # Experiment 1: SEC61B-tagged endoplasmic reticulum
   - name: "2025_07_22_SEC61"
-    data_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/registered.zarr"
-    tracks_path: "/hpc/projects/organelle_dynamics/2025_07_22_SEC61/tracks"
-    channel_names: ["Phase3D", "GFP", "Mito"]
-    source_channel: ["Phase3D", "GFP"]
+    data_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr"
+    tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/tracking.zarr"
+    # channel_names: ["Phase3D","raw GFP EX488 EM525-45"]
+    source_channel: ["Phase3D", "raw GFP EX488 EM525-45"]
     condition_wells:
-      uninfected: ["A/1", "A/2", "A/3"]
-      infected: ["B/1", "B/2", "B/3"]
-    interval_minutes: 30.0
+      uninfected: ["C/1"]
+      infected: ["C/2"]
+    interval_minutes: 10.0
     start_hpi: 3.0
 
   # Experiment 2: TOMM20-tagged mitochondria
-  # Different imaging interval — hours_post_infection is computed per-experiment
-  - name: "2025_08_15_TOMM20"
-    data_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/registered.zarr"
-    tracks_path: "/hpc/projects/organelle_dynamics/2025_08_15_TOMM20/tracks"
-    channel_names: ["Phase3D", "RFP"]
-    source_channel: ["Phase3D", "RFP"]
+  # Different imaging interval — hours_post_perturbation is computed per-experiment
+  - name: "2025_01_28_A549_G3BP1_ZIKV_DENV"
+    data_path: "/hpc/projects/organelle_phenotyping/datasets/organelle/G3BP1/2025_01_28_A549_G3BP1_ZIKV_DENV/rechunked.zarr"
+    tracks_path: "/hpc/projects/organelle_phenotyping/datasets/organelle/G3BP1/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr"
+    # channel_names: ["Phase3D",'raw GFP EX488 EM525-45', 'raw mCherry EX561 EM600-37']
+    source_channel: ["Phase3D"]
     condition_wells:
-      uninfected: ["A/1", "A/2"]
-      infected: ["B/1", "B/2"]
-      mock: ["C/1"]
-    interval_minutes: 15.0
-    start_hpi: 2.0
+      uninfected: ["B/4"]
+      infected: ["C/2"]
+    interval_minutes: 30.0
+    start_hpi: 4.0
