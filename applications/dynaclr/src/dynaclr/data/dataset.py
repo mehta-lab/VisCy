@@ -15,6 +15,8 @@ from collections import defaultdict
 import numpy as np
 import pandas as pd
 import torch
+import torch.nn.functional as F
+from torch import Tensor
 from torch.utils.data import Dataset
 
 try:
@@ -30,6 +32,7 @@ from viscy_data._utils import _read_norm_meta
 _META_COLUMNS = [
     "experiment",
     "condition",
+    "microscope",
     "fov_name",
     "global_track_id",
     "t",
@@ -40,6 +43,33 @@ _META_COLUMNS = [
 _logger = logging.getLogger(__name__)
 
 __all__ = ["MultiExperimentTripletDataset"]
+
+
+def _rescale_patch(patch: Tensor, scale: tuple[float, float, float], target: tuple[int, int, int]) -> Tensor:
+    """Rescale a ``(C, Z, Y, X)`` patch to *target* size using nearest-exact interpolation.
+
+    Parameters
+    ----------
+    patch : Tensor
+        Patch tensor of shape ``(C, Z, Y, X)``.
+    scale : tuple[float, float, float]
+        ``(scale_z, scale_y, scale_x)`` — 1.0 means no rescaling needed.
+    target : tuple[int, int, int]
+        Target spatial size ``(z, y, x)``.
+
+    Returns
+    -------
+    Tensor
+        Rescaled patch of shape ``(C, *target)``.
+    """
+    sz, sy, sx = scale
+    if sz == 1.0 and sy == 1.0 and sx == 1.0:
+        return patch
+    return F.interpolate(
+        patch.unsqueeze(0).float(),
+        size=target,
+        mode="nearest-exact",
+    ).squeeze(0)
 
 
 class MultiExperimentTripletDataset(Dataset):
@@ -78,6 +108,12 @@ class MultiExperimentTripletDataset(Dataset):
         If ``True``, randomly select one source channel per sample instead
         of reading all source channels.  Output shape is ``(B, 1, Z, Y, X)``
         instead of ``(B, C, Z, Y, X)``.
+    cross_scope_fraction : float
+        Fraction of positives sampled as cross-microscope positives
+        (same condition + HPI window, different microscope).
+        0.0 = pure temporal positives (default).
+    hpi_window : float
+        Half-width of HPI window (hours) for cross-scope positive matching.
     """
 
     def __init__(
@@ -89,6 +125,8 @@ class MultiExperimentTripletDataset(Dataset):
         return_negative: bool = False,
         cache_pool_bytes: int = 0,
         bag_of_channels: bool = False,
+        cross_scope_fraction: float = 0.0,
+        hpi_window: float = 1.0,
     ) -> None:
         if ts is None:
             raise ImportError(
@@ -100,6 +138,15 @@ class MultiExperimentTripletDataset(Dataset):
         self.tau_decay_rate = tau_decay_rate
         self.return_negative = return_negative
         self.bag_of_channels = bag_of_channels
+        self.cross_scope_fraction = cross_scope_fraction
+        self.hpi_window = hpi_window
+
+        if cross_scope_fraction > 0:
+            missing_microscope = [e.name for e in index.registry.experiments if not e.microscope]
+            if missing_microscope:
+                raise ValueError(
+                    f"cross_scope_fraction > 0 but experiments are missing microscope field: {missing_microscope}"
+                )
 
         self._rng = np.random.default_rng()
         self._setup_tensorstore_context(cache_pool_bytes)
@@ -157,7 +204,16 @@ class MultiExperimentTripletDataset(Dataset):
             In predict mode: ``{"anchor": Tensor, "index": list[dict]}``.
         """
         anchor_rows = self.index.valid_anchors.iloc[indices]
-        anchor_patches, anchor_norms = self._slice_patches(anchor_rows)
+
+        # In bag-of-channels mode, pre-sample one channel index per item so that
+        # anchor and positive always use the same channel (phase↔phase, fluor↔fluor).
+        if self.bag_of_channels:
+            n_channels = len(self.index.registry.source_channel_labels)
+            forced_channel_indices = list(self._rng.integers(n_channels, size=len(indices)))
+        else:
+            forced_channel_indices = None
+
+        anchor_patches, anchor_norms = self._slice_patches(anchor_rows, forced_channel_indices)
         sample: dict = {
             "anchor": anchor_patches,
             "anchor_norm_meta": anchor_norms,
@@ -166,7 +222,7 @@ class MultiExperimentTripletDataset(Dataset):
 
         if self.fit:
             positive_rows = self._sample_positives(anchor_rows)
-            positive_patches, positive_norms = self._slice_patches(positive_rows)
+            positive_patches, positive_norms = self._slice_patches(positive_rows, forced_channel_indices)
             sample["positive"] = positive_patches
             sample["positive_norm_meta"] = positive_norms
             sample["positive_meta"] = self._extract_meta(positive_rows)
@@ -209,6 +265,11 @@ class MultiExperimentTripletDataset(Dataset):
     def _sample_positives(self, anchor_rows: pd.DataFrame) -> pd.DataFrame:
         """Sample one positive for each anchor using lineage-aware lookup.
 
+        When ``cross_scope_fraction > 0``, a fraction of positives are sampled
+        as cross-microscope positives (same condition + HPI window, different
+        microscope).  Falls back to temporal positive when no cross-scope
+        candidate is found.
+
         Parameters
         ----------
         anchor_rows : pd.DataFrame
@@ -219,9 +280,19 @@ class MultiExperimentTripletDataset(Dataset):
         pd.DataFrame
             One row per anchor from ``self.index.tracks``.
         """
+        n = len(anchor_rows)
+        n_cross = int(n * self.cross_scope_fraction)
+        cross_mask = [True] * n_cross + [False] * (n - n_cross)
+        self._rng.shuffle(cross_mask)
+
         pos_rows = []
-        for _, row in anchor_rows.iterrows():
-            pos = self._find_positive(row, self._rng)
+        for use_cross, (_, row) in zip(cross_mask, anchor_rows.iterrows()):
+            if use_cross:
+                pos = self._find_cross_scope_positive(row, self._rng)
+                if pos is None:
+                    pos = self._find_positive(row, self._rng)
+            else:
+                pos = self._find_positive(row, self._rng)
             pos_rows.append(pos)
         return pd.DataFrame(pos_rows).reset_index(drop=True)
 
@@ -283,6 +354,38 @@ class MultiExperimentTripletDataset(Dataset):
 
         return None
 
+    def _find_cross_scope_positive(
+        self,
+        anchor_row: pd.Series,
+        rng: np.random.Generator,
+    ) -> pd.Series | None:
+        """Find a cross-microscope positive for a given anchor.
+
+        Searches for a row with a different ``microscope``, same ``condition``,
+        and ``hours_post_perturbation`` within ``self.hpi_window`` of the anchor.
+
+        Parameters
+        ----------
+        anchor_row : pd.Series
+            A single row from ``valid_anchors``.
+        rng : numpy.random.Generator
+            Random number generator for tie-breaking.
+
+        Returns
+        -------
+        pd.Series or None
+            A track row for the cross-scope positive, or ``None`` if no candidate found.
+        """
+        tracks = self.index.tracks
+        candidates = tracks[
+            (tracks["microscope"] != anchor_row["microscope"])
+            & (tracks["condition"] == anchor_row["condition"])
+            & ((tracks["hours_post_perturbation"] - anchor_row["hours_post_perturbation"]).abs() <= self.hpi_window)
+        ]
+        if candidates.empty:
+            return None
+        return candidates.iloc[rng.integers(len(candidates))]
+
     # ------------------------------------------------------------------
     # Patch extraction (tensorstore I/O)
     # ------------------------------------------------------------------
@@ -308,11 +411,14 @@ class MultiExperimentTripletDataset(Dataset):
             )
         return self._tensorstores[fov_name]
 
-    def _slice_patch(self, track_row: pd.Series) -> tuple["ts.TensorStore", NormMeta | None]:
+    def _slice_patch(
+        self, track_row: pd.Series, forced_source_idx: int | None = None
+    ) -> tuple["ts.TensorStore", NormMeta | None, tuple[float, float, float], tuple[int, int, int]]:
         """Slice a patch from the image store for a given track row.
 
-        Uses per-experiment ``channel_maps`` for channel index remapping
-        and ``y_clamp`` / ``x_clamp`` for border-safe centering.
+        Uses per-experiment ``channel_maps`` for channel index remapping,
+        ``y_clamp`` / ``x_clamp`` for border-safe centering, and scale factors
+        from the registry for physical-space normalization.
 
         Parameters
         ----------
@@ -321,8 +427,10 @@ class MultiExperimentTripletDataset(Dataset):
 
         Returns
         -------
-        tuple[ts.TensorStore, NormMeta | None]
-            The sliced patch (lazy tensorstore) and normalization metadata.
+        tuple[ts.TensorStore, NormMeta | None, tuple[float, float, float], tuple[int, int, int]]
+            The sliced patch (lazy tensorstore), normalization metadata,
+            scale factors ``(scale_z, scale_y, scale_x)``, and target size
+            ``(z_window, patch_h, patch_w)``.
         """
         position = track_row["position"]
         fov_name = track_row["fov_name"]
@@ -334,22 +442,30 @@ class MultiExperimentTripletDataset(Dataset):
         y_center = int(track_row["y_clamp"])
         x_center = int(track_row["x_clamp"])
 
-        y_half = self.index.yx_patch_size[0] // 2
-        x_half = self.index.yx_patch_size[1] // 2
+        # Per-experiment scale factors for physical-space normalization
+        scale_z, scale_y, scale_x = self.index.registry.scale_factors[exp_name]
+        y_half = round((self.index.yx_patch_size[0] // 2) * scale_y)
+        x_half = round((self.index.yx_patch_size[1] // 2) * scale_x)
 
         # Per-experiment channel remapping
         channel_map = self.index.registry.channel_maps[exp_name]
         source_labels = self.index.registry.source_channel_labels
         if self.bag_of_channels:
-            # Randomly select one source channel
-            source_idx = int(self._rng.integers(len(channel_map)))
+            source_idx = int(
+                forced_source_idx if forced_source_idx is not None else self._rng.integers(len(channel_map))
+            )
             channel_indices = [channel_map[source_idx]]
             selected_label = source_labels[source_idx]
         else:
             channel_indices = [channel_map[i] for i in sorted(channel_map.keys())]
 
-        # Per-experiment z_range
-        z_start, z_end = self.index.registry.z_ranges[exp_name]
+        # Per-experiment z_range (scale-adjusted window size centered on z_range center)
+        z_start_base, z_end_base = self.index.registry.z_ranges[exp_name]
+        z_window_size = z_end_base - z_start_base
+        z_count = round(z_window_size * scale_z)
+        z_focus = (z_start_base + z_end_base) // 2
+        z_start = z_focus - z_count // 2
+        z_end = z_start + z_count
         patch = image.oindex[
             t,
             [int(c) for c in channel_indices],
@@ -376,15 +492,23 @@ class MultiExperimentTripletDataset(Dataset):
             else:
                 raw_norm_meta = remapped
 
-        return patch, raw_norm_meta
+        target_size = (z_window_size, self.index.yx_patch_size[0], self.index.yx_patch_size[1])
+        return patch, raw_norm_meta, (scale_z, scale_y, scale_x), target_size
 
-    def _slice_patches(self, track_rows: pd.DataFrame) -> tuple[torch.Tensor, list[NormMeta | None]]:
+    def _slice_patches(
+        self,
+        track_rows: pd.DataFrame,
+        forced_channel_indices: list[int] | None = None,
+    ) -> tuple[torch.Tensor, list[NormMeta | None]]:
         """Slice and stack patches for multiple track rows.
 
         Parameters
         ----------
         track_rows : pd.DataFrame
             Multiple rows from ``tracks`` / ``valid_anchors``.
+        forced_channel_indices : list[int] or None
+            Per-sample source channel indices to use (bag-of-channels mode).
+            When provided, overrides the random draw in ``_slice_patch``.
 
         Returns
         -------
@@ -393,9 +517,19 @@ class MultiExperimentTripletDataset(Dataset):
         """
         patches = []
         norms = []
-        for _, row in track_rows.iterrows():
-            patch, norm = self._slice_patch(row)
+        scales = []
+        targets = []
+        for i, (_, row) in enumerate(track_rows.iterrows()):
+            forced = forced_channel_indices[i] if forced_channel_indices is not None else None
+            patch, norm, scale, target = self._slice_patch(row, forced_source_idx=forced)
             patches.append(patch)
             norms.append(norm)
+            scales.append(scale)
+            targets.append(target)
         results = ts.stack([p.translate_to[0] for p in patches]).read().result()  # noqa: PD013
-        return torch.from_numpy(results), norms
+        tensor = torch.from_numpy(results)
+        # Rescale patches that have non-unity scale factors
+        rescaled = []
+        for i in range(tensor.shape[0]):
+            rescaled.append(_rescale_patch(tensor[i], scales[i], targets[i]))
+        return torch.stack(rescaled), norms

@@ -87,6 +87,12 @@ class ExperimentEntry(BaseModel):
         Protein marker or dye name (e.g. ``"TOMM20"``, ``"SEC61B"``).
     organelle : str
         Target organelle or cellular structure (e.g. ``"mitochondria"``).
+    microscope : str
+        Microscope identifier (e.g. ``"scope1"``, ``"scope2"``).
+    pixel_size_xy_um : float or None
+        Pixel size in XY in micrometers. None means unknown / no rescaling.
+    pixel_size_z_um : float or None
+        Voxel size in Z in micrometers. None means unknown / no rescaling.
     date : str
         Experiment date string.
     moi : float
@@ -104,6 +110,9 @@ class ExperimentEntry(BaseModel):
     start_hpi: float = 0.0
     marker: str = ""
     organelle: str = ""
+    microscope: str = ""
+    pixel_size_xy_um: float | None = None
+    pixel_size_z_um: float | None = None
     date: str = ""
     moi: float = 0.0
     exclude_fovs: list[str] = []

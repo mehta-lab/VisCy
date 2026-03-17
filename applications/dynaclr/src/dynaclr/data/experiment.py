@@ -50,15 +50,22 @@ class ExperimentRegistry:
         Number of Z slices the model consumes.
     focus_channel : str or None
         Channel name to look up ``focus_slice`` metadata in plate zattrs.
+    reference_pixel_size_xy_um : float or None
+        Reference pixel size in XY (micrometers). None = no rescaling.
+    reference_pixel_size_z_um : float or None
+        Reference voxel size in Z (micrometers). None = no rescaling.
     """
 
     collection: Collection
     z_window: int | None = None
     focus_channel: str | None = None
+    reference_pixel_size_xy_um: float | None = None
+    reference_pixel_size_z_um: float | None = None
     num_source_channels: int = field(init=False)
     channel_maps: dict[str, dict[int, int]] = field(init=False)
     norm_meta_key_maps: dict[str, dict[str, str]] = field(init=False)
     z_ranges: dict[str, tuple[int, int]] = field(init=False)
+    scale_factors: dict[str, tuple[float, float, float]] = field(init=False)
 
     # internal lookup
     _name_map: dict[str, ExperimentEntry] = field(init=False, repr=False, compare=False)
@@ -131,6 +138,15 @@ class ExperimentRegistry:
 
         # Resolve per-experiment z_ranges
         self.z_ranges = self._resolve_z_ranges()
+
+        # Validate pixel sizes and compute scale factors
+        if self.reference_pixel_size_xy_um is not None or self.reference_pixel_size_z_um is not None:
+            missing = [e.name for e in experiments if e.pixel_size_xy_um is None or e.pixel_size_z_um is None]
+            if missing:
+                raise ValueError(
+                    f"reference_pixel_size set but experiments are missing pixel_size_xy_um/z_um: {missing}"
+                )
+        self.scale_factors = self._compute_scale_factors()
 
     @property
     def experiments(self) -> list[ExperimentEntry]:
@@ -209,6 +225,33 @@ class ExperimentRegistry:
 
         return z_ranges
 
+    def _compute_scale_factors(self) -> dict[str, tuple[float, float, float]]:
+        """Compute per-experiment scale factors for physical-space normalization.
+
+        Returns
+        -------
+        dict[str, tuple[float, float, float]]
+            ``{exp_name: (scale_z, scale_y, scale_x)}`` where scale = experiment_um /
+            reference_um.  When reference pixel size is 0.0, scale = 1.0 (no rescaling).
+        """
+        scale_factors: dict[str, tuple[float, float, float]] = {}
+        for exp in self.collection.experiments:
+            if (
+                self.reference_pixel_size_xy_um is not None
+                and self.reference_pixel_size_z_um is not None
+                and exp.pixel_size_xy_um is not None
+                and exp.pixel_size_z_um is not None
+            ):
+                scale_y = exp.pixel_size_xy_um / self.reference_pixel_size_xy_um
+                scale_x = exp.pixel_size_xy_um / self.reference_pixel_size_xy_um
+                scale_z = exp.pixel_size_z_um / self.reference_pixel_size_z_um
+            else:
+                scale_y = 1.0
+                scale_x = 1.0
+                scale_z = 1.0
+            scale_factors[exp.name] = (scale_z, scale_y, scale_x)
+        return scale_factors
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -219,6 +262,8 @@ class ExperimentRegistry:
         path: str | Path,
         z_window: int | None = None,
         focus_channel: str | None = None,
+        reference_pixel_size_xy_um: float | None = None,
+        reference_pixel_size_z_um: float | None = None,
     ) -> ExperimentRegistry:
         """Load experiments from a collection YAML file.
 
@@ -230,6 +275,10 @@ class ExperimentRegistry:
             Number of Z slices the model consumes.
         focus_channel : str or None
             Channel name for ``focus_slice`` lookup.
+        reference_pixel_size_xy_um : float or None
+            Reference pixel size in XY (micrometers). None = no rescaling.
+        reference_pixel_size_z_um : float or None
+            Reference voxel size in Z (micrometers). None = no rescaling.
 
         Returns
         -------
@@ -237,7 +286,13 @@ class ExperimentRegistry:
             Validated registry of experiments.
         """
         collection = load_collection(path)
-        return cls(collection=collection, z_window=z_window, focus_channel=focus_channel)
+        return cls(
+            collection=collection,
+            z_window=z_window,
+            focus_channel=focus_channel,
+            reference_pixel_size_xy_um=reference_pixel_size_xy_um,
+            reference_pixel_size_z_um=reference_pixel_size_z_um,
+        )
 
     def subset(self, experiment_names: list[str]) -> ExperimentRegistry:
         """Create a new registry with a subset of experiments.
@@ -273,6 +328,8 @@ class ExperimentRegistry:
             collection=subset_collection,
             z_window=self.z_window,
             focus_channel=self.focus_channel,
+            reference_pixel_size_xy_um=self.reference_pixel_size_xy_um,
+            reference_pixel_size_z_um=self.reference_pixel_size_z_um,
         )
 
     def tau_range_frames(

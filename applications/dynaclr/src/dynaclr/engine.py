@@ -43,9 +43,13 @@ class ContrastiveModule(LightningModule):
         log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
         ckpt_path: str | None = None,
+        freeze_backbone: bool = False,
+        projection: nn.Module | None = None,
     ) -> None:
         super().__init__()
         self.model = encoder
+        if projection is not None:
+            self.model.projection = projection
         self.loss_function = loss_function
         self.lr = lr
         self.schedule = schedule
@@ -56,9 +60,17 @@ class ContrastiveModule(LightningModule):
         self.validation_step_outputs = []
         self.log_embeddings = log_embeddings
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
+        self.freeze_backbone = freeze_backbone
 
         if ckpt_path is not None:
             self.load_state_dict(torch.load(ckpt_path, weights_only=True)["state_dict"])
+
+    def on_fit_start(self) -> None:  # noqa: D102
+        if self.freeze_backbone:
+            for param in self.model.stem.parameters():
+                param.requires_grad = False
+            for param in self.model.encoder.parameters():
+                param.requires_grad = False
 
     def forward(self, x: Tensor) -> tuple[Tensor, Tensor]:
         """Return both features and projections."""

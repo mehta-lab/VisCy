@@ -48,6 +48,7 @@ def _make_valid_df(n: int = 5) -> pd.DataFrame:
             "source_channels": json.dumps(["Phase", "GFP"]),
             "condition": "uninfected",
             "channel_name": "GFP",
+            "microscope": "",
         }
     )
 

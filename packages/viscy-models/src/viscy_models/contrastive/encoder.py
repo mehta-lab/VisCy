@@ -1,5 +1,6 @@
 """Contrastive encoder using timm 2D backbones with 3D-to-2D stem."""
 
+import warnings
 from typing import Literal
 
 import timm
@@ -8,11 +9,17 @@ from torch import Tensor
 
 from viscy_models.components.stems import StemDepthtoChannels
 
-__all__ = ["projection_mlp", "ContrastiveEncoder"]
+__all__ = ["projection_mlp", "ProjectionMLP", "ContrastiveEncoder"]
 
 
 def projection_mlp(in_dims: int, hidden_dims: int, out_dims: int) -> nn.Module:
     """Build a two-layer projection MLP with batch normalization.
+
+    .. deprecated::
+        Use :class:`ProjectionMLP` instead. This function returns a flat
+        ``nn.Sequential`` whose state dict keys (``projection.0.*``,
+        ``projection.4.*``) match legacy checkpoints. New code and configs
+        should use ``ProjectionMLP`` directly.
 
     Parameters
     ----------
@@ -28,6 +35,11 @@ def projection_mlp(in_dims: int, hidden_dims: int, out_dims: int) -> nn.Module:
     nn.Module
         Sequential MLP: Linear -> BN -> ReLU -> Linear -> BN.
     """
+    warnings.warn(
+        "projection_mlp() is deprecated and will be removed in a future release. Use ProjectionMLP instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
     return nn.Sequential(
         nn.Linear(in_dims, hidden_dims),
         nn.BatchNorm1d(hidden_dims),
@@ -35,6 +47,87 @@ def projection_mlp(in_dims: int, hidden_dims: int, out_dims: int) -> nn.Module:
         nn.Linear(hidden_dims, out_dims),
         nn.BatchNorm1d(out_dims),
     )
+
+
+class ProjectionMLP(nn.Module):
+    """Two-layer projection MLP with configurable normalization and activation.
+
+    Designed to be directly instantiable from a YAML config (e.g. LightningCLI).
+
+    Use ``norm="bn"`` (default) for standard contrastive pretraining.
+    Use ``norm="ln"`` for cross-scope finetuning where batches mix samples
+    from different microscopes — LayerNorm normalizes per-sample so domain
+    mixing does not contaminate the normalization statistics.
+
+    Use ``activation="relu"`` (default) for standard training.
+    Use ``activation="gelu"`` for consistency with ConvNeXt backbones
+    (which use GELU internally).
+
+    Parameters
+    ----------
+    in_dims : int
+        Input feature dimension (must match encoder ``embedding_dim``).
+    hidden_dims : int
+        Hidden layer dimension.
+    out_dims : int
+        Output projection dimension.
+    norm : Literal["bn", "ln"]
+        Normalization type. ``"bn"`` = BatchNorm1d, ``"ln"`` = LayerNorm.
+        Default: ``"bn"``.
+    activation : Literal["relu", "gelu", "silu"]
+        Hidden activation function. Default: ``"relu"``.
+    """
+
+    def __init__(
+        self,
+        in_dims: int,
+        hidden_dims: int,
+        out_dims: int,
+        norm: Literal["bn", "ln"] = "bn",
+        activation: Literal["relu", "gelu", "silu"] = "relu",
+    ) -> None:
+        super().__init__()
+        norm1: nn.Module
+        norm2: nn.Module
+        if norm == "bn":
+            norm1 = nn.BatchNorm1d(hidden_dims)
+            norm2 = nn.BatchNorm1d(out_dims)
+        elif norm == "ln":
+            norm1 = nn.LayerNorm(hidden_dims)
+            norm2 = nn.LayerNorm(out_dims)
+        else:
+            raise ValueError(f"norm must be 'bn' or 'ln', got '{norm}'")
+        act: nn.Module
+        if activation == "relu":
+            act = nn.ReLU(inplace=True)
+        elif activation == "gelu":
+            act = nn.GELU()
+        elif activation == "silu":
+            act = nn.SiLU(inplace=True)
+        else:
+            raise ValueError(f"activation must be 'relu', 'gelu', or 'silu', got '{activation}'")
+        self.net = nn.Sequential(
+            nn.Linear(in_dims, hidden_dims),
+            norm1,
+            act,
+            nn.Linear(hidden_dims, out_dims),
+            norm2,
+        )
+
+    def forward(self, x: Tensor) -> Tensor:
+        """Forward pass.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape ``(B, in_dims)``.
+
+        Returns
+        -------
+        Tensor
+            Projected tensor of shape ``(B, out_dims)``.
+        """
+        return self.net(x)
 
 
 class ContrastiveEncoder(nn.Module):
@@ -99,7 +192,13 @@ class ContrastiveEncoder(nn.Module):
         # contained within the encoder.
         # Use encoder.num_features for uniform API across all timm backbones
         # (fixes bug where encoder.head.fc.in_features fails for resnet50).
-        projection = projection_mlp(encoder.num_features, embedding_dim, projection_dim)
+        projection = nn.Sequential(
+            nn.Linear(encoder.num_features, embedding_dim),
+            nn.BatchNorm1d(embedding_dim),
+            nn.ReLU(inplace=True),
+            nn.Linear(embedding_dim, projection_dim),
+            nn.BatchNorm1d(projection_dim),
+        )
         if "convnext" in backbone:
             encoder.head.fc = nn.Identity()
         elif "resnet" in backbone:
