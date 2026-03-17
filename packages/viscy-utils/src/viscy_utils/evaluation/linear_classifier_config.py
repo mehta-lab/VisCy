@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 VALID_TASKS = Literal["infection_state", "organelle_state", "cell_division_state", "cell_death_state"]
 
 # Valid input channels
-VALID_CHANNELS = Literal["phase", "sensor", "organelle"]
+VALID_CHANNELS = Literal["phase", "sensor", "marker"]
 
 WANDB_PROJECT_PREFIX = "linearclassifiers"
 
@@ -23,7 +23,7 @@ class LinearClassifierTrainConfig(BaseModel):
         Classification task name (one of: infection_state, organelle_state,
         cell_division_state, cell_death_state).
     input_channel : str
-        Input channel name (one of: phase, sensor, organelle).
+        Input channel name (one of: phase, sensor, marker).
     embedding_model_name : str
         Name of the embedding model (e.g. ``DynaCLR-2D-BagOfChannels-timeaware``).
     embedding_model_version : str
