@@ -29,6 +29,7 @@ from torchmetrics.functional.segmentation import dice_score
 
 from viscy_data import CombinedDataModule, GPUTransformDataModule, Sample
 from viscy_models import FullyConvolutionalMAE, Unet2d, Unet25d, UNeXt2
+from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
 from viscy_utils.log_images import detach_sample, render_images
 
@@ -41,6 +42,11 @@ _UNET_ARCHITECTURE = {
 }
 
 _logger = logging.getLogger("lightning.pytorch")
+
+
+def _identity(x: Tensor) -> Tensor:
+    """Identity transform (no-op)."""
+    return x
 
 
 class MaskedMSELoss(nn.Module):
@@ -502,20 +508,18 @@ class VSUNet(LightningModule):
 
 
 class AugmentedPredictionVSUNet(LightningModule):
-    """Apply arbitrary collection of test-time augmentations for image translation prediction.
+    """Apply test-time augmentations and sliding window prediction for image translation.
 
     Parameters
     ----------
     model : nn.Module
         The model to be used for prediction.
-    forward_transforms : list[Callable[[Tensor], Tensor]]
-        A collection of transforms to apply to the input image before passing it to the model.
-        Each one is applied independently.
-        For example, resizing the input to match the expected voxel size of the model.
-    inverse_transforms : list[Callable[[Tensor], Tensor]]
+    forward_transforms : list[Callable[[Tensor], Tensor]] or None, optional
+        Transforms to apply to the input before the model. Each is applied independently.
+        If None, defaults to a single identity transform.
+    inverse_transforms : list[Callable[[Tensor], Tensor]] or None, optional
         Inverse transforms to apply to the model output before reduction.
-        They should be the inverse of each forward transform.
-        For example, resizing the output to match the original input shape for storage.
+        If None, defaults to a single identity transform.
     reduction : Literal["mean", "median"], optional
         The reduction method to apply to the predictions, by default "mean"
 
@@ -539,16 +543,16 @@ class AugmentedPredictionVSUNet(LightningModule):
     def __init__(
         self,
         model: nn.Module,
-        forward_transforms: list[Callable[[Tensor], Tensor]],
-        inverse_transforms: list[Callable[[Tensor], Tensor]],
+        forward_transforms: list[Callable[[Tensor], Tensor]] | None = None,
+        inverse_transforms: list[Callable[[Tensor], Tensor]] | None = None,
         reduction: Literal["mean", "median"] = "mean",
     ) -> None:
         super().__init__()
         down_factor = 2**model.num_blocks
         self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
         self.model = model
-        self._forward_transforms = forward_transforms
-        self._inverse_transforms = inverse_transforms
+        self._forward_transforms = forward_transforms or [_identity]
+        self._inverse_transforms = inverse_transforms or [_identity]
         self._reduction = reduction
 
     def forward(self, x: Tensor) -> Tensor:
@@ -591,13 +595,37 @@ class AugmentedPredictionVSUNet(LightningModule):
             prediction = prediction.median(dim=0).values
         return prediction
 
+    def _predict_with_tta(self, source: Tensor) -> Tensor:
+        """Apply test-time augmentations and reduce predictions.
+
+        Parameters
+        ----------
+        source : Tensor
+            Input tensor.
+
+        Returns
+        -------
+        Tensor
+            Prediction (reduced if multiple augmentations).
+        """
+        preds = []
+        for fwd_t, inv_t in zip(self._forward_transforms, self._inverse_transforms):
+            aug_source = fwd_t(source)
+            aug_source = self._predict_pad(aug_source)
+            pred = self.forward(aug_source)
+            pred = self._predict_pad.inverse(pred)
+            preds.append(inv_t(pred))
+        if len(preds) == 1:
+            return preds[0]
+        return self._reduce_predictions(preds)
+
     def predict_step(self, batch: Sample, batch_idx: int, dataloader_idx: int = 0) -> Tensor:
         """Execute a single prediction step with test-time augmentations.
 
         Parameters
         ----------
         batch : Sample
-            Input batch.
+            Input batch containing "source" tensor.
         batch_idx : int
             Batch index.
         dataloader_idx : int
@@ -606,22 +634,56 @@ class AugmentedPredictionVSUNet(LightningModule):
         Returns
         -------
         Tensor
-            Aggregated prediction.
+            Model prediction.
         """
-        source = batch["source"]
-        preds = []
-        for forward_t, inverse_t in zip(self._forward_transforms, self._inverse_transforms):
-            aug_source = forward_t(source)
-            aug_source = self._predict_pad(aug_source)
-            pred = self.forward(aug_source)
-            pred = self._predict_pad.inverse(pred)
-            pred = inverse_t(pred)
-            preds.append(pred)
-        if len(preds) == 1:
-            prediction = preds[0]
-        else:
-            prediction = self._reduce_predictions(preds)
-        return prediction
+        return self._predict_with_tta(batch["source"])
+
+    def predict_sliding_windows(self, x: Tensor, out_channel: int = 2, step: int = 1) -> Tensor:
+        """Run inference using sliding windows along Z with linear feathering blending.
+
+        Produces the same results as ``viscy predict`` CLI (HCSPredictionWriter)
+        since both use the same ``_blend_in`` blending algorithm.
+
+        Parameters
+        ----------
+        x : Tensor
+            Input tensor of shape (B, C, Z, Y, X).
+        out_channel : int, optional
+            Number of output channels, by default 2.
+        step : int, optional
+            Step size for sliding window along Z, by default 1.
+            With step=1, every Z position is covered. With step>1,
+            trailing positions beyond the last full window are not predicted.
+
+        Returns
+        -------
+        Tensor
+            Output tensor of shape (B, out_channel, Z, Y, X).
+
+        Raises
+        ------
+        ValueError
+            If input is not 5D, model lacks ``out_stack_depth``, or
+            model's stack depth exceeds input depth.
+        """
+        if x.ndim != 5:
+            raise ValueError(f"Expected input with 5 dimensions (B, C, Z, Y, X), got {x.shape}")
+        batch_size, _, depth, height, width = x.shape
+        in_stack_depth = getattr(self.model, "out_stack_depth", None)
+        if in_stack_depth is None:
+            raise ValueError(
+                f"Model {type(self.model).__name__} does not support sliding window "
+                "prediction (missing out_stack_depth attribute)."
+            )
+        if in_stack_depth > depth:
+            raise ValueError(f"in_stack_depth {in_stack_depth} > input depth {depth}")
+        out_tensor = x.new_zeros((batch_size, out_channel, depth, height, width))
+        for start in range(0, depth - in_stack_depth + 1, step):
+            end = start + in_stack_depth
+            pred = self._predict_with_tta(x[:, :, start:end])
+            z_slice = slice(start, end)
+            out_tensor[:, :, z_slice] = _blend_in(out_tensor[:, :, z_slice], pred, z_slice)
+        return out_tensor
 
 
 class FcmaeUNet(VSUNet):
