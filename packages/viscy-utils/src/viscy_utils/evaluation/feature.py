@@ -441,9 +441,7 @@ class CellFeatures:
         nr = np.bincount(r.ravel())
         radial_intensity_values = tbin / nr
 
-        radial_intensity_gradient = linregress(
-            range(len(radial_intensity_values)), radial_intensity_values
-        )
+        radial_intensity_gradient = linregress(range(len(radial_intensity_values)), radial_intensity_values)
 
         return radial_intensity_gradient[0]
 
@@ -671,13 +669,10 @@ class DynamicFeatures:
             Array of instantaneous velocities for each timepoint
         """
         # Get track data sorted by time
-        track_data = self.tracking_df[
-            self.tracking_df["track_id"] == track_id
-        ].sort_values("t")
+        track_data = self.tracking_df[self.tracking_df["track_id"] == track_id].sort_values("t")
 
-        # TODO: decide if we want to return nans or zeros
         if len(track_data) < 2:
-            return np.array([0.0])  # Return zero velocity for single-point tracks
+            return np.array([0.0])
 
         # Calculate displacements between consecutive points
         dx = np.diff(track_data["x"].values)
@@ -718,9 +713,7 @@ class DynamicFeatures:
                 Ratio of net displacement to total distance (0 to 1),
                 where 1 indicates perfectly straight movement
         """
-        track_data = self.tracking_df[
-            self.tracking_df["track_id"] == track_id
-        ].sort_values("t")
+        track_data = self.tracking_df[self.tracking_df["track_id"] == track_id].sort_values("t")
 
         if len(track_data) < 2:
             return 0.0, 0.0, 0.0
@@ -737,9 +730,7 @@ class DynamicFeatures:
         net_displacement = np.sqrt(np.sum((end_point - start_point) ** 2))
 
         # Compute directional persistence
-        directional_persistence = (
-            net_displacement / total_distance if total_distance > 0 else 0.0
-        )
+        directional_persistence = net_displacement / total_distance if total_distance > 0 else 0.0
 
         return total_distance, net_displacement, directional_persistence
 
@@ -764,9 +755,7 @@ class DynamicFeatures:
             - max_angular_velocity
             - std_angular_velocity
         """
-        track_data = self.tracking_df[
-            self.tracking_df["track_id"] == track_id
-        ].sort_values("t")
+        track_data = self.tracking_df[self.tracking_df["track_id"] == track_id].sort_values("t")
 
         if len(track_data) < 3:  # Need at least 3 points to compute angle changes
             return 0.0, 0.0, 0.0
@@ -781,9 +770,7 @@ class DynamicFeatures:
         angles = np.zeros(len(vectors) - 1)
         for i in range(len(vectors) - 1):
             v1, v2 = vectors[i], vectors[i + 1]
-            cos_angle = np.dot(v1, v2) / (
-                np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10
-            )
+            cos_angle = np.dot(v1, v2) / (np.linalg.norm(v1) * np.linalg.norm(v2) + 1e-10)
             angles[i] = np.arccos(np.clip(cos_angle, -1.0, 1.0))
 
         # Compute angular velocities (change in angle over time)

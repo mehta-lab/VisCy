@@ -1,18 +1,22 @@
 """Shared fixtures and skip markers for DynaCLR integration tests."""
 
-from pathlib import Path
-
-import anndata as ad
-import numpy as np
 import pandas as pd
-import pytest
-import torch
-from lightning.pytorch import LightningDataModule
-from torch import Tensor, nn
-from torch.utils.data import DataLoader, Dataset
 
-from viscy_data._typing import TripletSample
-from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+# anndata 0.12.x zarr writer does not support pandas ArrowStringArray (default in pandas 2.x with PyArrow installed)
+pd.options.future.infer_string = False
+
+from pathlib import Path  # noqa: E402
+
+import anndata as ad  # noqa: E402
+import numpy as np  # noqa: E402
+import pytest  # noqa: E402
+import torch  # noqa: E402
+from lightning.pytorch import LightningDataModule  # noqa: E402
+from torch import Tensor, nn  # noqa: E402
+from torch.utils.data import DataLoader, Dataset  # noqa: E402
+
+from viscy_data._typing import TripletSample  # noqa: E402
+from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # Shared synthetic data helpers (used by test_datamodule, test_dataset,

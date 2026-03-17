@@ -121,6 +121,9 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
+    # pandas 2.x with PyArrow defaults to ArrowStringArray; anndata zarr writer requires object dtype
+    for col in ultrack_indices.select_dtypes(include="string").columns:
+        ultrack_indices[col] = ultrack_indices[col].astype(object)
 
     adata = ad.AnnData(X=features, obs=ultrack_indices)
     if projections is not None:
@@ -144,7 +147,7 @@ def write_embedding_dataset(
             _, PHATE = compute_phate(features, **phate_kwargs)
             adata.obsm["X_phate"] = PHATE
         except Exception as e:
-            _logger.warning(f"PHATE computation failed: {str(e)}")
+            _logger.warning(f"PHATE computation failed: {str(e)}", exc_info=True)
 
     if pca_kwargs:
         from viscy_utils.evaluation.dimensionality_reduction import compute_pca
@@ -155,7 +158,7 @@ def write_embedding_dataset(
             PCA_features, _ = compute_pca(features, **pca_kwargs)
             adata.obsm["X_pca"] = PCA_features
         except Exception as e:
-            _logger.warning(f"PCA computation failed: {str(e)}")
+            _logger.warning(f"PCA computation failed: {str(e)}", exc_info=True)
 
     if uns_metadata:
         adata.uns.update(uns_metadata)

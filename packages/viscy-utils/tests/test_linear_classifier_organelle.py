@@ -14,6 +14,7 @@ from viscy_utils.evaluation.linear_classifier import (
     train_linear_classifier,
 )
 from viscy_utils.evaluation.linear_classifier_config import (
+    ClassifierModelSpec,
     LinearClassifierInferenceConfig,
 )
 
@@ -89,13 +90,17 @@ class TestPredictOrganelle:
 
 
 class TestLinearClassifierInferenceConfigOrganelle:
+    def _model_spec(self):
+        return [ClassifierModelSpec(model_name="test_model")]
+
     def test_output_path_none_defaults_to_inplace(self, tmp_path):
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
+            models=self._model_spec(),
         )
         assert config.output_path is None
 
@@ -103,19 +108,20 @@ class TestLinearClassifierInferenceConfigOrganelle:
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
-            include_wells=["A/1", "B/2"],
+            models=[ClassifierModelSpec(model_name="test_model", include_wells=["A/1", "B/2"])],
         )
-        assert config.include_wells == ["A/1", "B/2"]
+        assert config.models[0].include_wells == ["A/1", "B/2"]
 
     def test_include_wells_none_by_default(self, tmp_path):
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
+            models=self._model_spec(),
         )
-        assert config.include_wells is None
+        assert config.models[0].include_wells is None

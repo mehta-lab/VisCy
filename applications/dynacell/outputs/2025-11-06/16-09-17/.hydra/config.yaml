@@ -1,0 +1,32 @@
+input_data_path: /hpc/projects/virtual_staining/datasets/mehta-lab/DynaCell/tmp_alex_test/toy_dataset.zarr
+model_ckpt_path: /hpc/mydata/alex.kalinin/vs_test/epoch=83-step=14532-loss=0.492.ckpt
+output_path: /hpc/projects/virtual_staining/datasets/mehta-lab/DynaCell/tmp_alex_test/toy_dataset_predictions.zarr
+source_channel: Phase
+target_channels:
+- H2B
+- CAAX
+architecture: UNeXt2
+data:
+  z_window_size: 5
+  split_ratio: 0.8
+  batch_size: 2
+  num_workers: 0
+  normalization_level: fov_statistics
+  normalization_subtrahend: median
+  normalization_divisor: iqr
+model:
+  model_config:
+    in_channels: 1
+    out_channels: 2
+    in_stack_depth: 5
+    backbone: convnextv2_tiny
+    stem_kernel_size:
+    - 5
+    - 4
+    - 4
+    decoder_mode: pixelshuffle
+    head_expansion_ratio: 4
+    head_pool: true
+trainer:
+  accelerator: gpu
+  devices: auto

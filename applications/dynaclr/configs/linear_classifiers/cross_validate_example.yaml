@@ -8,7 +8,7 @@ output_dir: /hpc/projects/organelle_phenotyping/datasets/annotations/cross_valid
 ranking_metric: auroc  # auroc, weighted_f1, accuracy
 n_bootstrap: 3
 task: organelle_state  # Single task to run. Output goes to output_dir/<task>/. Omit to run all tasks.
-channels: [phase, sensor, organelle]  # Which embedding channels to cross-validate. Defaults to all if omitted.
+channels: [phase, sensor, marker]  # Which embedding channels to cross-validate. Defaults to all if omitted.
 
 # Marker name for marker-specific tasks (organelle_state).
 # Tags the output recommendations and W&B artifacts with the organelle name.

@@ -318,9 +318,9 @@ class TestLinearClassifierTrainConfig:
         config = LinearClassifierTrainConfig(
             task="cell_death_state",
             input_channel="phase",
-            embedding_model="test_model",
+            embedding_model_name="test_model",
+            embedding_model_version="v1",
             train_datasets=[dataset],
-            wandb_project="test_project",
         )
         assert config.task == "cell_death_state"
 
@@ -330,9 +330,9 @@ class TestLinearClassifierTrainConfig:
             LinearClassifierTrainConfig(
                 task="invalid_task",
                 input_channel="phase",
-                embedding_model="test_model",
+                embedding_model_name="test_model",
+                embedding_model_version="v1",
                 train_datasets=[dataset],
-                wandb_project="test_project",
             )
 
     def test_invalid_channel(self, tmp_path):
@@ -341,9 +341,9 @@ class TestLinearClassifierTrainConfig:
             LinearClassifierTrainConfig(
                 task="cell_death_state",
                 input_channel="invalid_channel",
-                embedding_model="test_model",
+                embedding_model_name="test_model",
+                embedding_model_version="v1",
                 train_datasets=[dataset],
-                wandb_project="test_project",
             )
 
     def test_pca_without_components(self, tmp_path):
@@ -352,11 +352,11 @@ class TestLinearClassifierTrainConfig:
             LinearClassifierTrainConfig(
                 task="cell_death_state",
                 input_channel="phase",
-                embedding_model="test_model",
+                embedding_model_name="test_model",
+                embedding_model_version="v1",
                 train_datasets=[dataset],
                 use_pca=True,
                 n_pca_components=None,
-                wandb_project="test_project",
             )
 
     def test_missing_dataset_keys(self, tmp_path):
@@ -364,9 +364,9 @@ class TestLinearClassifierTrainConfig:
             LinearClassifierTrainConfig(
                 task="cell_death_state",
                 input_channel="phase",
-                embedding_model="test_model",
+                embedding_model_name="test_model",
+                embedding_model_version="v1",
                 train_datasets=[{"only_embeddings": "/some/path"}],
-                wandb_project="test_project",
             )
 
     def test_nonexistent_paths(self, tmp_path):
@@ -374,36 +374,43 @@ class TestLinearClassifierTrainConfig:
             LinearClassifierTrainConfig(
                 task="cell_death_state",
                 input_channel="phase",
-                embedding_model="test_model",
+                embedding_model_name="test_model",
+                embedding_model_version="v1",
                 train_datasets=[
                     {
                         "embeddings": "/nonexistent/path.zarr",
                         "annotations": "/nonexistent/ann.csv",
                     }
                 ],
-                wandb_project="test_project",
             )
 
 
 class TestLinearClassifierInferenceConfig:
+    def _model_spec(self):
+        from viscy_utils.evaluation.linear_classifier_config import ClassifierModelSpec
+
+        return [ClassifierModelSpec(model_name="test_model")]
+
     def test_valid_config(self, tmp_path):
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
             output_path=str(tmp_path / "output.zarr"),
+            models=self._model_spec(),
         )
         assert config.embeddings_path == str(emb)
 
     def test_missing_embeddings(self, tmp_path):
         with pytest.raises(ValidationError, match="not found"):
             LinearClassifierInferenceConfig(
-                wandb_project="test_project",
-                model_name="test_model",
+                embedding_model_name="TestModel",
+                embedding_model_version="v1",
                 embeddings_path=str(tmp_path / "nonexistent.zarr"),
                 output_path=str(tmp_path / "output.zarr"),
+                models=self._model_spec(),
             )
 
     def test_output_exists_no_overwrite(self, tmp_path):
@@ -413,11 +420,12 @@ class TestLinearClassifierInferenceConfig:
         out.mkdir()
         with pytest.raises(ValidationError, match="already exists"):
             LinearClassifierInferenceConfig(
-                wandb_project="test_project",
-                model_name="test_model",
+                embedding_model_name="TestModel",
+                embedding_model_version="v1",
                 embeddings_path=str(emb),
                 output_path=str(out),
                 overwrite=False,
+                models=self._model_spec(),
             )
 
     def test_output_exists_with_overwrite(self, tmp_path):
@@ -426,11 +434,12 @@ class TestLinearClassifierInferenceConfig:
         out = tmp_path / "output.zarr"
         out.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
             output_path=str(out),
             overwrite=True,
+            models=self._model_spec(),
         )
         assert config.overwrite is True
 
@@ -438,29 +447,33 @@ class TestLinearClassifierInferenceConfig:
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
+            models=self._model_spec(),
         )
         assert config.output_path is None
 
     def test_include_wells(self, tmp_path):
+        from viscy_utils.evaluation.linear_classifier_config import ClassifierModelSpec
+
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
-            include_wells=["A/1", "B/2"],
+            models=[ClassifierModelSpec(model_name="test_model", include_wells=["A/1", "B/2"])],
         )
-        assert config.include_wells == ["A/1", "B/2"]
+        assert config.models[0].include_wells == ["A/1", "B/2"]
 
     def test_include_wells_none_by_default(self, tmp_path):
         emb = tmp_path / "emb.zarr"
         emb.mkdir()
         config = LinearClassifierInferenceConfig(
-            wandb_project="test_project",
-            model_name="test_model",
+            embedding_model_name="TestModel",
+            embedding_model_version="v1",
             embeddings_path=str(emb),
+            models=self._model_spec(),
         )
-        assert config.include_wells is None
+        assert config.models[0].include_wells is None

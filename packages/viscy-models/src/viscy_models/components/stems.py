@@ -75,11 +75,11 @@ class StemDepthtoChannels(nn.Module):
 
     def compute_stem_channels(
         self,
-        in_stack_depth,
-        stem_kernel_size,
-        stem_stride_depth,
-        in_channels_encoder,
-    ):
+        in_stack_depth: int,
+        stem_kernel_size: tuple[int, int, int],
+        stem_stride_depth: int,
+        in_channels_encoder: int,
+    ) -> int:
         """Compute the number of output channels for the 3D stem convolution.
 
         Parameters

@@ -94,11 +94,14 @@ class ConvBlock3D(nn.Module):
         # ---- Handle Kernel ----#
         ks = kernel_size
         if isinstance(ks, int):
-            assert ks % 2 == 1, "Kernel dims must be odd"
+            if ks % 2 != 1:
+                raise ValueError("Kernel dims must be odd")
         elif isinstance(ks, tuple):
             for i in range(len(ks)):
-                assert ks[i] % 2 == 1, "Kernel dims must be odd"
-            assert i == 2, "kernel_size length must be 3"
+                if ks[i] % 2 != 1:
+                    raise ValueError("Kernel dims must be odd")
+            if i != 2:
+                raise ValueError("kernel_size length must be 3")
         else:
             raise AttributeError("'kernel_size' must be either int or tuple")
         self.kernel_size = kernel_size

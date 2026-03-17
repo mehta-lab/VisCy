@@ -314,18 +314,18 @@ class TestMetrics:
 
     def test_run_statistical_tests(self, aligned_df):
         df_a = extract_annotation_signal(aligned_df)
-        df_a["organelle"] = "SEC61"
+        df_a["marker"] = "SEC61"
         df_b = df_a.copy()
-        df_b["organelle"] = "TOMM20"
+        df_b["marker"] = "TOMM20"
 
         organelle_results = {
             "SEC61": {"combined_df": df_a},
             "TOMM20": {"combined_df": df_b},
         }
         timing_a = compute_track_timing(df_a)
-        timing_a["organelle"] = "SEC61"
+        timing_a["marker"] = "SEC61"
         timing_b = compute_track_timing(df_b)
-        timing_b["organelle"] = "TOMM20"
+        timing_b["marker"] = "TOMM20"
         track_timing = pd.concat([timing_a, timing_b], ignore_index=True)
 
         stats = run_statistical_tests(organelle_results, track_timing)
@@ -363,9 +363,9 @@ class TestPlotting:
 
     def test_plot_timing_distributions_saves_files(self, aligned_df, tmp_path):
         df = extract_annotation_signal(aligned_df)
-        df["organelle"] = "SEC61"
+        df["marker"] = "SEC61"
         timing = compute_track_timing(df)
-        timing["organelle"] = "SEC61"
+        timing["marker"] = "SEC61"
         configs = {"SEC61": {"label": "SEC61", "color": "blue"}}
         fig = plot_timing_distributions(timing, configs, tmp_path)
         assert isinstance(fig, plt.Figure)
@@ -375,7 +375,7 @@ class TestPlotting:
     def test_plot_onset_comparison_saves_files(self, tmp_path):
         timing_metrics = pd.DataFrame(
             {
-                "organelle": ["SEC61", "TOMM20"],
+                "marker": ["SEC61", "TOMM20"],
                 "T_onset_minutes": [60.0, 120.0],
                 "T_50_minutes": [180.0, 240.0],
                 "T_peak_minutes": [300.0, 360.0],

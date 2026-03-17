@@ -19,7 +19,7 @@ def _make_embeddings_and_labels(
     First N are anchors, next N are positives.
     labels[i] == labels[i + N] for positive pairs.
     """
-    gen = torch.Generator(device="cpu").manual_seed(seed)
+    gen = torch.Generator(device=device).manual_seed(seed)
     embeddings = torch.randn(2 * batch_size, embed_dim, generator=gen, device=device)
     indices = torch.arange(batch_size, device=device)
     labels = torch.cat([indices, indices])

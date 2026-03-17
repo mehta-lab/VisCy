@@ -3,18 +3,11 @@
 from pydantic import BaseModel, Field
 
 from airtable_utils.schemas import (
-    BiologicalAnnotation,
     ChannelAnnotationEntry,
-    Perturbation,
     WellExperimentMetadata,
 )
 
-# Re-export so existing QC imports continue to work
 __all__ = [
-    "BiologicalAnnotation",
-    "ChannelAnnotationEntry",
-    "Perturbation",
-    "WellExperimentMetadata",
     "FocusSliceConfig",
     "AnnotationConfig",
     "QCConfig",

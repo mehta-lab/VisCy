@@ -239,7 +239,7 @@ def plot_timing_distributions(
     Parameters
     ----------
     track_timing_df : pd.DataFrame
-        Output of metrics.compute_track_timing with "organelle" column.
+        Output of metrics.compute_track_timing with "marker" column.
     organelle_configs : dict[str, dict]
         Per-organelle config with "label" and "color" keys.
     output_dir : Path
@@ -253,8 +253,8 @@ def plot_timing_distributions(
     """
     fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
-    for organelle in track_timing_df["organelle"].unique():
-        org_df = track_timing_df[track_timing_df["organelle"] == organelle]
+    for organelle in track_timing_df["marker"].unique():
+        org_df = track_timing_df[track_timing_df["marker"] == organelle]
         config = organelle_configs.get(organelle, {"color": "gray", "label": organelle})
         color = config["color"]
         label = config["label"]
@@ -303,7 +303,7 @@ def plot_onset_comparison(
     Parameters
     ----------
     timing_metrics : pd.DataFrame
-        DataFrame with columns: organelle, T_onset_minutes, T_50_minutes,
+        DataFrame with columns: marker, T_onset_minutes, T_50_minutes,
         T_peak_minutes (and optionally color).
     output_dir : Path
         Directory for saving plots.
@@ -316,7 +316,7 @@ def plot_onset_comparison(
     """
     fig, ax = plt.subplots(figsize=(8, 5))
 
-    organelles = timing_metrics["organelle"].values
+    organelles = timing_metrics["marker"].values
     x = np.arange(len(organelles))
     width = 0.25
 

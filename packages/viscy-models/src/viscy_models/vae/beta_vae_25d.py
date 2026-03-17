@@ -125,11 +125,9 @@ class VaeEncoder(nn.Module):
         out_channels_encoder = num_channels[-1]
 
         if "convnext" in backbone:
-            num_channels = encoder.feature_info.channels()
             encoder.stem_0 = nn.Identity()
         elif "resnet" in backbone:
             encoder.conv1 = nn.Identity()
-            out_channels_encoder = num_channels[-1]
         else:
             raise ValueError(
                 f"Backbone {backbone} not supported. Use 'resnet50', 'convnext_tiny', or 'convnextv2_tiny'"

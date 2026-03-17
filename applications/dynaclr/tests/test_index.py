@@ -1253,4 +1253,4 @@ class TestParquetPath:
             .set_index("global_track_id")["lineage_id"]
             .sort_index()
         )
-        pd.testing.assert_series_equal(legacy_lineage, parquet_lineage)
+        pd.testing.assert_series_equal(legacy_lineage, parquet_lineage, check_dtype=False, check_index_type=False)

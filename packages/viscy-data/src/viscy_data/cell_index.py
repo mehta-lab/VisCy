@@ -204,7 +204,7 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 
         parent_map: dict[str, str] = {}
         for _, row in group.drop_duplicates("track_id").iterrows():
-            ptid = row.get("parent_track_id")
+            ptid = row["parent_track_id"]
             if pd.notna(ptid) and int(ptid) in tid_to_gtid:
                 parent_map[row["global_track_id"]] = tid_to_gtid[int(ptid)]
 

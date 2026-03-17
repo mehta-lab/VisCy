@@ -14,10 +14,13 @@ Tests cover:
 
 from __future__ import annotations
 
+import math
+
 import numpy as np
 import pandas as pd
 import pytest
 
+import viscy_data
 from viscy_data.sampler import FlexibleBatchSampler
 
 # ---------------------------------------------------------------------------
@@ -449,8 +452,6 @@ class TestSamplerProtocol:
 
     def test_len_with_replicas(self, two_experiment_anchors: pd.DataFrame):
         """__len__ with num_replicas=2 should halve the count."""
-        import math
-
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
@@ -790,8 +791,6 @@ class TestDDPDisjointCoverage:
 
     def test_len_with_ddp(self, two_experiment_anchors: pd.DataFrame):
         """__len__ with num_replicas=2 returns ceil(total_batches / 2)."""
-        import math
-
         sampler = FlexibleBatchSampler(
             valid_anchors=two_experiment_anchors,
             batch_size=8,
@@ -884,6 +883,4 @@ class TestPackageImport:
 
     def test_in_all(self):
         """FlexibleBatchSampler should be in viscy_data.__all__."""
-        import viscy_data
-
         assert "FlexibleBatchSampler" in viscy_data.__all__

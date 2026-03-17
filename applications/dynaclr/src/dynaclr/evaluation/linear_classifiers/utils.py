@@ -5,7 +5,7 @@ and focus/z-range helpers used by both ``generate_batch_predictions.py``
 and ``generate_train_config.py``.
 """
 
-# %%
+import logging
 import re
 from glob import glob
 from pathlib import Path
@@ -17,6 +17,8 @@ from viscy_utils.evaluation.linear_classifier_config import (
     VALID_CHANNELS,
     VALID_TASKS,
 )
+
+_logger = logging.getLogger(__name__)
 
 CHANNELS = list(VALID_CHANNELS.__args__)
 TASKS = list(VALID_TASKS.__args__)
@@ -54,7 +56,7 @@ MODEL_2D_BAG_TIMEAWARE = {
 # ---------------------------------------------------------------------------
 
 CHANNEL_DEFAULTS: dict[str, dict] = {
-    "organelle": {
+    "marker": {
         "keyword": "GFP",
         "yaml_alias": "fluor",
         "normalization_class": "viscy_transforms.ScaleIntensityRangePercentilesd",
@@ -142,7 +144,7 @@ def resolve_channel_name(
     channel_names : list[str]
         Channel names from the zarr dataset.
     channel_type : str
-        One of "organelle", "phase", "sensor".
+        One of "marker", "phase", "sensor".
     channel_overrides : dict[str, str] or None
         Optional mapping of channel_type -> keyword override.
 
@@ -294,7 +296,7 @@ def get_z_range(
     plate.close()
 
     if z_focus_mean is None:
-        print(f"  Focus metadata missing for {Path(data_path).name}, computing...")
+        _logger.info(f"Focus metadata missing for {Path(data_path).name}, computing...")
         z_focus_mean = _compute_focus(str(data_path), focus_params or FOCUS_PARAMS, phase_channel)
 
     depth = model_config["in_stack_depth"]
@@ -380,6 +382,8 @@ def generate_yaml(
     norm_block = "\n".join(norm_lines)
 
     logger_base = model_config["logger_base"]
+    if not Path(logger_base).exists():
+        _logger.warning(f"logger_base path does not exist: {logger_base}")
     model_name = model_config["name"]
     logger_save_dir = f"{logger_base}/{dataset_name}"
     logger_name = f"{model_name}/{version}/{channel_type}"
