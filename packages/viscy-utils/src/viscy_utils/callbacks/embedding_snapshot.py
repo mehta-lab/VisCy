@@ -10,7 +10,7 @@ import torch
 from lightning.pytorch import LightningModule, Trainer
 from lightning.pytorch.callbacks import Callback
 
-from viscy_data._typing import ULTRACK_INDEX_COLUMNS, TripletSample
+from viscy_data._typing import INDEX_COLUMNS, TripletSample
 from viscy_utils.callbacks.embedding_writer import EmbeddingWriter, write_embedding_dataset
 
 _logger = logging.getLogger("lightning.pytorch")
@@ -128,7 +128,7 @@ class EmbeddingSnapshotCallback(Callback):
         projections_np = self._projections.numpy()
 
         if self._index is not None:
-            available = {k: v for k, v in self._index.items() if k in ULTRACK_INDEX_COLUMNS}
+            available = {k: v for k, v in self._index.items() if k in INDEX_COLUMNS}
             index_df = pd.DataFrame(available)
         else:
             index_df = pd.DataFrame({"fov_name": ["unknown"] * features_np.shape[0]})

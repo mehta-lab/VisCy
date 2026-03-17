@@ -2,76 +2,95 @@
 
 ## Project Reference
 
-See: .planning/PROJECT.md (updated 2026-02-21)
+See: .planning/PROJECT.md (updated 2026-02-12)
 
 **Core value:** Independent, reusable subpackages with clean import paths
-**Current focus:** Phase 26 -- Refactor Translation Application
+**Current focus:** Phase 10 - Public API & CI Integration -- PHASE COMPLETE -- v1.1 MILESTONE COMPLETE
 
 ## Current Position
 
-Phase: 26 (Refactor Translation Application)
-Plan: 02 of 2 complete
-Status: Phase Complete (all plans executed)
-Last activity: 2026-02-28 -- Plan 26-02 executed (engine migration + test suite)
+Phase: 10 of 10 (Public API & CI Integration) -- PHASE COMPLETE
+Plan: 1 of 1 in current phase
+Status: v1.1 Milestone Complete
+Last activity: 2026-02-13 -- Completed 10-01 Public API, state dict tests, CI integration
 
-Progress: [######################........] 20/25 phases complete (80%)
+Progress: [==================] 100% (v1.0 complete, v1.1 complete: all 10 phases done)
 
 ## Performance Metrics
 
-**Combined velocity (all branches):**
-- Total plans completed: 29 (v1.0: 7, v1.1: 9, v1.2: 9, v2.1: 2, v2.3: 2) + v2.0 manual phases
+**Velocity:**
+- Total plans completed: 16 (v1.0: 7, v1.1: 9)
+- Average duration: ~15 min
+- Total execution time: ~4.1 hours
 
-**By Milestone:**
+**By Phase:**
 
-| Milestone | Phases | Plans | Branch |
-|-----------|--------|-------|--------|
-| v1.0 Transforms | 1-5 | 7 | shared |
-| v1.1 Data | 6-9 | 9 | modular-data |
-| v1.2 Models | 10-14 | 9 | modular-models |
-| v2.0 DynaCLR | 15-17 | manual | app-dynaclr |
-| v2.1 Validation | 18-19 | 2 | app-dynaclr |
-| v2.2 Sampling | 20-25 | TBD | app-dynaclr |
-| v2.3 Translation | 26 | 2/2 | app-cytoland |
+| Phase | Plans | Total | Avg/Plan |
+|-------|-------|-------|----------|
+| 1. Foundation | 2 | ~60m | ~30m |
+| 2. Package | 1 | ~30m | ~30m |
+| 3. Migration | 3 | ~90m | ~30m |
+| 5. CI/CD | 1 | ~30m | ~30m |
+| 6. Package Scaffold | 3 | ~10m | ~3m |
+| 7. Core UNet Models | 2 | ~6m | ~3m |
+| 8. Representation Models | 2 | ~8m | ~4m |
+| 9. Legacy UNet Models | 1 | ~4m | ~4m |
+| 10. Public API & CI | 1 | ~4m | ~4m |
 
 ## Accumulated Context
 
 ### Decisions
 
-Key decisions carrying forward:
+Decisions are logged in PROJECT.md Key Decisions table.
+Recent decisions affecting current work:
 
-- Clean break on imports: `from viscy_{pkg} import X` (no backward compatibility)
-- Applications compose packages: dynaclr depends on viscy-data, viscy-models, viscy-transforms, viscy-utils
-- triplet.py is NOT modified -- new composable sampling code in new files only
-- FlexibleBatchSampler + ChannelDropout in packages/viscy-data/ (reusable)
-- ExperimentConfig, Registry, Index, Dataset, DataModule in applications/dynaclr/ (domain-specific)
-- NTXentHCL as nn.Module drop-in for ContrastiveModule(loss_function=...)
-- 2-channel input (Phase + Fluorescence) with channel dropout on channel 1
-- HCL in loss only, no kNN sampler -- FlexibleBatchSampler handles experiment/condition/temporal axes
-- Train/val split by whole experiments, not FOVs
-- DDP via FlexibleBatchSampler + ShardedDistributedSampler composition
-- TYPE_CHECKING guard for cross-package type-only imports (HCSPredictionWriter pattern)
-- viscy_utils.losses as shared location for reconstruction losses (MixedLoss)
-- Translation app delegates to viscy_utils.cli.main for LightningCLI entry point
-- MixedLoss removed from translation engine.py (imported from viscy_utils.losses)
-- Top-level viscy_data imports for Sample/SegmentationSample (both exported at top level)
+- Pure nn.Module in viscy-models: No Lightning/Hydra coupling
+- Function-based grouping: unet/, vae/, contrastive/ with shared components/
+- viscy-models independent of viscy-transforms (torch/timm/monai/numpy only)
+- 14+ shared components in unext2.py need extraction to components/
+- Mutable defaults must be fixed to tuples during migration
+- State dict key compatibility is non-negotiable for checkpoint loading
+- Followed viscy-transforms pyproject.toml pattern exactly for consistency
+- No optional-dependencies for viscy-models (no notebook extras needed)
+- Dev dependency group includes only test (no jupyter for models package)
+- Preserved register_modules/add_module pattern verbatim for state dict key compatibility
+- Fixed only docstring formatting for ruff D-series compliance, no logic changes to legacy code
+- Intra-components import allowed: heads.py imports icnr_init from blocks.py (no circular risk)
+- _get_convnext_stage private but importable; excluded from __all__
+- Preserved exact list mutation pattern (decoder_channels = num_channels alias) in UNeXt2 for compatibility
+- Marked deconv decoder test as xfail due to pre-existing channel mismatch bug in original code
+- Fixed deconv tuple assignment bug in UNeXt2UpStage (trailing comma created tuple instead of module)
+- Removed PixelToVoxelShuffleHead duplication from fcmae.py; import from canonical components.heads location
+- Fixed mutable list defaults (encoder_blocks, dims) to tuples in FullyConvolutionalMAE
+- Used encoder.num_features instead of encoder.head.fc.in_features for timm backbone-agnostic projection dim (fixes ResNet50 bug)
+- Added pretrained parameter (default False) to contrastive encoders for pure nn.Module semantics
+- VaeEncoder pretrained default changed to False for pure nn.Module semantics
+- VaeDecoder mutable list defaults fixed to tuples (COMPAT-02)
+- Helper classes (VaeUpStage, VaeEncoder, VaeDecoder) kept in beta_vae_25d.py, not components
+- SimpleNamespace return type preserved for VAE backward compatibility
+- Convert user-provided num_filters tuple to list internally for list concatenation compatibility
+- up_list kept as plain Python list (not nn.ModuleList) since nn.Upsample has no learnable parameters
+- Used --cov=src/ for cross-platform CI coverage (avoids hyphen-to-underscore conversion on Windows)
+- State dict tests use structural assertions (count + prefixes + sentinels) not frozen key lists
 
-### Roadmap Evolution
+### Pending Todos
 
-- Phase 26 added: Refactor translation application
-- Phase 26 planned: 2 plans (26-01 shared infra, 26-02 engine migration)
-- Phase 26 Plan 01 executed: HCSPredictionWriter + MixedLoss to viscy-utils, translation scaffold created
-- Phase 26 Plan 02 executed: VSUNet, FcmaeUNet, AugmentedPredictionVSUNet migrated with test suite
+- Fix deconv decoder channel mismatch in UNeXt2UpStage (pre-existing bug, xfailed test documents it)
 
 ### Blockers/Concerns
 
-- None. Phase 26 is complete.
+None currently.
+
+## v1.0 Completion Summary
+
+All 5 phases complete (Phase 4 Documentation deferred). See MILESTONES.md.
 
 ## Session Continuity
 
-Last session: 2026-02-28
-Stopped at: Completed 26-02-PLAN.md. Phase 26 complete.
+Last session: 2026-02-13
+Stopped at: Completed 10-01-PLAN.md (Public API & CI -- Phase 10 complete -- v1.1 MILESTONE COMPLETE)
 Resume file: None
 
 ---
 *State initialized: 2025-01-27*
-*Updated for v2.2 Composable Sampling Framework roadmap: 2026-02-21*
+*Last updated: 2026-02-13 (10-01 summary added, Phase 10 complete, v1.1 milestone complete)*

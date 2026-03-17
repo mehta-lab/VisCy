@@ -36,6 +36,7 @@ dependencies = [
   "numpy>=2.4.1",
   "timm>=1.0.15",
   "torch>=2.10",
+  "transformers>=4.40",
 ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"

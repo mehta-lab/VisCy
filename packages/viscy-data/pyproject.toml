@@ -36,6 +36,7 @@ dependencies = [
   "lightning>=2.3",
   "monai>=1.5.2",
   "numpy>=2.4.1",
+  "pydantic>=2",
   "torch>=2.10",
   "zarr",
 ]
@@ -43,14 +44,14 @@ dependencies = [
 optional-dependencies.all = [ "viscy-data[livecell,mmap,triplet]" ]
 optional-dependencies.livecell = [ "pycocotools", "tifffile", "torchvision" ]
 optional-dependencies.mmap = [ "tensordict" ]
-optional-dependencies.triplet = [ "pandas", "tensorstore" ]
+optional-dependencies.triplet = [ "pandas", "pyarrow", "tensorstore" ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"
 
 [dependency-groups]
 dev = [ { include-group = "test" } ]
-test = [ "pandas", "pytest>=9.0.2", "pytest-cov>=7", "tensorstore" ]
+test = [ "pandas", "pyarrow", "pytest>=9.0.2", "pytest-cov>=7", "tensorstore" ]
 
 [tool.hatch.version]
 source = "uv-dynamic-versioning"

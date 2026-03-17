@@ -78,11 +78,11 @@ def _resolve_class_path(class_path: str):
 
 
 @pytest.mark.parametrize(
-    "config_name",
-    ["fit.yml", "predict.yml"],
+    "config_name,config_subdir",
+    [("fit.yml", "training"), ("predict.yml", "prediction")],
 )
-def test_config_class_paths_resolve(config_name):
-    configs_dir = Path(__file__).parents[1] / "examples" / "configs"
+def test_config_class_paths_resolve(config_name, config_subdir):
+    configs_dir = Path(__file__).parents[1] / "configs" / config_subdir
     config_path = configs_dir / config_name
     assert config_path.exists(), f"Config file not found: {config_path}"
 

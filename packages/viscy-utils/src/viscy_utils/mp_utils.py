@@ -62,11 +62,10 @@ def get_val_stats(sample_values):
         percentiles).
     """
     percentiles = [1, 5, 25, 50, 75, 95, 99]
-    percentile_values = {
-        k: float(v)
-        for k, v in zip(percentiles, np.nanpercentile(sample_values, percentiles))
-    }
+    percentile_values = {k: float(v) for k, v in zip(percentiles, np.nanpercentile(sample_values, percentiles))}
     meta_row = {
+        "min": float(np.nanmin(sample_values)),
+        "max": float(np.nanmax(sample_values)),
         "mean": float(np.nanmean(sample_values)),
         "std": float(np.nanstd(sample_values)),
         "median": percentile_values[50],

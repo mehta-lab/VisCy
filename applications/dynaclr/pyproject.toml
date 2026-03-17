@@ -32,7 +32,9 @@ classifiers = [
 dynamic = [ "version" ]
 dependencies = [
   "click",
+  "iohub>=0.3a2",
   "pytorch-metric-learning",
+  "pyyaml",
   "torchvision",
   "viscy-data",
   "viscy-models",
@@ -72,7 +74,7 @@ source = "uv-dynamic-versioning"
 packages = [ "src/dynaclr" ]
 
 [tool.pytest.ini_options]
-pythonpath = [ "evaluation", "tests" ]
+pythonpath = [ "tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

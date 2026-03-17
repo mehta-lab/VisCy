@@ -1,7 +1,7 @@
 """Type definitions for viscy-data.
 
 Copied verbatim from ``viscy/data/typing.py`` with the following additions:
-- ``ULTRACK_INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
+- ``INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
 - ``__all__`` for explicit public API
 - Updated ``typing_extensions.NotRequired`` to ``typing.NotRequired`` (Python >=3.11)
 """
@@ -12,11 +12,19 @@ from torch import ShortTensor, Tensor
 
 __all__ = [
     "AnnotationColumns",
+    "CELL_INDEX_CORE_COLUMNS",
+    "CELL_INDEX_GROUPING_COLUMNS",
+    "CELL_INDEX_OPS_COLUMNS",
+    "CELL_INDEX_TIMELAPSE_COLUMNS",
     "ChannelMap",
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "ULTRACK_INDEX_COLUMNS",
+    "INDEX_COLUMNS",
+    "LABEL_CELL_CYCLE_STATE",
+    "LABEL_CELL_DIVISION_STATE",
+    "LABEL_CELL_REMODELING_STATE",
+    "LABEL_INFECTION_STATE",
     "LevelNormStats",
     "NormMeta",
     "OneOrSeq",
@@ -42,11 +50,12 @@ class LevelNormStats(TypedDict):
     iqr: Tensor
 
 
-class ChannelNormStats(TypedDict):
+class ChannelNormStats(TypedDict, total=False):
     """Per-channel normalization statistics."""
 
     dataset_statistics: LevelNormStats
     fov_statistics: LevelNormStats
+    timepoint_statistics: dict[str, LevelNormStats]
 
 
 NormMeta = dict[str, ChannelNormStats]
@@ -122,8 +131,61 @@ AnnotationColumns = Literal[
 ]
 
 
+# NOTE: The following labels are not mutable.
+# They are used to map the labels to the integer values.
+LABEL_INFECTION_STATE = {"uninfected": 0, "infected": 1, "unknown": -1}
+
+LABEL_CELL_DIVISION_STATE = {
+    "interphase": 0,
+    "mitosis": 1,
+    "unknown": -1,
+}
+
+LABEL_CELL_CYCLE_STATE = {
+    "G1": 0,
+    "S": 1,
+    "G2": 2,
+    "prophase": 3,
+    "metaphase": 4,
+    "anaphase": 5,
+    "telophase": 6,
+    "unknown": -1,
+}
+
+LABEL_CELL_REMODELING_STATE = {
+    "no_remodel": 0,
+    "remodeling": 1,
+    "unknown": -1,
+}
+
+CELL_INDEX_CORE_COLUMNS = [
+    "cell_id",
+    "experiment",
+    "store_path",
+    "tracks_path",
+    "fov",
+    "well",
+    "y",
+    "x",
+    "z",
+    "source_channels",
+]
+
+CELL_INDEX_GROUPING_COLUMNS = ["condition", "channel_name"]
+
+CELL_INDEX_TIMELAPSE_COLUMNS = [
+    "t",
+    "track_id",
+    "global_track_id",
+    "lineage_id",
+    "parent_track_id",
+    "hours_post_perturbation",
+]
+
+CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]
+
 # Extracted from viscy/data/triplet.py for shared access
-ULTRACK_INDEX_COLUMNS = [
+INDEX_COLUMNS = [
     "fov_name",
     "track_id",
     "t",

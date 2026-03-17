@@ -57,23 +57,24 @@ data:
   class_path: viscy_data.triplet.TripletDataModule
 ```
 
-DynaCLR also provides evaluation-specific commands:
+DynaCLR also provides evaluation-specific commands via `dynaclr <command>`:
+
+| Command | Description |
+|---------|-------------|
+| `train-linear-classifier` | Train a linear classifier on cell embeddings |
+| `apply-linear-classifier` | Apply a trained linear classifier to new embeddings |
+| `append-obs` | Append columns from a CSV to an AnnData zarr obs (with optional prefix, e.g. `annotated_`, `feature_`) |
+| `reduce-dimensionality` | Compute PCA, UMAP, and/or PHATE on saved embeddings |
+| `evaluate-smoothness` | Evaluate temporal smoothness of embedding models |
+| `compare-models` | Compare previously saved smoothness results |
+| `info` | Print summary of an AnnData zarr store |
 
 ```bash
-# Train a linear classifier on cell embeddings
-uv run --package dynaclr dynaclr train-linear-classifier --help
+# See all commands
+uv run --package dynaclr dynaclr --help
 
-# Apply a trained classifier to new embeddings
-uv run --package dynaclr dynaclr apply-linear-classifier --help
-
-# Compute PCA, UMAP, and/or PHATE on saved embeddings
-uv run --package dynaclr dynaclr reduce-dimensionality --help
-
-# Evaluate temporal smoothness of embedding models
-uv run --package dynaclr dynaclr evaluate-smoothness --help
-
-# Compare previously saved smoothness results
-uv run --package dynaclr dynaclr compare-models --help
+# Get help for a specific command
+uv run --package dynaclr dynaclr <command> --help
 ```
 
 ## Examples

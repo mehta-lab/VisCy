@@ -12,6 +12,126 @@ from torch import Tensor, nn
 from torch.utils.data import DataLoader, Dataset
 
 from viscy_data._typing import TripletSample
+from viscy_data.collection import Collection, ExperimentEntry, SourceChannel, save_collection
+
+# ---------------------------------------------------------------------------
+# Shared synthetic data helpers (used by test_datamodule, test_dataset,
+# test_multi_experiment_integration)
+# ---------------------------------------------------------------------------
+
+IMG_H = 64
+IMG_W = 64
+N_T = 10
+N_Z = 1
+N_TRACKS = 5
+
+
+def make_tracks_csv(
+    path: Path,
+    n_tracks: int = N_TRACKS,
+    n_t: int = N_T,
+    *,
+    start_t: int = 0,
+    parent_map: dict[int, int] | None = None,
+) -> None:
+    """Write a tracking CSV with standard columns."""
+    rows = []
+    for tid in range(n_tracks):
+        for t in range(start_t, start_t + n_t):
+            ptid = float("nan")
+            if parent_map and tid in parent_map:
+                ptid = parent_map[tid]
+            rows.append(
+                {
+                    "track_id": tid,
+                    "t": t,
+                    "id": tid * n_t + t,
+                    "parent_track_id": ptid,
+                    "parent_id": float("nan"),
+                    "z": 0,
+                    "y": 32.0,
+                    "x": 32.0,
+                }
+            )
+    df = pd.DataFrame(rows)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(path, index=False)
+
+
+def create_experiment(
+    tmp_path: Path,
+    name: str,
+    channel_names: list[str],
+    wells: list[tuple[str, str]],
+    condition_wells: dict[str, list[str]],
+    fovs_per_well: int = 1,
+    n_tracks: int = N_TRACKS,
+    n_t: int = N_T,
+    interval_minutes: float = 30.0,
+    start_hpi: float = 0.0,
+) -> ExperimentEntry:
+    """Create a mini HCS OME-Zarr store, tracking CSVs, and return an ExperimentEntry."""
+    from iohub.ngff import open_ome_zarr
+
+    zarr_path = tmp_path / f"{name}.zarr"
+    tracks_root = tmp_path / f"tracks_{name}"
+    n_ch = len(channel_names)
+    rng = np.random.default_rng(42)
+
+    with open_ome_zarr(zarr_path, layout="hcs", mode="w", channel_names=channel_names) as plate:
+        for row, col in wells:
+            for fov_idx in range(fovs_per_well):
+                pos = plate.create_position(row, col, str(fov_idx))
+                arr = pos.create_zeros(
+                    "0",
+                    shape=(n_t, n_ch, N_Z, IMG_H, IMG_W),
+                    dtype=np.float32,
+                )
+                arr[:] = rng.standard_normal(arr.shape).astype(np.float32)
+                fov_name = f"{row}/{col}/{fov_idx}"
+                csv_path = tracks_root / fov_name / "tracks.csv"
+                make_tracks_csv(csv_path, n_tracks=n_tracks, n_t=n_t)
+
+    return ExperimentEntry(
+        name=name,
+        data_path=str(zarr_path),
+        tracks_path=str(tracks_root),
+        channel_names=channel_names,
+        condition_wells=condition_wells,
+        interval_minutes=interval_minutes,
+        start_hpi=start_hpi,
+    )
+
+
+def write_collection_yaml(
+    tmp_path: Path,
+    entries: list[ExperimentEntry],
+    source_channels: list[SourceChannel] | None = None,
+) -> Path:
+    """Write a collection YAML from ExperimentEntry objects.
+
+    If source_channels is None, derives defaults: first channel per experiment
+    is labelfree, second (if present) is reporter.
+    """
+    if source_channels is None:
+        lf: dict[str, str] = {}
+        rp: dict[str, str] = {}
+        for e in entries:
+            lf[e.name] = e.channel_names[0]
+            if len(e.channel_names) > 1:
+                rp[e.name] = e.channel_names[1]
+        source_channels = [SourceChannel(label="labelfree", per_experiment=lf)]
+        if rp:
+            source_channels.append(SourceChannel(label="reporter", per_experiment=rp))
+    collection = Collection(
+        name="test_collection",
+        source_channels=source_channels,
+        experiments=entries,
+    )
+    yaml_path = tmp_path / "collection.yml"
+    save_collection(collection, yaml_path)
+    return yaml_path
+
 
 # Synthetic tensor dimensions shared across unit tests.
 SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W = 1, 1, 4, 4

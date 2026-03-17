@@ -27,8 +27,10 @@ dependencies = [
   "pandas",
   "pyairtable",
   "pydantic",
+  "viscy-data",
 ]
 
+optional-dependencies.dev = [ "pytest" ]
 urls.Homepage = "https://github.com/mehta-lab/VisCy"
 urls.Issues = "https://github.com/mehta-lab/VisCy/issues"
 urls.Repository = "https://github.com/mehta-lab/VisCy"

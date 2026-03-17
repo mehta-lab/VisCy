@@ -10,7 +10,7 @@ requires:
     provides: "Workspace layout pattern (packages/*/src) and viscy-transforms example"
 provides:
   - "Installable viscy-models package in uv workspace"
-  - "Subpackage structure: _components, unet, unet/_layers, contrastive, vae"
+  - "Subpackage structure: components, unet, unet/_layers, contrastive, vae"
   - "Test scaffolding with device fixture"
   - "PEP 561 py.typed marker for type checking"
 affects: [06-02, 06-03, 07, 08, 09, 10]
@@ -25,7 +25,7 @@ key-files:
     - packages/viscy-models/pyproject.toml
     - packages/viscy-models/src/viscy_models/__init__.py
     - packages/viscy-models/src/viscy_models/py.typed
-    - packages/viscy-models/src/viscy_models/_components/__init__.py
+    - packages/viscy-models/src/viscy_models/components/__init__.py
     - packages/viscy-models/src/viscy_models/unet/__init__.py
     - packages/viscy-models/src/viscy_models/unet/_layers/__init__.py
     - packages/viscy-models/src/viscy_models/contrastive/__init__.py
@@ -62,7 +62,7 @@ completed: 2026-02-13
 - **Files modified:** 15
 
 ## Accomplishments
-- Created viscy-models package scaffold with 5 subpackages (_components, unet, unet/_layers, contrastive, vae)
+- Created viscy-models package scaffold with 5 subpackages (components, unet, unet/_layers, contrastive, vae)
 - Registered package in uv workspace with proper dependency resolution (timm added to lockfile)
 - Verified installation, import, and test runner all work correctly
 
@@ -78,7 +78,7 @@ Each task was committed atomically:
 - `packages/viscy-models/README.md` - Brief package description
 - `packages/viscy-models/src/viscy_models/__init__.py` - Package entry with version from importlib.metadata
 - `packages/viscy-models/src/viscy_models/py.typed` - PEP 561 type marker
-- `packages/viscy-models/src/viscy_models/_components/__init__.py` - Shared components subpackage
+- `packages/viscy-models/src/viscy_models/components/__init__.py` - Shared components subpackage
 - `packages/viscy-models/src/viscy_models/unet/__init__.py` - UNet architectures subpackage
 - `packages/viscy-models/src/viscy_models/unet/_layers/__init__.py` - UNet layers subpackage
 - `packages/viscy-models/src/viscy_models/contrastive/__init__.py` - Contrastive learning subpackage

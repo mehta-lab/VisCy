@@ -80,3 +80,27 @@ class FocusSliceMetric(QCMetric):
             "fov_statistics": fov_stats,
             "per_timepoint": per_timepoint,
         }
+
+    def aggregate_dataset(self, all_results: list[dict]) -> dict:
+        """Compute dataset-level focus statistics across all positions.
+
+        Parameters
+        ----------
+        all_results : list[dict]
+            List of dicts returned by ``__call__`` for each position.
+
+        Returns
+        -------
+        dict
+            Dataset-level z-focus statistics.
+        """
+        all_values = []
+        for result in all_results:
+            all_values.extend(result["per_timepoint"].values())
+        arr = np.array(all_values, dtype=float)
+        return {
+            "z_focus_mean": float(np.mean(arr)),
+            "z_focus_std": float(np.std(arr)),
+            "z_focus_min": int(np.min(arr)),
+            "z_focus_max": int(np.max(arr)),
+        }

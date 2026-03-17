@@ -15,25 +15,28 @@ TABLE_NAME = "Datasets"
 class AirtableDatasets:
     """Interface to the Datasets table in the Computational Imaging Database.
 
-    Parameters
-    ----------
-    base_id : str
-        Airtable base ID (e.g. ``"appXXXXXXXXXXXXXX"``).
-        Defaults to ``AIRTABLE_BASE_ID`` env var.
-    api_key : str
-        Airtable personal access token (e.g. ``"patXXXXXXXXXXXXXX"``).
-        Defaults to ``AIRTABLE_API_KEY`` env var.
+    Credentials are read exclusively from environment variables:
+
+    - ``AIRTABLE_API_KEY``: Airtable personal access token.
+    - ``AIRTABLE_BASE_ID``: Airtable base ID.
+
+    Raises
+    ------
+    ValueError
+        If either environment variable is not set or empty.
     """
 
-    def __init__(
-        self,
-        base_id: str = os.environ.get("AIRTABLE_BASE_ID", ""),
-        api_key: str = os.environ.get("AIRTABLE_API_KEY", ""),
-    ):
-        if not base_id:
-            raise ValueError("base_id is required. Pass it directly or set AIRTABLE_BASE_ID.")
+    def __init__(self) -> None:
+        api_key = os.environ.get("AIRTABLE_API_KEY", "")
+        base_id = os.environ.get("AIRTABLE_BASE_ID", "")
         if not api_key:
-            raise ValueError("api_key is required. Pass it directly or set AIRTABLE_API_KEY.")
+            raise ValueError(
+                "AIRTABLE_API_KEY environment variable is required but not set."
+            )
+        if not base_id:
+            raise ValueError(
+                "AIRTABLE_BASE_ID environment variable is required but not set."
+            )
         api = Api(api_key)
         self._table = api.table(base_id, TABLE_NAME)
 

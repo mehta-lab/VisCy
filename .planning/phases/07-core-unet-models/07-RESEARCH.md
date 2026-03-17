@@ -6,9 +6,9 @@
 
 ## Summary
 
-Phase 7 migrates two model classes -- `UNeXt2` and `FullyConvolutionalMAE` -- into the `viscy-models` package at `unet/unext2.py` and `unet/fcmae.py` respectively. All shared components (stems, heads, blocks, decoder) were already extracted into `_components/` during Phase 6. The migration involves: (1) copying the model class code, (2) updating imports to point at `viscy_models._components` instead of the old monolithic `viscy.unet.networks.unext2`, (3) fixing two mutable list defaults in FCMAE's constructor, and (4) writing new tests for UNeXt2 (currently untested) and migrating 11 existing FCMAE tests.
+Phase 7 migrates two model classes -- `UNeXt2` and `FullyConvolutionalMAE` -- into the `viscy-models` package at `unet/unext2.py` and `unet/fcmae.py` respectively. All shared components (stems, heads, blocks, decoder) were already extracted into `components/` during Phase 6. The migration involves: (1) copying the model class code, (2) updating imports to point at `viscy_models.components` instead of the old monolithic `viscy.unet.networks.unext2`, (3) fixing two mutable list defaults in FCMAE's constructor, and (4) writing new tests for UNeXt2 (currently untested) and migrating 11 existing FCMAE tests.
 
-The UNeXt2 class is thin -- it composes a `timm.create_model` encoder with the already-extracted `UNeXt2Stem`, `UNeXt2Decoder`, and `PixelToVoxelHead`. A full forward pass through the composed pipeline has been verified to work with the Phase 6 extracted components (output: `(1, 2, 5, 256, 256)` from `(1, 1, 5, 256, 256)` input with `convnextv2_tiny` backbone). The FCMAE class contains 10 additional items (5 functions + 5 classes) for masked convolution that are FCMAE-specific and stay in `fcmae.py`. FCMAE imports `UNeXt2Decoder`, `PixelToVoxelHead`, and `PixelToVoxelShuffleHead` from `_components`, which are all available. State dict key compatibility is ensured by preserving module attribute names verbatim (`self.stem`, `self.encoder_stages`, `self.decoder`, `self.head` for UNeXt2; `self.encoder`, `self.decoder`, `self.head` for FCMAE).
+The UNeXt2 class is thin -- it composes a `timm.create_model` encoder with the already-extracted `UNeXt2Stem`, `UNeXt2Decoder`, and `PixelToVoxelHead`. A full forward pass through the composed pipeline has been verified to work with the Phase 6 extracted components (output: `(1, 2, 5, 256, 256)` from `(1, 1, 5, 256, 256)` input with `convnextv2_tiny` backbone). The FCMAE class contains 10 additional items (5 functions + 5 classes) for masked convolution that are FCMAE-specific and stay in `fcmae.py`. FCMAE imports `UNeXt2Decoder`, `PixelToVoxelHead`, and `PixelToVoxelShuffleHead` from `components`, which are all available. State dict key compatibility is ensured by preserving module attribute names verbatim (`self.stem`, `self.encoder_stages`, `self.decoder`, `self.head` for UNeXt2; `self.encoder`, `self.decoder`, `self.head` for FCMAE).
 
 **Primary recommendation:** This is a straightforward copy-and-rewire migration. The critical discipline is not changing any module attribute names. The real new work is writing UNeXt2 forward-pass tests covering multiple configurations (varying backbone, channel counts, stack depths, decoder modes).
 
@@ -40,7 +40,7 @@ uv sync --package viscy-models
 ### Target File Structure After Phase 7
 ```
 packages/viscy-models/src/viscy_models/
-    _components/           # Phase 6: DONE
+    components/           # Phase 6: DONE
         __init__.py
         stems.py           # UNeXt2Stem, StemDepthtoChannels
         heads.py           # PixelToVoxelHead, UnsqueezeHead, PixelToVoxelShuffleHead
@@ -72,9 +72,9 @@ from typing import Literal
 import timm
 from torch import Tensor, nn
 
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead
-from viscy_models._components.stems import UNeXt2Stem
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead
+from viscy_models.components.stems import UNeXt2Stem
 
 
 class UNeXt2(nn.Module):
@@ -107,15 +107,15 @@ class UNeXt2(nn.Module):
 - The strides array `[2] * (len(num_channels) - 1) + [stem_kernel_size[-1]]` creates one extra entry beyond what the decoder uses -- preserve this exactly
 
 ### Pattern 2: FCMAE Migration (Self-Contained with Component Imports)
-**What:** FCMAE contains 10 FCMAE-specific items plus the main class. Only 3 imports come from `_components`.
+**What:** FCMAE contains 10 FCMAE-specific items plus the main class. Only 3 imports come from `components`.
 **When to use:** This is the pattern for FCMAE specifically.
 
 ```python
 # packages/viscy-models/src/viscy_models/unet/fcmae.py
 # Change: from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder
 # To:
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead, PixelToVoxelShuffleHead
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead, PixelToVoxelShuffleHead
 ```
 
 **FCMAE-specific items that stay in fcmae.py (NOT extracted):**
@@ -170,7 +170,7 @@ __all__ = ["UNeXt2", "FullyConvolutionalMAE"]
 
 ### Anti-Patterns to Avoid
 - **Renaming module attributes:** `self.encoder_stages` must NOT become `self.encoder`. UNeXt2 uses `encoder_stages`, FCMAE uses `encoder`. They are different models with different attribute names.
-- **Extracting FCMAE-specific classes to _components:** `MaskedConvNeXtV2Block`, `MaskedConvNeXtV2Stage`, etc. are ONLY used by FCMAE. They do not belong in `_components/`.
+- **Extracting FCMAE-specific classes to components:** `MaskedConvNeXtV2Block`, `MaskedConvNeXtV2Stage`, etc. are ONLY used by FCMAE. They do not belong in `components/`.
 - **Changing the `num_channels` mutation pattern:** In UNeXt2.__init__, `num_channels = multi_scale_encoder.feature_info.channels()` returns a list, and later `decoder_channels = num_channels; decoder_channels.reverse()` mutates it. This is the original behavior; do not "fix" this -- it would change the decoder_channels computation.
 - **Re-exporting FCMAE internal classes from unet/__init__.py:** Only `FullyConvolutionalMAE` and `UNeXt2` should be in `__all__`. Internal FCMAE helper classes/functions are implementation details.
 
@@ -194,23 +194,23 @@ __all__ = ["UNeXt2", "FullyConvolutionalMAE"]
 **Warning signs:** If you change this pattern and see wrong decoder channel counts, this is why.
 
 ### Pitfall 2: FCMAE Import Path Change
-**What goes wrong:** Original FCMAE imports `from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder`. The migrated version must import from `viscy_models._components`.
-**Why it happens:** Components were extracted to `_components/` in Phase 6.
+**What goes wrong:** Original FCMAE imports `from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder`. The migrated version must import from `viscy_models.components`.
+**Why it happens:** Components were extracted to `components/` in Phase 6.
 **How to avoid:** Change exactly three import lines:
-  - `from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder` becomes two imports from `viscy_models._components.heads` and `viscy_models._components.blocks`
-  - `PixelToVoxelShuffleHead` is already defined in fcmae.py in the original, but was also extracted to `_components/heads.py` in Phase 6. Import it from `_components` instead of redefining it.
+  - `from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder` becomes two imports from `viscy_models.components.heads` and `viscy_models.components.blocks`
+  - `PixelToVoxelShuffleHead` is already defined in fcmae.py in the original, but was also extracted to `components/heads.py` in Phase 6. Import it from `components` instead of redefining it.
 **Warning signs:** `ImportError` at import time.
 
 ### Pitfall 3: PixelToVoxelShuffleHead Duplication
-**What goes wrong:** In the original codebase, `PixelToVoxelShuffleHead` is defined in BOTH `unext2.py` and `fcmae.py`. Phase 6 extracted it to `_components/heads.py`. During FCMAE migration, you must import from `_components` and NOT copy the class definition again.
+**What goes wrong:** In the original codebase, `PixelToVoxelShuffleHead` is defined in BOTH `unext2.py` and `fcmae.py`. Phase 6 extracted it to `components/heads.py`. During FCMAE migration, you must import from `components` and NOT copy the class definition again.
 **Why it happens:** Historical code duplication in the original monolith.
-**How to avoid:** Import `PixelToVoxelShuffleHead` from `viscy_models._components.heads` in fcmae.py. Verify the definition is identical (it is -- confirmed by source analysis).
+**How to avoid:** Import `PixelToVoxelShuffleHead` from `viscy_models.components.heads` in fcmae.py. Verify the definition is identical (it is -- confirmed by source analysis).
 **Warning signs:** Two definitions of the same class causing confusion or state dict mismatches.
 
 ### Pitfall 4: FCMAE Test Import Updates
 **What goes wrong:** All 11 existing FCMAE tests import from `viscy.unet.networks.fcmae`. These must be updated to `viscy_models.unet.fcmae`.
 **Why it happens:** Standard migration import update.
-**How to avoid:** Systematic find-and-replace of import paths in the migrated test file. Also note that `test_pixel_to_voxel_shuffle_head` tests a class that now lives in `_components.heads` -- update its import to come from the FCMAE module (since it is re-exported there) or from `_components.heads` directly.
+**How to avoid:** Systematic find-and-replace of import paths in the migrated test file. Also note that `test_pixel_to_voxel_shuffle_head` tests a class that now lives in `components.heads` -- update its import to come from the FCMAE module (since it is re-exported there) or from `components.heads` directly.
 **Warning signs:** `ModuleNotFoundError` when running tests.
 
 ### Pitfall 5: UNeXt2 Test Memory
@@ -238,9 +238,9 @@ from typing import Literal
 import timm
 from torch import Tensor, nn
 
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead
-from viscy_models._components.stems import UNeXt2Stem
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead
+from viscy_models.components.stems import UNeXt2Stem
 
 
 class UNeXt2(nn.Module):
@@ -323,11 +323,11 @@ class UNeXt2(nn.Module):
 from viscy.unet.networks.unext2 import PixelToVoxelHead, UNeXt2Decoder
 
 # AFTER (migrated fcmae.py):
-from viscy_models._components.blocks import UNeXt2Decoder
-from viscy_models._components.heads import PixelToVoxelHead, PixelToVoxelShuffleHead
+from viscy_models.components.blocks import UNeXt2Decoder
+from viscy_models.components.heads import PixelToVoxelHead, PixelToVoxelShuffleHead
 
 # Note: PixelToVoxelShuffleHead was DEFINED in the original fcmae.py
-# but is now imported from _components.heads (extracted in Phase 6).
+# but is now imported from components.heads (extracted in Phase 6).
 # Remove the class definition from fcmae.py and import instead.
 ```
 
@@ -407,7 +407,7 @@ from viscy_models.unet.fcmae import (
     masked_unpatchify,
     upsample_mask,
 )
-from viscy_models._components.heads import PixelToVoxelShuffleHead
+from viscy_models.components.heads import PixelToVoxelShuffleHead
 
 # ... rest of test functions unchanged except import paths ...
 ```
@@ -416,13 +416,13 @@ from viscy_models._components.heads import PixelToVoxelShuffleHead
 
 | Old Approach | Current Approach | When Changed | Impact |
 |--------------|------------------|--------------|--------|
-| All models in one `unext2.py` file | Shared components in `_components/`, models in separate files | Phase 6 (2026-02-12) | Clean separation, reusable components |
+| All models in one `unext2.py` file | Shared components in `components/`, models in separate files | Phase 6 (2026-02-12) | Clean separation, reusable components |
 | `from viscy.unet.networks.unext2 import ...` | `from viscy_models.unet import UNeXt2` | Phase 7 (current) | Independent package, clean API |
 | Mutable list defaults in FCMAE | Tuple defaults | Phase 7 (current) | Prevents shared-state bugs |
 | No UNeXt2 tests | Forward-pass tests covering multiple configs | Phase 7 (current) | Catches regression |
 
 **Deprecated/outdated:**
-- `PixelToVoxelShuffleHead` defined in fcmae.py: Now imported from `_components.heads` where it was extracted.
+- `PixelToVoxelShuffleHead` defined in fcmae.py: Now imported from `components.heads` where it was extracted.
 
 ## UNeXt2 Verified Configurations
 
@@ -460,12 +460,12 @@ ConvNeXtV2 backbone channel configurations (from timm 1.0.24):
 | `MaskedMultiscaleEncoder` | class | 45 |
 | `FullyConvolutionalMAE` | class | 55 |
 
-### Items imported from _components (already extracted)
-| Item | Source in _components |
+### Items imported from components (already extracted)
+| Item | Source in components |
 |------|---------------------|
-| `UNeXt2Decoder` | `_components.blocks` |
-| `PixelToVoxelHead` | `_components.heads` |
-| `PixelToVoxelShuffleHead` | `_components.heads` |
+| `UNeXt2Decoder` | `components.blocks` |
+| `PixelToVoxelHead` | `components.heads` |
+| `PixelToVoxelShuffleHead` | `components.heads` |
 
 ### Mutable defaults to fix
 | Parameter | Current | Fixed |
@@ -518,9 +518,9 @@ Top-level: `encoder`, `decoder`, `head`
    - What we know: Phase 6 already has this test in `test_components/test_heads.py` but with different parameters.
    - Recommendation: Keep both. The FCMAE test uses `(240, 3, 5, 4)` params matching FCMAE usage; the component test uses `(160, 2, 5, 4)` params. Different coverage is valuable.
 
-3. **Should FCMAE tests import `PixelToVoxelShuffleHead` from `_components.heads` or `unet.fcmae`?**
+3. **Should FCMAE tests import `PixelToVoxelShuffleHead` from `components.heads` or `unet.fcmae`?**
    - What we know: The class will be imported (not defined) in fcmae.py. It could be re-exported or not.
-   - Recommendation: Import from `viscy_models._components.heads` in the test since that is the canonical location. The FCMAE module should NOT re-export it in `__all__`.
+   - Recommendation: Import from `viscy_models.components.heads` in the test since that is the canonical location. The FCMAE module should NOT re-export it in `__all__`.
 
 ## Sources
 

@@ -11,7 +11,7 @@ import numpy as np
 import wandb
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, roc_auc_score
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
@@ -288,6 +288,16 @@ def train_linear_classifier(
         "train_weighted_f1": train_report["weighted avg"]["f1-score"],
     }
 
+    try:
+        y_train_proba = classifier.predict_proba(X_train)
+        if len(classifier.classes_) == 2:
+            train_metrics["train_auroc"] = roc_auc_score(y_train, y_train_proba[:, 1])
+        else:
+            train_metrics["train_auroc"] = roc_auc_score(y_train, y_train_proba, multi_class="ovr", average="macro")
+        print(f"  Train AUROC: {train_metrics['train_auroc']:.3f}")
+    except ValueError:
+        pass
+
     for class_name in classifier.classes_:
         if class_name in train_report:
             train_metrics[f"train_{class_name}_precision"] = train_report[class_name]["precision"]
@@ -307,6 +317,16 @@ def train_linear_classifier(
             "val_weighted_recall": val_report["weighted avg"]["recall"],
             "val_weighted_f1": val_report["weighted avg"]["f1-score"],
         }
+
+        try:
+            y_val_proba = classifier.predict_proba(X_val)
+            if len(classifier.classes_) == 2:
+                val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba[:, 1])
+            else:
+                val_metrics["val_auroc"] = roc_auc_score(y_val, y_val_proba, multi_class="ovr", average="macro")
+            print(f"  Val AUROC: {val_metrics['val_auroc']:.3f}")
+        except ValueError:
+            pass
 
         for class_name in classifier.classes_:
             if class_name in val_report:
@@ -469,9 +489,8 @@ def save_pipeline_to_wandb(
         tags=tags or [],
     )
 
-    for key, value in metrics.items():
-        run.summary[key] = value
-    print("\n✓ Logged metrics to wandb summary:")
+    wandb.log(metrics)
+    print("\n✓ Logged metrics to wandb:")
     for metric_name, metric_value in metrics.items():
         print(f"  {metric_name}: {metric_value:.3f}")
 

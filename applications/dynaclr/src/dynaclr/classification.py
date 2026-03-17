@@ -74,8 +74,9 @@ class ClassificationModule(LightningModule):
         x, y = batch
         y_hat = self(x)
         loss = self.loss(y_hat, y)
-        acc = binary_accuracy(y_hat, y)
-        f1 = binary_f1_score(y_hat, y)
+        y_prob = torch.sigmoid(y_hat)
+        acc = binary_accuracy(y_prob, y)
+        f1 = binary_f1_score(y_prob, y)
         self.log(f"loss/{stage}", loss, on_step=loss_on_step, on_epoch=True)
         self.log_dict(
             {f"metric/accuracy/{stage}": acc, f"metric/f1_score/{stage}": f1},

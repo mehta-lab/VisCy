@@ -25,47 +25,46 @@ def write_annotation_metadata(zarr_dir: str, annotation: AnnotationConfig) -> No
         If a channel name in config is not found in the plate, or if a well
         path in config does not exist in the plate.
     """
-    plate = open_ome_zarr(zarr_dir, mode="r+")
+    with open_ome_zarr(zarr_dir, mode="r+") as plate:
+        # Validate channel names
+        plate_channels = set(plate.channel_names)
+        for ch_name in annotation.channel_annotation:
+            if ch_name not in plate_channels:
+                raise ValueError(
+                    f"Channel '{ch_name}' in annotation config not found in plate. "
+                    f"Available channels: {sorted(plate_channels)}"
+                )
 
-    # Validate channel names
-    plate_channels = set(plate.channel_names)
-    for ch_name in annotation.channel_annotation:
-        if ch_name not in plate_channels:
-            plate.close()
-            raise ValueError(
-                f"Channel '{ch_name}' in annotation config not found in plate. "
-                f"Available channels: {sorted(plate_channels)}"
-            )
+        # Collect well paths present in the plate
+        plate_well_paths: set[str] = set()
+        position_list = list(plate.positions())
+        for name, _ in position_list:
+            plate_well_paths.add(parse_position_name(name)[0])
 
-    # Collect well paths present in the plate
-    plate_well_paths: set[str] = set()
-    position_list = list(plate.positions())
-    for name, _ in position_list:
-        plate_well_paths.add(parse_position_name(name)[0])
+        # Validate well paths
+        for well_path in annotation.experiment_metadata:
+            if well_path not in plate_well_paths:
+                raise ValueError(
+                    f"Well path '{well_path}' in annotation config not found in plate. "
+                    f"Available wells: {sorted(plate_well_paths)}"
+                )
 
-    # Validate well paths
-    for well_path in annotation.experiment_metadata:
-        if well_path not in plate_well_paths:
-            plate.close()
-            raise ValueError(
-                f"Well path '{well_path}' in annotation config not found in plate. "
-                f"Available wells: {sorted(plate_well_paths)}"
-            )
+        # Serialize channel_annotation once
+        channel_annotation_dict = {
+            k: v.model_dump() for k, v in annotation.channel_annotation.items()
+        }
 
-    # Serialize channel_annotation once
-    channel_annotation_dict = {k: v.model_dump() for k, v in annotation.channel_annotation.items()}
+        # Write channel_annotation to plate-level zattrs
+        plate.zattrs["channel_annotation"] = channel_annotation_dict
 
-    # Write channel_annotation to plate-level zattrs
-    plate.zattrs["channel_annotation"] = channel_annotation_dict
+        # Write per-position metadata
+        for name, pos in position_list:
+            # channel_annotation at every FOV
+            pos.zattrs["channel_annotation"] = channel_annotation_dict
 
-    # Write per-position metadata
-    for name, pos in position_list:
-        # channel_annotation at every FOV
-        pos.zattrs["channel_annotation"] = channel_annotation_dict
-
-        # experiment_metadata per well
-        well_path = parse_position_name(name)[0]
-        if well_path in annotation.experiment_metadata:
-            pos.zattrs["experiment_metadata"] = annotation.experiment_metadata[well_path].model_dump()
-
-    plate.close()
+            # experiment_metadata per well
+            well_path = parse_position_name(name)[0]
+            if well_path in annotation.experiment_metadata:
+                pos.zattrs["experiment_metadata"] = (
+                    annotation.experiment_metadata[well_path].model_dump()
+                )

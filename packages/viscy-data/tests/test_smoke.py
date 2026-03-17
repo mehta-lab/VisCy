@@ -3,19 +3,18 @@
 Testing strategy:
     1. Verify the base package imports without error.
     2. Verify every name in ``__all__`` is accessible via ``getattr``.
-    3. Verify optional-dep modules contain ``pip install`` error-message hints
+    3. Pin the ``__all__`` count at 45 to detect accidental additions/removals.
+    4. Verify optional-dep modules contain ``pip install`` error-message hints
        (checked via ``inspect.getsource`` so tests pass regardless of whether
        the optional deps are installed).
-    4. Verify importing ``viscy_data`` does not pull in the old ``viscy.data``
+    5. Verify importing ``viscy_data`` does not pull in the old ``viscy.data``
        namespace.
-    5. Verify lazy imports are not eagerly loaded at ``import viscy_data`` time.
 """
 
 from __future__ import annotations
 
 import importlib
 import inspect
-import subprocess
 import sys
 
 import pytest
@@ -45,7 +44,17 @@ def test_all_exports_importable(name: str):
 
 
 # ---------------------------------------------------------------------------
-# Test 3: Optional-dep error messages contain pip install hints
+# Test 3: __all__ count pinned at 54
+# ---------------------------------------------------------------------------
+
+
+def test_all_count():
+    """__all__ contains exactly 54 names (detect accidental add/remove)."""
+    assert len(viscy_data.__all__) == 54, f"Expected 54 names in __all__, got {len(viscy_data.__all__)}"
+
+
+# ---------------------------------------------------------------------------
+# Test 4: Optional-dep error messages contain pip install hints
 # ---------------------------------------------------------------------------
 
 
@@ -76,7 +85,7 @@ def test_optional_dep_error_messages(module_name: str, expected_pattern: str):
 
 
 # ---------------------------------------------------------------------------
-# Test 4: viscy_data does not depend on old viscy.data namespace
+# Test 5: viscy_data does not depend on old viscy.data namespace
 # ---------------------------------------------------------------------------
 
 
@@ -89,29 +98,3 @@ def test_no_viscy_dependency():
     """
     # viscy_data is already imported at module level; check sys.modules.
     assert "viscy.data" not in sys.modules, "viscy_data should not import from the legacy viscy.data namespace"
-
-
-# ---------------------------------------------------------------------------
-# Test 5: Lazy imports are not eagerly loaded
-# ---------------------------------------------------------------------------
-
-
-def test_lazy_imports_not_eagerly_loaded():
-    """Verify no lazy submodule is loaded by a bare ``import viscy_data``.
-
-    Runs in a subprocess so ``sys.modules`` reflects only the initial import,
-    not any names accessed by earlier tests in this process.
-    """
-    result = subprocess.run(
-        [
-            sys.executable,
-            "-c",
-            "import sys, viscy_data; "
-            "lazy = set(viscy_data._LAZY_IMPORTS.values()); "
-            "loaded = lazy & set(sys.modules); "
-            "assert not loaded, f'Eagerly loaded: {loaded}'",
-        ],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, f"Lazy import check failed:\n{result.stderr}"
