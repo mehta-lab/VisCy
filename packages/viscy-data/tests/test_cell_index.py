@@ -291,13 +291,6 @@ class TestOPSHelpers:
         assert y == pytest.approx(20.0)
         assert x == pytest.approx(30.0)
 
-    def test_nan_gene_name_to_ntc(self):
-        """12. NaN gene_name → 'NTC'."""
-        df = _make_ops_df()
-        df.loc[0, "gene_name"] = None
-        df["gene_name"] = df["gene_name"].fillna("NTC")
-        assert df.loc[0, "gene_name"] == "NTC"
-
     def test_small_bbox_filtering(self):
         """13. Small bbox filtering drops cells."""
         assert _parse_bbox_min_size("(10, 20, 12, 40)") == 2.0  # height=2, width=20

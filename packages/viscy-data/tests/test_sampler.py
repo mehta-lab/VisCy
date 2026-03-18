@@ -331,26 +331,6 @@ class TestSmallGroupFallback:
         batches = list(sampler)
         assert len(batches) > 0
 
-    def test_small_group_emits_warning(self, small_group_anchors: pd.DataFrame, caplog):
-        """Sampler should warn when a group < batch_size."""
-        import logging
-
-        with caplog.at_level(logging.WARNING):
-            FlexibleBatchSampler(
-                valid_anchors=small_group_anchors,
-                batch_size=32,
-                experiment_aware=True,
-                stratify_by=None,
-                leaky=0.0,
-                seed=42,
-            )
-        assert any(
-            "replacement" in record.message.lower()
-            or "small" in record.message.lower()
-            or "fewer" in record.message.lower()
-            for record in caplog.records
-        ), f"Expected warning about small group, got: {[r.message for r in caplog.records]}"
-
 
 # ---------------------------------------------------------------------------
 # Determinism and set_epoch

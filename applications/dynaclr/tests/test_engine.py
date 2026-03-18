@@ -1,7 +1,7 @@
 """Smoke tests for DynaCLR engine modules."""
 
 import torch
-from conftest import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder
+from helpers import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder
 from torch import nn
 
 from dynaclr.engine import ContrastiveModule

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 import torch
-from conftest import create_experiment, write_collection_yaml
+from helpers import create_experiment, write_collection_yaml
 
 from viscy_data.collection import ExperimentEntry
 

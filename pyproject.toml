@@ -47,7 +47,7 @@ package = true
 
 [tool.uv.workspace]
 members = [ "packages/*", "applications/*" ]
-exclude = [ "applications/dynacell" ]
+exclude = [ "applications/dynacell", "applications/benchmarking" ]
 
 [tool.uv.sources]
 viscy-data = { workspace = true }
@@ -79,10 +79,11 @@ lint.per-file-ignores."**/evaluation/**" = [ "D", "E501", "NPY002", "PD011" ]
 lint.per-file-ignores."**/tests/**" = [ "D" ]
 lint.pydocstyle.convention = "numpy"
 
-[tool.pytest]
+[tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = [ "packages/*/tests", "applications/*/tests", "tests" ]
 addopts = [ "-ra", "-q", "--import-mode=importlib" ]
+pythonpath = [ "applications/dynaclr/tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

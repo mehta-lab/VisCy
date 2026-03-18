@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 import torch
-from conftest import IMG_H, IMG_W, N_T, N_TRACKS, N_Z, make_tracks_csv
+from helpers import IMG_H, IMG_W, N_T, N_TRACKS, N_Z, make_tracks_csv
 
 from dynaclr.data.experiment import ExperimentRegistry
 from dynaclr.data.index import MultiExperimentIndex

@@ -31,6 +31,7 @@ classifiers = [
 ]
 dynamic = [ "version" ]
 dependencies = [
+  "anndata",
   "iohub>=0.3a2",
   "jsonargparse[signatures]>=4.26",
   "lightning>=2.3",
@@ -38,14 +39,14 @@ dependencies = [
   "numpy>=2.4.1",
   "pyyaml",
   "scikit-image",
+  "tensorboard",
   "tensorstore",
   "torch>=2.10",
   "wandb",
   "xarray",
 ]
 
-optional-dependencies.all = [ "viscy-utils[anndata,eval]" ]
-optional-dependencies.anndata = [ "anndata" ]
+optional-dependencies.all = [ "viscy-utils[eval]" ]
 optional-dependencies.eval = [
   "phate",
   "scikit-learn",

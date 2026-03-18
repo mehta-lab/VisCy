@@ -368,7 +368,7 @@ class HCSDataModule(LightningDataModule):
         if not self.caching:
             return
         # setup logger
-        logger = logging.getLogger("viscy_data")
+        logger = logging.getLogger("viscy_data.hcs.cache")
         logger.propagate = False
         logger.setLevel(logging.DEBUG)
         console_handler = logging.StreamHandler()

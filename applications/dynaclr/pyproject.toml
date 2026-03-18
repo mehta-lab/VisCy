@@ -48,6 +48,7 @@ optional-dependencies.eval = [
   "phate",
   "scikit-learn",
   "seaborn",
+  "statsmodels",
   "umap-learn",
   "wandb",
 ]
@@ -63,6 +64,7 @@ test = [
   "pandas",
   "pytest>=9.0.2",
   "pytest-cov>=7",
+  "statsmodels",
   "tensorboard",
   "tensorstore",
 ]
@@ -72,9 +74,6 @@ source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
 packages = [ "src/dynaclr" ]
-
-[tool.pytest.ini_options]
-pythonpath = [ "tests" ]
 
 [tool.uv-dynamic-versioning]
 vcs = "git"

@@ -11,7 +11,7 @@ import importlib
 from pathlib import Path
 
 import yaml
-from conftest import create_experiment, write_collection_yaml
+from helpers import create_experiment, write_collection_yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from torch import Tensor, nn
