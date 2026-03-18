@@ -856,6 +856,3 @@ profile_dataloader(dm, n_batches=10)
 # | `on_after_batch_transfer` | Normalizations -> augmentations -> center crop -> channel dropout |
 
 # %%
-plt.show()
-
-# %%

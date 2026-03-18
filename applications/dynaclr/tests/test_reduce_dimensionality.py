@@ -3,6 +3,8 @@
 import anndata as ad
 import numpy as np
 import pytest
+from pydantic import ValidationError
+
 from dynaclr.evaluation.dimensionality_reduction.config import (
     DimensionalityReductionConfig,
     PCAConfig,
@@ -14,7 +16,6 @@ from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import (
     _run_phate,
     _run_umap,
 )
-from pydantic import ValidationError
 
 
 @pytest.fixture
@@ -152,6 +153,7 @@ class TestRunPHATE:
 class TestCLIIntegration:
     def test_pca_end_to_end(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
+
         from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         output_path = str(tmp_path / "output.zarr")
@@ -169,6 +171,7 @@ class TestCLIIntegration:
 
     def test_overwrite_keys_protection(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
+
         from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         # Pre-populate X_pca
@@ -187,6 +190,7 @@ class TestCLIIntegration:
 
     def test_overwrite_keys_allowed(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
+
         from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         # Pre-populate X_pca
@@ -207,6 +211,7 @@ class TestCLIIntegration:
 
     def test_writes_back_to_input_when_no_output(self, synthetic_zarr, tmp_path):
         from click.testing import CliRunner
+
         from dynaclr.evaluation.dimensionality_reduction.reduce_dimensionality import main
 
         config_content = f"input_path: {synthetic_zarr}\npca:\n  n_components: 5\n"
