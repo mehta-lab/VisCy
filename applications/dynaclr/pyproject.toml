@@ -36,7 +36,7 @@ dependencies = [
   "pytorch-metric-learning",
   "pyyaml",
   "torchvision",
-  "viscy-data",
+  "viscy-data[triplet]",
   "viscy-models",
   "viscy-transforms",
   "viscy-utils",
