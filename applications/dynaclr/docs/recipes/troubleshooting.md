@@ -33,11 +33,6 @@ print(pos.channel_names)
 Your `source_channel` list references channels not in `channel_names`.
 Every entry in `source_channel` must be a member of `channel_names`.
 
-### "All experiments must have the same number of source_channel entries"
-
-Multi-experiment training requires positional channel alignment. If one
-experiment has `source_channel: ["Phase3D", "GFP"]` (2 channels), all
-experiments must also have exactly 2 source channels.
 
 ### "No training experiments remaining after splitting"
 
@@ -104,8 +99,8 @@ Reduce memory usage in order of impact:
 
 1. **Reduce `yx_patch_size`** — e.g., `[256, 256]` instead of `[384, 384]`
 2. **Reduce `batch_size`** — halving batch size roughly halves GPU memory
-3. **Reduce `z_range`** — fewer Z-slices = smaller input volume
-4. **Reduce `in_stack_depth`** — must match `z_range[1] - z_range[0]`
+3. **Reduce `z_window`** — fewer Z-slices = smaller input volume
+4. **Reduce `in_stack_depth`** — must match `z_window`
 5. **Use `precision: 16-mixed`** — mixed precision halves activation memory
 
 ### Loss is NaN
@@ -120,7 +115,7 @@ Reduce memory usage in order of impact:
 - Increase `beta` in `NTXentHCL` (harder negative mining)
 - Ensure `channel_dropout_prob` isn't too high — the model needs to see
   fluorescence often enough to learn from it
-- Check that `condition_balanced: true` is set — imbalanced conditions can
+- Check that `stratify_by: condition` is set — imbalanced conditions can
   cause the model to collapse to trivial solutions
 
 ### DDP hangs
