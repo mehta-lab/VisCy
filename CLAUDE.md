@@ -66,6 +66,18 @@ If you believe it is important to maintain backwards compatibility, explicitly a
 
 Delete and remove old code that is not used.
 
+### Use Context Managers for Resources
+Always use context managers (`with` statements) when opening external resources like zarr stores, files, or database connections. Never assign them to a variable without a context manager — this leaks file handles and locks.
+
+```python
+# correct
+with open_ome_zarr(path, mode="r") as plate:
+    ...
+
+# wrong — resource never closed
+plate = open_ome_zarr(path, mode="r")
+```
+
 ### Prefer Raising Errors
 In general, prefer raising errors instead of silently catching them. Errors are good and warn us of issues in the script. For example, prefer `value = my_dictionary['key']` over `value = my_dictionary.get('key')` since the former will raise a `KeyError` to signal that the underlying data is not behaving as expected.
 
@@ -94,7 +106,7 @@ For full setup instructions (installing uv, creating a venv, syncing dependencie
 Quick start:
 ```sh
 uv venv -p 3.13
-uv sync
+uv sync --all-packages --all-extras
 uv run pytest
 ```
 
