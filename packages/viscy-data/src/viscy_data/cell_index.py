@@ -267,57 +267,64 @@ def build_timelapse_cell_index(
         if exclude_fovs is not None:
             all_exclude.update(exclude_fovs)
 
-        plate = open_ome_zarr(exp.data_path, mode="r")
-        for _pos_path, position in plate.positions():
-            fov_name = position.zgroup.name.strip("/")
-            parts = fov_name.split("/")
-            well_name = "/".join(parts[:2])
+        with open_ome_zarr(exp.data_path, mode="r") as plate:
+            for _pos_path, position in plate.positions():
+                fov_name = position.zgroup.name.strip("/")
+                parts = fov_name.split("/")
+                well_name = "/".join(parts[:2])
 
-            if declared_wells and well_name not in declared_wells:
-                continue
-            if include_wells is not None and well_name not in include_wells:
-                continue
-            if all_exclude and fov_name in all_exclude:
-                continue
+                if declared_wells and well_name not in declared_wells:
+                    continue
+                if include_wells is not None and well_name not in include_wells:
+                    continue
+                if all_exclude and fov_name in all_exclude:
+                    continue
 
-            # Resolve condition
-            condition = _resolve_condition(condition_wells, well_name)
+                # Resolve condition
+                condition = _resolve_condition(condition_wells, well_name)
 
-            # Find tracking CSV
-            tracks_dir = Path(exp.tracks_path) / fov_name
-            csv_files = list(tracks_dir.glob("*.csv"))
-            if not csv_files:
-                _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
-                continue
-            tracks_df = pd.read_csv(csv_files[0])
+                # Find tracking CSV
+                tracks_dir = Path(exp.tracks_path) / fov_name
+                csv_files = list(tracks_dir.glob("*.csv"))
+                if not csv_files:
+                    raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
+                if len(csv_files) > 1:
+                    raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
+                tracks_df = pd.read_csv(csv_files[0])
 
-            # Derive source_channels from collection source_channels
-            source_channel_names = [
-                sc.per_experiment[exp.name] for sc in collection.source_channels if exp.name in sc.per_experiment
-            ]
-            fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
+                # Derive source_channels from collection source_channels
+                source_channel_names = [
+                    sc.per_experiment[exp.name] for sc in collection.source_channels if exp.name in sc.per_experiment
+                ]
+                fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
 
-            # Enrich
-            tracks_df["cell_id"] = (
-                exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
-            )
-            tracks_df["experiment"] = exp.name
-            tracks_df["store_path"] = str(exp.data_path)
-            tracks_df["tracks_path"] = str(exp.tracks_path)
-            tracks_df["fov"] = fov_name
-            tracks_df["well"] = well_name
-            tracks_df["condition"] = condition
-            tracks_df["channel_name"] = fluorescence_ch
-            tracks_df["source_channels"] = json.dumps(source_channel_names)
-            tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
-            tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
-            tracks_df["microscope"] = exp.microscope
+                # Enrich
+                tracks_df["cell_id"] = (
+                    exp.name
+                    + "_"
+                    + fov_name
+                    + "_"
+                    + tracks_df["track_id"].astype(str)
+                    + "_"
+                    + tracks_df["t"].astype(str)
+                )
+                tracks_df["experiment"] = exp.name
+                tracks_df["store_path"] = str(exp.data_path)
+                tracks_df["tracks_path"] = str(exp.tracks_path)
+                tracks_df["fov"] = fov_name
+                tracks_df["well"] = well_name
+                tracks_df["condition"] = condition
+                tracks_df["channel_name"] = fluorescence_ch
+                tracks_df["source_channels"] = json.dumps(source_channel_names)
+                tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+                tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
+                tracks_df["microscope"] = exp.microscope
 
-            # Ensure z column exists
-            if "z" not in tracks_df.columns:
-                tracks_df["z"] = 0
+                # Ensure z column exists
+                if "z" not in tracks_df.columns:
+                    tracks_df["z"] = 0
 
-            all_tracks.append(tracks_df)
+                all_tracks.append(tracks_df)
 
     if not all_tracks:
         df = pd.DataFrame(columns=list(_ALL_COLUMNS))

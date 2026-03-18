@@ -293,6 +293,12 @@ class MultiExperimentTripletDataset(Dataset):
                     pos = self._find_positive(row, self._rng)
             else:
                 pos = self._find_positive(row, self._rng)
+            if pos is None:
+                raise RuntimeError(
+                    f"No positive found for anchor (experiment={row.get('experiment')}, "
+                    f"lineage_id={row.get('lineage_id')}, t={row.get('t')}). "
+                    "This anchor should have been filtered out by valid_anchors."
+                )
             pos_rows.append(pos)
         return pd.DataFrame(pos_rows).reset_index(drop=True)
 

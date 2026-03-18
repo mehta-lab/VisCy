@@ -811,8 +811,8 @@ class TestValidAnchors:
         assert 9 not in slow_anchor_times
         assert 7 in slow_anchor_times
 
-    def test_empty_tracks_empty_anchors(self, tmp_path):
-        """When tracks is empty, valid_anchors is also empty."""
+    def test_missing_tracking_csv_raises(self, tmp_path):
+        """When a FOV has no tracking CSV, FileNotFoundError is raised immediately."""
         zarr_path = tmp_path / "empty.zarr"
         tracks_root = tmp_path / "tracks_empty"
 
@@ -820,7 +820,6 @@ class TestValidAnchors:
             pos = plate.create_position("A", "1", "0")
             pos.create_zeros("0", shape=(1, 2, 1, IMG_H, IMG_W), dtype=np.float32)
 
-        # No CSV -> no tracks loaded -> skip with warning
         cfg = ExperimentEntry(
             name="empty_exp",
             data_path=str(zarr_path),
@@ -830,12 +829,12 @@ class TestValidAnchors:
             interval_minutes=30.0,
         )
         registry = ExperimentRegistry(collection=_make_collection([cfg]))
-        index = MultiExperimentIndex(
-            registry=registry,
-            yx_patch_size=_YX_PATCH,
-            tau_range_hours=(0.5, 1.5),
-        )
-        assert len(index.valid_anchors) == 0
+        with pytest.raises(FileNotFoundError, match="No tracking CSV in"):
+            MultiExperimentIndex(
+                registry=registry,
+                yx_patch_size=_YX_PATCH,
+                tau_range_hours=(0.5, 1.5),
+            )
 
     def test_track_with_gap_still_valid(self, tmp_path):
         """Track with missing timepoint -> anchor at t=2 still valid if t=4 exists.

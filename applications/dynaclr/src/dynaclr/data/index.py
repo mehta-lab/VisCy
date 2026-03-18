@@ -79,55 +79,56 @@ def _load_experiment_fovs(
     for wells in condition_wells.values():
         registered_wells.update(wells)
 
-    plate = open_ome_zarr(data_path, mode="r")
     fov_dfs: list[pd.DataFrame] = []
 
-    for _pos_path, position in plate.positions():
-        fov_name = position.zgroup.name.strip("/")
-        parts = fov_name.split("/")
-        well_name = "/".join(parts[:2])
+    with open_ome_zarr(data_path, mode="r") as plate:
+        for _pos_path, position in plate.positions():
+            fov_name = position.zgroup.name.strip("/")
+            parts = fov_name.split("/")
+            well_name = "/".join(parts[:2])
 
-        if well_name not in registered_wells:
-            continue
-        if include_wells is not None and well_name not in include_wells:
-            continue
-        if exclude_fovs is not None and fov_name in exclude_fovs:
-            continue
+            if well_name not in registered_wells:
+                continue
+            if include_wells is not None and well_name not in include_wells:
+                continue
+            if exclude_fovs is not None and fov_name in exclude_fovs:
+                continue
 
-        # Resolve condition from condition_wells
-        condition = None
-        for condition_label, wells in condition_wells.items():
-            if well_name in wells:
-                condition = condition_label
-                break
-        if condition is None:
-            raise ValueError(
-                f"Well '{well_name}' not found in condition_wells mapping "
-                f"for experiment '{exp_name}'. Available wells: {dict(condition_wells)}"
-            )
+            # Resolve condition from condition_wells
+            condition = None
+            for condition_label, wells in condition_wells.items():
+                if well_name in wells:
+                    condition = condition_label
+                    break
+            if condition is None:
+                raise ValueError(
+                    f"Well '{well_name}' not found in condition_wells mapping "
+                    f"for experiment '{exp_name}'. Available wells: {dict(condition_wells)}"
+                )
 
-        # Read tracking CSV
-        tracks_dir = Path(tracks_path) / fov_name
-        csv_files = list(tracks_dir.glob("*.csv"))
-        if not csv_files:
-            _logger.warning("No tracking CSV in %s, skipping", tracks_dir)
-            continue
-        tracks_df = pd.read_csv(csv_files[0])
+            # Read tracking CSV
+            tracks_dir = Path(tracks_path) / fov_name
+            csv_files = list(tracks_dir.glob("*.csv"))
+            if not csv_files:
+                raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
+            if len(csv_files) > 1:
+                raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
+            tracks_df = pd.read_csv(csv_files[0])
 
-        # Enrich columns
-        tracks_df["store_path"] = data_path
-        tracks_df["experiment"] = exp_name
-        tracks_df["condition"] = condition
-        tracks_df["marker"] = marker
-        tracks_df["organelle"] = organelle
-        tracks_df["microscope"] = microscope
-        tracks_df["well_name"] = well_name
-        tracks_df["fov_name"] = fov_name
-        tracks_df["global_track_id"] = exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
-        tracks_df["hours_post_perturbation"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
-        tracks_df["fluorescence_channel"] = fluorescence_channel
+            # Enrich columns
+            tracks_df["store_path"] = data_path
+            tracks_df["experiment"] = exp_name
+            tracks_df["condition"] = condition
+            tracks_df["marker"] = marker
+            tracks_df["organelle"] = organelle
+            tracks_df["microscope"] = microscope
+            tracks_df["well_name"] = well_name
+            tracks_df["fov_name"] = fov_name
+            tracks_df["global_track_id"] = exp_name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+            tracks_df["hours_post_perturbation"] = start_hpi + tracks_df["t"] * interval_minutes / 60.0
+            tracks_df["fluorescence_channel"] = fluorescence_channel
 
-        fov_dfs.append(tracks_df)
+            fov_dfs.append(tracks_df)
 
     return fov_dfs
 
