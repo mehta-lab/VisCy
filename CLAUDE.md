@@ -13,7 +13,14 @@ packages/
   viscy-models/             # Neural network architectures
   viscy-transforms/         # Image transforms
 src/viscy/                  # Umbrella package (re-exports)
+applications/               # Self-contained research applications
 ```
+
+### Packages vs Applications
+
+- **Shared code belongs in `packages/`**, not in applications.
+- **Applications must not import from each other.** If two applications need the same logic, move it to an existing package or create a new one.
+- Applications are consumers of packages — the dependency graph always flows `applications/ → packages/`, never sideways.
 
 ## Code Style
 
