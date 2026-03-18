@@ -24,8 +24,11 @@ from helpers import (
 
 
 def pytest_configure(config):
-    # anndata 0.12.x zarr writer does not support pandas ArrowStringArray
-    # (default in pandas 2.x with PyArrow installed)
+    # anndata zarr writer does not support pandas ArrowStringArray (default in
+    # pandas 2.x when PyArrow is installed). Verified still broken in
+    # anndata==0.12.6 + zarr==3.x: IORegistryError on write_zarr with an
+    # ArrowStringArray index. Remove when anndata fixes zarr 3 support.
+    # See: https://github.com/scverse/anndata/issues/1510
     pd.options.future.infer_string = False
     config.addinivalue_line("markers", "hpc_integration: requires HPC paths and GPU")
 
