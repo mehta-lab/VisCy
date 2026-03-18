@@ -5913,6 +5913,7 @@ dependencies = [
     { name = "scikit-image" },
     { name = "tensorstore" },
     { name = "torch" },
+    { name = "wandb" },
     { name = "xarray" },
 ]
 
@@ -5961,6 +5962,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.10" },
     { name = "umap-learn", marker = "extra == 'all'" },
     { name = "umap-learn", marker = "extra == 'eval'" },
+    { name = "wandb" },
     { name = "xarray" },
 ]
 provides-extras = ["all", "anndata", "eval"]

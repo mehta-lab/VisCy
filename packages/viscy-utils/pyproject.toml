@@ -40,6 +40,7 @@ dependencies = [
   "scikit-image",
   "tensorstore",
   "torch>=2.10",
+  "wandb",
   "xarray",
 ]
 
