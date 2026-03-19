@@ -1,5 +1,5 @@
 # Virtual staining training configuration
-# Usage: python -m viscy_translation fit --config fit.yml
+# Usage: python -m cytoland fit --config fit.yml
 # See: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
 
 seed_everything: 42
@@ -32,7 +32,7 @@ trainer:
   inference_mode: true
   use_distributed_sampler: true
 model:
-  class_path: viscy_translation.engine.VSUNet
+  class_path: cytoland.engine.VSUNet
   init_args:
     architecture: UNeXt2
     model_config:

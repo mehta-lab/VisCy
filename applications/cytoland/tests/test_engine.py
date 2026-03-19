@@ -1,4 +1,4 @@
-"""Smoke tests for translation engine modules."""
+"""Smoke tests for cytoland engine modules."""
 
 import subprocess
 from pathlib import Path
@@ -7,12 +7,12 @@ import pytest
 import torch
 from conftest import FCMAE_H, FCMAE_W, SYNTH_B, SYNTH_C, SYNTH_D
 
-from viscy_translation.engine import AugmentedPredictionVSUNet, FcmaeUNet, VSUNet
+from cytoland.engine import AugmentedPredictionVSUNet, FcmaeUNet, VSUNet
 
 
 def test_imports():
     """Verify all top-level imports work."""
-    from viscy_translation import AugmentedPredictionVSUNet, FcmaeUNet, MaskedMSELoss, SegmentationMetrics2D, VSUNet
+    from cytoland import AugmentedPredictionVSUNet, FcmaeUNet, MaskedMSELoss, SegmentationMetrics2D, VSUNet
     from viscy_utils.callbacks import HCSPredictionWriter
     from viscy_utils.losses import MixedLoss
 

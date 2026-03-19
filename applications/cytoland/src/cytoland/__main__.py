@@ -2,8 +2,8 @@
 
 Usage
 -----
-python -m viscy_translation fit --config fit.yml
-python -m viscy_translation predict --config predict.yml
+python -m cytoland fit --config fit.yml
+python -m cytoland predict --config predict.yml
 """
 
 from viscy_utils.cli import main

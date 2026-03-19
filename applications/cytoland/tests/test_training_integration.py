@@ -1,6 +1,6 @@
-"""Training integration tests for translation models.
+"""Training integration tests for cytoland models.
 
-Validates that the forward+backward pass works for translation modules
+Validates that the forward+backward pass works for cytoland modules
 using ``fast_dev_run=True`` (1 batch of train + val). Follows the DynaCLR
 ``test_training_integration.py`` pattern.
 
@@ -17,7 +17,7 @@ import yaml
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 
-from viscy_translation.engine import FcmaeUNet, MaskedMSELoss, VSUNet
+from cytoland.engine import FcmaeUNet, MaskedMSELoss, VSUNet
 from viscy_utils.losses import MixedLoss
 
 from .conftest import (

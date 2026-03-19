@@ -3,8 +3,8 @@ build-backend = "hatchling.build"
 requires = [ "hatchling", "uv-dynamic-versioning" ]
 
 [project]
-name = "viscy-translation"
-description = "Virtual staining translation application"
+name = "cytoland"
+description = "Robust virtual staining of landmark organelles from label-free microscopy"
 readme = "README.md"
 keywords = [
   "deep learning",
@@ -59,7 +59,7 @@ test = [
 source = "uv-dynamic-versioning"
 
 [tool.hatch.build.targets.wheel]
-packages = [ "src/viscy_translation" ]
+packages = [ "src/cytoland" ]
 
 [tool.pytest.ini_options]
 pythonpath = [ "tests" ]
@@ -67,5 +67,5 @@ pythonpath = [ "tests" ]
 [tool.uv-dynamic-versioning]
 vcs = "git"
 style = "pep440"
-pattern-prefix = "viscy-translation-"
+pattern-prefix = "cytoland-"
 fallback-version = "0.0.0"

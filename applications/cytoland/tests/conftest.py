@@ -1,4 +1,4 @@
-"""Test fixtures for translation application tests."""
+"""Test fixtures for cytoland application tests."""
 
 from pathlib import Path
 

@@ -23,7 +23,7 @@ from iohub.ngff import open_ome_zarr
 from lightning.pytorch import seed_everything
 from scipy import stats
 
-from viscy_translation.engine import FcmaeUNet
+from cytoland.engine import FcmaeUNet
 
 from .conftest import requires_hpc_and_gpu
 
