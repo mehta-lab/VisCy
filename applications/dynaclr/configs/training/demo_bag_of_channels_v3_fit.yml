@@ -1,0 +1,123 @@
+# Demo bag-of-channels with zarr v3 datasets
+# Usage:
+#   viscy fit -c applications/dynaclr/configs/training/demo_bag_of_channels_v3_fit.yml
+# Fast dev run:
+#   viscy fit -c applications/dynaclr/configs/training/demo_bag_of_channels_v3_fit.yml --trainer.fast_dev_run true
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: 1
+  num_nodes: 1
+  precision: bf16-mixed
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: /hpc/mydata/eduardo.hirata/logs/dynaclr
+      version: demo_bag_v3
+      log_graph: false
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+  fast_dev_run: true
+  max_epochs: 2
+  log_every_n_steps: 1
+  enable_checkpointing: false
+  inference_mode: true
+  use_distributed_sampler: false
+model:
+  class_path: dynaclr.engine.ContrastiveModule
+  init_args:
+    encoder:
+      class_path: viscy_models.contrastive.ContrastiveEncoder
+      init_args:
+        backbone: convnext_tiny
+        in_channels: 1
+        in_stack_depth: 30
+        stem_kernel_size: [5, 4, 4]
+        stem_stride: [5, 4, 4]
+        embedding_dim: 768
+        projection_dim: 32
+        drop_path_rate: 0.0
+    loss_function:
+      class_path: viscy_models.contrastive.loss.NTXentHCL
+      init_args:
+        temperature: 0.2
+        beta: 0.5
+    lr: 0.00002
+    log_batches_per_epoch: 1
+    log_samples_per_batch: 2
+    example_input_array_shape: [1, 1, 30, 192, 192]
+data:
+  class_path: dynaclr.data.datamodule.MultiExperimentDataModule
+  init_args:
+    collection_path: applications/dynaclr/configs/collections/demo_bag_of_channels_v3.yml
+    cell_index_path: null
+    z_window: 30
+    yx_patch_size: [288, 288]
+    final_yx_patch_size: [192, 192]
+    split_ratio: 0.8
+    val_experiments: null
+    tau_range: [0.5, 2.0]
+    tau_decay_rate: 2.0
+    batch_size: 8
+    num_workers: 1
+    bag_of_channels: true
+    experiment_aware: true
+    stratify_by: [condition, organelle]
+    leaky: 0.0
+    temporal_enrichment: false
+    channel_dropout_channels: []
+    channel_dropout_prob: 0.0
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [channel]
+          level: timepoint_statistics
+          subtrahend: mean
+          divisor: std
+    augmentations:
+      - class_path: viscy_transforms.BatchedRandAffined
+        init_args:
+          keys: [channel]
+          prob: 0.8
+          scale_range: [[0.8, 1.2], [0.8, 1.2], [0.8, 1.2]]
+          rotate_range: [3.14, 0.0, 0.0]
+          shear_range: [0.05, 0.05, 0.0, 0.05, 0.0, 0.05]
+      - class_path: viscy_transforms.BatchedRandSpatialCropd
+        init_args:
+          keys: [channel]
+          roi_size: [35, 240, 240]
+      - class_path: viscy_transforms.BatchedRandFlipd
+        init_args:
+          keys: [channel]
+          prob: 0.5
+          spatial_axes: [1, 2]
+      - class_path: viscy_transforms.BatchedRandAdjustContrastd
+        init_args:
+          keys: [channel]
+          prob: 0.5
+          gamma: [0.6, 1.6]
+      - class_path: viscy_transforms.BatchedRandScaleIntensityd
+        init_args:
+          keys: [channel]
+          prob: 0.5
+          factors: 0.5
+      - class_path: viscy_transforms.BatchedRandGaussianSmoothd
+        init_args:
+          keys: [channel]
+          prob: 0.5
+          sigma_x: [0.25, 0.50]
+          sigma_y: [0.25, 0.50]
+          sigma_z: [0.0, 0.0]
+      - class_path: viscy_transforms.BatchedRandGaussianNoised
+        init_args:
+          keys: [channel]
+          prob: 0.5
+          mean: 0.0
+          std: 0.1
+    hcl_beta: 0.5
+    cache_pool_bytes: 0
+    seed: 0

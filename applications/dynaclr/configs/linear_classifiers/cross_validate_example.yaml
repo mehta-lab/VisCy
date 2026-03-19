@@ -1,0 +1,49 @@
+# Example configuration for cross-validation
+#
+# Usage:
+#   dynaclr cross-validate -c configs/cross_validate_example.yaml
+#   dynaclr cross-validate -c config.yaml --task infection_state  # CLI override
+
+output_dir: /hpc/projects/organelle_phenotyping/datasets/annotations/cross_validation/DynaCLR-2D-bagofchannels-v3
+ranking_metric: auroc  # auroc, weighted_f1, accuracy
+n_bootstrap: 3
+task: organelle_state  # Single task to run. Output goes to output_dir/<task>/. Omit to run all tasks.
+channels: [phase, sensor, marker]  # Which embedding channels to cross-validate. Defaults to all if omitted.
+
+# Marker name for marker-specific tasks (organelle_state).
+# Tags the output recommendations and W&B artifacts with the organelle name.
+# Run separate CV configs per marker (g3bp1, sec61b, tomm20) for organelle_state.
+# Set to null for non-marker tasks (infection_state, cell_division_state).
+marker: g3bp1
+
+models:
+  2D:
+    name: DynaCLR-2D-BagOfChannels-timeaware
+    version: v3
+    wandb_project: linearclassifiers-DynaCLR-2D-BagOfChannels-timeaware-v3
+    datasets:  # need >=3 for leave-one-out
+      - name: 2025_01_24_A549_G3BP1_DENV
+        embeddings_dir:
+        annotations: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_24_A549_G3BP1_DENV/2025_01_24_A549_G3BP1_DENV_combined_annotations.csv
+      - name: 2025_01_28_A549_G3BP1_ZIKV_DENV
+        embeddings_dir: /path/to/C/embeddings/
+        annotations: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_01_28_A549_G3BP1_ZIKV_DENV/2025_01_28_A549_G3BP1_ZIKV_DENV_combined_annotations.csv
+      - name: 2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV
+        embeddings_dir:
+        annotations: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+        include_wells: ["C/1", "C/2"]  # g3bp1 wells (sec61b in A/, tomm20 in B/)
+      - name: 2025_08_07_A549_SEC61_TOMM20_G3BP1_ZIKV
+        embeddings_dir:
+        annotations: /hpc/projects/organelle_phenotyping/datasets/annotations/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV/2025_07_24_A549_SEC61_TOMM20_G3BP1_ZIKV_combined_annotations.csv
+        include_wells: ["C/1", "C/2"]  # g3bp1 wells
+
+# Classifier hyperparams (all optional, shown with defaults)
+use_scaling: true
+n_pca_components: 50
+max_iter: 1000
+class_weight: balanced
+solver: liblinear
+split_train_data: 0.8
+random_seed: 42
+report: true  # Generate PDF report (also available as --report CLI flag)
+n_workers: 16  # Number of parallel workers. Default (null) = min(cpu_count, 32). Set to 1 for sequential/debug.

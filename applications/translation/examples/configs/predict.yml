@@ -1,0 +1,41 @@
+# Virtual staining prediction configuration
+# Usage: python -m viscy_translation predict --config predict.yml
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: auto
+  devices: auto
+  num_nodes: 1
+  precision: 32-true
+  callbacks:
+    - class_path: viscy_utils.callbacks.HCSPredictionWriter
+      init_args:
+        output_store: #TODO point to the path to save predictions
+  inference_mode: true
+model:
+  class_path: viscy_translation.engine.VSUNet
+  init_args:
+    architecture: UNeXt2
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      in_stack_depth: 5
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: #TODO point to the path to the data
+    source_channel: Phase3D
+    target_channel: Fluorescence
+    z_window_size: 5
+    batch_size: 32
+    num_workers: 8
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std
+return_predictions: false
+ckpt_path: #TODO point to the path to the checkpoint

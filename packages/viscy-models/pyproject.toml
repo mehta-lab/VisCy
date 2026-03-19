@@ -11,8 +11,8 @@ keywords = [
   "microscopy",
   "neural networks",
   "pytorch",
-  "virtual staining",
   "representation learning",
+  "virtual staining",
 ]
 license = "BSD-3-Clause"
 authors = [ { name = "Biohub", email = "compmicro@czbiohub.org" } ]
@@ -34,8 +34,10 @@ dynamic = [ "version" ]
 dependencies = [
   "monai>=1.5.2",
   "numpy>=2.4.1",
+  "pytorch-metric-learning",
   "timm>=1.0.15",
   "torch>=2.10",
+  "transformers>=4.40",
 ]
 
 urls.Homepage = "https://github.com/mehta-lab/VisCy"

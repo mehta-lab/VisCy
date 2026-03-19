@@ -78,11 +78,14 @@ class ConvBlock2D(nn.Module):
         # ---- Handle Kernel ----#
         ks = kernel_size
         if isinstance(ks, int):
-            assert ks % 2 == 1, "Kernel dims must be odd"
+            if ks % 2 != 1:
+                raise ValueError("Kernel dims must be odd")
         elif isinstance(ks, tuple):
             for i in range(len(ks)):
-                assert ks[i] % 2 == 1, "Kernel dims must be odd"
-            assert i == 1, "kernel_size length must be 2"
+                if ks[i] % 2 != 1:
+                    raise ValueError("Kernel dims must be odd")
+            if i != 1:
+                raise ValueError("kernel_size length must be 2")
         else:
             raise AttributeError("'kernel_size' must be either int or tuple")
         self.kernel_size = kernel_size
@@ -302,13 +305,11 @@ class ConvBlock2D(nn.Module):
         """
         if validate_input:
             if isinstance(self.kernel_size, int):
-                assert x.shape[-1] > self.kernel_size and x.shape[-2] > self.kernel_size, (
-                    f"Input size {x.shape} too small for kernel of size {self.kernel_size}"
-                )
+                if not (x.shape[-1] > self.kernel_size and x.shape[-2] > self.kernel_size):
+                    raise ValueError(f"Input size {x.shape} too small for kernel of size {self.kernel_size}")
             elif isinstance(self.kernel_size, tuple):
-                assert x.shape[-1] > self.kernel_size[-1] and x.shape[-2] > self.kernel_size[-2], (
-                    f"Input size {x.shape} too small for kernel of size {self.kernel_size}"
-                )
+                if not (x.shape[-1] > self.kernel_size[-1] and x.shape[-2] > self.kernel_size[-2]):
+                    raise ValueError(f"Input size {x.shape} too small for kernel of size {self.kernel_size}")
 
         x_0 = x
         for i in range(self.num_repeats):

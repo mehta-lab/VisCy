@@ -182,7 +182,7 @@ class SlidingWindowDataset(Dataset):
         }
         if self.target_ch_idx is not None:
             sample["target"] = self._stack_channels(sample_images, "target")
-        if self.load_normalization_metadata:
+        if self.load_normalization_metadata and norm_meta is not None:
             sample["norm_meta"] = norm_meta
         return sample
 
@@ -368,7 +368,7 @@ class HCSDataModule(LightningDataModule):
         if not self.caching:
             return
         # setup logger
-        logger = logging.getLogger("viscy_data")
+        logger = logging.getLogger("viscy_data.hcs.cache")
         logger.propagate = False
         logger.setLevel(logging.DEBUG)
         console_handler = logging.StreamHandler()
@@ -480,7 +480,7 @@ class HCSDataModule(LightningDataModule):
                 plate_path = self.data_path.parent.parent.parent
                 fov_name = self.data_path.relative_to(plate_path).as_posix()
                 plate = open_ome_zarr(plate_path)
-            except Exception:
+            except (OSError, ValueError):
                 raise FileNotFoundError("Parent HCS store not found for single FOV input.")
             positions = [plate[fov_name]]
         elif isinstance(dataset, Plate):

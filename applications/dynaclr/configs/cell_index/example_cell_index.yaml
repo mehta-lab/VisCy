@@ -1,0 +1,56 @@
+# Cell Index Builder — Example Configuration
+# ============================================
+#
+# Build a parquet-based cell observation index from time-lapse experiments.
+# One row per cell per timepoint, with lineage reconstruction.
+#
+# Usage:
+#   dynaclr build-cell-index example_cell_index.yaml output.parquet
+#   dynaclr build-cell-index example_cell_index.yaml output.parquet --include-wells A/1 --include-wells A/2
+#   dynaclr build-cell-index example_cell_index.yaml output.parquet --exclude-fovs A/1/0
+#
+# The output parquet follows the CELL_INDEX_SCHEMA and can be loaded via:
+#   from viscy_data.cell_index import read_cell_index
+#   df = read_cell_index("output.parquet")
+#
+# Schema columns (per row = one cell observation at one timepoint):
+#   CORE:      cell_id, experiment, store_path, tracks_path, fov, well, y, x, z, source_channels
+#   GROUPING:  condition, channel_name
+#   TIMELAPSE: t, track_id, global_track_id, lineage_id, parent_track_id, hours_post_perturbation
+#   OPS:       gene_name, reporter, sgRNA  (null for time-lapse data)
+#
+# Tracking CSV format (per FOV directory under tracks_path):
+#   Required columns: track_id, t, y, x
+#   Optional columns: z, id, parent_track_id, parent_id
+#
+# Example CSV at: {tracks_path}/A/1/0/tracks.csv
+#   track_id,t,y,x,id,parent_track_id,parent_id
+#   0,0,128.5,256.3,0,-1,-1
+#   0,1,130.2,255.8,1,-1,-1
+#   1,5,200.1,100.4,2,0,1      <- daughter of track 0
+
+experiments:
+  # Experiment 1: SEC61B-tagged endoplasmic reticulum
+  - name: "2025_07_22_SEC61"
+    data_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV.zarr"
+    tracks_path: "/hpc/projects/intracellular_dashboard/organelle_dynamics/2025_07_22_A549_SEC61_TOMM20_G3BP1_ZIKV/2-assemble/tracking.zarr"
+    # channel_names: ["Phase3D","raw GFP EX488 EM525-45"]
+    source_channel: ["Phase3D", "raw GFP EX488 EM525-45"]
+    condition_wells:
+      uninfected: ["C/1"]
+      infected: ["C/2"]
+    interval_minutes: 10.0
+    start_hpi: 3.0
+
+  # Experiment 2: TOMM20-tagged mitochondria
+  # Different imaging interval — hours_post_perturbation is computed per-experiment
+  - name: "2025_01_28_A549_G3BP1_ZIKV_DENV"
+    data_path: "/hpc/projects/organelle_phenotyping/datasets/organelle/G3BP1/2025_01_28_A549_G3BP1_ZIKV_DENV/rechunked.zarr"
+    tracks_path: "/hpc/projects/organelle_phenotyping/datasets/organelle/G3BP1/2025_01_28_A549_G3BP1_ZIKV_DENV/tracking.zarr"
+    # channel_names: ["Phase3D",'raw GFP EX488 EM525-45', 'raw mCherry EX561 EM600-37']
+    source_channel: ["Phase3D"]
+    condition_wells:
+      uninfected: ["B/4"]
+      infected: ["C/2"]
+    interval_minutes: 30.0
+    start_hpi: 4.0
