@@ -78,7 +78,7 @@ def convert(
         embedding_coords = natsorted([coord for coord in embeddings_ds.coords if embedding in coord])
         if embedding_coords:
             obsm[f"X_{embedding.lower()}"] = np.column_stack(
-                [embeddings_ds.coords[coord] for coord in embedding_coords]
+                [embeddings_ds.coords[coord].data for coord in embedding_coords]
             )
 
     # X, "expression" matrix (NN embedding features)

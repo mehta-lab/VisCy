@@ -5951,7 +5951,6 @@ test = [
 name = "viscy-utils"
 source = { editable = "packages/viscy-utils" }
 dependencies = [
-    { name = "anndata" },
     { name = "iohub" },
     { name = "jsonargparse", extra = ["signatures"] },
     { name = "lightning" },
@@ -5962,39 +5961,58 @@ dependencies = [
     { name = "tensorboard" },
     { name = "tensorstore" },
     { name = "torch" },
-    { name = "wandb" },
+    { name = "viscy-data" },
     { name = "xarray" },
 ]
 
 [package.optional-dependencies]
 all = [
+    { name = "anndata" },
+    { name = "natsort" },
     { name = "phate" },
     { name = "scikit-learn" },
     { name = "umap-learn" },
+    { name = "wandb" },
+]
+anndata = [
+    { name = "anndata" },
+    { name = "natsort" },
 ]
 eval = [
     { name = "phate" },
     { name = "scikit-learn" },
     { name = "umap-learn" },
+    { name = "wandb" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "anndata" },
+    { name = "natsort" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "scikit-learn" },
+    { name = "wandb" },
 ]
 test = [
+    { name = "anndata" },
+    { name = "natsort" },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "scikit-learn" },
+    { name = "wandb" },
 ]
 
 [package.metadata]
 requires-dist = [
-    { name = "anndata" },
+    { name = "anndata", marker = "extra == 'all'" },
+    { name = "anndata", marker = "extra == 'anndata'" },
     { name = "iohub", specifier = ">=0.3a2" },
     { name = "jsonargparse", extras = ["signatures"], specifier = ">=4.26" },
     { name = "lightning", specifier = ">=2.3" },
     { name = "matplotlib", specifier = ">=3.10" },
+    { name = "natsort", marker = "extra == 'all'" },
+    { name = "natsort", marker = "extra == 'anndata'" },
     { name = "numpy", specifier = ">=2.4.1" },
     { name = "phate", marker = "extra == 'all'" },
     { name = "phate", marker = "extra == 'eval'" },
@@ -6007,19 +6025,29 @@ requires-dist = [
     { name = "torch", specifier = ">=2.10" },
     { name = "umap-learn", marker = "extra == 'all'" },
     { name = "umap-learn", marker = "extra == 'eval'" },
-    { name = "wandb" },
+    { name = "viscy-data", editable = "packages/viscy-data" },
+    { name = "wandb", marker = "extra == 'all'" },
+    { name = "wandb", marker = "extra == 'eval'" },
     { name = "xarray" },
 ]
-provides-extras = ["all", "eval"]
+provides-extras = ["all", "anndata", "eval"]
 
 [package.metadata.requires-dev]
 dev = [
+    { name = "anndata" },
+    { name = "natsort" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
+    { name = "scikit-learn" },
+    { name = "wandb" },
 ]
 test = [
+    { name = "anndata" },
+    { name = "natsort" },
     { name = "pytest", specifier = ">=9.0.2" },
     { name = "pytest-cov", specifier = ">=7" },
+    { name = "scikit-learn" },
+    { name = "wandb" },
 ]
 
 [[package]]
