@@ -1,4 +1,4 @@
-"""Lightning CLI entry point for the translation application.
+"""Lightning CLI entry point for the Cytoland application.
 
 Usage
 -----

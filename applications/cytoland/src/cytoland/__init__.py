@@ -1,4 +1,4 @@
-"""Virtual staining translation application using UNet architectures."""
+"""Cytoland virtual staining application using UNet architectures."""
 
 from cytoland.engine import (
     AugmentedPredictionVSUNet,

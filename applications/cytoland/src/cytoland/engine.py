@@ -1,4 +1,4 @@
-"""Translation engine LightningModules for virtual staining."""
+"""Cytoland LightningModules for virtual staining."""
 
 import logging
 import os

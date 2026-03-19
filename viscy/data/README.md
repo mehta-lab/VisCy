@@ -362,7 +362,7 @@ Three training pipelines use different engine, DataModule, and Dataset combinati
 | Aspect | FCMAE Pretrain | Translation Fine-tune | DynaCLR (Contrastive) |
 |--------|---------------|----------------------|----------------------|
 | Engine class | `FcmaeUNet` | `VSUNet` | `ContrastiveModule` |
-| Source | `viscy.translation.engine` | `viscy.translation.engine` | `viscy.representation.engine` |
+| Source | `cytoland.engine` | `cytoland.engine` | `dynaclr.engine` |
 | DataModule | `CombinedDataModule` wrapping `CachedOmeZarrDataModule` | `HCSDataModule` | `TripletDataModule` |
 | Dataset | `CachedOmeZarrDataset` | `SlidingWindowDataset` | `TripletDataset` |
 | Batch structure | `list[list[dict]]` &rarr; collated `Sample` | `Sample` (`source`, `target`, `index`) | `TripletSample` (`anchor`, `positive`, `negative`) |
