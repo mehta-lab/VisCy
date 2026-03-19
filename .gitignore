@@ -6,6 +6,9 @@
 .vscode/
 .DS_Store
 
+# Filesystem artifacts
+.nfs*
+
 # Python bytecode
 __pycache__/
 *.py[cod]
