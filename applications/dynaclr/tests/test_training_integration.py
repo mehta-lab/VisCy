@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 import yaml
-from helpers import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
+from conftest import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.loggers import TensorBoardLogger
 from pytorch_metric_learning.losses import NTXentLoss

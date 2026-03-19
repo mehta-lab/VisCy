@@ -99,7 +99,7 @@ class ClassificationModule(LightningModule):
 
     def predict_step(self, batch, batch_idx: int, dataloader_idx: int | None = None):  # noqa: D102
         x, y, indices = batch
-        y_hat = nn.functional.sigmoid(self(x))
+        y_hat = torch.sigmoid(self(x))
         indices["label"] = y
         indices["prediction"] = y_hat
         return indices

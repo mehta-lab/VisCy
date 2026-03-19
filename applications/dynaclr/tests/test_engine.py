@@ -1,7 +1,7 @@
 """Smoke tests for DynaCLR engine modules."""
 
 import torch
-from helpers import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
+from conftest import SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W, SimpleEncoder, SyntheticTripletDataModule
 from lightning.pytorch import Trainer, seed_everything
 from torch import nn
 

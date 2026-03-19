@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import pytest
-from helpers import IMG_H, IMG_W, N_T, N_TRACKS, N_Z
+from conftest import IMG_H, IMG_W, N_T, N_TRACKS, N_Z
 from iohub.ngff import Position, open_ome_zarr
 
 from dynaclr.data.experiment import ExperimentRegistry

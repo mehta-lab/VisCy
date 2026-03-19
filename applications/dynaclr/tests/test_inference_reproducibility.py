@@ -20,7 +20,7 @@ Requirements: INFER-01, INFER-02, INFER-03, TEST-01, TEST-02
 import numpy as np
 import pytest
 import torch
-from helpers import requires_hpc_and_gpu
+from conftest import requires_hpc_and_gpu
 from lightning.pytorch import Trainer, seed_everything
 
 from dynaclr.engine import ContrastiveModule
