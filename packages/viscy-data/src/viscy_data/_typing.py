@@ -1,12 +1,20 @@
 """Type definitions for viscy-data.
 
 Copied verbatim from ``viscy/data/typing.py`` with the following additions:
-- ``INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
+- ``ULTRACK_INDEX_COLUMNS`` extracted from ``viscy/data/triplet.py``
 - ``__all__`` for explicit public API
 - Updated ``typing_extensions.NotRequired`` to ``typing.NotRequired`` (Python >=3.11)
 """
 
-from typing import Callable, Literal, NamedTuple, NotRequired, Sequence, TypedDict, TypeVar
+from typing import (
+    Callable,
+    Literal,
+    NamedTuple,
+    NotRequired,
+    Sequence,
+    TypedDict,
+    TypeVar,
+)
 
 from torch import ShortTensor, Tensor
 
@@ -20,7 +28,7 @@ __all__ = [
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "INDEX_COLUMNS",
+    "ULTRACK_INDEX_COLUMNS",
     "LABEL_CELL_CYCLE_STATE",
     "LABEL_CELL_DIVISION_STATE",
     "LABEL_CELL_REMODELING_STATE",
@@ -185,7 +193,7 @@ CELL_INDEX_TIMELAPSE_COLUMNS = [
 CELL_INDEX_OPS_COLUMNS = ["gene_name", "reporter", "sgRNA"]
 
 # Extracted from viscy/data/triplet.py for shared access
-INDEX_COLUMNS = [
+ULTRACK_INDEX_COLUMNS = [
     "fov_name",
     "track_id",
     "t",

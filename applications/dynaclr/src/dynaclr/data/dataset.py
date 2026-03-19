@@ -26,7 +26,7 @@ except ImportError:
 
 from dynaclr.data.index import MultiExperimentIndex
 from dynaclr.data.tau_sampling import sample_tau
-from viscy_data._typing import INDEX_COLUMNS, NormMeta
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import _read_norm_meta
 
 _META_COLUMNS = [
@@ -230,7 +230,7 @@ class MultiExperimentTripletDataset(Dataset):
             indices_list = []
             for _, anchor_row in anchor_rows.iterrows():
                 idx_dict: dict = {}
-                for col in INDEX_COLUMNS:
+                for col in ULTRACK_INDEX_COLUMNS:
                     if col in anchor_row.index:
                         idx_dict[col] = anchor_row[col]
                     elif col not in ["y", "x", "z"]:
@@ -419,7 +419,12 @@ class MultiExperimentTripletDataset(Dataset):
 
     def _slice_patch(
         self, track_row: pd.Series, forced_source_idx: int | None = None
-    ) -> tuple["ts.TensorStore", NormMeta | None, tuple[float, float, float], tuple[int, int, int]]:
+    ) -> tuple[
+        "ts.TensorStore",
+        NormMeta | None,
+        tuple[float, float, float],
+        tuple[int, int, int],
+    ]:
         """Slice a patch from the image store for a given track row.
 
         Uses per-experiment ``channel_maps`` for channel index remapping,
@@ -498,7 +503,11 @@ class MultiExperimentTripletDataset(Dataset):
             else:
                 raw_norm_meta = remapped
 
-        target_size = (z_window_size, self.index.yx_patch_size[0], self.index.yx_patch_size[1])
+        target_size = (
+            z_window_size,
+            self.index.yx_patch_size[0],
+            self.index.yx_patch_size[1],
+        )
         return patch, raw_norm_meta, (scale_z, scale_y, scale_x), target_size
 
     def _slice_patches(

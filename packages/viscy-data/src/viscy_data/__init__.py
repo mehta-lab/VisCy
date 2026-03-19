@@ -24,11 +24,11 @@ from viscy_data._typing import (
     CELL_INDEX_GROUPING_COLUMNS,
     CELL_INDEX_OPS_COLUMNS,
     CELL_INDEX_TIMELAPSE_COLUMNS,
-    INDEX_COLUMNS,
     LABEL_CELL_CYCLE_STATE,
     LABEL_CELL_DIVISION_STATE,
     LABEL_CELL_REMODELING_STATE,
     LABEL_INFECTION_STATE,
+    ULTRACK_INDEX_COLUMNS,
     AnnotationColumns,
     ChannelMap,
     ChannelNormStats,
@@ -57,7 +57,11 @@ from viscy_data.cell_division_triplet import (
 
 # Cell index (from cell_index.py -- requires [triplet] extra for pyarrow at runtime)
 try:
-    from viscy_data.cell_index import read_cell_index, validate_cell_index, write_cell_index
+    from viscy_data.cell_index import (
+        read_cell_index,
+        validate_cell_index,
+        write_cell_index,
+    )
 except ImportError:
     pass
 
@@ -117,7 +121,7 @@ __all__ = [
     "ChannelNormStats",
     "DictTransform",
     "HCSStackIndex",
-    "INDEX_COLUMNS",
+    "ULTRACK_INDEX_COLUMNS",
     "LABEL_CELL_CYCLE_STATE",
     "LABEL_CELL_DIVISION_STATE",
     "LABEL_CELL_REMODELING_STATE",

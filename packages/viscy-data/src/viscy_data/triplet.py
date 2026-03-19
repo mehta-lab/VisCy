@@ -28,7 +28,7 @@ from monai.transforms import Compose, MapTransform
 from torch import Tensor
 from torch.utils.data import Dataset
 
-from viscy_data._typing import INDEX_COLUMNS, NormMeta
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
 from viscy_data._utils import (
     _read_norm_meta,
     _transform_channel_wise,
@@ -281,7 +281,7 @@ class TripletDataset(Dataset):
             indices_list = []
             for _, anchor_row in anchor_rows.iterrows():
                 index_dict = {}
-                for col in INDEX_COLUMNS:
+                for col in ULTRACK_INDEX_COLUMNS:
                     if col in anchor_row.index:
                         index_dict[col] = anchor_row[col]
                     elif col not in ["y", "x", "z"]:
