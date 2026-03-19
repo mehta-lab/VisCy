@@ -50,7 +50,7 @@ data:
 ```bibtex
 @article{liu2025robust,
     title = {Robust virtual staining of landmark organelles},
-    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and Selvin, Johanna and Chandrasekar, Velmurugan and Tseng, Heng and Lew, Meru Dhananjay and Kim, Hee Jung and Hislop, Aerin and Tha, Anh and Tran, Buu and Changiv, Ram and Chan, Chin-Lin and Lao, Eason and Sun, Amanda and Ott, Marius and Mehta, Shalin B.},
+    author = {Liu, Ziwen and Hirata-Miyasaki, Eduardo and Pradeep, Soorya and others},
     journal = {Nature Machine Intelligence},
     year = {2025},
     doi = {10.1038/s42256-025-01046-2},
