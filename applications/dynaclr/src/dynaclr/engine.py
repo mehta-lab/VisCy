@@ -10,10 +10,11 @@ from lightning.pytorch import LightningModule
 from pytorch_metric_learning.losses import NTXentLoss
 from torch import Tensor, nn
 
-from viscy_data._typing import TrackingIndex, TripletSample
+from viscy_data._typing import CellIndex, TripletSample
 from viscy_models.contrastive import ContrastiveEncoder
 from viscy_models.vae import BetaVae25D, BetaVaeMonai
-from viscy_utils.log_images import detach_sample, render_images
+from viscy_utils.log_embeddings import pca_pairplot
+from viscy_utils.log_images import detach_sample, log_chw_tensor, log_histogram, log_image_grid
 
 _logger = logging.getLogger("lightning.pytorch")
 
@@ -23,7 +24,7 @@ class ContrastivePrediction(TypedDict):
 
     features: Tensor
     projections: Tensor
-    index: TrackingIndex
+    index: list[CellIndex]
 
 
 class ContrastiveModule(LightningModule):
@@ -39,7 +40,8 @@ class ContrastiveModule(LightningModule):
         schedule: Literal["WarmupCosine", "Constant"] = "Constant",
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
-        log_embeddings: bool = False,
+        log_embeddings_every_n_epochs: int | None = 10,
+        pca_color_key: str | None = "condition",
         log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
         ckpt_path: str | None = None,
@@ -58,8 +60,10 @@ class ContrastiveModule(LightningModule):
         self.example_input_array = torch.rand(*example_input_array_shape)
         self.training_step_outputs = []
         self.validation_step_outputs = []
-        self.log_embeddings = log_embeddings
+        self.log_embeddings_every_n_epochs = log_embeddings_every_n_epochs
+        self.pca_color_key = pca_color_key
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
+        self._embedding_outputs: list[tuple[Tensor, list]] = []
         self.freeze_backbone = freeze_backbone
 
         if ckpt_path is not None:
@@ -160,27 +164,40 @@ class ContrastiveModule(LightningModule):
         )
 
     def _log_samples(self, key: str, imgs: Sequence[Sequence[np.ndarray]]):
-        grid = render_images(imgs, cmaps=["gray"] * 3)
-        self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
+        if self.trainer.is_global_zero and self.logger is not None:
+            log_image_grid(self.logger, key, imgs, self.current_epoch, cmaps=["gray"] * 3)
 
-    def _log_step_samples(self, batch_idx, samples, stage: Literal["train", "val"]):
+    def _log_step_samples(self, batch_idx, samples: tuple, stage: Literal["train", "val"]):
         if batch_idx < self.log_batches_per_epoch:
             output_list = self.training_step_outputs if stage == "train" else self.validation_step_outputs
             output_list.extend(detach_sample(samples, self.log_samples_per_batch))
 
-    def log_embedding_umap(self, embeddings: Tensor, tag: str):
-        """Compute and log UMAP embeddings to TensorBoard."""
-        from umap import UMAP
+    def log_embedding_pca(self, embeddings: Tensor, meta: list[dict], tag: str, n_components: int = 8):
+        """Compute PCA and log a pairplot colored by condition to WandB."""
+        import matplotlib.pyplot as plt
+        from lightning.pytorch.loggers import WandbLogger
 
-        _logger.debug(f"Computing UMAP for {tag} embeddings.")
-        umap = UMAP(n_components=2)
+        if not self.trainer.is_global_zero:
+            return
+        if not isinstance(self.logger, WandbLogger):
+            return
+
+        import wandb
+
         embeddings_np = embeddings.detach().cpu().numpy()
-        umap_embeddings = umap.fit_transform(embeddings_np)
-        self.logger.experiment.add_embedding(
-            umap_embeddings,
-            global_step=self.current_epoch,
-            tag=f"{tag}_umap",
+        _logger.debug(f"Computing PCA for {tag}: {len(embeddings_np)} embeddings, {len(meta)} meta dicts.")
+        if len(meta) != len(embeddings_np):
+            _logger.warning("PCA meta/embedding count mismatch: %d vs %d.", len(meta), len(embeddings_np))
+
+        fig = pca_pairplot(
+            embeddings_np,
+            meta,
+            color_key=self.pca_color_key,
+            n_components=n_components,
+            title=f"{tag} PCA pairplot — epoch {self.current_epoch}",
         )
+        self.logger.experiment.log({f"{tag}_pca": wandb.Image(fig), "epoch": self.current_epoch})
+        plt.close(fig)
 
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         anchor_img = batch["anchor"]
@@ -216,7 +233,7 @@ class ContrastiveModule(LightningModule):
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         anchor = batch["anchor"]
         pos_img = batch["positive"]
-        _, anchor_projection = self(anchor)
+        anchor_features, anchor_projection = self(anchor)
         _, positive_projection = self(pos_img)
         negative_projection = None
         if isinstance(self.loss_function, NTXentLoss):
@@ -237,12 +254,20 @@ class ContrastiveModule(LightningModule):
             negative=negative_projection,
             stage="val",
         )
+        n = self.log_embeddings_every_n_epochs
+        if n is not None and self.current_epoch % n == 0 and not self.trainer.sanity_checking:
+            self._embedding_outputs.append((anchor_features.detach().cpu(), batch.get("anchor_meta", [])))
         return loss
 
     def on_validation_epoch_end(self) -> None:  # noqa: D102
         super().on_validation_epoch_end()
         self._log_samples("val_samples", self.validation_step_outputs)
         self.validation_step_outputs = []
+        if self._embedding_outputs:
+            all_embeddings = torch.cat([e for e, _ in self._embedding_outputs])
+            all_meta = [m for _, ms in self._embedding_outputs for m in ms]
+            self.log_embedding_pca(all_embeddings, all_meta, "val")
+            self._embedding_outputs = []
 
     def configure_optimizers(self):  # noqa: D102
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)
@@ -278,50 +303,33 @@ class BetaVaeModule(LightningModule):
         log_enhanced_visualizations_frequency: int = 30,
     ):
         super().__init__()
-        from dynaclr.vae_logging import BetaVaeLogger
-
         self.model = vae
         self.loss_function = loss_function
-
         self.beta = beta
         self.beta_schedule = beta_schedule
         self.beta_min = beta_min
         self.beta_warmup_epochs = beta_warmup_epochs
-
         self.lr = lr
         self.lr_schedule = lr_schedule
-
         self.log_batches_per_epoch = log_batches_per_epoch
         self.log_samples_per_batch = log_samples_per_batch
-
         self.example_input_array = torch.rand(*example_input_array_shape)
-
         self.log_enhanced_visualizations = log_enhanced_visualizations
         self.log_enhanced_visualizations_frequency = log_enhanced_visualizations_frequency
         self.training_step_outputs = []
         self.validation_step_outputs = []
-
         self._min_beta = 1e-15
         self._logvar_minmax = (-20, 20)
 
-        latent_dim = None
         if hasattr(self.model, "latent_dim"):
-            latent_dim = self.model.latent_dim
+            self._latent_dim = self.model.latent_dim
         elif hasattr(self.model, "latent_size"):
-            latent_dim = self.model.latent_size
+            self._latent_dim = self.model.latent_size
         elif hasattr(self.model, "encoder") and hasattr(self.model.encoder, "latent_dim"):
-            latent_dim = self.model.encoder.latent_dim
-
-        if latent_dim is not None:
-            self.vae_logger = BetaVaeLogger(latent_dim=latent_dim)
+            self._latent_dim = self.model.encoder.latent_dim
         else:
-            _logger.warning("No latent dimension provided for BetaVaeLogger. Using default with 128 dimensions.")
-            self.vae_logger = BetaVaeLogger()
-
-    def setup(self, stage: str = None):
-        """Initialize device-dependent components."""
-        super().setup(stage)
-        self.vae_logger.setup(device=self.device)
+            _logger.warning("Could not infer latent_dim from model; defaulting to 128.")
+            self._latent_dim = 128
 
     def _get_current_beta(self) -> float:
         """Get current beta value based on scheduling."""
@@ -404,23 +412,68 @@ class BetaVaeModule(LightningModule):
             "total_loss": total_loss,
         }
 
+    def _log_metrics(self, model_output: dict, x: Tensor, stage: str) -> None:
+        z = model_output["z"]
+        variances = torch.var(z, dim=0)
+        active_dims = torch.sum(variances > 0.01)
+        effective_dim = torch.sum(variances) ** 2 / torch.sum(variances**2)
+
+        encoder_grad_norm = (
+            sum(
+                p.grad.data.norm(2).item() ** 2
+                for n, p in self.named_parameters()
+                if "encoder" in n and p.grad is not None
+            )
+            ** 0.5
+        )
+        decoder_grad_norm = (
+            sum(
+                p.grad.data.norm(2).item() ** 2
+                for n, p in self.named_parameters()
+                if "decoder" in n and p.grad is not None
+            )
+            ** 0.5
+        )
+
+        self.log_dict(
+            {
+                f"loss/{stage}/total": model_output["total_loss"],
+                f"loss/{stage}/reconstruction": model_output["recon_loss"],
+                f"loss/{stage}/kl": model_output["kl_loss"],
+                f"beta/{stage}": self._get_current_beta(),
+                f"latent/active_dims/{stage}": active_dims.float(),
+                f"latent/effective_dim/{stage}": effective_dim,
+                f"latent/utilization/{stage}": active_dims / self._latent_dim,
+                "diagnostics/encoder_grad_norm": encoder_grad_norm,
+                "diagnostics/decoder_grad_norm": decoder_grad_norm,
+                "diagnostics/recon_has_nan": torch.isnan(model_output["recon_x"]).any().float(),
+                "diagnostics/input_has_nan": torch.isnan(x).any().float(),
+                "diagnostics/latent_has_nan": torch.isnan(z).any().float(),
+            },
+            on_step=False,
+            on_epoch=True,
+            logger=True,
+            sync_dist=True,
+        )
+
+        if stage == "val" and self.current_epoch % 10 == 0 and self.trainer.is_global_zero:
+            z_np = z.detach().cpu().numpy()
+            for i in range(min(16, z_np.shape[1])):
+                log_histogram(self.logger, f"latent_distributions/dim_{i}_{stage}", z_np[:, i], self.current_epoch)
+
     def training_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         x = batch["anchor"]
         model_output = self(x)
-        loss = model_output["total_loss"]
-        self.vae_logger.log_enhanced_metrics(
-            lightning_module=self, model_output=model_output, batch=batch, stage="train"
-        )
+        self._log_metrics(model_output, x, "train")
         self._log_step_samples(batch_idx, x, model_output["recon_x"], "train")
-        return loss
+        return model_output["total_loss"]
 
     def validation_step(self, batch: TripletSample, batch_idx: int) -> Tensor:  # noqa: D102
         x = batch["anchor"]
         model_output = self(x)
-        loss = model_output["total_loss"]
-        self.vae_logger.log_enhanced_metrics(lightning_module=self, model_output=model_output, batch=batch, stage="val")
+        self._log_metrics(model_output, x, "val")
         self._log_step_samples(batch_idx, x, model_output["recon_x"], "val")
-        return loss
+        return model_output["total_loss"]
 
     def _log_step_samples(self, batch_idx, original, reconstruction, stage: Literal["train", "val"]):
         if batch_idx < self.log_batches_per_epoch:
@@ -432,22 +485,18 @@ class BetaVaeModule(LightningModule):
             output_list.append(samples)
 
     def _log_samples(self, key: str, samples_list: list):
-        if len(samples_list) > 0:
-            mid_z = samples_list[0]["original"].shape[2] // 2
-            originals = []
-            reconstructions = []
-            for sample in samples_list:
-                orig = sample["original"][:, :, mid_z].numpy()
-                recon = sample["reconstruction"][:, :, mid_z].numpy()
-                originals.extend([orig[i] for i in range(orig.shape[0])])
-                reconstructions.extend([recon[i] for i in range(recon.shape[0])])
-
-            combined = []
-            for orig, recon in zip(originals[:4], reconstructions[:4]):
-                combined.append([orig, recon])
-
-            grid = render_images(combined, cmaps=["gray", "gray"])
-            self.logger.experiment.add_image(key, grid, self.current_epoch, dataformats="HWC")
+        if not self.trainer.is_global_zero or len(samples_list) == 0:
+            return
+        mid_z = samples_list[0]["original"].shape[2] // 2
+        originals = []
+        reconstructions = []
+        for sample in samples_list:
+            orig = sample["original"][:, :, mid_z].numpy()
+            recon = sample["reconstruction"][:, :, mid_z].numpy()
+            originals.extend([orig[i] for i in range(orig.shape[0])])
+            reconstructions.extend([recon[i] for i in range(recon.shape[0])])
+        combined = [[o, r] for o, r in zip(originals[:4], reconstructions[:4])]
+        log_image_grid(self.logger, key, combined, self.current_epoch, cmaps=["gray", "gray"])
 
     def on_train_epoch_end(self) -> None:  # noqa: D102
         super().on_train_epoch_end()
@@ -460,32 +509,72 @@ class BetaVaeModule(LightningModule):
         self.validation_step_outputs = []
 
         if (
-            self.log_enhanced_visualizations
+            self.trainer.is_global_zero
+            and self.log_enhanced_visualizations
             and self.current_epoch % self.log_enhanced_visualizations_frequency == 0
             and self.current_epoch > 0
         ):
             self._log_enhanced_visualizations()
 
+    def _get_decoder(self) -> nn.Module | None:
+        if hasattr(self.model, "decoder"):
+            return self.model.decoder
+        _logger.warning("No decoder found in model, skipping visualization.")
+        return None
+
     def _log_enhanced_visualizations(self):
-        try:
-            val_dataloaders = self.trainer.val_dataloaders
-            if val_dataloaders is None:
-                val_dataloader = None
-            elif isinstance(val_dataloaders, list):
-                val_dataloader = val_dataloaders[0] if val_dataloaders else None
-            else:
-                val_dataloader = val_dataloaders
+        from torchvision.utils import make_grid
 
-            if val_dataloader is None:
-                _logger.warning("No validation dataloader available for visualizations")
-                return
+        decoder = self._get_decoder()
+        if decoder is None:
+            return
 
-            _logger.info(f"Logging enhanced visualizations at epoch {self.current_epoch}")
-            self.vae_logger.log_latent_traversal(lightning_module=self, n_dims=8, n_steps=11)
-            self.vae_logger.log_latent_interpolation(lightning_module=self, n_pairs=3, n_steps=11)
-            self.vae_logger.log_factor_traversal_matrix(lightning_module=self, n_dims=8, n_steps=7)
-        except Exception as e:
-            _logger.error(f"Error logging enhanced visualizations: {e}")
+        _logger.info(f"Logging enhanced visualizations at epoch {self.current_epoch}")
+        self.model.eval()
+        with torch.no_grad():
+            # Latent traversal: vary each dim independently
+            z_base = torch.randn(1, self._latent_dim, device=self.device)
+            for dim in range(min(8, self._latent_dim)):
+                imgs = []
+                for val in np.linspace(-3, 3, 11):
+                    z = z_base.clone()
+                    z[0, dim] = val
+                    recon = decoder(z)
+                    mid = recon.shape[2] // 2
+                    img = recon[0, 0, mid].cpu()
+                    imgs.append((img - img.min()) / (img.max() - img.min() + 1e-8))
+                grid = make_grid(torch.stack(imgs).unsqueeze(1), nrow=11, normalize=True)
+                log_chw_tensor(self.logger, f"latent_traversal/dim_{dim}", grid, self.current_epoch)
+
+            # Latent interpolation: interpolate between random pairs
+            for pair_idx in range(3):
+                z1 = torch.randn(1, self._latent_dim, device=self.device)
+                z2 = torch.randn(1, self._latent_dim, device=self.device)
+                imgs = []
+                for alpha in np.linspace(0, 1, 11):
+                    recon = decoder(alpha * z1 + (1 - alpha) * z2)
+                    mid = recon.shape[2] // 2
+                    img = recon[0, 0, mid].cpu()
+                    imgs.append((img - img.min()) / (img.max() - img.min() + 1e-8))
+                grid = make_grid(torch.stack(imgs).unsqueeze(1), nrow=11, normalize=True)
+                log_chw_tensor(self.logger, f"latent_interpolation/pair_{pair_idx}", grid, self.current_epoch)
+
+            # Factor traversal matrix: all dims × steps in one grid
+            z_base = torch.randn(1, self._latent_dim, device=self.device)
+            rows = []
+            for dim in range(min(8, self._latent_dim)):
+                row = []
+                for step in range(7):
+                    val = -3 + 6 * step / 6
+                    z = z_base.clone()
+                    z[0, dim] = val
+                    recon = decoder(z)
+                    mid = recon.shape[2] // 2
+                    img = recon[0, 0, mid].cpu()
+                    row.append((img - img.min()) / (img.max() - img.min() + 1e-8))
+                rows.append(torch.stack(row))
+            grid = make_grid(torch.cat(rows).unsqueeze(1), nrow=7, normalize=True)
+            log_chw_tensor(self.logger, "factor_traversal_matrix", grid, self.current_epoch)
 
     def configure_optimizers(self):  # noqa: D102
         optimizer = torch.optim.AdamW(self.parameters(), lr=self.lr)

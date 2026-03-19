@@ -24,6 +24,7 @@ __all__ = [
     "CELL_INDEX_GROUPING_COLUMNS",
     "CELL_INDEX_OPS_COLUMNS",
     "CELL_INDEX_TIMELAPSE_COLUMNS",
+    "CellIndex",
     "ChannelMap",
     "ChannelNormStats",
     "DictTransform",
@@ -37,8 +38,8 @@ __all__ = [
     "NormMeta",
     "OneOrSeq",
     "Sample",
+    "SampleMeta",
     "SegmentationSample",
-    "TrackingIndex",
     "TripletSample",
 ]
 
@@ -111,14 +112,39 @@ class ChannelMap(TypedDict):
     target: NotRequired[OneOrSeq[str]]
 
 
-class TrackingIndex(TypedDict):
-    """Tracking index extracted from ultrack result.
+class CellIndex(TypedDict, total=False):
+    """Ultrack tracking index carried in predict-mode batches.
 
-    Potentially collated by the dataloader.
+    All fields optional — presence depends on the source CSV columns.
+    (fov_name, track_id, t) together uniquely identify a cell observation
+    and are the join key back to valid_anchors.
     """
 
     fov_name: OneOrSeq[str]
+    track_id: OneOrSeq[int]
+    t: OneOrSeq[int]
     id: OneOrSeq[int]
+    parent_track_id: OneOrSeq[int]
+    parent_id: OneOrSeq[int]
+    z: OneOrSeq[float]
+    y: OneOrSeq[float]
+    x: OneOrSeq[float]
+
+
+class SampleMeta(TypedDict, total=False):
+    """Biological metadata carried in train-mode batches for sampler debugging.
+
+    Joinable against valid_anchors on (global_track_id, t).
+    """
+
+    experiment: OneOrSeq[str]
+    condition: OneOrSeq[str]
+    microscope: OneOrSeq[str]
+    fov_name: OneOrSeq[str]
+    global_track_id: OneOrSeq[str]
+    t: OneOrSeq[int]
+    hours_post_perturbation: OneOrSeq[float]
+    lineage_id: OneOrSeq[int]
 
 
 class TripletSample(TypedDict):
@@ -127,7 +153,9 @@ class TripletSample(TypedDict):
     anchor: Tensor
     positive: NotRequired[Tensor]
     negative: NotRequired[Tensor]
-    index: NotRequired[TrackingIndex]
+    index: NotRequired[list[CellIndex]]
+    anchor_meta: NotRequired[list[SampleMeta]]
+    positive_meta: NotRequired[list[SampleMeta]]
 
 
 # NOTE: these are the only columns that are allowed for the annotation dataframe.

@@ -26,7 +26,7 @@ except ImportError:
 
 from dynaclr.data.index import MultiExperimentIndex
 from dynaclr.data.tau_sampling import sample_tau
-from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta
+from viscy_data._typing import ULTRACK_INDEX_COLUMNS, NormMeta, SampleMeta
 from viscy_data._utils import _read_norm_meta
 
 _META_COLUMNS = [
@@ -187,6 +187,12 @@ class MultiExperimentTripletDataset(Dataset):
         """Return number of valid anchor samples."""
         return len(self.index.valid_anchors)
 
+    def __getitem__(self, idx: int) -> None:  # noqa: D105
+        raise NotImplementedError(
+            "MultiExperimentTripletDataset only supports batched access via __getitems__. "
+            "Use a batch sampler with collate_fn=lambda x: x."
+        )
+
     def __getitems__(self, indices: list[int]) -> dict:
         """Return a batch of triplet samples for the given indices.
 
@@ -242,7 +248,7 @@ class MultiExperimentTripletDataset(Dataset):
         return sample
 
     @staticmethod
-    def _extract_meta(rows: pd.DataFrame) -> list[dict]:
+    def _extract_meta(rows: pd.DataFrame) -> list[SampleMeta]:
         """Extract lightweight metadata dicts from track rows.
 
         Parameters

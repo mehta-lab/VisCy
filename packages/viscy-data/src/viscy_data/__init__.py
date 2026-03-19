@@ -30,6 +30,7 @@ from viscy_data._typing import (
     LABEL_INFECTION_STATE,
     ULTRACK_INDEX_COLUMNS,
     AnnotationColumns,
+    CellIndex,
     ChannelMap,
     ChannelNormStats,
     DictTransform,
@@ -38,8 +39,8 @@ from viscy_data._typing import (
     NormMeta,
     OneOrSeq,
     Sample,
+    SampleMeta,
     SegmentationSample,
-    TrackingIndex,
     TripletSample,
 )
 
@@ -129,9 +130,10 @@ __all__ = [
     "LevelNormStats",
     "NormMeta",
     "OneOrSeq",
+    "CellIndex",
     "Sample",
+    "SampleMeta",
     "SegmentationSample",
-    "TrackingIndex",
     "TripletSample",
     # Cell index
     "read_cell_index",

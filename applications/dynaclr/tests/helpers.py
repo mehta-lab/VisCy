@@ -214,6 +214,14 @@ class SyntheticTripletDataset(Dataset):
                 "track_id": idx % 3,
                 "t": idx,
             },
+            "anchor_meta": [
+                {
+                    "experiment": "exp_a",
+                    "condition": "control" if idx % 2 == 0 else "treated",
+                    "hours_post_perturbation": float(idx),
+                    "t": idx,
+                }
+            ],
         }
 
 
