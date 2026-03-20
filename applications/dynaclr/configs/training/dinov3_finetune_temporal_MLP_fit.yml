@@ -78,7 +78,7 @@ model:
     log_batches_per_epoch: 3
     log_samples_per_batch: 3
     log_embeddings_every_n_epochs: 10
-    pca_color_key: condition
+    pca_color_keys: [condition, hours_post_perturbation]
     example_input_array_shape: [1, 1, 1, 160, 160]
 data:
   class_path: dynaclr.data.datamodule.MultiExperimentDataModule
