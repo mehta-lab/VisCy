@@ -12,12 +12,14 @@ from __future__ import annotations
 
 import json
 import logging
+from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
 import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from iohub.ngff import open_ome_zarr
+from tqdm import tqdm
 
 from viscy_data._typing import (
     CELL_INDEX_CORE_COLUMNS,
@@ -199,7 +201,10 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
     if "parent_track_id" not in tracks.columns:
         return tracks
 
-    for (exp, fov), group in tracks.groupby(["experiment", "fov"]):
+    lineage_series = tracks["lineage_id"].copy()
+
+    groups = list(tracks.groupby(["experiment", "fov"]))
+    for (exp, fov), group in tqdm(groups, desc="Reconstructing lineages", unit="fov"):
         tid_to_gtid: dict[int, str] = dict(zip(group["track_id"], group["global_track_id"]))
 
         parent_map: dict[str, str] = {}
@@ -216,11 +221,10 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
                 current = parent_map[current]
             return current
 
-        mask = (tracks["experiment"] == exp) & (tracks["fov"] == fov)
-        for gtid in group["global_track_id"].unique():
-            root = _find_root(gtid)
-            tracks.loc[mask & (tracks["global_track_id"] == gtid), "lineage_id"] = root
+        gtid_to_root = {gtid: _find_root(gtid) for gtid in group["global_track_id"].unique()}
+        lineage_series.loc[group.index] = group["global_track_id"].map(gtid_to_root)
 
+    tracks["lineage_id"] = lineage_series
     return tracks
 
 
@@ -229,11 +233,98 @@ def _reconstruct_lineage(tracks: pd.DataFrame) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 
 
+def _build_experiment_tracks(
+    exp: object,
+    collection_source_channels: list,
+    include_wells: list[str] | None,
+    exclude_fovs: list[str] | None,
+) -> pd.DataFrame:
+    """Build track rows for a single experiment.
+
+    Parameters
+    ----------
+    exp :
+        Experiment object from collection.
+    collection_source_channels :
+        Source channel list from collection.
+    include_wells : list[str] | None
+        Well filter passed from caller.
+    exclude_fovs : list[str] | None
+        FOV exclusion list passed from caller.
+
+    Returns
+    -------
+    pd.DataFrame
+        Track rows for this experiment.
+    """
+    condition_wells = exp.condition_wells
+    declared_wells = {w for wells in condition_wells.values() for w in wells}
+
+    all_exclude = set(exp.exclude_fovs)
+    if exclude_fovs is not None:
+        all_exclude.update(exclude_fovs)
+
+    source_channel_names = [
+        sc.per_experiment[exp.name] for sc in collection_source_channels if exp.name in sc.per_experiment
+    ]
+    fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
+
+    exp_tracks: list[pd.DataFrame] = []
+
+    with open_ome_zarr(exp.data_path, mode="r") as plate:
+        fovs = list(plate.positions())
+
+    for _pos_path, position in tqdm(fovs, desc=exp.name, leave=False, unit="fov"):
+        fov_name = position.zgroup.name.strip("/")
+        parts = fov_name.split("/")
+        well_name = "/".join(parts[:2])
+
+        if declared_wells and well_name not in declared_wells:
+            continue
+        if include_wells is not None and well_name not in include_wells:
+            continue
+        if all_exclude and fov_name in all_exclude:
+            continue
+
+        condition = _resolve_condition(condition_wells, well_name)
+
+        tracks_dir = Path(exp.tracks_path) / fov_name
+        csv_files = list(tracks_dir.glob("*.csv"))
+        if not csv_files:
+            raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
+        if len(csv_files) > 1:
+            raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
+        tracks_df = pd.read_csv(csv_files[0])
+
+        tracks_df["cell_id"] = (
+            exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str) + "_" + tracks_df["t"].astype(str)
+        )
+        tracks_df["experiment"] = exp.name
+        tracks_df["store_path"] = str(exp.data_path)
+        tracks_df["tracks_path"] = str(exp.tracks_path)
+        tracks_df["fov"] = fov_name
+        tracks_df["well"] = well_name
+        tracks_df["condition"] = condition
+        tracks_df["channel_name"] = fluorescence_ch
+        tracks_df["source_channels"] = json.dumps(source_channel_names)
+        tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
+        tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
+        tracks_df["microscope"] = exp.microscope
+
+        if "z" not in tracks_df.columns:
+            tracks_df["z"] = 0
+
+        exp_tracks.append(tracks_df)
+
+    return pd.concat(exp_tracks, ignore_index=True) if exp_tracks else pd.DataFrame()
+
+
 def build_timelapse_cell_index(
     collection_path: str | Path,
     output_path: str | Path,
     include_wells: list[str] | None = None,
     exclude_fovs: list[str] | None = None,
+    num_workers: int = -1,
 ) -> pd.DataFrame:
     """Build a cell index parquet from a collection YAML.
 
@@ -247,84 +338,54 @@ def build_timelapse_cell_index(
         If given, only include positions from these wells (e.g. ``["A/1"]``).
     exclude_fovs : list[str] | None
         If given, skip these FOV paths (e.g. ``["A/1/0"]``).
+    num_workers : int
+        Number of parallel worker processes. ``-1`` (default) uses all
+        available CPUs. ``1`` runs sequentially.
 
     Returns
     -------
     pd.DataFrame
         The written cell index.
     """
+    import os
+
     from viscy_data.collection import load_collection
 
     collection = load_collection(collection_path)
+    experiments = collection.experiments
+    n_workers = os.cpu_count() if num_workers == -1 else num_workers
+
+    print(f"Building cell index: {len(experiments)} experiments, {n_workers} workers")
+
     all_tracks: list[pd.DataFrame] = []
 
-    for exp in collection.experiments:
-        condition_wells = exp.condition_wells
-        declared_wells = {w for wells in condition_wells.values() for w in wells}
-
-        # Merge collection-level exclude_fovs
-        all_exclude = set(exp.exclude_fovs)
-        if exclude_fovs is not None:
-            all_exclude.update(exclude_fovs)
-
-        with open_ome_zarr(exp.data_path, mode="r") as plate:
-            for _pos_path, position in plate.positions():
-                fov_name = position.zgroup.name.strip("/")
-                parts = fov_name.split("/")
-                well_name = "/".join(parts[:2])
-
-                if declared_wells and well_name not in declared_wells:
-                    continue
-                if include_wells is not None and well_name not in include_wells:
-                    continue
-                if all_exclude and fov_name in all_exclude:
-                    continue
-
-                # Resolve condition
-                condition = _resolve_condition(condition_wells, well_name)
-
-                # Find tracking CSV
-                tracks_dir = Path(exp.tracks_path) / fov_name
-                csv_files = list(tracks_dir.glob("*.csv"))
-                if not csv_files:
-                    raise FileNotFoundError(f"No tracking CSV in {tracks_dir}")
-                if len(csv_files) > 1:
-                    raise ValueError(f"Expected exactly one tracking CSV in {tracks_dir}, found: {csv_files}")
-                tracks_df = pd.read_csv(csv_files[0])
-
-                # Derive source_channels from collection source_channels
-                source_channel_names = [
-                    sc.per_experiment[exp.name] for sc in collection.source_channels if exp.name in sc.per_experiment
-                ]
-                fluorescence_ch = source_channel_names[1] if len(source_channel_names) > 1 else ""
-
-                # Enrich
-                tracks_df["cell_id"] = (
-                    exp.name
-                    + "_"
-                    + fov_name
-                    + "_"
-                    + tracks_df["track_id"].astype(str)
-                    + "_"
-                    + tracks_df["t"].astype(str)
+    if n_workers == 1:
+        for exp in tqdm(experiments, desc="Experiments", unit="exp"):
+            df = _build_experiment_tracks(exp, collection.source_channels, include_wells, exclude_fovs)
+            if not df.empty:
+                all_tracks.append(df)
+                print(f"  {exp.name}: {len(df):,} rows")
+    else:
+        futures = {}
+        with ProcessPoolExecutor(max_workers=n_workers) as executor:
+            for exp in experiments:
+                future = executor.submit(
+                    _build_experiment_tracks,
+                    exp,
+                    collection.source_channels,
+                    include_wells,
+                    exclude_fovs,
                 )
-                tracks_df["experiment"] = exp.name
-                tracks_df["store_path"] = str(exp.data_path)
-                tracks_df["tracks_path"] = str(exp.tracks_path)
-                tracks_df["fov"] = fov_name
-                tracks_df["well"] = well_name
-                tracks_df["condition"] = condition
-                tracks_df["channel_name"] = fluorescence_ch
-                tracks_df["source_channels"] = json.dumps(source_channel_names)
-                tracks_df["global_track_id"] = exp.name + "_" + fov_name + "_" + tracks_df["track_id"].astype(str)
-                tracks_df["hours_post_perturbation"] = exp.start_hpi + tracks_df["t"] * exp.interval_minutes / 60.0
-                tracks_df["microscope"] = exp.microscope
+                futures[future] = exp.name
 
-                # Ensure z column exists
-                if "z" not in tracks_df.columns:
-                    tracks_df["z"] = 0
-
-                all_tracks.append(tracks_df)
+            with tqdm(total=len(futures), desc="Experiments", unit="exp") as pbar:
+                for future in as_completed(futures):
+                    exp_name = futures[future]
+                    df = future.result()
+                    if not df.empty:
+                        all_tracks.append(df)
+                        print(f"  {exp_name}: {len(df):,} rows")
+                    pbar.update(1)
 
     if not all_tracks:
         df = pd.DataFrame(columns=list(_ALL_COLUMNS))
@@ -332,11 +393,11 @@ def build_timelapse_cell_index(
         df = pd.concat(all_tracks, ignore_index=True)
         df = _reconstruct_lineage(df)
 
-    # Set OPS columns to None
     for col in CELL_INDEX_OPS_COLUMNS:
         df[col] = None
 
     write_cell_index(df, output_path)
+    print(f"Wrote {len(df):,} rows to {output_path}")
     return df
 
 

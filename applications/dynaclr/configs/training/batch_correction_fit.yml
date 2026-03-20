@@ -61,7 +61,7 @@ model:
     # contamination when batches mix samples from different microscopes).
     # in_dims must match ContrastiveEncoder.embedding_dim (default 768).
     projection:
-      class_path: viscy_models.contrastive.ProjectionMLP
+      class_path: viscy_models.components.heads.MLP
       init_args:
         in_dims: 768
         hidden_dims: 768

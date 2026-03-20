@@ -30,7 +30,7 @@ class VisCyCLI(LightningCLI):
         return subcommands
 
     def add_arguments_to_parser(self, parser) -> None:
-        """Set default logger and progress bar."""
+        """Set default logger and progress bar, link run dir to default_root_dir."""
         defaults = {
             "trainer.logger": lazy_instance(
                 TensorBoardLogger,
@@ -42,6 +42,8 @@ class VisCyCLI(LightningCLI):
         if not sys.stdout.isatty():
             defaults["trainer.callbacks"] = [lazy_instance(TQDMProgressBar, refresh_rate=10)]
         parser.set_defaults(defaults)
+        parser.link_arguments("trainer.default_root_dir", "trainer.logger.init_args.save_dir")
+        parser.link_arguments("trainer.default_root_dir", "trainer.callbacks.init_args.dirpath")
 
     def _parse_ckpt_path(self) -> None:
         try:
@@ -59,7 +61,7 @@ def _setup_environment() -> None:
 
 
 def main() -> None:
-    """Main Lightning CLI entry point.
+    """Run the Lightning CLI entry point.
 
     Parse log level and set TF32 precision.
     Set default random seed to 42.

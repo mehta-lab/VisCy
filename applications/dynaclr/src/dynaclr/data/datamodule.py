@@ -159,7 +159,7 @@ class MultiExperimentDataModule(LightningDataModule):
         bag_of_channels: bool = False,
         # Augmentation hyperparameters
         channel_dropout_channels: list[int] | None = None,
-        channel_dropout_prob: float = 0.5,
+        channel_dropout_prob: float = 0.0,
         normalizations: list[MapTransform] | None = None,
         augmentations: list[MapTransform] | None = None,
         # Loss hyperparameters (informational for CLI discoverability)

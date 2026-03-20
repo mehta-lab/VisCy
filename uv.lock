@@ -5768,6 +5768,7 @@ dependencies = [
     { name = "pyarrow" },
     { name = "pydantic" },
     { name = "torch" },
+    { name = "tqdm" },
     { name = "zarr" },
 ]
 
@@ -5824,6 +5825,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.10" },
     { name = "torchvision", marker = "extra == 'all'" },
     { name = "torchvision", marker = "extra == 'livecell'" },
+    { name = "tqdm" },
     { name = "zarr" },
 ]
 provides-extras = ["all", "livecell", "mmap", "triplet"]
