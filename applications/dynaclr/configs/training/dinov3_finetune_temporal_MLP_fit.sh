@@ -5,20 +5,22 @@
 #SBATCH --ntasks-per-node=1
 #SBATCH --gres=gpu:1
 #SBATCH --partition=gpu
-#SBATCH --cpus-per-task=14
-#SBATCH --mem-per-cpu=15G
-#SBATCH --time=0-20:00:00
+#SBATCH --cpus-per-task=16
+#SBATCH --mem-per-cpu=4G
+#SBATCH --time=0-5:00:00
+#SBATCH --constraint=a100|a40|a6000|h100
 
 # ── Run identity ─────────────────────────────────────────────────────────────
 # Model naming convention: {ModelType}-{Dimensionality}-{Features}
 # DINOv3-finetune: frozen backbone + trainable MLP adapter
 RUN_NAME="DINOv3-temporal-MLP-2D-BagOfChannels"
-RUN_DIR="/hpc/projects/intracellular_dashboard/organelle_dynamics/models/${RUN_NAME}"
+VERSION="v1"
+RUN_DIR="/hpc/projects/intracellular_dashboard/organelle_dynamics/models/${RUN_NAME}/${VERSION}"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 WORKSPACE_DIR=/hpc/mydata/eduardo.hirata/repos/viscy
 
-CONFIG="$(dirname "$0")/dinov3_finetune_temporal_MLP_fit.yml"
+CONFIG="/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/dinov3_finetune_temporal_MLP_fit.yml"
 
 # ── Environment ───────────────────────────────────────────────────────────────
 export PYTHONNOUSERSITE=1   # prevent ~/.local from shadowing conda/uv env
@@ -36,4 +38,4 @@ cat "$CONFIG"
 
 # ── Launch ────────────────────────────────────────────────────────────────────
 uv run --project "$WORKSPACE_DIR" --package viscy-utils viscy fit \
-  --config "$CONFIG"
+  --config "$CONFIG" \

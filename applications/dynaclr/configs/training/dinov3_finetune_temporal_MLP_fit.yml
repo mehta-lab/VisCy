@@ -35,8 +35,9 @@ trainer:
     class_path: lightning.pytorch.loggers.WandbLogger
     init_args:
       entity: computational_imaging
-      project: dynaclr
-      name: DINOv3-temporal-MLP-2D-BagOfChannels-v1
+      project: DINOv3-temporal-MLP-2D-BagOfChannels-v1
+      name: stratify-by-condition-and-organelle
+      save_dir: /hpc/projects/intracellular_dashboard/organelle_dynamics/models/DINOv3-temporal-MLP-2D-BagOfChannels/v1
   callbacks:
     - class_path: lightning.pytorch.callbacks.LearningRateMonitor
       init_args:
@@ -85,29 +86,37 @@ data:
     cell_index_path: /hpc/projects/intracellular_dashboard/organelle_dynamics/models/DINOv3-temporal-MLP-2D-BagOfChannels/DynaCLR-2D-BagOfChannels-v3.parquet
     collection_path: /home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/collections/DynaCLR-2D-BagOfChannels-v3.yml
     z_window: 1  # single focal slice — DINOv3 is 2D
-    yx_patch_size: [384, 384]
+    yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
     val_experiments: []
     tau_range: [0.5, 2.0]
     tau_decay_rate: 0.0
     bag_of_channels: true  # one channel per sample, key is "channel"
     batch_size: 256  # larger batch OK — no backbone gradients
-    num_workers: 12
+    num_workers: 1
     # Sampling axes
     experiment_aware: false
-    stratify_by: condition
+    stratify_by: [condition]
     leaky: 0.0
     temporal_enrichment: false
     # temporal_window_hours: 2.0
     # temporal_global_fraction: 0.3
     # Augmentation — bag-of-channels uses "channel" key
     normalizations:
-      - class_path: viscy_transforms.NormalizeSampled
+      # - class_path: viscy_transforms.NormalizeSampled
+      #   init_args:
+      #     keys: [channel]
+      #     level: timepoint_statistics
+      #     subtrahend: mean
+      #     divisor: std
+      - class_path: viscy_transforms.ScaleIntensityRangePercentilesd
         init_args:
           keys: [channel]
-          level: fov_statistics
-          subtrahend: median
-          divisor: iqr
+          lower: 50
+          upper: 99
+          b_min: 0.0
+          b_max: 1.0
+          clip: true
     augmentations:
       - class_path: viscy_transforms.BatchedRandAffined
         init_args:
@@ -139,6 +148,6 @@ data:
           prob: 0.5
           mean: 0.0
           std: 0.2
-    hcl_beta: 0.5
+    # hcl_beta: 0.5
     cache_pool_bytes: 0
     seed: 0
