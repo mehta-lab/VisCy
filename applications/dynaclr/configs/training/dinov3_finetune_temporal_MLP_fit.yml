@@ -44,7 +44,7 @@ trainer:
         logging_interval: step
     - class_path: lightning.pytorch.callbacks.ModelCheckpoint
       init_args:
-        monitor: loss/train
+        monitor: loss/val
         every_n_epochs: 1
         save_top_k: 4
         save_last: true
@@ -88,7 +88,7 @@ data:
     z_window: 1  # single focal slice — DINOv3 is 2D
     yx_patch_size: [256, 256]
     final_yx_patch_size: [160, 160]
-    val_experiments: []
+    split_ratio: 0.8  # 80% train / 20% val FOV split
     tau_range: [0.5, 2.0]
     tau_decay_rate: 0.0
     bag_of_channels: true  # one channel per sample, key is "channel"

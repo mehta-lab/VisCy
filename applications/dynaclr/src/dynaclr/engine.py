@@ -100,8 +100,8 @@ class ContrastiveModule(LightningModule):
         self.log(
             f"loss/{stage}",
             loss.to(self.device),
-            on_step=True,
-            on_epoch=True,
+            on_step=(stage == "train"),
+            on_epoch=(stage == "val"),
             prog_bar=True,
             logger=True,
             sync_dist=True,
