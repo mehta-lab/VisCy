@@ -41,6 +41,10 @@ data:
 | VSCyto3D | Phase3D | Nuclei + Membrane | FCMAE / UNeXt2 |
 | VSCyto2D | Phase2D | Nuclei + Membrane | UNeXt2 |
 | VSNeuromast | DIC | Multiple fluorescent markers | UNeXt2 |
+| FNet3D | Transmitted light | Fluorescence | Unet3d (Ounkomol et al. 2018) |
+
+> **FNet3D note:** All spatial dimensions (Z, Y, X) must be divisible by `2^depth`
+> (default depth=4 requires divisibility by 16). See `examples/configs/fit_fnet.yml`.
 
 ## References
 

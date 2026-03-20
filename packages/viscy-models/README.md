@@ -60,6 +60,7 @@ from viscy_models import BetaVae25D, BetaVaeMonai
 | `FullyConvolutionalMAE` | Fully convolutional masked autoencoder for self-supervised pretraining |
 | `Unet2d` | Classic 2D UNet with configurable depth and residual connections |
 | `Unet25d` | 2.5D UNet with learned 3D-to-2D compression via skip interruption |
+| `Unet3d` | 3D U-Net (F-Net, Ounkomol et al. 2018) with recursive encoder-decoder. All spatial dims must be divisible by `2^depth`. |
 
 ### Contrastive Encoders (`viscy_models.contrastive`)
 

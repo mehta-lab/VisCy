@@ -1,0 +1,67 @@
+# F-Net (Ounkomol et al. 2018) virtual staining training configuration
+# Usage: python -m cytoland fit --config fit_fnet.yml
+# See: https://lightning.ai/docs/pytorch/stable/cli/lightning_cli_advanced.html
+#
+# Note: F-Net downsamples Z/Y/X by 2 at each level. With depth=4,
+# all spatial dimensions must be divisible by 2^4 = 16.
+
+seed_everything: 42
+trainer:
+  accelerator: gpu
+  strategy: ddp
+  devices: 4
+  num_nodes: 1
+  precision: 32-true
+  logger:
+    class_path: lightning.pytorch.loggers.TensorBoardLogger
+    init_args:
+      save_dir: #TODO point to the path to save the logs
+      version: #TODO point to the version name
+      log_graph: True
+  callbacks:
+    - class_path: lightning.pytorch.callbacks.LearningRateMonitor
+      init_args:
+        logging_interval: step
+    - class_path: lightning.pytorch.callbacks.ModelCheckpoint
+      init_args:
+        monitor: loss/validate
+        every_n_epochs: 1
+        save_top_k: 4
+        save_last: true
+  fast_dev_run: false
+  max_epochs: 100
+  log_every_n_steps: 10
+  enable_checkpointing: true
+  inference_mode: true
+  use_distributed_sampler: true
+model:
+  class_path: cytoland.engine.VSUNet
+  init_args:
+    architecture: FNet3D
+    model_config:
+      in_channels: 1
+      out_channels: 1
+      depth: 4
+      mult_chan: 32
+      in_stack_depth: 32
+    lr: 0.001
+    schedule: Constant
+data:
+  class_path: viscy_data.hcs.HCSDataModule
+  init_args:
+    data_path: #TODO point to the path to the data
+    source_channel: Phase3D
+    target_channel: Fluorescence
+    z_window_size: 32
+    batch_size: 24
+    num_workers: 8
+    yx_patch_size:
+      - 64
+      - 64
+    normalizations:
+      - class_path: viscy_transforms.NormalizeSampled
+        init_args:
+          keys: [Phase3D]
+          level: fov_statistics
+          subtrahend: mean
+          divisor: std

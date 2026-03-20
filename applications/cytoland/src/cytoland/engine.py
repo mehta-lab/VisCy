@@ -28,7 +28,7 @@ from torchmetrics.functional import (
 from torchmetrics.functional.segmentation import dice_score
 
 from viscy_data import CombinedDataModule, GPUTransformDataModule, Sample
-from viscy_models import FullyConvolutionalMAE, Unet2d, Unet25d, UNeXt2
+from viscy_models import FullyConvolutionalMAE, Unet2d, Unet3d, Unet25d, UNeXt2
 from viscy_utils.callbacks.prediction_writer import _blend_in
 from viscy_utils.evaluation.metrics import mean_average_precision
 from viscy_utils.log_images import detach_sample, render_images
@@ -37,6 +37,7 @@ _UNET_ARCHITECTURE = {
     "2D": Unet2d,
     "UNeXt2": UNeXt2,
     "2.5D": Unet25d,
+    "FNet3D": Unet3d,
     "fcmae": FullyConvolutionalMAE,
     "UNeXt2_2D": FullyConvolutionalMAE,
 }
@@ -79,7 +80,7 @@ class VSUNet(LightningModule):
 
     Parameters
     ----------
-    architecture : Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"]
+    architecture : Literal["2D", "UNeXt2", "2.5D", "FNet3D", "fcmae", "UNeXt2_2D"]
         Architecture type to use.
     model_config : dict
         Model configuration dictionary.
@@ -114,7 +115,7 @@ class VSUNet(LightningModule):
 
     def __init__(
         self,
-        architecture: Literal["2D", "UNeXt2", "2.5D", "3D", "fcmae", "UNeXt2_2D"],
+        architecture: Literal["2D", "UNeXt2", "2.5D", "FNet3D", "fcmae", "UNeXt2_2D"],
         model_config: dict | None = None,
         loss_function: nn.Module | None = None,
         lr: float = 1e-3,
@@ -455,7 +456,10 @@ class VSUNet(LightningModule):
         The inverse of this transform crops the prediction to original shape.
         """
         down_factor = 2**self.model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        if getattr(self.model, "downsamples_z", False):
+            self._predict_pad = DivisiblePad((0, down_factor, down_factor, down_factor))
+        else:
+            self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
 
     def configure_optimizers(self):
         """Configure optimizer and learning rate scheduler."""
@@ -549,7 +553,10 @@ class AugmentedPredictionVSUNet(LightningModule):
     ) -> None:
         super().__init__()
         down_factor = 2**model.num_blocks
-        self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
+        if getattr(model, "downsamples_z", False):
+            self._predict_pad = DivisiblePad((0, down_factor, down_factor, down_factor))
+        else:
+            self._predict_pad = DivisiblePad((0, 0, down_factor, down_factor))
         self.model = model
         self._forward_transforms = forward_transforms or [_identity]
         self._inverse_transforms = inverse_transforms or [_identity]

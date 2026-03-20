@@ -48,6 +48,40 @@ def test_vsunet_forward(synthetic_batch):
     assert output.shape[1] == 1  # out_channels
 
 
+def test_fnet3d_init():
+    """Verify VSUNet instantiates with FNet3D architecture."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    assert model.model is not None
+    assert model.model.num_blocks == 1
+    assert model.model.downsamples_z is True
+
+
+def test_fnet3d_forward():
+    """Verify FNet3D forward pass produces correct output shape."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    model.eval()
+    x = torch.randn(2, 1, 4, 16, 16)
+    with torch.no_grad():
+        y = model(x)
+    assert y.shape == (2, 1, 4, 16, 16)
+
+
+def test_fnet3d_predict_start():
+    """Verify on_predict_start works with FNet3D (requires num_blocks)."""
+    model = VSUNet(
+        architecture="FNet3D",
+        model_config={"in_channels": 1, "out_channels": 1, "depth": 1, "mult_chan": 8, "in_stack_depth": 4},
+    )
+    model.on_predict_start()
+    assert model._predict_pad is not None
+
+
 def test_vsunet_state_dict_keys():
     """State dict key regression test for checkpoint compatibility."""
     model = VSUNet(
