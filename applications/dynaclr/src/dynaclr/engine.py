@@ -41,7 +41,7 @@ class ContrastiveModule(LightningModule):
         log_batches_per_epoch: int = 8,
         log_samples_per_batch: int = 1,
         log_embeddings_every_n_epochs: int | None = 10,
-        pca_color_key: str | None = "condition",
+        pca_color_keys: list[str] | str | None = "condition",
         log_negative_metrics_every_n_epochs: int = 2,
         example_input_array_shape: Sequence[int] = (1, 2, 15, 256, 256),
         ckpt_path: str | None = None,
@@ -61,7 +61,9 @@ class ContrastiveModule(LightningModule):
         self.training_step_outputs = []
         self.validation_step_outputs = []
         self.log_embeddings_every_n_epochs = log_embeddings_every_n_epochs
-        self.pca_color_key = pca_color_key
+        if isinstance(pca_color_keys, str):
+            pca_color_keys = [pca_color_keys]
+        self.pca_color_keys = pca_color_keys
         self.log_negative_metrics_every_n_epochs = log_negative_metrics_every_n_epochs
         self._embedding_outputs: list[tuple[Tensor, list]] = []
         self.freeze_backbone = freeze_backbone
@@ -192,7 +194,7 @@ class ContrastiveModule(LightningModule):
         fig = pca_pairplot(
             embeddings_np,
             meta,
-            color_key=self.pca_color_key,
+            color_keys=self.pca_color_keys,
             n_components=n_components,
             title=f"{tag} PCA pairplot — epoch {self.current_epoch}",
         )
