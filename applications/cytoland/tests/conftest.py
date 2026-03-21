@@ -79,6 +79,22 @@ def reference_zarr_path():
 
 
 @pytest.fixture
+def synth_dims():
+    """Synthetic data dimensions shared across tests."""
+    return {
+        "b": SYNTH_B,
+        "c": SYNTH_C,
+        "d": SYNTH_D,
+        "h": SYNTH_H,
+        "w": SYNTH_W,
+        "fcmae_h": FCMAE_H,
+        "fcmae_w": FCMAE_W,
+        "mixed_loss_h": MIXED_LOSS_H,
+        "mixed_loss_w": MIXED_LOSS_W,
+    }
+
+
+@pytest.fixture
 def synthetic_batch():
     """Create a synthetic batch dict matching the Sample type."""
     return {

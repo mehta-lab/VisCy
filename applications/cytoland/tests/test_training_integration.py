@@ -20,23 +20,17 @@ from lightning.pytorch.loggers import TensorBoardLogger
 from cytoland.engine import FcmaeUNet, MaskedMSELoss, VSUNet
 from viscy_utils.losses import MixedLoss
 
-SYNTH_D = 5
-SYNTH_H = 64
-SYNTH_W = 64
-MIXED_LOSS_H = 192
-MIXED_LOSS_W = 192
-
 # ---------------------------------------------------------------------------
 # Synthetic tests (CPU, always run)
 # ---------------------------------------------------------------------------
 
 
-def test_vsunet_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
+def test_vsunet_fast_dev_run(tmp_path, _SyntheticHCSDataModule, synth_dims):
     """VSUNet + UNeXt2 + MSELoss trains for 1 batch."""
     seed_everything(42)
     module = VSUNet(
         architecture="UNeXt2",
-        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": SYNTH_D},
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
         log_batches_per_epoch=1,
     )
     trainer = Trainer(
@@ -51,12 +45,12 @@ def test_vsunet_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
     assert trainer.state.status == "finished"
 
 
-def test_vsunet_mixed_loss_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
+def test_vsunet_mixed_loss_fast_dev_run(tmp_path, _SyntheticHCSDataModule, synth_dims):
     """VSUNet + UNeXt2 + MixedLoss (L1 + MS-DSSIM) trains for 1 batch."""
     seed_everything(42)
     module = VSUNet(
         architecture="UNeXt2",
-        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": SYNTH_D},
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
         loss_function=MixedLoss(l1_alpha=0.5, ms_dssim_alpha=0.5),
         log_batches_per_epoch=1,
     )
@@ -70,17 +64,17 @@ def test_vsunet_mixed_loss_fast_dev_run(tmp_path, _SyntheticHCSDataModule):
     # 192x192 spatial needed: MS-SSIM kernel 11x11, 5 scales → spatial/16 >= 11.
     trainer.fit(
         module,
-        datamodule=_SyntheticHCSDataModule(height=MIXED_LOSS_H, width=MIXED_LOSS_W),
+        datamodule=_SyntheticHCSDataModule(height=synth_dims["mixed_loss_h"], width=synth_dims["mixed_loss_w"]),
     )
     assert trainer.state.finished is True
     assert trainer.state.status == "finished"
 
 
-def test_fcmae_pretrain_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule):
+def test_fcmae_pretrain_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule, synth_dims):
     """FcmaeUNet FCMAE pretraining (MaskedMSELoss) trains for 1 batch."""
     seed_everything(42)
     module = FcmaeUNet(
-        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": SYNTH_D},
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
         loss_function=MaskedMSELoss(),
         fit_mask_ratio=0.5,
         log_batches_per_epoch=1,
@@ -97,14 +91,14 @@ def test_fcmae_pretrain_fast_dev_run(tmp_path, _make_synthetic_combined_datamodu
     assert trainer.state.status == "finished"
 
 
-def test_fcmae_finetune_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule):
+def test_fcmae_finetune_fast_dev_run(tmp_path, _make_synthetic_combined_datamodule, synth_dims):
     """FcmaeUNet supervised fine-tuning (MSELoss) trains for 1 batch."""
     seed_everything(42)
     module = FcmaeUNet(
         model_config={
             "in_channels": 1,
             "out_channels": 1,
-            "in_stack_depth": SYNTH_D,
+            "in_stack_depth": synth_dims["d"],
             "pretraining": False,
         },
         log_batches_per_epoch=1,
@@ -126,24 +120,24 @@ def test_fcmae_finetune_fast_dev_run(tmp_path, _make_synthetic_combined_datamodu
 # ---------------------------------------------------------------------------
 
 
-def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
+def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
     """VSUNet + real HCSDataModule end-to-end training for 1 batch."""
     from viscy_data.hcs import HCSDataModule
 
     seed_everything(42)
     module = VSUNet(
         architecture="UNeXt2",
-        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": SYNTH_D},
+        model_config={"in_channels": 1, "out_channels": 1, "in_stack_depth": synth_dims["d"]},
         log_batches_per_epoch=1,
     )
     datamodule = HCSDataModule(
         data_path=str(tiny_hcs_zarr),
         source_channel="Phase3D",
         target_channel="Fluorescence",
-        z_window_size=SYNTH_D,
+        z_window_size=synth_dims["d"],
         batch_size=2,
         num_workers=0,
-        yx_patch_size=(SYNTH_H, SYNTH_W),
+        yx_patch_size=(synth_dims["h"], synth_dims["w"]),
     )
     trainer = Trainer(
         fast_dev_run=True,
@@ -157,7 +151,7 @@ def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     assert trainer.state.status == "finished"
 
 
-def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
+def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr, synth_dims):
     """FcmaeUNet + real CachedOmeZarrDataModule + CombinedDataModule for 1 batch."""
     from monai.transforms import Decollated
 
@@ -185,7 +179,7 @@ def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
         model_config={
             "in_channels": 1,
             "out_channels": 1,
-            "in_stack_depth": SYNTH_D,
+            "in_stack_depth": synth_dims["d"],
             "pretraining": False,
         },
         log_batches_per_epoch=1,

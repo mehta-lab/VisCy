@@ -9,17 +9,15 @@ from torch import nn
 from dynaclr.engine import ContrastiveModule
 from viscy_utils.callbacks import EmbeddingSnapshotCallback
 
-SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W = 1, 1, 4, 4
-
 
 @pytest.fixture
-def _make_module(_SimpleEncoder):
+def _make_module(_SimpleEncoder, synth_dims):
     def factory():
         return ContrastiveModule(
             encoder=_SimpleEncoder(),
             loss_function=nn.TripletMarginLoss(margin=0.5),
             lr=1e-3,
-            example_input_array_shape=(1, SYNTH_C, SYNTH_D, SYNTH_H, SYNTH_W),
+            example_input_array_shape=(1, synth_dims["c"], synth_dims["d"], synth_dims["h"], synth_dims["w"]),
         )
 
     return factory
@@ -74,7 +72,7 @@ def test_snapshot_contains_features_and_projections(tmp_path, _make_module, _Syn
     assert "fov_name" in adata.obs.columns
 
 
-def test_snapshot_stores_images(tmp_path, _make_module, _SyntheticTripletDataModule):
+def test_snapshot_stores_images(tmp_path, _make_module, _SyntheticTripletDataModule, synth_dims):
     """When store_images=True, mid-Z patches are saved in obsm."""
     seed_everything(42)
     snapshot_dir = tmp_path / "snapshots"
@@ -96,9 +94,9 @@ def test_snapshot_stores_images(tmp_path, _make_module, _SyntheticTripletDataMod
     adata = ad.read_zarr(snapshot_dir / "epoch_0.zarr")
     assert "X_images" in adata.obsm
     image_shape = list(adata.uns["image_shape_cyx"])
-    assert image_shape == [SYNTH_C, SYNTH_H, SYNTH_W]
+    assert image_shape == [synth_dims["c"], synth_dims["h"], synth_dims["w"]]
     images = adata.obsm["X_images"].reshape(-1, *image_shape)
-    assert images.shape == (4, SYNTH_C, SYNTH_H, SYNTH_W)
+    assert images.shape == (4, synth_dims["c"], synth_dims["h"], synth_dims["w"])
 
 
 def test_snapshot_with_pca(tmp_path, _make_module, _SyntheticTripletDataModule):

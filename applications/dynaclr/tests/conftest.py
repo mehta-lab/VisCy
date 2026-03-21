@@ -319,6 +319,18 @@ def annotated_adata_zarr(annotated_adata, tmp_path) -> dict:
 
 
 @pytest.fixture
+def synth_dims():
+    """Synthetic tensor dimensions shared across unit tests."""
+    return {"c": SYNTH_C, "d": SYNTH_D, "h": SYNTH_H, "w": SYNTH_W, "flat": SYNTH_FLAT_DIM}
+
+
+@pytest.fixture
+def hcs_dims():
+    """Synthetic HCS data dimensions."""
+    return {"img_h": IMG_H, "img_w": IMG_W, "n_t": N_T, "n_z": N_Z, "n_tracks": N_TRACKS}
+
+
+@pytest.fixture
 def simple_encoder():
     return SimpleEncoder()
 
