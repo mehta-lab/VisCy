@@ -1051,7 +1051,7 @@ dependencies = [
     { name = "viscy-data", extra = ["triplet"] },
     { name = "viscy-models" },
     { name = "viscy-transforms" },
-    { name = "viscy-utils" },
+    { name = "viscy-utils", extra = ["eval"] },
 ]
 
 [package.optional-dependencies]
@@ -1103,7 +1103,7 @@ requires-dist = [
     { name = "viscy-data", extras = ["triplet"], editable = "packages/viscy-data" },
     { name = "viscy-models", editable = "packages/viscy-models" },
     { name = "viscy-transforms", editable = "packages/viscy-transforms" },
-    { name = "viscy-utils", editable = "packages/viscy-utils" },
+    { name = "viscy-utils", extras = ["eval"], editable = "packages/viscy-utils" },
     { name = "wandb", marker = "extra == 'eval'" },
 ]
 provides-extras = ["eval"]
