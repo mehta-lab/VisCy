@@ -13,7 +13,6 @@ import anndata as ad
 import click
 import numpy as np
 import torch
-import torch.nn.functional as F
 from pydantic import BaseModel, Field
 
 from viscy_models.components.heads import MLP
@@ -95,7 +94,7 @@ def main(config: Path) -> None:
     with torch.no_grad():
         for i in range(0, len(X_t), cfg.batch_size):
             batch = X_t[i : i + cfg.batch_size].to(device)
-            reps.append(F.normalize(model.backbone(batch), dim=1).cpu())
+            reps.append(model.encode(batch).cpu())
 
     X_mlp = torch.cat(reps, dim=0).numpy()
     click.echo(f"  Extracted representations: {X_mlp.shape}")

@@ -18,9 +18,10 @@ VERSION="v1"
 RUN_DIR="/hpc/projects/intracellular_dashboard/organelle_dynamics/models/${RUN_NAME}/${VERSION}"
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
-WORKSPACE_DIR=/hpc/mydata/eduardo.hirata/repos/viscy
+# TODO: point to your uv workspace
+WORKSPACE_DIR=/path/to/viscy
 
-CONFIG="/home/eduardo.hirata/repos/viscy/applications/dynaclr/configs/training/dinov3_finetune_temporal_MLP_fit.yml"
+CONFIG="$(dirname "$0")/dinov3_finetune_temporal_MLP_fit.yml"
 
 # ── Environment ───────────────────────────────────────────────────────────────
 export PYTHONNOUSERSITE=1   # prevent ~/.local from shadowing conda/uv env

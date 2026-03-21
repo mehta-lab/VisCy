@@ -77,9 +77,6 @@ def pca_pairplot(
     # Ensure all_axes is always 2-D
     if n_components == 1:
         all_axes = np.array([[all_axes]])
-    elif n_keys == 1:
-        all_axes = all_axes.reshape(n_components, n_components)
-        all_axes = all_axes[:, :, np.newaxis].squeeze(-1)  # keep shape consistent below
 
     cmap = plt.get_cmap("tab10")
 

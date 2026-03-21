@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
@@ -348,8 +349,6 @@ def build_timelapse_cell_index(
     pd.DataFrame
         The written cell index.
     """
-    import os
-
     from viscy_data.collection import load_collection
 
     collection = load_collection(collection_path)

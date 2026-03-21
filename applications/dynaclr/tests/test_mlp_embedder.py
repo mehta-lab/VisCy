@@ -134,10 +134,11 @@ class TestCheckpointRoundTrip:
 
 
 class TestApplyMlpEmbedder:
-    def test_obsm_written(self, annotated_adata, tmp_path):
-        import torch.nn.functional as F
+    def test_obsm_written(self, annotated_adata_zarr, tmp_path):
+        import anndata as ad
 
         from dynaclr.evaluation.mlp_embedder.apply_mlp_embedder import _load_model
+        from viscy_utils.evaluation.zarr_utils import append_to_anndata_zarr
 
         model = MLP(in_dims=16, hidden_dims=[32], num_classes=3).eval()
         checkpoint_path = tmp_path / "model.pt"
@@ -155,15 +156,18 @@ class TestApplyMlpEmbedder:
             checkpoint_path,
         )
 
+        zarr_path = annotated_adata_zarr["embeddings"]
         device = torch.device("cpu")
         loaded = _load_model(checkpoint_path, device)
 
-        X = annotated_adata.X
-        X_t = torch.tensor(X, dtype=torch.float32)
+        adata = ad.read_zarr(zarr_path)
+        X_t = torch.tensor(adata.X, dtype=torch.float32)
         with torch.no_grad():
-            reps = F.normalize(loaded.backbone(X_t), dim=1).numpy()
+            reps = loaded.encode(X_t).numpy()
 
-        annotated_adata.obsm["X_mlp"] = reps
-        assert "X_mlp" in annotated_adata.obsm
-        assert annotated_adata.obsm["X_mlp"].shape == (len(annotated_adata), 32)
+        append_to_anndata_zarr(zarr_path, obsm={"X_mlp": reps})
+
+        result = ad.read_zarr(zarr_path)
+        assert "X_mlp" in result.obsm
+        assert result.obsm["X_mlp"].shape == (len(result), 32)
         assert np.allclose(np.linalg.norm(reps, axis=1), 1.0, atol=1e-5)
