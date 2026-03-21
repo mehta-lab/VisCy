@@ -79,6 +79,7 @@ def write_embedding_dataset(
     features: np.ndarray,
     index_df: pd.DataFrame,
     projections: Optional[np.ndarray] = None,
+    embedding_key: Literal["features", "projections"] = "features",
     umap_kwargs: Optional[Dict[str, Any]] = None,
     phate_kwargs: Optional[Dict[str, Any]] = None,
     pca_kwargs: Optional[Dict[str, Any]] = None,
@@ -92,11 +93,18 @@ def write_embedding_dataset(
     output_path : Path
         Path to the zarr store.
     features : np.ndarray
-        Array of shape (n_samples, n_features) containing the embeddings.
+        Array of shape (n_samples, n_features) containing the backbone embeddings.
     index_df : pd.DataFrame
         DataFrame containing the index information for each embedding.
     projections : np.ndarray, optional
-        Array of shape (n_samples, n_projections) containing projections.
+        Array of shape (n_samples, n_projections) containing MLP projections.
+    embedding_key : {"features", "projections"}, optional
+        Which array to store as the primary embedding in ``adata.X``.
+        ``"features"`` (default) stores backbone features; ``"projections"`` stores
+        the MLP projection head output (recommended when the projection head was
+        finetuned, e.g. DINOv3-temporal-MLP). The other array is stored in
+        ``obsm["X_backbone"]`` or ``obsm["X_projections"]`` respectively.
+        Dimensionality reductions (UMAP, PHATE, PCA) are computed on ``adata.X``.
     umap_kwargs : dict, optional
         Keyword arguments passed to UMAP, by default None.
     phate_kwargs : dict, optional
@@ -111,8 +119,8 @@ def write_embedding_dataset(
     """
     import anndata as ad
 
-    if hasattr(ad, "settings") and hasattr(ad.settings, "allow_write_nullable_strings"):
-        ad.settings.allow_write_nullable_strings = True
+    # pandas 2.x with PyArrow defaults ArrowStringArray; anndata zarr writer requires numpy-backed strings
+    pd.options.future.infer_string = False
 
     output_path = Path(output_path)
 
@@ -121,13 +129,20 @@ def write_embedding_dataset(
 
     ultrack_indices = index_df.copy()
     ultrack_indices["fov_name"] = ultrack_indices["fov_name"].str.strip("/")
-    # pandas 2.x with PyArrow defaults to ArrowStringArray; anndata zarr writer requires object dtype
     for col in ultrack_indices.select_dtypes(include="string").columns:
         ultrack_indices[col] = ultrack_indices[col].astype(object)
 
-    adata = ad.AnnData(X=features, obs=ultrack_indices)
-    if projections is not None:
-        adata.obsm["X_projections"] = projections
+    if embedding_key == "projections":
+        if projections is None:
+            raise ValueError("embedding_key='projections' requires projections to be provided.")
+        X = projections
+        adata = ad.AnnData(X=X, obs=ultrack_indices)
+        adata.obsm["X_backbone"] = features
+    else:
+        X = features
+        adata = ad.AnnData(X=X, obs=ultrack_indices)
+        if projections is not None:
+            adata.obsm["X_projections"] = projections
 
     if umap_kwargs:
         from viscy_utils.evaluation.dimensionality_reduction import (
@@ -135,7 +150,7 @@ def write_embedding_dataset(
         )
 
         _logger.debug(f"Using UMAP kwargs: {umap_kwargs}")
-        _, UMAP = _fit_transform_umap(features, **umap_kwargs)
+        _, UMAP = _fit_transform_umap(X, **umap_kwargs)
         adata.obsm["X_umap"] = UMAP
 
     if phate_kwargs:
@@ -144,7 +159,7 @@ def write_embedding_dataset(
         _logger.debug(f"Using PHATE kwargs: {phate_kwargs}")
         try:
             _logger.debug("Computing PHATE")
-            _, PHATE = compute_phate(features, **phate_kwargs)
+            _, PHATE = compute_phate(X, **phate_kwargs)
             adata.obsm["X_phate"] = PHATE
         except Exception as e:
             _logger.warning(f"PHATE computation failed: {str(e)}", exc_info=True)
@@ -155,7 +170,7 @@ def write_embedding_dataset(
         _logger.debug(f"Using PCA kwargs: {pca_kwargs}")
         try:
             _logger.debug("Computing PCA")
-            PCA_features, _ = compute_pca(features, **pca_kwargs)
+            PCA_features, _ = compute_pca(X, **pca_kwargs)
             adata.obsm["X_pca"] = PCA_features
         except Exception as e:
             _logger.warning(f"PCA computation failed: {str(e)}", exc_info=True)
@@ -176,6 +191,10 @@ class EmbeddingWriter(BasePredictionWriter):
         Path to the zarr store.
     write_interval : str, optional
         When to write the embeddings, by default 'epoch'.
+    embedding_key : {"features", "projections"}, optional
+        Which array to store as the primary embedding in ``adata.X``.
+        Use ``"projections"`` when the MLP projection head was finetuned
+        (e.g. DINOv3-temporal-MLP). Default is ``"features"`` (backbone output).
     umap_kwargs : dict, optional
         Keyword arguments passed to UMAP, by default None.
     phate_kwargs : dict, optional
@@ -190,6 +209,7 @@ class EmbeddingWriter(BasePredictionWriter):
         self,
         output_path: Path,
         write_interval: Literal["batch", "epoch", "batch_and_epoch"] = "epoch",
+        embedding_key: Literal["features", "projections"] = "features",
         umap_kwargs: dict | None = None,
         phate_kwargs: dict | None = None,
         pca_kwargs: dict | None = None,
@@ -197,6 +217,7 @@ class EmbeddingWriter(BasePredictionWriter):
     ):
         super().__init__(write_interval)
         self.output_path = Path(output_path)
+        self.embedding_key = embedding_key
         self.umap_kwargs = umap_kwargs
         self.phate_kwargs = phate_kwargs
         self.pca_kwargs = pca_kwargs
@@ -237,6 +258,7 @@ class EmbeddingWriter(BasePredictionWriter):
             features=features,
             index_df=ultrack_indices,
             projections=projections,
+            embedding_key=self.embedding_key,
             umap_kwargs=self.umap_kwargs,
             phate_kwargs=self.phate_kwargs,
             pca_kwargs=self.pca_kwargs,
