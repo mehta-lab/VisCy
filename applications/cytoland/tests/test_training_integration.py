@@ -188,6 +188,44 @@ def test_vsunet_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     assert trainer.state.status == "finished"
 
 
+def test_fnet3d_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
+    """FNet3D + real HCSDataModule end-to-end training for 1 batch."""
+    from viscy_data.hcs import HCSDataModule
+
+    seed_everything(42)
+    # depth=1 needs Z divisible by 2; z_window_size=4 fits in SYNTH_D=5 z-slices.
+    module = VSUNet(
+        architecture="FNet3D",
+        model_config={
+            "in_channels": 1,
+            "out_channels": 1,
+            "depth": 1,
+            "mult_chan": 8,
+            "in_stack_depth": 4,
+        },
+        log_batches_per_epoch=1,
+    )
+    datamodule = HCSDataModule(
+        data_path=str(tiny_hcs_zarr),
+        source_channel="Phase3D",
+        target_channel="Fluorescence",
+        z_window_size=4,
+        batch_size=2,
+        num_workers=0,
+        yx_patch_size=(SYNTH_H, SYNTH_W),
+    )
+    trainer = Trainer(
+        fast_dev_run=True,
+        accelerator="cpu",
+        logger=TensorBoardLogger(save_dir=tmp_path),
+        enable_checkpointing=False,
+        enable_progress_bar=False,
+    )
+    trainer.fit(module, datamodule=datamodule)
+    assert trainer.state.finished is True
+    assert trainer.state.status == "finished"
+
+
 def test_fcmae_real_datamodule_fast_dev_run(tmp_path, tiny_hcs_zarr):
     """FcmaeUNet + real CachedOmeZarrDataModule + CombinedDataModule for 1 batch."""
     from monai.transforms import Decollated

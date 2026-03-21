@@ -65,3 +65,26 @@ def test_engine_attributes():
     assert model.num_blocks == 4
     assert model.out_stack_depth == 32
     assert model.downsamples_z is True
+
+
+def test_state_dict_keys():
+    """State dict key patterns for checkpoint compatibility."""
+    model = Unet3d(in_channels=1, out_channels=1, depth=2, mult_chan=16)
+    keys = set(model.state_dict().keys())
+
+    # Recursive structure: net_recurse contains nested sub_u levels
+    prefix_checks = [
+        "net_recurse.sub_2conv_more",
+        "net_recurse.conv_down",
+        "net_recurse.convt",
+        "net_recurse.sub_2conv_less",
+        "net_recurse.sub_u",
+        "conv_out",
+    ]
+    for prefix in prefix_checks:
+        matching = [k for k in keys if k.startswith(prefix)]
+        assert len(matching) > 0, f"No keys found with prefix '{prefix}'"
+
+    # All keys should start with net_recurse or conv_out
+    for key in keys:
+        assert key.startswith("net_recurse.") or key.startswith("conv_out."), f"Unexpected key prefix: {key}"
